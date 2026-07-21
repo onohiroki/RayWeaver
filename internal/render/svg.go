@@ -23,9 +23,9 @@ type Config struct {
 }
 
 const (
-	canvasW    = 1100.0
-	canvasH    = 780.0
-	margin     = 60.0
+	pageWidth  = 297.0
+	pageHeight = 210.0
+	margin     = 15.0
 )
 
 func LensSVG(cfg Config) string {
@@ -41,8 +41,8 @@ func LensSVG(cfg Config) string {
 	var b strings.Builder
 
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
-	b.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f">`,
-		canvasW, canvasH, canvasW, canvasH))
+	b.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0fmm" height="%.0fmm" viewBox="0 0 %.0f %.0f">`,
+		pageWidth, pageHeight, pageWidth, pageHeight))
 
 	lw := 0.4
 	if cfg.LensWidth > 0 {
@@ -62,7 +62,7 @@ func LensSVG(cfg Config) string {
 
 	// Main group: translate to center-left, scale 1,-1 for optical coordinates
 	b.WriteString(fmt.Sprintf(`<g transform="translate(%.0f,%.0f) scale(1,-1)">`,
-		margin, canvasH/2))
+		margin, pageHeight/2))
 
 	// Apply uniform scale of the lens system
 	b.WriteString(fmt.Sprintf(`<g transform="scale(%.6f)">`, scale))
@@ -117,8 +117,20 @@ func computeMaxY(surfaces []types.Surface, results []types.RayResult) float64 {
 			}
 		}
 	}
+	if len(surfaces) == 0 {
+		return maxY
+	}
+	z0 := 0.0
+	z1 := 0.0
+	for i := 0; i < len(surfaces)-1; i++ {
+		z1 += surfaces[i].Thickness
+	}
 	for _, r := range results {
 		for _, sr := range r.Surfaces {
+			z := sr.Position.Z
+			if z < z0 || z > z1 {
+				continue
+			}
 			y := math.Abs(sr.Position.Y)
 			if y > maxY {
 				maxY = y
@@ -129,8 +141,8 @@ func computeMaxY(surfaces []types.Surface, results []types.RayResult) float64 {
 }
 
 func computeScale(totalZ, maxY float64) float64 {
-	availW := canvasW - 2*margin
-	availH := canvasH - 2*margin
+	availW := pageWidth - 2*margin
+	availH := pageHeight - 2*margin
 	scaleX := availW / totalZ
 	scaleY := availH / (2 * maxY)
 	s := scaleX
