@@ -69,7 +69,7 @@ echo 'with chief data:'
 
 echo
 echo "=== SVG raytrace diagram ==="
-./rayweave chief --clear-aperture --marginal-rays < "$YAML" \
+./rayweave chief --clear-aperture < "$YAML" | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
   | ./rayweave plot -o "$OUTDIR/us2645157.svg"
 echo "Written: $OUTDIR/us2645157.svg"
