@@ -38,7 +38,7 @@ bash samples/run-demo.bash
 | `trace` | Trace ray(s) through the system and output intersection data per surface. |
 | `paraxial` | First-order properties: EFL, BFL, FFL, principal points, pupil positions, f/#. |
 | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. |
-| `plot` | Generate SVG cross-section diagram. Flags: `-o` (output file), `--lens-width`, `--ray-width`. |
+| `plot` | Generate SVG cross-section diagram. Flags: `-o` (output file), `--lens-width`, `--ray-width`, `--scale`, `--right-margin`. |
 
 ## Pipeline examples
 
@@ -52,7 +52,8 @@ bash samples/run-demo.bash
 
 # SVG raytrace diagram
 cat samples/us2645157.yaml \
-  | ./rayweave chief --clear-aperture --marginal-rays \
+  | ./rayweave chief --clear-aperture \
+  | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
   | ./rayweave plot -o diagram.svg
 
@@ -70,7 +71,7 @@ The [`samples/`](samples/) directory contains:
 - `run-demo.bash` — end-to-end demo script producing spot diagrams, SVG, and TMM results.
 - `README.md` — detailed documentation of all sample files and workflow.
 
-The [`lensforgedemo/`](lensforgedemo/) directory contains the Kidger triplet reference data and ZEMAX paraxial comparison tables.
+The [`samples/`](samples/) directory also includes generated artifacts (spot-diagram data, SVG diagrams, chief-ray results) produced by the demo pipeline.
 
 ## Units
 
