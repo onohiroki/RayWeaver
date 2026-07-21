@@ -1,0 +1,26 @@
+# 9-layer quarter-wave dielectric mirror (Bragg reflector)
+# Alternating SiO2 (n=1.46) and TiO2 (n=2.35) on glass substrate
+# Design wavelength: 550nm
+n_air: 1.0
+n_substrate: 1.52
+lambda: 0.00055
+theta_deg: 0
+layers:
+  - thickness: 94.2
+    n: 1.46
+  - thickness: 58.5
+    n: 2.35
+  - thickness: 94.2
+    n: 1.46
+  - thickness: 58.5
+    n: 2.35
+  - thickness: 94.2
+    n: 1.46
+  - thickness: 58.5
+    n: 2.35
+  - thickness: 94.2
+    n: 1.46
+  - thickness: 58.5
+    n: 2.35
+  - thickness: 94.2
+    n: 1.46

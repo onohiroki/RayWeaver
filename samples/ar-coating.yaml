@@ -1,0 +1,9 @@
+# Single-layer AR coating (MgF2 on N-SK16 substrate)
+# Quarter-wave thickness at 550nm: t = lambda/(4n) = 550/(4*1.38) = 99.6nm
+n_air: 1.0
+n_substrate: 1.62
+lambda: 0.00055
+theta_deg: 0
+layers:
+  - thickness: 99.6
+    n: 1.38
