@@ -14,41 +14,84 @@ type GlassInfo struct {
 }
 
 type Config struct {
-	Surfaces   []types.Surface
-	Results    []types.RayResult
-	ChiefRays  []types.ChiefRayResult
-	GlassMap   map[string]GlassInfo
-	LensWidth  float64
-	RayWidth   float64
+	Surfaces       []types.Surface
+	Results        []types.RayResult
+	ChiefRays      []types.ChiefRayResult
+	GlassMap       map[string]GlassInfo
+	LensWidth      float64
+	RayWidth       float64
+	ScaleOverride  float64
+	RightMarginPct float64
 }
 
 const (
-	pageWidth  = 297.0
-	pageHeight = 210.0
-	margin     = 15.0
+	canvasW = 1100.0
+	canvasH = 780.0
+	margin  = 60.0
 )
 
 func LensSVG(cfg Config) string {
 	zPos := computeZPositions(cfg.Surfaces)
 	totalZ := computeTotalZ(cfg.Surfaces)
-	maxY := computeMaxY(cfg.Surfaces, cfg.Results)
-
-	scale := computeScale(totalZ, maxY)
-
-	// lens bodies rendered below in the loop with glass color lookup
 	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays)
+
+	// Compute display Z span: if object plane is far, cap the
+	// object-side extent to min(lensLength, backFocalLength).
+	firstZ := zPos[0]
+	lastZ := zPos[len(zPos)-1]
+	lensLen := lastZ - firstZ
+	bfl := 0.0
+	if len(cfg.Surfaces) >= 2 {
+		bfl = cfg.Surfaces[len(cfg.Surfaces)-2].Thickness
+	}
+	if bfl <= 0 {
+		bfl = lensLen
+	}
+	leftSpan := lensLen
+	if bfl < leftSpan {
+		leftSpan = bfl
+	}
+	candidateMinZ := firstZ - leftSpan
+
+	minZ := 0.0
+	for _, r := range cfg.Results {
+		for _, sr := range r.Surfaces {
+			if sr.Position.Z < minZ {
+				minZ = sr.Position.Z
+			}
+		}
+	}
+	if minZ < candidateMinZ {
+		minZ = candidateMinZ
+	}
+
+	rightFrac := 0.2
+	if cfg.RightMarginPct > 0 {
+		rightFrac = cfg.RightMarginPct / 100.0
+	}
+	maxZ := totalZ * (1 + rightFrac)
+	zSpan := maxZ - minZ
+	if zSpan <= 0 {
+		zSpan = totalZ
+	}
+
+	maxY := computeMaxYInRange(cfg.Surfaces, cfg.Results, minZ, maxZ)
+	scale := computeScale(zSpan, maxY)
+	if cfg.ScaleOverride > 0 {
+		scale = cfg.ScaleOverride
+	}
 
 	var b strings.Builder
 
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
-	b.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0fmm" height="%.0fmm" viewBox="0 0 %.0f %.0f">`,
-		pageWidth, pageHeight, pageWidth, pageHeight))
+	b.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f">`,
+		canvasW, canvasH, canvasW, canvasH))
 
-	lw := 0.4
+	lw := 0.1
 	if cfg.LensWidth > 0 {
 		lw = cfg.LensWidth
 	}
-	rw := 0.3
+	rw := 0.1
 	if cfg.RayWidth > 0 {
 		rw = cfg.RayWidth
 	}
@@ -60,18 +103,24 @@ func LensSVG(cfg Config) string {
 	b.WriteString(".stop{stroke:rgb(80,80,80);stroke-width:0.6}\n")
 	b.WriteString("</style></defs>")
 
-	// Main group: translate to center-left, scale 1,-1 for optical coordinates
+	// Main group: center the full content span (minZ..maxZ) in the viewport
+	midZ := (minZ + maxZ) / 2
 	b.WriteString(fmt.Sprintf(`<g transform="translate(%.0f,%.0f) scale(1,-1)">`,
-		margin, pageHeight/2))
+		canvasW/2, canvasH/2))
 
-	// Apply uniform scale of the lens system
-	b.WriteString(fmt.Sprintf(`<g transform="scale(%.6f)">`, scale))
+	// Apply uniform scale and shift midZ to origin
+	b.WriteString(fmt.Sprintf(`<g transform="scale(%.6f) translate(%.6f,0)">`, scale, -midZ))
 
 	// Optical axis
-	axisLen := totalZ * 1.2
+	axisLen := totalZ * (1 + rightFrac)
 	b.WriteString(fmt.Sprintf(`<path class="axis" d="M 0,0 L %.6f,0"/>`, axisLen))
 
-	// Lens bodies (colored by glass type)
+	// Rays (rendered first so they appear behind lenses)
+	for _, r := range rayPaths {
+		b.WriteString(fmt.Sprintf(`<path class="ray" d="%s" stroke="%s"/>`, r.path, r.color))
+	}
+
+	// Lens bodies (colored by glass type, drawn on top of rays)
 	globalH := globalMaxSemiDiameter(cfg.Surfaces)
 	for _, e := range findElements(cfg.Surfaces, globalH) {
 		mat := e.r1Surf.Material
@@ -85,11 +134,6 @@ func LensSVG(cfg Config) string {
 		if path != "" {
 			b.WriteString(fmt.Sprintf(`<path class="lens-body" d="%s" fill="%s"/>`, path, fill))
 		}
-	}
-
-	// Rays
-	for _, r := range rayPaths {
-		b.WriteString(fmt.Sprintf(`<path class="ray" d="%s" stroke="%s"/>`, r.path, r.color))
 	}
 
 	b.WriteString("</g></g></svg>")
@@ -107,7 +151,7 @@ func computeTotalZ(surfaces []types.Surface) float64 {
 	return acc
 }
 
-func computeMaxY(surfaces []types.Surface, results []types.RayResult) float64 {
+func computeMaxYInRange(surfaces []types.Surface, results []types.RayResult, minZ, maxZ float64) float64 {
 	maxY := 1.0
 	for _, s := range surfaces {
 		if s.Diameter > 0 {
@@ -117,18 +161,9 @@ func computeMaxY(surfaces []types.Surface, results []types.RayResult) float64 {
 			}
 		}
 	}
-	if len(surfaces) == 0 {
-		return maxY
-	}
-	z0 := 0.0
-	z1 := 0.0
-	for i := 0; i < len(surfaces)-1; i++ {
-		z1 += surfaces[i].Thickness
-	}
 	for _, r := range results {
 		for _, sr := range r.Surfaces {
-			z := sr.Position.Z
-			if z < z0 || z > z1 {
+			if sr.Position.Z < minZ || sr.Position.Z > maxZ {
 				continue
 			}
 			y := math.Abs(sr.Position.Y)
@@ -140,10 +175,10 @@ func computeMaxY(surfaces []types.Surface, results []types.RayResult) float64 {
 	return maxY
 }
 
-func computeScale(totalZ, maxY float64) float64 {
-	availW := pageWidth - 2*margin
-	availH := pageHeight - 2*margin
-	scaleX := availW / totalZ
+func computeScale(zSpan, maxY float64) float64 {
+	targetW := canvasW * 0.8
+	availH := canvasH - 2*margin
+	scaleX := targetW / zSpan
 	scaleY := availH / (2 * maxY)
 	s := scaleX
 	if scaleY < s {
