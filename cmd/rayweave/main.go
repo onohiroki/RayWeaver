@@ -96,7 +96,7 @@ Chief ray = ray passing through the spot centroid on the reference
   surface (not the stop centre).  This definition is robust during
   optimisation where the stop may be ill-defined.
 
-See also: lensforgedemo/triplet.yaml
+See also: samples/us2645157.yaml
 `)
 	case "trace":
 		fmt.Print(`Usage: rayweave trace < system.yaml
@@ -161,16 +161,20 @@ Output: augmented YAML with paraxial_result: section:
   second_principal_focus: ...  # BFL in mm from last surface
   second_principal_point: ...  # mm from last surface
 
-See: lensforgedemo/kidger-triplet4.txt (reference values)
+See: samples/us2645157.yaml (reference values)
 `)
 	case "plot":
-		fmt.Print(`Usage: rayweave plot [-o file.svg] < input.yaml
+		fmt.Print(`Usage: rayweave plot [-o file.svg] [--lens-width 0.1] [--ray-width 0.1] < input.yaml
 
 Generates an SVG cross-section drawing of the lens system
 with ray paths overlaid.
 
 Options:
-  -o file.svg    output SVG file (default: stdout)
+  -o file.svg           output SVG file (default: stdout)
+  --lens-width 0.1      lens body stroke width
+  --ray-width 0.1       ray path stroke width
+  --scale 0             SVG scale factor (0 = auto)
+  --right-margin 20     right-side margin beyond image plane (% of lens length)
 
 Input: YAML with system surfaces + optional results[] and chief_rays[].
   Pipe after "rayweave trace" for ray paths:
