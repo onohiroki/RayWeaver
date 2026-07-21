@@ -18,23 +18,27 @@ func runPlot(data []byte) {
 	}
 
 	var outPath string
-	var lensWidth, rayWidth float64
+	var lensWidth, rayWidth, scaleOverride, rightMarginPct float64
 	args := os.Args[2:] // skip "plot"
 	fs := flag.NewFlagSet("plot", flag.ExitOnError)
 	fs.StringVar(&outPath, "o", "", "output SVG file path (default: stdout)")
-	fs.Float64Var(&lensWidth, "lens-width", 0.4, "lens body stroke width (default 0.4)")
-	fs.Float64Var(&rayWidth, "ray-width", 0.3, "ray path stroke width (default 0.3)")
+	fs.Float64Var(&lensWidth, "lens-width", 0.1, "lens body stroke width (default 0.1)")
+	fs.Float64Var(&rayWidth, "ray-width", 0.1, "ray path stroke width (default 0.1)")
+	fs.Float64Var(&scaleOverride, "scale", 0, "SVG scale factor (0 = auto)")
+	fs.Float64Var(&rightMarginPct, "right-margin", 20, "right-side margin beyond image plane (% of lens length, default 20)")
 	fs.Parse(args)
 
 	glassMap := buildGlassMap(output)
 
 	cfg := render.Config{
-		Surfaces:  output.System.Surfaces,
-		Results:   output.Results,
-		ChiefRays: output.ChiefRays,
-		GlassMap:  glassMap,
-		LensWidth: lensWidth,
-		RayWidth:  rayWidth,
+		Surfaces:       output.System.Surfaces,
+		Results:        output.Results,
+		ChiefRays:      output.ChiefRays,
+		GlassMap:       glassMap,
+		LensWidth:      lensWidth,
+		RayWidth:       rayWidth,
+		ScaleOverride:  scaleOverride,
+		RightMarginPct: rightMarginPct,
 	}
 
 	svg := render.LensSVG(cfg)
