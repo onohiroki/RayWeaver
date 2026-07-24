@@ -17,7 +17,7 @@ func singletSurfaces() []types.Surface {
 
 func TestOptimizerEvaluateMerit(t *testing.T) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
 	cfg := Config{
 		Surfaces:     singletSurfaces(),
@@ -107,7 +107,7 @@ func TestOptimizerApplyVariablesThickness(t *testing.T) {
 
 func TestOptimizerJacobianHasNonZeroEntries(t *testing.T) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
 	surfaces := singletSurfaces()
 
@@ -141,7 +141,7 @@ func TestOptimizerJacobianHasNonZeroEntries(t *testing.T) {
 
 func TestOptimizerResultHasExpectedFields(t *testing.T) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
@@ -256,8 +256,8 @@ func TestSurfaceIndex(t *testing.T) {
 
 func TestOptimizerCanImproveDegradedSystem(t *testing.T) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "SK18", ND: 1.63854, VD: 55.42})
-	gc.Add(types.Glass{Name: "SF12", ND: 1.64831, VD: 33.84})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SK18", ND: 1.63854, VD: 55.42})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SF12", ND: 1.64831, VD: 33.84})
 
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.12, Thickness: 1.524, Material: "SK18", Diameter: 10.0},
@@ -354,12 +354,12 @@ func (m *mockLogger) LogFinal(iter int, status string, merit float64, stepNorm f
 
 func TestOptimizerApplyVariablesND(t *testing.T) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "SK18", ND: 1.63854, VD: 55.42})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
 	cfg := Config{
 		Surfaces: singletSurfaces(),
 		Variables: []Variable{
-			{GlassName: "SK18", Param: "nd", Min: 1.4, Max: 1.9},
+			{SurfaceID: 1, Param: "nd", Min: 1.4, Max: 1.9},
 		},
 		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
 		GlassCatalog: gc,
@@ -369,23 +369,23 @@ func TestOptimizerApplyVariablesND(t *testing.T) {
 	opt := NewOptimizer(cfg)
 	opt.applyVariables([]float64{1.7})
 
-	g, ok := gc.Lookup("SK18")
+	g, ok := opt.tempGC.Lookup("N-BK7")
 	if !ok {
-		t.Fatal("SK18 not found in catalog after applyVariables")
+		t.Fatal("N-BK7 not found in tempGC after applyVariables")
 	}
 	if g.ND != 1.7 {
-		t.Errorf("SK18 ND = %v, want 1.7", g.ND)
+		t.Errorf("N-BK7 ND = %v, want 1.7", g.ND)
 	}
 }
 
 func TestOptimizerApplyVariablesVD(t *testing.T) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
 	cfg := Config{
 		Surfaces: singletSurfaces(),
 		Variables: []Variable{
-			{GlassName: "N-BK7", Param: "vd", Min: 20, Max: 80},
+			{SurfaceID: 1, Param: "vd", Min: 20, Max: 80},
 		},
 		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
 		GlassCatalog: gc,
@@ -395,9 +395,9 @@ func TestOptimizerApplyVariablesVD(t *testing.T) {
 	opt := NewOptimizer(cfg)
 	opt.applyVariables([]float64{50.0})
 
-	g, ok := gc.Lookup("N-BK7")
+	g, ok := opt.tempGC.Lookup("N-BK7")
 	if !ok {
-		t.Fatal("N-BK7 not found in catalog after applyVariables")
+		t.Fatal("N-BK7 not found in tempGC after applyVariables")
 	}
 	if g.VD != 50.0 {
 		t.Errorf("N-BK7 VD = %v, want 50.0", g.VD)
@@ -406,13 +406,13 @@ func TestOptimizerApplyVariablesVD(t *testing.T) {
 
 func TestOptimizerGetInitialStateGlass(t *testing.T) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
 	cfg := Config{
 		Surfaces: singletSurfaces(),
 		Variables: []Variable{
-			{Name: "bk7_nd", GlassName: "N-BK7", Param: "nd", Min: 1.4, Max: 1.9},
-			{Name: "bk7_vd", GlassName: "N-BK7", Param: "vd", Min: 20, Max: 80},
+			{Name: "bk7_nd", SurfaceID: 1, Param: "nd", Min: 1.4, Max: 1.9},
+			{Name: "bk7_vd", SurfaceID: 1, Param: "vd", Min: 20, Max: 80},
 		},
 		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
 		GlassCatalog: gc,
@@ -436,7 +436,7 @@ func TestOptimizerGetInitialStateGlassNotFound(t *testing.T) {
 	cfg := Config{
 		Surfaces: singletSurfaces(),
 		Variables: []Variable{
-			{Name: "nd", GlassName: "MISSING", Param: "nd", Min: 1.4, Max: 1.9},
+			{Name: "nd", SurfaceID: 99, Param: "nd", Min: 1.4, Max: 1.9},
 		},
 		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
 		GlassCatalog: gc,
@@ -454,12 +454,12 @@ func TestOptimizerGetInitialStateGlassNotFound(t *testing.T) {
 
 func TestBuildVariableStatesGlass(t *testing.T) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
 	cfg := Config{
 		Surfaces: singletSurfaces(),
 		Variables: []Variable{
-			{Name: "bk7_nd", GlassName: "N-BK7", Param: "nd", Min: 1.4, Max: 1.9},
+			{Name: "bk7_nd", SurfaceID: 1, Param: "nd", Min: 1.4, Max: 1.9},
 		},
 		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
 		GlassCatalog: gc,
@@ -481,15 +481,15 @@ func TestBuildVariableStatesGlass(t *testing.T) {
 	if math.Abs(states[0].After-1.7) > 1e-10 {
 		t.Errorf("After = %v, want 1.7", states[0].After)
 	}
-	if states[0].SurfaceID != 0 {
-		t.Errorf("SurfaceID = %d, want 0 for glass variable", states[0].SurfaceID)
+	if states[0].SurfaceID != 1 {
+		t.Errorf("SurfaceID = %d, want 1", states[0].SurfaceID)
 	}
 }
 
 func TestOptimizerLoggerCalled(t *testing.T) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "SK18", ND: 1.63854, VD: 55.42})
-	gc.Add(types.Glass{Name: "SF12", ND: 1.64831, VD: 33.84})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SK18", ND: 1.63854, VD: 55.42})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SF12", ND: 1.64831, VD: 33.84})
 
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.05, Thickness: 1.524, Material: "SK18", Diameter: 10.0},

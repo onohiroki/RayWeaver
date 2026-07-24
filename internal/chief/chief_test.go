@@ -11,7 +11,7 @@ import (
 
 func singletSystem() (types.System, *glass.Catalog) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
 		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},

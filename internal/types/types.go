@@ -25,6 +25,14 @@ const (
 	Reflect  InteractionType = "REFLECT"
 )
 
+type GlassType string
+
+const (
+	GlassTypeCatalog   GlassType = "catalog"
+	GlassTypeModel     GlassType = "model"
+	GlassTypeTabulated GlassType = "tabulated"
+)
+
 type DispersionFormula string
 
 const (
@@ -140,7 +148,10 @@ type RefractiveIndexEntry struct {
 }
 
 type Glass struct {
-	Name              string                 `yaml:"name"`
+	Type              GlassType              `yaml:"type,omitempty"`
+	Key               string                 `yaml:"key,omitempty"`
+	Name              string                 `yaml:"name,omitempty"`
+	Label             string                 `yaml:"label,omitempty"`
 	Manufacturer      string                 `yaml:"manufacturer,omitempty"`
 	DispersionFormula DispersionFormula      `yaml:"dispersion_formula,omitempty"`
 	ND                float64                `yaml:"nd,omitempty"`

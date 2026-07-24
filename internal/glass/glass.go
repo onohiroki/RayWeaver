@@ -19,16 +19,26 @@ func NewCatalog() *Catalog {
 }
 
 func (c *Catalog) Add(glass types.Glass) {
+	key := types.ResolveGlassKey(glass)
 	g := glass
-	c.ByName[glass.Name] = &g
+	g.Key = key
+	c.ByName[key] = &g
 	for _, alias := range glass.Aliases {
 		c.ByName[alias] = &g
 	}
 }
 
-func (c *Catalog) Lookup(name string) (*types.Glass, bool) {
-	g, ok := c.ByName[name]
-	return g, ok
+func (c *Catalog) Lookup(key string) (*types.Glass, bool) {
+	g, ok := c.ByName[key]
+	if ok {
+		return g, true
+	}
+	for _, g := range c.ByName {
+		if g.Name == key {
+			return g, true
+		}
+	}
+	return nil, false
 }
 
 func (c *Catalog) RefractiveIndex(material string, wavelength float64) (float64, error) {
@@ -45,20 +55,28 @@ func (c *Catalog) RefractiveIndex(material string, wavelength float64) (float64,
 }
 
 func CalcRefractiveIndex(g *types.Glass, wavelength float64) (float64, error) {
-	if len(g.RefractiveIndices) > 0 {
-		return interpolateRefractiveIndex(g.RefractiveIndices, wavelength)
-	}
-
-	switch g.DispersionFormula {
-	case types.Sellmeier1:
-		return sellmeier1(g.Coefficients, wavelength)
-	case types.Constant:
-		return g.ND, nil
-	default:
-		if g.ND != 0 && g.VD != 0 {
-			return RefractiveIndexFromNDVD(g.ND, g.VD, wavelength)
+	switch g.Type {
+	case types.GlassTypeCatalog:
+		switch g.DispersionFormula {
+		case types.Sellmeier1:
+			return sellmeier1(g.Coefficients, wavelength)
+		case types.Constant:
+			return g.ND, nil
+		default:
+			return 0, fmt.Errorf("catalog glass %q has unknown dispersion formula", g.Key)
 		}
-		return 0, fmt.Errorf("cannot compute refractive index for %s", g.Name)
+	case types.GlassTypeModel:
+		if g.ND == 0 || g.VD == 0 {
+			return 0, fmt.Errorf("model glass %q missing nd/vd", g.Key)
+		}
+		return RefractiveIndexFromNDVD(g.ND, g.VD, wavelength)
+	case types.GlassTypeTabulated:
+		if len(g.RefractiveIndices) == 0 {
+			return 0, fmt.Errorf("tabulated glass %q has no index data", g.Key)
+		}
+		return interpolateRefractiveIndex(g.RefractiveIndices, wavelength)
+	default:
+		return 0, fmt.Errorf("cannot compute refractive index for %s", g.Key)
 	}
 }
 

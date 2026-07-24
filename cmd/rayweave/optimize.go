@@ -99,8 +99,12 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 		fmt.Fprintf(os.Stderr, "  Improvement: %.2f%%\n", improvement)
 	}
 
-	outputSurfaces := applyVariableStates(surfaces, result.Variables, gc)
+	outputSurfaces, newGlasses := applyVariableStates(surfaces, result.Variables, gc)
 	input.System.Surfaces = outputSurfaces
+
+	for _, g := range newGlasses {
+		input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
+	}
 
 	output := types.Output{
 		Input: input,
@@ -123,19 +127,13 @@ func buildOptimizeVariables(opt *types.OptimizationConfig, gc *glass.Catalog) []
 
 		switch v.Target.Type {
 		case "surface":
-			varDef := optimize.Variable{
-				Name:      v.Name,
-				SurfaceID: v.Target.ID,
-				Param:     v.Target.Param,
-				Min:       v.Min,
-				Max:       v.Max,
-			}
-			variables = append(variables, varDef)
-		case "glass":
-			glassName := v.Target.Config
-			min, max := v.Min, v.Max
+			var min, max float64 = v.Min, v.Max
 			if min == 0 && max == 0 {
 				switch v.Target.Param {
+				case "curvature":
+					min, max = -0.5, 0.5
+				case "thickness":
+					min, max = 0.1, 50.0
 				case "nd":
 					min, max = 1.4, 1.9
 				case "vd":
@@ -144,7 +142,7 @@ func buildOptimizeVariables(opt *types.OptimizationConfig, gc *glass.Catalog) []
 			}
 			variables = append(variables, optimize.Variable{
 				Name:      v.Name,
-				GlassName: glassName,
+				SurfaceID: v.Target.ID,
 				Param:     v.Target.Param,
 				Min:       min,
 				Max:       max,
@@ -208,7 +206,7 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 	return terms
 }
 
-func applyVariableStates(surfaces []types.Surface, states []optimize.VariableState, gc *glass.Catalog) []types.Surface {
+func applyVariableStates(surfaces []types.Surface, states []optimize.VariableState, gc *glass.Catalog) ([]types.Surface, []types.Glass) {
 	result := make([]types.Surface, len(surfaces))
 	copy(result, surfaces)
 
@@ -226,23 +224,69 @@ func applyVariableStates(surfaces []types.Surface, states []optimize.VariableSta
 					break
 				}
 			}
-		case "nd", "vd":
-			if gc == nil || st.GlassName == "" {
-				continue
-			}
-			if g, ok := gc.ByName[st.GlassName]; ok {
-				switch st.Param {
-				case "nd":
-					g.ND = st.After
-				case "vd":
-					g.VD = st.After
-				}
-			}
 		}
 	}
 
 	surface.Precompute(result)
-	return result
+
+	type glassAccum struct {
+		nd, vd     float64
+		hasND, hasVD bool
+		origLabel  string
+	}
+	glassMap := map[string]*glassAccum{}
+	for _, st := range states {
+		if st.Param != "nd" && st.Param != "vd" || st.GlassName == "" {
+			continue
+		}
+		acc, ok := glassMap[st.GlassName]
+		if !ok {
+			acc = &glassAccum{}
+			if gc != nil {
+				if g, ok2 := gc.Lookup(st.GlassName); ok2 {
+					acc.origLabel = g.Label
+					acc.nd = g.ND
+					acc.vd = g.VD
+					acc.hasND = true
+					acc.hasVD = true
+				}
+			}
+			glassMap[st.GlassName] = acc
+		}
+		switch st.Param {
+		case "nd":
+			acc.nd = st.After
+			acc.hasND = true
+		case "vd":
+			acc.vd = st.After
+			acc.hasVD = true
+		}
+	}
+
+	var newGlasses []types.Glass
+	for origKey, acc := range glassMap {
+		if !acc.hasND || !acc.hasVD {
+			continue
+		}
+		g := types.Glass{
+			Type: types.GlassTypeModel,
+			ND:   acc.nd,
+			VD:   acc.vd,
+		}
+		if acc.origLabel != "" {
+			g.Label = acc.origLabel
+		}
+		newKey := types.ResolveGlassKey(g)
+		newGlasses = append(newGlasses, g)
+
+		for i := range result {
+			if result[i].Material == origKey {
+				result[i].Material = newKey
+			}
+		}
+	}
+
+	return result, newGlasses
 }
 
 type iterLog struct {

@@ -83,17 +83,18 @@ type pupilPoint struct {
 }
 
 type Optimizer struct {
-	surfaces        []types.Surface
-	variables       []Variable
-	meritTerms      []MeritTerm
-	gc              *glass.Catalog
-	origGlassValues map[string][2]float64
-	maxIter         int
-	mu              float64
-	tol             float64
-	epsilon         float64
-	numRays         int
-	logger          Logger
+	surfaces       []types.Surface
+	variables      []Variable
+	meritTerms     []MeritTerm
+	gc             *glass.Catalog
+	glassOverrides map[string]*types.Glass
+	tempGC         *glass.Catalog
+	maxIter        int
+	mu             float64
+	tol            float64
+	epsilon        float64
+	numRays        int
+	logger         Logger
 }
 
 func NewOptimizer(cfg Config) *Optimizer {
@@ -118,30 +119,53 @@ func NewOptimizer(cfg Config) *Optimizer {
 		numRays = defaultNumRays
 	}
 
-	origGlassValues := make(map[string][2]float64)
+	glassOverrides := make(map[string]*types.Glass)
 	if cfg.GlassCatalog != nil {
-		for _, v := range cfg.Variables {
-			if v.GlassName != "" {
-				if g, ok := cfg.GlassCatalog.ByName[v.GlassName]; ok {
-					origGlassValues[v.GlassName] = [2]float64{g.ND, g.VD}
+		for i := range cfg.Variables {
+			v := &cfg.Variables[i]
+			if v.Param == "nd" || v.Param == "vd" {
+				key := resolveGlassKeyFromSurface(cfg.Surfaces, cfg.GlassCatalog, *v)
+				v.GlassName = key
+				if key != "" {
+					if g, ok := cfg.GlassCatalog.Lookup(key); ok {
+						cp := *g
+						cp.Label = key
+						if cp.Type == types.GlassTypeCatalog {
+							cp.Type = types.GlassTypeModel
+							cp.DispersionFormula = ""
+						}
+						glassOverrides[key] = &cp
+					}
 				}
 			}
 		}
 	}
 
 	return &Optimizer{
-		surfaces:        cfg.Surfaces,
-		variables:       cfg.Variables,
-		meritTerms:      cfg.MeritTerms,
-		gc:              cfg.GlassCatalog,
-		origGlassValues: origGlassValues,
-		maxIter:         maxIter,
-		mu:              mu,
-		tol:             tol,
-		epsilon:         epsilon,
-		numRays:         numRays,
-		logger:          cfg.Logger,
+		surfaces:       cfg.Surfaces,
+		variables:      cfg.Variables,
+		meritTerms:     cfg.MeritTerms,
+		gc:             cfg.GlassCatalog,
+		glassOverrides: glassOverrides,
+		maxIter:        maxIter,
+		mu:             mu,
+		tol:            tol,
+		epsilon:        epsilon,
+		numRays:        numRays,
+		logger:         cfg.Logger,
 	}
+}
+
+func resolveGlassKeyFromSurface(surfaces []types.Surface, gc *glass.Catalog, v Variable) string {
+	for _, s := range surfaces {
+		if s.ID == v.SurfaceID {
+			if s.Material == "" || s.Material == "AIR" {
+				return ""
+			}
+			return s.Material
+		}
+	}
+	return ""
 }
 
 func (o *Optimizer) Optimize() Result {
@@ -270,7 +294,6 @@ func (o *Optimizer) Optimize() Result {
 				}
 				o.logger.LogFinal(iter+1, "converged", bestMerit, stepNorm, vars)
 			}
-			restoreGlassValues(o)
 			return Result{
 				BeforeMerit: beforeMerit,
 				AfterMerit:  bestMerit,
@@ -299,8 +322,6 @@ func (o *Optimizer) Optimize() Result {
 		o.logger.LogFinal(o.maxIter, "max_iterations", bestMerit, finalStepNorm, vars)
 	}
 
-	restoreGlassValues(o)
-
 	return Result{
 		BeforeMerit: beforeMerit,
 		AfterMerit:  bestMerit,
@@ -327,6 +348,7 @@ func (o *Optimizer) applyVariables(x []float64) []types.Surface {
 	result := make([]types.Surface, len(o.surfaces))
 	copy(result, o.surfaces)
 
+	needTempGC := false
 	for i, v := range o.variables {
 		switch v.Param {
 		case "curvature", "thickness":
@@ -341,10 +363,7 @@ func (o *Optimizer) applyVariables(x []float64) []types.Surface {
 				result[idx].Thickness = x[i]
 			}
 		case "nd", "vd":
-			if o.gc == nil || v.GlassName == "" {
-				continue
-			}
-			g, ok := o.gc.ByName[v.GlassName]
+			g, ok := o.glassOverrides[v.GlassName]
 			if !ok {
 				continue
 			}
@@ -354,7 +373,22 @@ func (o *Optimizer) applyVariables(x []float64) []types.Surface {
 			case "vd":
 				g.VD = x[i]
 			}
+			needTempGC = true
 		}
+	}
+
+	if needTempGC {
+		o.tempGC = glass.NewCatalog()
+		for _, g := range o.gc.ByName {
+			cp := *g
+			o.tempGC.Add(cp)
+		}
+		for _, ov := range o.glassOverrides {
+			cp := *ov
+			o.tempGC.Add(cp)
+		}
+	} else {
+		o.tempGC = nil
 	}
 
 	surface.Precompute(result)
@@ -362,7 +396,11 @@ func (o *Optimizer) applyVariables(x []float64) []types.Surface {
 }
 
 func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) []imagePoint {
-	engine := ray.NewEngine(o.gc, nil)
+	gc := o.gc
+	if o.tempGC != nil {
+		gc = o.tempGC
+	}
+	engine := ray.NewEngine(gc, nil)
 	p := buildPath(surfaces)
 
 	thetaRad := fieldAngle * math.Pi / 180.0
@@ -520,16 +558,15 @@ func (o *Optimizer) getInitialState() []float64 {
 				x[i] = (v.Min + v.Max) / 2
 				continue
 			}
-			g, ok := o.gc.ByName[v.GlassName]
-			if !ok {
+			if g, ok := o.gc.ByName[v.GlassName]; ok {
+				switch v.Param {
+				case "nd":
+					x[i] = g.ND
+				case "vd":
+					x[i] = g.VD
+				}
+			} else {
 				x[i] = (v.Min + v.Max) / 2
-				continue
-			}
-			switch v.Param {
-			case "nd":
-				x[i] = g.ND
-			case "vd":
-				x[i] = g.VD
 			}
 		default:
 			x[i] = (v.Min + v.Max) / 2
@@ -560,12 +597,14 @@ func (o *Optimizer) buildVariableStates(x []float64) []VariableState {
 				}
 			}
 		case "nd", "vd":
-			if orig, ok := o.origGlassValues[v.GlassName]; ok {
-				switch v.Param {
-				case "nd":
-					st.Before = orig[0]
-				case "vd":
-					st.Before = orig[1]
+			if o.gc != nil && v.GlassName != "" {
+				if g, ok := o.gc.ByName[v.GlassName]; ok {
+					switch v.Param {
+					case "nd":
+						st.Before = g.ND
+					case "vd":
+						st.Before = g.VD
+					}
 				}
 			}
 		}
@@ -712,31 +751,15 @@ func currentVariableValue(o *Optimizer, v Variable) float64 {
 			return o.surfaces[idx].Thickness
 		}
 	case "nd":
-		if o.gc != nil && v.GlassName != "" {
-			if g, ok := o.gc.ByName[v.GlassName]; ok {
-				return g.ND
-			}
+		if g, ok := o.glassOverrides[v.GlassName]; ok {
+			return g.ND
 		}
 	case "vd":
-		if o.gc != nil && v.GlassName != "" {
-			if g, ok := o.gc.ByName[v.GlassName]; ok {
-				return g.VD
-			}
+		if g, ok := o.glassOverrides[v.GlassName]; ok {
+			return g.VD
 		}
 	}
 	return (v.Min + v.Max) / 2
-}
-
-func restoreGlassValues(o *Optimizer) {
-	if o.gc == nil {
-		return
-	}
-	for name, orig := range o.origGlassValues {
-		if g, ok := o.gc.ByName[name]; ok {
-			g.ND = orig[0]
-			g.VD = orig[1]
-		}
-	}
 }
 
 func Debugf(format string, args ...interface{}) {

@@ -50,10 +50,13 @@ func ParseAGF(data []byte) ([]types.Glass, error) {
 			if current != nil {
 				glasses = append(glasses, *current)
 			}
+			name := strings.TrimSpace(line[4:])
 			current = &types.Glass{
+				Type:    types.GlassTypeCatalog,
+				Key:     name,
+				Name:    name,
 				Aliases: []string{},
 			}
-			current.Name = strings.TrimSpace(line[4:])
 			continue
 		}
 

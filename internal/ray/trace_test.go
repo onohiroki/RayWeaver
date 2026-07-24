@@ -10,7 +10,7 @@ import (
 
 func simpleSingletEngine() (*Engine, []types.Surface) {
 	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	engine := NewEngine(gc, nil)
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},

@@ -17,16 +17,32 @@ func TestNewCatalog(t *testing.T) {
 	}
 }
 
-func TestCatalogAddAndLookup(t *testing.T) {
+func TestCatalogAddAndLookupModel(t *testing.T) {
 	c := NewCatalog()
-	g := types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17}
+	g := types.Glass{Type: types.GlassTypeModel, Label: "my_glass", ND: 1.5168, VD: 64.17}
+	c.Add(g)
+	got, ok := c.Lookup("my_glass")
+	if !ok {
+		t.Fatal("Lookup by label failed")
+	}
+	if got.Name != "" {
+		t.Errorf("model glass Name should be empty, got %q", got.Name)
+	}
+	if got.Label != "my_glass" {
+		t.Errorf("Label = %q, want my_glass", got.Label)
+	}
+}
+
+func TestCatalogAddAndLookupCatalog(t *testing.T) {
+	c := NewCatalog()
+	g := types.Glass{Type: types.GlassTypeCatalog, Name: "N-BK7", ND: 1.5168, VD: 64.17}
 	c.Add(g)
 	got, ok := c.Lookup("N-BK7")
 	if !ok {
-		t.Fatal("Lookup failed for N-BK7")
+		t.Fatal("Lookup by name failed")
 	}
 	if got.Name != "N-BK7" {
-		t.Errorf("Name = %v, want N-BK7", got.Name)
+		t.Errorf("Name = %q, want N-BK7", got.Name)
 	}
 }
 
@@ -40,14 +56,28 @@ func TestCatalogLookupNotFound(t *testing.T) {
 
 func TestCatalogLookupAlias(t *testing.T) {
 	c := NewCatalog()
-	g := types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17, Aliases: []string{"BK7"}}
+	g := types.Glass{Type: types.GlassTypeCatalog, Name: "N-BK7", ND: 1.5168, VD: 64.17, Aliases: []string{"BK7"}}
 	c.Add(g)
 	got, ok := c.Lookup("BK7")
 	if !ok {
 		t.Fatal("Lookup via alias failed")
 	}
 	if got.Name != "N-BK7" {
-		t.Errorf("Name = %v, want N-BK7", got.Name)
+		t.Errorf("Name = %q, want N-BK7", got.Name)
+	}
+}
+
+func TestCatalogLookupModelAutoKey(t *testing.T) {
+	c := NewCatalog()
+	g := types.Glass{Type: types.GlassTypeModel, ND: 1.51680, VD: 64.17}
+	c.Add(g)
+	key := "1.51680:64.17"
+	got, ok := c.Lookup(key)
+	if !ok {
+		t.Fatalf("Lookup by auto key %q failed", key)
+	}
+	if got.ND != 1.51680 || got.VD != 64.17 {
+		t.Errorf("got nd=%v vd=%v", got.ND, got.VD)
 	}
 }
 
@@ -115,6 +145,7 @@ func TestInterpolateRefractiveIndex(t *testing.T) {
 
 func TestCalcRefractiveIndexSellmeier(t *testing.T) {
 	g := &types.Glass{
+		Type:              types.GlassTypeCatalog,
 		Name:              "N-BK7",
 		ND:                1.5168,
 		VD:                64.17,
@@ -130,24 +161,37 @@ func TestCalcRefractiveIndexSellmeier(t *testing.T) {
 	}
 }
 
-func TestCalcRefractiveIndexNDVD(t *testing.T) {
+func TestCalcRefractiveIndexModel(t *testing.T) {
 	g := &types.Glass{
-		Name: "N-BK7",
+		Type: types.GlassTypeModel,
+		Label: "my_glass",
 		ND:   1.51680,
 		VD:   64.17,
 	}
 	n, err := CalcRefractiveIndex(g, 0.000587562)
 	if err != nil {
-		t.Fatalf("CalcRefractiveIndex (NDVD): %v", err)
+		t.Fatalf("CalcRefractiveIndex (Model): %v", err)
 	}
 	if math.Abs(n-1.51680) > 0.001 {
 		t.Errorf("n(d-line) = %v, expected ~1.51680", n)
 	}
 }
 
-func TestCalcRefractiveIndexTableInterp(t *testing.T) {
+func TestCalcRefractiveIndexModelMissingNDVD(t *testing.T) {
 	g := &types.Glass{
-		Name: "test",
+		Type:  types.GlassTypeModel,
+		Label: "bad_glass",
+	}
+	_, err := CalcRefractiveIndex(g, 0.00058756)
+	if err == nil {
+		t.Error("Expected error for model glass missing nd/vd")
+	}
+}
+
+func TestCalcRefractiveIndexTabulated(t *testing.T) {
+	g := &types.Glass{
+		Type:  types.GlassTypeTabulated,
+		Label: "test_table",
 		RefractiveIndices: []types.RefractiveIndexEntry{
 			{Wavelength: 0.000486, Value: 1.522},
 			{Wavelength: 0.000656, Value: 1.514},
@@ -162,11 +206,21 @@ func TestCalcRefractiveIndexTableInterp(t *testing.T) {
 	}
 }
 
+func TestCalcRefractiveIndexTabulatedMissingLabel(t *testing.T) {
+	g := &types.Glass{
+		Type: types.GlassTypeModel,
+	}
+	_, err := CalcRefractiveIndex(g, 0.00058756)
+	if err == nil {
+		t.Error("Expected error for model glass with no data")
+	}
+}
+
 func TestCalcRefractiveIndexNoData(t *testing.T) {
 	g := &types.Glass{Name: "test"}
 	_, err := CalcRefractiveIndex(g, 0.00058756)
 	if err == nil {
-		t.Error("Expected error for glass with no dispersion data")
+		t.Error("Expected error for glass with no type")
 	}
 }
 

@@ -123,3 +123,96 @@ func (s Surface) MarshalYAML() (interface{}, error) {
 	}
 	return raw, nil
 }
+
+type glassYAML struct {
+	Type              GlassType              `yaml:"type,omitempty"`
+	Key               string                 `yaml:"key,omitempty"`
+	Name              string                 `yaml:"name,omitempty"`
+	Label             string                 `yaml:"label,omitempty"`
+	Manufacturer      string                 `yaml:"manufacturer,omitempty"`
+	DispersionFormula DispersionFormula      `yaml:"dispersion_formula,omitempty"`
+	ND                float64                `yaml:"nd,omitempty"`
+	VD                float64                `yaml:"vd,omitempty"`
+	Coefficients      []float64              `yaml:"coefficients,omitempty"`
+	WavelengthMin     float64                `yaml:"wavelength_range_min,omitempty"`
+	WavelengthMax     float64                `yaml:"wavelength_range_max,omitempty"`
+	Aliases           []string               `yaml:"aliases,omitempty"`
+	RefractiveIndices []RefractiveIndexEntry `yaml:"refractive_indices,omitempty"`
+}
+
+func ResolveGlassKey(g Glass) string {
+	switch g.Type {
+	case GlassTypeCatalog:
+		return g.Name
+	case GlassTypeTabulated:
+		return g.Label
+	case GlassTypeModel:
+		if g.Label != "" {
+			return g.Label
+		}
+		return fmt.Sprintf("%.5f:%.2f", g.ND, g.VD)
+	default:
+		return g.Name
+	}
+}
+
+func (g *Glass) UnmarshalYAML(node *yaml.Node) error {
+	var raw glassYAML
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+
+	g.Type = raw.Type
+	g.Key = raw.Key
+	g.Name = raw.Name
+	g.Label = raw.Label
+	g.Manufacturer = raw.Manufacturer
+	g.DispersionFormula = raw.DispersionFormula
+	g.ND = raw.ND
+	g.VD = raw.VD
+	g.Coefficients = raw.Coefficients
+	g.WavelengthMin = raw.WavelengthMin
+	g.WavelengthMax = raw.WavelengthMax
+	g.Aliases = raw.Aliases
+	g.RefractiveIndices = raw.RefractiveIndices
+
+	if g.Type == "" {
+		switch {
+		case g.DispersionFormula != "":
+			g.Type = GlassTypeCatalog
+		case len(g.RefractiveIndices) > 0:
+			g.Type = GlassTypeTabulated
+		default:
+			g.Type = GlassTypeModel
+		}
+	}
+
+	if g.Type == GlassTypeTabulated && g.Label == "" {
+		return fmt.Errorf("tabulated glass requires a label")
+	}
+
+	return nil
+}
+
+func (g Glass) MarshalYAML() (interface{}, error) {
+	key := g.Key
+	if key == "" {
+		key = ResolveGlassKey(g)
+	}
+	raw := glassYAML{
+		Type:              g.Type,
+		Key:               key,
+		Name:              g.Name,
+		Label:             g.Label,
+		Manufacturer:      g.Manufacturer,
+		DispersionFormula: g.DispersionFormula,
+		ND:                g.ND,
+		VD:                g.VD,
+		Coefficients:      g.Coefficients,
+		WavelengthMin:     g.WavelengthMin,
+		WavelengthMax:     g.WavelengthMax,
+		Aliases:           g.Aliases,
+		RefractiveIndices: g.RefractiveIndices,
+	}
+	return raw, nil
+}
