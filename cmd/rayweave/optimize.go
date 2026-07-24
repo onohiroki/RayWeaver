@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
@@ -11,7 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func runOptimize(data []byte) {
+func runOptimize(data []byte, verbose bool, logFile string) {
 	var input types.Input
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
@@ -44,15 +45,48 @@ func runOptimize(data []byte) {
 		os.Exit(1)
 	}
 
+
+	var logger optimize.Logger
+	logWriters := []struct {
+		name string
+		w    *os.File
+	}{}
+
+	if verbose {
+		logger = &jsonLogger{w: os.Stderr}
+	}
+
+	if logFile != "" {
+		f, err := os.Create(logFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating log file: %v\n", err)
+			os.Exit(1)
+		}
+		logWriters = append(logWriters, struct {
+			name string
+			w    *os.File
+		}{name: logFile, w: f})
+		if logger == nil {
+			logger = &jsonLogger{w: f}
+		} else {
+			logger = &multiLogger{loggers: []optimize.Logger{logger, &jsonLogger{w: f}}}
+		}
+	}
+
 	cfg := optimize.Config{
 		Surfaces:     surfaces,
 		Variables:    variables,
 		MeritTerms:   meritTerms,
 		GlassCatalog: gc,
+		Logger:       logger,
 	}
 
 	opt := optimize.NewOptimizer(cfg)
 	result := opt.Optimize()
+
+	for _, lw := range logWriters {
+		lw.w.Close()
+	}
 
 	fmt.Fprintf(os.Stderr, "=== Optimization complete ===\n")
 	fmt.Fprintf(os.Stderr, "  Status:      %s\n", result.Status)
@@ -171,4 +205,63 @@ func applyVariableStates(surfaces []types.Surface, states []optimize.VariableSta
 
 	surface.Precompute(result)
 	return result
+}
+
+type iterLog struct {
+	Iter        int       `json:"iter"`
+	Merit       float64   `json:"merit"`
+	Improvement float64   `json:"improvement"`
+	StepNorm    float64   `json:"step_norm"`
+	Variables   []float64 `json:"variables"`
+}
+
+type finalLog struct {
+	Iter      int       `json:"iter"`
+	Merit     float64   `json:"merit"`
+	StepNorm  float64   `json:"step_norm"`
+	Variables []float64 `json:"variables"`
+	Status    string    `json:"status"`
+}
+
+type jsonLogger struct {
+	w *os.File
+}
+
+func (j *jsonLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+	entry := iterLog{
+		Iter:        iter,
+		Merit:       merit,
+		Improvement: improvement,
+		StepNorm:    stepNorm,
+		Variables:   variables,
+	}
+	data, _ := json.Marshal(entry)
+	fmt.Fprintln(j.w, string(data))
+}
+
+func (j *jsonLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+	entry := finalLog{
+		Iter:      iter,
+		Merit:     merit,
+		Variables: variables,
+		Status:    status,
+	}
+	data, _ := json.Marshal(entry)
+	fmt.Fprintln(j.w, string(data))
+}
+
+type multiLogger struct {
+	loggers []optimize.Logger
+}
+
+func (m *multiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+	for _, l := range m.loggers {
+		l.LogIter(iter, merit, improvement, stepNorm, variables)
+	}
+}
+
+func (m *multiLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+	for _, l := range m.loggers {
+		l.LogFinal(iter, status, merit, stepNorm, variables)
+	}
 }

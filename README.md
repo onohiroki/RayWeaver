@@ -62,6 +62,12 @@ cat samples/us2645157.yaml \
 # DLS optimization
 ./rayweave optimize < samples/optimize-demo.yaml > optimized.yaml
 
+# DLS optimization with verbose progress (JSONL on stderr)
+./rayweave optimize --verbose < samples/optimize-demo.yaml > optimized.yaml
+
+# DLS optimization with progress logged to a file (JSONL)
+./rayweave optimize --log /tmp/opt-progress.jsonl < samples/optimize-demo.yaml > optimized.yaml
+
 # TMM coating analysis
 ./rayweave tmm < samples/ar-coating.yaml
 ```

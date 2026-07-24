@@ -314,3 +314,99 @@ func TestOptimizerCanImproveDegradedSystem(t *testing.T) {
 		t.Errorf("Optimizer did not improve merit: before=%.6e, after=%.6e", result.BeforeMerit, result.AfterMerit)
 	}
 }
+
+type mockLogger struct {
+	iterLogs  []struct {
+		Iter        int
+		Merit       float64
+		Improvement float64
+		StepNorm    float64
+		Variables   []float64
+	}
+	finalLogs []struct {
+		Iter      int
+		Merit     float64
+		StepNorm  float64
+		Variables []float64
+		Status    string
+	}
+}
+
+func (m *mockLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+	m.iterLogs = append(m.iterLogs, struct {
+		Iter        int
+		Merit       float64
+		Improvement float64
+		StepNorm    float64
+		Variables   []float64
+	}{iter, merit, improvement, stepNorm, variables})
+}
+
+func (m *mockLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+	m.finalLogs = append(m.finalLogs, struct {
+		Iter      int
+		Merit     float64
+		StepNorm  float64
+		Variables []float64
+		Status    string
+	}{iter, merit, stepNorm, variables, status})
+}
+
+func TestOptimizerLoggerCalled(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Name: "SK18", ND: 1.63854, VD: 55.42})
+	gc.Add(types.Glass{Name: "SF12", ND: 1.64831, VD: 33.84})
+
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.05, Thickness: 1.524, Material: "SK18", Diameter: 10.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 2.3368, Material: "AIR", Diameter: 10.0},
+		{ID: 3, Type: types.Sphere, Curvature: -0.05, Thickness: 0.508, Material: "SF12", Diameter: 6.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0.094413, Thickness: 1.4986, Material: "AIR", Diameter: 6.0},
+		{ID: 5, Type: types.Sphere, Curvature: 0, Thickness: 1.016, Material: "AIR", Diameter: 3.7825297358},
+		{ID: 6, Type: types.Sphere, Curvature: 0.025, Thickness: 1.524, Material: "SK18", Diameter: 6.0},
+		{ID: 7, Type: types.Sphere, Curvature: -0.15, Thickness: 21.36695183553, Material: "AIR", Diameter: 6.0},
+		{ID: 8, Type: types.Sphere, Curvature: 0, Thickness: 0.0, Material: "AIR"},
+	}
+
+	terms := []MeritTerm{
+		{FieldAngle: 0.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0004861, WavWeight: 1.0, Weight: 1.0},
+		{FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0005876, WavWeight: 1.0, Weight: 1.0},
+	}
+
+	variables := []Variable{
+		{Name: "s1_curvature", SurfaceID: 1, Param: "curvature", Min: 0.02, Max: 0.3},
+		{Name: "s3_curvature", SurfaceID: 3, Param: "curvature", Min: -0.3, Max: -0.01},
+	}
+
+	logger := &mockLogger{}
+	cfg := Config{
+		Surfaces:     surfaces,
+		Variables:    variables,
+		MeritTerms:   terms,
+		GlassCatalog: gc,
+		NumRays:      32,
+		Logger:       logger,
+	}
+
+	opt := NewOptimizer(cfg)
+	result := opt.Optimize()
+
+	if len(logger.iterLogs) == 0 {
+		t.Error("LogIter was not called during optimization")
+	}
+	if len(logger.finalLogs) != 1 {
+		t.Errorf("expected 1 LogFinal call, got %d", len(logger.finalLogs))
+	}
+	if len(logger.finalLogs) > 0 {
+		fl := logger.finalLogs[0]
+		if fl.Status != result.Status {
+			t.Errorf("final log status = %q, want %q", fl.Status, result.Status)
+		}
+		if fl.Iter != result.Iterations {
+			t.Errorf("final log iter = %d, want %d", fl.Iter, result.Iterations)
+		}
+	}
+	if len(logger.iterLogs) != result.Iterations {
+		t.Errorf("LogIter called %d times, want %d (iterations)", len(logger.iterLogs), result.Iterations)
+	}
+}

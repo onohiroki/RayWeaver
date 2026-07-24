@@ -27,6 +27,11 @@ type Variable struct {
 	Max       float64
 }
 
+type Logger interface {
+	LogIter(iter int, merit, improvement, stepNorm float64, variables []float64)
+	LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64)
+}
+
 type MeritTerm struct {
 	FieldAngle  float64
 	FieldDir    []float64
@@ -47,6 +52,7 @@ type Config struct {
 	Tol           float64
 	Epsilon       float64
 	NumRays       int
+	Logger        Logger
 }
 
 type Result struct {
@@ -84,6 +90,7 @@ type Optimizer struct {
 	tol        float64
 	epsilon    float64
 	numRays    int
+	logger     Logger
 }
 
 func NewOptimizer(cfg Config) *Optimizer {
@@ -117,6 +124,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		tol:        tol,
 		epsilon:    epsilon,
 		numRays:    numRays,
+		logger:     cfg.Logger,
 	}
 }
 
@@ -225,9 +233,37 @@ func (o *Optimizer) Optimize() Result {
 		for _, d := range delta {
 			norm += d * d
 		}
+		stepNorm := math.Sqrt(norm)
 		lastDelta = delta
 
+		improvement := merit - meritNew
+		if o.logger != nil {
+			currVars := make([]float64, len(o.variables))
+			for i, v := range o.variables {
+				idx := surfaceIndex(o.surfaces, v.SurfaceID)
+				if idx < 0 {
+					currVars[i] = (v.Min + v.Max) / 2
+					continue
+				}
+				switch v.Param {
+				case "curvature":
+					currVars[i] = o.surfaces[idx].Curvature
+				case "thickness":
+					currVars[i] = o.surfaces[idx].Thickness
+				}
+			}
+			o.logger.LogIter(iter+1, merit, improvement, stepNorm, currVars)
+		}
+
 		if math.Sqrt(norm) < o.tol {
+			if o.logger != nil {
+				finalVars := o.buildVariableStates(bestX)
+				vars := make([]float64, len(finalVars))
+				for i, s := range finalVars {
+					vars[i] = s.After
+				}
+				o.logger.LogFinal(iter+1, "converged", bestMerit, stepNorm, vars)
+			}
 			return Result{
 				BeforeMerit: beforeMerit,
 				AfterMerit:  bestMerit,
@@ -239,6 +275,22 @@ func (o *Optimizer) Optimize() Result {
 	}
 
 	_ = lastDelta
+
+	if o.logger != nil {
+		finalVars := o.buildVariableStates(bestX)
+		vars := make([]float64, len(finalVars))
+		for i, s := range finalVars {
+			vars[i] = s.After
+		}
+		finalStepNorm := 0.0
+		if lastDelta != nil {
+			for _, d := range lastDelta {
+				finalStepNorm += d * d
+			}
+			finalStepNorm = math.Sqrt(finalStepNorm)
+		}
+		o.logger.LogFinal(o.maxIter, "max_iterations", bestMerit, finalStepNorm, vars)
+	}
 
 	return Result{
 		BeforeMerit: beforeMerit,

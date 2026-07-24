@@ -11,7 +11,7 @@ echo
 
 echo "--- Initial state (degraded curvatures) ---"
 echo "=== DLS optimization ==="
-./rayweave optimize < "$YAML" > "$OPT_RESULT"
+./rayweave optimize --verbose < "$YAML" > "$OPT_RESULT"
 echo
 
 echo "--- SVG diagrams ---"

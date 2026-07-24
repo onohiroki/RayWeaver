@@ -38,11 +38,16 @@ func main() {
 		return
 	}
 
-	// Check for subcommand --help
+	// Parse optimize-specific flags before stdin reading
+	optVerbose := false
+	optLogFile := ""
 	subcommand := args[0]
-	if len(args) >= 2 && (args[1] == "--help" || args[1] == "-h") {
-		printHelp(subcommand)
-		return
+	if subcommand == "optimize" {
+		fs := flag.NewFlagSet("optimize", flag.ContinueOnError)
+		fs.BoolVar(&optVerbose, "verbose", false, "print per-iteration progress to stderr")
+		fs.StringVar(&optLogFile, "log", "", "write per-iteration progress to file (JSONL)")
+		fs.Parse(args[1:])
+		args = append([]string{"optimize"}, fs.Args()...)
 	}
 
 	data, err := readStdin()
@@ -63,7 +68,7 @@ func main() {
 	case "plot":
 		runPlot(data)
 	case "optimize":
-		runOptimize(data)
+		runOptimize(data, optVerbose, optLogFile)
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown subcommand %q\n", subcommand)
 		fmt.Fprintf(os.Stderr, "Run 'rayweave --help' for usage.\n")
@@ -190,9 +195,13 @@ glass_catalog section.  Ray colours follow the field angle
 (low = blue, high = red).
 `)
 	case "optimize":
-		fmt.Print(`Usage: rayweave optimize < input.yaml
+		fmt.Print(`Usage: rayweave optimize [--verbose] [--log FILE] < input.yaml
 
 DLS (Damped Least Squares) optimization of lens surfaces.
+
+Options:
+  --verbose        print per-iteration progress to stderr (JSONL)
+  --log FILE       write per-iteration progress to FILE (JSONL)
 
 Input YAML — optimization section:
   optimization:
