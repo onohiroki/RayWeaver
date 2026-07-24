@@ -101,12 +101,18 @@ $RAYWEAVE chief --clear-aperture < "$YAML" 2>/dev/null \
   | $RAYWEAVE trace 2>/dev/null \
   | $RAYWEAVE plot -o "$OUTDIR/glass-optimize-init.svg" 2>/dev/null || true
 echo "Written: $OUTDIR/glass-optimize-init.svg"
+if command -v rsvg-convert >/dev/null 2>&1; then
+  rsvg-convert "$OUTDIR/glass-optimize-init.svg" -o "$OUTDIR/glass-optimize-init.png" 2>/dev/null && echo "  PNG: $OUTDIR/glass-optimize-init.png"
+fi
 
 $RAYWEAVE chief --clear-aperture < "$OPT_RESULT" 2>/dev/null \
   | $RAYWEAVE chief --marginal-rays 2>/dev/null \
   | $RAYWEAVE trace 2>/dev/null \
   | $RAYWEAVE plot -o "$OUTDIR/glass-optimize-opt.svg" 2>/dev/null || true
 echo "Written: $OUTDIR/glass-optimize-opt.svg"
+if command -v rsvg-convert >/dev/null 2>&1; then
+  rsvg-convert "$OUTDIR/glass-optimize-opt.svg" -o "$OUTDIR/glass-optimize-opt.png" 2>/dev/null && echo "  PNG: $OUTDIR/glass-optimize-opt.png"
+fi
 echo
 
 echo "=== Spot diagrams (d-line, before vs after) ==="
