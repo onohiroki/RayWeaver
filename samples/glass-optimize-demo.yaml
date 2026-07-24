@@ -23,7 +23,7 @@ system:
     - id: 2
       type: "sphere"
       curvature: -0.01
-      thickness: 12.0
+      thickness: 6.0
       material: "AIR"
       diameter: 30.0
       auto_aperture: true
@@ -38,7 +38,7 @@ system:
     - id: 4
       type: "sphere"
       curvature: 0.0
-      thickness: 6.0
+      thickness: 3.0
       material: "AIR"
       diameter: 22.0
       auto_aperture: true
@@ -78,6 +78,9 @@ chief:
 
 optimization:
   method: dls
+  max_iter: 500
+  tol: 1e-8
+  epsilon: 1e-7
   variables:
     - name: s1_curvature
       target:
@@ -176,12 +179,15 @@ configs:
         weight: 0.5
     wavelengths:
       - id: 0
-        value: 0.0004861
+        value: 0.0004358
         weight: 1.0
       - id: 1
-        value: 0.0005876
+        value: 0.0004861
         weight: 1.0
       - id: 2
+        value: 0.0005876
+        weight: 1.0
+      - id: 3
         value: 0.0006563
         weight: 1.0
     merit:
@@ -189,6 +195,10 @@ configs:
       terms:
         - kind: spot_rms
           field: 0
+          wavelength: 0.0004358
+          weight: 1.0
+        - kind: spot_rms
+          field: 0
           wavelength: 0.0004861
           weight: 1.0
         - kind: spot_rms
@@ -201,6 +211,10 @@ configs:
           weight: 1.0
         - kind: spot_rms
           field: 1
+          wavelength: 0.0004358
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
           wavelength: 0.0004861
           weight: 1.0
         - kind: spot_rms
@@ -211,6 +225,10 @@ configs:
           field: 1
           wavelength: 0.0006563
           weight: 1.0
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.0004358
+          weight: 0.5
         - kind: spot_rms
           field: 2
           wavelength: 0.0004861

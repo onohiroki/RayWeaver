@@ -299,6 +299,9 @@ type Constraint struct {
 type OptimizationConfig struct {
 	Method      string                  `yaml:"method"`
 	Aggregate   string                  `yaml:"aggregate,omitempty"`
+	MaxIter     int                     `yaml:"max_iter,omitempty"`
+	Tol         float64                 `yaml:"tol,omitempty"`
+	Epsilon     float64                 `yaml:"epsilon,omitempty"`
 	Variables   []OptimizationVariable  `yaml:"variables"`
 	Constraints []Constraint            `yaml:"constraints,omitempty"`
 }

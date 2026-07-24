@@ -1,16 +1,20 @@
 glass_catalog:
   entries:
-    - name: SK18
+    - type: model
+      key: 1.63854:55.42
+      name: SK18
       nd: 1.63854
       vd: 55.42
-    - name: SF12
+    - type: model
+      key: 1.64831:33.84
+      name: SF12
       nd: 1.64831
       vd: 33.84
 system:
   surfaces:
     - id: 1
       type: sphere
-      curvature: 0.09001268330508154
+      curvature: 0.08909086406676071
       conic: 0
       thickness: 1.524
       material: SK18
@@ -24,7 +28,7 @@ system:
       diameter: 10
     - id: 3
       type: sphere
-      curvature: -0.0777061489013852
+      curvature: -0.07852615913124529
       conic: 0
       thickness: 0.508
       material: SF12
@@ -44,14 +48,14 @@ system:
       diameter: 3.7825297358
     - id: 6
       type: sphere
-      curvature: 0.016850816451877342
+      curvature: 0.017209348797195056
       conic: 0
       thickness: 1.524
       material: SK18
       diameter: 6
     - id: 7
       type: sphere
-      curvature: -0.10746808600727505
+      curvature: -0.1096558486914772
       conic: 0
       thickness: 21.36695183553
       material: AIR

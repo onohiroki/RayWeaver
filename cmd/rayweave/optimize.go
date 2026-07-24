@@ -80,6 +80,9 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 		MeritTerms:   meritTerms,
 		GlassCatalog: gc,
 		Logger:       logger,
+		MaxIter:      input.Optimization.MaxIter,
+		Tol:          input.Optimization.Tol,
+		Epsilon:      input.Optimization.Epsilon,
 	}
 
 	opt := optimize.NewOptimizer(cfg)
