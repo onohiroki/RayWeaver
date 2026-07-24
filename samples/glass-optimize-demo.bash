@@ -14,7 +14,7 @@ echo "  Surface 1-2: Singlet lens (model1, nd=1.5, vd=60)"
 echo "  Surface 3-4: model2 lens (stop, 9mm)"
 echo "  Surface 5-6: model3 lens"
 echo "  Surface 7:   Image plane"
-echo "  Fields: 0/10/15 degrees — 3 fields" 
+echo "  Fields: 0/10/16 degrees — 3 fields" 
 echo "  Wavelengths: g(436nm) F(486nm) d(588nm) C(656nm) — 4 colors"
 echo
 echo "Vignetting control:"

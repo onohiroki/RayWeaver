@@ -5,12 +5,12 @@ glass_catalog:
       vd: 60.0
     - name: "model2"
       label: "model2"
-      nd: 1.7
-      vd: 30.0
-    - name: "model3"
-      label: "model3"
       nd: 1.5
       vd: 70.0
+    - name: "model3"
+      label: "model3"
+      nd: 1.7
+      vd: 30.0
 
 system:
   surfaces:
@@ -69,9 +69,9 @@ chief:
   fields:
     - angle: 0.0
       direction: [0, 1]
-    - angle: 8.0
+    - angle: 10.0
       direction: [0, 1]
-    - angle: 13.0
+    - angle: 16.0
       direction: [0, 1]
   reference_surface: 7
   num_rays: 512
@@ -206,10 +206,10 @@ configs:
         angle_deg: 0.0
         weight: 1.0
       - id: 1
-        angle_deg: 8.0
+        angle_deg: 10.0
         weight: 1.0
       - id: 2
-        angle_deg: 13.0
+        angle_deg: 16.0
         weight: 0.5
     wavelengths:
       - id: 0
