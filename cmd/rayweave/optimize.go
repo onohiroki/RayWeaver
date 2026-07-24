@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 
+	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -32,7 +33,7 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 	}
 	surface.Precompute(surfaces)
 
-	variables := buildOptimizeVariables(input.Optimization, surfaces)
+	variables := buildOptimizeVariables(input.Optimization, gc)
 	if len(variables) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: no optimization variables defined\n")
 		os.Exit(1)
@@ -98,7 +99,7 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 		fmt.Fprintf(os.Stderr, "  Improvement: %.2f%%\n", improvement)
 	}
 
-	outputSurfaces := applyVariableStates(surfaces, result.Variables)
+	outputSurfaces := applyVariableStates(surfaces, result.Variables, gc)
 	input.System.Surfaces = outputSurfaces
 
 	output := types.Output{
@@ -113,22 +114,44 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 	os.Stdout.Write(outData)
 }
 
-func buildOptimizeVariables(opt *types.OptimizationConfig, surfaces []types.Surface) []optimize.Variable {
+func buildOptimizeVariables(opt *types.OptimizationConfig, gc *glass.Catalog) []optimize.Variable {
 	var variables []optimize.Variable
 	for _, v := range opt.Variables {
 		if !v.Active {
 			continue
 		}
-		if v.Target.Type != "surface" {
+
+		switch v.Target.Type {
+		case "surface":
+			varDef := optimize.Variable{
+				Name:      v.Name,
+				SurfaceID: v.Target.ID,
+				Param:     v.Target.Param,
+				Min:       v.Min,
+				Max:       v.Max,
+			}
+			variables = append(variables, varDef)
+		case "glass":
+			glassName := v.Target.Config
+			min, max := v.Min, v.Max
+			if min == 0 && max == 0 {
+				switch v.Target.Param {
+				case "nd":
+					min, max = 1.4, 1.9
+				case "vd":
+					min, max = 20.0, 80.0
+				}
+			}
+			variables = append(variables, optimize.Variable{
+				Name:      v.Name,
+				GlassName: glassName,
+				Param:     v.Target.Param,
+				Min:       min,
+				Max:       max,
+			})
+		default:
 			continue
 		}
-		variables = append(variables, optimize.Variable{
-			Name:      v.Name,
-			SurfaceID: v.Target.ID,
-			Param:     v.Target.Param,
-			Min:       v.Min,
-			Max:       v.Max,
-		})
 	}
 	return variables
 }
@@ -185,20 +208,35 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 	return terms
 }
 
-func applyVariableStates(surfaces []types.Surface, states []optimize.VariableState) []types.Surface {
+func applyVariableStates(surfaces []types.Surface, states []optimize.VariableState, gc *glass.Catalog) []types.Surface {
 	result := make([]types.Surface, len(surfaces))
 	copy(result, surfaces)
 
 	for _, st := range states {
-		for i := range result {
-			if result[i].ID == st.SurfaceID {
-				switch st.Param {
-				case "curvature":
-					result[i].Curvature = st.After
-				case "thickness":
-					result[i].Thickness = st.After
+		switch st.Param {
+		case "curvature", "thickness":
+			for i := range result {
+				if result[i].ID == st.SurfaceID {
+					switch st.Param {
+					case "curvature":
+						result[i].Curvature = st.After
+					case "thickness":
+						result[i].Thickness = st.After
+					}
+					break
 				}
-				break
+			}
+		case "nd", "vd":
+			if gc == nil || st.GlassName == "" {
+				continue
+			}
+			if g, ok := gc.ByName[st.GlassName]; ok {
+				switch st.Param {
+				case "nd":
+					g.ND = st.After
+				case "vd":
+					g.VD = st.After
+				}
 			}
 		}
 	}

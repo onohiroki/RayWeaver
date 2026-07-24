@@ -352,6 +352,140 @@ func (m *mockLogger) LogFinal(iter int, status string, merit float64, stepNorm f
 	}{iter, merit, stepNorm, variables, status})
 }
 
+func TestOptimizerApplyVariablesND(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Name: "SK18", ND: 1.63854, VD: 55.42})
+
+	cfg := Config{
+		Surfaces: singletSurfaces(),
+		Variables: []Variable{
+			{GlassName: "SK18", Param: "nd", Min: 1.4, Max: 1.9},
+		},
+		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
+		GlassCatalog: gc,
+		NumRays:      4,
+	}
+
+	opt := NewOptimizer(cfg)
+	opt.applyVariables([]float64{1.7})
+
+	g, ok := gc.Lookup("SK18")
+	if !ok {
+		t.Fatal("SK18 not found in catalog after applyVariables")
+	}
+	if g.ND != 1.7 {
+		t.Errorf("SK18 ND = %v, want 1.7", g.ND)
+	}
+}
+
+func TestOptimizerApplyVariablesVD(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	cfg := Config{
+		Surfaces: singletSurfaces(),
+		Variables: []Variable{
+			{GlassName: "N-BK7", Param: "vd", Min: 20, Max: 80},
+		},
+		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
+		GlassCatalog: gc,
+		NumRays:      4,
+	}
+
+	opt := NewOptimizer(cfg)
+	opt.applyVariables([]float64{50.0})
+
+	g, ok := gc.Lookup("N-BK7")
+	if !ok {
+		t.Fatal("N-BK7 not found in catalog after applyVariables")
+	}
+	if g.VD != 50.0 {
+		t.Errorf("N-BK7 VD = %v, want 50.0", g.VD)
+	}
+}
+
+func TestOptimizerGetInitialStateGlass(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	cfg := Config{
+		Surfaces: singletSurfaces(),
+		Variables: []Variable{
+			{Name: "bk7_nd", GlassName: "N-BK7", Param: "nd", Min: 1.4, Max: 1.9},
+			{Name: "bk7_vd", GlassName: "N-BK7", Param: "vd", Min: 20, Max: 80},
+		},
+		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
+		GlassCatalog: gc,
+		NumRays:      4,
+	}
+
+	opt := NewOptimizer(cfg)
+	x := opt.getInitialState()
+
+	if math.Abs(x[0]-1.5168) > 1e-10 {
+		t.Errorf("initial nd = %v, want 1.5168", x[0])
+	}
+	if math.Abs(x[1]-64.17) > 1e-10 {
+		t.Errorf("initial vd = %v, want 64.17", x[1])
+	}
+}
+
+func TestOptimizerGetInitialStateGlassNotFound(t *testing.T) {
+	gc := glass.NewCatalog()
+
+	cfg := Config{
+		Surfaces: singletSurfaces(),
+		Variables: []Variable{
+			{Name: "nd", GlassName: "MISSING", Param: "nd", Min: 1.4, Max: 1.9},
+		},
+		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
+		GlassCatalog: gc,
+		NumRays:      4,
+	}
+
+	opt := NewOptimizer(cfg)
+	x := opt.getInitialState()
+
+	expected := (1.4 + 1.9) / 2
+	if math.Abs(x[0]-expected) > 1e-10 {
+		t.Errorf("initial state = %v, want %v (midpoint fallback)", x[0], expected)
+	}
+}
+
+func TestBuildVariableStatesGlass(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Name: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	cfg := Config{
+		Surfaces: singletSurfaces(),
+		Variables: []Variable{
+			{Name: "bk7_nd", GlassName: "N-BK7", Param: "nd", Min: 1.4, Max: 1.9},
+		},
+		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
+		GlassCatalog: gc,
+		NumRays:      4,
+	}
+
+	opt := NewOptimizer(cfg)
+	states := opt.buildVariableStates([]float64{1.7})
+
+	if len(states) != 1 {
+		t.Fatalf("expected 1 state, got %d", len(states))
+	}
+	if states[0].GlassName != "N-BK7" {
+		t.Errorf("GlassName = %q, want N-BK7", states[0].GlassName)
+	}
+	if math.Abs(states[0].Before-1.5168) > 1e-10 {
+		t.Errorf("Before = %v, want 1.5168", states[0].Before)
+	}
+	if math.Abs(states[0].After-1.7) > 1e-10 {
+		t.Errorf("After = %v, want 1.7", states[0].After)
+	}
+	if states[0].SurfaceID != 0 {
+		t.Errorf("SurfaceID = %d, want 0 for glass variable", states[0].SurfaceID)
+	}
+}
+
 func TestOptimizerLoggerCalled(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Name: "SK18", ND: 1.63854, VD: 55.42})
