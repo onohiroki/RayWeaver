@@ -6,6 +6,7 @@ OUTDIR="samples"
 OPT_RESULT="$OUTDIR/glass-optimize-result.yaml"
 OPT_CHIEF="$OUTDIR/glass-optimize-chief.yaml"
 OPT_WITH_CHIEF="$OUTDIR/glass-opt-with-chief.yaml"
+OPT_LOG="$OUTDIR/glass-optimize-log.jsonl"
 RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 echo "=== Glass optimization demo: 35mm-format 3-lens system ==="
@@ -38,7 +39,7 @@ echo "  - model3_nd/vd   (lens 3 glass nd/vd)"
 echo
 
 echo "=== DLS optimization ==="
-$RAYWEAVE optimize --verbose < "$YAML" > "$OPT_RESULT"
+$RAYWEAVE optimize --verbose --log "$OPT_LOG" < "$YAML" > "$OPT_RESULT"
 
 echo
 echo "--- Optimized 3-lens system ---"
