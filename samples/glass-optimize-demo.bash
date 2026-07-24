@@ -109,4 +109,73 @@ $RAYWEAVE chief --clear-aperture < "$OPT_RESULT" 2>/dev/null \
 echo "Written: $OUTDIR/glass-optimize-opt.svg"
 echo
 
+echo "=== Spot diagrams (d-line, before vs after) ==="
+# Collect spot data for initial design
+INIT_CHIEF="$OUTDIR/glass-init-chief.yaml"
+$RAYWEAVE chief < "$YAML" > "$INIT_CHIEF" 2>/dev/null || true
+
+# Extract spot data for each field
+for fi in 0 1 2; do
+  LABELS=("on-axis" "12deg" "18deg")
+  # initial spots
+  yq ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity] | @tsv" \
+    "$INIT_CHIEF" 2>/dev/null > "$OUTDIR/glass-spot-init-f${fi}.txt" || true
+  # optimized spots
+  OPT_CHIEF_FILE="$OUTDIR/glass-opt-chief.yaml"
+  $RAYWEAVE chief < "$OPT_RESULT" > "$OPT_CHIEF_FILE" 2>/dev/null || true
+  yq ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity] | @tsv" \
+    "$OPT_CHIEF_FILE" 2>/dev/null > "$OUTDIR/glass-spot-opt-f${fi}.txt" || true
+done
+
+# Determine global scale from both init and opt spots
+XMIN=999; XMAX=-999; YMIN=999; YMAX=-999
+for fi in 0 1 2; do
+  for phase in init opt; do
+    F="$OUTDIR/glass-spot-${phase}-f${fi}.txt"
+    if [ -f "$F" ] && [ -s "$F" ]; then
+      read xm xx ym yx <<<$(awk '{if(NR==1||$1<xm)xm=$1;if($1>xx)xx=$1;if($2<ym)ym=$2;if($2>yx)yx=$2} END{print xm,xx,ym,yx}' "$F")
+      XMIN=$(echo "if($xm<$XMIN) $xm else $XMIN" | bc -l)
+      XMAX=$(echo "if($xx>$XMAX) $xx else $XMAX" | bc -l)
+      YMIN=$(echo "if($ym<$YMIN) $ym else $YMIN" | bc -l)
+      YMAX=$(echo "if($yx>$YMAX) $yx else $YMAX" | bc -l)
+    fi
+  done
+done
+# Add 10% margin
+RANGE=$(echo "scale=6; m=sqrt(($XMAX-$XMIN)^2+($YMAX-$YMIN)^2); if (m<0.001) m=0.1; m*0.55" | bc -l)
+XLOW=$(echo "$XMIN - $RANGE" | bc -l)
+XHIGH=$(echo "$XMAX + $RANGE" | bc -l)
+YLOW=$(echo "$YMIN - $RANGE" | bc -l)
+YHIGH=$(echo "$YMAX + $RANGE" | bc -l)
+
+export GNUTERM=pngcairo
+for fi in 0 1 2; do
+  case $fi in
+    0) FLABEL="on-axis";;
+    1) FLABEL="12deg";;
+    2) FLABEL="18deg";;
+  esac
+  gnuplot 2>/dev/null <<GPLOT
+    set terminal pngcairo size 800,400
+    set output "$OUTDIR/glass-spot-f${fi}.png"
+    set multiplot layout 1,2 title "$FLABEL spot diagram (d-line)"
+    set xlabel "image X (mm)"
+    set ylabel "image Y (mm)"
+    set size ratio -1
+    set cbrange [0.95:1.00]
+    set xtics nomirror; set ytics nomirror
+    set xrange [$XLOW:$XHIGH]
+    set yrange [$YLOW:$YHIGH]
+    set title "before"
+    plot "$OUTDIR/glass-spot-init-f${fi}.txt" using 1:2:3 \
+      with points pt 7 ps 2 palette title ""
+    set title "after"
+    plot "$OUTDIR/glass-spot-opt-f${fi}.txt" using 1:2:3 \
+      with points pt 7 ps 2 palette title ""
+    unset multiplot
+GPLOT
+done
+echo "Written: $OUTDIR/glass-spot-f{0,1,2}.png"
+echo
+
 echo "=== Iteration log saved: $OPT_LOG ==="
