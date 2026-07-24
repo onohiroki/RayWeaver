@@ -132,52 +132,55 @@ for fi in 0 1 2; do
     "$OPT_CHIEF_FILE" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/glass-spot-opt-f${fi}.txt" || true
 done
 
-# Determine global scale from both init and opt spots
-XMIN=999; XMAX=-999; YMIN=999; YMAX=-999; HAS_DATA=0
-for fi in 0 1 2; do
-  for phase in init opt; do
-    F="$OUTDIR/glass-spot-${phase}-f${fi}.txt"
-    if [ -f "$F" ] && [ -s "$F" ]; then
-      read xm xx ym yx <<<$(awk -F, 'BEGIN{xm=999;xx=-999;ym=999;yx=-999}{if($1<xm)xm=$1;if($1>xx)xx=$1;if($2<ym)ym=$2;if($2>yx)yx=$2} END{print xm,xx,ym,yx}' "$F")
-      XMIN=$(echo "scale=6; if($xm<$XMIN) $xm else $XMIN" | bc -l 2>/dev/null || echo "-0.5")
-      XMAX=$(echo "scale=6; if($xx>$XMAX) $xx else $XMAX" | bc -l 2>/dev/null || echo "0.5")
-      YMIN=$(echo "scale=6; if($ym<$YMIN) $ym else $YMIN" | bc -l 2>/dev/null || echo "-0.5")
-      YMAX=$(echo "scale=6; if($yx>$YMAX) $yx else $YMAX" | bc -l 2>/dev/null || echo "0.5")
-      HAS_DATA=1
-    fi
-  done
-done
-if [ "$HAS_DATA" -eq 0 ]; then
-  XMIN=-0.5; XMAX=0.5; YMIN=-0.5; YMAX=0.5
-fi
-# Add 10% margin
-RANGE=$(echo "scale=6; dx=$XMAX-$XMIN; dy=$YMAX-$YMIN; m=sqrt(dx*dx+dy*dy); if(m<0.001)m=0.1; m*0.55" | bc -l 2>/dev/null || echo "0.1")
-XLOW=$(echo "$XMIN - $RANGE" | bc -l 2>/dev/null || echo "-0.6")
-XHIGH=$(echo "$XMAX + $RANGE" | bc -l 2>/dev/null || echo "0.6")
-YLOW=$(echo "$YMIN - $RANGE" | bc -l 2>/dev/null || echo "-0.6")
-YHIGH=$(echo "$YMAX + $RANGE" | bc -l 2>/dev/null || echo "0.6")
-
 export GNUTERM=pngcairo
 for fi in 0 1 2; do
   case $fi in
     0) FLABEL="on-axis";;
-    1) FLABEL="12deg";;
-    2) FLABEL="18deg";;
+    1) FLABEL="10deg";;
+    2) FLABEL="16deg";;
   esac
   gnuplot 2>/dev/null <<GPLOT
     set terminal pngcairo size 800,400
     set output "$OUTDIR/glass-spot-f${fi}.png"
     set datafile separator comma
-    set multiplot layout 1,2 title "$FLABEL spot diagram (d-line)"
-    set xlabel "image X (mm)"
-    set ylabel "image Y (mm)"
+
+    # compute centroid for initial and optimized
+    stats "$OUTDIR/glass-spot-init-f${fi}.txt" using 1:2 nooutput
+    cx_init = STATS_mean_x; cy_init = STATS_mean_y
+    stats "$OUTDIR/glass-spot-opt-f${fi}.txt" using 1:2 nooutput
+    cx_opt = STATS_mean_x; cy_opt = STATS_mean_y
+
+    # determine global range from centered data
+    set term push
+    set terminal unknown
+    plot "$OUTDIR/glass-spot-init-f${fi}.txt" using (\$1-cx_init):(\$2-cy_init)
+    xmin = GPVAL_DATA_X_MIN; xmax = GPVAL_DATA_X_MAX
+    ymin = GPVAL_DATA_Y_MIN; ymax = GPVAL_DATA_Y_MAX
+    plot "$OUTDIR/glass-spot-opt-f${fi}.txt" using (\$1-cx_opt):(\$2-cy_opt)
+    xmin2 = GPVAL_DATA_X_MIN; xmax2 = GPVAL_DATA_X_MAX
+    ymin2 = GPVAL_DATA_Y_MIN; ymax2 = GPVAL_DATA_Y_MAX
+    set term pop
+
+    if (xmin2 < xmin) { xmin = xmin2 }
+    if (xmax2 > xmax) { xmax = xmax2 }
+    if (ymin2 < ymin) { ymin = ymin2 }
+    if (ymax2 > ymax) { ymax = ymax2 }
+
+    dx = xmax - xmin; dy = ymax - ymin
+    range = (dx > dy ? dx : dy) * 0.6
+    if (range < 0.01) { range = 0.01 }
+
+    set multiplot layout 1,2 title "$FLABEL spot diagram (d-line, centered)"
+    set xlabel "dx (mm)"
+    set ylabel "dy (mm)"
     set cbrange [0.95:1.00]
-    set xrange [$XLOW:$XHIGH]; set yrange [$YLOW:$YHIGH]
+    set xrange [-range:range]; set yrange [-range:range]
+    set size square
     set title "before"
-    plot "$OUTDIR/glass-spot-init-f${fi}.txt" using 1:2:3 \
+    plot "$OUTDIR/glass-spot-init-f${fi}.txt" using (\$1-cx_init):(\$2-cy_init):3 \
       with points pt 7 ps 2 palette title ""
     set title "after"
-    plot "$OUTDIR/glass-spot-opt-f${fi}.txt" using 1:2:3 \
+    plot "$OUTDIR/glass-spot-opt-f${fi}.txt" using (\$1-cx_opt):(\$2-cy_opt):3 \
       with points pt 7 ps 2 palette title ""
     unset multiplot
 GPLOT
