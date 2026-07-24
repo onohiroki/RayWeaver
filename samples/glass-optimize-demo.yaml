@@ -1,0 +1,225 @@
+glass_catalog:
+  entries:
+    - name: "LENS_GLASS"
+      nd: 1.5
+      vd: 60.0
+    - name: "BK7_WIN"
+      nd: 1.5168
+      vd: 64.17
+    - name: "SF12_WIN"
+      nd: 1.64831
+      vd: 33.84
+
+system:
+  surfaces:
+    - id: 1
+      type: "sphere"
+      curvature: 0.015
+      thickness: 6.0
+      material: "LENS_GLASS"
+      diameter: 30.0
+      auto_aperture: true
+      min_glass_path: 2.0
+    - id: 2
+      type: "sphere"
+      curvature: -0.01
+      thickness: 12.0
+      material: "AIR"
+      diameter: 30.0
+      auto_aperture: true
+    - id: 3
+      type: "sphere"
+      curvature: 0.0
+      thickness: 3.0
+      material: "BK7_WIN"
+      diameter: 22.0
+      auto_aperture: false
+      min_glass_path: 1.0
+    - id: 4
+      type: "sphere"
+      curvature: 0.0
+      thickness: 6.0
+      material: "AIR"
+      diameter: 22.0
+      auto_aperture: true
+    - id: 5
+      type: "sphere"
+      curvature: 0.0
+      thickness: 3.0
+      material: "SF12_WIN"
+      diameter: 22.0
+      auto_aperture: true
+      min_glass_path: 1.0
+    - id: 6
+      type: "sphere"
+      curvature: 0.0
+      thickness: 20.0
+      material: "AIR"
+      diameter: 22.0
+      auto_aperture: true
+    - id: 7
+      type: "sphere"
+      curvature: 0.0
+      thickness: 0.0
+      material: "AIR"
+
+chief:
+  fields:
+    - angle: 0.0
+      direction: [0, 1]
+    - angle: 14.0
+      direction: [0, 1]
+    - angle: 20.0
+      direction: [0, 1]
+  reference_surface: 7
+  num_rays: 512
+  grid_type: hex
+  dump_map: false
+
+optimization:
+  method: dls
+  variables:
+    - name: s1_curvature
+      target:
+        type: surface
+        id: 1
+        param: curvature
+      min: -0.1
+      max: 0.1
+      active: true
+    - name: s2_curvature
+      target:
+        type: surface
+        id: 2
+        param: curvature
+      min: -0.1
+      max: 0.1
+      active: true
+    - name: lens_nd
+      target:
+        type: surface
+        id: 1
+        param: nd
+      min: 1.4
+      max: 1.9
+      active: true
+    - name: lens_vd
+      target:
+        type: surface
+        id: 1
+        param: vd
+      min: 20.0
+      max: 80.0
+      active: true
+    - name: s3_curvature
+      target:
+        type: surface
+        id: 3
+        param: curvature
+      min: -0.1
+      max: 0.1
+      active: true
+    - name: s4_curvature
+      target:
+        type: surface
+        id: 4
+        param: curvature
+      min: -0.1
+      max: 0.1
+      active: true
+    - name: s5_curvature
+      target:
+        type: surface
+        id: 5
+        param: curvature
+      min: -0.1
+      max: 0.1
+      active: true
+    - name: s6_curvature
+      target:
+        type: surface
+        id: 6
+        param: curvature
+      min: -0.1
+      max: 0.1
+      active: true
+    - name: s2_thickness
+      target:
+        type: surface
+        id: 2
+        param: thickness
+      min: 1.0
+      max: 30.0
+      active: true
+    - name: s4_thickness
+      target:
+        type: surface
+        id: 4
+        param: thickness
+      min: 1.0
+      max: 20.0
+      active: true
+
+configs:
+  - id: 0
+    name: nominal
+    active: true
+    fields:
+      - id: 0
+        angle_deg: 0.0
+        weight: 1.0
+      - id: 1
+        angle_deg: 14.0
+        weight: 1.0
+      - id: 2
+        angle_deg: 20.0
+        weight: 0.5
+    wavelengths:
+      - id: 0
+        value: 0.0004861
+        weight: 1.0
+      - id: 1
+        value: 0.0005876
+        weight: 1.0
+      - id: 2
+        value: 0.0006563
+        weight: 1.0
+    merit:
+      type: weighted_sum
+      terms:
+        - kind: spot_rms
+          field: 0
+          wavelength: 0.0004861
+          weight: 1.0
+        - kind: spot_rms
+          field: 0
+          wavelength: 0.0005876
+          weight: 1.0
+        - kind: spot_rms
+          field: 0
+          wavelength: 0.0006563
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.0004861
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.0005876
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.0006563
+          weight: 1.0
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.0004861
+          weight: 0.5
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.0005876
+          weight: 0.5
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.0006563
+          weight: 0.5
