@@ -1,12 +1,12 @@
 glass_catalog:
   entries:
-    - name: "LENS_GLASS"
+    - name: "model1"
       nd: 1.5
       vd: 60.0
-    - name: "BK7_WIN"
+    - name: "model2"
       nd: 1.5168
       vd: 64.17
-    - name: "SF12_WIN"
+    - name: "model3"
       nd: 1.64831
       vd: 33.84
 
@@ -16,7 +16,7 @@ system:
       type: "sphere"
       curvature: 0.015
       thickness: 6.0
-      material: "LENS_GLASS"
+      material: "model1"
       diameter: 30.0
       auto_aperture: true
       min_glass_path: 2.0
@@ -31,7 +31,7 @@ system:
       type: "sphere"
       curvature: 0.0
       thickness: 3.0
-      material: "BK7_WIN"
+      material: "model2"
       diameter: 22.0
       auto_aperture: false
       min_glass_path: 1.0
@@ -46,7 +46,7 @@ system:
       type: "sphere"
       curvature: 0.0
       thickness: 3.0
-      material: "SF12_WIN"
+      material: "model3"
       diameter: 22.0
       auto_aperture: true
       min_glass_path: 1.0

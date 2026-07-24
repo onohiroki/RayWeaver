@@ -11,9 +11,9 @@ RAYWEAVE="${RAYWEAVE:-./rayweave}"
 echo "=== Glass optimization demo: 35mm-format 3-lens system ==="
 echo
 echo "Optical system (35mm full-frame):"
-echo "  Surface 1-2: Singlet lens (LENS_GLASS, nd=1.5, vd=60)"
-echo "  Surface 3-4: BK7 window  → becomes 2nd lens (stop)"
-echo "  Surface 5-6: SF12 window → becomes 3rd lens"
+echo "  Surface 1-2: Singlet lens (model1, nd=1.5, vd=60)"
+echo "  Surface 3-4: model2 lens (stop)"
+echo "  Surface 5-6: model3 lens"
 echo "  Surface 7:   Image plane"
 echo "  Fields: 0° (on-axis), 14°, 20° (full 35mm coverage)"
 echo
