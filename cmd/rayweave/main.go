@@ -305,6 +305,7 @@ func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
 	clearAperture := fs.Bool("clear-aperture", false, "compute clear aperture diameters from grid ray extents and set system.surfaces[].diameter")
 	marginalRays := fs.Bool("marginal-rays", false, "add marginal rays (max/min Y, and X if applicable) to output rays")
+	wlFlag := fs.Float64("wl", 0.00058756, "wavelength (mm) for grid ray tracing")
 	fs.Parse(os.Args[2:])
 
 	var input types.Input
@@ -332,7 +333,7 @@ func runChief(data []byte) {
 		os.Exit(1)
 	}
 
-	wavelength := 0.00058756
+	wavelength := *wlFlag
 
 	gc, _ := loadCatalogs(&input)
 	surface.Precompute(input.System.Surfaces)

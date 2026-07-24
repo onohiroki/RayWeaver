@@ -115,21 +115,29 @@ if command -v rsvg-convert >/dev/null 2>&1; then
 fi
 echo
 
-echo "=== Spot diagrams (d-line, before vs after) ==="
-# Collect spot data for initial design
-INIT_CHIEF="$OUTDIR/glass-init-chief.yaml"
-$RAYWEAVE chief < "$YAML" > "$INIT_CHIEF" 2>/dev/null || true
+echo "=== Spot diagrams (4 wavelengths, before vs after) ==="
 
-# Extract spot data for each field
-for fi in 0 1 2; do
-  # initial spots
-  yq eval ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity]" \
-    "$INIT_CHIEF" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/glass-spot-init-f${fi}.txt" || true
-  # optimized spots
-  OPT_CHIEF_FILE="$OUTDIR/glass-opt-chief.yaml"
-  $RAYWEAVE chief < "$OPT_RESULT" > "$OPT_CHIEF_FILE" 2>/dev/null || true
-  yq eval ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity]" \
-    "$OPT_CHIEF_FILE" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/glass-spot-opt-f${fi}.txt" || true
+WL_NAMES=("g" "F" "d" "C")
+WL_VALUES=(0.0004358 0.0004861 0.0005876 0.0006563)
+WL_COLORS=("#1a237e" "#1565c0" "#2e7d32" "#c62828")
+NTN_NAMES=("g(436nm)" "F(486nm)" "d(588nm)" "C(656nm)")
+
+# For each wavelength, run chief and extract spots
+for wli in 0 1 2 3; do
+  wl="${WL_VALUES[$wli]}"
+  for phase in init opt; do
+    case $phase in
+      init) INPUT="$YAML";;
+      opt)  INPUT="$OPT_RESULT";;
+    esac
+    CHIEF_OUT="$OUTDIR/glass-chief-${phase}-wl${wli}.yaml"
+    $RAYWEAVE chief --wl "$wl" < "$INPUT" > "$CHIEF_OUT" 2>/dev/null || true
+    for fi in 0 1 2; do
+      yq eval ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, $wli]" \
+        "$CHIEF_OUT" -o=csv 2>/dev/null | tail -n +2 \
+        >> "$OUTDIR/glass-spot-${phase}-f${fi}-all.txt" || true
+    done
+  done
 done
 
 export GNUTERM=pngcairo
@@ -140,52 +148,55 @@ for fi in 0 1 2; do
     2) FLABEL="16deg";;
   esac
   gnuplot 2>/dev/null <<GPLOT
-    set terminal pngcairo size 800,400
+    set terminal pngcairo size 1000,450
     set output "$OUTDIR/glass-spot-f${fi}.png"
-    set datafile separator comma
 
-    # compute centroid for initial and optimized
-    stats "$OUTDIR/glass-spot-init-f${fi}.txt" using 1:2 nooutput
+    # palette: g=darkblue, F=blue, d=green, C=red
+    set palette defined (0 "#1a237e", 1 "#1565c0", 2 "#2e7d32", 3 "#c62828")
+    set cbrange [0:3]
+
+    # compute centroid (all wavelengths combined)
+    stats "$OUTDIR/glass-spot-init-f${fi}-all.txt" using 1:2 nooutput
     cx_init = STATS_mean_x; cy_init = STATS_mean_y
-    stats "$OUTDIR/glass-spot-opt-f${fi}.txt" using 1:2 nooutput
+    stats "$OUTDIR/glass-spot-opt-f${fi}-all.txt" using 1:2 nooutput
     cx_opt = STATS_mean_x; cy_opt = STATS_mean_y
 
-    # determine global range from centered data
-    set term push
-    set terminal unknown
-    plot "$OUTDIR/glass-spot-init-f${fi}.txt" using (\$1-cx_init):(\$2-cy_init)
+    # global range from centered data (all wl)
+    set term push; set terminal unknown
+    plot "$OUTDIR/glass-spot-init-f${fi}-all.txt" using (\$1-cx_init):(\$2-cy_init)
     xmin = GPVAL_DATA_X_MIN; xmax = GPVAL_DATA_X_MAX
     ymin = GPVAL_DATA_Y_MIN; ymax = GPVAL_DATA_Y_MAX
-    plot "$OUTDIR/glass-spot-opt-f${fi}.txt" using (\$1-cx_opt):(\$2-cy_opt)
-    xmin2 = GPVAL_DATA_X_MIN; xmax2 = GPVAL_DATA_X_MAX
-    ymin2 = GPVAL_DATA_Y_MIN; ymax2 = GPVAL_DATA_Y_MAX
+    plot "$OUTDIR/glass-spot-opt-f${fi}-all.txt" using (\$1-cx_opt):(\$2-cy_opt)
+    if (GPVAL_DATA_X_MIN < xmin) { xmin = GPVAL_DATA_X_MIN }
+    if (GPVAL_DATA_X_MAX > xmax) { xmax = GPVAL_DATA_X_MAX }
+    if (GPVAL_DATA_Y_MIN < ymin) { ymin = GPVAL_DATA_Y_MIN }
+    if (GPVAL_DATA_Y_MAX > ymax) { ymax = GPVAL_DATA_Y_MAX }
     set term pop
-
-    if (xmin2 < xmin) { xmin = xmin2 }
-    if (xmax2 > xmax) { xmax = xmax2 }
-    if (ymin2 < ymin) { ymin = ymin2 }
-    if (ymax2 > ymax) { ymax = ymax2 }
-
     dx = xmax - xmin; dy = ymax - ymin
-    range = (dx > dy ? dx : dy) * 0.6
-    if (range < 0.01) { range = 0.01 }
+    range = (dx > dy ? dx : dy) * 0.6; if (range < 0.005) { range = 0.005 }
 
-    set multiplot layout 1,2 title "$FLABEL spot diagram (d-line, centered)"
-    set xlabel "dx (mm)"
-    set ylabel "dy (mm)"
-    set cbrange [0.95:1.00]
+    set multiplot layout 1,2 title "$FLABEL spot diagram (g/F/d/C, centered)"
+    set xlabel "dx (mm)"; set ylabel "dy (mm)"
     set xrange [-range:range]; set yrange [-range:range]
-    set size square
+    set size square; set key outside right
+
+    # before
     set title "before"
-    plot "$OUTDIR/glass-spot-init-f${fi}.txt" using (\$1-cx_init):(\$2-cy_init):3 \
-      with points pt 7 ps 2 palette title ""
+    plot "$OUTDIR/glass-spot-init-f${fi}-all.txt" using (\$1-cx_init):(\$2-cy_init):3 \
+      with points pt 7 ps 1.5 lc palette title "", \
+      keyentry w ls 1 t "g(436nm)", keyentry w ls 2 t "F(486nm)", \
+      keyentry w ls 3 t "d(588nm)", keyentry w ls 4 t "C(656nm)"
+
+    # after
     set title "after"
-    plot "$OUTDIR/glass-spot-opt-f${fi}.txt" using (\$1-cx_opt):(\$2-cy_opt):3 \
-      with points pt 7 ps 2 palette title ""
+    plot "$OUTDIR/glass-spot-opt-f${fi}-all.txt" using (\$1-cx_opt):(\$2-cy_opt):3 \
+      with points pt 7 ps 1.5 lc palette title "", \
+      keyentry w ls 1 t "g(436nm)", keyentry w ls 2 t "F(486nm)", \
+      keyentry w ls 3 t "d(588nm)", keyentry w ls 4 t "C(656nm)"
     unset multiplot
 GPLOT
   if [ -f "$OUTDIR/glass-spot-f${fi}.png" ]; then
-    echo "Written: $OUTDIR/glass-spot-f${fi}.png"
+    echo "Written: $OUTDIR/glass-spot-f${fi}.png (4 wavelengths)"
   fi
 done
 echo
