@@ -83,18 +83,19 @@ type pupilPoint struct {
 }
 
 type Optimizer struct {
-	surfaces       []types.Surface
-	variables      []Variable
-	meritTerms     []MeritTerm
-	gc             *glass.Catalog
-	glassOverrides map[string]*types.Glass
-	tempGC         *glass.Catalog
-	maxIter        int
-	mu             float64
-	tol            float64
-	epsilon        float64
-	numRays        int
-	logger         Logger
+	surfaces        []types.Surface
+	variables       []Variable
+	meritTerms      []MeritTerm
+	gc              *glass.Catalog
+	glassOverrides  map[string]*types.Glass
+	tempGC          *glass.Catalog
+	apertureExtents map[int]float64
+	maxIter         int
+	mu              float64
+	tol             float64
+	epsilon         float64
+	numRays         int
+	logger          Logger
 }
 
 func NewOptimizer(cfg Config) *Optimizer {
@@ -269,6 +270,8 @@ func (o *Optimizer) Optimize() Result {
 			}
 		}
 
+		o.applyApertureExtents()
+
 		norm := 0.0
 		for _, d := range delta {
 			norm += d * d
@@ -333,14 +336,43 @@ func (o *Optimizer) Optimize() Result {
 
 func (o *Optimizer) evaluateMerit(x []float64) float64 {
 	surfaces := o.applyVariables(x)
+	onAxisFloor := make(map[int]float64)
+	offAxisMax := make(map[int]float64)
 	merit := 0.0
 
 	for _, term := range o.meritTerms {
-		points := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+		points, extents := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+		if term.FieldAngle == 0 {
+			for id, e := range extents {
+				if e > onAxisFloor[id] {
+					onAxisFloor[id] = e
+				}
+			}
+		} else {
+			for id, e := range extents {
+				if e > offAxisMax[id] {
+					offAxisMax[id] = e
+				}
+			}
+		}
 		rms := computeSpotRMS(points)
 		merit += term.Weight * term.FieldWeight * term.WavWeight * rms * rms
 	}
 
+	o.apertureExtents = make(map[int]float64, len(offAxisMax))
+	for id, e := range offAxisMax {
+		floor := onAxisFloor[id]
+		if e >= floor {
+			o.apertureExtents[id] = e
+		} else {
+			o.apertureExtents[id] = floor
+		}
+	}
+	for id, e := range onAxisFloor {
+		if _, ok := o.apertureExtents[id]; !ok {
+			o.apertureExtents[id] = e
+		}
+	}
 	return merit
 }
 
@@ -395,7 +427,7 @@ func (o *Optimizer) applyVariables(x []float64) []types.Surface {
 	return result
 }
 
-func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) []imagePoint {
+func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) ([]imagePoint, map[int]float64) {
 	gc := o.gc
 	if o.tempGC != nil {
 		gc = o.tempGC
@@ -418,9 +450,12 @@ func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64,
 
 	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
 
-	apertureRadius := findMinApertureRadius(surfaces)
+	apertureRadius := findFixedApertureRadius(surfaces)
 	if apertureRadius <= 0 {
-		return nil
+		apertureRadius = findMinApertureRadius(surfaces)
+	}
+	if apertureRadius <= 0 {
+		return nil, nil
 	}
 
 	zStart := -100.0
@@ -438,20 +473,34 @@ func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64,
 		}
 	}
 
+	perSurfMax := make(map[int]float64)
 	var points []imagePoint
 	for _, pt := range grid {
 		origin := types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}
 		r := types.Ray{
-			Wavelength: wavelength,
-			Initial:    types.RayState{Origin: origin, Direction: rayDir},
-			Path:       p,
-			Jones:      types.NewCircularJones(true),
+			Wavelength:        wavelength,
+			Initial:           types.RayState{Origin: origin, Direction: rayDir},
+			Path:              p,
+			Jones:             types.NewCircularJones(true),
+			SkipGlassPathCheck: fieldAngle == 0,
 		}
 
 		result := engine.TraceRay(r, surfaces)
 		if result.Error != "" {
 			points = append(points, imagePoint{OK: false})
 			continue
+		}
+
+		for _, sr := range result.Surfaces {
+			ax := math.Abs(sr.Position.X)
+			ay := math.Abs(sr.Position.Y)
+			e := ax
+			if ay > e {
+				e = ay
+			}
+			if e > perSurfMax[sr.SurfaceID] {
+				perSurfMax[sr.SurfaceID] = e
+			}
 		}
 
 		if len(result.Surfaces) > 0 {
@@ -462,7 +511,7 @@ func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64,
 		}
 	}
 
-	return points
+	return points, perSurfMax
 }
 
 func computeSpotRMS(points []imagePoint) float64 {
@@ -529,7 +578,7 @@ func (o *Optimizer) computeResiduals(x []float64) []float64 {
 	r := make([]float64, len(o.meritTerms))
 
 	for i, term := range o.meritTerms {
-		points := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+		points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
 		rms := computeSpotRMS(points)
 		r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
 	}
@@ -558,7 +607,7 @@ func (o *Optimizer) getInitialState() []float64 {
 				x[i] = (v.Min + v.Max) / 2
 				continue
 			}
-			if g, ok := o.gc.ByName[v.GlassName]; ok {
+			if g, ok := o.gc.Lookup(v.GlassName); ok {
 				switch v.Param {
 				case "nd":
 					x[i] = g.ND
@@ -598,7 +647,7 @@ func (o *Optimizer) buildVariableStates(x []float64) []VariableState {
 			}
 		case "nd", "vd":
 			if o.gc != nil && v.GlassName != "" {
-				if g, ok := o.gc.ByName[v.GlassName]; ok {
+				if g, ok := o.gc.Lookup(v.GlassName); ok {
 					switch v.Param {
 					case "nd":
 						st.Before = g.ND
@@ -677,6 +726,19 @@ func buildPath(surfaces []types.Surface) []int {
 	return path
 }
 
+func findFixedApertureRadius(surfaces []types.Surface) float64 {
+	minR := math.MaxFloat64
+	for _, s := range surfaces {
+		if !s.AutoAperture && s.Diameter > 0 && s.Diameter/2 < minR {
+			minR = s.Diameter / 2
+		}
+	}
+	if minR == math.MaxFloat64 {
+		return 0
+	}
+	return minR
+}
+
 func findMinApertureRadius(surfaces []types.Surface) float64 {
 	minR := math.MaxFloat64
 	for _, s := range surfaces {
@@ -738,6 +800,16 @@ func computeStopZ(surfaces []types.Surface) float64 {
 		z += s.Thickness
 	}
 	return 0
+}
+
+func (o *Optimizer) applyApertureExtents() {
+	for id, extent := range o.apertureExtents {
+		for i := range o.surfaces {
+			if o.surfaces[i].ID == id && o.surfaces[i].AutoAperture {
+				o.surfaces[i].Diameter = 2 * extent
+			}
+		}
+	}
 }
 
 func currentVariableValue(o *Optimizer, v Variable) float64 {
