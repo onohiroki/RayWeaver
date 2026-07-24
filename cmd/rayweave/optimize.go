@@ -312,26 +312,49 @@ type jsonLogger struct {
 	w *os.File
 }
 
+func safeF(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
+}
+
+func safeVars(v []float64) []float64 {
+	s := make([]float64, len(v))
+	for i, x := range v {
+		s[i] = safeF(x)
+	}
+	return s
+}
+
 func (j *jsonLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
 	entry := iterLog{
 		Iter:        iter,
-		Merit:       merit,
-		Improvement: improvement,
-		StepNorm:    stepNorm,
-		Variables:   variables,
+		Merit:       safeF(merit),
+		Improvement: safeF(improvement),
+		StepNorm:    safeF(stepNorm),
+		Variables:   safeVars(variables),
 	}
-	data, _ := json.Marshal(entry)
+	data, err := json.Marshal(entry)
+	if err != nil {
+		fmt.Fprintf(j.w, "ERR iter=%d: %v\n", iter, err)
+		return
+	}
 	fmt.Fprintln(j.w, string(data))
 }
 
 func (j *jsonLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
 	entry := finalLog{
 		Iter:      iter,
-		Merit:     merit,
-		Variables: variables,
+		Merit:     safeF(merit),
+		Variables: safeVars(variables),
 		Status:    status,
 	}
-	data, _ := json.Marshal(entry)
+	data, err := json.Marshal(entry)
+	if err != nil {
+		fmt.Fprintf(j.w, "ERR final: %v\n", err)
+		return
+	}
 	fmt.Fprintln(j.w, string(data))
 }
 

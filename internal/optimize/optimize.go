@@ -547,9 +547,20 @@ func computeSpotRMS(points []imagePoint) float64 {
 	return math.Sqrt(sumSq / float64(count))
 }
 
+func sanitizeFloat64(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
+}
+
 func (o *Optimizer) computeJacobianAndResiduals(x []float64) ([][]float64, []float64) {
 	nTerms := len(o.meritTerms)
 	nVars := len(x)
+
+	for j := 0; j < nVars; j++ {
+		x[j] = sanitizeFloat64(x[j])
+	}
 
 	r0 := o.computeResiduals(x)
 
@@ -566,7 +577,8 @@ func (o *Optimizer) computeJacobianAndResiduals(x []float64) ([][]float64, []flo
 		rPert := o.computeResiduals(xPert)
 
 		for i := 0; i < nTerms; i++ {
-			J[i][j] = (rPert[i] - r0[i]) / o.epsilon
+			diff := rPert[i] - r0[i]
+			J[i][j] = sanitizeFloat64(diff / o.epsilon)
 		}
 	}
 
@@ -668,8 +680,10 @@ func solveLinearSystem(H [][]float64, g []float64) []float64 {
 	aug := make([][]float64, n)
 	for i := 0; i < n; i++ {
 		aug[i] = make([]float64, n+1)
-		copy(aug[i], H[i])
-		aug[i][n] = g[i]
+		for j := 0; j < n; j++ {
+			aug[i][j] = sanitizeFloat64(H[i][j])
+		}
+		aug[i][n] = sanitizeFloat64(g[i])
 	}
 
 	for col := 0; col < n; col++ {
@@ -708,6 +722,7 @@ func solveLinearSystem(H [][]float64, g []float64) []float64 {
 
 func projectOntoBox(x []float64, variables []Variable) {
 	for i, v := range variables {
+		x[i] = sanitizeFloat64(x[i])
 		if x[i] < v.Min {
 			x[i] = v.Min
 		} else if x[i] > v.Max {
