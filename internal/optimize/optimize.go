@@ -90,6 +90,7 @@ type Optimizer struct {
 	glassOverrides  map[string]*types.Glass
 	tempGC          *glass.Catalog
 	apertureExtents map[int]float64
+	initialDiameters map[int]float64
 	maxIter         int
 	mu              float64
 	tol             float64
@@ -142,18 +143,26 @@ func NewOptimizer(cfg Config) *Optimizer {
 		}
 	}
 
+	initialDiameters := make(map[int]float64)
+	for _, s := range cfg.Surfaces {
+		if s.AutoAperture {
+			initialDiameters[s.ID] = s.Diameter
+		}
+	}
+
 	return &Optimizer{
-		surfaces:       cfg.Surfaces,
-		variables:      cfg.Variables,
-		meritTerms:     cfg.MeritTerms,
-		gc:             cfg.GlassCatalog,
-		glassOverrides: glassOverrides,
-		maxIter:        maxIter,
-		mu:             mu,
-		tol:            tol,
-		epsilon:        epsilon,
-		numRays:        numRays,
-		logger:         cfg.Logger,
+		surfaces:         cfg.Surfaces,
+		variables:        cfg.Variables,
+		meritTerms:       cfg.MeritTerms,
+		gc:               cfg.GlassCatalog,
+		glassOverrides:   glassOverrides,
+		initialDiameters: initialDiameters,
+		maxIter:          maxIter,
+		mu:               mu,
+		tol:              tol,
+		epsilon:          epsilon,
+		numRays:          numRays,
+		logger:           cfg.Logger,
 	}
 }
 
@@ -172,6 +181,7 @@ func resolveGlassKeyFromSurface(surfaces []types.Surface, gc *glass.Catalog, v V
 func (o *Optimizer) Optimize() Result {
 	x := o.getInitialState()
 	merit := o.evaluateMerit(x)
+	o.applyApertureExtents()
 	beforeMerit := merit
 
 	mu := o.mu
@@ -184,7 +194,13 @@ func (o *Optimizer) Optimize() Result {
 	var lastDelta []float64
 
 	for iter := 0; iter < o.maxIter; iter++ {
+		savedExtents := make(map[int]float64, len(o.apertureExtents))
+		for k, v := range o.apertureExtents {
+			savedExtents[k] = v
+		}
 		J, r := o.computeJacobianAndResiduals(x)
+		o.apertureExtents = savedExtents
+		o.applyApertureExtents()
 
 		g := make([]float64, nVars)
 		for j := 0; j < nVars; j++ {
@@ -228,6 +244,7 @@ func (o *Optimizer) Optimize() Result {
 		projectOntoBox(xNew, o.variables)
 
 		meritNew := o.evaluateMerit(xNew)
+		o.applyApertureExtents()
 		actualReduction := merit - meritNew
 
 		predictedReduction := 0.0
@@ -269,8 +286,6 @@ func (o *Optimizer) Optimize() Result {
 				copy(bestX, x)
 			}
 		}
-
-		o.applyApertureExtents()
 
 		norm := 0.0
 		for _, d := range delta {
@@ -336,43 +351,59 @@ func (o *Optimizer) Optimize() Result {
 
 func (o *Optimizer) evaluateMerit(x []float64) float64 {
 	surfaces := o.applyVariables(x)
-	onAxisFloor := make(map[int]float64)
-	offAxisMax := make(map[int]float64)
+
+	// Reset auto_aperture diameters to initial (design) values
+	for i := range surfaces {
+		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
+			surfaces[i].Diameter = d
+		}
+	}
+
+	// Find the extreme field (max |fieldAngle|)
+	extremeAngle := 0.0
+	for _, term := range o.meritTerms {
+		a := math.Abs(term.FieldAngle)
+		if a > extremeAngle {
+			extremeAngle = a
+		}
+	}
+
+	extents := make(map[int]float64)
 	merit := 0.0
 
-	for _, term := range o.meritTerms {
-		points, extents := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-		if term.FieldAngle == 0 {
-			for id, e := range extents {
-				if e > onAxisFloor[id] {
-					onAxisFloor[id] = e
+	// Pass 1: extreme field only — defines clear aperture
+	// Pass 2: all other fields — use the aperture set by pass 1
+	for pass := 0; pass < 2; pass++ {
+		for _, term := range o.meritTerms {
+			isExtreme := math.Abs(term.FieldAngle) == extremeAngle && extremeAngle > 0
+			if (pass == 0) != isExtreme {
+				continue
+			}
+
+			points, perSurf := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+
+			if isExtreme {
+				for id, e := range perSurf {
+					if e > extents[id] {
+						extents[id] = e
+					}
+				}
+				// Update diameters immediately from extreme-field extents
+				for id, e := range extents {
+					for i := range surfaces {
+						if surfaces[i].ID == id && surfaces[i].AutoAperture {
+							surfaces[i].Diameter = 2 * e
+						}
+					}
 				}
 			}
-		} else {
-			for id, e := range extents {
-				if e > offAxisMax[id] {
-					offAxisMax[id] = e
-				}
-			}
+
+			rms := computeSpotRMS(points)
+			merit += term.Weight * term.FieldWeight * term.WavWeight * rms * rms
 		}
-		rms := computeSpotRMS(points)
-		merit += term.Weight * term.FieldWeight * term.WavWeight * rms * rms
 	}
 
-	o.apertureExtents = make(map[int]float64, len(offAxisMax))
-	for id, e := range offAxisMax {
-		floor := onAxisFloor[id]
-		if e >= floor {
-			o.apertureExtents[id] = e
-		} else {
-			o.apertureExtents[id] = floor
-		}
-	}
-	for id, e := range onAxisFloor {
-		if _, ok := o.apertureExtents[id]; !ok {
-			o.apertureExtents[id] = e
-		}
-	}
+	o.apertureExtents = extents
 	return merit
 }
 

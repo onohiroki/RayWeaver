@@ -36,7 +36,7 @@ system:
       material: "model2"
       diameter: 9.0
       auto_aperture: false
-      min_glass_path: 0.5
+      min_glass_path: 0.3
     - id: 4
       type: "sphere"
       curvature: 0.0
@@ -51,7 +51,7 @@ system:
       material: "model3"
       diameter: 22.0
       auto_aperture: true
-      min_glass_path: 0.5
+      min_glass_path: 0.3
     - id: 6
       type: "sphere"
       curvature: 0.0
@@ -69,9 +69,9 @@ chief:
   fields:
     - angle: 0.0
       direction: [0, 1]
-    - angle: 12.0
+    - angle: 8.0
       direction: [0, 1]
-    - angle: 18.0
+    - angle: 13.0
       direction: [0, 1]
   reference_surface: 7
   num_rays: 512
@@ -206,10 +206,10 @@ configs:
         angle_deg: 0.0
         weight: 1.0
       - id: 1
-        angle_deg: 12.0
+        angle_deg: 8.0
         weight: 1.0
       - id: 2
-        angle_deg: 18.0
+        angle_deg: 13.0
         weight: 0.5
     wavelengths:
       - id: 0
