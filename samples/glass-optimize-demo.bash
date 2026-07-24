@@ -116,37 +116,40 @@ $RAYWEAVE chief < "$YAML" > "$INIT_CHIEF" 2>/dev/null || true
 
 # Extract spot data for each field
 for fi in 0 1 2; do
-  LABELS=("on-axis" "12deg" "18deg")
   # initial spots
-  yq ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity] | @tsv" \
-    "$INIT_CHIEF" 2>/dev/null > "$OUTDIR/glass-spot-init-f${fi}.txt" || true
+  yq eval ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity]" \
+    "$INIT_CHIEF" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/glass-spot-init-f${fi}.txt" || true
   # optimized spots
   OPT_CHIEF_FILE="$OUTDIR/glass-opt-chief.yaml"
   $RAYWEAVE chief < "$OPT_RESULT" > "$OPT_CHIEF_FILE" 2>/dev/null || true
-  yq ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity] | @tsv" \
-    "$OPT_CHIEF_FILE" 2>/dev/null > "$OUTDIR/glass-spot-opt-f${fi}.txt" || true
+  yq eval ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity]" \
+    "$OPT_CHIEF_FILE" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/glass-spot-opt-f${fi}.txt" || true
 done
 
 # Determine global scale from both init and opt spots
-XMIN=999; XMAX=-999; YMIN=999; YMAX=-999
+XMIN=999; XMAX=-999; YMIN=999; YMAX=-999; HAS_DATA=0
 for fi in 0 1 2; do
   for phase in init opt; do
     F="$OUTDIR/glass-spot-${phase}-f${fi}.txt"
     if [ -f "$F" ] && [ -s "$F" ]; then
-      read xm xx ym yx <<<$(awk '{if(NR==1||$1<xm)xm=$1;if($1>xx)xx=$1;if($2<ym)ym=$2;if($2>yx)yx=$2} END{print xm,xx,ym,yx}' "$F")
-      XMIN=$(echo "if($xm<$XMIN) $xm else $XMIN" | bc -l)
-      XMAX=$(echo "if($xx>$XMAX) $xx else $XMAX" | bc -l)
-      YMIN=$(echo "if($ym<$YMIN) $ym else $YMIN" | bc -l)
-      YMAX=$(echo "if($yx>$YMAX) $yx else $YMAX" | bc -l)
+      read xm xx ym yx <<<$(awk 'BEGIN{xm=999;xx=-999;ym=999;yx=-999}{if($1<xm)xm=$1;if($1>xx)xx=$1;if($2<ym)ym=$2;if($2>yx)yx=$2} END{print xm,xx,ym,yx}' "$F")
+      XMIN=$(echo "scale=6; if($xm<$XMIN) $xm else $XMIN" | bc -l 2>/dev/null || echo "-0.5")
+      XMAX=$(echo "scale=6; if($xx>$XMAX) $xx else $XMAX" | bc -l 2>/dev/null || echo "0.5")
+      YMIN=$(echo "scale=6; if($ym<$YMIN) $ym else $YMIN" | bc -l 2>/dev/null || echo "-0.5")
+      YMAX=$(echo "scale=6; if($yx>$YMAX) $yx else $YMAX" | bc -l 2>/dev/null || echo "0.5")
+      HAS_DATA=1
     fi
   done
 done
+if [ "$HAS_DATA" -eq 0 ]; then
+  XMIN=-0.5; XMAX=0.5; YMIN=-0.5; YMAX=0.5
+fi
 # Add 10% margin
-RANGE=$(echo "scale=6; m=sqrt(($XMAX-$XMIN)^2+($YMAX-$YMIN)^2); if (m<0.001) m=0.1; m*0.55" | bc -l)
-XLOW=$(echo "$XMIN - $RANGE" | bc -l)
-XHIGH=$(echo "$XMAX + $RANGE" | bc -l)
-YLOW=$(echo "$YMIN - $RANGE" | bc -l)
-YHIGH=$(echo "$YMAX + $RANGE" | bc -l)
+RANGE=$(echo "scale=6; dx=$XMAX-$XMIN; dy=$YMAX-$YMIN; m=sqrt(dx*dx+dy*dy); if(m<0.001)m=0.1; m*0.55" | bc -l 2>/dev/null || echo "0.1")
+XLOW=$(echo "$XMIN - $RANGE" | bc -l 2>/dev/null || echo "-0.6")
+XHIGH=$(echo "$XMAX + $RANGE" | bc -l 2>/dev/null || echo "0.6")
+YLOW=$(echo "$YMIN - $RANGE" | bc -l 2>/dev/null || echo "-0.6")
+YHIGH=$(echo "$YMAX + $RANGE" | bc -l 2>/dev/null || echo "0.6")
 
 export GNUTERM=pngcairo
 for fi in 0 1 2; do
@@ -158,14 +161,12 @@ for fi in 0 1 2; do
   gnuplot 2>/dev/null <<GPLOT
     set terminal pngcairo size 800,400
     set output "$OUTDIR/glass-spot-f${fi}.png"
+    set datafile separator comma
     set multiplot layout 1,2 title "$FLABEL spot diagram (d-line)"
     set xlabel "image X (mm)"
     set ylabel "image Y (mm)"
-    set size ratio -1
     set cbrange [0.95:1.00]
-    set xtics nomirror; set ytics nomirror
-    set xrange [$XLOW:$XHIGH]
-    set yrange [$YLOW:$YHIGH]
+    set xrange [$XLOW:$XHIGH]; set yrange [$YLOW:$YHIGH]
     set title "before"
     plot "$OUTDIR/glass-spot-init-f${fi}.txt" using 1:2:3 \
       with points pt 7 ps 2 palette title ""
@@ -174,8 +175,10 @@ for fi in 0 1 2; do
       with points pt 7 ps 2 palette title ""
     unset multiplot
 GPLOT
+  if [ -f "$OUTDIR/glass-spot-f${fi}.png" ]; then
+    echo "Written: $OUTDIR/glass-spot-f${fi}.png"
+  fi
 done
-echo "Written: $OUTDIR/glass-spot-f{0,1,2}.png"
 echo
 
 echo "=== Iteration log saved: $OPT_LOG ==="

@@ -76,7 +76,7 @@ chief:
   reference_surface: 7
   num_rays: 512
   grid_type: hex
-  dump_map: false
+  dump_map: true
 
 optimization:
   method: dls

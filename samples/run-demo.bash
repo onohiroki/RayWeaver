@@ -19,8 +19,8 @@ echo "=== Chief ray computation ==="
 
 extract_spot() {
   local field_index=$1 label=$2
-  yq ".chief_rays[$field_index].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity] | @tsv" \
-    "$CHIEF_RESULT" > "$OUTDIR/spot-${label}.txt"
+  yq eval ".chief_rays[$field_index].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity]" \
+    "$CHIEF_RESULT" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/spot-${label}.txt"
 }
 
 extract_spot 0 "00"
@@ -39,14 +39,14 @@ for field in 00 f16 f24; do
   gnuplot -e "
     set terminal pngcairo size 600,600;
     set output '$OUTDIR/spot-${field}.png';
+    set datafile separator comma;
     set title '$title - spot diagram';
     set xlabel 'image X (mm)';
     set ylabel 'image Y (mm)';
-    set size ratio -1;
     set cbrange [0.95:1.00];
     plot '$OUTDIR/spot-${field}.txt' using 1:2:3 \
       with points pt 7 ps 2 palette title ''
-  "
+  " 2>/dev/null || true
 done
 
 echo
