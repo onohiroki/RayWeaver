@@ -19,14 +19,14 @@ func Precompute(surfaces []types.Surface) {
 
 		switch s.Type {
 		case types.Sphere:
-			if s.Radius != 0 {
-				s.ParaxialRadius = raymath.SphereParaxialRadius(s.Radius, s.Coefficients)
+			if s.Curvature != 0 {
+				s.ParaxialRadius = raymath.SphereParaxialRadius(s.Radius(), s.Coefficients)
 			} else {
 				s.ParaxialRadius = 0
 			}
 		case types.AspherePolynomial:
 			sagFunc := func(h float64) float64 {
-				return raymath.PolynomialAsphereSag(h, s.Radius, s.Conic, s.Coefficients)
+				return raymath.PolynomialAsphereSag(h, s.Radius(), s.Conic, s.Coefficients)
 			}
 			curvature := raymath.ComputeParaxialCurvature(sagFunc)
 			if curvature != 0 {
@@ -36,7 +36,7 @@ func Precompute(surfaces []types.Surface) {
 			}
 		case types.AsphereZernike:
 			sagFunc := func(h float64) float64 {
-				return raymath.ZernikeAsphereSag(h, s.Radius, s.Conic, s.Coefficients, s.NormRadius)
+				return raymath.ZernikeAsphereSag(h, s.Radius(), s.Conic, s.Coefficients, s.NormRadius)
 			}
 			curvature := raymath.ComputeParaxialCurvature(sagFunc)
 			if curvature != 0 {

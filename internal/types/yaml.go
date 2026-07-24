@@ -58,3 +58,68 @@ func (j *JonesVector) UnmarshalYAML(node *yaml.Node) error {
 func (j JonesVector) MarshalYAML() (interface{}, error) {
 	return []float64{real(j.Ex), imag(j.Ex), real(j.Ey), imag(j.Ey)}, nil
 }
+
+type surfaceYAML struct {
+	ID           int             `yaml:"id"`
+	Type         SurfaceType    `yaml:"type"`
+	Radius       float64        `yaml:"radius,omitempty"`
+	Curvature    float64        `yaml:"curvature,omitempty"`
+	Conic        float64        `yaml:"conic"`
+	Thickness    float64        `yaml:"thickness"`
+	Material     string         `yaml:"material"`
+	Diameter     float64        `yaml:"diameter,omitempty"`
+	Coefficients []float64      `yaml:"coefficients,omitempty"`
+	NormRadius   float64        `yaml:"norm_radius,omitempty"`
+	Decenter     []DecenterStep `yaml:"decenter,omitempty"`
+	Coating      string         `yaml:"coating,omitempty"`
+	Role         string         `yaml:"role,omitempty"`
+}
+
+func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
+	var raw surfaceYAML
+	if err := node.Decode(&raw); err != nil {
+		return err
+	}
+	s.ID = raw.ID
+	s.Type = raw.Type
+	s.Conic = raw.Conic
+	s.Thickness = raw.Thickness
+	s.Material = raw.Material
+	s.Diameter = raw.Diameter
+	s.Coefficients = raw.Coefficients
+	s.NormRadius = raw.NormRadius
+	s.Decenter = raw.Decenter
+	s.Coating = raw.Coating
+	s.Role = raw.Role
+
+	if raw.Curvature != 0 {
+		s.Curvature = raw.Curvature
+		s.radiusUsed = false
+	} else {
+		s.SetRadius(raw.Radius)
+		s.radiusUsed = true
+	}
+	return nil
+}
+
+func (s Surface) MarshalYAML() (interface{}, error) {
+	raw := surfaceYAML{
+		ID:           s.ID,
+		Type:         s.Type,
+		Conic:        s.Conic,
+		Thickness:    s.Thickness,
+		Material:     s.Material,
+		Diameter:     s.Diameter,
+		Coefficients: s.Coefficients,
+		NormRadius:   s.NormRadius,
+		Decenter:     s.Decenter,
+		Coating:      s.Coating,
+		Role:         s.Role,
+	}
+	if s.radiusUsed {
+		raw.Radius = s.Radius()
+	} else {
+		raw.Curvature = s.Curvature
+	}
+	return raw, nil
+}

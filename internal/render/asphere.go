@@ -16,15 +16,15 @@ func sagFuncForSurface(surf types.Surface) func(float64) float64 {
 	switch surf.Type {
 	case types.Sphere:
 		return func(h float64) float64 {
-			return raymath.PolynomialAsphereSag(h, surf.Radius, 0, nil)
+			return raymath.PolynomialAsphereSag(h, surf.Radius(), 0, nil)
 		}
 	case types.AspherePolynomial:
 		return func(h float64) float64 {
-			return raymath.PolynomialAsphereSag(h, surf.Radius, surf.Conic, surf.Coefficients)
+			return raymath.PolynomialAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients)
 		}
 	case types.AsphereZernike:
 		return func(h float64) float64 {
-			return raymath.ZernikeAsphereSag(h, surf.Radius, surf.Conic, surf.Coefficients, surf.NormRadius)
+			return raymath.ZernikeAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients, surf.NormRadius)
 		}
 	default:
 		return func(float64) float64 { return 0 }
@@ -38,13 +38,13 @@ func surfaceDownPath(surf types.Surface, h, zOffset float64) string {
 	}
 	switch surf.Type {
 	case types.Sphere:
-		if surf.Radius == 0 {
+		if surf.Radius() == 0 {
 			return fmt.Sprintf("M %.6f,%.6f L %.6f,%.6f",
 				zOffset+sag, h, zOffset+sag, -h)
 		}
-		r := math.Abs(surf.Radius)
+		r := math.Abs(surf.Radius())
 		sweep := "1"
-		if surf.Radius < 0 {
+		if surf.Radius() < 0 {
 			sweep = "0"
 		}
 		return fmt.Sprintf("M %.6f,%.6f a %s,%s 0 0 %s 0,-%.6f",
@@ -61,13 +61,13 @@ func surfaceUpPath(surf types.Surface, h, zOffset float64) string {
 	}
 	switch surf.Type {
 	case types.Sphere:
-		if surf.Radius == 0 {
+		if surf.Radius() == 0 {
 			return fmt.Sprintf("L %.6f,%.6f L %.6f,%.6f",
 				zOffset+sag, -h, zOffset+sag, h)
 		}
-		r := math.Abs(surf.Radius)
+		r := math.Abs(surf.Radius())
 		sweep := "0"
-		if surf.Radius < 0 {
+		if surf.Radius() < 0 {
 			sweep = "1"
 		}
 		return fmt.Sprintf("a %s,%s 0 0 %s 0,%.6f",

@@ -196,7 +196,7 @@ func Compute(
 
 		// BFL from last LENS surface vertex (skip image plane at end)
 		bflIdx := len(fwdVerts) - 1
-		for bflIdx > 0 && surfaces[bflIdx].Radius == 0 && surfaces[bflIdx].Thickness == 0 {
+		for bflIdx > 0 && surfaces[bflIdx].Radius() == 0 && surfaces[bflIdx].Thickness == 0 {
 			bflIdx--
 		}
 		bflVert := fwdVerts[bflIdx]

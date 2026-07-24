@@ -57,8 +57,8 @@ type DecenterStep struct {
 
 type Surface struct {
 	ID             int             `yaml:"id"`
-	Type           SurfaceType    `yaml:"type"`
-	Radius         float64        `yaml:"radius"`
+Type           SurfaceType    `yaml:"type"`
+	Curvature      float64        `yaml:"curvature,omitempty"`
 	Conic          float64        `yaml:"conic"`
 	Thickness      float64        `yaml:"thickness"`
 	Material       string         `yaml:"material"`
@@ -67,10 +67,28 @@ type Surface struct {
 	NormRadius     float64        `yaml:"norm_radius,omitempty"`
 	Decenter       []DecenterStep `yaml:"decenter,omitempty"`
 	Coating        string         `yaml:"coating,omitempty"`
+	Role           string         `yaml:"role,omitempty"`
 
 	LocalToGlobal  Mat4 `yaml:"-"`
 	GlobalToLocal  Mat4 `yaml:"-"`
 	ParaxialRadius float64 `yaml:"-"`
+
+	radiusUsed bool `yaml:"-"`
+}
+
+func (s *Surface) Radius() float64 {
+	if s.Curvature == 0 {
+		return 0
+	}
+	return 1.0 / s.Curvature
+}
+
+func (s *Surface) SetRadius(r float64) {
+	if r == 0 {
+		s.Curvature = 0
+	} else {
+		s.Curvature = 1.0 / r
+	}
 }
 
 type RayState struct {
@@ -160,10 +178,10 @@ type System struct {
 
 type FieldDef struct {
 	Angle       float64   `yaml:"angle,omitempty"`
-	ImageHeight float64   `yaml:"image_height,omitempty"` // image height (mm) at reference surface; searched via field angle
-	Height      float64   `yaml:"height,omitempty"`       // object height (mm), for finite-conjugate
-	ObjectZ     float64   `yaml:"object_z,omitempty"`     // object plane Z (mm), default -1000
-	Direction   []float64 `yaml:"direction,omitempty"`    // [dx, dy]; default [0, 1]
+	ImageHeight float64   `yaml:"image_height,omitempty"`
+	Height      float64   `yaml:"height,omitempty"`
+	ObjectZ     float64   `yaml:"object_z,omitempty"`
+	Direction   []float64 `yaml:"direction,omitempty"`
 }
 
 type ChiefInput struct {
@@ -180,13 +198,136 @@ type RayInput struct {
 	Rays         []Ray       `yaml:"rays"`
 }
 
+type FieldItem struct {
+	ID       int     `yaml:"id"`
+	AngleDeg float64 `yaml:"angle_deg,omitempty"`
+	Weight   float64 `yaml:"weight"`
+}
+
+type WavelengthItem struct {
+	ID     int     `yaml:"id"`
+	Value  float64 `yaml:"value"`
+	Label  string  `yaml:"label,omitempty"`
+	Weight float64 `yaml:"weight"`
+}
+
+type RayPath struct {
+	ID            string `yaml:"id"`
+	ObjectSurface int    `yaml:"object_surface"`
+	ImageSurface  int    `yaml:"image_surface"`
+	StopSurface   int    `yaml:"stop_surface"`
+}
+
+type MeritTerm struct {
+	Kind       string  `yaml:"kind"`
+	Field      int     `yaml:"field"`
+	Wavelength float64 `yaml:"wavelength"`
+	SurfaceSet []int   `yaml:"surface_set"`
+	Weight     float64 `yaml:"weight"`
+}
+
+type MeritFunction struct {
+	Type  string      `yaml:"type"`
+	Terms []MeritTerm `yaml:"terms"`
+}
+
+type Config struct {
+	ID          string            `yaml:"id"`
+	Name        string            `yaml:"name"`
+	Weight      float64           `yaml:"weight"`
+	Active      bool              `yaml:"active"`
+	Fields      []FieldItem       `yaml:"fields"`
+	Wavelengths []WavelengthItem  `yaml:"wavelengths"`
+	RayPaths    []RayPath         `yaml:"ray_paths"`
+	Surfaces    []Surface         `yaml:"surfaces"`
+	Merit       *MeritFunction    `yaml:"merit,omitempty"`
+}
+
+type VariableTarget struct {
+	Type   string `yaml:"type"`
+	Config string `yaml:"config,omitempty"`
+	ID     int    `yaml:"id"`
+	Param  string `yaml:"param"`
+}
+
+type OptimizationVariable struct {
+	Name   string          `yaml:"name"`
+	Target VariableTarget  `yaml:"target"`
+	Min    float64         `yaml:"min"`
+	Max    float64         `yaml:"max"`
+	Step   float64         `yaml:"step,omitempty"`
+	Active bool            `yaml:"active"`
+}
+
+type PenaltyConfig struct {
+	Type   string  `yaml:"type"`
+	Weight float64 `yaml:"weight"`
+	Tau    float64 `yaml:"tau,omitempty"`
+}
+
+type ConstraintTarget struct {
+	Type   string `yaml:"type"`
+	Config string `yaml:"config,omitempty"`
+	ID     int    `yaml:"id,omitempty"`
+	Param  string `yaml:"param,omitempty"`
+}
+
+type Constraint struct {
+	Name    string           `yaml:"name"`
+	Kind    string           `yaml:"kind"`
+	Target  ConstraintTarget `yaml:"target"`
+	Limit   float64          `yaml:"limit"`
+	Penalty PenaltyConfig    `yaml:"penalty"`
+	Active  bool             `yaml:"active"`
+}
+
+type OptimizationConfig struct {
+	Method      string                  `yaml:"method"`
+	Aggregate   string                  `yaml:"aggregate,omitempty"`
+	Variables   []OptimizationVariable  `yaml:"variables"`
+	Constraints []Constraint            `yaml:"constraints,omitempty"`
+}
+
+type MeritTermResult struct {
+	Kind       string  `yaml:"kind"`
+	Field      int     `yaml:"field"`
+	Wavelength float64 `yaml:"wavelength"`
+	SurfaceSet []int   `yaml:"surface_set"`
+	Weight     float64 `yaml:"weight"`
+	Before     float64 `yaml:"before"`
+	After      float64 `yaml:"after"`
+}
+
+type MeritBeforeAfter struct {
+	Before      float64 `yaml:"before"`
+	After       float64 `yaml:"after"`
+	Improvement float64 `yaml:"improvement,omitempty"`
+	Ratio       float64 `yaml:"ratio,omitempty"`
+}
+
+type OptimizationResult struct {
+	TotalMerit        *MeritBeforeAfter `yaml:"total_merit"`
+	ConstraintPenalty *MeritBeforeAfter `yaml:"constraint_penalty,omitempty"`
+	Status            string            `yaml:"status"`
+	Iterations        int               `yaml:"iterations"`
+	Reason            string            `yaml:"reason,omitempty"`
+}
+
+type Provenance struct {
+	OptimizedFrom    string `yaml:"optimized_from,omitempty"`
+	OptimizerVersion string `yaml:"optimizer_version,omitempty"`
+}
+
 type Input struct {
-	GlassCatalog   *GlassCatalog   `yaml:"glass_catalog,omitempty"`
-	CoatingCatalog *CoatingCatalog `yaml:"coating_catalog,omitempty"`
-	System         System          `yaml:"system"`
-	Chief          *ChiefInput     `yaml:"chief,omitempty"`
-	Rays           *RayInput       `yaml:"rays,omitempty"`
-	Paraxial       *ParaxialInput  `yaml:"paraxial,omitempty"`
+	GlassCatalog   *GlassCatalog        `yaml:"glass_catalog,omitempty"`
+	CoatingCatalog *CoatingCatalog      `yaml:"coating_catalog,omitempty"`
+	Version        int                  `yaml:"version,omitempty"`
+	System         System               `yaml:"system"`
+	Optimization   *OptimizationConfig  `yaml:"optimization,omitempty"`
+	Configs        []Config             `yaml:"configs,omitempty"`
+	Chief          *ChiefInput          `yaml:"chief,omitempty"`
+	Rays           *RayInput            `yaml:"rays,omitempty"`
+	Paraxial       *ParaxialInput       `yaml:"paraxial,omitempty"`
 }
 
 type GridPoint struct {
@@ -261,19 +402,21 @@ type ParaxialInput struct {
 }
 
 type Output struct {
-	Input          `yaml:",inline"`
-	ChiefRays      []ChiefRayResult `yaml:"chief_rays,omitempty"`
-	Results        []RayResult      `yaml:"results,omitempty"`
-	ParaxialResult *ParaxialResult  `yaml:"paraxial_result,omitempty"`
+	Input           `yaml:",inline"`
+	ChiefRays       []ChiefRayResult  `yaml:"chief_rays,omitempty"`
+	Results         []RayResult       `yaml:"results,omitempty"`
+	ParaxialResult  *ParaxialResult   `yaml:"paraxial_result,omitempty"`
+	OptResults      *OptimizationResult `yaml:"opt_results,omitempty"`
+	Provenance      *Provenance       `yaml:"provenance,omitempty"`
 }
 
 type TMMInput struct {
-	GlassCatalog *GlassCatalog `yaml:"glass_catalog,omitempty"`
-	NAir         float64       `yaml:"n_air"`
-	NSub         float64       `yaml:"n_substrate"`
+	GlassCatalog *GlassCatalog  `yaml:"glass_catalog,omitempty"`
+	NAir         float64        `yaml:"n_air"`
+	NSub         float64        `yaml:"n_substrate"`
 	Layers       []CoatingLayer `yaml:"layers"`
-	Lambda       float64       `yaml:"lambda"`
-	ThetaDeg     float64       `yaml:"theta_deg"`
+	Lambda       float64        `yaml:"lambda"`
+	ThetaDeg     float64        `yaml:"theta_deg"`
 }
 
 type TMMOutput struct {

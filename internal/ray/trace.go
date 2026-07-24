@@ -203,43 +203,43 @@ func getPrevMaterial(surfaces []types.Surface, prevID int) string {
 func intersect(surf *types.Surface, origin, dir types.Vec3) (float64, bool) {
 	switch surf.Type {
 	case types.Sphere:
-		return raymath.IntersectSphere(origin, dir, surf.Radius)
+		return raymath.IntersectSphere(origin, dir, surf.Radius())
 	case types.AspherePolynomial:
 		sagFunc := func(h float64) float64 {
-			return raymath.PolynomialAsphereSag(h, surf.Radius, surf.Conic, surf.Coefficients)
+			return raymath.PolynomialAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients)
 		}
 		return raymath.IntersectAsphere(origin, dir, sagFunc, 50, 1e-12)
 	case types.AsphereZernike:
 		sagFunc := func(h float64) float64 {
-			return raymath.ZernikeAsphereSag(h, surf.Radius, surf.Conic, surf.Coefficients, surf.NormRadius)
+			return raymath.ZernikeAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients, surf.NormRadius)
 		}
 		return raymath.IntersectAsphere(origin, dir, sagFunc, 50, 1e-12)
 	default:
-		return raymath.IntersectSphere(origin, dir, surf.Radius)
+		return raymath.IntersectSphere(origin, dir, surf.Radius())
 	}
 }
 
 func computeNormal(surf *types.Surface, p types.Vec3) types.Vec3 {
 	switch surf.Type {
 	case types.Sphere:
-		if surf.Radius == 0 {
+		if surf.Radius() == 0 {
 			return types.Vec3{0, 0, 1}
 		}
-		return raymath.SphereNormal(p, surf.Radius)
+		return raymath.SphereNormal(p, surf.Radius())
 	case types.AspherePolynomial:
 		sagFunc := func(h float64) float64 {
-			return raymath.PolynomialAsphereSag(h, surf.Radius, surf.Conic, surf.Coefficients)
+			return raymath.PolynomialAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients)
 		}
 		return raymath.AsphereNormal(p, sagFunc)
 	case types.AsphereZernike:
 		sagFunc := func(h float64) float64 {
-			return raymath.ZernikeAsphereSag(h, surf.Radius, surf.Conic, surf.Coefficients, surf.NormRadius)
+			return raymath.ZernikeAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients, surf.NormRadius)
 		}
 		return raymath.AsphereNormal(p, sagFunc)
 	default:
-		if surf.Radius == 0 {
+		if surf.Radius() == 0 {
 			return types.Vec3{0, 0, 1}
 		}
-		return raymath.SphereNormal(p, surf.Radius)
+		return raymath.SphereNormal(p, surf.Radius())
 	}
 }

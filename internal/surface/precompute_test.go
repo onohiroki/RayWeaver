@@ -11,12 +11,12 @@ func TestPrecomputeSpherical(t *testing.T) {
 	surfaces := []types.Surface{
 		{
 			Type:      types.Sphere,
-			Radius:    100.0,
+			Curvature: 0.01,
 			Thickness: 10.0,
 		},
 		{
 			Type:      types.Sphere,
-			Radius:    -100.0,
+			Curvature: -0.01,
 			Thickness: 100.0,
 		},
 	}
@@ -38,8 +38,8 @@ func TestPrecomputeSpherical(t *testing.T) {
 
 func TestPrecomputePlane(t *testing.T) {
 	surfaces := []types.Surface{
-		{Type: types.Sphere, Radius: 0.0, Thickness: 50.0},
-		{Type: types.Sphere, Radius: 0.0, Thickness: 0.0},
+		{Type: types.Sphere, Curvature: 0.0, Thickness: 50.0},
+		{Type: types.Sphere, Curvature: 0.0, Thickness: 0.0},
 	}
 	Precompute(surfaces)
 	if surfaces[0].ParaxialRadius != 0.0 {
