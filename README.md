@@ -28,17 +28,19 @@ No external dependencies beyond `gopkg.in/yaml.v3`.
 ```sh
 ./rayweave trace < samples/us2645157.yaml
 bash samples/run-demo.bash
+bash samples/optimize-demo.bash
 ```
 
 ## Subcommands
 
 | Subcommand | Description |
 |---|---|
-| `chief` | Determine chief ray and pupil grid for each field. Flags: `--clear-aperture` (set diameters from grid extents), `--marginal-rays` (add marginal rays to output). |
+| `chief` | Determine chief ray and pupil grid for each field. Flags: `--clear-aperture`, `--marginal-rays`. |
 | `trace` | Trace ray(s) through the system and output intersection data per surface. |
 | `paraxial` | First-order properties: EFL, BFL, FFL, principal points, pupil positions, f/#. |
 | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. |
-| `plot` | Generate SVG cross-section diagram. Flags: `-o` (output file), `--lens-width`, `--ray-width`, `--scale`, `--right-margin`. |
+| `plot` | Generate SVG cross-section diagram. Flags: `-o`, `--lens-width`, `--ray-width`, `--scale`, `--right-margin`. |
+| `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. |
 
 ## Pipeline examples
 
@@ -57,6 +59,9 @@ cat samples/us2645157.yaml \
   | ./rayweave trace \
   | ./rayweave plot -o diagram.svg
 
+# DLS optimization
+./rayweave optimize < samples/optimize-demo.yaml > optimized.yaml
+
 # TMM coating analysis
 ./rayweave tmm < samples/ar-coating.yaml
 ```
@@ -66,9 +71,12 @@ cat samples/us2645157.yaml \
 The [`samples/`](samples/) directory contains:
 
 - `us2645157.yaml` — triplet-derivative lens from US patent 2,645,157 (MIT license, ©2014 Daniel J. Reiley). Converted from a ZMX file obtained from [lens-designs.com](https://www.lens-designs.com/), validated against [LensForge](https://www.ripplon.com/LensForge/) trace output.
+- `us2645157-degraded.yaml` — same triplet with perturbed curvatures (pin-blur starting state) and `optimization` + `configs` sections for the `optimize` subcommand.
+- `optimize-demo.bash` — draws SVG cross-sections of the initial (degraded) and optimized lens systems, demonstrating before/after comparison.
 - `ar-coating.yaml` — single-layer MgF2 AR coating on N-SK16.
 - `dielectric-mirror.yaml` — 9-layer quarter-wave Bragg reflector (SiO2/TiO2).
 - `run-demo.bash` — end-to-end demo script producing spot diagrams, SVG, and TMM results.
+- `optimize-demo.bash` — draws before/after SVG cross-sections of the US2645157 triplet (degraded → optimized).
 - `README.md` — detailed documentation of all sample files and workflow.
 
 The [`samples/`](samples/) directory also includes generated artifacts (spot-diagram data, SVG diagrams, chief-ray results) produced by the demo pipeline.

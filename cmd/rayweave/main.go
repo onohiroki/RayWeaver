@@ -62,6 +62,8 @@ func main() {
 		runTMM(data)
 	case "plot":
 		runPlot(data)
+	case "optimize":
+		runOptimize(data)
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown subcommand %q\n", subcommand)
 		fmt.Fprintf(os.Stderr, "Run 'rayweave --help' for usage.\n")
@@ -187,6 +189,28 @@ Glass types are colour-coded using the nd/vd values from the
 glass_catalog section.  Ray colours follow the field angle
 (low = blue, high = red).
 `)
+	case "optimize":
+		fmt.Print(`Usage: rayweave optimize < input.yaml
+
+DLS (Damped Least Squares) optimization of lens surfaces.
+
+Input YAML — optimization section:
+  optimization:
+    method: dls
+    variables:
+      - name: s2_curvature
+        target:
+          type: surface
+          id: 2
+          param: curvature
+        min: -0.2
+        max: 0.2
+        active: true
+
+Merit terms are read from configs[0].merit (see help for details).
+
+Output: optimized YAML with updated surface parameters.
+`)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml
 
@@ -216,6 +240,7 @@ Subcommands:
   paraxial   Paraxial (first-order) ray trace
   tmm        Thin-film coating analysis (transfer-matrix method)
   plot       Generate SVG cross-section drawing
+  optimize   DLS optimization of lens surfaces
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
   for detailed options and YAML structure.

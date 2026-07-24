@@ -1,0 +1,158 @@
+glass_catalog:
+  entries:
+    - name: "SK18"
+      nd: 1.63854
+      vd: 55.42
+    - name: "SF12"
+      nd: 1.64831
+      vd: 33.84
+
+system:
+  surfaces:
+    - id: 1
+      type: "sphere"
+      radius: 10.2871491742
+      thickness: 1.524
+      material: "SK18"
+      diameter: 10.0
+    - id: 2
+      type: "sphere"
+      radius: -239.3967954752
+      thickness: 2.3368
+      material: "AIR"
+      diameter: 10.0
+    - id: 3
+      type: "sphere"
+      radius: -12.8269871730
+      thickness: 0.508
+      material: "SF12"
+      diameter: 6.0
+    - id: 4
+      type: "sphere"
+      radius: 10.5917184406
+      thickness: 1.4986
+      material: "AIR"
+      diameter: 6.0
+    - id: 5
+      type: "sphere"
+      radius: 0.0
+      thickness: 1.016
+      material: "AIR"
+      diameter: 3.7825297358
+    - id: 6
+      type: "sphere"
+      radius: 61.8456294200
+      thickness: 1.524
+      material: "SK18"
+      diameter: 6.0
+    - id: 7
+      type: "sphere"
+      radius: -10.0074859032
+      thickness: 21.36695183553
+      material: "AIR"
+      diameter: 6.0
+    - id: 8
+      type: "sphere"
+      radius: 0.0
+      thickness: 0.0
+      material: "AIR"
+
+optimization:
+  method: dls
+  variables:
+    - name: s1_curvature
+      target:
+        type: surface
+        id: 1
+        param: curvature
+      min: -0.5
+      max: 0.5
+      active: true
+    - name: s3_curvature
+      target:
+        type: surface
+        id: 3
+        param: curvature
+      min: -0.5
+      max: 0.5
+      active: true
+    - name: s6_curvature
+      target:
+        type: surface
+        id: 6
+        param: curvature
+      min: -0.5
+      max: 0.5
+      active: true
+    - name: s7_curvature
+      target:
+        type: surface
+        id: 7
+        param: curvature
+      min: -0.5
+      max: 0.5
+      active: true
+
+configs:
+  - id: 0
+    name: nominal
+    active: true
+    fields:
+      - id: 0
+        angle_deg: 0.0
+        weight: 1.0
+      - id: 1
+        angle_deg: 16.0
+        weight: 1.0
+      - id: 2
+        angle_deg: 24.0
+        weight: 0.5
+    wavelengths:
+      - id: 0
+        value: 0.0004861
+        weight: 1.0
+      - id: 1
+        value: 0.0005876
+        weight: 1.0
+      - id: 2
+        value: 0.0006563
+        weight: 1.0
+    merit:
+      type: weighted_sum
+      terms:
+        - kind: spot_rms
+          field: 0
+          wavelength: 0.0004861
+          weight: 1.0
+        - kind: spot_rms
+          field: 0
+          wavelength: 0.0005876
+          weight: 1.0
+        - kind: spot_rms
+          field: 0
+          wavelength: 0.0006563
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.0004861
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.0005876
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.0006563
+          weight: 1.0
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.0004861
+          weight: 0.5
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.0005876
+          weight: 0.5
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.0006563
+          weight: 0.5
