@@ -132,7 +132,7 @@ for fi in 0 1 2; do
   for phase in init opt; do
     F="$OUTDIR/glass-spot-${phase}-f${fi}.txt"
     if [ -f "$F" ] && [ -s "$F" ]; then
-      read xm xx ym yx <<<$(awk 'BEGIN{xm=999;xx=-999;ym=999;yx=-999}{if($1<xm)xm=$1;if($1>xx)xx=$1;if($2<ym)ym=$2;if($2>yx)yx=$2} END{print xm,xx,ym,yx}' "$F")
+      read xm xx ym yx <<<$(awk -F, 'BEGIN{xm=999;xx=-999;ym=999;yx=-999}{if($1<xm)xm=$1;if($1>xx)xx=$1;if($2<ym)ym=$2;if($2>yx)yx=$2} END{print xm,xx,ym,yx}' "$F")
       XMIN=$(echo "scale=6; if($xm<$XMIN) $xm else $XMIN" | bc -l 2>/dev/null || echo "-0.5")
       XMAX=$(echo "scale=6; if($xx>$XMAX) $xx else $XMAX" | bc -l 2>/dev/null || echo "0.5")
       YMIN=$(echo "scale=6; if($ym<$YMIN) $ym else $YMIN" | bc -l 2>/dev/null || echo "-0.5")
