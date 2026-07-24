@@ -1,6 +1,7 @@
 package glass
 
 import (
+	"math"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/types"
@@ -80,19 +81,8 @@ func TestCatalogRefractiveIndexGlassNotFound(t *testing.T) {
 	}
 }
 
-func TestApproximateFromNDVD(t *testing.T) {
-	n, err := approximateFromNDVD(1.5168, 64.17, 0.00058756)
-	if err != nil {
-		t.Fatalf("approximateFromNDVD: %v", err)
-	}
-	if n < 1.50 || n > 1.53 {
-		t.Errorf("n(d-line) = %v, expected ~1.5168", n)
-	}
-}
-
 func TestSellmeier1(t *testing.T) {
 	coeffs := []float64{1.03961212, 0.00600069867, 0.231792344, 0.0200179144, 1.01046945, 103.560653}
-	// Sellmeier formula treats λ in µm. 587.56 nm → 0.58756 µm.
 	n, err := sellmeier1(coeffs, 0.58756)
 	if err != nil {
 		t.Fatalf("sellmeier1: %v", err)
@@ -123,16 +113,6 @@ func TestInterpolateRefractiveIndex(t *testing.T) {
 	}
 }
 
-func TestEstimatePartialDispersion(t *testing.T) {
-	nF, nC, err := estimatePartialDispersion(1.5168, 64.17)
-	if err != nil {
-		t.Fatalf("estimatePartialDispersion: %v", err)
-	}
-	if nF <= nC {
-		t.Error("nF should be > nC (normal dispersion)")
-	}
-}
-
 func TestCalcRefractiveIndexSellmeier(t *testing.T) {
 	g := &types.Glass{
 		Name:              "N-BK7",
@@ -150,19 +130,18 @@ func TestCalcRefractiveIndexSellmeier(t *testing.T) {
 	}
 }
 
-func TestCalcRefractiveIndexCauchy(t *testing.T) {
+func TestCalcRefractiveIndexNDVD(t *testing.T) {
 	g := &types.Glass{
-		Name:              "N-BK7",
-		ND:                1.5168,
-		VD:                64.17,
-		DispersionFormula: types.Constant,
+		Name: "N-BK7",
+		ND:   1.51680,
+		VD:   64.17,
 	}
-	n, err := CalcRefractiveIndex(g, 0.00058756)
+	n, err := CalcRefractiveIndex(g, 0.000587562)
 	if err != nil {
-		t.Fatalf("CalcRefractiveIndex (Cauchy): %v", err)
+		t.Fatalf("CalcRefractiveIndex (NDVD): %v", err)
 	}
-	if n < 1.50 || n > 1.53 {
-		t.Errorf("n = %v, expected ~1.5168", n)
+	if math.Abs(n-1.51680) > 0.001 {
+		t.Errorf("n(d-line) = %v, expected ~1.51680", n)
 	}
 }
 
@@ -188,5 +167,128 @@ func TestCalcRefractiveIndexNoData(t *testing.T) {
 	_, err := CalcRefractiveIndex(g, 0.00058756)
 	if err == nil {
 		t.Error("Expected error for glass with no dispersion data")
+	}
+}
+
+func TestIndecesFromNdVdN_BK7(t *testing.T) {
+	nd := 1.51680
+	vd := 64.17
+
+	indices := IndecesFromNdVd(nd, vd)
+
+	cases := []struct {
+		name string
+		key  string
+		want float64
+	}{
+		{"nC", "C", 1.51432},
+		{"nF", "F", 1.52238},
+		{"ng", "g", 1.52668},
+		{"nd", "d", 1.51680},
+	}
+	for _, c := range cases {
+		got := indices[c.key].Index
+		diff := math.Abs(got-c.want) / c.want
+		if diff > 0.001 {
+			t.Errorf("%s = %v, want %v (relative error %v > 0.1%%)", c.name, got, c.want, diff)
+		}
+	}
+}
+
+func TestIndecesFromNdVdOrder(t *testing.T) {
+	nd := 1.51680
+	vd := 64.17
+	indices := IndecesFromNdVd(nd, vd)
+
+	if indices["C"].Index >= nd {
+		t.Error("nC should be less than nd (normal dispersion)")
+	}
+	if nd >= indices["F"].Index {
+		t.Error("nF should be greater than nd")
+	}
+	if indices["F"].Index >= indices["g"].Index {
+		t.Error("ng should be greater than nF")
+	}
+}
+
+func TestIndecesFromNdVdVdZero(t *testing.T) {
+	nd := 1.5
+	vd := 0.0
+	indices := IndecesFromNdVd(nd, vd)
+
+	for name, e := range indices {
+		if e.Index != nd {
+			t.Errorf("%s index = %v, want %v (vd=0)", name, e.Index, nd)
+		}
+	}
+}
+
+func TestSplineInterpolate(t *testing.T) {
+	nd := 1.51680
+	vd := 64.17
+	indices := IndecesFromNdVd(nd, vd)
+	knots := sortedKnots(indices)
+
+	s, err := BuildSpline(knots)
+	if err != nil {
+		t.Fatalf("BuildSpline: %v", err)
+	}
+
+	for _, k := range knots {
+		got := EvalSpline(knots, s, k.Wavelength)
+		if math.Abs(got-k.Index) > 1e-12 {
+			t.Errorf("Spline at λ=%v: got %v, want %v", k.Wavelength, got, k.Index)
+		}
+	}
+}
+
+func TestCauchyFit(t *testing.T) {
+	nd := 1.51680
+	vd := 64.17
+	indices := IndecesFromNdVd(nd, vd)
+	knots := sortedKnots(indices)
+
+	ca := FitCauchy(knots, 3)
+
+	// Cauchy is an approximation over a wide range; verify at d-line (anchor point)
+	n := ca.Eval(0.000587562)
+	if math.Abs(n-1.51680) > 0.001 {
+		t.Errorf("Cauchy at d-line: got %v, want ~1.51680", n)
+	}
+
+	// Extrapolation: should return reasonable values (not NaN, physically sensible)
+	for _, wl := range []float64{0.000330, 0.000350, 0.002200, 0.004000} {
+		n := ca.Eval(wl)
+		if n <= 1.0 || n > 2.0 || math.IsNaN(n) {
+			t.Errorf("Cauchy at λ=%v: unreasonable value %v", wl, n)
+		}
+	}
+	nIR := ca.Eval(0.002500)
+	nVis := ca.Eval(0.000550)
+	if nIR > nVis {
+		t.Errorf("Cauchy: n at 2500nm (%v) should be < n at 550nm (%v)", nIR, nVis)
+	}
+}
+
+func TestRefractiveIndexFromNDVD(t *testing.T) {
+	nd := 1.51680
+	vd := 64.17
+
+	n, err := RefractiveIndexFromNDVD(nd, vd, 0.000587562)
+	if err != nil {
+		t.Fatalf("RefractiveIndexFromNDVD: %v", err)
+	}
+	if math.Abs(n-1.51680) > 1e-10 {
+		t.Errorf("n(d-line) = %v, want 1.51680", n)
+	}
+}
+
+func TestRefractiveIndexFromNDVDOutsideRange(t *testing.T) {
+	n, err := RefractiveIndexFromNDVD(1.51680, 64.17, 0.000300)
+	if err != nil {
+		t.Fatalf("RefractiveIndexFromNDVD: %v", err)
+	}
+	if n != 1.51680 {
+		t.Errorf("n = %v, want nd (outside range fallback)", n)
 	}
 }

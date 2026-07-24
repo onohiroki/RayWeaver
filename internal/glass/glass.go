@@ -56,7 +56,7 @@ func CalcRefractiveIndex(g *types.Glass, wavelength float64) (float64, error) {
 		return g.ND, nil
 	default:
 		if g.ND != 0 && g.VD != 0 {
-			return approximateFromNDVD(g.ND, g.VD, wavelength)
+			return RefractiveIndexFromNDVD(g.ND, g.VD, wavelength)
 		}
 		return 0, fmt.Errorf("cannot compute refractive index for %s", g.Name)
 	}
@@ -79,38 +79,44 @@ func sellmeier1(coeffs []float64, lambda float64) (float64, error) {
 	return math.Sqrt(n2), nil
 }
 
-func approximateFromNDVD(nd, vd, wavelength float64) (float64, error) {
-	nF, nC, err := estimatePartialDispersion(nd, vd)
-	if err != nil {
-		return 0, err
+func RefractiveIndexFromNDVD(nd, vd, wavelength float64) (float64, error) {
+	const (
+		splineMin = 0.000365
+		splineMax = 0.002058
+		cauchyMin = 0.000320
+		cauchyMax = 0.005000
+	)
+
+	if wavelength >= splineMin && wavelength <= splineMax {
+		indices := IndecesFromNdVd(nd, vd)
+		knots := sortedKnots(indices)
+		return SplineInterpolate(knots, wavelength)
 	}
 
-	a := nF - nC
-
-	lambdaF := 0.00048613
-	lambdaC := 0.00065627
-
-	denom := (1.0/(lambdaF*lambdaF) - 1.0/(lambdaC*lambdaC))
-	if denom == 0 {
-		return 0, fmt.Errorf("invalid wavelength for cauchy fit")
-	}
-	B := a / denom
-	A := nC - B/(lambdaC*lambdaC)
-
-	if A == 0 && B == 0 {
-		return nd, nil
+	if wavelength > cauchyMin && wavelength < splineMin ||
+		wavelength > splineMax && wavelength < cauchyMax {
+		indices := IndecesFromNdVd(nd, vd)
+		knots := sortedKnots(indices)
+		ca := FitCauchy(knots, 3)
+		return ca.Eval(wavelength), nil
 	}
 
-	return A + B/(wavelength*wavelength), nil
+	return nd, nil
 }
 
-func estimatePartialDispersion(nd, vd float64) (nF, nC float64, err error) {
-	PC := 0.6423 - 0.0032*vd
-
-	nF_minus_nC := nd / vd
-	nC = nd - PC*nF_minus_nC
-	nF = nC + nF_minus_nC
-	return
+func sortedKnots(indices map[string]IndexEntry) []IndexEntry {
+	knots := make([]IndexEntry, 0, len(indices))
+	for _, e := range indices {
+		knots = append(knots, e)
+	}
+	for i := 0; i < len(knots); i++ {
+		for j := i + 1; j < len(knots); j++ {
+			if knots[j].Wavelength < knots[i].Wavelength {
+				knots[i], knots[j] = knots[j], knots[i]
+			}
+		}
+	}
+	return knots
 }
 
 func interpolateRefractiveIndex(entries []types.RefractiveIndexEntry, wavelength float64) (float64, error) {
