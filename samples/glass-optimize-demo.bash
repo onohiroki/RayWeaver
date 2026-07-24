@@ -19,7 +19,7 @@ echo "  Fields: 0° (on-axis), 14°, 20° (full 35mm coverage)"
 echo
 echo "Vignetting control:"
 echo "  auto_aperture on surfaces 1,2,4,5,6 (dynamic clear aperture)"
-echo "  Surface 3: fixed stop (22mm)"
+echo "  Surface 3: fixed stop (9mm, f/4)"
 echo "  min_glass_path: 2.0mm (lens 1), 1.0mm (lenses 2, 3)"
 echo
 echo "Optimization variables:"
@@ -33,6 +33,8 @@ echo "  - lens_nd        (lens 1 refractive index nd)"
 echo "  - lens_vd        (lens 1 Abbe number vd)"
 echo "  - s2_thickness   (air gap lens1→lens2)"
 echo "  - s4_thickness   (air gap lens2→lens3)"
+echo "  - model2_nd/vd   (lens 2 glass nd/vd)"
+echo "  - model3_nd/vd   (lens 3 glass nd/vd)"
 echo
 
 echo "=== DLS optimization ==="
