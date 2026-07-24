@@ -31,6 +31,9 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 	state := ray.Initial
 	jones := ray.Jones
 
+	var glassEntryPos types.Vec3
+	var glassEntrySurfaceID int
+
 	for i := 0; i < len(ray.Path); i++ {
 		currentID := ray.Path[i]
 
@@ -84,7 +87,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			Z: localOrigin.Z + localDir.Z*t,
 		}
 
-		if currentSurf.Diameter > 0 {
+		if currentSurf.Diameter > 0 && !(ray.SkipGlassPathCheck && currentSurf.AutoAperture) {
 			h := math.Sqrt(hitPoint.X*hitPoint.X + hitPoint.Y*hitPoint.Y)
 			if h > currentSurf.Diameter/2 {
 				result.Error = "ray missed surface (aperture stop)"
@@ -146,6 +149,27 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 
 		globalPos := currentSurf.LocalToGlobal.MultiplyPoint(hitPoint)
 		globalDir := currentSurf.LocalToGlobal.MultiplyVector(state.Direction).Normalize()
+
+		if !ray.SkipGlassPathCheck && glassEntrySurfaceID > 0 {
+			path := globalPos.Subtract(glassEntryPos).Length()
+			entrySurf := findSurface(surfaces, glassEntrySurfaceID)
+			if entrySurf != nil {
+				if entrySurf.MinGlassPath > 0 && path < entrySurf.MinGlassPath {
+					result.Error = "ray missed surface (glass path too short)"
+					return result
+				}
+				if entrySurf.MaxGlassPath > 0 && path > entrySurf.MaxGlassPath {
+					result.Error = "ray missed surface (glass path too long)"
+					return result
+				}
+			}
+		}
+		if currentSurf.Material != "AIR" {
+			glassEntryPos = globalPos
+			glassEntrySurfaceID = currentID
+		} else {
+			glassEntrySurfaceID = 0
+		}
 
 		segmentOPL := math.Abs(t) * n1
 

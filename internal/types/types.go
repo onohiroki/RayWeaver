@@ -76,6 +76,9 @@ Type           SurfaceType    `yaml:"type"`
 	Decenter       []DecenterStep `yaml:"decenter,omitempty"`
 	Coating        string         `yaml:"coating,omitempty"`
 	Role           string         `yaml:"role,omitempty"`
+	AutoAperture   bool           `yaml:"auto_aperture,omitempty"`
+	MinGlassPath   float64        `yaml:"min_glass_path,omitempty"`
+	MaxGlassPath   float64        `yaml:"max_glass_path,omitempty"`
 
 	LocalToGlobal  Mat4 `yaml:"-"`
 	GlobalToLocal  Mat4 `yaml:"-"`
@@ -111,13 +114,14 @@ type PassThroughTarget struct {
 }
 
 type Ray struct {
-	ID          string             `yaml:"id"`
-	Wavelength  float64            `yaml:"wavelength"`
-	Initial     RayState           `yaml:"initial"`
-	Aim         *Vec3              `yaml:"aim,omitempty"`
-	PassThrough *PassThroughTarget `yaml:"pass_through,omitempty"`
-	Path        []int              `yaml:"path"`
-	Jones       JonesVector        `yaml:"-"`
+	ID                string             `yaml:"id"`
+	Wavelength        float64            `yaml:"wavelength"`
+	Initial           RayState           `yaml:"initial"`
+	Aim               *Vec3              `yaml:"aim,omitempty"`
+	PassThrough       *PassThroughTarget `yaml:"pass_through,omitempty"`
+	Path              []int              `yaml:"path"`
+	Jones             JonesVector        `yaml:"-"`
+	SkipGlassPathCheck bool              `yaml:"-"`
 }
 
 type SurfaceResult struct {

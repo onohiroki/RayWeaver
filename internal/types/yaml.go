@@ -71,8 +71,11 @@ type surfaceYAML struct {
 	Coefficients []float64      `yaml:"coefficients,omitempty"`
 	NormRadius   float64        `yaml:"norm_radius,omitempty"`
 	Decenter     []DecenterStep `yaml:"decenter,omitempty"`
-	Coating      string         `yaml:"coating,omitempty"`
-	Role         string         `yaml:"role,omitempty"`
+	Coating        string         `yaml:"coating,omitempty"`
+	Role           string         `yaml:"role,omitempty"`
+	AutoAperture   bool           `yaml:"auto_aperture,omitempty"`
+	MinGlassPath   float64        `yaml:"min_glass_path,omitempty"`
+	MaxGlassPath   float64        `yaml:"max_glass_path,omitempty"`
 }
 
 func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
@@ -91,6 +94,9 @@ func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
 	s.Decenter = raw.Decenter
 	s.Coating = raw.Coating
 	s.Role = raw.Role
+	s.AutoAperture = raw.AutoAperture
+	s.MinGlassPath = raw.MinGlassPath
+	s.MaxGlassPath = raw.MaxGlassPath
 
 	if raw.Curvature != 0 {
 		s.Curvature = raw.Curvature
@@ -115,6 +121,9 @@ func (s Surface) MarshalYAML() (interface{}, error) {
 		Decenter:     s.Decenter,
 		Coating:      s.Coating,
 		Role:         s.Role,
+		AutoAperture: s.AutoAperture,
+		MinGlassPath: s.MinGlassPath,
+		MaxGlassPath: s.MaxGlassPath,
 	}
 	if s.radiusUsed {
 		raw.Radius = s.Radius()
