@@ -449,7 +449,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		}
 	}
 
-	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, tol, epsilon, logger)
+	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, tol, epsilon, 2.0, logger)
 	result := opt.Optimize()
 
 	for _, lw := range logWriters {

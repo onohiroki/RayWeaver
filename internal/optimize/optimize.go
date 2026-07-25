@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -52,8 +53,9 @@ type Config struct {
 	Mu            float64
 	Tol           float64
 	Epsilon       float64
-	NumRays       int
-	Logger        Logger
+	NumRays        int
+	ApertureMargin float64
+	Logger         Logger
 }
 
 type Result struct {
@@ -96,6 +98,7 @@ type Optimizer struct {
 	tol             float64
 	epsilon         float64
 	numRays         int
+	apertureMargin  float64
 	logger          Logger
 }
 
@@ -150,6 +153,11 @@ func NewOptimizer(cfg Config) *Optimizer {
 		}
 	}
 
+	apertureMargin := cfg.ApertureMargin
+	if apertureMargin <= 0 {
+		apertureMargin = 2.0
+	}
+
 	return &Optimizer{
 		surfaces:         cfg.Surfaces,
 		variables:        cfg.Variables,
@@ -162,6 +170,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		tol:              tol,
 		epsilon:          epsilon,
 		numRays:          numRays,
+		apertureMargin:   apertureMargin,
 		logger:           cfg.Logger,
 	}
 }
@@ -481,10 +490,7 @@ func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64,
 
 	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
 
-	apertureRadius := findFixedApertureRadius(surfaces)
-	if apertureRadius <= 0 {
-		apertureRadius = findMinApertureRadius(surfaces)
-	}
+	apertureRadius := apertureRadiusForGrid(surfaces, wavelength, o.gc, o.apertureMargin)
 	if apertureRadius <= 0 {
 		return nil, nil
 	}
@@ -770,6 +776,26 @@ func buildPath(surfaces []types.Surface) []int {
 		}
 	}
 	return path
+}
+
+func apertureRadiusForGrid(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, margin float64) float64 {
+	if r := paraxialEntranceRadius(surfaces, wavelength, gc, margin); r > 0 {
+		return r
+	}
+	r := findFixedApertureRadius(surfaces)
+	if r <= 0 {
+		r = findMinApertureRadius(surfaces)
+	}
+	return r
+}
+
+func paraxialEntranceRadius(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, margin float64) float64 {
+	sys := types.System{Surfaces: surfaces}
+	res := paraxial.Compute(sys, wavelength, gc, 0, nil)
+	if res.EntrancePupilDiameter > 0 {
+		return (res.EntrancePupilDiameter / 2) * margin
+	}
+	return 0
 }
 
 func findFixedApertureRadius(surfaces []types.Surface) float64 {
