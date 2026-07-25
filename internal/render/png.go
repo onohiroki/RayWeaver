@@ -235,11 +235,29 @@ func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2,
 	sag2mh := sagFuncForSurface(e.r2Surf)(-h)
 
 	ras.Reset(canvasW, canvasH)
+	// Left curved surface (top → bottom)
+	strokeSagPath(ras, e.r1Surf, h, -h, z1, scale, midZ, strokeWidth)
+	// Right curved surface (bottom → top)
+	strokeSagPath(ras, e.r2Surf, -h, h, z2, scale, midZ, strokeWidth)
 	// Top edge
 	strokeLine(ras, z1+sag1h, h, z2+sag2h, h, strokeWidth, scale, midZ)
 	// Bottom edge
 	strokeLine(ras, z2+sag2mh, -h, z1+sag1mh, -h, strokeWidth, scale, midZ)
 	ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
+}
+
+func strokeSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset, scale, midZ, width float64) {
+	n := 20
+	sagFn := sagFuncForSurface(surf)
+	hPrev := hStart
+	sPrev := sagFn(hPrev)
+	for i := 1; i <= n; i++ {
+		t := float64(i) / float64(n)
+		h := hStart + (hEnd-hStart)*t
+		s := sagFn(h)
+		strokeLine(r, zOffset+sPrev, hPrev, zOffset+s, h, width, scale, midZ)
+		hPrev, sPrev = h, s
+	}
 }
 
 func sampleSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset, scale, midZ float64) {
