@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"strconv"
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/coating"
@@ -615,19 +616,34 @@ func buildPath(surfaces []types.Surface) []int {
 	return p
 }
 
+// resolveConfig finds the config whose id matches val (by string id or 0-based index).
+// Returns the index into configs, or -1 + error message.
+func resolveConfig(configs []types.Config, val string) (int, string) {
+	// Try numeric index first
+	if idx, err := strconv.Atoi(val); err == nil && idx >= 0 && idx < len(configs) {
+		return idx, ""
+	}
+	// Fall back to string id
+	for i := range configs {
+		if configs[i].ID == val {
+			return i, ""
+		}
+	}
+	return -1, fmt.Sprintf("config %q not found", val)
+}
+
 // selectSurfaces resolves which surface list to use:
 //   - if configFlag is set, returns the matching config's surfaces
 //   - else if system.surfaces is empty but configs exist, returns configs[0].surfaces
 //   - otherwise returns system.surfaces
 func selectSurfaces(sysSurfaces []types.Surface, configs []types.Config, configFlag *string) []types.Surface {
 	if *configFlag != "" {
-		for i := range configs {
-			if configs[i].ID == *configFlag {
-				return configs[i].Surfaces
-			}
+		idx, err := resolveConfig(configs, *configFlag)
+		if idx < 0 {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "Error: config %q not found\n", *configFlag)
-		os.Exit(1)
+		return configs[idx].Surfaces
 	}
 	if len(sysSurfaces) == 0 && len(configs) > 0 && len(configs[0].Surfaces) > 0 {
 		return configs[0].Surfaces

@@ -32,18 +32,12 @@ func runPlot(data []byte) {
 
 	surfaces := output.System.Surfaces
 	if configFlag != "" {
-		found := false
-		for _, cfg := range output.Configs {
-			if cfg.ID == configFlag {
-				surfaces = cfg.Surfaces
-				found = true
-				break
-			}
-		}
-		if !found {
-			fmt.Fprintf(os.Stderr, "Error: config %q not found\n", configFlag)
+		idx, err := resolveConfig(output.Configs, configFlag)
+		if idx < 0 {
+			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
 			os.Exit(1)
 		}
+		surfaces = output.Configs[idx].Surfaces
 	} else if len(surfaces) == 0 && len(output.Configs) > 0 {
 		surfaces = output.Configs[0].Surfaces
 		if len(surfaces) == 0 {
