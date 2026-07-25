@@ -151,6 +151,8 @@ for fi in 0 1 2; do
     set terminal pngcairo size 1000,450
     set output "$OUTDIR/glass-spot-f${fi}.png"
 
+    set datafile separator ","
+
     # palette: g=darkblue, F=blue, d=green, C=red
     set palette defined (0 "#1a237e", 1 "#1565c0", 2 "#2e7d32", 3 "#c62828")
     set cbrange [0:3]
@@ -184,15 +186,19 @@ for fi in 0 1 2; do
     set title "before"
     plot "$OUTDIR/glass-spot-init-f${fi}-all.txt" using (\$1-cx_init):(\$2-cy_init):3 \
       with points pt 7 ps 1.5 lc palette title "", \
-      keyentry w ls 1 t "g(436nm)", keyentry w ls 2 t "F(486nm)", \
-      keyentry w ls 3 t "d(588nm)", keyentry w ls 4 t "C(656nm)"
+      keyentry with lines lc rgb "#1a237e" title "g(436nm)", \
+      keyentry with lines lc rgb "#1565c0" title "F(486nm)", \
+      keyentry with lines lc rgb "#2e7d32" title "d(588nm)", \
+      keyentry with lines lc rgb "#c62828" title "C(656nm)"
 
     # after
     set title "after"
     plot "$OUTDIR/glass-spot-opt-f${fi}-all.txt" using (\$1-cx_opt):(\$2-cy_opt):3 \
       with points pt 7 ps 1.5 lc palette title "", \
-      keyentry w ls 1 t "g(436nm)", keyentry w ls 2 t "F(486nm)", \
-      keyentry w ls 3 t "d(588nm)", keyentry w ls 4 t "C(656nm)"
+      keyentry with lines lc rgb "#1a237e" title "g(436nm)", \
+      keyentry with lines lc rgb "#1565c0" title "F(486nm)", \
+      keyentry with lines lc rgb "#2e7d32" title "d(588nm)", \
+      keyentry with lines lc rgb "#c62828" title "C(656nm)"
     unset multiplot
 GPLOT
   if [ -f "$OUTDIR/glass-spot-f${fi}.png" ]; then
