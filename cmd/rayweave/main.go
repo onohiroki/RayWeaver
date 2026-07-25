@@ -201,30 +201,34 @@ Output: augmented YAML with paraxial_result: section:
 See: samples/us2645157.yaml (reference values)
 `)
 	case "plot":
-		fmt.Print(`Usage: rayweave plot [-o file.svg] [--config ID] [--lens-width 0.1] [--ray-width 0.1] < input.yaml
+		fmt.Print(`Usage: rayweave plot [-o file.svg|.png] [--config ID] [--lens-width 0.1] [--ray-width 0.1] < input.yaml
 
-Generates an SVG cross-section drawing of the lens system
-with ray paths overlaid.
+Generates a cross-section drawing (SVG or PNG) of the lens
+system with ray paths overlaid.
 
 Options:
-  -o file.svg           output SVG file (default: stdout)
+  -o file.svg          output file (.svg or .png; default: stdout = SVG)
   --config ID          select a config by id (multi-config mode)
   --lens-width 0.1     lens body stroke width
   --ray-width 0.1      ray path stroke width
-  --scale 0            SVG scale factor (0 = auto)
+  --scale 0            SVG/PNG scale factor (0 = auto)
   --right-margin 20    right-side margin beyond image plane (% of lens length)
 
 Input: YAML with system surfaces + optional results[] and chief_rays[].
 Pipe after "rayweave trace" for ray paths:
   cat system.yaml | rayweave chief | rayweave trace | rayweave plot -o lens.svg
+  cat system.yaml | rayweave chief | rayweave trace | rayweave plot -o lens.png
 
 In multi-config mode, use --config to select which config to draw:
   cat result.yaml | rayweave plot --config wide -o wide.svg
-  cat result.yaml | rayweave plot --config tele -o tele.svg
+  cat result.yaml | rayweave plot --config tele -o tele.png
 
 Glass types are colour-coded using the nd/vd values from the
 glass_catalog section.  Ray colours follow the field angle
 (low = blue, high = red).
+
+Note: PNG output uses golang.org/x/image/vector for rasterization
+  with anti-aliasing.  No external tools required.
 `)
 	case "optimize":
 		fmt.Print(`Usage: rayweave optimize [--verbose] [--log FILE] < input.yaml

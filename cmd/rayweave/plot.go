@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/hiroki/rayweaver/internal/render"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -22,7 +23,7 @@ func runPlot(data []byte) {
 	var configFlag string
 	args := os.Args[2:] // skip "plot"
 	fs := flag.NewFlagSet("plot", flag.ExitOnError)
-	fs.StringVar(&outPath, "o", "", "output SVG file path (default: stdout)")
+	fs.StringVar(&outPath, "o", "", "output file path (.svg or .png; default: stdout = SVG)")
 	fs.Float64Var(&lensWidth, "lens-width", 0.1, "lens body stroke width (default 0.1)")
 	fs.Float64Var(&rayWidth, "ray-width", 0.1, "ray path stroke width (default 0.1)")
 	fs.Float64Var(&scaleOverride, "scale", 0, "SVG scale factor (0 = auto)")
@@ -57,6 +58,19 @@ func runPlot(data []byte) {
 		RayWidth:       rayWidth,
 		ScaleOverride:  scaleOverride,
 		RightMarginPct: rightMarginPct,
+	}
+
+	if outPath != "" && strings.HasSuffix(strings.ToLower(outPath), ".png") {
+		pngData, err := render.LensPNG(cfg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error rendering PNG: %v\n", err)
+			os.Exit(1)
+		}
+		if err := os.WriteFile(outPath, pngData, 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing PNG: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	svg := render.LensSVG(cfg)

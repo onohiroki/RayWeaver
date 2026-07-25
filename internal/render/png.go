@@ -34,7 +34,7 @@ func LensPNG(cfg Config) ([]byte, error) {
 	if bfl < leftSpan {
 		leftSpan = bfl
 	}
-	candidateMinZ := firstZ - leftSpan
+	leftEdge := firstZ - leftSpan
 
 	minZ := 0.0
 	for _, r := range cfg.Results {
@@ -44,8 +44,8 @@ func LensPNG(cfg Config) ([]byte, error) {
 			}
 		}
 	}
-	if minZ < candidateMinZ {
-		minZ = candidateMinZ
+	if minZ < leftEdge {
+		minZ = leftEdge
 	}
 
 	rightFrac := 0.2
@@ -69,15 +69,15 @@ func LensPNG(cfg Config) ([]byte, error) {
 	img := image.NewRGBA(image.Rect(0, 0, canvasW, canvasH))
 	fillWhite(img)
 
-	ras := vector.New(canvasW, canvasH)
+	ras := vector.NewRasterizer(canvasW, canvasH)
 
-	// Axis
+	// Axis (rendered first = behind everything)
 	axisLen := totalZ * (1 + rightFrac)
 	ras.Reset(canvasW, canvasH)
-	drawDashedLine(ras, minZ, minZ+axisLen, 0, 0.3, scale, midZ, 3, 3)
-	ras.Draw(img, image.NewUniform(color.RGBA{160, 160, 160, 128}), image.Point{})
+	dashedLine(ras, minZ, minZ+axisLen, 0, 0.3, scale, midZ, 3, 3)
+	ras.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{160, 160, 160, 128}), image.Point{})
 
-	// Rays
+	// Rays (behind lenses)
 	rayWidth := cfg.RayWidth
 	if rayWidth <= 0 {
 		rayWidth = 0.1
@@ -87,7 +87,7 @@ func LensPNG(cfg Config) ([]byte, error) {
 		drawRayPath(ras, img, rp.path, rayWidth, scale, midZ, col)
 	}
 
-	// Lens bodies
+	// Lens bodies (on top of rays)
 	lw := cfg.LensWidth
 	if lw <= 0 {
 		lw = 0.1
@@ -127,10 +127,9 @@ func fillWhite(img *image.RGBA) {
 	}
 }
 
-func drawFill(ras *vector.Rasterizer, img *image.RGBA, fn func(*vector.Rasterizer), c color.RGBA) {
+func rasterFill(ras *vector.Rasterizer, img *image.RGBA, fn func(*vector.Rasterizer)) {
 	ras.Reset(canvasW, canvasH)
 	fn(ras)
-	ras.Draw(img, image.NewUniform(c), image.Point{})
 }
 
 func strokeLine(ras *vector.Rasterizer, z0, y0, z1, y1, width, scale, midZ float64) {
@@ -159,7 +158,7 @@ func strokeLinePx(ras *vector.Rasterizer, px0, py0, px1, py1 float32, width, sca
 	ras.ClosePath()
 }
 
-func drawDashedLine(ras *vector.Rasterizer, z0, z1, y, width, scale, midZ float64, onLen, offLen float64) {
+func dashedLine(ras *vector.Rasterizer, z0, z1, y, width, scale, midZ float64, onLen, offLen float64) {
 	z := z0
 	for z < z1 {
 		end := z + onLen
@@ -196,9 +195,9 @@ func drawRayPath(ras *vector.Rasterizer, img *image.RGBA, svgPath string, width,
 			first = false
 			continue
 		}
-		drawFill(ras, img, func(r *vector.Rasterizer) {
-			strokeLine(r, prevZ, prevY, z, y, width, scale, midZ)
-		}, c)
+		ras.Reset(canvasW, canvasH)
+		strokeLine(ras, prevZ, prevY, z, y, width, scale, midZ)
+		ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
 		prevZ, prevY = z, y
 	}
 }
@@ -209,23 +208,20 @@ func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, sc
 		return
 	}
 	sag1h := sagFuncForSurface(e.r1Surf)(h)
+	ras.Reset(canvasW, canvasH)
+	px, py := worldPt(z1+sag1h, h, midZ, scale)
+	ras.MoveTo(px, py)
+
+	sampleSagPath(ras, e.r1Surf, h, -h, z1, scale, midZ)
+
 	sag2h := sagFuncForSurface(e.r2Surf)(h)
+	px2, py2 := worldPt(z2+sag2h, -h, midZ, scale)
+	ras.LineTo(px2, py2)
 
-	drawFill(ras, img, func(r *vector.Rasterizer) {
-		px, py := worldPt(z1+sag1h, h, midZ, scale)
-		r.MoveTo(px, py)
-		sampleSagPath(r, e.r1Surf, h, -h, z1, scale, midZ)
-		px2, py2 := worldPt(z2+sag2h, -h, midZ, scale)
-		r.LineTo(px2, py2)
+	sampleSagPath(ras, e.r2Surf, -h, h, z2, scale, midZ)
+	ras.ClosePath()
 
-		sag2mh := sagFuncForSurface(e.r2Surf)(h)
-		px3, py3 := worldPt(z2+sag2mh, h, midZ, scale)
-		_ = px3
-		_ = py3
-
-		sampleSagPathRev(r, e.r2Surf, -h, h, z2, scale, midZ)
-		r.ClosePath()
-	}, c)
+	ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
 }
 
 func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ, strokeWidth float64, c color.RGBA) {
@@ -238,14 +234,12 @@ func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2,
 	sag2h := sagFuncForSurface(e.r2Surf)(h)
 	sag2mh := sagFuncForSurface(e.r2Surf)(-h)
 
+	ras.Reset(canvasW, canvasH)
 	// Top edge
-	drawFill(ras, img, func(r *vector.Rasterizer) {
-		strokeLine(r, z1+sag1h, h, z2+sag2h, h, strokeWidth, scale, midZ)
-	}, c)
+	strokeLine(ras, z1+sag1h, h, z2+sag2h, h, strokeWidth, scale, midZ)
 	// Bottom edge
-	drawFill(ras, img, func(r *vector.Rasterizer) {
-		strokeLine(r, z2+sag2mh, -h, z1+sag1mh, -h, strokeWidth, scale, midZ)
-	}, c)
+	strokeLine(ras, z2+sag2mh, -h, z1+sag1mh, -h, strokeWidth, scale, midZ)
+	ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
 }
 
 func sampleSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset, scale, midZ float64) {
@@ -258,10 +252,6 @@ func sampleSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffs
 		px, py := worldPt(zOffset+s, h, midZ, scale)
 		r.LineTo(px, py)
 	}
-}
-
-func sampleSagPathRev(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset, scale, midZ float64) {
-	sampleSagPath(r, surf, hStart, hEnd, zOffset, scale, midZ)
 }
 
 func glassFill(nd, vd float64, alpha uint8) color.RGBA {
