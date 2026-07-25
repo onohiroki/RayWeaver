@@ -79,9 +79,12 @@ func main() {
 func printHelp(cmd string) {
 	switch cmd {
 	case "chief":
-		fmt.Print(`Usage: rayweave chief < system.yaml
+		fmt.Print(`Usage: rayweave chief [--config ID] < system.yaml
 
 Determines chief rays (spot centroid) for each field.
+
+Options:
+  --config ID          select config by id (multi-config mode)
 
 Input YAML — chief section:
   fields:
@@ -134,9 +137,12 @@ The "chief" subcommand outputs YAML that can be piped directly
   into "rayweave trace".
 `)
 	case "paraxial":
-		fmt.Print(`Usage: rayweave paraxial < system.yaml
+		fmt.Print(`Usage: rayweave paraxial [--config ID] < system.yaml
 
 Performs paraxial (first-order) ray trace and cardinal analysis.
+
+Options:
+  --config ID          select config by id (multi-config mode)
 
 Input: standard system YAML (glass_catalog + surfaces)
 Optional input:
@@ -171,24 +177,26 @@ Output: augmented YAML with paraxial_result: section:
 See: samples/us2645157.yaml (reference values)
 `)
 	case "plot":
-		fmt.Print(`Usage: rayweave plot [-o file.svg] [--lens-width 0.1] [--ray-width 0.1] < input.yaml
+		fmt.Print(`Usage: rayweave plot [-o file.svg] [--config ID] [--lens-width 0.1] [--ray-width 0.1] < input.yaml
 
 Generates an SVG cross-section drawing of the lens system
 with ray paths overlaid.
 
 Options:
   -o file.svg           output SVG file (default: stdout)
-  --lens-width 0.1      lens body stroke width
-  --ray-width 0.1       ray path stroke width
-  --scale 0             SVG scale factor (0 = auto)
-  --right-margin 20     right-side margin beyond image plane (% of lens length)
+  --config ID          select a config by id (multi-config mode)
+  --lens-width 0.1     lens body stroke width
+  --ray-width 0.1      ray path stroke width
+  --scale 0            SVG scale factor (0 = auto)
+  --right-margin 20    right-side margin beyond image plane (% of lens length)
 
 Input: YAML with system surfaces + optional results[] and chief_rays[].
-  Pipe after "rayweave trace" for ray paths:
-    cat system.yaml | rayweave chief | rayweave trace | rayweave plot -o lens.svg
+Pipe after "rayweave trace" for ray paths:
+  cat system.yaml | rayweave chief | rayweave trace | rayweave plot -o lens.svg
 
-  Or with a standalone trace result:
-    cat system.yaml | rayweave trace | rayweave plot -o lens.svg
+In multi-config mode, use --config to select which config to draw:
+  cat result.yaml | rayweave plot --config wide -o wide.svg
+  cat result.yaml | rayweave plot --config tele -o tele.svg
 
 Glass types are colour-coded using the nd/vd values from the
 glass_catalog section.  Ray colours follow the field angle
@@ -204,6 +212,8 @@ Options:
   --log FILE       write per-iteration progress to FILE (JSONL)
 
 Input YAML — optimization section:
+
+Single-config mode:
   optimization:
     method: dls
     variables:
@@ -216,10 +226,59 @@ Input YAML — optimization section:
         max: 0.2
         active: true
 
-Merit terms are read from configs[0].merit (see help for details).
+Multi-config mode (shared/local variables):
+  optimization:
+    method: dls
+    shared_variables:
+      - name: group2_shift
+        min: -5.0
+        max: 5.0
+        active: true
+        bindings:
+          - config: wide
+            id: 3
+            param: thickness
+            scale: 1.0
+            offset: 0.0
+    local_variables:
+      - name: wide_extra_space
+        config: wide
+        target:
+          type: surface
+          id: 4
+          param: thickness
+        min: 0.1
+        max: 50.0
+        active: true
 
-Output: optimized YAML with updated surface parameters.
-`)
+Configs each have their own surfaces/fields/wavelengths/merit:
+  configs:
+    - id: wide
+      name: Wide
+      weight: 1.0
+      active: true
+      fields: [...]
+      wavelengths: [...]
+      surfaces: [...]
+      merit:
+        type: spot_rms
+        terms: [...]
+    - id: tele
+      name: Tele
+      weight: 1.0
+      active: true
+      fields: [...]
+      wavelengths: [...]
+      surfaces: [...]
+      merit:
+        type: spot_rms
+        terms: [...]
+
+Merit terms are evaluated per-config and summed weighted by config weight.
+A CONF operand selects which config's merit terms are active for each rule.
+
+Output: optimized YAML with updated surface parameters in each config.
+ `)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml
 
@@ -306,6 +365,7 @@ func runChief(data []byte) {
 	clearAperture := fs.Bool("clear-aperture", false, "compute clear aperture diameters from grid ray extents and set system.surfaces[].diameter")
 	marginalRays := fs.Bool("marginal-rays", false, "add marginal rays (max/min Y, and X if applicable) to output rays")
 	wlFlag := fs.Float64("wl", 0.00058756, "wavelength (mm) for grid ray tracing")
+	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	fs.Parse(os.Args[2:])
 
 	var input types.Input
@@ -336,7 +396,12 @@ func runChief(data []byte) {
 	wavelength := *wlFlag
 
 	gc, _ := loadCatalogs(&input)
-	surface.Precompute(input.System.Surfaces)
+
+	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
+	surface.Precompute(surfaces)
+
+	selectedSys := input.System
+	selectedSys.Surfaces = surfaces
 
 	pol := types.NewCircularJones(true)
 	if input.Rays != nil {
@@ -344,7 +409,7 @@ func runChief(data []byte) {
 	}
 
 	results := chief.DetermineChiefRaysGrid(
-		input.System,
+		selectedSys,
 		fields,
 		input.Chief.ReferenceSurface,
 		input.Chief.NumRays,
@@ -358,21 +423,21 @@ func runChief(data []byte) {
 	// --- --clear-aperture: trace grid points and set Diameter on all surfaces ---
 	if *clearAperture && len(results) > 0 {
 		engine2 := ray.NewEngine(gc, nil)
-		surface.Precompute(input.System.Surfaces)
+		surface.Precompute(surfaces)
 
 		path := []int{0}
-		for _, s := range input.System.Surfaces {
+		for _, s := range surfaces {
 			if s.ID > 0 {
 				path = append(path, s.ID)
 			}
 		}
 
 		surfIDtoIdx := make(map[int]int)
-		for i, s := range input.System.Surfaces {
+		for i, s := range surfaces {
 			surfIDtoIdx[s.ID] = i
 		}
 
-		perSurfaceMaxY := make([]float64, len(input.System.Surfaces))
+		perSurfaceMaxY := make([]float64, len(surfaces))
 
 		for _, r := range results {
 			for _, gp := range r.GridPoints {
@@ -385,7 +450,7 @@ func runChief(data []byte) {
 					Path:       path,
 					Jones:      pol,
 				}
-				tr := engine2.TraceRay(ray, input.System.Surfaces)
+				tr := engine2.TraceRay(ray, surfaces)
 				if tr.Error != "" {
 					continue
 				}
@@ -406,9 +471,9 @@ func runChief(data []byte) {
 			}
 		}
 
-		for i := range input.System.Surfaces {
+		for i := range surfaces {
 			if perSurfaceMaxY[i] > 0 {
-				input.System.Surfaces[i].Diameter = perSurfaceMaxY[i] * 2
+				surfaces[i].Diameter = perSurfaceMaxY[i] * 2
 			}
 		}
 	}
@@ -478,7 +543,7 @@ func runChief(data []byte) {
 					ID:         fmt.Sprintf("marginal_%s_Yplus", fid),
 					Wavelength: wavelength,
 					Initial:    types.RayState{Origin: maxY.Origin, Direction: maxY.Direction},
-					Path:       buildPath(input.System.Surfaces),
+					Path:       buildPath(surfaces),
 					Jones:      pol,
 				})
 			}
@@ -487,7 +552,7 @@ func runChief(data []byte) {
 					ID:         fmt.Sprintf("marginal_%s_Yminus", fid),
 					Wavelength: wavelength,
 					Initial:    types.RayState{Origin: minY.Origin, Direction: minY.Direction},
-					Path:       buildPath(input.System.Surfaces),
+					Path:       buildPath(surfaces),
 					Jones:      pol,
 				})
 			}
@@ -497,7 +562,7 @@ func runChief(data []byte) {
 						ID:         fmt.Sprintf("marginal_%s_Xplus", fid),
 						Wavelength: wavelength,
 						Initial:    types.RayState{Origin: maxX.Origin, Direction: maxX.Direction},
-						Path:       buildPath(input.System.Surfaces),
+						Path:       buildPath(surfaces),
 						Jones:      pol,
 					})
 				}
@@ -506,7 +571,7 @@ func runChief(data []byte) {
 						ID:         fmt.Sprintf("marginal_%s_Xminus", fid),
 						Wavelength: wavelength,
 						Initial:    types.RayState{Origin: minX.Origin, Direction: minX.Direction},
-						Path:       buildPath(input.System.Surfaces),
+						Path:       buildPath(surfaces),
 						Jones:      pol,
 					})
 				}
@@ -542,7 +607,32 @@ func buildPath(surfaces []types.Surface) []int {
 	return p
 }
 
+// selectSurfaces resolves which surface list to use:
+//   - if configFlag is set, returns the matching config's surfaces
+//   - else if system.surfaces is empty but configs exist, returns configs[0].surfaces
+//   - otherwise returns system.surfaces
+func selectSurfaces(sysSurfaces []types.Surface, configs []types.Config, configFlag *string) []types.Surface {
+	if *configFlag != "" {
+		for i := range configs {
+			if configs[i].ID == *configFlag {
+				return configs[i].Surfaces
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Error: config %q not found\n", *configFlag)
+		os.Exit(1)
+	}
+	if len(sysSurfaces) == 0 && len(configs) > 0 && len(configs[0].Surfaces) > 0 {
+		return configs[0].Surfaces
+	}
+	return sysSurfaces
+}
+
 func runTrace(data []byte) {
+	args := os.Args[2:]
+	fs := flag.NewFlagSet("trace", flag.ExitOnError)
+	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
+	fs.Parse(args)
+
 	var input types.Input
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
@@ -555,20 +645,31 @@ func runTrace(data []byte) {
 	}
 
 	gc, cc := loadCatalogs(&input)
-	surface.Precompute(input.System.Surfaces)
+	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
+	surface.Precompute(surfaces)
 
 	engine := ray.NewEngine(gc, cc)
 
+	// Preserve chief_rays from input data if present
+	var chiefRays []types.ChiefRayResult
+	var temp struct {
+		ChiefRays []types.ChiefRayResult `yaml:"chief_rays"`
+	}
+	if err := yaml.Unmarshal(data, &temp); err == nil {
+		chiefRays = temp.ChiefRays
+	}
+
 	output := types.Output{
-		Input:   input,
-		Results: make([]types.RayResult, 0, len(input.Rays.Rays)),
+		Input:     input,
+		Results:   make([]types.RayResult, 0, len(input.Rays.Rays)),
+		ChiefRays: chiefRays,
 	}
 
 	for i := range input.Rays.Rays {
 		r := &input.Rays.Rays[i]
 		r.Jones = input.Rays.Polarization
-		ray.ResolveRay(r, input.System.Surfaces, engine)
-		result := engine.TraceRay(*r, input.System.Surfaces)
+		ray.ResolveRay(r, surfaces, engine)
+		result := engine.TraceRay(*r, surfaces)
 		output.Results = append(output.Results, result)
 	}
 
@@ -581,6 +682,11 @@ func runTrace(data []byte) {
 }
 
 func runParaxial(data []byte) {
+	args := os.Args[2:]
+	fs := flag.NewFlagSet("paraxial", flag.ExitOnError)
+	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
+	fs.Parse(args)
+
 	var input types.Input
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
@@ -588,7 +694,12 @@ func runParaxial(data []byte) {
 	}
 
 	gc, _ := loadCatalogs(&input)
-	surface.Precompute(input.System.Surfaces)
+
+	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
+	surface.Precompute(surfaces)
+
+	selectedSys := input.System
+	selectedSys.Surfaces = surfaces
 
 	wavelength := 0.00058756
 	objectHeight := 0.0
@@ -606,7 +717,7 @@ func runParaxial(data []byte) {
 		chiefRays = temp.ChiefRays
 	}
 
-	result := paraxial.Compute(input.System, wavelength, gc, objectHeight, chiefRays)
+	result := paraxial.Compute(selectedSys, wavelength, gc, objectHeight, chiefRays)
 
 	output := types.Output{
 		Input:          input,

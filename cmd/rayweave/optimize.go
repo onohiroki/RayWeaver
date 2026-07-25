@@ -7,10 +7,19 @@ import (
 	"os"
 
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/multiopt"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	defaultMaxIter = 100
+	defaultMu      = 1.0
+	defaultTol     = 1e-6
+	defaultEpsilon = 1e-6
+	defaultNumRays = 64
 )
 
 func runOptimize(data []byte, verbose bool, logFile string) {
@@ -27,9 +36,30 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 
 	gc, _ := loadCatalogs(&input)
 
+	// Detect multi-config mode: shared_variables exist, or multiple configs with merits
+	isMultiConfig := len(input.Optimization.SharedVariables) > 0 || len(input.Optimization.LocalVariables) > 0
+	if !isMultiConfig {
+		for _, cfg := range input.Configs {
+			if cfg.Merit != nil {
+				isMultiConfig = true
+				break
+			}
+		}
+	}
+
+	if isMultiConfig && len(input.Configs) > 1 {
+		runMultiConfigOptimize(input, gc, verbose, logFile)
+		return
+	}
+
+	// Single-config: use configs[0].surfaces if available, otherwise system.surfaces
 	surfaces := input.System.Surfaces
 	if len(input.Configs) > 0 && len(input.Configs[0].Surfaces) > 0 {
 		surfaces = input.Configs[0].Surfaces
+	}
+	if len(surfaces) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no surfaces defined (add 'system.surfaces' or 'configs[0].surfaces')\n")
+		os.Exit(1)
 	}
 	surface.Precompute(surfaces)
 
@@ -290,6 +320,331 @@ func applyVariableStates(surfaces []types.Surface, states []optimize.VariableSta
 	}
 
 	return result, newGlasses
+}
+
+func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, logFile string) {
+	var configs []multiopt.ConfigInput
+	for _, cfg := range input.Configs {
+		if !cfg.Active {
+			continue
+		}
+		surfaces := cfg.Surfaces
+		if len(surfaces) == 0 {
+			fmt.Fprintf(os.Stderr, "Error: config %q has no surfaces defined\n", cfg.ID)
+			os.Exit(1)
+		}
+
+		var fields []types.FieldItem
+		for _, f := range cfg.Fields {
+			fields = append(fields, f)
+		}
+		if len(fields) == 0 && len(input.Chief.Fields) > 0 {
+			for _, f := range input.Chief.Fields {
+				fields = append(fields, types.FieldItem{
+					ID:       0,
+					AngleDeg: f.Angle,
+					Weight:   1.0,
+				})
+			}
+		}
+
+		var wavelengths []types.WavelengthItem
+		for _, w := range cfg.Wavelengths {
+			wavelengths = append(wavelengths, w)
+		}
+
+		var meritTerms []types.MeritTerm
+		if cfg.Merit != nil {
+			for _, mt := range cfg.Merit.Terms {
+				if mt.Kind != "spot_rms" {
+					continue
+				}
+				var fieldAngle, fieldWeight float64
+				for _, f := range cfg.Fields {
+					if f.ID == mt.Field {
+						fieldAngle = f.AngleDeg
+						fieldWeight = f.Weight
+						break
+					}
+				}
+				var wavWeight float64
+				for _, w := range cfg.Wavelengths {
+					if math.Abs(w.Value-mt.Wavelength) < 1e-12 {
+						wavWeight = w.Weight
+						break
+					}
+				}
+				if fieldWeight == 0 {
+					fieldWeight = 1.0
+				}
+				if wavWeight == 0 {
+					wavWeight = 1.0
+				}
+				meritTerms = append(meritTerms, types.MeritTerm{
+					Field:      mt.Field,
+					Wavelength: mt.Wavelength,
+					Weight:     mt.Weight,
+				})
+				_ = fieldAngle
+				_ = fieldWeight
+				_ = wavWeight
+			}
+		}
+
+		configs = append(configs, multiopt.ConfigInput{
+			ID:          cfg.ID,
+			Weight:      cfg.Weight,
+			Surfaces:    surfaces,
+			Fields:      fields,
+			Wavelengths: wavelengths,
+			MeritTerms:  meritTerms,
+		})
+	}
+
+	if len(configs) == 0 {
+		fmt.Fprintf(os.Stderr, "Error: no active configs found\n")
+		os.Exit(1)
+	}
+
+	sharedVars := input.Optimization.SharedVariables
+	localVars := input.Optimization.LocalVariables
+
+	maxIter := input.Optimization.MaxIter
+	if maxIter <= 0 {
+		maxIter = defaultMaxIter
+	}
+	tol := input.Optimization.Tol
+	if tol <= 0 {
+		tol = defaultTol
+	}
+	epsilon := input.Optimization.Epsilon
+	if epsilon <= 0 {
+		epsilon = defaultEpsilon
+	}
+
+	var logger multiopt.Logger
+	logWriters := []struct {
+		name string
+		w    *os.File
+	}{}
+
+	if verbose {
+		logger = &jsonMultiLogger{w: os.Stderr}
+	}
+
+	if logFile != "" {
+		f, err := os.Create(logFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating log file: %v\n", err)
+			os.Exit(1)
+		}
+		logWriters = append(logWriters, struct {
+			name string
+			w    *os.File
+		}{name: logFile, w: f})
+		if logger == nil {
+			logger = &jsonMultiLogger{w: f}
+		} else {
+			logger = &multiMultiLogger{loggers: []multiopt.Logger{logger, &jsonMultiLogger{w: f}}}
+		}
+	}
+
+	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, tol, epsilon, logger)
+	result := opt.Optimize()
+
+	for _, lw := range logWriters {
+		lw.w.Close()
+	}
+
+	fmt.Fprintf(os.Stderr, "=== Multi-Config Optimization complete ===\n")
+	fmt.Fprintf(os.Stderr, "  Status:      %s\n", result.Status)
+	fmt.Fprintf(os.Stderr, "  Iterations:  %d\n", result.Iterations)
+	fmt.Fprintf(os.Stderr, "  Before:      %.6e\n", result.BeforeMerit)
+	fmt.Fprintf(os.Stderr, "  After:       %.6e\n", result.AfterMerit)
+	if result.BeforeMerit > 0 {
+		improvement := (result.BeforeMerit - result.AfterMerit) / result.BeforeMerit * 100
+		fmt.Fprintf(os.Stderr, "  Improvement: %.2f%%\n", improvement)
+	}
+
+	// Re-apply final variable values to all configs' surfaces
+	finalX := getFinalX(opt, result.Variables)
+	configSurfaces := applyMultiVars(input, finalX, gc)
+
+	// Update input configs with optimized surfaces
+	for i := range input.Configs {
+		if cfg, ok := configSurfaces[input.Configs[i].ID]; ok {
+			input.Configs[i].Surfaces = cfg
+		}
+	}
+
+	output := types.Output{
+		Input: input,
+	}
+
+	outData, err := yaml.Marshal(&output)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error marshaling output: %v\n", err)
+		os.Exit(1)
+	}
+	os.Stdout.Write(outData)
+}
+
+func applyMultiVars(input types.Input, x []float64, gc *glass.Catalog) map[string][]types.Surface {
+	result := make(map[string][]types.Surface)
+
+	// Build flat variable list from shared + local
+	var varIdx int
+	for _, sv := range input.Optimization.SharedVariables {
+		if !sv.Active {
+			continue
+		}
+		val := 0.0
+		if varIdx < len(x) {
+			val = x[varIdx]
+		}
+		varIdx++
+
+		for _, b := range sv.Bindings {
+			scale := b.Scale
+			if scale == 0 {
+				scale = 1.0
+			}
+			applied := scale*val + b.Offset
+
+			for ci := range input.Configs {
+				cfg := &input.Configs[ci]
+				if cfg.ID != b.Config {
+					continue
+				}
+		surfaces := cfg.Surfaces
+		if len(surfaces) == 0 {
+			fmt.Fprintf(os.Stderr, "Error: config %q has no surfaces defined\n", cfg.ID)
+			os.Exit(1)
+		}
+				s := make([]types.Surface, len(surfaces))
+				copy(s, surfaces)
+				for i := range s {
+					if s[i].ID == b.ID {
+						setSurfaceParam(&s[i], b.Param, applied)
+						break
+					}
+				}
+				surface.Precompute(s)
+				result[cfg.ID] = s
+			}
+		}
+	}
+
+	for _, lv := range input.Optimization.LocalVariables {
+		if !lv.Active {
+			continue
+		}
+		val := 0.0
+		if varIdx < len(x) {
+			val = x[varIdx]
+		}
+		varIdx++
+
+		for ci := range input.Configs {
+			cfg := &input.Configs[ci]
+			if cfg.ID != lv.Config {
+				continue
+			}
+			surfaces := cfg.Surfaces
+			if len(surfaces) == 0 {
+				fmt.Fprintf(os.Stderr, "Error: config %q has no surfaces defined\n", cfg.ID)
+				os.Exit(1)
+			}
+			s := make([]types.Surface, len(surfaces))
+			copy(s, surfaces)
+			for i := range s {
+				if s[i].ID == lv.Target.ID {
+					setSurfaceParam(&s[i], lv.Target.Param, val)
+					break
+				}
+			}
+			surface.Precompute(s)
+			result[cfg.ID] = s
+		}
+	}
+
+	return result
+}
+
+func setSurfaceParam(s *types.Surface, param string, val float64) {
+	switch param {
+	case "curvature":
+		s.Curvature = val
+	case "thickness":
+		s.Thickness = val
+	case "radius":
+		if val == 0 {
+			s.Curvature = 0
+		} else {
+			s.Curvature = 1.0 / val
+		}
+	}
+}
+
+func getFinalX(opt *multiopt.MultiOptimizer, states []multiopt.VariableState) []float64 {
+	// We need the final x from the optimizer's internal state.
+	// For now, reconstruct from the VariableState After values in order.
+	var x []float64
+	for _, st := range states {
+		x = append(x, st.After)
+	}
+	return x
+}
+
+type jsonMultiLogger struct {
+	w *os.File
+}
+
+func (j *jsonMultiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+	entry := iterLog{
+		Iter:        iter,
+		Merit:       safeF(merit),
+		Improvement: safeF(improvement),
+		StepNorm:    safeF(stepNorm),
+		Variables:   safeVars(variables),
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		fmt.Fprintf(j.w, "ERR iter=%d: %v\n", iter, err)
+		return
+	}
+	fmt.Fprintln(j.w, string(data))
+}
+
+func (j *jsonMultiLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+	entry := finalLog{
+		Iter:      iter,
+		Merit:     safeF(merit),
+		Variables: safeVars(variables),
+		Status:    status,
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		fmt.Fprintf(j.w, "ERR final: %v\n", err)
+		return
+	}
+	fmt.Fprintln(j.w, string(data))
+}
+
+type multiMultiLogger struct {
+	loggers []multiopt.Logger
+}
+
+func (m *multiMultiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+	for _, l := range m.loggers {
+		l.LogIter(iter, merit, improvement, stepNorm, variables)
+	}
+}
+
+func (m *multiMultiLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+	for _, l := range m.loggers {
+		l.LogFinal(iter, status, merit, stepNorm, variables)
+	}
 }
 
 type iterLog struct {

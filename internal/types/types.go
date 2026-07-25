@@ -266,12 +266,37 @@ type VariableTarget struct {
 }
 
 type OptimizationVariable struct {
-	Name   string          `yaml:"name"`
-	Target VariableTarget  `yaml:"target"`
-	Min    float64         `yaml:"min"`
-	Max    float64         `yaml:"max"`
-	Step   float64         `yaml:"step,omitempty"`
-	Active bool            `yaml:"active"`
+	Name   string         `yaml:"name"`
+	Target VariableTarget `yaml:"target"`
+	Min    float64        `yaml:"min"`
+	Max    float64        `yaml:"max"`
+	Step   float64        `yaml:"step,omitempty"`
+	Active bool           `yaml:"active"`
+}
+
+type SharedVariableBinding struct {
+	Config      string  `yaml:"config"`
+	ID          int     `yaml:"id"`
+	Param       string  `yaml:"param"`
+	Scale       float64 `yaml:"scale,omitempty"`
+	Offset      float64 `yaml:"offset,omitempty"`
+}
+
+type SharedVariable struct {
+	Name     string                `yaml:"name"`
+	Min      float64               `yaml:"min"`
+	Max      float64               `yaml:"max"`
+	Active   bool                  `yaml:"active"`
+	Bindings []SharedVariableBinding `yaml:"bindings"`
+}
+
+type LocalVariableDef struct {
+	Name   string         `yaml:"name"`
+	Config string         `yaml:"config"`
+	Target VariableTarget `yaml:"target"`
+	Min    float64        `yaml:"min"`
+	Max    float64        `yaml:"max"`
+	Active bool           `yaml:"active"`
 }
 
 type PenaltyConfig struct {
@@ -297,13 +322,15 @@ type Constraint struct {
 }
 
 type OptimizationConfig struct {
-	Method      string                  `yaml:"method"`
-	Aggregate   string                  `yaml:"aggregate,omitempty"`
-	MaxIter     int                     `yaml:"max_iter,omitempty"`
-	Tol         float64                 `yaml:"tol,omitempty"`
-	Epsilon     float64                 `yaml:"epsilon,omitempty"`
-	Variables   []OptimizationVariable  `yaml:"variables"`
-	Constraints []Constraint            `yaml:"constraints,omitempty"`
+	Method          string                  `yaml:"method"`
+	Aggregate       string                  `yaml:"aggregate,omitempty"`
+	MaxIter         int                     `yaml:"max_iter,omitempty"`
+	Tol             float64                 `yaml:"tol,omitempty"`
+	Epsilon         float64                 `yaml:"epsilon,omitempty"`
+	Variables       []OptimizationVariable  `yaml:"variables,omitempty"`
+	SharedVariables []SharedVariable        `yaml:"shared_variables,omitempty"`
+	LocalVariables  []LocalVariableDef      `yaml:"local_variables,omitempty"`
+	Constraints     []Constraint            `yaml:"constraints,omitempty"`
 }
 
 type MeritTermResult struct {
