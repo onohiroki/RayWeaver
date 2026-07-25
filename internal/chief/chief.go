@@ -69,7 +69,7 @@ func determineChiefRays(
 ) []Result {
 	engine := ray.NewEngine(gc, nil)
 
-	apertureRadius := findMinApertureRadius(system.Surfaces)
+	apertureRadius := FindMinApertureRadius(system.Surfaces)
 	if apertureRadius <= 0 {
 		return nil
 	}
@@ -569,7 +569,7 @@ func searchDirectionForTarget(
 
 // generateGridPoints returns a list of pupil (px, py) sample coordinates
 // for the given grid type and aperture radius.
-func generateGridPoints(numRays int, apertureRadius float64, gridType types.GridType) []struct{ X, Y float64 } {
+func GenerateGridPoints(numRays int, apertureRadius float64, gridType types.GridType) []struct{ X, Y float64 } {
 	var pts []struct{ X, Y float64 }
 
 	switch gridType {
@@ -664,7 +664,7 @@ func tracePupilGrid(
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, runtime.NumCPU())
 
-	samples := generateGridPoints(numRays, apertureRadius, gridType)
+	samples := GenerateGridPoints(numRays, apertureRadius, gridType)
 	for i := range samples {
 		px := pupilCenterX + samples[i].X
 		py := pupilCenterY + samples[i].Y
@@ -856,7 +856,7 @@ func computeTargetZ(surfaces []types.Surface, targetID int) float64 {
 	return z
 }
 
-func findMinApertureRadius(surfaces []types.Surface) float64 {
+func FindMinApertureRadius(surfaces []types.Surface) float64 {
 	minR := math.MaxFloat64
 	for _, s := range surfaces {
 		if s.Diameter > 0 && s.Diameter/2 < minR {

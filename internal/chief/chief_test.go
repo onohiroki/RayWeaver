@@ -21,27 +21,27 @@ func singletSystem() (types.System, *glass.Catalog) {
 }
 
 func TestGenerateGridPointsPolar(t *testing.T) {
-	pts := generateGridPoints(7, 10.0, types.GridPolar)
+	pts := GenerateGridPoints(7, 10.0, types.GridPolar)
 	if len(pts) == 0 {
-		t.Error("generateGridPoints returned empty slice")
+		t.Error("GenerateGridPoints returned empty slice")
 	}
 }
 
 func TestGenerateGridPointsSquare(t *testing.T) {
 	// numRays=5 → n=2 → 2x2=4 points (all within unit circle)
-	pts := generateGridPoints(5, 10.0, types.GridSquare)
+	pts := GenerateGridPoints(5, 10.0, types.GridSquare)
 	if len(pts) != 4 {
 		t.Errorf("Square grid (n=5->n=2): got %d points, want 4", len(pts))
 	}
 	// numRays=20 → n=4 → 4x4=16 points with circle clipping
-	pts2 := generateGridPoints(20, 10.0, types.GridSquare)
+	pts2 := GenerateGridPoints(20, 10.0, types.GridSquare)
 	if len(pts2) == 0 || len(pts2) > 16 {
 		t.Errorf("Square grid (n=20->n=4): got %d, want <=16", len(pts2))
 	}
 }
 
 func TestGenerateGridPointsHex(t *testing.T) {
-	pts := generateGridPoints(7, 10.0, types.GridHex)
+	pts := GenerateGridPoints(7, 10.0, types.GridHex)
 	if len(pts) == 0 {
 		t.Error("Hex grid returned empty")
 	}
@@ -104,8 +104,8 @@ func TestFindMinApertureRadius(t *testing.T) {
 		{Diameter: 0.0},
 		{Diameter: 20.0},
 	}
-	r := findMinApertureRadius(surfaces)
+	r := FindMinApertureRadius(surfaces)
 	if r != 10.0 {
-		t.Errorf("Min aperture radius = %v, want 10", r)
+		t.Errorf("FindMinApertureRadius = %v, want 10", r)
 	}
 }

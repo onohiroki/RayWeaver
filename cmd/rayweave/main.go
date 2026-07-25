@@ -96,8 +96,11 @@ Options:
   --config ID          select config by id (multi-config mode)
   --pass-through N     constrain chief ray to pass through (0,0) centre of
                          surface N (overrides YAML pass_through.surface)
-  --clear-aperture     trace all grid rays through every surface and set
-                         system.surfaces[].diameter = 2x max radial extent
+  --clear-aperture     trace grid rays (all fields) through every surface and
+                         set system.surfaces[].diameter = 2x max radial extent
+                         using entrance-pupil-based beam diameter
+  --clear-aperture-margin 2.0   beam diameter multiplier relative to entrance
+                         pupil (default 2 = 2× entrance pupil diameter)
   --marginal-rays      extract marginal (max/min) rays from grid points and
                          append them for piping into trace/plot
   --wl 0.00058756      reference wavelength (mm)
@@ -390,7 +393,8 @@ func loadCatalogs(input *types.Input) (*glass.Catalog, *coating.Catalog) {
 
 func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
-	clearAperture := fs.Bool("clear-aperture", false, "trace all grid rays through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set system.surfaces[].diameter = 2x that extent")
+	clearAperture := fs.Bool("clear-aperture", false, "trace grid rays (all fields, at entrance-pupil-based beam diameter) through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set system.surfaces[].diameter = 2x that extent")
+	clearApertureMargin := fs.Float64("clear-aperture-margin", 2.0, "beam diameter multiplier relative to entrance pupil (default 2 = 2× entrance pupil diameter)")
 	marginalRays := fs.Bool("marginal-rays", false, "from each field's grid points find the rays with max/min image Y (and X for off-axis fields) and append them as marginal rays to the output 'rays' section for piping into trace/plot")
 	passThrough := fs.Int("pass-through", 0, "constrain chief ray to pass through (0,0,0) center of surface N (overrides YAML pass_through.surface)")
 	wlFlag := fs.Float64("wl", 0.00058756, "wavelength (mm) for grid ray tracing")
@@ -459,17 +463,40 @@ func runChief(data []byte) {
 		pt,
 	)
 
-	// --- --clear-aperture: trace grid points and set Diameter on all surfaces ---
+	// --- --clear-aperture: scale grid points by entrance-pupil-based radius and set Diameter ---
 	if *clearAperture && len(results) > 0 {
-		engine2 := ray.NewEngine(gc, nil)
-		surface.Precompute(surfaces)
-
-		path := []int{0}
-		for _, s := range surfaces {
-			if s.ID > 0 {
-				path = append(path, s.ID)
+		// Compute entrance pupil diameter via paraxial
+		chiefRayResults := make([]types.ChiefRayResult, len(results))
+		for i, r := range results {
+			chiefRayResults[i] = types.ChiefRayResult{
+				FieldAngle:    r.FieldAngle,
+				ChiefRay:      r.ChiefRay,
+				ImageHeight:   r.ImageHeight,
+				EntrancePupil: r.EntrancePupil,
 			}
 		}
+		paraxResult := paraxial.Compute(selectedSys, wavelength, gc, 0, chiefRayResults)
+
+		// Determine beam radius = (entrance pupil radius) × margin
+		var newRadius float64
+		if paraxResult.EntrancePupilDiameter > 0 {
+			newRadius = (paraxResult.EntrancePupilDiameter / 2) * (*clearApertureMargin)
+		}
+		oldRadius := chief.FindMinApertureRadius(surfaces)
+		if newRadius <= 0 {
+			newRadius = oldRadius
+		}
+
+		// Precompute scale factor (constant for all grid points)
+		useScale := oldRadius > 0 && newRadius > 0
+		var scale float64
+		if useScale {
+			scale = newRadius / oldRadius
+		}
+
+		engine2 := ray.NewEngine(gc, nil)
+		surface.Precompute(surfaces)
+		path := buildPath(surfaces)
 
 		surfIDtoIdx := make(map[int]int)
 		for i, s := range surfaces {
@@ -483,9 +510,14 @@ func runChief(data []byte) {
 				if gp.ImageX == nil {
 					continue
 				}
+				origin := gp.Origin
+				if useScale {
+					origin.X *= scale
+					origin.Y *= scale
+				}
 				ray := types.Ray{
 					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: gp.Origin, Direction: gp.Direction},
+					Initial:    types.RayState{Origin: origin, Direction: gp.Direction},
 					Path:       path,
 					Jones:      pol,
 				}
