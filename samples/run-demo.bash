@@ -68,13 +68,14 @@ echo 'with chief data:'
 ./rayweave paraxial < "$CHIEF_RESULT" | yq '.paraxial_result'
 
 echo
-echo "=== PNG raytrace diagram ==="
+echo "=== Raytrace diagram (SVG + PNG) ==="
 ./rayweave chief --clear-aperture < "$YAML" \
   | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
   | tee "$OUTDIR/us2645157-trace-result.yaml" \
-  | ./rayweave plot -o "$OUTDIR/us2645157.png"
-echo "Written: $OUTDIR/us2645157.png"
+        >(./rayweave plot -o "$OUTDIR/us2645157.png") \
+  | ./rayweave plot -o "$OUTDIR/us2645157.svg"
+echo "Written: $OUTDIR/us2645157.svg and $OUTDIR/us2645157.png"
 
 echo
 echo "=== TMM: single-layer AR coating (MgF2 on N-SK16, lambda=550nm) ==="
