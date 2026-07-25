@@ -72,6 +72,7 @@ echo "=== PNG raytrace diagram ==="
 ./rayweave chief --clear-aperture < "$YAML" \
   | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
+  | tee "$OUTDIR/us2645157-trace-result.yaml" \
   | ./rayweave plot -o "$OUTDIR/us2645157.png"
 echo "Written: $OUTDIR/us2645157.png"
 
