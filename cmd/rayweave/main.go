@@ -38,6 +38,14 @@ func main() {
 		return
 	}
 
+	// Subcommand help (no stdin required) — check before any flag parsing
+	for _, a := range args[1:] {
+		if a == "--help" || a == "-h" {
+			printHelp(args[0])
+			return
+		}
+	}
+
 	// Parse optimize-specific flags before stdin reading
 	optVerbose := false
 	optLogFile := ""
