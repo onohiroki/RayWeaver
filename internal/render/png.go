@@ -75,7 +75,7 @@ func LensPNG(cfg Config) ([]byte, error) {
 	axisLen := totalZ * (1 + rightFrac)
 	ras.Reset(canvasW, canvasH)
 	dashedLine(ras, minZ, minZ+axisLen, 0, 0.3, scale, midZ, 3, 3)
-	ras.Draw(img, img.Bounds(), image.NewUniform(color.RGBA{160, 160, 160, 128}), image.Point{})
+	ras.Draw(img, img.Bounds(), image.NewUniform(blendOverWhite(160, 160, 160, 128)), image.Point{})
 
 	// Rays (behind lenses)
 	rayWidth := cfg.RayWidth
@@ -93,14 +93,14 @@ func LensPNG(cfg Config) ([]byte, error) {
 		lw = 0.1
 	}
 	globalH := globalMaxSemiDiameter(cfg.Surfaces)
-	outlineCol := color.RGBA{180, 180, 180, 191}
+	outlineCol := blendOverWhite(180, 180, 180, 191)
 	for _, e := range findElements(cfg.Surfaces, globalH) {
 		mat := e.r1Surf.Material
 		var fill color.RGBA
 		if gi, ok := cfg.GlassMap[mat]; ok {
 			fill = glassFill(gi.ND, gi.VD, 191)
 		} else {
-			fill = color.RGBA{180, 180, 180, 191}
+			fill = blendOverWhite(180, 180, 180, 191)
 		}
 		drawElemFill(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, fill)
 		drawElemOutline(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, lw, outlineCol)
@@ -272,20 +272,30 @@ func sampleSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffs
 	}
 }
 
-func glassFill(nd, vd float64, alpha uint8) color.RGBA {
+func glassFill(nd, vd float64, _ uint8) color.RGBA {
 	r := (2.5-nd)/(2.5-1.4)*90 + (100-vd)/(100-20)*90
 	g := (2.5-nd)/(2.5-1.4)*150 + (vd-20)/(100-20)*100
 	b := (2.5-nd)/(2.5-1.4)*70 + 180
-	return color.RGBA{clampU8(r), clampU8(g), clampU8(b), alpha}
+	return blendOverWhite(clampU8(r), clampU8(g), clampU8(b), 191)
 }
 
 func parseRGB(s string, alpha uint8) color.RGBA {
 	var r, g, b uint8
 	n, _ := fmt.Sscanf(s, "rgb(%d,%d,%d)", &r, &g, &b)
 	if n == 3 {
-		return color.RGBA{r, g, b, alpha}
+		return blendOverWhite(r, g, b, alpha)
 	}
-	return color.RGBA{100, 100, 180, alpha}
+	return blendOverWhite(100, 100, 180, alpha)
+}
+
+func blendOverWhite(r, g, b, alpha uint8) color.RGBA {
+	inv := 255 - uint32(alpha)
+	return color.RGBA{
+		R: uint8((uint32(r)*uint32(alpha) + 255*inv) / 255),
+		G: uint8((uint32(g)*uint32(alpha) + 255*inv) / 255),
+		B: uint8((uint32(b)*uint32(alpha) + 255*inv) / 255),
+		A: 255,
+	}
 }
 
 func clampU8(v float64) uint8 {
