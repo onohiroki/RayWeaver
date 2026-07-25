@@ -35,7 +35,7 @@ bash samples/optimize-demo.bash
 
 | Subcommand | Description |
 |---|---|
-| `chief` | Determine chief ray and pupil grid for each field. Flags: `--clear-aperture`, `--marginal-rays`. |
+| `chief` | Determine chief ray and pupil grid for each field. Flags: `--clear-aperture`, `--marginal-rays`, `--pass-through N`, `--config ID`, `--wl`. Optional YAML `pass_through` field constrains the chief ray to pass through a specific surface coordinate. |
 | `trace` | Trace ray(s) through the system and output intersection data per surface. |
 | `paraxial` | First-order properties: EFL, BFL, FFL, principal points, pupil positions, f/#. |
 | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. |
@@ -52,12 +52,19 @@ bash samples/optimize-demo.bash
 ./rayweave chief < samples/us2645157.yaml | tee chief-result.yaml \
   | ./rayweave paraxial
 
-# SVG raytrace diagram
+# SVG raytrace diagram (centroid-based chief rays)
 cat samples/us2645157.yaml \
   | ./rayweave chief --clear-aperture \
   | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
   | ./rayweave plot -o diagram.svg
+
+# SVG raytrace diagram (stop-centre chief rays via --pass-through)
+cat samples/us2645157.yaml \
+  | ./rayweave chief --pass-through 5 --clear-aperture \
+  | ./rayweave chief --marginal-rays \
+  | ./rayweave trace \
+  | ./rayweave plot -o diagram-stop.svg
 
 # DLS optimization
 ./rayweave optimize < samples/optimize-demo.yaml > optimized.yaml

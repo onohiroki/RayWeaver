@@ -73,7 +73,7 @@ func TestDetermineChiefRaysAngle(t *testing.T) {
 	fields := []types.FieldDef{
 		{Angle: 0.0, Direction: []float64{0, 1}},
 	}
-	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar)
+	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil)
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
 	}
@@ -88,7 +88,7 @@ func TestDetermineChiefRaysImageHeight(t *testing.T) {
 	fields := []types.FieldDef{
 		{ImageHeight: 5.0, Direction: []float64{0, 1}},
 	}
-	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar)
+	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil)
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
 	}

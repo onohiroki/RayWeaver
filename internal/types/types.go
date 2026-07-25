@@ -200,12 +200,13 @@ type FieldDef struct {
 }
 
 type ChiefInput struct {
-	FieldAngles      []float64  `yaml:"field_angles,omitempty"`
-	Fields           []FieldDef `yaml:"fields,omitempty"`
-	ReferenceSurface int        `yaml:"reference_surface"`
-	NumRays          int        `yaml:"num_rays"`
-	GridType         GridType   `yaml:"grid_type,omitempty"`
-	DumpMap          bool       `yaml:"dump_map,omitempty"`
+	FieldAngles      []float64          `yaml:"field_angles,omitempty"`
+	Fields           []FieldDef         `yaml:"fields,omitempty"`
+	ReferenceSurface int                `yaml:"reference_surface"`
+	NumRays          int                `yaml:"num_rays"`
+	GridType         GridType           `yaml:"grid_type,omitempty"`
+	DumpMap          bool               `yaml:"dump_map,omitempty"`
+	PassThrough      *PassThroughTarget `yaml:"pass_through,omitempty"`
 }
 
 type RayInput struct {

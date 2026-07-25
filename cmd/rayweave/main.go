@@ -88,12 +88,19 @@ func main() {
 func printHelp(cmd string) {
 	switch cmd {
 	case "chief":
-		fmt.Print(`Usage: rayweave chief [--config ID] < system.yaml
+		fmt.Print(`Usage: rayweave chief [--config ID] [--pass-through N] < system.yaml
 
-Determines chief rays (spot centroid) for each field.
+Determines chief rays for each field.
 
 Options:
   --config ID          select config by id (multi-config mode)
+  --pass-through N     constrain chief ray to pass through (0,0) centre of
+                         surface N (overrides YAML pass_through.surface)
+  --clear-aperture     trace all grid rays through every surface and set
+                         system.surfaces[].diameter = 2x max radial extent
+  --marginal-rays      extract marginal (max/min) rays from grid points and
+                         append them for piping into trace/plot
+  --wl 0.00058756      reference wavelength (mm)
 
 Input YAML — chief section:
   fields:
@@ -108,12 +115,20 @@ Input YAML — chief section:
   grid_type: polar             # pupil grid: polar | square | hex
   dump_map: false              # output per-ray spot data (grid_points)
 
+  pass_through:                # optional: constrain chief ray to pass
+    surface: 3                 #   through a specific surface coordinate
+    coordinate: [0, 0, 0]      #   (default [0, 0, 0] = surface centre)
+
 Output: augmented YAML with chief_rays[] section.
   Pipe into "rayweave trace" to trace each chief ray through the system.
 
-Chief ray = ray passing through the spot centroid on the reference
-  surface (not the stop centre).  This definition is robust during
-  optimisation where the stop may be ill-defined.
+Without pass_through, the chief ray passes through the spot centroid on
+  the reference surface.  This definition is robust during optimisation
+  where the stop may be ill-defined.
+
+With pass_through, the chief ray is defined as the ray from the field
+  that passes through the given coordinate on the given surface
+  (traditional "stop-centre" definition).
 
 See also: samples/us2645157.yaml
 `)
@@ -371,8 +386,9 @@ func loadCatalogs(input *types.Input) (*glass.Catalog, *coating.Catalog) {
 
 func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
-	clearAperture := fs.Bool("clear-aperture", false, "compute clear aperture diameters from grid ray extents and set system.surfaces[].diameter")
-	marginalRays := fs.Bool("marginal-rays", false, "add marginal rays (max/min Y, and X if applicable) to output rays")
+	clearAperture := fs.Bool("clear-aperture", false, "trace all grid rays through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set system.surfaces[].diameter = 2x that extent")
+	marginalRays := fs.Bool("marginal-rays", false, "from each field's grid points find the rays with max/min image Y (and X for off-axis fields) and append them as marginal rays to the output 'rays' section for piping into trace/plot")
+	passThrough := fs.Int("pass-through", 0, "constrain chief ray to pass through (0,0,0) center of surface N (overrides YAML pass_through.surface)")
 	wlFlag := fs.Float64("wl", 0.00058756, "wavelength (mm) for grid ray tracing")
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	fs.Parse(os.Args[2:])
@@ -386,6 +402,15 @@ func runChief(data []byte) {
 	if input.Chief == nil {
 		fmt.Fprintf(os.Stderr, "Error: 'chief' section is required\n")
 		os.Exit(1)
+	}
+
+	pt := input.Chief.PassThrough
+	if *passThrough > 0 {
+		if pt == nil {
+			pt = &types.PassThroughTarget{Surface: *passThrough, Coordinate: types.Vec3{}}
+		} else {
+			pt.Surface = *passThrough
+		}
 	}
 
 	// Resolve field definitions
@@ -427,6 +452,7 @@ func runChief(data []byte) {
 		wavelength,
 		input.Chief.DumpMap,
 		input.Chief.GridType,
+		pt,
 	)
 
 	// --- --clear-aperture: trace grid points and set Diameter on all surfaces ---
