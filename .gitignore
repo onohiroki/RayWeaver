@@ -9,5 +9,15 @@
 /*.json
 /*.csv
 /*.xlsx
+/*.jsonl
 /rayweave
-samples/glass-spot-*.txt
+.idea
+samples/*.txt
+samples/*.jsonl
+samples/*.svg
+samples/*.png
+samples/*.csv
+samples/glass-chief-init-w*.yaml
+samples/glass-chief-opt-w*.yaml
+
+samples/*-result.yaml
