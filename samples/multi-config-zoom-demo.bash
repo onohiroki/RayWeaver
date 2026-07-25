@@ -24,21 +24,15 @@ echo
 echo "--- Config surfaces (after optimization, lens bodies only) ---"
 for cfg in wide mid tele; do
   echo "  Config: $cfg"
-  cat "$RESULT" | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-opt.svg" 2>/dev/null
-  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-opt.svg"
-  if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert "$OUTDIR/multi-config-zoom-${cfg}-opt.svg" -o "$OUTDIR/multi-config-zoom-${cfg}-opt.png" 2>/dev/null && echo "      PNG: $OUTDIR/multi-config-zoom-${cfg}-opt.png"
-  fi
+  cat "$RESULT" | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-opt.png" 2>/dev/null
+  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-opt.png"
 done
 echo
 
 echo "=== Before optimization (initial lens bodies) ==="
 for cfg in wide mid tele; do
-  cat "$YAML" | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-init.svg" 2>/dev/null
-  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-init.svg"
-  if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert "$OUTDIR/multi-config-zoom-${cfg}-init.svg" -o "$OUTDIR/multi-config-zoom-${cfg}-init.png" 2>/dev/null && echo "      PNG: $OUTDIR/multi-config-zoom-${cfg}-init.png"
-  fi
+  cat "$YAML" | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-init.png" 2>/dev/null
+  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-init.png"
 done
 echo
 
@@ -49,12 +43,8 @@ for cfg in wide mid tele; do
     | $RAYWEAVE chief --clear-aperture --config "$cfg" \
     | $RAYWEAVE chief --marginal-rays --config "$cfg" \
     | $RAYWEAVE trace --config "$cfg" \
-    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-opt-rays.svg" 2>/dev/null
-  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-opt-rays.svg"
-  if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert "$OUTDIR/multi-config-zoom-${cfg}-opt-rays.svg" -o "$OUTDIR/multi-config-zoom-${cfg}-opt-rays.png" 2>/dev/null \
-      && echo "      PNG: $OUTDIR/multi-config-zoom-${cfg}-opt-rays.png"
-  fi
+    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-opt-rays.png" 2>/dev/null
+  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-opt-rays.png"
 done
 echo
 
@@ -65,12 +55,8 @@ for cfg in wide mid tele; do
     | $RAYWEAVE chief --clear-aperture --config "$cfg" \
     | $RAYWEAVE chief --marginal-rays --config "$cfg" \
     | $RAYWEAVE trace --config "$cfg" \
-    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-init-rays.svg" 2>/dev/null
-  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-init-rays.svg"
-  if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert "$OUTDIR/multi-config-zoom-${cfg}-init-rays.svg" -o "$OUTDIR/multi-config-zoom-${cfg}-init-rays.png" 2>/dev/null \
-      && echo "      PNG: $OUTDIR/multi-config-zoom-${cfg}-init-rays.png"
-  fi
+    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-init-rays.png" 2>/dev/null
+  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-init-rays.png"
 done
 echo
 

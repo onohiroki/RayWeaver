@@ -17,13 +17,8 @@ echo "=== Initial lens layout (no rays) ==="
 for cfg in config0 config1 config2; do
   echo "  Config: $cfg"
   cat "$YAML" \
-    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-init.svg" 2>/dev/null
-  echo "    SVG: $OUTDIR/simple-zoom-${cfg}-init.svg"
-  if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert "$OUTDIR/simple-zoom-${cfg}-init.svg" \
-      -o "$OUTDIR/simple-zoom-${cfg}-init.png" 2>/dev/null \
-      && echo "    PNG: $OUTDIR/simple-zoom-${cfg}-init.png"
-  fi
+    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-init.png" 2>/dev/null
+  echo "    PNG: $OUTDIR/simple-zoom-${cfg}-init.png"
 done
 echo
 
@@ -42,13 +37,8 @@ echo "=== Optimized lens layout (no rays) ==="
 for cfg in config0 config1 config2; do
   echo "  Config: $cfg"
   cat "$RESULT" \
-    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-opt.svg" 2>/dev/null
-  echo "    SVG: $OUTDIR/simple-zoom-${cfg}-opt.svg"
-  if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert "$OUTDIR/simple-zoom-${cfg}-opt.svg" \
-      -o "$OUTDIR/simple-zoom-${cfg}-opt.png" 2>/dev/null \
-      && echo "    PNG: $OUTDIR/simple-zoom-${cfg}-opt.png"
-  fi
+    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-opt.png" 2>/dev/null
+  echo "    PNG: $OUTDIR/simple-zoom-${cfg}-opt.png"
 done
 echo
 
@@ -60,13 +50,8 @@ for cfg in config0 config1 config2; do
     | $RAYWEAVE chief --clear-aperture --config "$cfg" \
     | $RAYWEAVE chief --marginal-rays --config "$cfg" \
     | $RAYWEAVE trace --config "$cfg" \
-    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-init-rays.svg" 2>/dev/null
-  echo "    SVG: $OUTDIR/simple-zoom-${cfg}-init-rays.svg"
-  if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert "$OUTDIR/simple-zoom-${cfg}-init-rays.svg" \
-      -o "$OUTDIR/simple-zoom-${cfg}-init-rays.png" 2>/dev/null \
-      && echo "    PNG: $OUTDIR/simple-zoom-${cfg}-init-rays.png"
-  fi
+    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-init-rays.png" 2>/dev/null
+  echo "    PNG: $OUTDIR/simple-zoom-${cfg}-init-rays.png"
 done
 echo
 
@@ -79,13 +64,8 @@ for cfg in config0 config1 config2; do
     | $RAYWEAVE chief --clear-aperture --config "$cfg" \
     | $RAYWEAVE chief --marginal-rays --config "$cfg" \
     | $RAYWEAVE trace --config "$cfg" \
-    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-opt-rays.svg" 2>/dev/null
-  echo "    SVG: $OUTDIR/simple-zoom-${cfg}-opt-rays.svg"
-  if command -v rsvg-convert >/dev/null 2>&1; then
-    rsvg-convert "$OUTDIR/simple-zoom-${cfg}-opt-rays.svg" \
-      -o "$OUTDIR/simple-zoom-${cfg}-opt-rays.png" 2>/dev/null \
-      && echo "    PNG: $OUTDIR/simple-zoom-${cfg}-opt-rays.png"
-  fi
+    | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-opt-rays.png" 2>/dev/null
+  echo "    PNG: $OUTDIR/simple-zoom-${cfg}-opt-rays.png"
 done
 echo
 
