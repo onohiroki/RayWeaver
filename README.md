@@ -39,12 +39,8 @@ bash samples/optimize-demo.bash
 | `trace` | Trace ray(s) through the system and output intersection data per surface. |
 | `paraxial` | First-order properties: EFL, BFL, FFL, principal points, pupil positions, f/#. |
 | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. |
-<<<<<<< HEAD
 | `plot` | Generate SVG or PNG cross-section diagram. Flags: `-o file.svg|.png`, `--lens-width`, `--ray-width`, `--scale`, `--right-margin`, `--config`. |
 | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. |
-=======
-| `plot` | Generate SVG cross-section diagram. Flags: `-o` (output file), `--lens-width`, `--ray-width`, `--scale`, `--right-margin`. |
->>>>>>> 98a18625d7879aa6cee169573114519f573997c0
 
 ## Pipeline examples
 
@@ -112,7 +108,7 @@ All units are millimetres (wavelengths, thicknesses, radii, coordinates). Coatin
 ## Dependencies
 
 | Library | License |
-|---|---|---|
+|:---:|:---:|
 | [gopkg.in/yaml.v3](https://github.com/go-yaml/yaml) | MIT |
 | [golang.org/x/image](https://pkg.go.dev/golang.org/x/image) | BSD |
 
