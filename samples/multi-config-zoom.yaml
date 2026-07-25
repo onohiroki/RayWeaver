@@ -273,8 +273,8 @@ optimization:
         type: surface
         id: 4
         param: thickness
-      min: 2.0
-      max: 50.0
+      min: 1.0
+      max: 15.0
       active: true
 
     - name: wide_g2stop_gap
@@ -283,7 +283,7 @@ optimization:
         type: surface
         id: 8
         param: thickness
-      min: 2.0
+      min: 30.0
       max: 60.0
       active: true
 
@@ -293,7 +293,7 @@ optimization:
         type: surface
         id: 4
         param: thickness
-      min: 2.0
+      min: 30.0
       max: 60.0
       active: true
 
@@ -303,8 +303,8 @@ optimization:
         type: surface
         id: 8
         param: thickness
-      min: 2.0
-      max: 50.0
+      min: 1.0
+      max: 15.0
       active: true
 
   constraints: []
@@ -349,52 +349,52 @@ configs:
       # Group 1 — fixed positive focusing group (2 elements)
       - id: 1
         type: sphere
-        curvature: 0.018
+        curvature: 0.020
         thickness: 6.0
         material: N-BK7
         diameter: 35.0
       - id: 2
         type: sphere
-        curvature: 0.005
+        curvature: 0.003
         thickness: 4.0
         material: AIR
         diameter: 35.0
       - id: 3
         type: sphere
-        curvature: 0.022
+        curvature: 0.025
         thickness: 5.0
         material: S-LAH66
         diameter: 34.0
       - id: 4
         type: sphere
-        curvature: 0.008
-        thickness: 8.0
+        curvature: 0.004
+        thickness: 5.0
         material: AIR
         diameter: 34.0
 
       # Group 2 — negative variator (2 elements)
       - id: 5
         type: sphere
-        curvature: -0.012
+        curvature: -0.006
         thickness: 3.5
         material: F2
         diameter: 26.0
       - id: 6
         type: sphere
-        curvature: 0.018
+        curvature: 0.010
         thickness: 2.0
         material: AIR
         diameter: 26.0
       - id: 7
         type: sphere
-        curvature: -0.010
+        curvature: -0.005
         thickness: 3.0
         material: SF12
         diameter: 24.0
       - id: 8
         type: sphere
-        curvature: 0.006
-        thickness: 40.0
+        curvature: 0.008
+        thickness: 45.0
         material: AIR
         diameter: 22.0
 
@@ -409,45 +409,45 @@ configs:
       # Group 3 — compensator (2 elements)
       - id: 10
         type: sphere
-        curvature: -0.008
+        curvature: 0.008
         thickness: 4.0
         material: S-LAH66
         diameter: 22.0
       - id: 11
         type: sphere
-        curvature: -0.006
+        curvature: 0.003
         thickness: 3.0
         material: AIR
         diameter: 22.0
       - id: 12
         type: sphere
-        curvature: -0.015
+        curvature: 0.010
         thickness: 3.5
         material: F2
         diameter: 20.0
       - id: 13
         type: sphere
-        curvature: 0.010
-        thickness: 25.0
+        curvature: 0.003
+        thickness: 15.0
         material: AIR
         diameter: 20.0
 
       # Group 4 — fixed positive relay (2 elements)
       - id: 14
         type: sphere
-        curvature: 0.016
+        curvature: 0.020
         thickness: 5.0
         material: N-BK7
         diameter: 18.0
       - id: 15
         type: sphere
-        curvature: -0.012
+        curvature: -0.015
         thickness: 10.0
         material: AIR
         diameter: 18.0
       - id: 16
         type: sphere
-        curvature: 0.010
+        curvature: 0.015
         thickness: 4.0
         material: N-BK7
         diameter: 16.0
@@ -497,50 +497,50 @@ configs:
     surfaces:
       - id: 1
         type: sphere
-        curvature: 0.018
+        curvature: 0.020
         thickness: 6.0
         material: N-BK7
         diameter: 35.0
       - id: 2
         type: sphere
-        curvature: 0.005
+        curvature: 0.003
         thickness: 4.0
         material: AIR
         diameter: 35.0
       - id: 3
         type: sphere
-        curvature: 0.022
+        curvature: 0.025
         thickness: 5.0
         material: S-LAH66
         diameter: 34.0
       - id: 4
         type: sphere
-        curvature: 0.008
-        thickness: 22.0
+        curvature: 0.004
+        thickness: 20.0
         material: AIR
         diameter: 34.0
       - id: 5
         type: sphere
-        curvature: -0.012
+        curvature: -0.006
         thickness: 3.5
         material: F2
         diameter: 26.0
       - id: 6
         type: sphere
-        curvature: 0.018
+        curvature: 0.010
         thickness: 2.0
         material: AIR
         diameter: 26.0
       - id: 7
         type: sphere
-        curvature: -0.010
+        curvature: -0.005
         thickness: 3.0
         material: SF12
         diameter: 24.0
       - id: 8
         type: sphere
-        curvature: 0.006
-        thickness: 28.0
+        curvature: 0.008
+        thickness: 25.0
         material: AIR
         diameter: 22.0
       - id: 9
@@ -551,43 +551,43 @@ configs:
         diameter: 12.0
       - id: 10
         type: sphere
-        curvature: -0.008
+        curvature: 0.008
         thickness: 4.0
         material: S-LAH66
         diameter: 22.0
       - id: 11
         type: sphere
-        curvature: -0.006
+        curvature: 0.003
         thickness: 3.0
         material: AIR
         diameter: 22.0
       - id: 12
         type: sphere
-        curvature: -0.015
+        curvature: 0.010
         thickness: 3.5
         material: F2
         diameter: 20.0
       - id: 13
         type: sphere
-        curvature: 0.010
-        thickness: 25.0
+        curvature: 0.003
+        thickness: 30.0
         material: AIR
         diameter: 20.0
       - id: 14
         type: sphere
-        curvature: 0.016
+        curvature: 0.020
         thickness: 5.0
         material: N-BK7
         diameter: 18.0
       - id: 15
         type: sphere
-        curvature: -0.012
+        curvature: -0.015
         thickness: 10.0
         material: AIR
         diameter: 18.0
       - id: 16
         type: sphere
-        curvature: 0.010
+        curvature: 0.015
         thickness: 4.0
         material: N-BK7
         diameter: 16.0
@@ -637,50 +637,50 @@ configs:
     surfaces:
       - id: 1
         type: sphere
-        curvature: 0.018
+        curvature: 0.020
         thickness: 6.0
         material: N-BK7
         diameter: 35.0
       - id: 2
         type: sphere
-        curvature: 0.005
+        curvature: 0.003
         thickness: 4.0
         material: AIR
         diameter: 35.0
       - id: 3
         type: sphere
-        curvature: 0.022
+        curvature: 0.025
         thickness: 5.0
         material: S-LAH66
         diameter: 34.0
       - id: 4
         type: sphere
-        curvature: 0.008
-        thickness: 40.0
+        curvature: 0.004
+        thickness: 50.0
         material: AIR
         diameter: 34.0
       - id: 5
         type: sphere
-        curvature: -0.012
+        curvature: -0.006
         thickness: 3.5
         material: F2
         diameter: 26.0
       - id: 6
         type: sphere
-        curvature: 0.018
+        curvature: 0.010
         thickness: 2.0
         material: AIR
         diameter: 26.0
       - id: 7
         type: sphere
-        curvature: -0.010
+        curvature: -0.005
         thickness: 3.0
         material: SF12
         diameter: 24.0
       - id: 8
         type: sphere
-        curvature: 0.006
-        thickness: 12.0
+        curvature: 0.008
+        thickness: 3.0
         material: AIR
         diameter: 22.0
       - id: 9
@@ -691,43 +691,43 @@ configs:
         diameter: 12.0
       - id: 10
         type: sphere
-        curvature: -0.008
+        curvature: 0.008
         thickness: 4.0
         material: S-LAH66
         diameter: 22.0
       - id: 11
         type: sphere
-        curvature: -0.006
+        curvature: 0.003
         thickness: 3.0
         material: AIR
         diameter: 22.0
       - id: 12
         type: sphere
-        curvature: -0.015
+        curvature: 0.010
         thickness: 3.5
         material: F2
         diameter: 20.0
       - id: 13
         type: sphere
-        curvature: 0.010
-        thickness: 35.0
+        curvature: 0.003
+        thickness: 45.0
         material: AIR
         diameter: 20.0
       - id: 14
         type: sphere
-        curvature: 0.016
+        curvature: 0.020
         thickness: 5.0
         material: N-BK7
         diameter: 18.0
       - id: 15
         type: sphere
-        curvature: -0.012
+        curvature: -0.015
         thickness: 10.0
         material: AIR
         diameter: 18.0
       - id: 16
         type: sphere
-        curvature: 0.010
+        curvature: 0.015
         thickness: 4.0
         material: N-BK7
         diameter: 16.0
