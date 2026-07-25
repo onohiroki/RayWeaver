@@ -72,9 +72,10 @@ func LensPNG(cfg Config) ([]byte, error) {
 	ras := vector.NewRasterizer(canvasW, canvasH)
 
 	// Axis (rendered first = behind everything)
+	// SVG renders axis as "M 0,0 L axisLen,0": world z=0 to z=axisLen.
 	axisLen := totalZ * (1 + rightFrac)
 	ras.Reset(canvasW, canvasH)
-	dashedLine(ras, minZ, minZ+axisLen, 0, 0.3, scale, midZ, 3, 3)
+	dashedLine(ras, 0, axisLen, 0, 0.3, scale, midZ, 3, 3)
 	ras.Draw(img, img.Bounds(), image.NewUniform(blendOverWhite(160, 160, 160, 128)), image.Point{})
 
 	// Rays (behind lenses)
