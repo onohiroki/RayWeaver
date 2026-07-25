@@ -1,0 +1,750 @@
+version: 1
+
+glass_catalog:
+  entries:
+    - type: model
+      label: N-BK7
+      nd: 1.5168
+      vd: 64.17
+    - type: model
+      label: SF12
+      nd: 1.64831
+      vd: 33.84
+    - type: model
+      label: S-LAH66
+      nd: 1.77250
+      vd: 49.60
+    - type: model
+      label: F2
+      nd: 1.62004
+      vd: 36.37
+
+optimization:
+  method: dls
+  max_iter: 50
+  tol: 1e-6
+  epsilon: 1e-6
+
+  shared_variables:
+    - name: s1_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 1
+          param: curvature
+        - config: mid
+          id: 1
+          param: curvature
+        - config: tele
+          id: 1
+          param: curvature
+
+    - name: s2_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 2
+          param: curvature
+        - config: mid
+          id: 2
+          param: curvature
+        - config: tele
+          id: 2
+          param: curvature
+
+    - name: s3_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 3
+          param: curvature
+        - config: mid
+          id: 3
+          param: curvature
+        - config: tele
+          id: 3
+          param: curvature
+
+    - name: s4_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 4
+          param: curvature
+        - config: mid
+          id: 4
+          param: curvature
+        - config: tele
+          id: 4
+          param: curvature
+
+    - name: s5_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 5
+          param: curvature
+        - config: mid
+          id: 5
+          param: curvature
+        - config: tele
+          id: 5
+          param: curvature
+
+    - name: s6_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 6
+          param: curvature
+        - config: mid
+          id: 6
+          param: curvature
+        - config: tele
+          id: 6
+          param: curvature
+
+    - name: s7_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 7
+          param: curvature
+        - config: mid
+          id: 7
+          param: curvature
+        - config: tele
+          id: 7
+          param: curvature
+
+    - name: s8_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 8
+          param: curvature
+        - config: mid
+          id: 8
+          param: curvature
+        - config: tele
+          id: 8
+          param: curvature
+
+    - name: aperture_stop_radius
+      min: 3.0
+      max: 15.0
+      active: true
+      bindings:
+        - config: wide
+          id: 9
+          param: radius
+        - config: mid
+          id: 9
+          param: radius
+        - config: tele
+          id: 9
+          param: radius
+
+    - name: s10_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 10
+          param: curvature
+        - config: mid
+          id: 10
+          param: curvature
+        - config: tele
+          id: 10
+          param: curvature
+
+    - name: s11_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 11
+          param: curvature
+        - config: mid
+          id: 11
+          param: curvature
+        - config: tele
+          id: 11
+          param: curvature
+
+    - name: s12_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 12
+          param: curvature
+        - config: mid
+          id: 12
+          param: curvature
+        - config: tele
+          id: 12
+          param: curvature
+
+    - name: s13_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 13
+          param: curvature
+        - config: mid
+          id: 13
+          param: curvature
+        - config: tele
+          id: 13
+          param: curvature
+
+    - name: s14_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 14
+          param: curvature
+        - config: mid
+          id: 14
+          param: curvature
+        - config: tele
+          id: 14
+          param: curvature
+
+    - name: s15_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 15
+          param: curvature
+        - config: mid
+          id: 15
+          param: curvature
+        - config: tele
+          id: 15
+          param: curvature
+
+    - name: s16_curvature
+      min: -0.1
+      max: 0.1
+      active: true
+      bindings:
+        - config: wide
+          id: 16
+          param: curvature
+        - config: mid
+          id: 16
+          param: curvature
+        - config: tele
+          id: 16
+          param: curvature
+
+  local_variables:
+    - name: wide_g1g2_gap
+      config: wide
+      target:
+        type: surface
+        id: 4
+        param: thickness
+      min: 2.0
+      max: 50.0
+      active: true
+
+    - name: wide_g2stop_gap
+      config: wide
+      target:
+        type: surface
+        id: 8
+        param: thickness
+      min: 2.0
+      max: 60.0
+      active: true
+
+    - name: tele_g1g2_gap
+      config: tele
+      target:
+        type: surface
+        id: 4
+        param: thickness
+      min: 2.0
+      max: 60.0
+      active: true
+
+    - name: tele_g2stop_gap
+      config: tele
+      target:
+        type: surface
+        id: 8
+        param: thickness
+      min: 2.0
+      max: 50.0
+      active: true
+
+  constraints: []
+
+chief:
+  reference_surface: 17
+  num_rays: 256
+  fields:
+    - angle: 0.0
+    - angle: 5.0
+    - angle: 10.0
+    - angle: 15.0
+    - angle: 20.0
+
+configs:
+  - id: wide
+    name: Wide
+    weight: 1.0
+    active: true
+    fields:
+      - id: 0
+        angle_deg: 0.0
+        weight: 1.0
+      - id: 1
+        angle_deg: 10.0
+        weight: 0.5
+    wavelengths:
+      - id: 0
+        value: 0.00054607
+        weight: 1.0
+      - id: 1
+        value: 0.00048000
+        weight: 0.5
+      - id: 2
+        value: 0.00064385
+        weight: 0.5
+    ray_paths:
+      - object_surface: 0
+        image_surface: 17
+        stop_surface: 9
+    surfaces:
+      # Group 1 — fixed positive focusing group (2 elements)
+      - id: 1
+        type: sphere
+        curvature: 0.018
+        thickness: 6.0
+        material: N-BK7
+        diameter: 35.0
+      - id: 2
+        type: sphere
+        curvature: 0.005
+        thickness: 4.0
+        material: AIR
+        diameter: 35.0
+      - id: 3
+        type: sphere
+        curvature: 0.022
+        thickness: 5.0
+        material: S-LAH66
+        diameter: 34.0
+      - id: 4
+        type: sphere
+        curvature: 0.008
+        thickness: 8.0
+        material: AIR
+        diameter: 34.0
+
+      # Group 2 — negative variator (2 elements)
+      - id: 5
+        type: sphere
+        curvature: -0.012
+        thickness: 3.5
+        material: F2
+        diameter: 26.0
+      - id: 6
+        type: sphere
+        curvature: 0.018
+        thickness: 2.0
+        material: AIR
+        diameter: 26.0
+      - id: 7
+        type: sphere
+        curvature: -0.010
+        thickness: 3.0
+        material: SF12
+        diameter: 24.0
+      - id: 8
+        type: sphere
+        curvature: 0.006
+        thickness: 40.0
+        material: AIR
+        diameter: 22.0
+
+      # Aperture stop
+      - id: 9
+        type: sphere
+        curvature: 0
+        thickness: 6.0
+        material: AIR
+        diameter: 12.0
+
+      # Group 3 — compensator (2 elements)
+      - id: 10
+        type: sphere
+        curvature: -0.008
+        thickness: 4.0
+        material: S-LAH66
+        diameter: 22.0
+      - id: 11
+        type: sphere
+        curvature: -0.006
+        thickness: 3.0
+        material: AIR
+        diameter: 22.0
+      - id: 12
+        type: sphere
+        curvature: -0.015
+        thickness: 3.5
+        material: F2
+        diameter: 20.0
+      - id: 13
+        type: sphere
+        curvature: 0.010
+        thickness: 25.0
+        material: AIR
+        diameter: 20.0
+
+      # Group 4 — fixed positive relay (2 elements)
+      - id: 14
+        type: sphere
+        curvature: 0.016
+        thickness: 5.0
+        material: N-BK7
+        diameter: 18.0
+      - id: 15
+        type: sphere
+        curvature: -0.012
+        thickness: 10.0
+        material: AIR
+        diameter: 18.0
+      - id: 16
+        type: sphere
+        curvature: 0.010
+        thickness: 4.0
+        material: N-BK7
+        diameter: 16.0
+      - id: 17
+        type: sphere
+        curvature: 0
+        thickness: 0.0
+        material: AIR
+        diameter: 12.0
+    merit:
+      type: spot_rms
+      terms:
+        - kind: spot_rms
+          field: 0
+          wavelength: 0.00054607
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.00054607
+          weight: 0.5
+
+  - id: mid
+    name: Mid
+    weight: 1.0
+    active: true
+    fields:
+      - id: 0
+        angle_deg: 0.0
+        weight: 1.0
+      - id: 1
+        angle_deg: 8.0
+        weight: 0.5
+    wavelengths:
+      - id: 0
+        value: 0.00054607
+        weight: 1.0
+      - id: 1
+        value: 0.00048000
+        weight: 0.5
+      - id: 2
+        value: 0.00064385
+        weight: 0.5
+    ray_paths:
+      - object_surface: 0
+        image_surface: 17
+        stop_surface: 9
+    surfaces:
+      - id: 1
+        type: sphere
+        curvature: 0.018
+        thickness: 6.0
+        material: N-BK7
+        diameter: 35.0
+      - id: 2
+        type: sphere
+        curvature: 0.005
+        thickness: 4.0
+        material: AIR
+        diameter: 35.0
+      - id: 3
+        type: sphere
+        curvature: 0.022
+        thickness: 5.0
+        material: S-LAH66
+        diameter: 34.0
+      - id: 4
+        type: sphere
+        curvature: 0.008
+        thickness: 22.0
+        material: AIR
+        diameter: 34.0
+      - id: 5
+        type: sphere
+        curvature: -0.012
+        thickness: 3.5
+        material: F2
+        diameter: 26.0
+      - id: 6
+        type: sphere
+        curvature: 0.018
+        thickness: 2.0
+        material: AIR
+        diameter: 26.0
+      - id: 7
+        type: sphere
+        curvature: -0.010
+        thickness: 3.0
+        material: SF12
+        diameter: 24.0
+      - id: 8
+        type: sphere
+        curvature: 0.006
+        thickness: 28.0
+        material: AIR
+        diameter: 22.0
+      - id: 9
+        type: sphere
+        curvature: 0
+        thickness: 6.0
+        material: AIR
+        diameter: 12.0
+      - id: 10
+        type: sphere
+        curvature: -0.008
+        thickness: 4.0
+        material: S-LAH66
+        diameter: 22.0
+      - id: 11
+        type: sphere
+        curvature: -0.006
+        thickness: 3.0
+        material: AIR
+        diameter: 22.0
+      - id: 12
+        type: sphere
+        curvature: -0.015
+        thickness: 3.5
+        material: F2
+        diameter: 20.0
+      - id: 13
+        type: sphere
+        curvature: 0.010
+        thickness: 25.0
+        material: AIR
+        diameter: 20.0
+      - id: 14
+        type: sphere
+        curvature: 0.016
+        thickness: 5.0
+        material: N-BK7
+        diameter: 18.0
+      - id: 15
+        type: sphere
+        curvature: -0.012
+        thickness: 10.0
+        material: AIR
+        diameter: 18.0
+      - id: 16
+        type: sphere
+        curvature: 0.010
+        thickness: 4.0
+        material: N-BK7
+        diameter: 16.0
+      - id: 17
+        type: sphere
+        curvature: 0
+        thickness: 0.0
+        material: AIR
+        diameter: 12.0
+    merit:
+      type: spot_rms
+      terms:
+        - kind: spot_rms
+          field: 0
+          wavelength: 0.00054607
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.00054607
+          weight: 0.5
+
+  - id: tele
+    name: Tele
+    weight: 1.0
+    active: true
+    fields:
+      - id: 0
+        angle_deg: 0.0
+        weight: 1.0
+      - id: 1
+        angle_deg: 5.0
+        weight: 0.5
+    wavelengths:
+      - id: 0
+        value: 0.00054607
+        weight: 1.0
+      - id: 1
+        value: 0.00048000
+        weight: 0.5
+      - id: 2
+        value: 0.00064385
+        weight: 0.5
+    ray_paths:
+      - object_surface: 0
+        image_surface: 17
+        stop_surface: 9
+    surfaces:
+      - id: 1
+        type: sphere
+        curvature: 0.018
+        thickness: 6.0
+        material: N-BK7
+        diameter: 35.0
+      - id: 2
+        type: sphere
+        curvature: 0.005
+        thickness: 4.0
+        material: AIR
+        diameter: 35.0
+      - id: 3
+        type: sphere
+        curvature: 0.022
+        thickness: 5.0
+        material: S-LAH66
+        diameter: 34.0
+      - id: 4
+        type: sphere
+        curvature: 0.008
+        thickness: 40.0
+        material: AIR
+        diameter: 34.0
+      - id: 5
+        type: sphere
+        curvature: -0.012
+        thickness: 3.5
+        material: F2
+        diameter: 26.0
+      - id: 6
+        type: sphere
+        curvature: 0.018
+        thickness: 2.0
+        material: AIR
+        diameter: 26.0
+      - id: 7
+        type: sphere
+        curvature: -0.010
+        thickness: 3.0
+        material: SF12
+        diameter: 24.0
+      - id: 8
+        type: sphere
+        curvature: 0.006
+        thickness: 12.0
+        material: AIR
+        diameter: 22.0
+      - id: 9
+        type: sphere
+        curvature: 0
+        thickness: 6.0
+        material: AIR
+        diameter: 12.0
+      - id: 10
+        type: sphere
+        curvature: -0.008
+        thickness: 4.0
+        material: S-LAH66
+        diameter: 22.0
+      - id: 11
+        type: sphere
+        curvature: -0.006
+        thickness: 3.0
+        material: AIR
+        diameter: 22.0
+      - id: 12
+        type: sphere
+        curvature: -0.015
+        thickness: 3.5
+        material: F2
+        diameter: 20.0
+      - id: 13
+        type: sphere
+        curvature: 0.010
+        thickness: 35.0
+        material: AIR
+        diameter: 20.0
+      - id: 14
+        type: sphere
+        curvature: 0.016
+        thickness: 5.0
+        material: N-BK7
+        diameter: 18.0
+      - id: 15
+        type: sphere
+        curvature: -0.012
+        thickness: 10.0
+        material: AIR
+        diameter: 18.0
+      - id: 16
+        type: sphere
+        curvature: 0.010
+        thickness: 4.0
+        material: N-BK7
+        diameter: 16.0
+      - id: 17
+        type: sphere
+        curvature: 0
+        thickness: 0.0
+        material: AIR
+        diameter: 12.0
+    merit:
+      type: spot_rms
+      terms:
+        - kind: spot_rms
+          field: 0
+          wavelength: 0.00054607
+          weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.00054607
+          weight: 0.5
