@@ -377,7 +377,7 @@ chief:
 configs:
   - id: config0
     name: Config0
-    weight: 2.0
+    weight: 3.0
     active: true
     fields:
       - id: 0
@@ -510,7 +510,7 @@ configs:
 
   - id: config1
     name: Config1
-    weight: 1.0
+    weight: 2.0
     active: true
     fields:
       - id: 0
@@ -643,7 +643,7 @@ configs:
 
   - id: config2
     name: Config2
-    weight: 1.0
+    weight: 2.0
     active: true
     fields:
       - id: 0
