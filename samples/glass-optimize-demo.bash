@@ -1,4 +1,14 @@
 #!/bin/bash
+set -euo pipefail
+
+# CLI options
+CLEAN=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --clean) CLEAN=true; shift ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
 
 YAML="samples/glass-optimize-demo.yaml"
 OUTDIR="samples"
@@ -6,6 +16,18 @@ OPT_RESULT="$OUTDIR/glass-optimize-result.yaml"
 OPT_CHIEF="$OUTDIR/glass-optimize-chief.yaml"
 OPT_LOG="$OUTDIR/glass-optimize-log.jsonl"
 RAYWEAVE="${RAYWEAVE:-./rayweave}"
+
+# Clean-only mode: remove generated files and exit
+if [ "$CLEAN" = true ]; then
+  echo "=== Cleaning up generated files ==="
+  for f in "$OPT_RESULT" "$OPT_CHIEF" "$OPT_LOG"; do
+    rm -f "$f"
+  done
+  rm -f "$OUTDIR"/glass-optimize-init.png "$OUTDIR"/glass-optimize-opt.png
+  rm -f "$OUTDIR"/glass-chief-*.yaml "$OUTDIR"/glass-spot-*.txt "$OUTDIR"/glass-spot-*.png
+  echo "  Removed generated files"
+  exit 0
+fi
 
 echo "=== Glass optimization demo: 35mm-format 3-lens system ==="
 echo

@@ -314,11 +314,15 @@ const (
 type ConstraintMeasure string
 
 const (
-	MeasureImageHeight   ConstraintMeasure = "image_height"
-	MeasureIncidentAngle ConstraintMeasure = "incident_angle"
-	MeasureThickness     ConstraintMeasure = "thickness"
-	MeasureEFL           ConstraintMeasure = "efl"
-	MeasureSystemLength  ConstraintMeasure = "system_length"
+	MeasureImageHeight            ConstraintMeasure = "image_height"
+	MeasureIncidentAngle          ConstraintMeasure = "incident_angle"
+	MeasureThickness              ConstraintMeasure = "thickness"
+	MeasureEFL                    ConstraintMeasure = "efl"
+	MeasureAbsEFL                 ConstraintMeasure = "abs_efl"
+	MeasureSystemLength           ConstraintMeasure = "system_length"
+	MeasureEntrancePupilDiameter  ConstraintMeasure = "entrance_pupil_diameter"
+	MeasureEdgeThickness          ConstraintMeasure = "edge_thickness"
+	MeasureDiameter               ConstraintMeasure = "diameter"
 )
 
 type ConstraintOperand struct {

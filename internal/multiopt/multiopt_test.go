@@ -232,9 +232,9 @@ func TestMultiOptimizerGetInitialState(t *testing.T) {
 	if len(x) != 2 {
 		t.Fatalf("Expected 2 variables, got %d", len(x))
 	}
-	// Shared variable initial value should be midpoint of [-0.1, 0.1] = 0
-	if math.Abs(x[0]) > 1e-10 {
-		t.Errorf("Shared variable initial = %v, want 0", x[0])
+	// Shared variable initial value should be read from the first binding's surface (curvature 0.01)
+	if math.Abs(x[0]-0.01) > 1e-10 {
+		t.Errorf("Shared variable initial = %v, want 0.01", x[0])
 	}
 	// Local variable initial value should be midpoint of [0.1, 200] if not found
 	// But since curvature of surface 2 is -0.01, thickness should be 100

@@ -199,6 +199,8 @@ func (o *MultiOptimizer) Optimize() Result {
 	copy(bestX, x)
 	bestMerit := merit
 
+	converged := false
+
 	// Stage 1: full DLS with all variables
 	for iter := 0; iter < o.maxIter; iter++ {
 		J, r := o.computeJacobianAndResiduals(x)
@@ -270,6 +272,8 @@ func (o *MultiOptimizer) Optimize() Result {
 			rho = actualReduction / predictedReduction
 		} else if predictedReduction < -1e-20 {
 			rho = -1.0
+		} else if actualReduction < 0 {
+			rho = -1.0
 		}
 
 		if rho > 0.25 {
@@ -293,16 +297,17 @@ func (o *MultiOptimizer) Optimize() Result {
 		}
 		stepNorm := math.Sqrt(norm)
 
-		improvement := merit - meritNew
+		improvement := actualReduction
 		if o.logger != nil {
 			currVars := make([]float64, len(o.variables))
-			for i, vi := range o.variables {
-				currVars[i] = currentVariableValue(o, vi, x)
+			for i := range o.variables {
+				currVars[i] = x[i]
 			}
 			o.logger.LogIter(iter+1, merit, improvement, stepNorm, currVars)
 		}
 
 		if math.Sqrt(norm) < o.tol {
+			converged = true
 			break
 		}
 	}
@@ -411,6 +416,8 @@ func (o *MultiOptimizer) Optimize() Result {
 				} else if predictedReduction < -1e-20 {
 					rho = -1.0
 				}
+			} else if actualReduction < 0 {
+				rho = -1.0
 			}
 
 			if rho > 0.25 {
@@ -437,8 +444,7 @@ func (o *MultiOptimizer) Optimize() Result {
 			stepNorm := math.Sqrt(norm)
 
 			if o.logger != nil {
-				imp := merit - meritNew
-				o.logger.LogIter(iter+1+o.maxIter, merit, imp, stepNorm, nil)
+				o.logger.LogIter(iter+1+o.maxIter, merit, actualReduction, stepNorm, nil)
 			}
 
 			if stepNorm < o.tol {
@@ -447,20 +453,25 @@ func (o *MultiOptimizer) Optimize() Result {
 		}
 	}
 
+	status := "converged"
+	if !converged {
+		status = "max_iterations"
+	}
+
 	if o.logger != nil {
 		finalVars := o.buildVariableStates(bestX)
 		vars := make([]float64, len(finalVars))
 		for i, s := range finalVars {
 			vars[i] = s.After
 		}
-		o.logger.LogFinal(o.maxIter, "converged", bestMerit, 0, vars)
+		o.logger.LogFinal(o.maxIter, status, bestMerit, 0, vars)
 	}
 
 	return Result{
 		BeforeMerit: beforeMerit,
 		AfterMerit:  bestMerit,
 		Iterations:  o.maxIter,
-		Status:      "converged",
+		Status:      status,
 		Variables:   o.buildVariableStates(bestX),
 	}
 }
@@ -737,6 +748,8 @@ func (o *MultiOptimizer) computeJacobianAndResiduals(x []float64) ([][]float64, 
 			diff := rPert[i] - r0[i]
 			J[i][j] = sanitizeFloat64(diff / delta)
 		}
+		if j == 0 && len(r0) > 0 {
+			}
 	}
 
 	return J, r0
@@ -808,6 +821,13 @@ func (o *MultiOptimizer) getInitialState() []float64 {
 						break
 					}
 				}
+			}
+			// Clamp to bounds — the first binding's surface value may be
+			// outside the declared [min, max] range for this shared variable.
+			if x[i] < v.Min {
+				x[i] = v.Min
+			} else if x[i] > v.Max {
+				x[i] = v.Max
 			}
 		} else {
 			switch v.Target.Param {
@@ -1172,7 +1192,7 @@ func computeSpotRMS(points []imagePoint) float64 {
 	}
 
 	if count == 0 {
-		return math.Inf(1)
+		return 1e6
 	}
 
 	cx := sumX / float64(count)

@@ -24,8 +24,17 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 		return evaluateThickness(surfaces, op.Surface)
 	case types.MeasureEFL:
 		return evaluateEFL(surfaces, gc)
+	case types.MeasureAbsEFL:
+		return math.Abs(evaluateEFL(surfaces, gc))
 	case types.MeasureSystemLength:
 		return evaluateSystemLength(surfaces)
+	case types.MeasureEntrancePupilDiameter:
+		return evaluateEntrancePupilDiameter(surfaces, gc)
+	case types.MeasureDiameter:
+		return evaluateDiameter(surfaces, op.Surface)
+	case types.MeasureEdgeThickness:
+		backID := int(math.Round(op.Target))
+		return evaluateEdgeThickness(surfaces, op.Surface, backID)
 	default:
 		return 0
 	}
@@ -165,6 +174,53 @@ func evaluateEFL(surfaces []types.Surface, gc *glass.Catalog) float64 {
 	sys := types.System{Surfaces: surfaces}
 	res := paraxial.Compute(sys, 0.0005876, gc, 0, nil)
 	return res.FocalLength
+}
+
+func evaluateDiameter(surfaces []types.Surface, id int) float64 {
+	for _, s := range surfaces {
+		if s.ID == id {
+			return s.Diameter
+		}
+	}
+	return 0
+}
+
+func sagitta(curvature, semiDiam float64) float64 {
+	if curvature == 0 || semiDiam <= 0 {
+		return 0
+	}
+	R := 1.0 / curvature
+	absR := math.Abs(R)
+	h := math.Abs(semiDiam)
+	if h >= absR {
+		return 0
+	}
+	return R - math.Copysign(math.Sqrt(absR*absR-h*h), R)
+}
+
+func evaluateEdgeThickness(surfaces []types.Surface, frontID, backID int) float64 {
+	var front, back *types.Surface
+	for i := range surfaces {
+		if surfaces[i].ID == frontID {
+			front = &surfaces[i]
+		}
+		if surfaces[i].ID == backID {
+			back = &surfaces[i]
+		}
+	}
+	if front == nil || back == nil {
+		return 0
+	}
+
+	center := front.Thickness
+	h := math.Min(front.Diameter, back.Diameter) / 2.0
+	return center + sagitta(back.Curvature, h) - sagitta(front.Curvature, h)
+}
+
+func evaluateEntrancePupilDiameter(surfaces []types.Surface, gc *glass.Catalog) float64 {
+	sys := types.System{Surfaces: surfaces}
+	res := paraxial.Compute(sys, 0.0005876, gc, 0, nil)
+	return res.EntrancePupilDiameter
 }
 
 func evaluateSystemLength(surfaces []types.Surface) float64 {

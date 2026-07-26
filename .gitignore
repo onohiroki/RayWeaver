@@ -12,6 +12,7 @@
 /*.jsonl
 /rayweave
 .idea
+.aiignore
 samples/*.txt
 samples/*.jsonl
 samples/*.svg

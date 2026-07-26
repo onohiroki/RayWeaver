@@ -1,8 +1,29 @@
 #!/bin/bash
+set -euo pipefail
+
+# CLI options
+CLEAN=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --clean) CLEAN=true; shift ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
 
 YAML="samples/us2645157.yaml"
 OUTDIR="samples"
 CHIEF_RESULT="$OUTDIR/us2645157-chief-result.yaml"
+
+# Clean-only mode: remove generated files and exit
+if [ "$CLEAN" = true ]; then
+  echo "=== Cleaning up generated files ==="
+  rm -f "$CHIEF_RESULT"
+  rm -f "$OUTDIR"/us2645157-trace-result.yaml
+  rm -f "$OUTDIR"/us2645157.svg "$OUTDIR"/us2645157.png
+  rm -f "$OUTDIR"/spot-*.txt "$OUTDIR"/spot-*.png
+  echo "  Removed generated files"
+  exit 0
+fi
 
 run_trace() {
   local input=$1 idx=$2
@@ -51,11 +72,7 @@ done
 
 echo
 
-# 3. Trace ray paths
-run_trace "$YAML" 0
-run_trace "$YAML" 1
-run_trace "$YAML" 2
-
+# 3. Trace chief ray paths
 echo "=== Trace (post-chief) ==="
 run_trace "$CHIEF_RESULT" 0
 run_trace "$CHIEF_RESULT" 1

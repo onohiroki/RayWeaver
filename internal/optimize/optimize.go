@@ -587,7 +587,7 @@ func computeSpotRMS(points []imagePoint) float64 {
 	}
 
 	if count == 0 {
-		return math.Inf(1)
+		return 1e6
 	}
 
 	cx := sumX / float64(count)

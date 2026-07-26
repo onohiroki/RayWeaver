@@ -211,8 +211,8 @@ func TestComputeSpotRMSAllFailed(t *testing.T) {
 		{OK: false},
 	}
 	rms := computeSpotRMS(points)
-	if !math.IsInf(rms, 1) {
-		t.Errorf("RMS = %v, want +Inf for all-failed points", rms)
+	if rms != 1e6 {
+		t.Errorf("RMS = %v, want 1e6 for all-failed points", rms)
 	}
 }
 

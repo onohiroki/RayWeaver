@@ -1,4 +1,14 @@
 #!/bin/bash
+set -euo pipefail
+
+# CLI options
+CLEAN=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --clean) CLEAN=true; shift ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
 
 YAML="samples/multi-config-zoom.yaml"
 OUTDIR="samples"
@@ -6,11 +16,23 @@ RESULT="$OUTDIR/multi-config-zoom-result.yaml"
 LOG="$OUTDIR/multi-config-zoom-log.jsonl"
 RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
+# Clean-only mode: remove generated files and exit
+if [ "$CLEAN" = true ]; then
+  echo "=== Cleaning up generated files ==="
+  for cfg in config0 config1 config2; do
+    rm -f "$OUTDIR/multi-config-zoom-${cfg}-init-rays.png"
+    rm -f "$OUTDIR/multi-config-zoom-${cfg}-opt-rays.png"
+  done
+  rm -f "$RESULT" "$LOG"
+  echo "  Removed: PNGs, $RESULT, $LOG"
+  exit 0
+fi
+
 echo "=== Multi-Config Zoom Lens Demo ==="
 echo
-echo "Layout: 3 configs (Wide / Mid / Tele)"
-echo "Shared variables: group3_curvature, group4_thickness, aperture_stop_radius"
-echo "Local variables: wide_space, tele_space"
+echo "Layout: 3 configs (config0 / config1 / config2)"
+echo "Shared variables: variables following simple-zoom pattern"
+echo "Local variables: 2 air gaps per config"
 echo
 
 echo "=== DLS Multi-Config Optimization ==="
@@ -18,26 +40,33 @@ $RAYWEAVE optimize --verbose --log "$LOG" < "$YAML" > "$RESULT"
 
 echo
 echo "--- Optimization results ---"
-grep -E "^=== |Status|Merit|Improvement|Iterations" "$RESULT" 2>/dev/null | head -10
+grep -i -E "^=== |status|merit" "$RESULT" 2>/dev/null | head -10 || true
 echo
 
-echo "--- Config surfaces (after optimization, lens bodies only) ---"
-for cfg in wide mid tele; do
+echo "--- RMS spot size comparison (before → after) ---"
+for cfg in config0 config1 config2; do
   echo "  Config: $cfg"
-  cat "$RESULT" | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-opt.png" 2>/dev/null
-  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-opt.png"
-done
-echo
-
-echo "=== Before optimization (initial lens bodies) ==="
-for cfg in wide mid tele; do
-  cat "$YAML" | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-init.png" 2>/dev/null
-  echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-init.png"
+  for label in "Before" "After"; do
+    [ "$label" = "Before" ] && src="$YAML" || src="$RESULT"
+    echo "    $label:"
+    cat "$src" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
+      | awk '
+        BEGIN{ang=""; in_spot=0}
+        /field_angle:/{ ang = $NF }
+        /spot_stats:/{ in_spot = 1; rms = "" }
+        in_spot && /rms_r:/{ rms = $NF }
+        in_spot && /traced_rays:/ && rms != "" {
+          tr = $NF
+          if (tr + 0 > 0)
+            printf "      field %s° RMS=%.4fmm (%d rays)\n", ang, rms + 0, tr
+          in_spot = 0
+        }'
+  done
 done
 echo
 
 echo "=== Ray-overlaid layout (after optimization) ==="
-for cfg in wide mid tele; do
+for cfg in config0 config1 config2; do
   echo "  Config: $cfg"
   cat "$RESULT" \
     | $RAYWEAVE chief --clear-aperture --config "$cfg" \
@@ -49,7 +78,7 @@ done
 echo
 
 echo "=== Ray-overlaid layout (before optimization) ==="
-for cfg in wide mid tele; do
+for cfg in config0 config1 config2; do
   echo "  Config: $cfg"
   cat "$YAML" \
     | $RAYWEAVE chief --clear-aperture --config "$cfg" \
@@ -60,6 +89,40 @@ for cfg in wide mid tele; do
 done
 echo
 
+echo "=== Performance comparison ==="
+printf "  %-8s %6s  %10s  %10s\n" "Config" "Field" "RMS bef" "RMS aft"
+printf "  %-8s %6s  %10s  %10s\n" "------" "-----" "-------" "-------"
+for cfg in config0 config1 config2; do
+  # Extract field angles and RMS before/after
+  bef=$(cat "$YAML" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
+    | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)print ang,r; in_spot=0}')
+  aft=$(cat "$RESULT" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
+    | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)print ang,r; in_spot=0}')
+  efl=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
+    | awk -F': ' '/focal_length:/{printf "%.1f",$2; exit}')
+  # Show each field with before/after RMS
+  line_no=0
+  while IFS= read -r bline; do
+    aline=$(echo "$aft" | sed -n "$((line_no+1))p")
+    fa=$(echo "$bline" | awk '{print $1}')
+    br=$(echo "$bline" | awk '{print $2}')
+    ar=$(echo "$aline" | awk '{print $2}')
+    if [ "$line_no" -eq 0 ]; then
+      printf "  %-8s %5s°  %8.4f  %8.4f    EFL=%smm\n" "$cfg" "$fa" "$br" "$ar" "$efl"
+    else
+      printf "  %-8s %5s°  %8.4f  %8.4f\n" "" "$fa" "$br" "$ar"
+    fi
+    line_no=$((line_no + 1))
+  done <<< "$bef"
+
+done
+echo
+
 echo "=== Iteration log saved: $LOG ==="
-echo "  Log entries:"
-wc -l "$LOG" 2>/dev/null
+if [ -f "$LOG" ]; then
+  echo "  Log entries:"
+  wc -l "$LOG" 2>/dev/null
+fi
+echo
+
+# (cleanup is handled at the top for --clean mode)
