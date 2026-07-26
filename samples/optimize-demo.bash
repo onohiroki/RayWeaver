@@ -6,6 +6,24 @@ OUTDIR="samples"
 OPT_RESULT="$OUTDIR/us2645157-optimize-result.yaml"
 OPT_WITH_CHIEF="$OUTDIR/us2645157-opt-with-chief.yaml"
 
+# CLI options
+CLEAN=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --clean) CLEAN=true; shift ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
+  esac
+done
+
+# Clean-only mode: remove generated files and exit
+if [ "$CLEAN" = true ]; then
+  echo "=== Cleaning up generated files ==="
+  rm -f "$OPT_RESULT" "$OPT_WITH_CHIEF"
+  rm -f "$OUTDIR/us2645157-init.png" "$OUTDIR/us2645157-opt.png"
+  echo "  Removed: PNGs, $OPT_RESULT, $OPT_WITH_CHIEF"
+  exit 0
+fi
+
 echo "=== Optimize demo: degraded US2645157 triplet ==="
 echo
 
