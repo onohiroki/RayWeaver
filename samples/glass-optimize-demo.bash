@@ -117,6 +117,40 @@ if [ -n "$FNO" ]; then
   echo
 fi
 
+# ── Spot RMS comparison (before vs after) ──
+echo "=== Spot RMS Comparison ==="
+printf "  %-8s %6s  %10s  %10s\n" "Phase" "Field" "RMS before" "RMS after"
+printf "  %-8s %6s  %10s  %10s\n" "-----" "-----" "--------" "--------"
+rms_field() {
+  local yaml_file="$1"
+  local fi="$2"
+  python3 -c "
+import sys, yaml
+with open('/dev/stdin') as f:
+    data = yaml.safe_load(f)
+if data and 'chief_rays' in data and $fi < len(data['chief_rays']):
+    ss = data['chief_rays'][$fi].get('spot_stats', {})
+    rms = ss.get('rms_r', -1)
+    if rms > 0:
+        print(rms)
+    else:
+        print(-1)
+else:
+    print(-1)
+" < <($RAYWEAVE chief < "$yaml_file" 2>/dev/null)
+}
+for fi in 0 1 2; do
+  rms_before=$(rms_field "$YAML" "$fi")
+  rms_after=$(rms_field "$OPT_RESULT" "$fi")
+  printf "  %-8s %6s  %10.4f  %10.4f" "optimize" "f$fi" "$rms_before" "$rms_after"
+  if [ "$(echo "$rms_after < $rms_before" | bc -l 2>/dev/null)" = "1" ]; then
+    echo "   ✓"
+  else
+    echo "   ✗"
+  fi
+done
+echo
+
 echo "=== PNG diagrams ==="
 $RAYWEAVE chief --clear-aperture < "$YAML" 2>/dev/null \
   | $RAYWEAVE chief --marginal-rays 2>/dev/null \
