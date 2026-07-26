@@ -110,8 +110,8 @@ print(-1)
 " < <($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null)
 }
 
-rms_before_config1=$(get_onaxis_rms "$YAML" config1)
-echo "  (config1 on-axis before = $rms_before_config1 mm — reference)"
+THRESHOLD=0.5
+echo "  (threshold = $THRESHOLD mm — all configs on-axis RMS must be below this)"
 
 failed=false
 for cfg in config0 config1 config2; do
@@ -126,19 +126,18 @@ for cfg in config0 config1 config2; do
     fi
   fi
   echo
-  # Check if all optimized RMS < initial config1 RMS
-  if [ "$rms_after" != "-1" ] && (( $(echo "$rms_after >= $rms_before_config1" | bc -l) )); then
+  if [ "$rms_after" != "-1" ] && (( $(echo "$rms_after >= $THRESHOLD" | bc -l) )); then
     failed=true
   fi
 done
 
 if [ "$failed" = true ]; then
   echo
-  echo "  >>> Optimization failed: not all configs improved below config1's initial on-axis RMS ($rms_before_config1 mm)"
+  echo "  >>> Optimization failed: not all configs on-axis RMS < $THRESHOLD mm"
   exit 1
 fi
 echo
-echo "  >>> Optimization passed: all configs on-axis RMS < config1 initial ($rms_before_config1 mm)"
+echo "  >>> Optimization passed: all configs on-axis RMS < $THRESHOLD mm"
 echo
 
 # (cleanup is handled at the top for --clean mode)
