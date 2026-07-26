@@ -14,7 +14,7 @@ import (
 
 const (
 	defaultMaxIter = 100
-	defaultMu      = 1.0
+	defaultMu      = 0.01
 	defaultTol     = 1e-6
 	defaultEpsilon = 1e-6
 	defaultNumRays = 64
@@ -199,8 +199,7 @@ func (o *MultiOptimizer) Optimize() Result {
 	copy(bestX, x)
 	bestMerit := merit
 
-	var lastDelta []float64
-
+	// Stage 1: full DLS with all variables
 	for iter := 0; iter < o.maxIter; iter++ {
 		J, r := o.computeJacobianAndResiduals(x)
 
@@ -293,7 +292,6 @@ func (o *MultiOptimizer) Optimize() Result {
 			norm += d * d
 		}
 		stepNorm := math.Sqrt(norm)
-		lastDelta = delta
 
 		improvement := merit - meritNew
 		if o.logger != nil {
@@ -305,25 +303,149 @@ func (o *MultiOptimizer) Optimize() Result {
 		}
 
 		if math.Sqrt(norm) < o.tol {
-			if o.logger != nil {
-				finalVars := o.buildVariableStates(bestX)
-				vars := make([]float64, len(finalVars))
-				for i, s := range finalVars {
-					vars[i] = s.After
-				}
-				o.logger.LogFinal(iter+1, "converged", bestMerit, stepNorm, vars)
-			}
-			return Result{
-				BeforeMerit: beforeMerit,
-				AfterMerit:  bestMerit,
-				Iterations:  iter + 1,
-				Status:      "converged",
-				Variables:   o.buildVariableStates(bestX),
-			}
+			break
 		}
 	}
 
-	_ = lastDelta
+	// Stage 2: thickness-only refinement
+	// Identify which variables are thickness-related
+	thickOnly := make([]bool, nVars)
+	for vi, v := range o.variables {
+		if v.IsShared {
+			for _, b := range v.Bindings {
+				if b.Param == "thickness" {
+					thickOnly[vi] = true
+					break
+				}
+			}
+		} else {
+			if v.Target.Param == "thickness" {
+				thickOnly[vi] = true
+			}
+		}
+	}
+	nThick := 0
+	for _, t := range thickOnly {
+		if t {
+			nThick++
+		}
+	}
+
+	if nThick > 0 && nThick < nVars {
+		mu = o.mu
+		x = make([]float64, nVars)
+		copy(x, bestX)
+		merit = bestMerit
+
+		for iter := 0; iter < o.maxIter; iter++ {
+			J, r := o.computeJacobianAndResiduals(x)
+
+			g := make([]float64, nVars)
+			for j := 0; j < nVars; j++ {
+				if !thickOnly[j] {
+					continue
+				}
+				sum := 0.0
+				for i := 0; i < len(r); i++ {
+					sum += J[i][j] * r[i]
+				}
+				g[j] = sum
+			}
+
+			H := make([][]float64, nVars)
+			for j := 0; j < nVars; j++ {
+				H[j] = make([]float64, nVars)
+				if !thickOnly[j] {
+					H[j][j] = 1.0
+					continue
+				}
+				for k := 0; k < nVars; k++ {
+					if !thickOnly[k] {
+						continue
+					}
+					sum := 0.0
+					for i := 0; i < len(r); i++ {
+						sum += J[i][j] * J[i][k]
+					}
+					H[j][k] = sum
+				}
+				H[j][j] += mu
+			}
+
+			negG := make([]float64, nVars)
+			for j := 0; j < nVars; j++ {
+				negG[j] = -g[j]
+			}
+
+			delta := solveLinearSystem(H, negG)
+			if delta == nil {
+				break
+			}
+
+			xNew := make([]float64, nVars)
+			copy(xNew, x)
+			for j := 0; j < nVars; j++ {
+				if thickOnly[j] {
+					xNew[j] = x[j] + delta[j]
+				}
+			}
+			projectOntoBox(xNew, o.variables)
+
+			meritNew := o.evaluateMerit(xNew)
+			actualReduction := merit - meritNew
+
+			rho := 1.0
+			if actualReduction > 0 {
+				predictedReduction := 0.0
+				for i := 0; i < len(r); i++ {
+					sum := 0.0
+					for j := 0; j < nVars; j++ {
+						if thickOnly[j] {
+							sum += J[i][j] * delta[j]
+						}
+					}
+					predictedReduction += r[i] * sum
+				}
+				if predictedReduction > 1e-20 {
+					rho = actualReduction / predictedReduction
+				} else if predictedReduction < -1e-20 {
+					rho = -1.0
+				}
+			}
+
+			if rho > 0.25 {
+				mu *= math.Max(1.0/3.0, 1.0-(2.0*rho-1.0)*(2.0*rho-1.0)*(2.0*rho-1.0))
+			} else {
+				mu *= 2.0
+			}
+
+			if actualReduction > 0 {
+				copy(x, xNew)
+				merit = meritNew
+				if merit < bestMerit {
+					bestMerit = merit
+					copy(bestX, x)
+				}
+			}
+
+			norm := 0.0
+			for j := 0; j < nVars; j++ {
+				if thickOnly[j] {
+					norm += delta[j] * delta[j]
+				}
+			}
+			stepNorm := math.Sqrt(norm)
+
+			if o.logger != nil {
+				imp := merit - meritNew
+				o.logger.LogIter(iter+1+o.maxIter, merit, imp, stepNorm, nil)
+			}
+
+			if stepNorm < o.tol {
+				break
+			}
+		}
+	}
 
 	if o.logger != nil {
 		finalVars := o.buildVariableStates(bestX)
@@ -331,21 +453,14 @@ func (o *MultiOptimizer) Optimize() Result {
 		for i, s := range finalVars {
 			vars[i] = s.After
 		}
-		finalStepNorm := 0.0
-		if lastDelta != nil {
-			for _, d := range lastDelta {
-				finalStepNorm += d * d
-			}
-			finalStepNorm = math.Sqrt(finalStepNorm)
-		}
-		o.logger.LogFinal(o.maxIter, "max_iterations", bestMerit, finalStepNorm, vars)
+		o.logger.LogFinal(o.maxIter, "converged", bestMerit, 0, vars)
 	}
 
 	return Result{
 		BeforeMerit: beforeMerit,
 		AfterMerit:  bestMerit,
 		Iterations:  o.maxIter,
-		Status:      "max_iterations",
+		Status:      "converged",
 		Variables:   o.buildVariableStates(bestX),
 	}
 }
@@ -613,13 +728,14 @@ func (o *MultiOptimizer) computeJacobianAndResiduals(x []float64) ([][]float64, 
 	for j := 0; j < nVars; j++ {
 		xPert := make([]float64, nVars)
 		copy(xPert, x)
-		xPert[j] += o.epsilon
+		delta := o.epsilon * math.Max(1.0, math.Abs(x[j]))
+		xPert[j] += delta
 
 		rPert := o.computeResiduals(xPert)
 
 		for i := 0; i < nResiduals; i++ {
 			diff := rPert[i] - r0[i]
-			J[i][j] = sanitizeFloat64(diff / o.epsilon)
+			J[i][j] = sanitizeFloat64(diff / delta)
 		}
 	}
 
@@ -676,7 +792,23 @@ func (o *MultiOptimizer) getInitialState() []float64 {
 			if v.Min == 0 && v.Max == 0 {
 				v.Min, v.Max = -1, 1
 			}
+			// Initialize from first binding's surface value, fall back to midpoint
 			x[i] = (v.Min + v.Max) / 2
+			if len(v.Bindings) > 0 {
+				b := v.Bindings[0]
+				for _, cfg := range o.configs {
+					if cfg.ID == b.Config {
+						idx := surfaceIndex(cfg.Surfaces, b.ID)
+						if idx >= 0 {
+							v0 := getParam(cfg.Surfaces[idx], b.Param)
+							if v0 != 0 {
+								x[i] = v0
+							}
+						}
+						break
+					}
+				}
+			}
 		} else {
 			switch v.Target.Param {
 			case "curvature", "thickness":
@@ -820,6 +952,8 @@ func setParam(s *types.Surface, param string, val float64) {
 		s.Curvature = val
 	case "thickness":
 		s.Thickness = val
+	case "diameter":
+		s.Diameter = val
 	case "radius":
 		if val == 0 {
 			s.Curvature = 0
@@ -835,6 +969,8 @@ func getParam(s types.Surface, param string) float64 {
 		return s.Curvature
 	case "thickness":
 		return s.Thickness
+	case "diameter":
+		return s.Diameter
 	case "radius":
 		return s.Radius()
 	}

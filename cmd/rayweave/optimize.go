@@ -522,7 +522,19 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 func applyMultiVars(input types.Input, x []float64, gc *glass.Catalog) map[string][]types.Surface {
 	result := make(map[string][]types.Surface)
 
-	// Build flat variable list from shared + local
+	// First pass: copy all config surfaces into result (one copy per config)
+	for ci := range input.Configs {
+		cfg := &input.Configs[ci]
+		if len(cfg.Surfaces) == 0 {
+			fmt.Fprintf(os.Stderr, "Error: config %q has no surfaces defined\n", cfg.ID)
+			os.Exit(1)
+		}
+		s := make([]types.Surface, len(cfg.Surfaces))
+		copy(s, cfg.Surfaces)
+		result[cfg.ID] = s
+	}
+
+	// Second pass: apply all shared variable bindings in-place
 	var varIdx int
 	for _, sv := range input.Optimization.SharedVariables {
 		if !sv.Active {
@@ -541,30 +553,20 @@ func applyMultiVars(input types.Input, x []float64, gc *glass.Catalog) map[strin
 			}
 			applied := scale*val + b.Offset
 
-			for ci := range input.Configs {
-				cfg := &input.Configs[ci]
-				if cfg.ID != b.Config {
-					continue
+			surfaces, ok := result[b.Config]
+			if !ok {
+				continue
+			}
+			for i := range surfaces {
+				if surfaces[i].ID == b.ID {
+					setSurfaceParam(&surfaces[i], b.Param, applied)
+					break
 				}
-		surfaces := cfg.Surfaces
-		if len(surfaces) == 0 {
-			fmt.Fprintf(os.Stderr, "Error: config %q has no surfaces defined\n", cfg.ID)
-			os.Exit(1)
-		}
-				s := make([]types.Surface, len(surfaces))
-				copy(s, surfaces)
-				for i := range s {
-					if s[i].ID == b.ID {
-						setSurfaceParam(&s[i], b.Param, applied)
-						break
-					}
-				}
-				surface.Precompute(s)
-				result[cfg.ID] = s
 			}
 		}
 	}
 
+	// Third pass: apply all local variables in-place
 	for _, lv := range input.Optimization.LocalVariables {
 		if !lv.Active {
 			continue
@@ -575,26 +577,22 @@ func applyMultiVars(input types.Input, x []float64, gc *glass.Catalog) map[strin
 		}
 		varIdx++
 
-		for ci := range input.Configs {
-			cfg := &input.Configs[ci]
-			if cfg.ID != lv.Config {
-				continue
+		surfaces, ok := result[lv.Config]
+		if !ok {
+			continue
+		}
+		for i := range surfaces {
+			if surfaces[i].ID == lv.Target.ID {
+				setSurfaceParam(&surfaces[i], lv.Target.Param, val)
+				break
 			}
-			surfaces := cfg.Surfaces
-			if len(surfaces) == 0 {
-				fmt.Fprintf(os.Stderr, "Error: config %q has no surfaces defined\n", cfg.ID)
-				os.Exit(1)
-			}
-			s := make([]types.Surface, len(surfaces))
-			copy(s, surfaces)
-			for i := range s {
-				if s[i].ID == lv.Target.ID {
-					setSurfaceParam(&s[i], lv.Target.Param, val)
-					break
-				}
-			}
+		}
+	}
+
+	// Fourth pass: precompute all surfaces
+	for _, cfg := range input.Configs {
+		if s, ok := result[cfg.ID]; ok {
 			surface.Precompute(s)
-			result[cfg.ID] = s
 		}
 	}
 
@@ -607,6 +605,8 @@ func setSurfaceParam(s *types.Surface, param string, val float64) {
 		s.Curvature = val
 	case "thickness":
 		s.Thickness = val
+	case "diameter":
+		s.Diameter = val
 	case "radius":
 		if val == 0 {
 			s.Curvature = 0

@@ -511,13 +511,29 @@ func runChief(data []byte) {
 					continue
 				}
 				origin := gp.Origin
-				if useScale {
-					origin.X *= scale
-					origin.Y *= scale
+				dir := gp.Direction
+				if useScale && r.FieldHeight > 0 {
+					var t float64
+					if math.Abs(dir.X) > 1e-12 {
+						t = (gp.PupilX - origin.X) / dir.X
+					} else {
+						t = (gp.PupilY - origin.Y) / dir.Y
+					}
+					zStart := origin.Z + dir.Z*t
+					aim := types.Vec3{X: gp.PupilX * scale, Y: gp.PupilY * scale, Z: zStart}
+					dir = types.Vec3{
+						X: aim.X - origin.X,
+						Y: aim.Y - origin.Y,
+						Z: aim.Z - origin.Z,
+					}.Normalize()
+				} else if useScale {
+					fc := r.ChiefRay.Initial.Origin
+					origin.X = fc.X + (gp.PupilX-fc.X)*scale
+					origin.Y = fc.Y + (gp.PupilY-fc.Y)*scale
 				}
 				ray := types.Ray{
 					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: origin, Direction: gp.Direction},
+					Initial:    types.RayState{Origin: origin, Direction: dir},
 					Path:       path,
 					Jones:      pol,
 				}
@@ -542,9 +558,16 @@ func runChief(data []byte) {
 			}
 		}
 
+		refID := input.Chief.ReferenceSurface
 		for i := range surfaces {
+			if surfaces[i].ID == refID {
+				continue
+			}
 			if perSurfaceMaxY[i] > 0 {
-				surfaces[i].Diameter = perSurfaceMaxY[i] * 2
+				computedDiam := perSurfaceMaxY[i] * 2
+				if computedDiam > surfaces[i].Diameter {
+					surfaces[i].Diameter = computedDiam
+				}
 			}
 		}
 	}

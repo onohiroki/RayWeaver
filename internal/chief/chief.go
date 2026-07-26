@@ -77,7 +77,7 @@ func determineChiefRays(
 	var results []Result
 
 	for _, fd := range fields {
-		dx, dy := 1.0, 0.0
+		dx, dy := 0.0, 1.0
 		if len(fd.Direction) >= 2 {
 			norm := math.Hypot(fd.Direction[0], fd.Direction[1])
 			if norm > 0 {
@@ -879,8 +879,9 @@ func buildPath(surfaces []types.Surface) []int {
 	return path
 }
 
-// imageHeightForAngle returns the centroid Y at the reference surface for a
-// given field angle (degrees).  Uses a full grid trace with the given numRays.
+// imageHeightForAngle returns the projected centroid (dx*cx + dy*cy) at the
+// reference surface for a given field angle (degrees).  Uses a full grid trace
+// with the given numRays.
 func imageHeightForAngle(
 	system types.System,
 	engine *ray.Engine,
@@ -903,18 +904,21 @@ func imageHeightForAngle(
 	pupilCenterX := -(stopZ - zStart) * tanT * dx
 	pupilCenterY := -(stopZ - zStart) * tanT * dy
 
-	_, cy, _ := tracePupilGrid(system, engine, numRays, apertureRadius,
+	cx, cy, grid := tracePupilGrid(system, engine, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
 		refSurfaceID, pol, wavelength, false, gridType)
 
-	if math.Abs(cy) > 0 || numRays > 0 {
-		return cy, true
+	height := cx*dx + cy*dy
+	for _, gp := range grid {
+		if gp.ImageX != nil {
+			return height, true
+		}
 	}
 	return 0, false
 }
 
-// searchAngleForImageHeight finds the field angle (degrees) whose centroid
-// Y at the reference surface equals the target Y.
+// searchAngleForImageHeight finds the field angle (degrees) whose projected
+// centroid (dx*cx + dy*cy) at the reference surface equals targetY.
 func searchAngleForImageHeight(
 	system types.System,
 	engine *ray.Engine,
@@ -945,7 +949,13 @@ func searchAngleForImageHeight(
 				return 0
 			}
 			yLo, okLo = imageHeightForAngle(system, engine, loDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
-		} else if !okHi || yHi < targetY {
+		} else if !okHi {
+			hiDeg = (loDeg + hiDeg) / 2
+			if math.Abs(hiDeg-loDeg) < 1e-12 {
+				return 0
+			}
+			yHi, okHi = imageHeightForAngle(system, engine, hiDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
+		} else if yHi < targetY {
 			hiDeg += 3.0
 			if hiDeg > 80 {
 				return 0

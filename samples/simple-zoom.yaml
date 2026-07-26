@@ -19,8 +19,8 @@ optimization:
 
   shared_variables:
     - name: s1_curvature
-      min: -0.1
-      max: 0.1
+      min: -0.2
+      max: 0.2
       active: true
       bindings:
         - config: config0
@@ -34,8 +34,8 @@ optimization:
           param: curvature
 
     - name: s2_curvature
-      min: -0.1
-      max: 0.1
+      min: -0.2
+      max: 0.2
       active: true
       bindings:
         - config: config0
@@ -49,8 +49,8 @@ optimization:
           param: curvature
 
     - name: s3_curvature
-      min: -0.1
-      max: 0.1
+      min: -0.2
+      max: 0.2
       active: true
       bindings:
         - config: config0
@@ -64,8 +64,8 @@ optimization:
           param: curvature
 
     - name: s4_curvature
-      min: -0.1
-      max: 0.1
+      min: -0.2
+      max: 0.2
       active: true
       bindings:
         - config: config0
@@ -79,8 +79,8 @@ optimization:
           param: curvature
 
     - name: s5_curvature
-      min: -0.1
-      max: 0.1
+      min: -0.2
+      max: 0.2
       active: true
       bindings:
         - config: config0
@@ -94,8 +94,8 @@ optimization:
           param: curvature
 
     - name: s6_curvature
-      min: -0.1
-      max: 0.1
+      min: -0.2
+      max: 0.2
       active: true
       bindings:
         - config: config0
@@ -109,8 +109,8 @@ optimization:
           param: curvature
 
     - name: s7_curvature
-      min: -0.1
-      max: 0.1
+      min: -0.2
+      max: 0.2
       active: true
       bindings:
         - config: config0
@@ -169,8 +169,8 @@ optimization:
           param: thickness
 
     - name: s6_thickness
-      min: 10.0
-      max: 100.0
+      min: 0.1
+      max: 200.0
       active: true
       bindings:
         - config: config0
@@ -197,6 +197,111 @@ optimization:
         - config: config2
           id: 7
           param: thickness
+
+    - name: s1_diameter
+      min: 1.0
+      max: 100.0
+      active: true
+      bindings:
+        - config: config0
+          id: 1
+          param: diameter
+        - config: config1
+          id: 1
+          param: diameter
+        - config: config2
+          id: 1
+          param: diameter
+
+    - name: s2_diameter
+      min: 1.0
+      max: 100.0
+      active: true
+      bindings:
+        - config: config0
+          id: 2
+          param: diameter
+        - config: config1
+          id: 2
+          param: diameter
+        - config: config2
+          id: 2
+          param: diameter
+
+    - name: s3_diameter
+      min: 1.0
+      max: 100.0
+      active: true
+      bindings:
+        - config: config0
+          id: 3
+          param: diameter
+        - config: config1
+          id: 3
+          param: diameter
+        - config: config2
+          id: 3
+          param: diameter
+
+    - name: s4_diameter
+      min: 1.0
+      max: 100.0
+      active: true
+      bindings:
+        - config: config0
+          id: 4
+          param: diameter
+        - config: config1
+          id: 4
+          param: diameter
+        - config: config2
+          id: 4
+          param: diameter
+
+    - name: s5_diameter
+      min: 1.0
+      max: 100.0
+      active: true
+      bindings:
+        - config: config0
+          id: 5
+          param: diameter
+        - config: config1
+          id: 5
+          param: diameter
+        - config: config2
+          id: 5
+          param: diameter
+
+    - name: s6_diameter
+      min: 1.0
+      max: 100.0
+      active: true
+      bindings:
+        - config: config0
+          id: 6
+          param: diameter
+        - config: config1
+          id: 6
+          param: diameter
+        - config: config2
+          id: 6
+          param: diameter
+
+    - name: s7_diameter
+      min: 1.0
+      max: 100.0
+      active: true
+      bindings:
+        - config: config0
+          id: 7
+          param: diameter
+        - config: config1
+          id: 7
+          param: diameter
+        - config: config2
+          id: 7
+          param: diameter
 
   local_variables:
     - name: config0_s2_thickness
@@ -265,6 +370,8 @@ chief:
   reference_surface: 7
   num_rays: 256
   fields:
+    - image_height: 0.0
+    - image_height: 10.0
     - image_height: 15.0
 
 configs:
@@ -276,6 +383,12 @@ configs:
       - id: 0
         angle_deg: 0.0
         weight: 1.0
+      - id: 1
+        angle_deg: 4.58
+        weight: 1.0
+      - id: 2
+        angle_deg: 7.09
+        weight: 1.0
     wavelengths:
       - id: 0
         value: 0.00058756
@@ -290,43 +403,43 @@ configs:
         curvature: 0.007692308
         thickness: 10.0
         material: BK7
-        diameter: 20.0
+        diameter: 40.0
       - id: 2
         type: sphere
         curvature: -0.01
         thickness: 20.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
       - id: 3
         type: sphere
         curvature: -0.01
         thickness: 10.0
         material: F2
-        diameter: 20.0
+        diameter: 40.0
       - id: 4
         type: sphere
         curvature: 0.01
         thickness: 80.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
       - id: 5
         type: sphere
         curvature: 0.01
         thickness: 10.0
         material: BK7
-        diameter: 20.0
+        diameter: 40.0
       - id: 6
         type: sphere
         curvature: -0.01
-        thickness: 54.27562
+        thickness: 40.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
       - id: 7
         type: sphere
         curvature: 0.001
         thickness: 0.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
     merit:
       type: spot_rms
       terms:
@@ -334,6 +447,66 @@ configs:
           field: 0
           wavelength: 0.00058756
           weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.00058756
+          weight: 0.3
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.00058756
+          weight: 0.1
+    constraints:
+      - id: img_h0
+        kind: equality
+        measure: image_height
+        field: 0
+        target: 0.0
+        weight: 1.0
+        active: true
+      - id: img_h1
+        kind: equality
+        measure: image_height
+        field: 1
+        target: 10.0
+        weight: 1.0
+        active: true
+      - id: img_h2
+        kind: equality
+        measure: image_height
+        field: 2
+        target: 15.0
+        weight: 1.0
+        active: true
+      - id: inc_a0
+        kind: fuzzy
+        measure: incident_angle
+        field: 0
+        surface: 1
+        target: 0.0
+        band_width: 0.5
+        softness: 3.0
+        weight: 0.5
+        active: true
+      - id: inc_a1
+        kind: fuzzy
+        measure: incident_angle
+        field: 1
+        surface: 1
+        target: 5.61
+        band_width: 2.0
+        softness: 5.0
+        weight: 0.5
+        active: true
+      - id: inc_a2
+        kind: fuzzy
+        measure: incident_angle
+        field: 2
+        surface: 1
+        target: 9.27
+        band_width: 2.0
+        softness: 5.0
+        weight: 0.5
+        active: true
 
   - id: config1
     name: Config1
@@ -343,6 +516,12 @@ configs:
       - id: 0
         angle_deg: 0.0
         weight: 1.0
+      - id: 1
+        angle_deg: 3.52
+        weight: 1.0
+      - id: 2
+        angle_deg: 5.30
+        weight: 1.0
     wavelengths:
       - id: 0
         value: 0.00058756
@@ -357,43 +536,43 @@ configs:
         curvature: 0.007692308
         thickness: 10.0
         material: BK7
-        diameter: 20.0
+        diameter: 40.0
       - id: 2
         type: sphere
         curvature: -0.01
         thickness: 50.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
       - id: 3
         type: sphere
         curvature: -0.01
         thickness: 10.0
         material: F2
-        diameter: 20.0
+        diameter: 40.0
       - id: 4
         type: sphere
         curvature: 0.01
         thickness: 50.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
       - id: 5
         type: sphere
         curvature: 0.01
         thickness: 10.0
         material: BK7
-        diameter: 20.0
+        diameter: 40.0
       - id: 6
         type: sphere
         curvature: -0.01
-        thickness: 54.27562
+        thickness: 40.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
       - id: 7
         type: sphere
         curvature: 0.001
         thickness: 0.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
     merit:
       type: spot_rms
       terms:
@@ -401,6 +580,66 @@ configs:
           field: 0
           wavelength: 0.00058756
           weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.00058756
+          weight: 0.3
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.00058756
+          weight: 0.1
+    constraints:
+      - id: img_h0
+        kind: equality
+        measure: image_height
+        field: 0
+        target: 0.0
+        weight: 1.0
+        active: true
+      - id: img_h1
+        kind: equality
+        measure: image_height
+        field: 1
+        target: 10.0
+        weight: 1.0
+        active: true
+      - id: img_h2
+        kind: equality
+        measure: image_height
+        field: 2
+        target: 15.0
+        weight: 1.0
+        active: true
+      - id: inc_a0
+        kind: fuzzy
+        measure: incident_angle
+        field: 0
+        surface: 1
+        target: 0.0
+        band_width: 0.5
+        softness: 3.0
+        weight: 0.5
+        active: true
+      - id: inc_a1
+        kind: fuzzy
+        measure: incident_angle
+        field: 1
+        surface: 1
+        target: 4.93
+        band_width: 2.0
+        softness: 5.0
+        weight: 0.5
+        active: true
+      - id: inc_a2
+        kind: fuzzy
+        measure: incident_angle
+        field: 2
+        surface: 1
+        target: 6.73
+        band_width: 2.0
+        softness: 5.0
+        weight: 0.5
+        active: true
 
   - id: config2
     name: Config2
@@ -410,6 +649,12 @@ configs:
       - id: 0
         angle_deg: 0.0
         weight: 1.0
+      - id: 1
+        angle_deg: 3.19
+        weight: 1.0
+      - id: 2
+        angle_deg: 5.06
+        weight: 1.0
     wavelengths:
       - id: 0
         value: 0.00058756
@@ -424,43 +669,43 @@ configs:
         curvature: 0.007692308
         thickness: 10.0
         material: BK7
-        diameter: 20.0
+        diameter: 40.0
       - id: 2
         type: sphere
         curvature: -0.01
         thickness: 80.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
       - id: 3
         type: sphere
         curvature: -0.01
         thickness: 10.0
         material: F2
-        diameter: 20.0
+        diameter: 40.0
       - id: 4
         type: sphere
         curvature: 0.01
         thickness: 20.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
       - id: 5
         type: sphere
         curvature: 0.01
         thickness: 10.0
         material: BK7
-        diameter: 20.0
+        diameter: 40.0
       - id: 6
         type: sphere
         curvature: -0.01
-        thickness: 54.27562
+        thickness: 40.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
       - id: 7
         type: sphere
         curvature: 0.001
         thickness: 0.0
         material: AIR
-        diameter: 20.0
+        diameter: 40.0
     merit:
       type: spot_rms
       terms:
@@ -468,3 +713,63 @@ configs:
           field: 0
           wavelength: 0.00058756
           weight: 1.0
+        - kind: spot_rms
+          field: 1
+          wavelength: 0.00058756
+          weight: 0.3
+        - kind: spot_rms
+          field: 2
+          wavelength: 0.00058756
+          weight: 0.1
+    constraints:
+      - id: img_h0
+        kind: equality
+        measure: image_height
+        field: 0
+        target: 0.0
+        weight: 1.0
+        active: true
+      - id: img_h1
+        kind: equality
+        measure: image_height
+        field: 1
+        target: 10.0
+        weight: 1.0
+        active: true
+      - id: img_h2
+        kind: equality
+        measure: image_height
+        field: 2
+        target: 15.0
+        weight: 1.0
+        active: true
+      - id: inc_a0
+        kind: fuzzy
+        measure: incident_angle
+        field: 0
+        surface: 1
+        target: 0.0
+        band_width: 0.5
+        softness: 3.0
+        weight: 0.5
+        active: true
+      - id: inc_a1
+        kind: fuzzy
+        measure: incident_angle
+        field: 1
+        surface: 1
+        target: 3.36
+        band_width: 2.0
+        softness: 5.0
+        weight: 0.5
+        active: true
+      - id: inc_a2
+        kind: fuzzy
+        measure: incident_angle
+        field: 2
+        surface: 1
+        target: 5.06
+        band_width: 2.0
+        softness: 5.0
+        weight: 0.5
+        active: true
