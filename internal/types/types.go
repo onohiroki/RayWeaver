@@ -215,9 +215,10 @@ type RayInput struct {
 }
 
 type FieldItem struct {
-	ID       int     `yaml:"id"`
-	AngleDeg float64 `yaml:"angle_deg,omitempty"`
-	Weight   float64 `yaml:"weight"`
+	ID          int     `yaml:"id"`
+	AngleDeg    float64 `yaml:"angle_deg,omitempty"`
+	ImageHeight float64 `yaml:"image_height,omitempty"`
+	Weight      float64 `yaml:"weight"`
 }
 
 type WavelengthItem struct {

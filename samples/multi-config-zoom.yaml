@@ -521,9 +521,9 @@ chief:
   reference_surface: 12
   num_rays: 256
   fields:
-  - angle: 0.0
-  - angle: 6.0
-  - angle: 10.0
+  - image_height: 0.0
+  - image_height: 10.0
+  - image_height: 15.0
 configs:
 - id: config0
   name: Wide
@@ -531,13 +531,13 @@ configs:
   active: true
   fields:
   - id: 0
-    angle_deg: 0.0
+    image_height: 0.0
     weight: 1.0
   - id: 1
-    angle_deg: 7.0
+    image_height: 10.0
     weight: 1.0
   - id: 2
-    angle_deg: 10.5
+    image_height: 15.0
     weight: 1.0
   wavelengths:
   - id: 0
@@ -681,13 +681,13 @@ configs:
   active: true
   fields:
   - id: 0
-    angle_deg: 0.0
+    image_height: 0.0
     weight: 1.0
   - id: 1
-    angle_deg: 6.0
+    image_height: 10.0
     weight: 1.0
   - id: 2
-    angle_deg: 9.0
+    image_height: 15.0
     weight: 1.0
   wavelengths:
   - id: 0
@@ -831,13 +831,13 @@ configs:
   active: true
   fields:
   - id: 0
-    angle_deg: 0.0
+    image_height: 0.0
     weight: 1.0
   - id: 1
-    angle_deg: 5.0
+    image_height: 10.0
     weight: 1.0
   - id: 2
-    angle_deg: 7.5
+    image_height: 15.0
     weight: 1.0
   wavelengths:
   - id: 0

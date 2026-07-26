@@ -494,7 +494,7 @@ func (o *MultiOptimizer) evaluateMerit(x []float64) float64 {
 
 		extremeAngle := 0.0
 		for _, term := range cfg.MeritTerms {
-			angle := fieldAngleForTerm(cfg, term)
+			angle := o.fieldAngleForTerm(cfg, term, surfaces)
 			a := math.Abs(angle)
 			if a > extremeAngle {
 				extremeAngle = a
@@ -506,7 +506,7 @@ func (o *MultiOptimizer) evaluateMerit(x []float64) float64 {
 
 		for pass := 0; pass < 2; pass++ {
 			for _, term := range cfg.MeritTerms {
-				angle := fieldAngleForTerm(cfg, term)
+				angle := o.fieldAngleForTerm(cfg, term, surfaces)
 				isExtreme := math.Abs(angle) == extremeAngle && extremeAngle > 0
 				if (pass == 0) != isExtreme {
 					continue
@@ -543,7 +543,7 @@ func (o *MultiOptimizer) evaluateMerit(x []float64) float64 {
 			if !c.Active {
 				continue
 			}
-			angle := fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field})
+			angle := o.fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field}, surfaces)
 			value := constraint.Evaluate(c, surfaces, angle, gc)
 			err := constraint.ComputeError(c.Kind, value, c)
 			cfgMerit += c.Weight * err * err
@@ -644,7 +644,7 @@ func (o *MultiOptimizer) traceFieldGrid(surfaces []types.Surface, cfg ConfigInpu
 	}
 	engine := ray.NewEngine(gc, nil)
 
-	fieldAngle := fieldAngleForTerm(cfg, term)
+	fieldAngle := o.fieldAngleForTerm(cfg, term, surfaces)
 	wavelength := term.Wavelength
 
 	path := buildPath(surfaces)
@@ -788,7 +788,7 @@ func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 				allR = append(allR, 0)
 				continue
 			}
-			angle := fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field})
+			angle := o.fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field}, surfaces)
 			value := constraint.Evaluate(c, surfaces, angle, gc)
 			err := constraint.ComputeError(c.Kind, value, c)
 			allR = append(allR, math.Sqrt(c.Weight)*err)
@@ -929,13 +929,68 @@ func currentVariableValue(o *MultiOptimizer, v VariableInfo, x []float64) float6
 	return x[0] // simplified; caller should index properly
 }
 
-func fieldAngleForTerm(cfg ConfigInput, term types.MeritTerm) float64 {
+func (o *MultiOptimizer) fieldAngleForTerm(cfg ConfigInput, term types.MeritTerm, surfaces []types.Surface) float64 {
 	for _, f := range cfg.Fields {
 		if f.ID == term.Field {
-			return f.AngleDeg
+			if f.AngleDeg != 0 || f.ImageHeight == 0 {
+				return f.AngleDeg
+			}
+			return o.imageHeightToFieldAngle(cfg, surfaces, f.ImageHeight, term.Wavelength)
 		}
 	}
 	return 0
+}
+
+func (o *MultiOptimizer) imageHeightToFieldAngle(cfg ConfigInput, surfaces []types.Surface, targetHeight, wavelength float64) float64 {
+	gc := o.gc
+	if o.tempGC != nil {
+		gc = o.tempGC
+	}
+	path := buildPath(surfaces)
+	engine := ray.NewEngine(gc, nil)
+
+	apertureRadius := apertureRadiusForGrid(surfaces, wavelength, gc, o.apertureMargin)
+	if apertureRadius <= 0 {
+		return 0
+	}
+
+	pol := types.NewCircularJones(true)
+
+	lo, hi := 0.0, 45.0
+	for iter := 0; iter < 30; iter++ {
+		mid := (lo + hi) / 2
+		thetaRad := mid * math.Pi / 180.0
+		dir := types.Vec3{X: 0, Y: math.Sin(thetaRad), Z: math.Cos(thetaRad)}.Normalize()
+
+		origin := types.Vec3{X: 0, Y: 0, Z: -100.0}
+		r := types.Ray{
+			Wavelength:        wavelength,
+			Initial:           types.RayState{Origin: origin, Direction: dir},
+			Path:              path,
+			Jones:             pol,
+			SkipGlassPathCheck: mid == 0,
+		}
+		result := engine.TraceRay(r, surfaces)
+		if result.Error != "" {
+			hi = mid
+			continue
+		}
+		if len(result.Surfaces) == 0 {
+			return 0
+		}
+		last := result.Surfaces[len(result.Surfaces)-1]
+		y := last.Position.Y
+
+		if math.Abs(y-targetHeight) < 1e-6 {
+			return mid
+		}
+		if y < targetHeight {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return (lo + hi) / 2
 }
 
 func fieldWeightForTerm(cfg ConfigInput, term types.MeritTerm) float64 {
