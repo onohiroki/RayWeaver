@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 
+	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
@@ -44,15 +45,17 @@ type MeritTerm struct {
 }
 
 type Config struct {
-	Surfaces      []types.Surface
-	Variables     []Variable
-	MeritTerms    []MeritTerm
-	GlassCatalog  *glass.Catalog
+	Surfaces       []types.Surface
+	Variables      []Variable
+	MeritTerms     []MeritTerm
+	Fields         []types.FieldItem
+	Constraints    []types.ConstraintOperand
+	GlassCatalog   *glass.Catalog
 	CoatingCatalog interface{}
-	MaxIter       int
-	Mu            float64
-	Tol           float64
-	Epsilon       float64
+	MaxIter        int
+	Mu             float64
+	Tol            float64
+	Epsilon        float64
 	NumRays        int
 	ApertureMargin float64
 	Logger         Logger
@@ -88,6 +91,8 @@ type Optimizer struct {
 	surfaces        []types.Surface
 	variables       []Variable
 	meritTerms      []MeritTerm
+	fields          []types.FieldItem
+	constraints     []types.ConstraintOperand
 	gc              *glass.Catalog
 	glassOverrides  map[string]*types.Glass
 	tempGC          *glass.Catalog
@@ -162,6 +167,8 @@ func NewOptimizer(cfg Config) *Optimizer {
 		surfaces:         cfg.Surfaces,
 		variables:        cfg.Variables,
 		meritTerms:       cfg.MeritTerms,
+		fields:           cfg.Fields,
+		constraints:      cfg.Constraints,
 		gc:               cfg.GlassCatalog,
 		glassOverrides:   glassOverrides,
 		initialDiameters: initialDiameters,
@@ -413,6 +420,21 @@ func (o *Optimizer) evaluateMerit(x []float64) float64 {
 	}
 
 	o.apertureExtents = extents
+
+	// Constraint penalties
+	gcConstraint := o.gc
+	if o.tempGC != nil {
+		gcConstraint = o.tempGC
+	}
+	for _, c := range o.constraints {
+		if !c.Active {
+			continue
+		}
+		value := constraint.Evaluate(c, surfaces, o.resolveFieldAngle(c.Field), gcConstraint)
+		err := constraint.ComputeError(c.Kind, value, c)
+		merit += c.Weight * err * err
+	}
+
 	return merit
 }
 
@@ -592,7 +614,7 @@ func sanitizeFloat64(v float64) float64 {
 }
 
 func (o *Optimizer) computeJacobianAndResiduals(x []float64) ([][]float64, []float64) {
-	nTerms := len(o.meritTerms)
+	nResiduals := len(o.meritTerms) + len(o.constraints)
 	nVars := len(x)
 
 	for j := 0; j < nVars; j++ {
@@ -601,8 +623,8 @@ func (o *Optimizer) computeJacobianAndResiduals(x []float64) ([][]float64, []flo
 
 	r0 := o.computeResiduals(x)
 
-	J := make([][]float64, nTerms)
-	for i := 0; i < nTerms; i++ {
+	J := make([][]float64, nResiduals)
+	for i := 0; i < nResiduals; i++ {
 		J[i] = make([]float64, nVars)
 	}
 
@@ -613,7 +635,7 @@ func (o *Optimizer) computeJacobianAndResiduals(x []float64) ([][]float64, []flo
 
 		rPert := o.computeResiduals(xPert)
 
-		for i := 0; i < nTerms; i++ {
+		for i := 0; i < nResiduals; i++ {
 			diff := rPert[i] - r0[i]
 			J[i][j] = sanitizeFloat64(diff / o.epsilon)
 		}
@@ -624,12 +646,29 @@ func (o *Optimizer) computeJacobianAndResiduals(x []float64) ([][]float64, []flo
 
 func (o *Optimizer) computeResiduals(x []float64) []float64 {
 	surfaces := o.applyVariables(x)
-	r := make([]float64, len(o.meritTerms))
+	nTerms := len(o.meritTerms)
+	nCon := len(o.constraints)
+	r := make([]float64, nTerms+nCon)
+
+	gc := o.gc
+	if o.tempGC != nil {
+		gc = o.tempGC
+	}
 
 	for i, term := range o.meritTerms {
 		points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
 		rms := computeSpotRMS(points)
 		r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
+	}
+
+	for j, c := range o.constraints {
+		if !c.Active {
+			r[nTerms+j] = 0
+			continue
+		}
+		value := constraint.Evaluate(c, surfaces, o.resolveFieldAngle(c.Field), gc)
+		err := constraint.ComputeError(c.Kind, value, c)
+		r[nTerms+j] = math.Sqrt(c.Weight) * err
 	}
 
 	return r
@@ -850,6 +889,18 @@ func generatePupilGrid(numRays int, apertureRadius float64) []pupilPoint {
 		}
 	}
 	return pts
+}
+
+func (o *Optimizer) resolveFieldAngle(fieldID int) float64 {
+	if fieldID == 0 {
+		return 0
+	}
+	for _, f := range o.fields {
+		if f.ID == fieldID {
+			return f.AngleDeg
+		}
+	}
+	return 0
 }
 
 func computeStopZ(surfaces []types.Surface) float64 {

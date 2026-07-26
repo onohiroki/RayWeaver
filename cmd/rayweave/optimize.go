@@ -104,10 +104,14 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 		}
 	}
 
+	fields := loadFields(input)
+
 	cfg := optimize.Config{
 		Surfaces:     surfaces,
 		Variables:    variables,
 		MeritTerms:   meritTerms,
+		Fields:       fields,
+		Constraints:  input.Optimization.Constraints,
 		GlassCatalog: gc,
 		Logger:       logger,
 		MaxIter:      input.Optimization.MaxIter,
@@ -237,6 +241,26 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 	}
 
 	return terms
+}
+
+func loadFields(input types.Input) []types.FieldItem {
+	if len(input.Configs) > 0 {
+		if len(input.Configs[0].Fields) > 0 {
+			return input.Configs[0].Fields
+		}
+	}
+	if input.Chief != nil {
+		var fields []types.FieldItem
+		for _, f := range input.Chief.Fields {
+			fields = append(fields, types.FieldItem{
+				ID:       0,
+				AngleDeg: f.Angle,
+				Weight:   1.0,
+			})
+		}
+		return fields
+	}
+	return nil
 }
 
 func applyVariableStates(surfaces []types.Surface, states []optimize.VariableState, gc *glass.Catalog) ([]types.Surface, []types.Glass) {
@@ -391,6 +415,11 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 			}
 		}
 
+		constraints := input.Optimization.Constraints
+		if len(cfg.Constraints) > 0 {
+			constraints = cfg.Constraints
+		}
+
 		configs = append(configs, multiopt.ConfigInput{
 			ID:          cfg.ID,
 			Weight:      cfg.Weight,
@@ -398,6 +427,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 			Fields:      fields,
 			Wavelengths: wavelengths,
 			MeritTerms:  meritTerms,
+			Constraints: constraints,
 		})
 	}
 

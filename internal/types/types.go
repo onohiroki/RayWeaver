@@ -248,15 +248,16 @@ type MeritFunction struct {
 }
 
 type Config struct {
-	ID          string            `yaml:"id"`
-	Name        string            `yaml:"name"`
-	Weight      float64           `yaml:"weight"`
-	Active      bool              `yaml:"active"`
-	Fields      []FieldItem       `yaml:"fields"`
-	Wavelengths []WavelengthItem  `yaml:"wavelengths"`
-	RayPaths    []RayPath         `yaml:"ray_paths"`
-	Surfaces    []Surface         `yaml:"surfaces"`
-	Merit       *MeritFunction    `yaml:"merit,omitempty"`
+	ID          string               `yaml:"id"`
+	Name        string               `yaml:"name"`
+	Weight      float64              `yaml:"weight"`
+	Active      bool                 `yaml:"active"`
+	Fields      []FieldItem          `yaml:"fields"`
+	Wavelengths []WavelengthItem     `yaml:"wavelengths"`
+	RayPaths    []RayPath            `yaml:"ray_paths"`
+	Surfaces    []Surface            `yaml:"surfaces"`
+	Merit       *MeritFunction       `yaml:"merit,omitempty"`
+	Constraints []ConstraintOperand  `yaml:"constraints,omitempty"`
 }
 
 type VariableTarget struct {
@@ -300,26 +301,40 @@ type LocalVariableDef struct {
 	Active bool           `yaml:"active"`
 }
 
-type PenaltyConfig struct {
-	Type   string  `yaml:"type"`
-	Weight float64 `yaml:"weight"`
-	Tau    float64 `yaml:"tau,omitempty"`
-}
+type ConstraintKind string
 
-type ConstraintTarget struct {
-	Type   string `yaml:"type"`
-	Config string `yaml:"config,omitempty"`
-	ID     int    `yaml:"id,omitempty"`
-	Param  string `yaml:"param,omitempty"`
-}
+const (
+	ConstraintEquality        ConstraintKind = "equality"
+	ConstraintInequalityUpper ConstraintKind = "inequality_upper"
+	ConstraintInequalityLower ConstraintKind = "inequality_lower"
+	ConstraintBand            ConstraintKind = "band"
+	ConstraintFuzzy           ConstraintKind = "fuzzy"
+)
 
-type Constraint struct {
-	Name    string           `yaml:"name"`
-	Kind    string           `yaml:"kind"`
-	Target  ConstraintTarget `yaml:"target"`
-	Limit   float64          `yaml:"limit"`
-	Penalty PenaltyConfig    `yaml:"penalty"`
-	Active  bool             `yaml:"active"`
+type ConstraintMeasure string
+
+const (
+	MeasureImageHeight   ConstraintMeasure = "image_height"
+	MeasureIncidentAngle ConstraintMeasure = "incident_angle"
+	MeasureThickness     ConstraintMeasure = "thickness"
+	MeasureEFL           ConstraintMeasure = "efl"
+	MeasureSystemLength  ConstraintMeasure = "system_length"
+)
+
+type ConstraintOperand struct {
+	ID         string            `yaml:"id"`
+	Kind       ConstraintKind    `yaml:"kind"`
+	Measure    ConstraintMeasure `yaml:"measure"`
+	Field      int               `yaml:"field,omitempty"`
+	Wavelength float64           `yaml:"wavelength,omitempty"`
+	Surface    int               `yaml:"surface,omitempty"`
+	Target     float64           `yaml:"target,omitempty"`
+	Lower      float64           `yaml:"lower,omitempty"`
+	Upper      float64           `yaml:"upper,omitempty"`
+	BandWidth  float64           `yaml:"band_width,omitempty"`
+	Softness   float64           `yaml:"softness,omitempty"`
+	Weight     float64           `yaml:"weight"`
+	Active     bool              `yaml:"active"`
 }
 
 type OptimizationConfig struct {
@@ -331,7 +346,7 @@ type OptimizationConfig struct {
 	Variables       []OptimizationVariable  `yaml:"variables,omitempty"`
 	SharedVariables []SharedVariable        `yaml:"shared_variables,omitempty"`
 	LocalVariables  []LocalVariableDef      `yaml:"local_variables,omitempty"`
-	Constraints     []Constraint            `yaml:"constraints,omitempty"`
+	Constraints     []ConstraintOperand      `yaml:"constraints,omitempty"`
 }
 
 type MeritTermResult struct {

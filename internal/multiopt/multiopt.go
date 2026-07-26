@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
@@ -26,6 +27,7 @@ type ConfigInput struct {
 	Fields      []types.FieldItem
 	Wavelengths []types.WavelengthItem
 	MeritTerms  []types.MeritTerm
+	Constraints []types.ConstraintOperand
 }
 
 type VariableInfo struct {
@@ -406,6 +408,21 @@ func (o *MultiOptimizer) evaluateMerit(x []float64) float64 {
 			}
 		}
 
+		// Constraint penalties
+		gc := o.gc
+		if o.tempGC != nil {
+			gc = o.tempGC
+		}
+		for _, c := range cfg.Constraints {
+			if !c.Active {
+				continue
+			}
+			angle := fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field})
+			value := constraint.Evaluate(c, surfaces, angle, gc)
+			err := constraint.ComputeError(c.Kind, value, c)
+			cfgMerit += c.Weight * err * err
+		}
+
 		merit += cfg.Weight * cfgMerit
 	}
 
@@ -576,9 +593,9 @@ func (o *MultiOptimizer) traceFieldGrid(surfaces []types.Surface, cfg ConfigInpu
 }
 
 func (o *MultiOptimizer) computeJacobianAndResiduals(x []float64) ([][]float64, []float64) {
-	totalTerms := 0
+	nResiduals := 0
 	for _, cfg := range o.configs {
-		totalTerms += len(cfg.MeritTerms)
+		nResiduals += len(cfg.MeritTerms) + len(cfg.Constraints)
 	}
 	nVars := len(x)
 
@@ -588,8 +605,8 @@ func (o *MultiOptimizer) computeJacobianAndResiduals(x []float64) ([][]float64, 
 
 	r0 := o.computeResiduals(x)
 
-	J := make([][]float64, totalTerms)
-	for i := 0; i < totalTerms; i++ {
+	J := make([][]float64, nResiduals)
+	for i := 0; i < nResiduals; i++ {
 		J[i] = make([]float64, nVars)
 	}
 
@@ -600,7 +617,7 @@ func (o *MultiOptimizer) computeJacobianAndResiduals(x []float64) ([][]float64, 
 
 		rPert := o.computeResiduals(xPert)
 
-		for i := 0; i < totalTerms; i++ {
+		for i := 0; i < nResiduals; i++ {
 			diff := rPert[i] - r0[i]
 			J[i][j] = sanitizeFloat64(diff / o.epsilon)
 		}
@@ -611,6 +628,11 @@ func (o *MultiOptimizer) computeJacobianAndResiduals(x []float64) ([][]float64, 
 
 func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 	configSurfaces := o.applyVariables(x)
+
+	gc := o.gc
+	if o.tempGC != nil {
+		gc = o.tempGC
+	}
 
 	var allR []float64
 	for _, cfg := range o.configs {
@@ -630,6 +652,17 @@ func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 			rms := computeSpotRMS(points)
 			r := math.Sqrt(cfg.Weight*term.Weight*fieldWeightForTerm(cfg, term)*wavWeightForTerm(cfg, term)) * rms
 			allR = append(allR, r)
+		}
+
+		for _, c := range cfg.Constraints {
+			if !c.Active {
+				allR = append(allR, 0)
+				continue
+			}
+			angle := fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field})
+			value := constraint.Evaluate(c, surfaces, angle, gc)
+			err := constraint.ComputeError(c.Kind, value, c)
+			allR = append(allR, math.Sqrt(c.Weight)*err)
 		}
 	}
 
