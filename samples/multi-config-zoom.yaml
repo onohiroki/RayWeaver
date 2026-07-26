@@ -638,8 +638,8 @@ configs:
   constraints:
   - kind: band
     measure: abs_efl
-    lower: 65
-    upper: 85
+    lower: 60
+    upper: 100
     weight: 1.0
     active: true
   - kind: inequality_lower
@@ -788,8 +788,8 @@ configs:
   constraints:
   - kind: band
     measure: abs_efl
-    lower: 86
-    upper: 110
+    lower: 90
+    upper: 130
     weight: 1.0
     active: true
   - kind: inequality_lower
@@ -938,8 +938,8 @@ configs:
   constraints:
   - kind: band
     measure: abs_efl
-    lower: 111
-    upper: 160
+    lower: 100
+    upper: 200
     weight: 1.0
     active: true
   - kind: inequality_lower

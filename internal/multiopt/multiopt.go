@@ -255,7 +255,7 @@ func (o *MultiOptimizer) Optimize() Result {
 			for j := 0; j < nVars; j++ {
 				sum += J[i][j] * delta[j]
 			}
-			predictedReduction -= r[i] * sum
+			predictedReduction += r[i] * sum
 		}
 		halfDeltaHDelta := 0.0
 		for j := 0; j < nVars; j++ {
@@ -409,23 +409,8 @@ func (o *MultiOptimizer) Optimize() Result {
 							sum += J[i][j] * delta[j]
 						}
 					}
-					predictedReduction -= r[i] * sum
+					predictedReduction += r[i] * sum
 				}
-				// Add -0.5·δᵀ·H·δ term for full quadratic model
-				hh := 0.0
-				for j := 0; j < nVars; j++ {
-					if !thickOnly[j] {
-						continue
-					}
-					sum := 0.0
-					for k := 0; k < nVars; k++ {
-						if thickOnly[k] {
-							sum += H[j][k] * delta[k]
-						}
-					}
-					hh += delta[j] * sum
-				}
-				predictedReduction -= 0.5 * hh
 				if predictedReduction > 1e-20 {
 					rho = actualReduction / predictedReduction
 				} else if predictedReduction < -1e-20 {
