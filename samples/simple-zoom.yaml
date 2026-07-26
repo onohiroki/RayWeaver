@@ -461,21 +461,21 @@ configs:
         measure: image_height
         field: 0
         target: 0.0
-        weight: 1.0
+        weight: 100.0
         active: true
       - id: img_h1
         kind: equality
         measure: image_height
         field: 1
         target: 10.0
-        weight: 1.0
+        weight: 100.0
         active: true
       - id: img_h2
         kind: equality
         measure: image_height
         field: 2
         target: 15.0
-        weight: 1.0
+        weight: 100.0
         active: true
       - id: inc_a0
         kind: fuzzy
@@ -594,21 +594,21 @@ configs:
         measure: image_height
         field: 0
         target: 0.0
-        weight: 1.0
+        weight: 100.0
         active: true
       - id: img_h1
         kind: equality
         measure: image_height
         field: 1
         target: 10.0
-        weight: 1.0
+        weight: 100.0
         active: true
       - id: img_h2
         kind: equality
         measure: image_height
         field: 2
         target: 15.0
-        weight: 1.0
+        weight: 100.0
         active: true
       - id: inc_a0
         kind: fuzzy
@@ -727,21 +727,21 @@ configs:
         measure: image_height
         field: 0
         target: 0.0
-        weight: 1.0
+        weight: 100.0
         active: true
       - id: img_h1
         kind: equality
         measure: image_height
         field: 1
         target: 10.0
-        weight: 1.0
+        weight: 100.0
         active: true
       - id: img_h2
         kind: equality
         measure: image_height
         field: 2
         target: 15.0
-        weight: 1.0
+        weight: 100.0
         active: true
       - id: inc_a0
         kind: fuzzy
