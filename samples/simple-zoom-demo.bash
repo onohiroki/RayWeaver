@@ -85,4 +85,60 @@ for cfg in config0 config1 config2; do
 done
 echo
 
+# ── 5. Spot RMS comparison (before vs after) ──
+echo "=== Spot RMS Comparison (on-axis, field 0°) ==="
+printf "  %-8s %12s %12s\n" "Config" "RMS before" "RMS after"
+
+# Extract on-axis RMS from chief output (field_angle: 0)
+get_onaxis_rms() {
+  local yaml_file="$1"
+  local cfg="$2"
+  # Use python3 to safely parse the YAML chief output
+  python3 -c "
+import sys, yaml
+with open('/dev/stdin') as f:
+    data = yaml.safe_load(f)
+if data and 'chief_rays' in data:
+    for ray in data['chief_rays']:
+        if ray.get('field_angle') == 0 or abs(ray.get('field_angle', 1)) < 1e-10:
+            ss = ray.get('spot_stats', {})
+            rms = ss.get('rms_r', -1)
+            if rms > 0:
+                print(rms)
+                sys.exit(0)
+print(-1)
+" < <($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null)
+}
+
+rms_before_config1=$(get_onaxis_rms "$YAML" config1)
+echo "  (config1 on-axis before = $rms_before_config1 mm — reference)"
+
+failed=false
+for cfg in config0 config1 config2; do
+  rms_before=$(get_onaxis_rms "$YAML" "$cfg")
+  rms_after=$(get_onaxis_rms "$RESULT" "$cfg")
+  printf "  %-8s %12.4f %12.4f" "$cfg" "$rms_before" "$rms_after"
+  if [ "$rms_before" != "-1" ] && [ "$rms_after" != "-1" ]; then
+    if (( $(echo "$rms_after < $rms_before" | bc -l) )); then
+      printf "   ✓"
+    else
+      printf "   ✗"
+    fi
+  fi
+  echo
+  # Check if all optimized RMS < initial config1 RMS
+  if [ "$rms_after" != "-1" ] && (( $(echo "$rms_after >= $rms_before_config1" | bc -l) )); then
+    failed=true
+  fi
+done
+
+if [ "$failed" = true ]; then
+  echo
+  echo "  >>> Optimization failed: not all configs improved below config1's initial on-axis RMS ($rms_before_config1 mm)"
+  exit 1
+fi
+echo
+echo "  >>> Optimization passed: all configs on-axis RMS < config1 initial ($rms_before_config1 mm)"
+echo
+
 # (cleanup is handled at the top for --clean mode)
