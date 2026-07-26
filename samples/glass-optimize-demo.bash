@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 # CLI options
 CLEAN=false
@@ -68,20 +68,27 @@ grep -E "^=== |Status|Merit|Improvement" "$OPT_RESULT" 2>/dev/null | head -10
 echo
 
 echo "--- Glass before → after ---"
-# Extract initial glass values from YAML
-INIT_ND1=$(grep -A2 "name: \"model1\"" "$YAML" | grep "nd:" | sed 's/.*nd: //')
-INIT_VD1=$(grep -A2 "name: \"model1\"" "$YAML" | grep "vd:" | sed 's/.*vd: //')
-INIT_ND2=$(grep -A2 "name: \"model2\"" "$YAML" | grep "nd:" | sed 's/.*nd: //')
-INIT_VD2=$(grep -A2 "name: \"model2\"" "$YAML" | grep "vd:" | sed 's/.*vd: //')
-INIT_ND3=$(grep -A2 "name: \"model3\"" "$YAML" | grep "nd:" | sed 's/.*nd: //')
-INIT_VD3=$(grep -A2 "name: \"model3\"" "$YAML" | grep "vd:" | sed 's/.*vd: //')
-# Optimized glasses are the last 3 nd/vd pairs in the glass entries
-OPT_ND3=$(grep -E "^\s+nd: [0-9]" "$OPT_RESULT" | tail -1 | sed 's/.*nd: //')
-OPT_VD3=$(grep -E "^\s+vd: [0-9]" "$OPT_RESULT" | tail -1 | sed 's/.*vd: //')
-OPT_ND2=$(grep -E "^\s+nd: [0-9]" "$OPT_RESULT" | tail -3 | sed -n '2p' | sed 's/.*nd: //')
-OPT_VD2=$(grep -E "^\s+vd: [0-9]" "$OPT_RESULT" | tail -3 | sed -n '2p' | sed 's/.*vd: //')
-OPT_ND1=$(grep -E "^\s+nd: [0-9]" "$OPT_RESULT" | tail -3 | sed -n '1p' | sed 's/.*nd: //')
-OPT_VD1=$(grep -E "^\s+vd: [0-9]" "$OPT_RESULT" | tail -3 | sed -n '1p' | sed 's/.*vd: //')
+extract_glass_value() {
+  local yaml="$1"
+  local label="$2"
+  local field="$3"
+  grep -A3 "name: \"$label\"" "$yaml" | grep "$field:" | sed 's/.*'"$field"': *//' | head -1
+}
+INIT_ND1=$(extract_glass_value "$YAML" model1 nd)
+INIT_VD1=$(extract_glass_value "$YAML" model1 vd)
+INIT_ND2=$(extract_glass_value "$YAML" model2 nd)
+INIT_VD2=$(extract_glass_value "$YAML" model2 vd)
+INIT_ND3=$(extract_glass_value "$YAML" model3 nd)
+INIT_VD3=$(extract_glass_value "$YAML" model3 vd)
+# Optimized glasses: extract the last 3 nd/vd pairs from the result
+OPT_NDS=$(grep -E "^\s+nd: [0-9]" "$OPT_RESULT" | tail -3)
+OPT_VDS=$(grep -E "^\s+vd: [0-9]" "$OPT_RESULT" | tail -3)
+OPT_ND1=$(echo "$OPT_NDS" | sed -n '1p' | sed 's/.*nd: *//')
+OPT_VD1=$(echo "$OPT_VDS" | sed -n '1p' | sed 's/.*vd: *//')
+OPT_ND2=$(echo "$OPT_NDS" | sed -n '2p' | sed 's/.*nd: *//')
+OPT_VD2=$(echo "$OPT_VDS" | sed -n '2p' | sed 's/.*vd: *//')
+OPT_ND3=$(echo "$OPT_NDS" | sed -n '3p' | sed 's/.*nd: *//')
+OPT_VD3=$(echo "$OPT_VDS" | sed -n '3p' | sed 's/.*vd: *//')
 echo "  model1: nd $INIT_ND1 → $OPT_ND1  vd $INIT_VD1 → $OPT_VD1"
 echo "  model2: nd $INIT_ND2 → $OPT_ND2  vd $INIT_VD2 → $OPT_VD2"
 echo "  model3: nd $INIT_ND3 → $OPT_ND3  vd $INIT_VD3 → $OPT_VD3"
@@ -90,31 +97,30 @@ echo
 echo "--- Surface curvatures and diameters ---"
 echo "  Surface  curv       diameter  material"
 for ID in 1 2 3 4 5 6; do
-  BLOCK=$(grep -A8 "id: $ID$" "$OPT_RESULT")
-  CV=$(echo "$BLOCK" | grep -E "curvature:|radius:" | sed 's/.*: //')
-  DIAM=$(echo "$BLOCK" | grep "diameter:" | sed 's/.*diameter: //')
-  MAT=$(echo "$BLOCK" | grep "material:" | sed 's/.*material: //')
+  BLOCK=$(grep -A8 "id: $ID$" "$OPT_RESULT" 2>/dev/null || true)
+  CV=$(echo "$BLOCK" | grep -E "curvature:|radius:" | sed 's/.*: //' 2>/dev/null || echo "?")
+  DIAM=$(echo "$BLOCK" | grep "diameter:" | sed 's/.*diameter: //' 2>/dev/null || echo "?")
+  MAT=$(echo "$BLOCK" | grep "material:" | sed 's/.*material: //' 2>/dev/null || echo "?")
   printf "  %-7s %-10s %-8s  %s\n" "S$ID" "$CV" "${DIAM:-?}" "$MAT"
 done
 echo
 
-# Compute diffraction limit
-FNO=$($RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | grep "inf_conj_image_space_f_number" | sed 's/.*f_number: //')
+# Compute diffraction limit (best-effort)
+FNO=$($RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | grep "inf_conj_image_space_f_number" | sed 's/.*f_number: //' || echo "")
 if [ -n "$FNO" ]; then
   AIRY=$(echo "scale=6; 1.22 * 0.0005876 * $FNO" | bc -l 2>/dev/null || echo "0")
-  # Extract final merit from the log file (last iter before final entry)
-  MERIT=$(grep '"merit"' "$OPT_LOG" | tail -2 | head -1 | sed 's/.*"merit"://;s/,.*//' 2>/dev/null || echo "0")
+  MERIT=$(grep '"merit"' "$OPT_LOG" 2>/dev/null | tail -2 | head -1 | sed 's/.*"merit"://;s/,.*//' || echo "0")
   NTERMS=12
   RMS_R=$(echo "scale=6; sqrt($MERIT / $NTERMS)" | bc -l 2>/dev/null || echo "0")
-  echo "--- Diffraction limit ---"
-  printf "  F-number:         %s\n" "$FNO"
-  printf "  Airy disk radius: %.6f mm (1.22λF#)\n" "$AIRY"
-  printf "  RMS spot radius:  %.6f mm\n" "$RMS_R"
-  if [ "$(echo "$RMS_R > 0" | bc -l 2>/dev/null)" = "1" ]; then
+  if [ "$RMS_R" != "0" ]; then
+    echo "--- Diffraction limit ---"
+    printf "  F-number:         %s\n" "$FNO"
+    printf "  Airy disk radius: %.6f mm (1.22λF#)\n" "$AIRY"
+    printf "  RMS spot radius:  %.6f mm\n" "$RMS_R"
     RATIO=$(echo "scale=1; $RMS_R / $AIRY" | bc -l 2>/dev/null || echo "0")
     echo "  Spot / Airy:      ${RATIO}x"
+    echo
   fi
-  echo
 fi
 
 # ── Spot RMS comparison (before vs after) ──
@@ -164,6 +170,8 @@ $RAYWEAVE chief --clear-aperture < "$OPT_RESULT" 2>/dev/null \
   | $RAYWEAVE plot -o "$OUTDIR/glass-optimize-opt.png" 2>/dev/null || true
 echo "Written: $OUTDIR/glass-optimize-opt.png"
 echo
+
+if command -v yq &>/dev/null && command -v gnuplot &>/dev/null 2>&1; then
 
 echo "=== Spot diagrams (4 wavelengths, before vs after) ==="
 
@@ -256,5 +264,9 @@ GPLOT
   fi
 done
 echo
+
+else
+  echo "  (spot diagrams skipped: yq or gnuplot not available)"
+fi
 
 echo "=== Iteration log saved: $OPT_LOG ==="
