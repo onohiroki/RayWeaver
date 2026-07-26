@@ -78,6 +78,8 @@ func main() {
 		runPlot(data)
 	case "optimize":
 		runOptimize(data, optVerbose, optLogFile)
+	case "import":
+		runImport(data)
 	default:
 		fmt.Fprintf(os.Stderr, "Error: unknown subcommand %q\n", subcommand)
 		fmt.Fprintf(os.Stderr, "Run 'rayweave --help' for usage.\n")
@@ -310,6 +312,32 @@ A CONF operand selects which config's merit terms are active for each rule.
 
 Output: optimized YAML with updated surface parameters in each config.
  `)
+	case "import":
+		fmt.Print(`Usage: rayweave import --format zemax < lens.zmx > system.yaml
+
+Imports a lens file from another optical design tool and converts it
+to RayWeave YAML (multi-config format).
+
+If the lens data includes field angles, chief rays and marginal rays
+are automatically computed so the output can be piped directly into
+"rayweave trace" and "rayweave plot".
+
+Options:
+  --format zemax     input format (required: zemax | oslo | codev)
+  --config-id name   config id (default: "config1")
+  --config-name name config display name (default: "Config1")
+  --no-chief         skip automatic chief ray computation
+
+Supported surface types:
+  ZEMAX: STANDARD → sphere, EVENASPH → asphere_polynomial
+  OSLO:  SRF (RD/TH/GL/AP/CV) → sphere, NXT format
+  CODE V: RDY/THI/GLA/CCY/DIA/STO → sphere, ASP/AD/AE/AF → asphere_polynomial
+
+Examples:
+  rayweave import --format zemax < lens.zmx > system.yaml
+  rayweave import --format oslo < lens.len | rayweave trace
+  rayweave import --format zemax < lens.zmx | rayweave plot -o lens.svg
+`)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml
 
@@ -340,6 +368,7 @@ Subcommands:
   tmm        Thin-film coating analysis (transfer-matrix method)
   plot       Generate SVG cross-section drawing
   optimize   DLS optimization of lens surfaces
+  import     Import ZEMAX/OSLO/CODE V lens files
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
   for detailed options and YAML structure.
@@ -419,6 +448,7 @@ func runChief(data []byte) {
 		} else {
 			pt.Surface = *passThrough
 		}
+		input.Chief.StopSurface = *passThrough
 	}
 
 	// Resolve field definitions
