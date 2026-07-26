@@ -76,7 +76,7 @@ func LensPNG(cfg Config) ([]byte, error) {
 	axisLen := totalZ * (1 + rightFrac)
 	ras.Reset(canvasW, canvasH)
 	dashedLine(ras, 0, axisLen, 0, 0.3, scale, midZ, 3, 3)
-	ras.Draw(img, img.Bounds(), image.NewUniform(blendOverWhite(160, 160, 160, 128)), image.Point{})
+	ras.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{160, 160, 160, 128}), image.Point{})
 
 	// Rays (behind lenses)
 	rayWidth := cfg.RayWidth
@@ -94,14 +94,14 @@ func LensPNG(cfg Config) ([]byte, error) {
 		lw = 0.1
 	}
 	globalH := globalMaxSemiDiameter(cfg.Surfaces)
-	outlineCol := blendOverWhite(180, 180, 180, 191)
+	outlineCol := color.NRGBA{180, 180, 180, 191}
 	for _, e := range findElements(cfg.Surfaces, globalH) {
 		mat := e.r1Surf.Material
-		var fill color.RGBA
+		var fill color.NRGBA
 		if gi, ok := cfg.GlassMap[mat]; ok {
 			fill = glassFill(gi.ND, gi.VD, 191)
 		} else {
-			fill = blendOverWhite(180, 180, 180, 191)
+			fill = color.NRGBA{180, 180, 180, 191}
 		}
 		drawElemFill(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, fill)
 		drawElemOutline(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, lw, outlineCol)
@@ -171,7 +171,7 @@ func dashedLine(ras *vector.Rasterizer, z0, z1, y, width, scale, midZ float64, o
 	}
 }
 
-func drawRayPath(ras *vector.Rasterizer, img *image.RGBA, svgPath string, width, scale, midZ float64, c color.RGBA) {
+func drawRayPath(ras *vector.Rasterizer, img *image.RGBA, svgPath string, width, scale, midZ float64, c color.NRGBA) {
 	s := svgPath
 	if !strings.HasPrefix(s, "M ") {
 		return
@@ -203,7 +203,7 @@ func drawRayPath(ras *vector.Rasterizer, img *image.RGBA, svgPath string, width,
 	}
 }
 
-func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ float64, c color.RGBA) {
+func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ float64, c color.NRGBA) {
 	h := e.h
 	if h <= 0 {
 		return
@@ -225,7 +225,7 @@ func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, sc
 	ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
 }
 
-func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ, strokeWidth float64, c color.RGBA) {
+func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ, strokeWidth float64, c color.NRGBA) {
 	h := e.h
 	if h <= 0 {
 		return
@@ -273,30 +273,20 @@ func sampleSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffs
 	}
 }
 
-func glassFill(nd, vd float64, _ uint8) color.RGBA {
+func glassFill(nd, vd float64, alpha uint8) color.NRGBA {
 	r := (2.5-nd)/(2.5-1.4)*90 + (100-vd)/(100-20)*90
 	g := (2.5-nd)/(2.5-1.4)*150 + (vd-20)/(100-20)*100
 	b := (2.5-nd)/(2.5-1.4)*70 + 180
-	return blendOverWhite(clampU8(r), clampU8(g), clampU8(b), 191)
+	return color.NRGBA{clampU8(r), clampU8(g), clampU8(b), alpha}
 }
 
-func parseRGB(s string, alpha uint8) color.RGBA {
+func parseRGB(s string, alpha uint8) color.NRGBA {
 	var r, g, b uint8
 	n, _ := fmt.Sscanf(s, "rgb(%d,%d,%d)", &r, &g, &b)
 	if n == 3 {
-		return blendOverWhite(r, g, b, alpha)
+		return color.NRGBA{r, g, b, alpha}
 	}
-	return blendOverWhite(100, 100, 180, alpha)
-}
-
-func blendOverWhite(r, g, b, alpha uint8) color.RGBA {
-	inv := 255 - uint32(alpha)
-	return color.RGBA{
-		R: uint8((uint32(r)*uint32(alpha) + 255*inv) / 255),
-		G: uint8((uint32(g)*uint32(alpha) + 255*inv) / 255),
-		B: uint8((uint32(b)*uint32(alpha) + 255*inv) / 255),
-		A: 255,
-	}
+	return color.NRGBA{100, 100, 180, alpha}
 }
 
 func clampU8(v float64) uint8 {
