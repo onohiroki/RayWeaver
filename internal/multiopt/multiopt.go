@@ -14,7 +14,7 @@ import (
 
 const (
 	defaultMaxIter = 100
-	defaultMu      = 1.0
+	defaultMu      = 0.01
 	defaultTol     = 1e-6
 	defaultEpsilon = 1e-6
 	defaultNumRays = 64
