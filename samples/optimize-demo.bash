@@ -3,8 +3,8 @@ set -euo pipefail
 
 YAML="samples/us2645157-degraded.yaml"
 OUTDIR="samples"
-OPT_RESULT="$OUTDIR/us2645157-optimize-result.yaml"
-OPT_WITH_CHIEF="$OUTDIR/us2645157-opt-with-chief.yaml"
+OPT_RESULT="$OUTDIR/optimize-demo-result.yaml"
+OPT_WITH_CHIEF="$OUTDIR/optimize-demo-with-chief.yaml"
 
 # CLI options
 CLEAN=false
@@ -19,7 +19,7 @@ done
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
   rm -f "$OPT_RESULT" "$OPT_WITH_CHIEF"
-  rm -f "$OUTDIR/us2645157-init.png" "$OUTDIR/us2645157-opt.png"
+  rm -f "$OUTDIR/optimize-demo-init.png" "$OUTDIR/optimize-demo-opt.png"
   echo "  Removed: PNGs, $OPT_RESULT, $OPT_WITH_CHIEF"
   exit 0
 fi
@@ -36,14 +36,14 @@ echo "--- PNG diagrams ---"
 echo "=== Initial diagram ==="
 ./rayweave chief --clear-aperture < "$YAML" | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
-  | ./rayweave plot -o "$OUTDIR/us2645157-init.png"
-echo "Written: $OUTDIR/us2645157-init.png"
+  | ./rayweave plot -o "$OUTDIR/optimize-demo-init.png"
+echo "Written: $OUTDIR/optimize-demo-init.png"
 echo
 
 echo "=== Optimized diagram ==="
 yq '.chief = {"fields": [{"angle": 0.0, "direction": [0, 1]}, {"angle": 16.0, "direction": [0, 1]}, {"angle": 24.0, "direction": [0, 1]}], "reference_surface": 8, "num_rays": 512, "grid_type": "hex", "dump_map": false}' "$OPT_RESULT" > "$OPT_WITH_CHIEF"
 ./rayweave chief --clear-aperture < "$OPT_WITH_CHIEF" | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
-  | ./rayweave plot -o "$OUTDIR/us2645157-opt.png"
-echo "Written: $OUTDIR/us2645157-opt.png"
+  | ./rayweave plot -o "$OUTDIR/optimize-demo-opt.png"
+echo "Written: $OUTDIR/optimize-demo-opt.png"
 echo

@@ -21,4 +21,5 @@ samples/*.csv
 samples/*-result.yaml
 samples/*-optimized.yaml
 samples/glass-chief-init-w*.yaml
+samples/optimize-demo-*
 samples/glass-chief-opt-w*.yaml
