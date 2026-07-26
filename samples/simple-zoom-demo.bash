@@ -110,7 +110,7 @@ print(-1)
 " < <($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null)
 }
 
-THRESHOLD=0.5
+THRESHOLD=0.4
 echo "  (threshold = $THRESHOLD mm — all configs on-axis RMS must be below this)"
 
 failed=false

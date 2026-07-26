@@ -13,7 +13,7 @@ glass_catalog:
 
 optimization:
   method: dls
-  max_iter: 50
+  max_iter: 200
   tol: 1e-6
   epsilon: 1e-6
 
@@ -377,7 +377,7 @@ chief:
 configs:
   - id: config0
     name: Config0
-    weight: 1.0
+    weight: 2.0
     active: true
     fields:
       - id: 0
@@ -446,7 +446,7 @@ configs:
         - kind: spot_rms
           field: 0
           wavelength: 0.00058756
-          weight: 1.0
+          weight: 2.0
         - kind: spot_rms
           field: 1
           wavelength: 0.00058756
