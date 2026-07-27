@@ -118,7 +118,9 @@ func ParseZemax(input string) (*ParseResult, error) {
 		}
 
 		mat := strings.TrimSpace(sp.Material)
-		if mat != "" && !isAir(mat) {
+		if mat == "" || isAir(mat) {
+			mat = "AIR"
+		} else {
 			found := false
 			for _, g := range result.GlassEntries {
 				if strings.EqualFold(g.Label, mat) {
@@ -139,6 +141,7 @@ func ParseZemax(input string) (*ParseResult, error) {
 				result.GlassEntries = append(result.GlassEntries, entry)
 			}
 		}
+		s.Material = mat
 
 		if sp.ID != 0 {
 			result.Surfaces = append(result.Surfaces, s)
@@ -190,7 +193,7 @@ func parseZemaxSurfaceParam(s *zemaxSurface, keyword string, args []string) {
 		if len(args) > 0 {
 			s.Curvature = parseFloat(args[0])
 		}
-	case "THIC":
+	case "THIC", "DISZ":
 		if len(args) > 0 {
 			s.Thickness = parseThickness(args[0])
 		}
@@ -237,18 +240,22 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 	case "FIELD":
 		if len(args) >= 3 {
 			fieldType := int(parseFloat(args[1]))
-			if fieldType == 0 {
-				f := types.FieldItem{
-					ID:       len(result.Fields),
-					AngleDeg: parseFloat(args[2]),
-				}
-				if len(args) >= 5 {
-					f.Weight = parseFloat(args[4])
-				} else {
-					f.Weight = 1.0
-				}
-				result.Fields = append(result.Fields, f)
+			f := types.FieldItem{
+				ID:     len(result.Fields),
+				Weight: 1.0,
 			}
+			if len(args) >= 5 {
+				f.Weight = parseFloat(args[4])
+			}
+			switch fieldType {
+			case 0:
+				f.AngleDeg = parseFloat(args[2])
+			case 1:
+				f.ImageHeight = parseFloat(args[2])
+			case 2:
+				f.AngleDeg = parseFloat(args[2])
+			}
+			result.Fields = append(result.Fields, f)
 		} else if len(args) >= 1 {
 			f := types.FieldItem{
 				ID:       len(result.Fields),
@@ -270,6 +277,13 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 			}
 			result.Wavelengths = append(result.Wavelengths, wl)
 		}
+	case "WWGT":
+		for i := range result.Wavelengths {
+			if i < len(args) {
+				result.Wavelengths[i].Weight = parseFloat(args[i])
+			}
+		}
+	case "PWAV":
 	case "UNIT":
 	case "VERS":
 	case "MODE":
