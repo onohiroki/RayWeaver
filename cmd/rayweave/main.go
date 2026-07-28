@@ -703,10 +703,6 @@ func runChief(data []byte) {
 		}
 	}
 
-	if !*clearAperture && !*marginalRays {
-		input.Chief = nil
-	}
-
 	output := types.Output{
 		Input:     input,
 		ChiefRays: chiefRays,
