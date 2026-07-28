@@ -16,6 +16,8 @@
 /rayweave
 .idea
 .aiignore
+GLASS/*.agf
+GLASS/*.AGF
 samples/*.txt
 samples/*.jsonl
 samples/*.svg
