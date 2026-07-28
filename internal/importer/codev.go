@@ -404,10 +404,10 @@ func ParseCodeV(input string) (*ParseResult, error) {
 				}
 			}
 			if hasNonZero {
-				size := maxOrder / 2
+				size := maxOrder/2 - 2
 				coeffs := make([]float64, size+1)
 				for order, val := range s.Coeffs {
-					idx := order / 2
+					idx := order/2 - 2
 					if idx >= 0 && idx <= size {
 						coeffs[idx] = val
 					}

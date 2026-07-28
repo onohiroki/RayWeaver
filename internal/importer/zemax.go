@@ -106,12 +106,10 @@ func ParseZemax(input string) (*ParseResult, error) {
 				}
 			}
 			if maxN >= 2 {
-				size := maxN/2 + 1
-				s.Coefficients = make([]float64, size)
+				s.Coefficients = make([]float64, maxN-1)
 				for n, val := range sp.Parms {
-					idx := n/2 - 1
-					if idx >= 0 && idx < size {
-						s.Coefficients[idx+1] = val
+					if n >= 2 && n-2 < len(s.Coefficients) {
+						s.Coefficients[n-2] = val
 					}
 				}
 			}
@@ -203,7 +201,7 @@ func parseZemaxSurfaceParam(s *zemaxSurface, keyword string, args []string) {
 		}
 	case "DIAM":
 		if len(args) > 0 {
-			s.Diameter = parseFloat(args[0])
+			s.Diameter = parseFloat(args[0]) * 2
 		}
 	case "CONI":
 		if len(args) > 0 {

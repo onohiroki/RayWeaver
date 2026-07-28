@@ -158,11 +158,11 @@ END
 	if s.Conic != -1.5 {
 		t.Errorf("conic: expected -1.5, got %g", s.Conic)
 	}
-	// RayWeaver indexing: coeffs[0]=r^0, coeffs[1]=r^2, coeffs[2]=r^4 (=A), ...
-	// A=0.001 (r^4)→idx2, B=-0.0002(r^6)→idx3, C=1e-05(r^8)→idx4, D=-1e-06(r^10)→idx5,
-	// E=1e-07(r^12)→idx6, F=-1e-08(r^14)→idx7, G=1e-09(r^16)→idx8, H=-1e-10(r^18)→idx9,
-	// J=1e-11(r^20)→idx10
-	want := []float64{0, 0, 0.001, -0.0002, 1e-05, -1e-06, 1e-07, -1e-08, 1e-09, -1e-10, 1e-11}
+	// PolynomialAsphereSag indexing: coeffs[0]=r^4 (=A), coeffs[1]=r^6 (=B), ...
+	// A=0.001 (r^4)→idx0, B=-0.0002(r^6)→idx1, C=1e-05(r^8)→idx2, D=-1e-06(r^10)→idx3,
+	// E=1e-07(r^12)→idx4, F=-1e-08(r^14)→idx5, G=1e-09(r^16)→idx6, H=-1e-10(r^18)→idx7,
+	// J=1e-11(r^20)→idx8
+	want := []float64{0.001, -0.0002, 1e-05, -1e-06, 1e-07, -1e-08, 1e-09, -1e-10, 1e-11}
 	if len(s.Coefficients) != len(want) {
 		t.Fatalf("coefficients len: expected %d, got %d (vals=%v)", len(want), len(s.Coefficients), s.Coefficients)
 	}
@@ -374,8 +374,8 @@ END
 	if s.Conic != -1.0 {
 		t.Errorf("conic: expected -1.0, got %g", s.Conic)
 	}
-	// A=1e-4(r^4)→idx2, B=2e-5(r^6)→idx3, C=3e-6(r^8)→idx4
-	want := []float64{0, 0, 1e-4, 2e-5, 3e-6}
+	// A=1e-4(r^4)→idx0, B=2e-5(r^6)→idx1, C=3e-6(r^8)→idx2
+	want := []float64{1e-4, 2e-5, 3e-6}
 	if len(s.Coefficients) != len(want) {
 		t.Fatalf("coefficients len: expected %d, got %d (vals=%v)", len(want), len(s.Coefficients), s.Coefficients)
 	}
