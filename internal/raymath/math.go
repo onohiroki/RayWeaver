@@ -152,8 +152,13 @@ func IntersectAsphere(origin, dir types.Vec3, sagFunc func(float64) float64, max
 			return t, true
 		}
 
-		dz := sagFunc(h+1e-6) - sagFunc(h-1e-6)
-		df := dir.Z - dz*1e-6
+		dh := 1e-6
+		dsagDh := (sagFunc(h+dh) - sagFunc(h-dh)) / (2 * dh)
+		var dhDt float64
+		if h > 1e-12 {
+			dhDt = (p.X*dir.X + p.Y*dir.Y) / h
+		}
+		df := dir.Z - dsagDh*dhDt
 		if df == 0 {
 			break
 		}

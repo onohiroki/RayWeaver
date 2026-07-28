@@ -1,9 +1,7 @@
 package chief
 
 import (
-	"fmt"
 	"math"
-	"os"
 	"runtime"
 	"sync"
 
@@ -89,11 +87,8 @@ func determineChiefRays(
 		var result Result
 		switch {
 		case math.Abs(fd.ImageHeight) > 1e-12:
-			if passThrough != nil && passThrough.Surface > 0 {
-				fmt.Fprintf(os.Stderr, "Warning: pass_through is not supported with image_height fields; ignoring pass_through\n")
-			}
 			angle := searchAngleForImageHeight(system, engine, fd.ImageHeight,
-				dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
+				dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType, passThrough)
 			thetaRad := angle * math.Pi / 180.0
 			if passThrough != nil && passThrough.Surface > 0 {
 				result = computeChiefRayAngleGridWithPassThrough(system, engine, thetaRad, dx, dy,
@@ -376,74 +371,137 @@ func searchOriginForTarget(
 	tanComp := dirComp / math.Sqrt(1-dirComp*dirComp)
 	geoEst := -(stopZ - zStart) * tanComp
 
-	trace := func(originComp float64) (float64, bool) {
+	makeRay := func(originComp float64) types.Ray {
 		orig := types.Vec3{X: 0, Y: 0, Z: zStart}
 		if isX {
 			orig.X = originComp
 		} else {
 			orig.Y = originComp
 		}
-		r := types.Ray{
+		return types.Ray{
 			Wavelength: wavelength,
 			Initial:    types.RayState{Origin: orig, Direction: rayDir},
 			Path:       path,
 			Jones:      pol,
 		}
+	}
+
+	trace := func(originComp float64) (float64, bool, bool) {
+		r := makeRay(originComp)
 		res := engine.TraceRay(r, surfaces)
 		for _, sr := range res.Surfaces {
 			if sr.SurfaceID == targetID {
-				return getPos(sr), true
+				return getPos(sr), true, false
 			}
 		}
-		return 0, false
+		if res.Error != "" {
+			return math.Inf(1), true, true
+		}
+		return 0, false, false
 	}
 
-	v0, ok := trace(geoEst)
-	if !ok || math.Abs(v0-targetVal) < 1e-12 {
+	vEst, okEst, clipEst := trace(geoEst)
+	if okEst && !clipEst && math.Abs(vEst-targetVal) < 1e-12 {
 		return geoEst
 	}
 
-	lo, hi := geoEst-1.0, geoEst+1.0
-	vLo, okLo := trace(lo)
-	vHi, okHi := trace(hi)
+	// Find a safe anchor: any origin value where trace succeeds.
+	// Try geoEst first; if that clips, walk outward in both directions.
+	anchor := geoEst
+	var vAnc float64
+	found := false
 
-	for iter := 0; iter < 40; iter++ {
-		if okLo && okHi && (vLo-targetVal)*(vHi-targetVal) <= 0 {
+	if okEst && !clipEst {
+		vAnc = vEst
+		found = true
+	} else {
+		step := math.Max(math.Abs(geoEst)*0.05, 0.5)
+		for s := step; s < 200; s += step {
+			if v, ok, clipped := trace(geoEst + s); ok && !clipped {
+				anchor = geoEst + s
+				vAnc = v
+				found = true
+				break
+			}
+			if v, ok, clipped := trace(geoEst - s); ok && !clipped {
+				anchor = geoEst - s
+				vAnc = v
+				found = true
+				break
+			}
+		}
+	}
+
+	if !found {
+		return geoEst
+	}
+
+	if math.Abs(vAnc-targetVal) < 1e-12 {
+		return anchor
+	}
+
+	sign := 1.0
+	if targetVal < vAnc {
+		sign = -1.0
+	}
+
+	maxV := math.Max(math.Abs(anchor)*2, 20.0)
+	if maxV < 5 {
+		maxV = 5
+	}
+	step := maxV / 200
+	if step < 0.01 {
+		step = 0.01
+	}
+
+	v := anchor
+	currentVal := vAnc
+
+	for iter := 0; iter < 400; iter++ {
+		prevV := v
+		prevVal := currentVal
+
+		v += sign * step
+		if math.Abs(v) > maxV {
 			break
 		}
-		if !okLo || ((vLo > targetVal) == (v0 > targetVal)) {
-			lo -= 2.0
-			vLo, okLo = trace(lo)
-		} else {
-			hi += 2.0
-			vHi, okHi = trace(hi)
-		}
-		if math.Abs(lo)+math.Abs(hi) > 200 {
-			return geoEst
-		}
-	}
 
-	if !okLo || !okHi || (vLo-targetVal)*(vHi-targetVal) > 0 {
-		return geoEst
-	}
-
-	for iter := 0; iter < 50; iter++ {
-		mid := (lo + hi) / 2
-		vMid, ok := trace(mid)
+		val, ok, clipped := trace(v)
 		if !ok {
-			if (mid-lo) > (hi-mid) {
+			break
+		}
+		currentVal = val
+
+		if clipped || (currentVal-targetVal)*(prevVal-targetVal) <= 0 {
+			return binarySearchOrigin(math.Min(prevV, v), math.Max(prevV, v),
+				targetVal, prevVal, currentVal, trace)
+		}
+	}
+
+	return geoEst
+}
+
+func binarySearchOrigin(lo, hi, targetVal, valLo, valHi float64, trace func(float64) (float64, bool, bool)) float64 {
+	for iter := 0; iter < 60; iter++ {
+		mid := (lo + hi) / 2
+		midVal, ok, _ := trace(mid)
+		if !ok {
+			return mid
+		}
+		if math.IsInf(midVal, 1) {
+			if math.IsInf(valLo, 1) {
 				lo = mid
 			} else {
 				hi = mid
 			}
 			continue
 		}
-		if math.Abs(vMid-targetVal) < 1e-12 {
+		if math.Abs(midVal-targetVal) < 1e-12 {
 			return mid
 		}
-		if (vMid-targetVal)*(vLo-targetVal) >= 0 {
+		if (midVal-targetVal)*(valLo-targetVal) >= 0 {
 			lo = mid
-			vLo = vMid
+			valLo = midVal
 		} else {
 			hi = mid
 		}
@@ -468,7 +526,7 @@ func searchDirectionForTarget(
 		return baseDir
 	}
 
-	trace := func(tan float64) (float64, bool) {
+	trace := func(tan float64) (float64, bool, bool) {
 		dz := 1.0 / math.Sqrt(1+tan*tan)
 		dx, dy := 0.0, 0.0
 		if useX {
@@ -486,83 +544,80 @@ func searchDirectionForTarget(
 		res := engine.TraceRay(r, surfaces)
 		for _, sr := range res.Surfaces {
 			if sr.SurfaceID == targetID {
-				return getPos(sr), true
+				return getPos(sr), true, false
 			}
 		}
-		return 0, false
+		if res.Error != "" {
+			return math.Inf(1), true, true
+		}
+		return 0, false, false
 	}
 
-	v0, ok := trace(tanComp)
-	if !ok || math.Abs(v0-targetVal) < 1e-12 {
+	v0, ok0, clip0 := trace(tanComp)
+	if ok0 && !clip0 && math.Abs(v0-targetVal) < 1e-12 {
 		return baseDir
 	}
 
-	// Lever arm for delta estimate: distance from object to target surface
-	delta := math.Abs(v0-targetVal) / (computeTargetZ(surfaces, targetID) - objectPoint.Z)
-	if delta < 1e-6 {
-		delta = 1e-6
+	// Anchor: trace with tan=0 (direction parallel to axis).
+	anchor := 0.0
+	vAnc, okAnc, clipAnc := trace(anchor)
+	if !okAnc || clipAnc {
+		return baseDir
 	}
-	lo, hi := tanComp-delta*100, tanComp+delta*100
-	vLo, okLo := trace(lo)
-	vHi, okHi := trace(hi)
+	if math.Abs(vAnc-targetVal) < 1e-12 {
+		dz := 1.0
+		dir := types.Vec3{X: 0, Y: 0, Z: dz}.Normalize()
+		return dir
+	}
 
-	for iter := 0; iter < 40; iter++ {
-		if okLo && okHi && (vLo-targetVal)*(vHi-targetVal) <= 0 {
+	sign := 1.0
+	if targetVal < vAnc {
+		sign = -1.0
+	}
+
+	maxV := math.Max(math.Abs(tanComp)*2, 0.5)
+	if maxV < 0.5 {
+		maxV = 0.5
+	}
+	step := maxV / 200
+	if step < 0.0001 {
+		step = 0.0001
+	}
+
+	v := anchor
+	currentVal := vAnc
+
+	for iter := 0; iter < 400; iter++ {
+		prevV := v
+		prevVal := currentVal
+
+		v += sign * step
+		if math.Abs(v) > maxV {
 			break
 		}
-		if !okLo || ((vLo > targetVal) == (v0 > targetVal)) {
-			lo -= delta * 100
-			vLo, okLo = trace(lo)
-		} else {
-			hi += delta * 100
-			vHi, okHi = trace(hi)
-		}
-		if math.Abs(tanComp-lo)+math.Abs(tanComp-hi) > math.Abs(tanComp)*2+0.1 {
-			return baseDir
-		}
-	}
 
-	if !okLo || !okHi || (vLo-targetVal)*(vHi-targetVal) > 0 {
-		return baseDir
-	}
-
-	for iter := 0; iter < 50; iter++ {
-		mid := (lo + hi) / 2
-		vMid, ok := trace(mid)
+		val, ok, clipped := trace(v)
 		if !ok {
-			if (mid-lo) > (hi-mid) {
-				lo = mid
-			} else {
-				hi = mid
-			}
-			continue
+			break
 		}
-		if math.Abs(vMid-targetVal) < 1e-12 {
-			dz := 1.0 / math.Sqrt(1+mid*mid)
-			dx, dy := 0.0, 0.0
+		currentVal = val
+
+		if clipped || (currentVal-targetVal)*(prevVal-targetVal) <= 0 {
+			lo, hi := math.Min(prevV, v), math.Max(prevV, v)
+			bestTan := binarySearchOrigin(lo, hi, targetVal, prevVal, currentVal, trace)
+
+			dz := 1.0 / math.Sqrt(1+bestTan*bestTan)
+			dxBest, dyBest := 0.0, 0.0
 			if useX {
-				dx = mid * dz
+				dxBest = bestTan * dz
 			} else {
-				dy = mid * dz
+				dyBest = bestTan * dz
 			}
-			return types.Vec3{X: dx, Y: dy, Z: dz}.Normalize()
-		}
-		if (vMid-targetVal)*(vLo-targetVal) >= 0 {
-			lo = mid
-			vLo = vMid
-		} else {
-			hi = mid
+			return types.Vec3{X: dxBest, Y: dyBest, Z: dz}.Normalize()
 		}
 	}
-	mid := (lo + hi) / 2
-	dz := 1.0 / math.Sqrt(1+mid*mid)
-	dx, dy := 0.0, 0.0
-	if useX {
-		dx = mid * dz
-	} else {
-		dy = mid * dz
-	}
-	return types.Vec3{X: dx, Y: dy, Z: dz}.Normalize()
+
+	return baseDir
 }
 
 // --- shared helpers ---
@@ -929,11 +984,20 @@ func searchAngleForImageHeight(
 	pol types.JonesVector,
 	wavelength float64,
 	gridType types.GridType,
+	passThrough *types.PassThroughTarget,
 ) float64 {
+	heightFn := func(angleDeg float64) (float64, bool) {
+		if passThrough != nil && passThrough.Surface > 0 {
+			y, ok := imageHeightForAnglePT(system, engine, angleDeg, dx, dy, refSurfaceID, pol, wavelength, passThrough)
+			return y, ok
+		}
+		return imageHeightForAngle(system, engine, angleDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
+	}
+
 	// Bracket search: start with 0–15° and expand as needed.
 	loDeg, hiDeg := 0.0, 15.0
-	yLo, okLo := imageHeightForAngle(system, engine, loDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
-	yHi, okHi := imageHeightForAngle(system, engine, hiDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
+	yLo, okLo := heightFn(loDeg)
+	yHi, okHi := heightFn(hiDeg)
 
 	for iter := 0; iter < 25; iter++ {
 		if okLo && okHi && yLo <= targetY && targetY <= yHi {
@@ -941,26 +1005,26 @@ func searchAngleForImageHeight(
 		}
 		if hiDeg > 70 {
 			hiDeg = 70
-			yHi, okHi = imageHeightForAngle(system, engine, hiDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
+			yHi, okHi = heightFn(hiDeg)
 		}
 		if !okLo || yLo > targetY {
 			loDeg -= 3.0
 			if loDeg < -80 {
 				return 0
 			}
-			yLo, okLo = imageHeightForAngle(system, engine, loDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
+			yLo, okLo = heightFn(loDeg)
 		} else if !okHi {
 			hiDeg = (loDeg + hiDeg) / 2
 			if math.Abs(hiDeg-loDeg) < 1e-12 {
 				return 0
 			}
-			yHi, okHi = imageHeightForAngle(system, engine, hiDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
+			yHi, okHi = heightFn(hiDeg)
 		} else if yHi < targetY {
 			hiDeg += 3.0
 			if hiDeg > 80 {
 				return 0
 			}
-			yHi, okHi = imageHeightForAngle(system, engine, hiDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
+			yHi, okHi = heightFn(hiDeg)
 		} else {
 			break
 		}
@@ -972,7 +1036,7 @@ func searchAngleForImageHeight(
 
 	for iter := 0; iter < 40; iter++ {
 		midDeg := (loDeg + hiDeg) / 2
-		yMid, ok := imageHeightForAngle(system, engine, midDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType)
+		yMid, ok := heightFn(midDeg)
 		if !ok {
 			if math.Abs(midDeg-loDeg) > math.Abs(hiDeg-midDeg) {
 				loDeg = midDeg
@@ -996,6 +1060,61 @@ func searchAngleForImageHeight(
 		}
 	}
 	return (loDeg + hiDeg) / 2
+}
+
+// imageHeightForAnglePT returns the Y position at the reference surface for a
+// ray at the given field angle, using pass_through to ensure the ray passes
+// through the stop center.  This is more accurate than the paraxial pupil
+// approximation used by imageHeightForAngle when the entrance pupil differs
+// from the physical stop.
+func imageHeightForAnglePT(
+	system types.System,
+	engine *ray.Engine,
+	angleDeg, dx, dy float64,
+	refSurfaceID int,
+	pol types.JonesVector,
+	wavelength float64,
+	pt *types.PassThroughTarget,
+) (float64, bool) {
+	thetaRad := angleDeg * math.Pi / 180.0
+	zStart := -100.0
+	sinT := math.Sin(thetaRad)
+	cosT := math.Cos(thetaRad)
+	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
+
+	path := buildPath(system.Surfaces)
+
+	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, pt.Surface, pt.Coordinate.Y,
+		path, wavelength, pol, engine, system.Surfaces, false,
+		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
+
+	originX := 0.0
+	if math.Abs(rayDir.X) > 1e-12 || math.Abs(pt.Coordinate.X) > 1e-12 {
+		originX = searchOriginForTarget(rayDir.X, rayDir, zStart, pt.Surface, pt.Coordinate.X,
+			path, wavelength, pol, engine, system.Surfaces, true,
+			func(sr types.SurfaceResult) float64 { return sr.Position.X })
+	}
+
+	origin := types.Vec3{X: originX, Y: originY, Z: zStart}
+
+	ray := types.Ray{
+		Wavelength: wavelength,
+		Initial:    types.RayState{Origin: origin, Direction: rayDir},
+		Path:       path,
+		Jones:      pol,
+	}
+
+	traceResult := engine.TraceRay(ray, system.Surfaces)
+	if traceResult.Error != "" {
+		return 0, false
+	}
+
+	for _, sr := range traceResult.Surfaces {
+		if sr.SurfaceID == refSurfaceID {
+			return sr.Position.Y, true
+		}
+	}
+	return 0, false
 }
 
 func inferStopPosition(results []Result) {
