@@ -200,6 +200,59 @@ END
 	}
 }
 
+func TestCodeV_YIMFields(t *testing.T) {
+	input := `SEQ
+YIM 0.0 1.1203446 1.8544681
+WTF 1.0 0.8 0.6
+S 50 2
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(result.Fields))
+	}
+	want := []float64{0, 1.1203446, 1.8544681}
+	weights := []float64{1.0, 0.8, 0.6}
+	for i, f := range result.Fields {
+		if f.ImageHeight != want[i] {
+			t.Errorf("field %d image_height: expected %g, got %g", i, want[i], f.ImageHeight)
+		}
+		if f.AngleDeg != 0 {
+			t.Errorf("field %d angle_deg: expected 0, got %g", i, f.AngleDeg)
+		}
+		if f.Weight != weights[i] {
+			t.Errorf("field %d weight: expected %g, got %g", i, weights[i], f.Weight)
+		}
+	}
+}
+
+func TestCodeV_YRIWithDefaultField(t *testing.T) {
+	// When only YRI is present (no YAN/YIM), fields should still be created
+	input := `SEQ
+YRI 5.0 10.0
+S 50 2
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(result.Fields))
+	}
+	if result.Fields[0].ImageHeight != 5.0 {
+		t.Errorf("field 0 image_height: expected 5.0, got %g", result.Fields[0].ImageHeight)
+	}
+	if result.Fields[1].ImageHeight != 10.0 {
+		t.Errorf("field 1 image_height: expected 10.0, got %g", result.Fields[1].ImageHeight)
+	}
+}
+
 func TestCodeV_SOSI(t *testing.T) {
 	input := `SEQ
 SO 0 1e10

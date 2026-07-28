@@ -115,7 +115,10 @@ func runImport(data []byte) {
 	if !*noChief && len(result.Fields) > 0 {
 		chiefFields := make([]types.FieldDef, len(result.Fields))
 		for i, f := range result.Fields {
-			chiefFields[i] = types.FieldDef{Angle: f.AngleDeg}
+			chiefFields[i] = types.FieldDef{
+				Angle:       f.AngleDeg,
+				ImageHeight: f.ImageHeight,
+			}
 		}
 
 		wavelength := firstWavelength(result.Wavelengths)

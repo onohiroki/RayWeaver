@@ -82,6 +82,20 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		if strings.HasPrefix(upper, "XAN ") {
 			continue
 		}
+		if strings.HasPrefix(upper, "YIM ") || strings.HasPrefix(upper, "YRI ") {
+			for _, v := range tokens[1:] {
+				val := parseCodeVFloat(v)
+				result.Fields = append(result.Fields, types.FieldItem{
+					ID:          0,
+					ImageHeight: val,
+					Weight:      1.0,
+				})
+			}
+			continue
+		}
+		if strings.HasPrefix(upper, "XIM ") || strings.HasPrefix(upper, "XRI ") {
+			continue
+		}
 		if strings.HasPrefix(upper, "WTF ") {
 			ws := make([]float64, 0, len(tokens)-1)
 			for _, v := range tokens[1:] {
@@ -133,6 +147,20 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			continue
 		}
 		if strings.HasPrefix(upper, "XAN ") {
+			continue
+		}
+		if strings.HasPrefix(upper, "YIM ") || strings.HasPrefix(upper, "YRI ") {
+			for _, v := range tokens[1:] {
+				val := parseCodeVFloat(v)
+				result.Fields = append(result.Fields, types.FieldItem{
+					ID:          0,
+					ImageHeight: val,
+					Weight:      1.0,
+				})
+			}
+			continue
+		}
+		if strings.HasPrefix(upper, "XIM ") || strings.HasPrefix(upper, "XRI ") {
 			continue
 		}
 		if strings.HasPrefix(upper, "WTF ") {
