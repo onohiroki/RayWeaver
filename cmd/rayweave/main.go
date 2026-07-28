@@ -212,7 +212,7 @@ Generates a cross-section drawing (SVG or PNG) of the lens
 system with ray paths overlaid.
 
 Options:
-  -o file.svg          output file (.svg or .png; default: stdout = SVG)
+  -o, --output file.svg   output file (.svg or .png; default: stdout = SVG)
   --config ID          select a config by id (multi-config mode)
   --lens-width 0.1     lens body stroke width
   --ray-width 0.1      ray path stroke width

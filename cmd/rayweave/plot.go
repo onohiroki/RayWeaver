@@ -24,6 +24,7 @@ func runPlot(data []byte) {
 	args := os.Args[2:] // skip "plot"
 	fs := flag.NewFlagSet("plot", flag.ExitOnError)
 	fs.StringVar(&outPath, "o", "", "output file path (.svg or .png; default: stdout = SVG)")
+	fs.StringVar(&outPath, "output", "", "alias for -o")
 	fs.Float64Var(&lensWidth, "lens-width", 0.1, "lens body stroke width (default 0.1)")
 	fs.Float64Var(&rayWidth, "ray-width", 0.1, "ray path stroke width (default 0.1)")
 	fs.Float64Var(&scaleOverride, "scale", 0, "SVG scale factor (0 = auto)")
@@ -70,6 +71,7 @@ func runPlot(data []byte) {
 			fmt.Fprintf(os.Stderr, "Error writing PNG: %v\n", err)
 			os.Exit(1)
 		}
+		os.Stdout.Write(data)
 		return
 	}
 
@@ -80,6 +82,7 @@ func runPlot(data []byte) {
 			fmt.Fprintf(os.Stderr, "Error writing SVG: %v\n", err)
 			os.Exit(1)
 		}
+		os.Stdout.Write(data)
 	} else {
 		os.Stdout.Write([]byte(svg))
 	}
