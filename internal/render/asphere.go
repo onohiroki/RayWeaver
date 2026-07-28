@@ -119,14 +119,14 @@ func bezierUpAt(surf types.Surface, h, zOffset float64) string {
 }
 
 func catmullRomDown(pts []vec2) string {
-	return catmullRomRange(pts, -1)
+	return catmullRomRange(pts, -1, "M")
 }
 
 func catmullRomUp(pts []vec2) string {
-	return catmullRomRange(pts, 1)
+	return catmullRomRange(pts, 1, "L")
 }
 
-func catmullRomRange(pts []vec2, dir int) string {
+func catmullRomRange(pts []vec2, dir int, firstCmd string) string {
 	if len(pts) < 2 {
 		return ""
 	}
@@ -149,15 +149,16 @@ func catmullRomRange(pts []vec2, dir int) string {
 		}
 	}
 
-	return catmullRomCurve(all)
+	return catmullRomCurve(all, firstCmd)
 }
 
-func catmullRomCurve(pts []vec2) string {
+func catmullRomCurve(pts []vec2, firstCmd string) string {
 	if len(pts) < 2 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("M ")
+	b.WriteString(firstCmd)
+	b.WriteByte(' ')
 	b.WriteString(f64str(pts[0].X))
 	b.WriteByte(',')
 	b.WriteString(f64str(pts[0].Y))
