@@ -56,10 +56,19 @@ func Solve(m Model) Result {
 	muCon := 0.01
 
 	merit := m.EvaluateMerit(xPhys0)
+	meritOnly := merit
 	if hasConstraints {
 		for j, cj := range c0 {
-			merit += lambdas[j]*cj + 0.5*muCon*cj*cj
+			term := lambdas[j]*cj + 0.5*muCon*cj*cj
+			if term < 0 {
+				lambdas[j] = 0
+				term = 0.5 * muCon * cj * cj
+			}
+			merit += term
 		}
+	}
+	if merit < meritOnly {
+		merit = meritOnly
 	}
 	beforeMerit := merit
 
@@ -174,12 +183,20 @@ func Solve(m Model) Result {
 		xPhysNew := denormalize(xNormNew, variables, scales)
 
 		meritNew := m.EvaluateMerit(xPhysNew)
+		meritNewOnly := meritNew
 		var cNew []float64
 		if hasConstraints {
 			cNew = m.ComputeConstraints(xPhysNew)
 			for j, cj := range cNew {
-				meritNew += lambdas[j]*cj + 0.5*muCon*cj*cj
+				term := lambdas[j]*cj + 0.5*muCon*cj*cj
+				if term < 0 {
+					term = 0.5 * muCon * cj * cj
+				}
+				meritNew += term
 			}
+		}
+		if meritNew < meritNewOnly {
+			meritNew = meritNewOnly
 		}
 
 		actualReduction := merit - meritNew
@@ -208,12 +225,20 @@ func Solve(m Model) Result {
 
 				xTestPhys := denormalize(xTestNorm, variables, scales)
 				meritTest := m.EvaluateMerit(xTestPhys)
+				meritTestOnly := meritTest
 				var cTest []float64
 				if hasConstraints {
 					cTest = m.ComputeConstraints(xTestPhys)
 					for j, cj := range cTest {
-						meritTest += lambdas[j]*cj + 0.5*muCon*cj*cj
+						term := lambdas[j]*cj + 0.5*muCon*cj*cj
+						if term < 0 {
+							term = 0.5 * muCon * cj * cj
+						}
+						meritTest += term
 					}
+				}
+				if meritTest < meritTestOnly {
+					meritTest = meritTestOnly
 				}
 
 				if meritTest <= merit+1e-4*alpha*dirDeriv {
