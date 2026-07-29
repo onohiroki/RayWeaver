@@ -14,6 +14,7 @@ YAML="samples/multi-config-zoom.yaml"
 OUTDIR="samples"
 RESULT="$OUTDIR/multi-config-zoom-result.yaml"
 LOG="$OUTDIR/multi-config-zoom-log.jsonl"
+RESULT_FILE="$OUTDIR/multi-config-zoom-demo-result.txt"
 RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 # Clean-only mode: remove generated files and exit
@@ -23,8 +24,8 @@ if [ "$CLEAN" = true ]; then
     rm -f "$OUTDIR/multi-config-zoom-${cfg}-init-rays.png"
     rm -f "$OUTDIR/multi-config-zoom-${cfg}-opt-rays.png"
   done
-  rm -f "$RESULT" "$LOG"
-  echo "  Removed: PNGs, $RESULT, $LOG"
+  rm -f "$RESULT" "$LOG" "$RESULT_FILE"
+  echo "  Removed: PNGs, $RESULT, $LOG, $RESULT_FILE"
   exit 0
 fi
 
@@ -89,34 +90,36 @@ for cfg in config0 config1 config2; do
 done
 echo
 
-echo "=== Performance comparison ==="
-printf "  %-8s %6s  %10s  %10s\n" "Config" "Field" "RMS bef" "RMS aft"
-printf "  %-8s %6s  %10s  %10s\n" "------" "-----" "-------" "-------"
-for cfg in config0 config1 config2; do
-  # Extract field angles and RMS before/after
-  bef=$(cat "$YAML" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
-    | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)print ang,r; in_spot=0}')
-  aft=$(cat "$RESULT" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
-    | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)print ang,r; in_spot=0}')
-  efl=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
-    | awk -F': ' '/focal_length:/{printf "%.1f",$2; exit}')
-  # Show each field with before/after RMS
-  line_no=0
-  while IFS= read -r bline; do
-    aline=$(echo "$aft" | sed -n "$((line_no+1))p")
-    fa=$(echo "$bline" | awk '{print $1}')
-    br=$(echo "$bline" | awk '{print $2}')
-    ar=$(echo "$aline" | awk '{print $2}')
-    if [ "$line_no" -eq 0 ]; then
-      printf "  %-8s %5s°  %8.4f  %8.4f    EFL=%smm\n" "$cfg" "$fa" "$br" "$ar" "$efl"
-    else
-      printf "  %-8s %5s°  %8.4f  %8.4f\n" "" "$fa" "$br" "$ar"
-    fi
-    line_no=$((line_no + 1))
-  done <<< "$bef"
+{
+  echo "=== Performance comparison ==="
+  printf "  %-8s %6s  %10s  %10s\n" "Config" "Field" "RMS bef" "RMS aft"
+  printf "  %-8s %6s  %10s  %10s\n" "------" "-----" "-------" "-------"
+  for cfg in config0 config1 config2; do
+    # Extract field angles and RMS before/after
+    bef=$(cat "$YAML" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
+      | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)print ang,r; in_spot=0}')
+    aft=$(cat "$RESULT" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
+      | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)print ang,r; in_spot=0}')
+    efl=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
+      | awk -F': ' '/focal_length:/{printf "%.1f",$2; exit}')
+    # Show each field with before/after RMS
+    line_no=0
+    while IFS= read -r bline; do
+      aline=$(echo "$aft" | sed -n "$((line_no+1))p")
+      fa=$(echo "$bline" | awk '{print $1}')
+      br=$(echo "$bline" | awk '{print $2}')
+      ar=$(echo "$aline" | awk '{print $2}')
+      if [ "$line_no" -eq 0 ]; then
+        printf "  %-8s %5s°  %8.4f  %8.4f    EFL=%smm\n" "$cfg" "$fa" "$br" "$ar" "$efl"
+      else
+        printf "  %-8s %5s°  %8.4f  %8.4f\n" "" "$fa" "$br" "$ar"
+      fi
+      line_no=$((line_no + 1))
+    done <<< "$bef"
 
-done
-echo
+  done
+  echo
+} | tee -a "$RESULT_FILE"
 
 echo "=== Iteration log saved: $LOG ==="
 if [ -f "$LOG" ]; then

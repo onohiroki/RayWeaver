@@ -14,6 +14,7 @@ YAML="samples/simple-zoom.yaml"
 OUTDIR="samples"
 RESULT="$OUTDIR/simple-zoom-optimized.yaml"
 LOG="$OUTDIR/simple-zoom-log.jsonl"
+RESULT_FILE="$OUTDIR/simple-zoom-demo-result.txt"
 RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 # Clean-only mode: remove generated files and exit
@@ -23,8 +24,8 @@ if [ "$CLEAN" = true ]; then
     rm -f "$OUTDIR/simple-zoom-${cfg}-init-rays.png"
     rm -f "$OUTDIR/simple-zoom-${cfg}-opt-rays.png"
   done
-  rm -f "$RESULT" "$LOG"
-  echo "  Removed: PNGs, $RESULT, $LOG"
+  rm -f "$RESULT" "$LOG" "$RESULT_FILE"
+  echo "  Removed: PNGs, $RESULT, $LOG, $RESULT_FILE"
   exit 0
 fi
 
@@ -130,6 +131,20 @@ for cfg in config0 config1 config2; do
     failed=true
   fi
 done
+
+# ── Save RMS comparison to result file ──
+{
+  echo "=== Spot RMS Comparison (on-axis, field 0°) ==="
+  printf "  %-8s %12s %12s\n" "Config" "RMS before" "RMS after"
+  echo "  (threshold = $THRESHOLD mm)"
+  for cfg in config0 config1 config2; do
+    rms_before=$(get_onaxis_rms "$YAML" "$cfg")
+    rms_after=$(get_onaxis_rms "$RESULT" "$cfg")
+    printf "  %-8s %12.4f %12.4f\n" "$cfg" "$rms_before" "$rms_after"
+  done
+  echo
+} > "$RESULT_FILE"
+echo "  (RMS comparison saved to $RESULT_FILE)"
 
 if [ "$failed" = true ]; then
   echo

@@ -5,6 +5,7 @@ YAML="samples/us2645157-degraded.yaml"
 OUTDIR="samples"
 OPT_RESULT="$OUTDIR/optimize-demo-result.yaml"
 OPT_WITH_CHIEF="$OUTDIR/optimize-demo-with-chief.yaml"
+RESULT_FILE="$OUTDIR/optimize-demo-result.txt"
 
 # CLI options
 CLEAN=false
@@ -18,9 +19,9 @@ done
 # Clean-only mode: remove generated files and exit
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
-  rm -f "$OPT_RESULT" "$OPT_WITH_CHIEF"
+  rm -f "$OPT_RESULT" "$OPT_WITH_CHIEF" "$RESULT_FILE"
   rm -f "$OUTDIR/optimize-demo-init.png" "$OUTDIR/optimize-demo-opt.png"
-  echo "  Removed: PNGs, $OPT_RESULT, $OPT_WITH_CHIEF"
+  echo "  Removed: PNGs, $OPT_RESULT, $OPT_WITH_CHIEF, $RESULT_FILE"
   exit 0
 fi
 
@@ -47,3 +48,33 @@ yq '.chief = {"fields": [{"angle": 0.0, "direction": [0, 1]}, {"angle": 16.0, "d
   | ./rayweave plot -o "$OUTDIR/optimize-demo-opt.png"
 echo "Written: $OUTDIR/optimize-demo-opt.png"
 echo
+
+# ── Spot RMS comparison ──
+rms_field() {
+  local yaml_file=$1 fi=$2
+  ./rayweave chief < "$yaml_file" 2>/dev/null | python3 -c "
+import sys, yaml
+with open('/dev/stdin') as f:
+    data = yaml.safe_load(f)
+if data and 'chief_rays' in data and $fi < len(data['chief_rays']):
+    ss = data['chief_rays'][$fi].get('spot_stats', {})
+    rms = ss.get('rms_r', -1)
+    if rms > 0: print(rms)
+    else: print(-1)
+else: print(-1)
+"
+}
+{
+  echo "=== Spot RMS Comparison ==="
+  printf "  %-8s %6s  %10s  %10s\n" "Phase" "Field" "RMS before" "RMS after"
+  printf "  %-8s %6s  %10s  %10s\n" "-----" "-----" "--------" "--------"
+  for fi in 0 1 2; do
+    rms_before=$(rms_field "$YAML" "$fi")
+    rms_after=$(rms_field "$OPT_WITH_CHIEF" "$fi")
+    mark=""; [ "$rms_before" != "-1" ] && [ "$rms_after" != "-1" ] \
+      && [ "$(echo "$rms_after < $rms_before" | bc -l 2>/dev/null)" = "1" ] && mark="   ✓" || mark="   ✗"
+    printf "  %-8s %6s  %10.4f  %10.4f%s\n" "optimize" "f$fi" "$rms_before" "$rms_after" "$mark"
+  done
+  echo
+} | tee -a "$RESULT_FILE"
+echo "  (RMS comparison saved to $RESULT_FILE)"

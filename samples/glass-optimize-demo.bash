@@ -15,6 +15,7 @@ OUTDIR="samples"
 OPT_RESULT="$OUTDIR/glass-optimize-result.yaml"
 OPT_CHIEF="$OUTDIR/glass-optimize-chief.yaml"
 OPT_LOG="$OUTDIR/glass-optimize-log.jsonl"
+RESULT_FILE="$OUTDIR/glass-optimize-demo-result.txt"
 RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 # Clean-only mode: remove generated files and exit
@@ -25,6 +26,7 @@ if [ "$CLEAN" = true ]; then
   done
   rm -f "$OUTDIR"/glass-optimize-init.png "$OUTDIR"/glass-optimize-opt.png
   rm -f "$OUTDIR"/glass-chief-*.yaml "$OUTDIR"/glass-spot-*.txt "$OUTDIR"/glass-spot-*.png
+  rm -f "$RESULT_FILE"
   echo "  Removed generated files"
   exit 0
 fi
@@ -124,9 +126,6 @@ if [ -n "$FNO" ]; then
 fi
 
 # ── Spot RMS comparison (before vs after) ──
-echo "=== Spot RMS Comparison ==="
-printf "  %-8s %6s  %10s  %10s\n" "Phase" "Field" "RMS before" "RMS after"
-printf "  %-8s %6s  %10s  %10s\n" "-----" "-----" "--------" "--------"
 rms_field() {
   local yaml_file="$1"
   local fi="$2"
@@ -145,17 +144,22 @@ else:
     print(-1)
 " < <($RAYWEAVE chief < "$yaml_file" 2>/dev/null)
 }
-for fi in 0 1 2; do
-  rms_before=$(rms_field "$YAML" "$fi")
-  rms_after=$(rms_field "$OPT_RESULT" "$fi")
-  printf "  %-8s %6s  %10.4f  %10.4f" "optimize" "f$fi" "$rms_before" "$rms_after"
-  if [ "$(echo "$rms_after < $rms_before" | bc -l 2>/dev/null)" = "1" ]; then
-    echo "   ✓"
-  else
-    echo "   ✗"
-  fi
-done
-echo
+{
+  echo "=== Spot RMS Comparison ==="
+  printf "  %-8s %6s  %10s  %10s\n" "Phase" "Field" "RMS before" "RMS after"
+  printf "  %-8s %6s  %10s  %10s\n" "-----" "-----" "--------" "--------"
+  for fi in 0 1 2; do
+    rms_before=$(rms_field "$YAML" "$fi")
+    rms_after=$(rms_field "$OPT_RESULT" "$fi")
+    printf "  %-8s %6s  %10.4f  %10.4f" "optimize" "f$fi" "$rms_before" "$rms_after"
+    if [ "$(echo "$rms_after < $rms_before" | bc -l 2>/dev/null)" = "1" ]; then
+      echo "   ✓"
+    else
+      echo "   ✗"
+    fi
+  done
+  echo
+} | tee -a "$RESULT_FILE"
 
 echo "=== PNG diagrams ==="
 $RAYWEAVE chief --clear-aperture < "$YAML" 2>/dev/null \
