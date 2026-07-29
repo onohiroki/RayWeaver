@@ -295,21 +295,6 @@ func (o *MultiOptimizer) evaluateMerit(x []float64) float64 {
 			}
 		}
 
-		// Constraint penalties
-		gc := o.gc
-		if o.tempGC != nil {
-			gc = o.tempGC
-		}
-		for _, c := range cfg.Constraints {
-			if !c.Active {
-				continue
-			}
-			angle := o.fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field}, surfaces)
-			value := constraint.Evaluate(c, surfaces, angle, gc)
-			err := constraint.ComputeError(c.Kind, value, c)
-			cfgMerit += c.Weight * err * err
-		}
-
 		merit += cfg.Weight * cfgMerit
 	}
 
@@ -479,50 +464,8 @@ func (o *MultiOptimizer) traceFieldGrid(surfaces []types.Surface, cfg ConfigInpu
 	return points, perSurfMax
 }
 
-func (o *MultiOptimizer) computeJacobianAndResiduals(x []float64) ([][]float64, []float64) {
-	nResiduals := 0
-	for _, cfg := range o.configs {
-		nResiduals += len(cfg.MeritTerms) + len(cfg.Constraints)
-	}
-	nVars := len(x)
-
-	for j := 0; j < nVars; j++ {
-		x[j] = sanitizeFloat64(x[j])
-	}
-
-	r0 := o.computeResiduals(x)
-
-	J := make([][]float64, nResiduals)
-	for i := 0; i < nResiduals; i++ {
-		J[i] = make([]float64, nVars)
-	}
-
-	for j := 0; j < nVars; j++ {
-		xPert := make([]float64, nVars)
-		copy(xPert, x)
-		delta := o.epsilon * math.Max(1.0, math.Abs(x[j]))
-		xPert[j] += delta
-
-		rPert := o.computeResiduals(xPert)
-
-		for i := 0; i < nResiduals; i++ {
-			diff := rPert[i] - r0[i]
-			J[i][j] = sanitizeFloat64(diff / delta)
-		}
-		if j == 0 && len(r0) > 0 {
-			}
-	}
-
-	return J, r0
-}
-
 func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 	configSurfaces := o.applyVariables(x)
-
-	gc := o.gc
-	if o.tempGC != nil {
-		gc = o.tempGC
-	}
 
 	var allR []float64
 	for _, cfg := range o.configs {
@@ -543,20 +486,44 @@ func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 			r := math.Sqrt(cfg.Weight*term.Weight*fieldWeightForTerm(cfg, term)*wavWeightForTerm(cfg, term)) * rms
 			allR = append(allR, r)
 		}
+	}
+
+	return allR
+}
+
+func (o *MultiOptimizer) ComputeConstraints(x []float64) []float64 {
+	configSurfaces := o.applyVariables(x)
+
+	gc := o.gc
+	if o.tempGC != nil {
+		gc = o.tempGC
+	}
+
+	var allC []float64
+	for _, cfg := range o.configs {
+		surfaces := configSurfaces[cfg.ID]
+
+		for i := range surfaces {
+			key := cfgSurfKey(cfg.ID, surfaces[i].ID)
+			if d, ok := o.initialDiameters[key]; ok {
+				surfaces[i].Diameter = d
+			}
+		}
+
+		surface.Precompute(surfaces)
 
 		for _, c := range cfg.Constraints {
 			if !c.Active {
-				allR = append(allR, 0)
+				allC = append(allC, 0)
 				continue
 			}
 			angle := o.fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field}, surfaces)
 			value := constraint.Evaluate(c, surfaces, angle, gc)
-			err := constraint.ComputeError(c.Kind, value, c)
-			allR = append(allR, math.Sqrt(c.Weight)*err)
+			allC = append(allC, constraint.ComputeError(c.Kind, value, c))
 		}
 	}
 
-	return allR
+	return allC
 }
 
 func (o *MultiOptimizer) getInitialState() []float64 {
@@ -684,10 +651,6 @@ func (o *MultiOptimizer) buildVariableStates(x []float64) []VariableState {
 		states[i] = st
 	}
 	return states
-}
-
-func currentVariableValue(o *MultiOptimizer, v VariableInfo, x []float64) float64 {
-	return x[0] // simplified; caller should index properly
 }
 
 func (o *MultiOptimizer) fieldAngleForTerm(cfg ConfigInput, term types.MeritTerm, surfaces []types.Surface) float64 {
@@ -823,69 +786,6 @@ func resolveGlassKeyFromSurfaces(surfaces []types.Surface, gc *glass.Catalog, id
 		}
 	}
 	return ""
-}
-
-func sanitizeFloat64(v float64) float64 {
-	if math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0
-	}
-	return v
-}
-
-func solveLinearSystem(H [][]float64, g []float64) []float64 {
-	n := len(g)
-	aug := make([][]float64, n)
-	for i := 0; i < n; i++ {
-		aug[i] = make([]float64, n+1)
-		for j := 0; j < n; j++ {
-			aug[i][j] = sanitizeFloat64(H[i][j])
-		}
-		aug[i][n] = sanitizeFloat64(g[i])
-	}
-
-	for col := 0; col < n; col++ {
-		maxVal := math.Abs(aug[col][col])
-		maxRow := col
-		for row := col + 1; row < n; row++ {
-			if math.Abs(aug[row][col]) > maxVal {
-				maxVal = math.Abs(aug[row][col])
-				maxRow = row
-			}
-		}
-		aug[col], aug[maxRow] = aug[maxRow], aug[col]
-
-		if math.Abs(aug[col][col]) < 1e-15 {
-			return nil
-		}
-
-		for row := col + 1; row < n; row++ {
-			factor := aug[row][col] / aug[col][col]
-			for j := col; j <= n; j++ {
-				aug[row][j] -= factor * aug[col][j]
-			}
-		}
-	}
-
-	x := make([]float64, n)
-	for i := n - 1; i >= 0; i-- {
-		x[i] = aug[i][n]
-		for j := i + 1; j < n; j++ {
-			x[i] -= aug[i][j] * x[j]
-		}
-		x[i] /= aug[i][i]
-	}
-	return x
-}
-
-func projectOntoBox(x []float64, variables []VariableInfo) {
-	for i, v := range variables {
-		x[i] = sanitizeFloat64(x[i])
-		if x[i] < v.Min {
-			x[i] = v.Min
-		} else if x[i] > v.Max {
-			x[i] = v.Max
-		}
-	}
 }
 
 func buildPath(surfaces []types.Surface) []int {

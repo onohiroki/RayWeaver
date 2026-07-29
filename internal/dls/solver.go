@@ -6,21 +6,10 @@ import (
 
 const (
 	defaultMaxIter = 100
-	defaultMu      = 1.0
+	defaultMu      = 1e-3
 	defaultTol     = 1e-6
 	defaultEpsilon = 1e-6
 )
-
-func defaultOptions() Options {
-	return Options{
-		MaxIter:        defaultMaxIter,
-		Mu:             defaultMu,
-		Tol:            defaultTol,
-		Epsilon:        defaultEpsilon,
-		NumRays:        64,
-		ApertureMargin: 2.0,
-	}
-}
 
 func Solve(m Model) Result {
 	opts := m.Options()
@@ -40,18 +29,45 @@ func Solve(m Model) Result {
 		opts.ApertureMargin = 2.0
 	}
 
-	x := m.InitialState()
-	merit := m.EvaluateMerit(x)
+	variables := m.Variables()
+	nVars := len(variables)
+
+	scales := make([]float64, nVars)
+	for i, v := range variables {
+		scales[i] = v.Max - v.Min
+		if scales[i] <= 0 {
+			scales[i] = 1.0
+		}
+	}
+
+	xPhys0 := m.InitialState()
+	xNorm := make([]float64, nVars)
+	for i := range xPhys0 {
+		xNorm[i] = (xPhys0[i] - variables[i].Min) / scales[i]
+	}
+
+	c0 := m.ComputeConstraints(xPhys0)
+	nCon := len(c0)
+	hasConstraints := nCon > 0
+
+	lambdas := make([]float64, nCon)
+	muCon := 1.0
+
+	merit := m.EvaluateMerit(xPhys0)
+	if hasConstraints {
+		for j, cj := range c0 {
+			merit += lambdas[j]*cj + 0.5*muCon*cj*cj
+		}
+	}
 	beforeMerit := merit
 
 	mu := opts.Mu
 	if mu <= 0 {
 		mu = defaultMu
 	}
-	nVars := len(x)
 
-	bestX := make([]float64, nVars)
-	copy(bestX, x)
+	bestXNorm := make([]float64, nVars)
+	copy(bestXNorm, xNorm)
 	bestMerit := merit
 
 	var lastDelta []float64
@@ -59,7 +75,12 @@ func Solve(m Model) Result {
 	totalIter := 0
 
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
-		J, r := computeJacobian(m, x, opts.Epsilon)
+		J_opt, r_opt, J_con, c_con := computeJacobians(m, xNorm, variables, scales, opts.Epsilon)
+
+		J, r := J_opt, r_opt
+		if hasConstraints {
+			J, r = buildAugmented(J_opt, r_opt, J_con, c_con, lambdas, muCon)
+		}
 
 		g := make([]float64, nVars)
 		for j := 0; j < nVars; j++ {
@@ -82,12 +103,38 @@ func Solve(m Model) Result {
 			}
 		}
 		for j := 0; j < nVars; j++ {
-			H[j][j] += mu
+			H[j][j] += mu * H[j][j]
 		}
 
 		negG := make([]float64, nVars)
 		for j := 0; j < nVars; j++ {
 			negG[j] = -g[j]
+		}
+
+		gNorm := 0.0
+		for j := 0; j < nVars; j++ {
+			gNorm += g[j] * g[j]
+		}
+		if math.Sqrt(gNorm) < opts.Tol {
+			status = "converged_gradient"
+			break
+		}
+
+		frozen := make([]bool, nVars)
+		for j := 0; j < nVars; j++ {
+			if (xNorm[j] < 1e-8 && g[j] >= 0) || (xNorm[j] > 1-1e-8 && g[j] <= 0) {
+				frozen[j] = true
+			}
+		}
+		for j := 0; j < nVars; j++ {
+			if frozen[j] {
+				for k := 0; k < nVars; k++ {
+					H[j][k] = 0
+					H[k][j] = 0
+				}
+				H[j][j] = 1
+				negG[j] = 0
+			}
 		}
 
 		delta := solveLinearSystem(H, negG)
@@ -96,14 +143,79 @@ func Solve(m Model) Result {
 			continue
 		}
 
-		xNew := make([]float64, nVars)
+		xNormNew := make([]float64, nVars)
 		for j := 0; j < nVars; j++ {
-			xNew[j] = x[j] + delta[j]
+			xNormNew[j] = xNorm[j] + delta[j]
 		}
-		projectOntoBox(xNew, m.Variables())
 
-		meritNew := m.EvaluateMerit(xNew)
+		for j := 0; j < nVars; j++ {
+			xNormNew[j] = sanitize(xNormNew[j])
+			if xNormNew[j] < 0 {
+				xNormNew[j] = 0
+			} else if xNormNew[j] > 1 {
+				xNormNew[j] = 1
+			}
+		}
+
+		xPhysNew := denormalize(xNormNew, variables, scales)
+
+		meritNew := m.EvaluateMerit(xPhysNew)
+		var cNew []float64
+		if hasConstraints {
+			cNew = m.ComputeConstraints(xPhysNew)
+			for j, cj := range cNew {
+				meritNew += lambdas[j]*cj + 0.5*muCon*cj*cj
+			}
+		}
+
 		actualReduction := merit - meritNew
+
+		if actualReduction <= 0 {
+			dirDeriv := 0.0
+			for j := 0; j < nVars; j++ {
+				dirDeriv += g[j] * delta[j]
+			}
+
+			alpha := 1.0
+			for k := 0; k < 8; k++ {
+				alpha *= 0.5
+				xTestNorm := make([]float64, nVars)
+				for j := 0; j < nVars; j++ {
+					xTestNorm[j] = xNorm[j] + alpha*delta[j]
+				}
+				for j := 0; j < nVars; j++ {
+					xTestNorm[j] = sanitize(xTestNorm[j])
+					if xTestNorm[j] < 0 {
+						xTestNorm[j] = 0
+					} else if xTestNorm[j] > 1 {
+						xTestNorm[j] = 1
+					}
+				}
+
+				xTestPhys := denormalize(xTestNorm, variables, scales)
+				meritTest := m.EvaluateMerit(xTestPhys)
+				var cTest []float64
+				if hasConstraints {
+					cTest = m.ComputeConstraints(xTestPhys)
+					for j, cj := range cTest {
+						meritTest += lambdas[j]*cj + 0.5*muCon*cj*cj
+					}
+				}
+
+				if meritTest <= merit+1e-4*alpha*dirDeriv {
+					xNormNew = xTestNorm
+					xPhysNew = xTestPhys
+					meritNew = meritTest
+					cNew = cTest
+					actualReduction = merit - meritNew
+					break
+				}
+
+				if alpha < 1e-3 {
+					break
+				}
+			}
+		}
 
 		predictedReduction := 0.0
 		for i := 0; i < len(r); i++ {
@@ -137,11 +249,17 @@ func Solve(m Model) Result {
 		}
 
 		if actualReduction > 0 {
-			copy(x, xNew)
+			copy(xNorm, xNormNew)
 			merit = meritNew
+			if hasConstraints && cNew != nil {
+				for j, cj := range cNew {
+					lambdas[j] += muCon * cj
+				}
+				muCon *= 1.2
+			}
 			if merit < bestMerit {
 				bestMerit = merit
-				copy(bestX, x)
+				copy(bestXNorm, xNorm)
 			}
 		}
 
@@ -153,9 +271,9 @@ func Solve(m Model) Result {
 		lastDelta = delta
 
 		if opts.Logger != nil {
-			currVars := make([]float64, len(m.Variables()))
-			for i := range m.Variables() {
-				currVars[i] = x[i]
+			currVars := make([]float64, nVars)
+			for i := range nVars {
+				currVars[i] = variables[i].Min + xNorm[i]*scales[i]
 			}
 			opts.Logger.LogIter(totalIter+1, merit, actualReduction, stepNorm, currVars)
 		}
@@ -167,8 +285,10 @@ func Solve(m Model) Result {
 	}
 
 	if opts.Logger != nil {
-		finalVars := make([]float64, len(m.Variables()))
-		copy(finalVars, bestX)
+		finalVars := make([]float64, nVars)
+		for i := range nVars {
+			finalVars[i] = variables[i].Min + bestXNorm[i]*scales[i]
+		}
 		finalStepNorm := 0.0
 		if lastDelta != nil {
 			for _, d := range lastDelta {
@@ -179,13 +299,12 @@ func Solve(m Model) Result {
 		opts.Logger.LogFinal(totalIter+1, status, bestMerit, finalStepNorm, finalVars)
 	}
 
-	varInfo := m.Variables()
-	vars := make([]VariableState, len(varInfo))
-	for i, vi := range varInfo {
+	vars := make([]VariableState, len(variables))
+	for i, vi := range variables {
 		vars[i] = VariableState{
 			Name:  vi.Name,
 			Param: vi.Param,
-			After: bestX[i],
+			After: vi.Min + bestXNorm[i]*scales[i],
 		}
 	}
 
@@ -203,33 +322,81 @@ func Solve(m Model) Result {
 	}
 }
 
-func computeJacobian(m Model, x []float64, epsilon float64) ([][]float64, []float64) {
-	nVars := len(x)
+func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales []float64, epsilon float64) ([][]float64, []float64, [][]float64, []float64) {
+	nVars := len(xNorm)
+	xPhys := denormalize(xNorm, variables, scales)
 
 	for j := 0; j < nVars; j++ {
-		x[j] = sanitize(x[j])
+		xPhys[j] = sanitize(xPhys[j])
 	}
 
-	r0 := m.ComputeResiduals(x)
-	nResiduals := len(r0)
+	r0 := m.ComputeResiduals(xPhys)
+	nOpt := len(r0)
 
-	J := make([][]float64, nResiduals)
-	for i := 0; i < nResiduals; i++ {
-		J[i] = make([]float64, nVars)
+	c0 := m.ComputeConstraints(xPhys)
+	nCon := len(c0)
+
+	J_opt := make([][]float64, nOpt)
+	for i := 0; i < nOpt; i++ {
+		J_opt[i] = make([]float64, nVars)
+	}
+
+	J_con := make([][]float64, nCon)
+	for i := 0; i < nCon; i++ {
+		J_con[i] = make([]float64, nVars)
 	}
 
 	for j := 0; j < nVars; j++ {
 		xPert := make([]float64, nVars)
-		copy(xPert, x)
-		xPert[j] += epsilon
+		copy(xPert, xPhys)
+		xPert[j] += epsilon * scales[j]
 
 		rPert := m.ComputeResiduals(xPert)
+		cPert := m.ComputeConstraints(xPert)
 
-		for i := 0; i < nResiduals; i++ {
+		for i := 0; i < nOpt; i++ {
 			diff := rPert[i] - r0[i]
-			J[i][j] = sanitize(diff / epsilon)
+			J_opt[i][j] = sanitize(diff / epsilon)
+		}
+		for i := 0; i < nCon; i++ {
+			diff := cPert[i] - c0[i]
+			J_con[i][j] = sanitize(diff / epsilon)
 		}
 	}
 
-	return J, r0
+	return J_opt, r0, J_con, c0
+}
+
+func buildAugmented(J_opt [][]float64, r_opt []float64, J_con [][]float64, c_con []float64, lambdas []float64, muCon float64) ([][]float64, []float64) {
+	nOpt := len(r_opt)
+	nCon := len(c_con)
+	nVars := len(J_opt[0])
+
+	rAug := make([]float64, nOpt+nCon)
+	JAug := make([][]float64, nOpt+nCon)
+
+	for i := 0; i < nOpt; i++ {
+		rAug[i] = r_opt[i]
+		JAug[i] = make([]float64, nVars)
+		copy(JAug[i], J_opt[i])
+	}
+
+	sqrtMu := math.Sqrt(muCon)
+	for j := 0; j < nCon; j++ {
+		rAug[nOpt+j] = sqrtMu * (c_con[j] + lambdas[j]/muCon)
+		JAug[nOpt+j] = make([]float64, nVars)
+		for k := 0; k < nVars; k++ {
+			JAug[nOpt+j][k] = sqrtMu * J_con[j][k]
+		}
+	}
+
+	return JAug, rAug
+}
+
+func denormalize(n []float64, variables []VariableInfo, scales []float64) []float64 {
+	x := make([]float64, len(n))
+	for i := range n {
+		x[i] = variables[i].Min + n[i]*scales[i]
+	}
+	return x
 }

@@ -239,27 +239,13 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 		}
 	}
 
-	gcConstraint := o.gc
-	if o.tempGC != nil {
-		gcConstraint = o.tempGC
-	}
-	for _, c := range o.constraints {
-		if !c.Active {
-			continue
-		}
-		value := constraint.Evaluate(c, surfaces, o.resolveFieldAngle(c.Field), gcConstraint)
-		err := constraint.ComputeError(c.Kind, value, c)
-		merit += c.Weight * err * err
-	}
-
 	return merit
 }
 
 func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 	surfaces := o.applyVariables(x)
 	nTerms := len(o.meritTerms)
-	nCon := len(o.constraints)
-	r := make([]float64, nTerms+nCon)
+	r := make([]float64, nTerms)
 
 	for i := range surfaces {
 		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
@@ -273,21 +259,34 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 		r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
 	}
 
+	return r
+}
+
+func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
+	surfaces := o.applyVariables(x)
+
+	for i := range surfaces {
+		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
+			surfaces[i].Diameter = d
+		}
+	}
+
 	gcConstraint := o.gc
 	if o.tempGC != nil {
 		gcConstraint = o.tempGC
 	}
-	for j, c := range o.constraints {
-		if !c.Active {
-			r[nTerms+j] = 0
+
+	c := make([]float64, len(o.constraints))
+	for j, op := range o.constraints {
+		if !op.Active {
+			c[j] = 0
 			continue
 		}
-		value := constraint.Evaluate(c, surfaces, o.resolveFieldAngle(c.Field), gcConstraint)
-		err := constraint.ComputeError(c.Kind, value, c)
-		r[nTerms+j] = math.Sqrt(c.Weight) * err
+		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint)
+		c[j] = constraint.ComputeError(op.Kind, value, op)
 	}
 
-	return r
+	return c
 }
 
 func (o *Optimizer) Optimize() Result {

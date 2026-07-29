@@ -55,5 +55,6 @@ type Model interface {
 	InitialState() []float64
 	EvaluateMerit(x []float64) float64
 	ComputeResiduals(x []float64) []float64
+	ComputeConstraints(x []float64) []float64
 	Options() Options
 }
