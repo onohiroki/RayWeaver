@@ -1,0 +1,68 @@
+package dls
+
+import (
+    "math"
+
+	"github.com/hiroki/rayweaver/internal/types"
+)
+
+type IPoint struct {
+	X, Y float64
+	OK   bool
+}
+
+type pupilPoint struct {
+	X, Y float64
+}
+
+func ComputeSpotRMS(points []IPoint) float64 {
+	var sumX, sumY float64
+	var count int
+
+	for _, p := range points {
+		if !p.OK {
+			continue
+		}
+		sumX += p.X
+		sumY += p.Y
+		count++
+	}
+
+	if count == 0 {
+		return 1e6
+	}
+
+	cx := sumX / float64(count)
+	cy := sumY / float64(count)
+
+	var sumSq float64
+	for _, p := range points {
+		if !p.OK {
+			continue
+		}
+		dx := p.X - cx
+		dy := p.Y - cy
+		sumSq += dx*dx + dy*dy
+	}
+
+	return math.Sqrt(sumSq / float64(count))
+}
+
+func BuildPath(surfaces []types.Surface) []int {
+	path := []int{0}
+	for _, s := range surfaces {
+		if s.ID > 0 {
+			path = append(path, s.ID)
+		}
+	}
+	return path
+}
+
+func SurfaceIndex(surfaces []types.Surface, id int) int {
+	for i, s := range surfaces {
+		if s.ID == id {
+			return i
+		}
+	}
+	return -1
+}

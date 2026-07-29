@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/multiopt"
 	"github.com/hiroki/rayweaver/internal/optimize"
@@ -77,7 +78,7 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 	}
 
 
-	var logger optimize.Logger
+	var logger dls.Logger
 	logWriters := []struct {
 		name string
 		w    *os.File
@@ -100,7 +101,7 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 		if logger == nil {
 			logger = &jsonLogger{w: f}
 		} else {
-			logger = &multiLogger{loggers: []optimize.Logger{logger, &jsonLogger{w: f}}}
+			logger = &multiLogger{loggers: []dls.Logger{logger, &jsonLogger{w: f}}}
 		}
 	}
 
@@ -452,7 +453,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		epsilon = defaultEpsilon
 	}
 
-	var logger multiopt.Logger
+	var logger dls.Logger
 	logWriters := []struct {
 		name string
 		w    *os.File
@@ -475,7 +476,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		if logger == nil {
 			logger = &jsonMultiLogger{w: f}
 		} else {
-			logger = &multiMultiLogger{loggers: []multiopt.Logger{logger, &jsonMultiLogger{w: f}}}
+			logger = &multiMultiLogger{loggers: []dls.Logger{logger, &jsonMultiLogger{w: f}}}
 		}
 	}
 
@@ -662,7 +663,7 @@ func (j *jsonMultiLogger) LogFinal(iter int, status string, merit float64, stepN
 }
 
 type multiMultiLogger struct {
-	loggers []multiopt.Logger
+	loggers []dls.Logger
 }
 
 func (m *multiMultiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
@@ -744,7 +745,7 @@ func (j *jsonLogger) LogFinal(iter int, status string, merit float64, stepNorm f
 }
 
 type multiLogger struct {
-	loggers []optimize.Logger
+	loggers []dls.Logger
 }
 
 func (m *multiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {

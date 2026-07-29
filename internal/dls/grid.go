@@ -1,0 +1,178 @@
+package dls
+
+import (
+	"math"
+
+	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
+	"github.com/hiroki/rayweaver/internal/ray"
+	"github.com/hiroki/rayweaver/internal/types"
+)
+
+func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int) ([]IPoint, map[int]float64) {
+	engine := ray.NewEngine(gc, nil)
+	p := BuildPath(surfaces)
+
+	thetaRad := fieldAngle * math.Pi / 180.0
+	sinT := math.Sin(thetaRad)
+	cosT := math.Cos(thetaRad)
+
+	dx, dy := 0.0, 1.0
+	if len(fieldDir) >= 2 {
+		norm := math.Hypot(fieldDir[0], fieldDir[1])
+		if norm > 0 {
+			dx = fieldDir[0] / norm
+			dy = fieldDir[1] / norm
+		}
+	}
+
+	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
+
+	apertureRadius := ApertureRadiusForGrid(surfaces, wavelength, gc, apertureMargin)
+	if apertureRadius <= 0 {
+		return nil, nil
+	}
+
+	zStart := -100.0
+	grid := generatePupilGrid(numRays, apertureRadius)
+
+	stopZ := computeStopZ(surfaces)
+	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
+	if rayDir.Z > 1e-12 && tanComponent > 1e-12 {
+		tanComponent /= rayDir.Z
+		pupilOffsetX := -(stopZ - zStart) * tanComponent * dx
+		pupilOffsetY := -(stopZ - zStart) * tanComponent * dy
+		for i := range grid {
+			grid[i].X += pupilOffsetX
+			grid[i].Y += pupilOffsetY
+		}
+	}
+
+	perSurfMax := make(map[int]float64)
+	var points []IPoint
+	skipGlassPathCheck := fieldAngle == 0
+	for _, pt := range grid {
+		origin := types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}
+		r := types.Ray{
+			Wavelength:         wavelength,
+			Initial:            types.RayState{Origin: origin, Direction: rayDir},
+			Path:               p,
+			Jones:              types.NewCircularJones(true),
+			SkipGlassPathCheck: skipGlassPathCheck,
+		}
+
+		result := engine.TraceRay(r, surfaces)
+		if result.Error != "" {
+			points = append(points, IPoint{OK: false})
+			continue
+		}
+
+		for _, sr := range result.Surfaces {
+			ax := math.Abs(sr.Position.X)
+			ay := math.Abs(sr.Position.Y)
+			e := ax
+			if ay > e {
+				e = ay
+			}
+			if e > perSurfMax[sr.SurfaceID] {
+				perSurfMax[sr.SurfaceID] = e
+			}
+		}
+
+		if len(result.Surfaces) > 0 {
+			last := result.Surfaces[len(result.Surfaces)-1]
+			points = append(points, IPoint{X: last.Position.X, Y: last.Position.Y, OK: true})
+		} else {
+			points = append(points, IPoint{OK: false})
+		}
+	}
+
+	return points, perSurfMax
+}
+
+func generatePupilGrid(numRays int, apertureRadius float64) []pupilPoint {
+	var pts []pupilPoint
+	n := int(math.Sqrt(float64(numRays)))
+	if n < 2 {
+		n = 2
+	}
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			r := (float64(i) + 0.5) / float64(n) * apertureRadius
+			theta := 2 * math.Pi * (float64(j) + 0.5) / float64(n)
+			pts = append(pts, pupilPoint{
+				X: r * math.Cos(theta),
+				Y: r * math.Sin(theta),
+			})
+		}
+	}
+	return pts
+}
+
+func computeStopZ(surfaces []types.Surface) float64 {
+	stopID := 0
+	minD := math.MaxFloat64
+	for _, s := range surfaces {
+		if s.Diameter > 0 && s.Diameter < minD {
+			minD = s.Diameter
+			stopID = s.ID
+		}
+	}
+	if stopID == 0 {
+		return 0
+	}
+	z := 0.0
+	for _, s := range surfaces {
+		if s.ID == stopID {
+			return z
+		}
+		z += s.Thickness
+	}
+	return 0
+}
+
+func ApertureRadiusForGrid(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, margin float64) float64 {
+	if r := paraxialEntranceRadius(surfaces, wavelength, gc, margin); r > 0 {
+		return r
+	}
+	r := findFixedApertureRadius(surfaces)
+	if r <= 0 {
+		r = findMinApertureRadius(surfaces)
+	}
+	return r
+}
+
+func paraxialEntranceRadius(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, margin float64) float64 {
+	sys := types.System{Surfaces: surfaces}
+	res := paraxial.Compute(sys, wavelength, gc, 0, nil)
+	if res.EntrancePupilDiameter > 0 {
+		return (res.EntrancePupilDiameter / 2) * margin
+	}
+	return 0
+}
+
+func findFixedApertureRadius(surfaces []types.Surface) float64 {
+	minR := math.MaxFloat64
+	for _, s := range surfaces {
+		if !s.AutoAperture && s.Diameter > 0 && s.Diameter/2 < minR {
+			minR = s.Diameter / 2
+		}
+	}
+	if minR == math.MaxFloat64 {
+		return 0
+	}
+	return minR
+}
+
+func findMinApertureRadius(surfaces []types.Surface) float64 {
+	minR := math.MaxFloat64
+	for _, s := range surfaces {
+		if s.Diameter > 0 && s.Diameter/2 < minR {
+			minR = s.Diameter / 2
+		}
+	}
+	if minR == math.MaxFloat64 {
+		return 0
+	}
+	return minR
+}

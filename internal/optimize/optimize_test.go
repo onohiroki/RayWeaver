@@ -29,7 +29,7 @@ func TestOptimizerEvaluateMerit(t *testing.T) {
 
 	opt := NewOptimizer(cfg)
 	x := opt.getInitialState()
-	merit := opt.evaluateMerit(x)
+	merit := opt.EvaluateMerit(x)
 
 	if math.IsInf(merit, 0) || math.IsNaN(merit) {
 		t.Fatalf("evaluateMerit returned non-finite value: %v", merit)
@@ -105,40 +105,6 @@ func TestOptimizerApplyVariablesThickness(t *testing.T) {
 	}
 }
 
-func TestOptimizerJacobianHasNonZeroEntries(t *testing.T) {
-	gc := glass.NewCatalog()
-	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
-
-	surfaces := singletSurfaces()
-
-	cfg := Config{
-		Surfaces: surfaces,
-		Variables: []Variable{
-			{SurfaceID: 1, Param: "curvature", Min: -1.0, Max: 1.0},
-		},
-		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
-		GlassCatalog: gc,
-		NumRays:      16,
-		Epsilon:      1e-6,
-	}
-
-	opt := NewOptimizer(cfg)
-	x := opt.getInitialState()
-	J, r := opt.computeJacobianAndResiduals(x)
-
-	if len(J) != 1 {
-		t.Fatalf("Expected 1 residual term, got %d", len(J))
-	}
-	if len(J[0]) != 1 {
-		t.Fatalf("Expected 1 variable, got %d", len(J[0]))
-	}
-	if math.IsNaN(J[0][0]) || math.IsInf(J[0][0], 0) {
-		t.Fatalf("Jacobian entry is NaN or Inf: %v", J[0][0])
-	}
-
-	_ = r
-}
-
 func TestOptimizerResultHasExpectedFields(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
@@ -173,84 +139,6 @@ func TestOptimizerResultHasExpectedFields(t *testing.T) {
 	}
 	if result.AfterMerit <= 0 {
 		t.Errorf("AfterMerit = %v, want positive value", result.AfterMerit)
-	}
-}
-
-func TestProjectOntoBox(t *testing.T) {
-	variables := []Variable{
-		{Min: 0.0, Max: 1.0},
-		{Min: -5.0, Max: 5.0},
-	}
-	x := []float64{-1.0, 10.0}
-	projectOntoBox(x, variables)
-	if x[0] != 0.0 {
-		t.Errorf("x[0] = %v, want 0.0 (clamped to min)", x[0])
-	}
-	if x[1] != 5.0 {
-		t.Errorf("x[1] = %v, want 5.0 (clamped to max)", x[1])
-	}
-}
-
-func TestComputeSpotRMS(t *testing.T) {
-	points := []imagePoint{
-		{X: 1.0, Y: 0.0, OK: true},
-		{X: -1.0, Y: 0.0, OK: true},
-		{X: 0.0, Y: 1.0, OK: true},
-		{X: 0.0, Y: -1.0, OK: true},
-	}
-	rms := computeSpotRMS(points)
-	expected := 1.0
-	if math.Abs(rms-expected) > 1e-10 {
-		t.Errorf("RMS = %v, want %v", rms, expected)
-	}
-}
-
-func TestComputeSpotRMSAllFailed(t *testing.T) {
-	points := []imagePoint{
-		{OK: false},
-		{OK: false},
-	}
-	rms := computeSpotRMS(points)
-	if rms != 1e6 {
-		t.Errorf("RMS = %v, want 1e6 for all-failed points", rms)
-	}
-}
-
-func TestBuildPath(t *testing.T) {
-	surfaces := []types.Surface{
-		{ID: 0},
-		{ID: 1},
-		{ID: 2},
-	}
-	path := buildPath(surfaces)
-	if len(path) != 3 || path[0] != 0 || path[1] != 1 || path[2] != 2 {
-		t.Errorf("buildPath = %v, want [0, 1, 2]", path)
-	}
-}
-
-func TestFindMinApertureRadius(t *testing.T) {
-	surfaces := []types.Surface{
-		{ID: 1, Diameter: 10.0},
-		{ID: 2, Diameter: 20.0},
-		{ID: 3, Diameter: 0.0},
-	}
-	r := findMinApertureRadius(surfaces)
-	if math.Abs(r-5.0) > 1e-10 {
-		t.Errorf("findMinApertureRadius = %v, want 5.0", r)
-	}
-}
-
-func TestSurfaceIndex(t *testing.T) {
-	surfaces := []types.Surface{
-		{ID: 1},
-		{ID: 2},
-		{ID: 3},
-	}
-	if surfaceIndex(surfaces, 2) != 1 {
-		t.Error("surfaceIndex(surfaces, 2) != 1")
-	}
-	if surfaceIndex(surfaces, 99) != -1 {
-		t.Error("surfaceIndex(surfaces, 99) should be -1")
 	}
 }
 

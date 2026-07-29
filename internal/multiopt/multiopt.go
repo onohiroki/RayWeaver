@@ -5,19 +5,12 @@ import (
 	"math"
 
 	"github.com/hiroki/rayweaver/internal/constraint"
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
-)
-
-const (
-	defaultMaxIter = 100
-	defaultMu      = 0.01
-	defaultTol     = 1e-6
-	defaultEpsilon = 1e-6
-	defaultNumRays = 64
 )
 
 type ConfigInput struct {
@@ -57,13 +50,10 @@ type MultiOptimizer struct {
 	epsilon         float64
 	numRays         int
 	apertureMargin  float64
-	logger          Logger
+	logger          dls.Logger
 }
 
-type Logger interface {
-	LogIter(iter int, merit, improvement, stepNorm float64, variables []float64)
-	LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64)
-}
+
 
 type Result struct {
 	BeforeMerit float64         `yaml:"before_merit"`
@@ -91,15 +81,15 @@ type pupilPoint struct {
 	X, Y float64
 }
 
-func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, tol float64, epsilon float64, apertureMargin float64, logger Logger) *MultiOptimizer {
+func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, tol float64, epsilon float64, apertureMargin float64, logger dls.Logger) *MultiOptimizer {
 	if maxIter <= 0 {
-		maxIter = defaultMaxIter
+		maxIter = 100
 	}
 	if tol <= 0 {
-		tol = defaultTol
+		tol = 1e-6
 	}
 	if epsilon <= 0 {
-		epsilon = defaultEpsilon
+		epsilon = 1e-6
 	}
 
 	var variables []VariableInfo
@@ -178,301 +168,72 @@ func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []t
 		glassOverrides:   glassOverrides,
 		initialDiameters: initialDiameters,
 		maxIter:          maxIter,
-		mu:               defaultMu,
+		mu:               0.01,
 		tol:              tol,
 		epsilon:          epsilon,
-		numRays:          defaultNumRays,
+		numRays:          64,
 		apertureMargin:   apertureMargin,
 		logger:           logger,
 	}
 }
 
-func (o *MultiOptimizer) Optimize() Result {
-	x := o.getInitialState()
-	merit := o.evaluateMerit(x)
-	beforeMerit := merit
-
-	mu := o.mu
-	nVars := len(x)
-
-	bestX := make([]float64, nVars)
-	copy(bestX, x)
-	bestMerit := merit
-
-	converged := false
-
-	// Stage 1: full DLS with all variables
-	for iter := 0; iter < o.maxIter; iter++ {
-		J, r := o.computeJacobianAndResiduals(x)
-
-		g := make([]float64, nVars)
-		for j := 0; j < nVars; j++ {
-			sum := 0.0
-			for i := 0; i < len(r); i++ {
-				sum += J[i][j] * r[i]
-			}
-			g[j] = sum
-		}
-
-		H := make([][]float64, nVars)
-		for j := 0; j < nVars; j++ {
-			H[j] = make([]float64, nVars)
-			for k := 0; k < nVars; k++ {
-				sum := 0.0
-				for i := 0; i < len(r); i++ {
-					sum += J[i][j] * J[i][k]
-				}
-				H[j][k] = sum
-			}
-		}
-		for j := 0; j < nVars; j++ {
-			H[j][j] += mu
-		}
-
-		negG := make([]float64, nVars)
-		for j := 0; j < nVars; j++ {
-			negG[j] = -g[j]
-		}
-
-		delta := solveLinearSystem(H, negG)
-		if delta == nil {
-			mu *= 2.0
-			continue
-		}
-
-		xNew := make([]float64, nVars)
-		for j := 0; j < nVars; j++ {
-			xNew[j] = x[j] + delta[j]
-		}
-		projectOntoBox(xNew, o.variables)
-
-		meritNew := o.evaluateMerit(xNew)
-		actualReduction := merit - meritNew
-
-		predictedReduction := 0.0
-		for i := 0; i < len(r); i++ {
-			sum := 0.0
-			for j := 0; j < nVars; j++ {
-				sum += J[i][j] * delta[j]
-			}
-			predictedReduction += r[i] * sum
-		}
-		halfDeltaHDelta := 0.0
-		for j := 0; j < nVars; j++ {
-			sum := 0.0
-			for k := 0; k < nVars; k++ {
-				sum += H[j][k] * delta[k]
-			}
-			halfDeltaHDelta += delta[j] * sum
-		}
-		predictedReduction -= 0.5 * halfDeltaHDelta
-
-		rho := 1.0
-		if predictedReduction > 1e-20 {
-			rho = actualReduction / predictedReduction
-		} else if predictedReduction < -1e-20 {
-			rho = -1.0
-		} else if actualReduction < 0 {
-			rho = -1.0
-		}
-
-		if rho > 0.25 {
-			mu *= math.Max(1.0/3.0, 1.0-(2.0*rho-1.0)*(2.0*rho-1.0)*(2.0*rho-1.0))
-		} else {
-			mu *= 2.0
-		}
-
-		if actualReduction > 0 {
-			copy(x, xNew)
-			merit = meritNew
-			if merit < bestMerit {
-				bestMerit = merit
-				copy(bestX, x)
-			}
-		}
-
-		norm := 0.0
-		for _, d := range delta {
-			norm += d * d
-		}
-		stepNorm := math.Sqrt(norm)
-
-		improvement := actualReduction
-		if o.logger != nil {
-			currVars := make([]float64, len(o.variables))
-			for i := range o.variables {
-				currVars[i] = x[i]
-			}
-			o.logger.LogIter(iter+1, merit, improvement, stepNorm, currVars)
-		}
-
-		if math.Sqrt(norm) < o.tol {
-			converged = true
-			break
-		}
-	}
-
-	// Stage 2: thickness-only refinement
-	// Identify which variables are thickness-related
-	thickOnly := make([]bool, nVars)
-	for vi, v := range o.variables {
+func (o *MultiOptimizer) Variables() []dls.VariableInfo {
+	result := make([]dls.VariableInfo, len(o.variables))
+	for i, v := range o.variables {
+		var param string
 		if v.IsShared {
-			for _, b := range v.Bindings {
-				if b.Param == "thickness" {
-					thickOnly[vi] = true
-					break
-				}
+			if len(v.Bindings) > 0 {
+				param = v.Bindings[0].Param
 			}
 		} else {
-			if v.Target.Param == "thickness" {
-				thickOnly[vi] = true
-			}
+			param = v.Target.Param
+		}
+		result[i] = dls.VariableInfo{
+			Name:  v.Name,
+			Param: param,
+			Min:   v.Min,
+			Max:   v.Max,
 		}
 	}
-	nThick := 0
-	for _, t := range thickOnly {
-		if t {
-			nThick++
-		}
+	return result
+}
+
+func (o *MultiOptimizer) Options() dls.Options {
+	return dls.Options{
+		MaxIter:        o.maxIter,
+		Mu:             o.mu,
+		Tol:            o.tol,
+		Epsilon:        o.epsilon,
+		NumRays:        o.numRays,
+		ApertureMargin: o.apertureMargin,
+		Logger:         o.logger,
 	}
+}
 
-	if nThick > 0 && nThick < nVars {
-		mu = o.mu
-		x = make([]float64, nVars)
-		copy(x, bestX)
-		merit = bestMerit
+func (o *MultiOptimizer) InitialState() []float64 {
+	return o.getInitialState()
+}
 
-		for iter := 0; iter < o.maxIter; iter++ {
-			J, r := o.computeJacobianAndResiduals(x)
+func (o *MultiOptimizer) EvaluateMerit(x []float64) float64 {
+	return o.evaluateMerit(x)
+}
 
-			g := make([]float64, nVars)
-			for j := 0; j < nVars; j++ {
-				if !thickOnly[j] {
-					continue
-				}
-				sum := 0.0
-				for i := 0; i < len(r); i++ {
-					sum += J[i][j] * r[i]
-				}
-				g[j] = sum
-			}
+func (o *MultiOptimizer) ComputeResiduals(x []float64) []float64 {
+	return o.computeResiduals(x)
+}
 
-			H := make([][]float64, nVars)
-			for j := 0; j < nVars; j++ {
-				H[j] = make([]float64, nVars)
-				if !thickOnly[j] {
-					H[j][j] = 1.0
-					continue
-				}
-				for k := 0; k < nVars; k++ {
-					if !thickOnly[k] {
-						continue
-					}
-					sum := 0.0
-					for i := 0; i < len(r); i++ {
-						sum += J[i][j] * J[i][k]
-					}
-					H[j][k] = sum
-				}
-				H[j][j] += mu
-			}
-
-			negG := make([]float64, nVars)
-			for j := 0; j < nVars; j++ {
-				negG[j] = -g[j]
-			}
-
-			delta := solveLinearSystem(H, negG)
-			if delta == nil {
-				break
-			}
-
-			xNew := make([]float64, nVars)
-			copy(xNew, x)
-			for j := 0; j < nVars; j++ {
-				if thickOnly[j] {
-					xNew[j] = x[j] + delta[j]
-				}
-			}
-			projectOntoBox(xNew, o.variables)
-
-			meritNew := o.evaluateMerit(xNew)
-			actualReduction := merit - meritNew
-
-			rho := 1.0
-			if actualReduction > 0 {
-				predictedReduction := 0.0
-				for i := 0; i < len(r); i++ {
-					sum := 0.0
-					for j := 0; j < nVars; j++ {
-						if thickOnly[j] {
-							sum += J[i][j] * delta[j]
-						}
-					}
-					predictedReduction += r[i] * sum
-				}
-				if predictedReduction > 1e-20 {
-					rho = actualReduction / predictedReduction
-				} else if predictedReduction < -1e-20 {
-					rho = -1.0
-				}
-			} else if actualReduction < 0 {
-				rho = -1.0
-			}
-
-			if rho > 0.25 {
-				mu *= math.Max(1.0/3.0, 1.0-(2.0*rho-1.0)*(2.0*rho-1.0)*(2.0*rho-1.0))
-			} else {
-				mu *= 2.0
-			}
-
-			if actualReduction > 0 {
-				copy(x, xNew)
-				merit = meritNew
-				if merit < bestMerit {
-					bestMerit = merit
-					copy(bestX, x)
-				}
-			}
-
-			norm := 0.0
-			for j := 0; j < nVars; j++ {
-				if thickOnly[j] {
-					norm += delta[j] * delta[j]
-				}
-			}
-			stepNorm := math.Sqrt(norm)
-
-			if o.logger != nil {
-				o.logger.LogIter(iter+1+o.maxIter, merit, actualReduction, stepNorm, nil)
-			}
-
-			if stepNorm < o.tol {
-				break
-			}
-		}
+func (o *MultiOptimizer) Optimize() Result {
+	dlsResult := dls.Solve(o)
+	x := make([]float64, len(dlsResult.Variables))
+	for i, vs := range dlsResult.Variables {
+		x[i] = vs.After
 	}
-
-	status := "converged"
-	if !converged {
-		status = "max_iterations"
-	}
-
-	if o.logger != nil {
-		finalVars := o.buildVariableStates(bestX)
-		vars := make([]float64, len(finalVars))
-		for i, s := range finalVars {
-			vars[i] = s.After
-		}
-		o.logger.LogFinal(o.maxIter, status, bestMerit, 0, vars)
-	}
-
 	return Result{
-		BeforeMerit: beforeMerit,
-		AfterMerit:  bestMerit,
-		Iterations:  o.maxIter,
-		Status:      status,
-		Variables:   o.buildVariableStates(bestX),
+		BeforeMerit: dlsResult.BeforeMerit,
+		AfterMerit:  dlsResult.AfterMerit,
+		Iterations:  dlsResult.Iterations,
+		Status:      dlsResult.Status,
+		Variables:   o.buildVariableStates(x),
 	}
 }
 
