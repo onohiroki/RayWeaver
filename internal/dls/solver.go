@@ -239,7 +239,11 @@ func Solve(m Model) Result {
 			}
 			halfDeltaHDelta += delta[j] * sum
 		}
-		predictedReduction := 0.5 * halfDeltaHDelta
+		normDelta := 0.0
+		for _, d := range delta {
+			normDelta += d * d
+		}
+		predictedReduction := 0.5*halfDeltaHDelta + 0.5*mu*normDelta
 
 		rho := 1.0
 		if predictedReduction > 1e-20 {
@@ -285,11 +289,7 @@ func Solve(m Model) Result {
 			}
 		}
 
-		norm := 0.0
-		for _, d := range delta {
-			norm += d * d
-		}
-		stepNorm := math.Sqrt(norm)
+		stepNorm := math.Sqrt(normDelta)
 		lastDelta = delta
 
 		if opts.Logger != nil {
@@ -300,7 +300,7 @@ func Solve(m Model) Result {
 			opts.Logger.LogIter(totalIter+1, merit, actualReduction, stepNorm, currVars)
 		}
 
-		if stepNorm < opts.Tol {
+		if stepNorm < opts.Tol && actualReduction < 1e-8*merit {
 			status = "converged"
 			break
 		}
