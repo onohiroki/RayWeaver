@@ -90,8 +90,8 @@ echo "=== Raytrace diagram (SVG + PNG) ==="
   | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
   | tee "$OUTDIR/us2645157-trace-result.yaml" \
-        >(./rayweave plot -o "$OUTDIR/us2645157.png") \
-  | ./rayweave plot -o "$OUTDIR/us2645157.svg"
+        >(./rayweave plot -o "$OUTDIR/us2645157.png" > /dev/null) \
+  | ./rayweave plot -o "$OUTDIR/us2645157.svg" > /dev/null
 echo "Written: $OUTDIR/us2645157.svg and $OUTDIR/us2645157.png"
 
 echo
