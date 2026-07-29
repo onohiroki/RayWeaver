@@ -452,6 +452,10 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 	if epsilon <= 0 {
 		epsilon = defaultEpsilon
 	}
+	mu := input.Optimization.Mu
+	if mu <= 0 {
+		mu = defaultMu
+	}
 
 	var logger dls.Logger
 	logWriters := []struct {
@@ -480,7 +484,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		}
 	}
 
-	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, tol, epsilon, 1.2, logger)
+	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, 1.2, logger)
 	result := opt.Optimize()
 
 	for _, lw := range logWriters {

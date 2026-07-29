@@ -6,7 +6,7 @@ import (
 
 const (
 	defaultMaxIter = 100
-	defaultMu      = 1e-3
+	defaultMu      = 1e-2
 	defaultTol     = 1e-6
 	defaultEpsilon = 1e-6
 )
@@ -51,7 +51,9 @@ func Solve(m Model) Result {
 	hasConstraints := nCon > 0
 
 	lambdas := make([]float64, nCon)
-	muCon := 1.0
+	cPrev := make([]float64, nCon)
+	copy(cPrev, c0)
+	muCon := 0.01
 
 	merit := m.EvaluateMerit(xPhys0)
 	if hasConstraints {
@@ -141,6 +143,18 @@ func Solve(m Model) Result {
 		if delta == nil {
 			mu *= 2.0
 			continue
+		}
+
+		stepBeforeClamp := 0.0
+		for _, d := range delta {
+			stepBeforeClamp += d * d
+		}
+		stepBeforeClamp = math.Sqrt(stepBeforeClamp)
+		if stepBeforeClamp > 0.5 {
+			backoff := 0.5 / stepBeforeClamp
+			for j := 0; j < nVars; j++ {
+				delta[j] *= backoff
+			}
 		}
 
 		xNormNew := make([]float64, nVars)
@@ -247,7 +261,23 @@ func Solve(m Model) Result {
 				for j, cj := range cNew {
 					lambdas[j] += muCon * cj
 				}
-				muCon *= 1.2
+				cNewNorm := 0.0
+				for _, cj := range cNew {
+					cNewNorm += cj * cj
+				}
+				cNewNorm = math.Sqrt(cNewNorm)
+				cPrevNorm := 0.0
+				for _, cj := range cPrev {
+					cPrevNorm += cj * cj
+				}
+				cPrevNorm = math.Sqrt(cPrevNorm)
+				if cPrevNorm > 1e-12 && cNewNorm > 0.25*cPrevNorm {
+					muCon *= 10.0
+					if muCon > 1e8 {
+						muCon = 1e8
+					}
+				}
+				copy(cPrev, cNew)
 			}
 			if merit < bestMerit {
 				bestMerit = merit
@@ -276,6 +306,11 @@ func Solve(m Model) Result {
 		}
 	}
 
+	iterations := totalIter
+	if status == "converged" || status == "converged_gradient" {
+		iterations = totalIter + 1
+	}
+
 	if opts.Logger != nil {
 		finalVars := make([]float64, nVars)
 		for i := range nVars {
@@ -288,7 +323,7 @@ func Solve(m Model) Result {
 			}
 			finalStepNorm = math.Sqrt(finalStepNorm)
 		}
-		opts.Logger.LogFinal(totalIter+1, status, bestMerit, finalStepNorm, finalVars)
+		opts.Logger.LogFinal(iterations, status, bestMerit, finalStepNorm, finalVars)
 	}
 
 	vars := make([]VariableState, len(variables))
@@ -298,11 +333,6 @@ func Solve(m Model) Result {
 			Param: vi.Param,
 			After: vi.Min + bestXNorm[i]*scales[i],
 		}
-	}
-
-	iterations := totalIter
-	if status == "converged" {
-		iterations = totalIter + 1
 	}
 
 	return Result{

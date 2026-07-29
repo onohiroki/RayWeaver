@@ -81,7 +81,7 @@ type pupilPoint struct {
 	X, Y float64
 }
 
-func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, tol float64, epsilon float64, apertureMargin float64, logger dls.Logger) *MultiOptimizer {
+func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, logger dls.Logger) *MultiOptimizer {
 	if maxIter <= 0 {
 		maxIter = 100
 	}
@@ -168,7 +168,7 @@ func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []t
 		glassOverrides:   glassOverrides,
 		initialDiameters: initialDiameters,
 		maxIter:          maxIter,
-		mu:               0.01,
+		mu:               mu,
 		tol:              tol,
 		epsilon:          epsilon,
 		numRays:          64,
