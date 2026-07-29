@@ -198,111 +198,6 @@ optimization:
           id: 7
           param: thickness
 
-    - name: s1_diameter
-      min: 1.0
-      max: 100.0
-      active: true
-      bindings:
-        - config: config0
-          id: 1
-          param: diameter
-        - config: config1
-          id: 1
-          param: diameter
-        - config: config2
-          id: 1
-          param: diameter
-
-    - name: s2_diameter
-      min: 1.0
-      max: 100.0
-      active: true
-      bindings:
-        - config: config0
-          id: 2
-          param: diameter
-        - config: config1
-          id: 2
-          param: diameter
-        - config: config2
-          id: 2
-          param: diameter
-
-    - name: s3_diameter
-      min: 1.0
-      max: 100.0
-      active: true
-      bindings:
-        - config: config0
-          id: 3
-          param: diameter
-        - config: config1
-          id: 3
-          param: diameter
-        - config: config2
-          id: 3
-          param: diameter
-
-    - name: s4_diameter
-      min: 1.0
-      max: 100.0
-      active: true
-      bindings:
-        - config: config0
-          id: 4
-          param: diameter
-        - config: config1
-          id: 4
-          param: diameter
-        - config: config2
-          id: 4
-          param: diameter
-
-    - name: s5_diameter
-      min: 1.0
-      max: 100.0
-      active: true
-      bindings:
-        - config: config0
-          id: 5
-          param: diameter
-        - config: config1
-          id: 5
-          param: diameter
-        - config: config2
-          id: 5
-          param: diameter
-
-    - name: s6_diameter
-      min: 1.0
-      max: 100.0
-      active: true
-      bindings:
-        - config: config0
-          id: 6
-          param: diameter
-        - config: config1
-          id: 6
-          param: diameter
-        - config: config2
-          id: 6
-          param: diameter
-
-    - name: s7_diameter
-      min: 1.0
-      max: 100.0
-      active: true
-      bindings:
-        - config: config0
-          id: 7
-          param: diameter
-        - config: config1
-          id: 7
-          param: diameter
-        - config: config2
-          id: 7
-          param: diameter
-
   local_variables:
     - name: config0_s2_thickness
       config: config0
@@ -311,7 +206,7 @@ optimization:
         id: 2
         param: thickness
       min: 0.1
-      max: 100.0
+      max: 200.0
       active: true
 
     - name: config0_s4_thickness
@@ -321,7 +216,7 @@ optimization:
         id: 4
         param: thickness
       min: 0.1
-      max: 100.0
+      max: 200.0
       active: true
 
     - name: config1_s2_thickness
@@ -331,7 +226,7 @@ optimization:
         id: 2
         param: thickness
       min: 0.1
-      max: 100.0
+      max: 200.0
       active: true
 
     - name: config1_s4_thickness
@@ -341,7 +236,7 @@ optimization:
         id: 4
         param: thickness
       min: 0.1
-      max: 100.0
+      max: 200.0
       active: true
 
     - name: config2_s2_thickness
@@ -351,7 +246,7 @@ optimization:
         id: 2
         param: thickness
       min: 0.1
-      max: 100.0
+      max: 200.0
       active: true
 
     - name: config2_s4_thickness
@@ -361,7 +256,7 @@ optimization:
         id: 4
         param: thickness
       min: 0.1
-      max: 100.0
+      max: 200.0
       active: true
 
   constraints: []

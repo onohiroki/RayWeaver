@@ -217,14 +217,6 @@ func Solve(m Model) Result {
 			}
 		}
 
-		predictedReduction := 0.0
-		for i := 0; i < len(r); i++ {
-			sum := 0.0
-			for j := 0; j < nVars; j++ {
-				sum += J[i][j] * delta[j]
-			}
-			predictedReduction += r[i] * sum
-		}
 		halfDeltaHDelta := 0.0
 		for j := 0; j < nVars; j++ {
 			sum := 0.0
@@ -233,7 +225,7 @@ func Solve(m Model) Result {
 			}
 			halfDeltaHDelta += delta[j] * sum
 		}
-		predictedReduction -= 0.5 * halfDeltaHDelta
+		predictedReduction := 0.5 * halfDeltaHDelta
 
 		rho := 1.0
 		if predictedReduction > 1e-20 {
