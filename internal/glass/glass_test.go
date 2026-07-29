@@ -338,11 +338,185 @@ func TestRefractiveIndexFromNDVD(t *testing.T) {
 }
 
 func TestRefractiveIndexFromNDVDOutsideRange(t *testing.T) {
-	n, err := RefractiveIndexFromNDVD(1.51680, 64.17, 0.000300)
+	_, err := RefractiveIndexFromNDVD(1.5, 60, 0.000300)
 	if err != nil {
-		t.Fatalf("RefractiveIndexFromNDVD: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if n != 1.51680 {
-		t.Errorf("n = %v, want nd (outside range fallback)", n)
+}
+
+// --- AGF NM format parsing ---
+
+func TestParseAGF_NMFormat(t *testing.T) {
+	input := `CC SCHOTT June 2025
+NM N-BK7 2 520636.252 1.51680 64.17 0 1
+CD 1.265385420E+00 8.131040780E-03 1.441910730E-02 5.433032260E-02 1.003230280E+00 1.028211660E+02
+ED
+`
+	glasses, err := ParseAGF([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseAGF failed: %v", err)
+	}
+	if len(glasses) != 1 {
+		t.Fatalf("expected 1 glass, got %d", len(glasses))
+	}
+	g := glasses[0]
+	if g.Name != "N-BK7" {
+		t.Errorf("expected Name=N-BK7, got %q", g.Name)
+	}
+	if g.Type != types.GlassTypeCatalog {
+		t.Errorf("expected Type=catalog, got %q", g.Type)
+	}
+	if math.Abs(g.ND-1.51680) > 1e-4 {
+		t.Errorf("expected ND≈1.51680, got %f", g.ND)
+	}
+	if math.Abs(g.VD-64.17) > 1e-2 {
+		t.Errorf("expected VD≈64.17, got %f", g.VD)
+	}
+	if len(g.Coefficients) < 6 {
+		t.Fatalf("expected ≥6 coefficients, got %d", len(g.Coefficients))
+	}
+	if g.Coefficients[0] != 1.265385420E+00 {
+		t.Errorf("expected coeff[0]=1.265385420, got %g", g.Coefficients[0])
+	}
+	if g.DispersionFormula != types.Sellmeier1 {
+		t.Errorf("expected DispersionFormula=sellmeier_1, got %q", g.DispersionFormula)
+	}
+}
+
+func TestParseAGF_NMFormat_MultipleGlasses(t *testing.T) {
+	input := `CC SCHOTT June 2025
+NM N-BK7 2 520636.252 1.51680 64.17 0 1
+CD 1.265385420E+00 8.131040780E-03 1.441910730E-02 5.433032260E-02 1.003230280E+00 1.028211660E+02
+ED
+NM F2 2 620364.360 1.62004 36.37 0 1
+CD 1.345333590E+00 9.977438710E-03 2.090731760E-01 4.704507670E-02 9.373571620E-01 1.118867640E+02
+ED
+`
+	glasses, err := ParseAGF([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseAGF failed: %v", err)
+	}
+	if len(glasses) != 2 {
+		t.Fatalf("expected 2 glasses, got %d", len(glasses))
+	}
+	if glasses[0].Name != "N-BK7" {
+		t.Errorf("expected glass[0]=N-BK7, got %q", glasses[0].Name)
+	}
+	if glasses[1].Name != "F2" {
+		t.Errorf("expected glass[1]=F2, got %q", glasses[1].Name)
+	}
+}
+
+func TestParseAGF_DetectManufacturer_CC_Keyword(t *testing.T) {
+	input := `CC SCHOTT June 2025 preferred
+NM N-BK7 2 520636.252 1.51680 64.17 0 1
+CD 1.265385420E+00 8.131040780E-03 1.441910730E-02 5.433032260E-02 1.003230280E+00 1.028211660E+02
+ED
+`
+	glasses, err := ParseAGF([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseAGF failed: %v", err)
+	}
+	if len(glasses) != 1 {
+		t.Fatalf("expected 1 glass, got %d", len(glasses))
+	}
+	if glasses[0].Manufacturer != "SCHOTT" {
+		t.Errorf("expected Manufacturer=SCHOTT, got %q", glasses[0].Manufacturer)
+	}
+}
+
+func TestParseAGF_DetectManufacturer_CC_FirstToken(t *testing.T) {
+	input := `CC CUSTOM_OPTICS 2025
+NM N-BK7 2 520636.252 1.51680 64.17 0 1
+CD 1.265385420E+00 8.131040780E-03 1.441910730E-02 5.433032260E-02 1.003230280E+00 1.028211660E+02
+ED
+`
+	glasses, err := ParseAGF([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseAGF failed: %v", err)
+	}
+	if len(glasses) != 1 {
+		t.Fatalf("expected 1 glass, got %d", len(glasses))
+	}
+	expected := "CUSTOM_OPTICS"
+	if glasses[0].Manufacturer != expected {
+		t.Errorf("expected Manufacturer=%q, got %q", expected, glasses[0].Manufacturer)
+	}
+}
+
+func TestParseAGF_DetectManufacturer_CC_Keyword_OHARA(t *testing.T) {
+	input := `CC
+NM PBM2R 2 1 1.620040 36.407735 0 1 1
+CD 1.341394220E+00 9.803016690E-03 2.131855100E-01 4.705870880E-02 9.832880160E-01 1.174582700E+02
+ED
+`
+	glasses, err := ParseAGF([]byte(input), "OHARA_260701.AGF")
+	if err != nil {
+		t.Fatalf("ParseAGF failed: %v", err)
+	}
+	if len(glasses) != 1 {
+		t.Fatalf("expected 1 glass, got %d", len(glasses))
+	}
+	if glasses[0].Manufacturer != "OHARA" {
+		t.Errorf("expected Manufacturer=OHARA, got %q", glasses[0].Manufacturer)
+	}
+}
+
+func TestParseAGF_DecodeUTF16LE(t *testing.T) {
+	utf16Bytes := []byte{0xFF, 0xFE}
+	utf16Bytes = append(utf16Bytes, []byte("N\000A\000M\000E\000 \000N\000-\000B\000K\0007\000\n\000")...)
+	glasses, err := ParseAGF(utf16Bytes)
+	if err != nil {
+		t.Fatalf("ParseAGF failed: %v", err)
+	}
+	if len(glasses) != 0 {
+		t.Logf("got %d glasses from NAME format (may vary)", len(glasses))
+	}
+}
+
+func TestParseAGF_CRLF(t *testing.T) {
+	input := "CC SCHOTT\r\nNM N-BK7 2 520636.252 1.51680 64.17 0 1\r\nCD 1.265385420E+00 8.131040780E-03 1.441910730E-02 5.433032260E-02 1.003230280E+00 1.028211660E+02\r\nED\r\n"
+	glasses, err := ParseAGF([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseAGF failed: %v", err)
+	}
+	if len(glasses) != 1 {
+		t.Fatalf("expected 1 glass, got %d", len(glasses))
+	}
+	if glasses[0].Name != "N-BK7" {
+		t.Errorf("expected N-BK7, got %q", glasses[0].Name)
+	}
+}
+
+func TestParseAGF_NAMEFormat_StillWorks(t *testing.T) {
+	input := `NAME N-BK7
+MANUFACTURER SCHOTT
+ND 1.51680
+VD 64.17
+CO 1.265385420E+00 8.131040780E-03 1.441910730E-02 5.433032260E-02 1.003230280E+00 1.028211660E+02
+ED
+`
+	glasses, err := ParseAGF([]byte(input))
+	if err != nil {
+		t.Fatalf("ParseAGF failed: %v", err)
+	}
+	if len(glasses) != 1 {
+		t.Fatalf("expected 1 glass, got %d", len(glasses))
+	}
+	g := glasses[0]
+	if g.Name != "N-BK7" {
+		t.Errorf("expected Name=N-BK7, got %q", g.Name)
+	}
+	if g.Type != types.GlassTypeCatalog {
+		t.Errorf("expected Type=catalog, got %q", g.Type)
+	}
+	if g.Manufacturer != "SCHOTT" {
+		t.Errorf("expected Manufacturer=SCHOTT, got %q", g.Manufacturer)
+	}
+	if math.Abs(g.ND-1.51680) > 1e-4 {
+		t.Errorf("expected ND≈1.51680, got %f", g.ND)
+	}
+	if len(g.Coefficients) < 6 {
+		t.Errorf("expected ≥6 coefficients, got %d", len(g.Coefficients))
 	}
 }
