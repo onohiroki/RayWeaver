@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/render"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
@@ -20,7 +21,7 @@ func runPlot(data []byte) {
 
 	var outPath string
 	var lensWidth, rayWidth, scaleOverride, rightMarginPct float64
-	var configFlag string
+	var configFlag, glassDir string
 	args := os.Args[2:] // skip "plot"
 	fs := flag.NewFlagSet("plot", flag.ExitOnError)
 	fs.StringVar(&outPath, "o", "", "output file path (.svg or .png; default: stdout = SVG)")
@@ -30,7 +31,24 @@ func runPlot(data []byte) {
 	fs.Float64Var(&scaleOverride, "scale", 0, "SVG scale factor (0 = auto)")
 	fs.Float64Var(&rightMarginPct, "right-margin", 20, "right-side margin beyond image plane (% of lens length, default 20)")
 	fs.StringVar(&configFlag, "config", "", "select config by id (multi-config mode)")
+	fs.StringVar(&glassDir, "glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(args)
+
+	if glassDir != "" {
+		agfGlasses, err := glass.LoadAGFDir(glassDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cannot load AGF directory %s: %v\n", glassDir, err)
+		} else {
+			if output.GlassCatalog == nil {
+				output.GlassCatalog = &types.GlassCatalog{}
+			}
+			for _, g := range agfGlasses {
+				if !containsGlass(output.GlassCatalog.Entries, g) {
+					output.GlassCatalog.Entries = append(output.GlassCatalog.Entries, g)
+				}
+			}
+		}
+	}
 
 	surfaces := output.System.Surfaces
 	if configFlag != "" {

@@ -50,11 +50,13 @@ func main() {
 	// Parse optimize-specific flags before stdin reading
 	optVerbose := false
 	optLogFile := ""
+	optGlassDir := ""
 	subcommand := args[0]
 	if subcommand == "optimize" {
 		fs := flag.NewFlagSet("optimize", flag.ContinueOnError)
 		fs.BoolVar(&optVerbose, "verbose", false, "print per-iteration progress to stderr")
 		fs.StringVar(&optLogFile, "log", "", "write per-iteration progress to file (JSONL)")
+		fs.StringVar(&optGlassDir, "glass-dir", "", "AGF glass catalog directory")
 		fs.Parse(args[1:])
 		args = append([]string{"optimize"}, fs.Args()...)
 	}
@@ -77,7 +79,7 @@ func main() {
 	case "plot":
 		runPlot(data)
 	case "optimize":
-		runOptimize(data, optVerbose, optLogFile)
+		runOptimize(data, optVerbose, optLogFile, optGlassDir)
 	case "import":
 		runImport(data)
 	default:
@@ -327,6 +329,7 @@ Options:
   --config-id name   config id (default: "config1")
   --config-name name config display name (default: "Config1")
   --no-chief         skip automatic chief ray computation
+  --glass-dir dir    load AGF glass catalog from directory
 
 Supported surface types:
   ZEMAX: STANDARD → sphere, EVENASPH → asphere_polynomial
@@ -387,12 +390,37 @@ func readStdin() ([]byte, error) {
 	return io.ReadAll(os.Stdin)
 }
 
-func loadCatalogs(input *types.Input) (*glass.Catalog, *coating.Catalog) {
+func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coating.Catalog) {
 	gc := glass.NewCatalog()
-	if input.GlassCatalog != nil {
-		for _, g := range input.GlassCatalog.Entries {
-			gc.Add(g)
+	if input.GlassCatalog == nil {
+		input.GlassCatalog = &types.GlassCatalog{}
+	}
+
+	for _, g := range input.GlassCatalog.Entries {
+		gc.Add(g)
+	}
+
+	agfPath := ""
+	if len(glassDir) > 0 && glassDir[0] != "" {
+		agfPath = glassDir[0]
+	} else if input.GlassCatalog.Directory != "" {
+		agfPath = input.GlassCatalog.Directory
+	}
+
+	if agfPath != "" {
+		agfGlasses, err := glass.LoadAGFDir(agfPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: cannot load AGF directory %s: %v\n", agfPath, err)
 		}
+		for _, g := range agfGlasses {
+			gc.Add(g)
+			if !containsGlass(input.GlassCatalog.Entries, g) {
+				input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
+			}
+		}
+	}
+
+	if agfPath == "" {
 		for _, path := range input.GlassCatalog.Files {
 			agfData, err := os.ReadFile(path)
 			if err != nil {
@@ -406,6 +434,9 @@ func loadCatalogs(input *types.Input) (*glass.Catalog, *coating.Catalog) {
 			}
 			for _, g := range glasses {
 				gc.Add(g)
+				if !containsGlass(input.GlassCatalog.Entries, g) {
+					input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
+				}
 			}
 		}
 	}
@@ -420,6 +451,16 @@ func loadCatalogs(input *types.Input) (*glass.Catalog, *coating.Catalog) {
 	return gc, cc
 }
 
+func containsGlass(entries []types.Glass, g types.Glass) bool {
+	key := types.ResolveGlassKey(g)
+	for _, e := range entries {
+		if types.ResolveGlassKey(e) == key {
+			return true
+		}
+	}
+	return false
+}
+
 func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
 	clearAperture := fs.Bool("clear-aperture", false, "trace grid rays (all fields, at entrance-pupil-based beam diameter) through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set system.surfaces[].diameter = 2x that extent")
@@ -428,6 +469,7 @@ func runChief(data []byte) {
 	passThrough := fs.Int("pass-through", 0, "constrain chief ray to pass through (0,0,0) center of surface N (overrides YAML pass_through.surface)")
 	wlFlag := fs.Float64("wl", 0.00058756, "wavelength (mm) for grid ray tracing")
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
+	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(os.Args[2:])
 
 	var input types.Input
@@ -467,7 +509,7 @@ func runChief(data []byte) {
 
 	wavelength := *wlFlag
 
-	gc, _ := loadCatalogs(&input)
+	gc, _ := loadCatalogs(&input, *glassDir)
 
 	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
 	surface.Precompute(surfaces)
@@ -766,6 +808,7 @@ func runTrace(data []byte) {
 	args := os.Args[2:]
 	fs := flag.NewFlagSet("trace", flag.ExitOnError)
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
+	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(args)
 
 	var input types.Input
@@ -779,7 +822,7 @@ func runTrace(data []byte) {
 		os.Exit(1)
 	}
 
-	gc, cc := loadCatalogs(&input)
+	gc, cc := loadCatalogs(&input, *glassDir)
 	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
 	surface.Precompute(surfaces)
 
@@ -820,6 +863,7 @@ func runParaxial(data []byte) {
 	args := os.Args[2:]
 	fs := flag.NewFlagSet("paraxial", flag.ExitOnError)
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
+	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(args)
 
 	var input types.Input
@@ -828,7 +872,7 @@ func runParaxial(data []byte) {
 		os.Exit(1)
 	}
 
-	gc, _ := loadCatalogs(&input)
+	gc, _ := loadCatalogs(&input, *glassDir)
 
 	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
 	surface.Precompute(surfaces)

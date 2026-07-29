@@ -23,7 +23,7 @@ const (
 	defaultNumRays = 64
 )
 
-func runOptimize(data []byte, verbose bool, logFile string) {
+func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 	var input types.Input
 	if err := yaml.Unmarshal(data, &input); err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
@@ -35,7 +35,7 @@ func runOptimize(data []byte, verbose bool, logFile string) {
 		os.Exit(1)
 	}
 
-	gc, _ := loadCatalogs(&input)
+	gc, _ := loadCatalogs(&input, glassDir)
 
 	// Detect multi-config mode: shared_variables exist, or multiple configs with merits
 	isMultiConfig := len(input.Optimization.SharedVariables) > 0 || len(input.Optimization.LocalVariables) > 0

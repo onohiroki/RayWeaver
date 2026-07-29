@@ -21,6 +21,7 @@ func runImport(data []byte) {
 	configID := fs.String("config-id", "config1", "")
 	configName := fs.String("config-name", "Config1", "")
 	noChief := fs.Bool("no-chief", false, "skip chief ray computation")
+	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(os.Args[2:])
 
 	if *format == "" {
@@ -44,6 +45,16 @@ func runImport(data []byte) {
 	}
 	if len(result.Surfaces) == 0 {
 		log.Fatal("no surfaces found in input")
+	}
+
+	if *glassDir != "" {
+		agfGlasses, err := glass.LoadAGFDir(*glassDir)
+		if err != nil {
+			log.Fatalf("error loading AGF files: %v", err)
+		}
+		result.GlassEntries = importer.EnhanceGlassEntriesFromAGF(
+			result.GlassEntries, agfGlasses, *format,
+		)
 	}
 
 	lastID := result.Surfaces[len(result.Surfaces)-1].ID
