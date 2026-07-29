@@ -105,7 +105,7 @@ func Solve(m Model) Result {
 			}
 		}
 		for j := 0; j < nVars; j++ {
-			H[j][j] += mu * H[j][j]
+			H[j][j] += mu
 		}
 
 		negG := make([]float64, nVars)
