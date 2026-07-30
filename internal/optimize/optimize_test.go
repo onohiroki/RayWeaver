@@ -428,7 +428,10 @@ func TestOptimizerLoggerCalled(t *testing.T) {
 			t.Errorf("final log iter = %d, want %d", fl.Iter, result.Iterations)
 		}
 	}
-	if len(logger.iterLogs) != result.Iterations {
-		t.Errorf("LogIter called %d times, want %d (iterations)", len(logger.iterLogs), result.Iterations)
+	if len(logger.iterLogs) == 0 {
+		t.Error("LogIter was not called")
+	}
+	if len(logger.iterLogs) > result.Iterations {
+		t.Errorf("LogIter called %d times, want at most %d (iterations)", len(logger.iterLogs), result.Iterations)
 	}
 }

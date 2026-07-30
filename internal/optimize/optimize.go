@@ -81,6 +81,7 @@ type Optimizer struct {
 	epsilon          float64
 	numRays          int
 	apertureMargin   float64
+	gridRotation     float64
 	logger           dls.Logger
 }
 
@@ -364,7 +365,7 @@ func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64,
 	if o.tempGC != nil {
 		gc = o.tempGC
 	}
-	return dls.TraceFieldGrid(gc, surfaces, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays)
+	return dls.TraceFieldGrid(gc, surfaces, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
 }
 
 func (o *Optimizer) getInitialState() []float64 {

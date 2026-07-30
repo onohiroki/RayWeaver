@@ -15,25 +15,28 @@ type pupilPoint struct {
 	X, Y float64
 }
 
-func ComputeSpotRMS(points []IPoint) float64 {
-	var sumX, sumY float64
-	var count int
-
+func Centroid(points []IPoint) (cx, cy float64, count int) {
 	for _, p := range points {
 		if !p.OK {
 			continue
 		}
-		sumX += p.X
-		sumY += p.Y
+		cx += p.X
+		cy += p.Y
 		count++
 	}
+	if count == 0 {
+		return 0, 0, 0
+	}
+	cx /= float64(count)
+	cy /= float64(count)
+	return cx, cy, count
+}
 
+func ComputeSpotRMS(points []IPoint) float64 {
+	cx, cy, count := Centroid(points)
 	if count == 0 {
 		return 1e6
 	}
-
-	cx := sumX / float64(count)
-	cy := sumY / float64(count)
 
 	var sumSq float64
 	for _, p := range points {

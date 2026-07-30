@@ -9,7 +9,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int) ([]IPoint, map[int]float64) {
+func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
@@ -34,7 +34,7 @@ func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle floa
 	}
 
 	zStart := -100.0
-	grid := generatePupilGrid(numRays, apertureRadius)
+	grid := generatePupilGrid(numRays, apertureRadius, rotationOffset)
 
 	stopZ := computeStopZ(surfaces)
 	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
@@ -90,7 +90,7 @@ func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle floa
 	return points, perSurfMax
 }
 
-func generatePupilGrid(numRays int, apertureRadius float64) []pupilPoint {
+func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float64) []pupilPoint {
 	var pts []pupilPoint
 	n := int(math.Sqrt(float64(numRays)))
 	if n < 2 {
@@ -99,7 +99,7 @@ func generatePupilGrid(numRays int, apertureRadius float64) []pupilPoint {
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
 			r := (float64(i) + 0.5) / float64(n) * apertureRadius
-			theta := 2 * math.Pi * (float64(j) + 0.5) / float64(n)
+			theta := 2 * math.Pi * (float64(j) + 0.5) / float64(n) + rotationOffset
 			pts = append(pts, pupilPoint{
 				X: r * math.Cos(theta),
 				Y: r * math.Sin(theta),

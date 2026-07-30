@@ -35,22 +35,23 @@ type VariableInfo struct {
 }
 
 type MultiOptimizer struct {
-	configs         []ConfigInput
-	variables       []VariableInfo
-	sharedVars      []types.SharedVariable
-	localVars       []types.LocalVariableDef
-	gc              *glass.Catalog
-	glassOverrides  map[string]*types.Glass
-	tempGC          *glass.Catalog
-	apertureExtents map[string]float64
+	configs          []ConfigInput
+	variables        []VariableInfo
+	sharedVars       []types.SharedVariable
+	localVars        []types.LocalVariableDef
+	gc               *glass.Catalog
+	glassOverrides   map[string]*types.Glass
+	tempGC           *glass.Catalog
+	apertureExtents  map[string]float64
 	initialDiameters map[string]float64
-	maxIter         int
-	mu              float64
-	tol             float64
-	epsilon         float64
-	numRays         int
-	apertureMargin  float64
-	logger          dls.Logger
+	maxIter          int
+	mu               float64
+	tol              float64
+	epsilon          float64
+	numRays          int
+	apertureMargin   float64
+	gridRotation     float64
+	logger           dls.Logger
 }
 
 
@@ -409,7 +410,7 @@ func (o *MultiOptimizer) traceFieldGrid(surfaces []types.Surface, cfg ConfigInpu
 	}
 
 	zStart := -100.0
-	grid := generatePupilGrid(o.numRays, apertureRadius)
+	grid := generatePupilGrid(o.numRays, apertureRadius, o.gridRotation)
 
 	stopZ := computeStopZ(surfaces)
 	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
@@ -853,7 +854,7 @@ func paraxialEntranceRadius(surfaces []types.Surface, wavelength float64, gc *gl
 	return 0
 }
 
-func generatePupilGrid(numRays int, apertureRadius float64) []pupilPoint {
+func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float64) []pupilPoint {
 	var pts []pupilPoint
 	n := int(math.Sqrt(float64(numRays)))
 	if n < 2 {
@@ -862,7 +863,7 @@ func generatePupilGrid(numRays int, apertureRadius float64) []pupilPoint {
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
 			r := (float64(i) + 0.5) / float64(n) * apertureRadius
-			theta := 2 * math.Pi * (float64(j) + 0.5) / float64(n)
+			theta := 2 * math.Pi * (float64(j) + 0.5) / float64(n) + rotationOffset
 			pts = append(pts, pupilPoint{
 				X: r * math.Cos(theta),
 				Y: r * math.Sin(theta),
