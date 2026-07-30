@@ -55,7 +55,7 @@ func TestMultiOptimizerApplySharedVariables(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil)
+	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 
 	x := []float64{0.05}
 	configSurfaces := opt.applyVariables(x)
@@ -116,7 +116,7 @@ func TestMultiOptimizerApplyLocalVariables(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := New(configs, nil, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil)
+	opt := New(configs, nil, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := []float64{75.0}
 	configSurfaces := opt.applyVariables(x)
 
@@ -175,7 +175,7 @@ func TestMultiOptimizerEvaluateMerit(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil)
+	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := []float64{0.0}
 	merit := opt.evaluateMerit(x)
 
@@ -226,7 +226,7 @@ func TestMultiOptimizerGetInitialState(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := New(configs, sharedVars, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil)
+	opt := New(configs, sharedVars, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := opt.getInitialState()
 
 	if len(x) != 2 {
@@ -271,7 +271,7 @@ func TestMultiOptimizerBuildVariableStates(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil)
+	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := []float64{0.03}
 	states := opt.buildVariableStates(x)
 
@@ -318,7 +318,7 @@ func TestMultiOptimizerNoGlassCatalog(t *testing.T) {
 		},
 	}
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil)
+	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := []float64{0.0}
 	merit := opt.evaluateMerit(x)
 
@@ -359,7 +359,7 @@ func TestMultiOptimizerResultHasExpectedFields(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil)
+	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	result := opt.Optimize()
 
 	if result.Status != "max_iterations" {

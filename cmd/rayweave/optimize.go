@@ -123,6 +123,18 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		MuConMax:       input.Optimization.MuConMax,
 	}
 
+	if input.Optimization.GlassHull != nil && input.Optimization.GlassHull.Enabled {
+		cfg.Hull = glass.NewDefaultConvexHull()
+		cfg.HullMargin = input.Optimization.GlassHull.Margin
+		cfg.HullWeight = input.Optimization.GlassHull.Weight
+		if cfg.HullMargin <= 0 {
+			cfg.HullMargin = 0.02
+		}
+		if cfg.HullWeight <= 0 {
+			cfg.HullWeight = 1.0
+		}
+	}
+
 	opt := optimize.NewOptimizer(cfg)
 	result := opt.Optimize()
 
@@ -477,7 +489,20 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		}
 	}
 
-	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, logger)
+	var hull *glass.ConvexHull
+	hullMargin := 0.02
+	hullWeight := 1.0
+	if input.Optimization.GlassHull != nil && input.Optimization.GlassHull.Enabled {
+		hull = glass.NewDefaultConvexHull()
+		if input.Optimization.GlassHull.Margin > 0 {
+			hullMargin = input.Optimization.GlassHull.Margin
+		}
+		if input.Optimization.GlassHull.Weight > 0 {
+			hullWeight = input.Optimization.GlassHull.Weight
+		}
+	}
+
+	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, logger, hull, hullMargin, hullWeight)
 	result := opt.Optimize()
 
 	for _, lw := range logWriters {

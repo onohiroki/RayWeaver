@@ -86,6 +86,10 @@ optimization:
   num_rays: 256
   mu_con_max: 10.0
   aperture_margin: 1.0
+  glass_hull:
+    enabled: true
+    margin: 0.02
+    weight: 1.0
   variables:
     - name: s1_curvature
       target:

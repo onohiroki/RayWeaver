@@ -28,6 +28,9 @@ type Config struct {
 	ApertureMargin float64
 	MuConMax       float64
 	Logger         dls.Logger
+	Hull           *glass.ConvexHull
+	HullMargin     float64
+	HullWeight     float64
 }
 
 type Variable struct {
@@ -68,6 +71,12 @@ type VariableState struct {
 	After     float64
 }
 
+type glassPair struct {
+	ndIndex int
+	vdIndex int
+	name    string
+}
+
 type Optimizer struct {
 	surfaces         []types.Surface
 	variables        []Variable
@@ -87,6 +96,10 @@ type Optimizer struct {
 	muConMax         float64
 	gridRotation     float64
 	logger           dls.Logger
+	hull             *glass.ConvexHull
+	hullMargin       float64
+	hullWeight       float64
+	hullPairs        []glassPair
 }
 
 func NewOptimizer(cfg Config) *Optimizer {
@@ -145,6 +158,8 @@ func NewOptimizer(cfg Config) *Optimizer {
 		apertureMargin = 1.0
 	}
 
+	hullPairs := buildHullPairs(cfg.Variables)
+
 	return &Optimizer{
 		surfaces:         cfg.Surfaces,
 		variables:        cfg.Variables,
@@ -162,6 +177,10 @@ func NewOptimizer(cfg Config) *Optimizer {
 		apertureMargin:   apertureMargin,
 		muConMax:         cfg.MuConMax,
 		logger:           cfg.Logger,
+		hull:             cfg.Hull,
+		hullMargin:       cfg.HullMargin,
+		hullWeight:       cfg.HullWeight,
+		hullPairs:        hullPairs,
 	}
 }
 
@@ -195,6 +214,32 @@ func (o *Optimizer) Options() dls.Options {
 
 func (o *Optimizer) InitialState() []float64 {
 	return o.getInitialState()
+}
+
+func (o *Optimizer) addHullPenalty(merit float64, x []float64) float64 {
+	if o.hull == nil || len(o.hullPairs) == 0 {
+		return merit
+	}
+	for _, pair := range o.hullPairs {
+		nd := x[pair.ndIndex]
+		vd := x[pair.vdIndex]
+		pen := o.hull.Penalty(nd, vd, o.hullMargin, o.hullWeight)
+		merit += pen
+	}
+	return merit
+}
+
+func (o *Optimizer) makeHullResiduals(x []float64) []float64 {
+	if o.hull == nil || len(o.hullPairs) == 0 {
+		return nil
+	}
+	res := make([]float64, len(o.hullPairs))
+	for i, pair := range o.hullPairs {
+		nd := x[pair.ndIndex]
+		vd := x[pair.vdIndex]
+		res[i] = o.hull.Residual(nd, vd, o.hullMargin, o.hullWeight)
+	}
+	return res
 }
 
 func (o *Optimizer) EvaluateMerit(x []float64) float64 {
@@ -255,13 +300,15 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 		}
 	}
 
+	merit = o.addHullPenalty(merit, x)
 	return merit
 }
 
 func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 	surfaces := o.applyVariables(x)
 	nTerms := len(o.meritTerms)
-	r := make([]float64, nTerms)
+	nHull := len(o.hullPairs)
+	r := make([]float64, nTerms+nHull)
 
 	for i := range surfaces {
 		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
@@ -314,6 +361,15 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 				diff := val - term.Target
 				r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * diff
 			}
+		}
+	}
+
+	// Append hull residuals at the end
+	if o.hull != nil {
+		for i, pair := range o.hullPairs {
+			nd := x[pair.ndIndex]
+			vd := x[pair.vdIndex]
+			r[nTerms+i] = o.hull.Residual(nd, vd, o.hullMargin, o.hullWeight)
 		}
 	}
 
@@ -570,6 +626,26 @@ func (o *Optimizer) resolveFieldAngle(fieldID int) float64 {
 		}
 	}
 	return 0
+}
+
+func buildHullPairs(variables []Variable) []glassPair {
+	ndMap := make(map[string]int)
+	vdMap := make(map[string]int)
+	for i, v := range variables {
+		switch v.Param {
+		case "nd":
+			ndMap[v.GlassName] = i
+		case "vd":
+			vdMap[v.GlassName] = i
+		}
+	}
+	var pairs []glassPair
+	for name, ndIdx := range ndMap {
+		if vdIdx, ok := vdMap[name]; ok {
+			pairs = append(pairs, glassPair{ndIndex: ndIdx, vdIndex: vdIdx, name: name})
+		}
+	}
+	return pairs
 }
 
 func resolveGlassKeyFromSurface(surfaces []types.Surface, gc *glass.Catalog, v Variable) string {

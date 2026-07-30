@@ -34,6 +34,11 @@ type VariableInfo struct {
 	Max       float64
 }
 
+type hullPair struct {
+	ndIndex int
+	vdIndex int
+}
+
 type MultiOptimizer struct {
 	configs          []ConfigInput
 	variables        []VariableInfo
@@ -53,6 +58,10 @@ type MultiOptimizer struct {
 	muConMax         float64
 	gridRotation     float64
 	logger           dls.Logger
+	hull             *glass.ConvexHull
+	hullMargin       float64
+	hullWeight       float64
+	hullPairs        []hullPair
 }
 
 
@@ -83,7 +92,7 @@ type pupilPoint struct {
 	X, Y float64
 }
 
-func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, logger dls.Logger) *MultiOptimizer {
+func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64) *MultiOptimizer {
 	if maxIter <= 0 {
 		maxIter = 100
 	}
@@ -164,6 +173,30 @@ func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []t
 		}
 	}
 
+	// Build hull pairs from local nd/vd variables
+	var hullPairs []hullPair
+	if hull != nil {
+		ndMap := make(map[string]int)
+		vdMap := make(map[string]int)
+		for i, v := range variables {
+			if v.IsShared {
+				continue
+			}
+			key := v.Config + ":" + v.Target.Type + ":" + fmt.Sprintf("%d", v.Target.ID)
+			switch v.Target.Param {
+			case "nd":
+				ndMap[key] = i
+			case "vd":
+				vdMap[key] = i
+			}
+		}
+		for key, ndIdx := range ndMap {
+			if vdIdx, ok := vdMap[key]; ok {
+				hullPairs = append(hullPairs, hullPair{ndIndex: ndIdx, vdIndex: vdIdx})
+			}
+		}
+	}
+
 	return &MultiOptimizer{
 		configs:          configs,
 		variables:        variables,
@@ -180,6 +213,10 @@ func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []t
 		apertureMargin:   apertureMargin,
 		muConMax:         muConMax,
 		logger:           logger,
+		hull:             hull,
+		hullMargin:       hullMargin,
+		hullWeight:       hullWeight,
+		hullPairs:        hullPairs,
 	}
 }
 
@@ -364,6 +401,14 @@ func (o *MultiOptimizer) evaluateMerit(x []float64) float64 {
 		}
 
 		merit += cfg.Weight * cfgMerit
+	}
+
+	if o.hull != nil {
+		for _, pair := range o.hullPairs {
+			nd := x[pair.ndIndex]
+			vd := x[pair.vdIndex]
+			merit += o.hull.Penalty(nd, vd, o.hullMargin, o.hullWeight)
+		}
 	}
 
 	return merit
@@ -591,6 +636,14 @@ func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 		}
 
 		allR = append(allR, termR...)
+	}
+
+	if o.hull != nil {
+		for _, pair := range o.hullPairs {
+			nd := x[pair.ndIndex]
+			vd := x[pair.vdIndex]
+			allR = append(allR, o.hull.Residual(nd, vd, o.hullMargin, o.hullWeight))
+		}
 	}
 
 	return allR
