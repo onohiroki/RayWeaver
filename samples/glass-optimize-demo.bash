@@ -182,7 +182,7 @@ print(-1)
 # ── On-axis RMS threshold check ──
 THRESHOLD=0.3
 printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this)\n"
-rms_onaxis=$(rms_field "$OPT_RESULT" 0)
+rms_onaxis=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[0].get('spot_stats',{}).get('rms_r',-1))")
 if [ "$rms_onaxis" != "-1" ] && (( $(echo "$rms_onaxis >= $THRESHOLD" | bc -l) )); then
   msg="  >>> Optimization failed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
   echo "$msg" | tee -a "$RESULT_FILE"

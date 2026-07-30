@@ -19,6 +19,7 @@ optimization:
   epsilon: 1e-4
   num_rays: 256
   mu_con_max: 10.0
+  aperture_margin: 1.0
 
   shared_variables:
     - name: s1_curvature

@@ -358,6 +358,7 @@ type OptimizationConfig struct {
 	Epsilon         float64                 `yaml:"epsilon,omitempty"`
 	NumRays         int                     `yaml:"num_rays,omitempty"`
 	MuConMax        float64                 `yaml:"mu_con_max,omitempty"`
+	ApertureMargin  float64                 `yaml:"aperture_margin,omitempty"`
 	Variables       []OptimizationVariable  `yaml:"variables,omitempty"`
 	SharedVariables []SharedVariable        `yaml:"shared_variables,omitempty"`
 	LocalVariables  []LocalVariableDef      `yaml:"local_variables,omitempty"`

@@ -244,6 +244,67 @@ func (o *MultiOptimizer) Optimize() Result {
 	}
 }
 
+func (o *MultiOptimizer) FinalApertures(x []float64) map[string]map[int]float64 {
+	configSurfaces := o.applyVariables(x)
+	result := make(map[string]map[int]float64)
+
+	for _, cfg := range o.configs {
+		surfaces := configSurfaces[cfg.ID]
+
+		for i := range surfaces {
+			key := cfgSurfKey(cfg.ID, surfaces[i].ID)
+			if d, ok := o.initialDiameters[key]; ok {
+				surfaces[i].Diameter = d
+			}
+		}
+		surface.Precompute(surfaces)
+
+		extremeAngle := 0.0
+		for _, term := range cfg.MeritTerms {
+			angle := o.fieldAngleForTerm(cfg, term, surfaces)
+			a := math.Abs(angle)
+			if a > extremeAngle {
+				extremeAngle = a
+			}
+		}
+
+		extents := make(map[int]float64)
+		for pass := 0; pass < 2; pass++ {
+			for _, term := range cfg.MeritTerms {
+				angle := o.fieldAngleForTerm(cfg, term, surfaces)
+				isExtreme := math.Abs(angle) == extremeAngle && extremeAngle > 0
+				if (pass == 0) != isExtreme {
+					continue
+				}
+				_, perSurf := o.traceFieldGrid(surfaces, cfg, term)
+				if isExtreme {
+					for id, e := range perSurf {
+						if e > extents[id] {
+							extents[id] = e
+						}
+					}
+					for id, e := range extents {
+						for i := range surfaces {
+							if surfaces[i].ID == id && surfaces[i].AutoAperture {
+								surfaces[i].Diameter = 2 * e
+							}
+						}
+					}
+				}
+			}
+		}
+
+		cfgResult := make(map[int]float64)
+		for i := range surfaces {
+			if surfaces[i].AutoAperture {
+				cfgResult[surfaces[i].ID] = surfaces[i].Diameter
+			}
+		}
+		result[cfg.ID] = cfgResult
+	}
+	return result
+}
+
 func (o *MultiOptimizer) evaluateMerit(x []float64) float64 {
 	configSurfaces := o.applyVariables(x)
 

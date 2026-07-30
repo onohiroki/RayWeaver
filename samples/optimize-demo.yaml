@@ -59,6 +59,7 @@ system:
 
 optimization:
   method: dls
+  aperture_margin: 1.0
   variables:
     - name: s1_curvature
       target:

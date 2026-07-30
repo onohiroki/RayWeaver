@@ -115,11 +115,12 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		Constraints:  input.Optimization.Constraints,
 		GlassCatalog: gc,
 		Logger:       logger,
-		MaxIter:      input.Optimization.MaxIter,
-		Tol:          input.Optimization.Tol,
-		Epsilon:      input.Optimization.Epsilon,
-		NumRays:      input.Optimization.NumRays,
-		MuConMax:     input.Optimization.MuConMax,
+		MaxIter:        input.Optimization.MaxIter,
+		Tol:            input.Optimization.Tol,
+		Epsilon:        input.Optimization.Epsilon,
+		NumRays:        input.Optimization.NumRays,
+		ApertureMargin: input.Optimization.ApertureMargin,
+		MuConMax:       input.Optimization.MuConMax,
 	}
 
 	opt := optimize.NewOptimizer(cfg)
@@ -140,6 +141,18 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 	}
 
 	outputSurfaces, newGlasses := applyVariableStates(surfaces, result.Variables, gc)
+
+	xFinal := make([]float64, len(result.Variables))
+	for i, vs := range result.Variables {
+		xFinal[i] = vs.After
+	}
+	finalAps := opt.FinalApertures(xFinal)
+	for i := range outputSurfaces {
+		if d, ok := finalAps[outputSurfaces[i].ID]; ok {
+			outputSurfaces[i].Diameter = d
+		}
+	}
+
 	input.System.Surfaces = outputSurfaces
 
 	for _, g := range newGlasses {
@@ -432,6 +445,10 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 	if numRays <= 0 {
 		numRays = defaultNumRays
 	}
+	apertureMargin := input.Optimization.ApertureMargin
+	if apertureMargin <= 0 {
+		apertureMargin = 1.0
+	}
 
 	var logger dls.Logger
 	logWriters := []struct {
@@ -460,7 +477,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		}
 	}
 
-	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, 1.2, numRays, input.Optimization.MuConMax, logger)
+	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, logger)
 	result := opt.Optimize()
 
 	for _, lw := range logWriters {
@@ -480,6 +497,20 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 	// Re-apply final variable values to all configs' surfaces
 	finalX := getFinalX(opt, result.Variables)
 	configSurfaces := applyMultiVars(input, finalX, gc)
+
+	// Apply final auto_aperture diameters
+	finalAps := opt.FinalApertures(finalX)
+	for cfgID, apMap := range finalAps {
+		surfaces, ok := configSurfaces[cfgID]
+		if !ok {
+			continue
+		}
+		for i := range surfaces {
+			if d, ok := apMap[surfaces[i].ID]; ok {
+				surfaces[i].Diameter = d
+			}
+		}
+	}
 
 	// Update input configs with optimized surfaces
 	for i := range input.Configs {

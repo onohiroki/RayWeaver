@@ -142,7 +142,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 
 	apertureMargin := cfg.ApertureMargin
 	if apertureMargin <= 0 {
-		apertureMargin = 2.0
+		apertureMargin = 1.0
 	}
 
 	return &Optimizer{
@@ -367,6 +367,59 @@ func (o *Optimizer) Optimize() Result {
 		Status:      dlsResult.Status,
 		Variables:   o.buildVariableStates(x),
 	}
+}
+
+func (o *Optimizer) FinalApertures(x []float64) map[int]float64 {
+	surfaces := o.applyVariables(x)
+
+	for i := range surfaces {
+		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
+			surfaces[i].Diameter = d
+		}
+	}
+
+	extremeAngle := 0.0
+	for _, term := range o.meritTerms {
+		a := math.Abs(term.FieldAngle)
+		if a > extremeAngle {
+			extremeAngle = a
+		}
+	}
+
+	extents := make(map[int]float64)
+	for pass := 0; pass < 2; pass++ {
+		for _, term := range o.meritTerms {
+			if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+				isExtreme := math.Abs(term.FieldAngle) == extremeAngle && extremeAngle > 0
+				if (pass == 0) != isExtreme {
+					continue
+				}
+				_, perSurf := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+				if isExtreme {
+					for id, e := range perSurf {
+						if e > extents[id] {
+							extents[id] = e
+						}
+					}
+					for id, e := range extents {
+						for i := range surfaces {
+							if surfaces[i].ID == id && surfaces[i].AutoAperture {
+								surfaces[i].Diameter = 2 * e
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	result := make(map[int]float64)
+	for i := range surfaces {
+		if surfaces[i].AutoAperture {
+			result[surfaces[i].ID] = surfaces[i].Diameter
+		}
+	}
+	return result
 }
 
 func (o *Optimizer) applyVariables(x []float64) []types.Surface {

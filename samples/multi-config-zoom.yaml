@@ -14,6 +14,7 @@ optimization:
   max_iter: 100
   tol: 1.0e-06
   epsilon: 1.0e-06
+  aperture_margin: 1.2
   shared_variables:
   - name: s1_curvature
     min: -0.2
