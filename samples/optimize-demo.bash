@@ -35,7 +35,7 @@ echo
 
 echo "--- PNG diagrams ---"
 echo "=== Initial diagram ==="
-./rayweave chief --clear-aperture < "$YAML" | ./rayweave chief --marginal-rays \
+./rayweave chief --clear-aperture --ray-fan < "$YAML" | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
   | ./rayweave plot -o "$OUTDIR/optimize-demo-init.png"
 echo "Written: $OUTDIR/optimize-demo-init.png"
@@ -43,7 +43,7 @@ echo
 
 echo "=== Optimized diagram ==="
 yq '.chief = {"fields": [{"angle": 0.0, "direction": [0, 1]}, {"angle": 16.0, "direction": [0, 1]}, {"angle": 24.0, "direction": [0, 1]}], "reference_surface": 8, "num_rays": 512, "grid_type": "hex", "dump_map": false}' "$OPT_RESULT" > "$OPT_WITH_CHIEF"
-./rayweave chief --clear-aperture < "$OPT_WITH_CHIEF" | ./rayweave chief --marginal-rays \
+./rayweave chief --clear-aperture --ray-fan < "$OPT_WITH_CHIEF" | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
   | ./rayweave plot -o "$OUTDIR/optimize-demo-opt.png"
 echo "Written: $OUTDIR/optimize-demo-opt.png"
@@ -76,5 +76,17 @@ else: print(-1)
     printf "  %-8s %6s  %10.4f  %10.4f%s\n" "optimize" "f$fi" "$rms_before" "$rms_after" "$mark"
   done
   echo
-} | tee -a "$RESULT_FILE"
-echo "  (RMS comparison saved to $RESULT_FILE)"
+} | tee "$RESULT_FILE"
+
+# ── On-axis RMS threshold check ──
+THRESHOLD=0.3
+printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this)\n"
+rms_onaxis=$(rms_field "$OPT_WITH_CHIEF" 0)
+if [ "$rms_onaxis" != "-1" ] && (( $(echo "$rms_onaxis >= $THRESHOLD" | bc -l) )); then
+  msg="  >>> Optimization failed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
+  echo "$msg" | tee -a "$RESULT_FILE"
+  exit 1
+else
+  msg="  >>> Optimization passed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm < $THRESHOLD mm"
+  echo "$msg" | tee -a "$RESULT_FILE"
+fi

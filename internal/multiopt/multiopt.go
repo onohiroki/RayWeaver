@@ -50,6 +50,7 @@ type MultiOptimizer struct {
 	epsilon          float64
 	numRays          int
 	apertureMargin   float64
+	muConMax         float64
 	gridRotation     float64
 	logger           dls.Logger
 }
@@ -82,7 +83,7 @@ type pupilPoint struct {
 	X, Y float64
 }
 
-func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, logger dls.Logger) *MultiOptimizer {
+func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, logger dls.Logger) *MultiOptimizer {
 	if maxIter <= 0 {
 		maxIter = 100
 	}
@@ -91,6 +92,9 @@ func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []t
 	}
 	if epsilon <= 0 {
 		epsilon = 1e-6
+	}
+	if numRays <= 0 {
+		numRays = 64
 	}
 
 	var variables []VariableInfo
@@ -172,8 +176,9 @@ func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []t
 		mu:               mu,
 		tol:              tol,
 		epsilon:          epsilon,
-		numRays:          64,
+		numRays:          numRays,
 		apertureMargin:   apertureMargin,
+		muConMax:         muConMax,
 		logger:           logger,
 	}
 }
@@ -207,6 +212,7 @@ func (o *MultiOptimizer) Options() dls.Options {
 		Epsilon:        o.epsilon,
 		NumRays:        o.numRays,
 		ApertureMargin: o.apertureMargin,
+		MuConMax:       o.muConMax,
 		Logger:         o.logger,
 	}
 }
@@ -481,12 +487,49 @@ func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 
 		surface.Precompute(surfaces)
 
+		extremeAngle := 0.0
 		for _, term := range cfg.MeritTerms {
-			points, _ := o.traceFieldGrid(surfaces, cfg, term)
-			rms := computeSpotRMS(points)
-			r := math.Sqrt(cfg.Weight*term.Weight*fieldWeightForTerm(cfg, term)*wavWeightForTerm(cfg, term)) * rms
-			allR = append(allR, r)
+			angle := o.fieldAngleForTerm(cfg, term, surfaces)
+			a := math.Abs(angle)
+			if a > extremeAngle {
+				extremeAngle = a
+			}
 		}
+
+		extents := make(map[int]float64)
+
+		termR := make([]float64, len(cfg.MeritTerms))
+		for pass := 0; pass < 2; pass++ {
+			for ti, term := range cfg.MeritTerms {
+				angle := o.fieldAngleForTerm(cfg, term, surfaces)
+				isExtreme := math.Abs(angle) == extremeAngle && extremeAngle > 0
+				if (pass == 0) != isExtreme {
+					continue
+				}
+
+				points, perSurf := o.traceFieldGrid(surfaces, cfg, term)
+
+				if isExtreme {
+					for id, e := range perSurf {
+						if e > extents[id] {
+							extents[id] = e
+						}
+					}
+					for id, e := range extents {
+						for i := range surfaces {
+							if surfaces[i].ID == id && surfaces[i].AutoAperture {
+								surfaces[i].Diameter = 2 * e
+							}
+						}
+					}
+				}
+
+				rms := computeSpotRMS(points)
+				termR[ti] = math.Sqrt(cfg.Weight*term.Weight*fieldWeightForTerm(cfg, term)*wavWeightForTerm(cfg, term)) * rms
+			}
+		}
+
+		allR = append(allR, termR...)
 	}
 
 	return allR

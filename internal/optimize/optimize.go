@@ -26,6 +26,7 @@ type Config struct {
 	Epsilon        float64
 	NumRays        int
 	ApertureMargin float64
+	MuConMax       float64
 	Logger         dls.Logger
 }
 
@@ -83,6 +84,7 @@ type Optimizer struct {
 	epsilon          float64
 	numRays          int
 	apertureMargin   float64
+	muConMax         float64
 	gridRotation     float64
 	logger           dls.Logger
 }
@@ -158,6 +160,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		epsilon:          epsilon,
 		numRays:          numRays,
 		apertureMargin:   apertureMargin,
+		muConMax:         cfg.MuConMax,
 		logger:           cfg.Logger,
 	}
 }
@@ -185,6 +188,7 @@ func (o *Optimizer) Options() dls.Options {
 		Epsilon:        o.epsilon,
 		NumRays:        o.numRays,
 		ApertureMargin: o.apertureMargin,
+		MuConMax:       o.muConMax,
 		Logger:         o.logger,
 	}
 }
@@ -265,15 +269,51 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 		}
 	}
 
-	for i, term := range o.meritTerms {
-		if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
-			points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-			rms := dls.ComputeSpotRMS(points)
-			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
-		} else {
-			val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
-			diff := val - term.Target
-			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * diff
+	extremeAngle := 0.0
+	for _, term := range o.meritTerms {
+		a := math.Abs(term.FieldAngle)
+		if a > extremeAngle {
+			extremeAngle = a
+		}
+	}
+
+	extents := make(map[int]float64)
+
+	for pass := 0; pass < 2; pass++ {
+		for i, term := range o.meritTerms {
+			if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+				isExtreme := math.Abs(term.FieldAngle) == extremeAngle && extremeAngle > 0
+				if (pass == 0) != isExtreme {
+					continue
+				}
+
+				points, perSurf := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+
+				if isExtreme {
+					for id, e := range perSurf {
+						if e > extents[id] {
+							extents[id] = e
+						}
+					}
+					for id, e := range extents {
+						for j := range surfaces {
+							if surfaces[j].ID == id && surfaces[j].AutoAperture {
+								surfaces[j].Diameter = 2 * e
+							}
+						}
+					}
+				}
+
+				rms := dls.ComputeSpotRMS(points)
+				r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
+			} else {
+				if pass == 1 {
+					continue
+				}
+				val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
+				diff := val - term.Target
+				r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * diff
+			}
 		}
 	}
 

@@ -118,6 +118,8 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		MaxIter:      input.Optimization.MaxIter,
 		Tol:          input.Optimization.Tol,
 		Epsilon:      input.Optimization.Epsilon,
+		NumRays:      input.Optimization.NumRays,
+		MuConMax:     input.Optimization.MuConMax,
 	}
 
 	opt := optimize.NewOptimizer(cfg)
@@ -426,6 +428,10 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 	if mu <= 0 {
 		mu = defaultMu
 	}
+	numRays := input.Optimization.NumRays
+	if numRays <= 0 {
+		numRays = defaultNumRays
+	}
 
 	var logger dls.Logger
 	logWriters := []struct {
@@ -454,7 +460,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		}
 	}
 
-	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, 1.2, logger)
+	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, 1.2, numRays, input.Optimization.MuConMax, logger)
 	result := opt.Optimize()
 
 	for _, lw := range logWriters {

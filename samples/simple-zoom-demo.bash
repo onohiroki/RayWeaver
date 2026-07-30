@@ -49,7 +49,7 @@ echo "=== Initial ray-overlaid layout ==="
 for cfg in config0 config1 config2; do
   echo "  Config: $cfg"
   cat "$YAML" \
-    | $RAYWEAVE chief --clear-aperture --config "$cfg" \
+    | $RAYWEAVE chief --clear-aperture --ray-fan --config "$cfg" \
     | $RAYWEAVE chief --marginal-rays --config "$cfg" \
     | $RAYWEAVE trace --config "$cfg" \
     | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-init-rays.png" 2>/dev/null
@@ -62,7 +62,7 @@ echo "=== Optimized ray-overlaid layout ==="
 for cfg in config0 config1 config2; do
   echo "  Config: $cfg"
   cat "$RESULT" \
-    | $RAYWEAVE chief --clear-aperture --config "$cfg" \
+    | $RAYWEAVE chief --clear-aperture --ray-fan --config "$cfg" \
     | $RAYWEAVE chief --marginal-rays --config "$cfg" \
     | $RAYWEAVE trace --config "$cfg" \
     | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/simple-zoom-${cfg}-opt-rays.png" 2>/dev/null
@@ -149,10 +149,11 @@ echo "  (RMS comparison saved to $RESULT_FILE)"
 if [ "$failed" = true ]; then
   echo
   echo "  >>> Optimization failed: not all configs on-axis RMS < $THRESHOLD mm"
+  echo "  >>> Optimization failed: not all configs on-axis RMS < $THRESHOLD mm" >> "$RESULT_FILE"
   exit 1
 fi
 echo
 echo "  >>> Optimization passed: all configs on-axis RMS < $THRESHOLD mm"
-echo
+echo "  >>> Optimization passed: all configs on-axis RMS < $THRESHOLD mm" >> "$RESULT_FILE"
 
 # (cleanup is handled at the top for --clean mode)

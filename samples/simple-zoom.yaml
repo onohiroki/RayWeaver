@@ -15,8 +15,10 @@ optimization:
   method: dls
   max_iter: 500
   mu: 0.1
-  tol: 1e-8
+  tol: 1e-4
   epsilon: 1e-4
+  num_rays: 256
+  mu_con_max: 10.0
 
   shared_variables:
     - name: s1_curvature
@@ -368,24 +370,30 @@ configs:
           weight: 0.1
     constraints:
       - id: img_h0
-        kind: equality
+        kind: fuzzy
         measure: image_height
         field: 0
         target: 0.0
+        band_width: 0.5
+        softness: 5.0
         weight: 1.0
         active: true
       - id: img_h1
-        kind: equality
+        kind: fuzzy
         measure: image_height
         field: 1
         target: 10.0
+        band_width: 0.5
+        softness: 5.0
         weight: 1.0
         active: true
       - id: img_h2
-        kind: equality
+        kind: fuzzy
         measure: image_height
         field: 2
         target: 15.0
+        band_width: 0.5
+        softness: 5.0
         weight: 1.0
         active: true
       - id: inc_a0
@@ -501,24 +509,30 @@ configs:
           weight: 0.1
     constraints:
       - id: img_h0
-        kind: equality
+        kind: fuzzy
         measure: image_height
         field: 0
         target: 0.0
+        band_width: 0.5
+        softness: 5.0
         weight: 1.0
         active: true
       - id: img_h1
-        kind: equality
+        kind: fuzzy
         measure: image_height
         field: 1
         target: 10.0
+        band_width: 0.5
+        softness: 5.0
         weight: 1.0
         active: true
       - id: img_h2
-        kind: equality
+        kind: fuzzy
         measure: image_height
         field: 2
         target: 15.0
+        band_width: 0.5
+        softness: 5.0
         weight: 1.0
         active: true
       - id: inc_a0
@@ -634,24 +648,30 @@ configs:
           weight: 0.1
     constraints:
       - id: img_h0
-        kind: equality
+        kind: fuzzy
         measure: image_height
         field: 0
         target: 0.0
+        band_width: 0.5
+        softness: 5.0
         weight: 1.0
         active: true
       - id: img_h1
-        kind: equality
+        kind: fuzzy
         measure: image_height
         field: 1
         target: 10.0
+        band_width: 0.5
+        softness: 5.0
         weight: 1.0
         active: true
       - id: img_h2
-        kind: equality
+        kind: fuzzy
         measure: image_height
         field: 2
         target: 15.0
+        band_width: 0.5
+        softness: 5.0
         weight: 1.0
         active: true
       - id: inc_a0

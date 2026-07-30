@@ -126,31 +126,15 @@ if [ -n "$FNO" ]; then
 fi
 
 # ── Spot RMS comparison (before vs after) ──
-rms_field() {
-  local yaml_file="$1"
-  local fi="$2"
-  python3 -c "
-import sys, yaml
-with open('/dev/stdin') as f:
-    data = yaml.safe_load(f)
-if data and 'chief_rays' in data and $fi < len(data['chief_rays']):
-    ss = data['chief_rays'][$fi].get('spot_stats', {})
-    rms = ss.get('rms_r', -1)
-    if rms > 0:
-        print(rms)
-    else:
-        print(-1)
-else:
-    print(-1)
-" < <($RAYWEAVE chief < "$yaml_file" 2>/dev/null)
-}
+BEFORE_CHIEF=$($RAYWEAVE chief < "$YAML" 2>/dev/null)
+AFTER_CHIEF=$($RAYWEAVE chief < "$OPT_RESULT" 2>/dev/null)
 {
-  echo "=== Spot RMS Comparison ==="
+  echo "=== Spot RMS Comparison (primary λ=587.6nm) ==="
   printf "  %-8s %6s  %10s  %10s\n" "Phase" "Field" "RMS before" "RMS after"
   printf "  %-8s %6s  %10s  %10s\n" "-----" "-----" "--------" "--------"
   for fi in 0 1 2; do
-    rms_before=$(rms_field "$YAML" "$fi")
-    rms_after=$(rms_field "$OPT_RESULT" "$fi")
+    rms_before=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[$fi].get('spot_stats',{}).get('rms_r',-1))")
+    rms_after=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[$fi].get('spot_stats',{}).get('rms_r',-1))")
     printf "  %-8s %6s  %10.4f  %10.4f" "optimize" "f$fi" "$rms_before" "$rms_after"
     if [ "$(echo "$rms_after < $rms_before" | bc -l 2>/dev/null)" = "1" ]; then
       echo "   ✓"
@@ -159,16 +143,63 @@ else:
     fi
   done
   echo
-} | tee -a "$RESULT_FILE"
+  echo "=== Per-Wavelength RMS (after optimization) ==="
+  printf "  %-6s" "Field"
+  for wl in 0.0004358 0.0004861 0.0005876 0.0006563; do
+    printf "  %10s" "$wl"
+  done
+  echo
+  printf "  %-6s" "------"
+  for wl in 0.0004358 0.0004861 0.0005876 0.0006563; do
+    printf "  %10s" "----------"
+  done
+  echo
+  for fi in 0 1 2; do
+    printf "  %-6s" "f$fi"
+    for wl in 0.0004358 0.0004861 0.0005876 0.0006563; do
+      r=$(echo "$AFTER_CHIEF" | python3 -c "
+import sys,yaml
+d=yaml.safe_load(sys.stdin)
+cr=d['chief_rays']
+wls=cr[$fi].get('wavelengths',[])
+for w in wls:
+    if abs(w['value']-$wl)<1e-12:
+        print(w['spot_stats'].get('rms_r',-1))
+        sys.exit(0)
+print(-1)
+")
+      if [ "$r" != "-1" ]; then
+        printf "  %10.4f" "$r"
+      else
+        printf "  %10s" "-"
+      fi
+    done
+    echo
+  done
+  echo
+} | tee "$RESULT_FILE"
+
+# ── On-axis RMS threshold check ──
+THRESHOLD=0.3
+printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this)\n"
+rms_onaxis=$(rms_field "$OPT_RESULT" 0)
+if [ "$rms_onaxis" != "-1" ] && (( $(echo "$rms_onaxis >= $THRESHOLD" | bc -l) )); then
+  msg="  >>> Optimization failed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
+  echo "$msg" | tee -a "$RESULT_FILE"
+  exit 1
+else
+  msg="  >>> Optimization passed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm < $THRESHOLD mm"
+  echo "$msg" | tee -a "$RESULT_FILE"
+fi
 
 echo "=== PNG diagrams ==="
-$RAYWEAVE chief --clear-aperture < "$YAML" 2>/dev/null \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" 2>/dev/null \
   | $RAYWEAVE chief --marginal-rays 2>/dev/null \
   | $RAYWEAVE trace 2>/dev/null \
   | $RAYWEAVE plot -o "$OUTDIR/glass-optimize-init.png" 2>/dev/null || true
 echo "Written: $OUTDIR/glass-optimize-init.png"
 
-$RAYWEAVE chief --clear-aperture < "$OPT_RESULT" 2>/dev/null \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$OPT_RESULT" 2>/dev/null \
   | $RAYWEAVE chief --marginal-rays 2>/dev/null \
   | $RAYWEAVE trace 2>/dev/null \
   | $RAYWEAVE plot -o "$OUTDIR/glass-optimize-opt.png" 2>/dev/null || true

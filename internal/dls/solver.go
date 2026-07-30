@@ -28,6 +28,9 @@ func Solve(m Model) Result {
 	if opts.ApertureMargin <= 0 {
 		opts.ApertureMargin = 2.0
 	}
+	if opts.MuConMax <= 0 {
+		opts.MuConMax = 100.0
+	}
 
 	variables := m.Variables()
 	nVars := len(variables)
@@ -84,6 +87,11 @@ func Solve(m Model) Result {
 	var lastDelta []float64
 	status := "max_iterations"
 	totalIter := 0
+	consecStall := 0
+
+	bestKnownNorm := make([]float64, nVars)
+	copy(bestKnownNorm, xNorm)
+	bestKnownMerit := merit
 
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
 		J_opt, r_opt, J_con, c_con := computeJacobians(m, xNorm, variables, scales, opts.Epsilon)
@@ -302,15 +310,17 @@ func Solve(m Model) Result {
 				cPrevNorm = math.Sqrt(cPrevNorm)
 				if cPrevNorm > 1e-12 && cNewNorm > 0.25*cPrevNorm {
 					muCon *= 10.0
-					if muCon > 1e8 {
-						muCon = 1e8
+					if muCon > opts.MuConMax {
+						muCon = opts.MuConMax
 					}
 				}
 				copy(cPrev, cNew)
 			}
 			if merit < bestMerit {
 				bestMerit = merit
+				bestKnownMerit = merit
 				copy(bestXNorm, xNorm)
+				copy(bestKnownNorm, xNorm)
 			}
 		}
 
@@ -332,9 +342,64 @@ func Solve(m Model) Result {
 			opts.Logger.LogIter(totalIter+1, merit, actualReduction, stepNorm, currVars, constr)
 		}
 
+			if actualReduction > 0 {
+			consecStall = 0
+		} else {
+			consecStall++
+		}
+
 		if stepNorm < opts.Tol && actualReduction < 1e-8*merit {
 			status = "converged"
 			break
+		}
+
+		// Stall escape: when stuck for many iterations, perturb the state and reset damping
+		if consecStall >= 30 && totalIter < opts.MaxIter-10 {
+			// Reset to best known state before perturbing
+			copy(xNorm, bestKnownNorm)
+			merit = bestKnownMerit
+
+			// Deterministic pseudo-random perturbation (±1% of normalized range)
+			for j := 0; j < nVars; j++ {
+				perturb := float64((totalIter+1)*(j+1)%53) / 53.0
+				xNorm[j] += (perturb - 0.5) * 0.02
+			}
+			for j := 0; j < nVars; j++ {
+				if xNorm[j] < 0 {
+					xNorm[j] = 0
+				} else if xNorm[j] > 1 {
+					xNorm[j] = 1
+				}
+			}
+
+			xPhys := denormalize(xNorm, variables, scales)
+
+			meritNew := m.EvaluateMerit(xPhys)
+			meritNewOnly := meritNew
+			if hasConstraints {
+				cNew := m.ComputeConstraints(xPhys)
+				for j, cj := range cNew {
+					cPrev[j] = cj
+					term := lambdas[j]*cj + 0.5*muCon*cj*cj
+					if term < 0 {
+						lambdas[j] = 0
+						term = 0.5 * muCon * cj * cj
+					}
+					meritNew += term
+				}
+			}
+			if meritNew < meritNewOnly {
+				meritNew = meritNewOnly
+			}
+			merit = meritNew
+
+			mu = opts.Mu
+			consecStall = 0
+
+			if merit < bestMerit {
+				bestMerit = merit
+				copy(bestKnownNorm, xNorm)
+			}
 		}
 	}
 

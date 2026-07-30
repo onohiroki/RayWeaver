@@ -44,6 +44,7 @@ type Options struct {
 	Epsilon        float64
 	NumRays        int
 	ApertureMargin float64
+	MuConMax       float64
 	Logger         Logger
 }
 

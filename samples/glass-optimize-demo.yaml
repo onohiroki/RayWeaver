@@ -20,15 +20,14 @@ system:
       thickness: 6.0
       material: "model1"
       diameter: 30.0
-      auto_aperture: true
-      min_glass_path: 1.0
+      auto_aperture: false
     - id: 2
       type: "sphere"
       curvature: -0.01
       thickness: 6.0
       material: "AIR"
       diameter: 30.0
-      auto_aperture: true
+      auto_aperture: false
     - id: 3
       type: "sphere"
       curvature: 0.0
@@ -36,29 +35,27 @@ system:
       material: "model2"
       diameter: 9.0
       auto_aperture: false
-      min_glass_path: 0.3
     - id: 4
       type: "sphere"
       curvature: 0.0
       thickness: 3.0
       material: "AIR"
       diameter: 22.0
-      auto_aperture: true
+      auto_aperture: false
     - id: 5
       type: "sphere"
       curvature: 0.0
       thickness: 3.0
       material: "model3"
       diameter: 22.0
-      auto_aperture: true
-      min_glass_path: 0.3
+      auto_aperture: false
     - id: 6
       type: "sphere"
       curvature: 0.0
       thickness: 20.0
       material: "AIR"
       diameter: 22.0
-      auto_aperture: true
+      auto_aperture: false
     - id: 7
       type: "sphere"
       curvature: 0.0
@@ -77,12 +74,15 @@ chief:
   num_rays: 512
   grid_type: hex
   dump_map: true
+  wavelengths: [0.0004358, 0.0004861, 0.0005876, 0.0006563]
 
 optimization:
   method: dls
   max_iter: 500
-  tol: 1e-8
-  epsilon: 1e-7
+  tol: 1e-4
+  epsilon: 1e-4
+  num_rays: 256
+  mu_con_max: 10.0
   variables:
     - name: s1_curvature
       target:
@@ -164,6 +164,22 @@ optimization:
       min: 1.0
       max: 20.0
       active: true
+    - name: s3_thickness
+      target:
+        type: surface
+        id: 3
+        param: thickness
+      min: 0.3
+      max: 15.0
+      active: true
+    - name: s5_thickness
+      target:
+        type: surface
+        id: 5
+        param: thickness
+      min: 0.3
+      max: 15.0
+      active: true
     - name: model2_nd
       target:
         type: surface
@@ -197,6 +213,8 @@ optimization:
       max: 80.0
       active: true
 
+  constraints: []
+
 configs:
   - id: 0
     name: nominal
@@ -207,7 +225,7 @@ configs:
         weight: 1.0
       - id: 1
         angle_deg: 10.0
-        weight: 1.0
+        weight: 2.0
       - id: 2
         angle_deg: 16.0
         weight: 0.5
@@ -262,16 +280,51 @@ configs:
         - kind: spot_rms
           field: 2
           wavelength: 0.0004358
-          weight: 0.5
+          weight: 0.3
         - kind: spot_rms
           field: 2
           wavelength: 0.0004861
-          weight: 0.5
+          weight: 0.3
         - kind: spot_rms
           field: 2
           wavelength: 0.0005876
-          weight: 0.5
+          weight: 0.3
         - kind: spot_rms
           field: 2
           wavelength: 0.0006563
+          weight: 0.3
+        - kind: lateral_color
+          field: 0
+          wavelength: 0.0004358
+          wavelength2: 0.0006563
           weight: 0.5
+        - kind: lateral_color
+          field: 1
+          wavelength: 0.0004358
+          wavelength2: 0.0006563
+          weight: 0.5
+        - kind: lateral_color
+          field: 2
+          wavelength: 0.0004358
+          wavelength2: 0.0006563
+          weight: 0.2
+        - kind: seidel_astigmatism
+          field: 1
+          weight: 0.001
+        - kind: seidel_astigmatism
+          field: 2
+          weight: 0.0005
+        - kind: seidel_coma
+          field: 1
+          weight: 0.0005
+        - kind: seidel_coma
+          field: 2
+          weight: 0.0003
+        - kind: opd_rms
+          field: 0
+          wavelength: 0.0005876
+          weight: 0.5
+        - kind: opd_rms
+          field: 1
+          wavelength: 0.0005876
+          weight: 0.3

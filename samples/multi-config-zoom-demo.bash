@@ -59,7 +59,7 @@ for cfg in config0 config1 config2; do
         in_spot && /traced_rays:/ && rms != "" {
           tr = $NF
           if (tr + 0 > 0)
-            printf "      field %s° RMS=%.4fmm (%d rays)\n", ang, rms + 0, tr
+            printf "      field %.3f° RMS=%.4fmm (%d rays)\n", ang, rms + 0, tr
           in_spot = 0
         }'
   done
@@ -70,7 +70,7 @@ echo "=== Ray-overlaid layout (after optimization) ==="
 for cfg in config0 config1 config2; do
   echo "  Config: $cfg"
   cat "$RESULT" \
-    | $RAYWEAVE chief --clear-aperture --config "$cfg" \
+    | $RAYWEAVE chief --clear-aperture --ray-fan --config "$cfg" \
     | $RAYWEAVE chief --marginal-rays --config "$cfg" \
     | $RAYWEAVE trace --config "$cfg" \
     | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-opt-rays.png" 2>/dev/null
@@ -82,7 +82,7 @@ echo "=== Ray-overlaid layout (before optimization) ==="
 for cfg in config0 config1 config2; do
   echo "  Config: $cfg"
   cat "$YAML" \
-    | $RAYWEAVE chief --clear-aperture --config "$cfg" \
+    | $RAYWEAVE chief --clear-aperture --ray-fan --config "$cfg" \
     | $RAYWEAVE chief --marginal-rays --config "$cfg" \
     | $RAYWEAVE trace --config "$cfg" \
     | $RAYWEAVE plot --config "$cfg" -o "$OUTDIR/multi-config-zoom-${cfg}-init-rays.png" 2>/dev/null
@@ -97,9 +97,9 @@ echo
   for cfg in config0 config1 config2; do
     # Extract field angles and RMS before/after
     bef=$(cat "$YAML" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
-      | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)print ang,r; in_spot=0}')
+      | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)printf "%.3f %.4f\n", ang, r; in_spot=0}')
     aft=$(cat "$RESULT" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
-      | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)print ang,r; in_spot=0}')
+      | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)printf "%.3f %.4f\n", ang, r; in_spot=0}')
     efl=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
       | awk -F': ' '/focal_length:/{printf "%.1f",$2; exit}')
     # Show each field with before/after RMS
@@ -121,11 +121,61 @@ echo
   echo
 } | tee -a "$RESULT_FILE"
 
+# ── On-axis RMS threshold check (all configs) ──
+THRESHOLD=0.03
+echo "=== On-axis RMS threshold check ==="
+printf "  (threshold = $THRESHOLD mm — all configs on-axis RMS must be below this)\n"
+
+get_onaxis_rms() {
+  local yaml_file="$1"
+  local cfg="$2"
+  python3 -c "
+import sys, yaml
+with open('/dev/stdin') as f:
+    data = yaml.safe_load(f)
+if data and 'chief_rays' in data:
+    for ray in data['chief_rays']:
+        if ray.get('field_angle') == 0 or abs(ray.get('field_angle', 1)) < 1e-10:
+            ss = ray.get('spot_stats', {})
+            rms = ss.get('rms_r', -1)
+            if rms > 0:
+                print(rms)
+                sys.exit(0)
+print(-1)
+" < <($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null)
+}
+
+failed=false
+for cfg in config0 config1 config2; do
+  rms_after=$(get_onaxis_rms "$RESULT" "$cfg")
+  printf "  %-8s on-axis RMS = %8.4f mm" "$cfg" "$rms_after"
+  if [ "$rms_after" != "-1" ] && (( $(echo "$rms_after >= $THRESHOLD" | bc -l) )); then
+    echo "   ✗"
+    failed=true
+  else
+    echo "   ✓"
+  fi
+done
+
+{
+  echo
+  if [ "$failed" = true ]; then
+    echo "  >>> Optimization failed: not all configs on-axis RMS < $THRESHOLD mm"
+  else
+    echo "  >>> Optimization passed: all configs on-axis RMS < $THRESHOLD mm"
+  fi
+  echo
+} | tee -a "$RESULT_FILE"
+
 echo "=== Iteration log saved: $LOG ==="
 if [ -f "$LOG" ]; then
   echo "  Log entries:"
   wc -l "$LOG" 2>/dev/null
 fi
 echo
+
+if [ "$failed" = true ]; then
+  exit 1
+fi
 
 # (cleanup is handled at the top for --clean mode)
