@@ -154,6 +154,8 @@ func runImport(data []byte) {
 			true,
 			types.GridPolar,
 			pt,
+			false,
+			nil,
 		)
 
 		outputOut.ChiefRays = make([]types.ChiefRayResult, len(chiefResults))

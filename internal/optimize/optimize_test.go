@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -220,7 +221,7 @@ type mockLogger struct {
 	}
 }
 
-func (m *mockLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+func (m *mockLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	m.iterLogs = append(m.iterLogs, struct {
 		Iter        int
 		Merit       float64
@@ -228,9 +229,10 @@ func (m *mockLogger) LogIter(iter int, merit, improvement, stepNorm float64, var
 		StepNorm    float64
 		Variables   []float64
 	}{iter, merit, improvement, stepNorm, variables})
+	_ = constraints
 }
 
-func (m *mockLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+func (m *mockLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	m.finalLogs = append(m.finalLogs, struct {
 		Iter      int
 		Merit     float64
@@ -238,6 +240,7 @@ func (m *mockLogger) LogFinal(iter int, status string, merit float64, stepNorm f
 		Variables []float64
 		Status    string
 	}{iter, merit, stepNorm, variables, status})
+	_ = constraints
 }
 
 func TestOptimizerApplyVariablesND(t *testing.T) {

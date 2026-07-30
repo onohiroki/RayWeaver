@@ -322,7 +322,14 @@ func Solve(m Model) Result {
 			for i := range nVars {
 				currVars[i] = variables[i].Min + xNorm[i]*scales[i]
 			}
-			opts.Logger.LogIter(totalIter+1, merit, actualReduction, stepNorm, currVars)
+			var constr []ConstraintState
+			if hasConstraints {
+				constr = make([]ConstraintState, len(cPrev))
+				for j, cj := range cPrev {
+					constr[j] = ConstraintState{Residual: cj}
+				}
+			}
+			opts.Logger.LogIter(totalIter+1, merit, actualReduction, stepNorm, currVars, constr)
 		}
 
 		if stepNorm < opts.Tol && actualReduction < 1e-8*merit {
@@ -348,7 +355,14 @@ func Solve(m Model) Result {
 			}
 			finalStepNorm = math.Sqrt(finalStepNorm)
 		}
-		opts.Logger.LogFinal(iterations, status, bestMerit, finalStepNorm, finalVars)
+		var constr []ConstraintState
+		if hasConstraints {
+			constr = make([]ConstraintState, len(cPrev))
+			for j, cj := range cPrev {
+				constr[j] = ConstraintState{Residual: cj}
+			}
+		}
+		opts.Logger.LogFinal(iterations, status, bestMerit, finalStepNorm, finalVars, constr)
 	}
 
 	vars := make([]VariableState, len(variables))

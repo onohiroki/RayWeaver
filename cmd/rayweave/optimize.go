@@ -199,9 +199,11 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 		cfg := input.Configs[0]
 		if cfg.Merit != nil {
 			for _, mt := range cfg.Merit.Terms {
-				if mt.Kind != "spot_rms" {
-					continue
+				kind := mt.Kind
+				if kind == "" {
+					kind = "spot_rms"
 				}
+
 				var fieldAngle, fieldWeight float64
 				for _, f := range cfg.Fields {
 					if f.ID == mt.Field {
@@ -210,6 +212,10 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 						break
 					}
 				}
+				if fieldWeight == 0 {
+					fieldWeight = 1.0
+				}
+
 				var wavWeight float64
 				for _, w := range cfg.Wavelengths {
 					if math.Abs(w.Value-mt.Wavelength) < 1e-12 {
@@ -217,27 +223,22 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 						break
 					}
 				}
-				if fieldWeight == 0 {
-					fieldWeight = 1.0
-				}
 				if wavWeight == 0 {
 					wavWeight = 1.0
 				}
+
 				terms = append(terms, optimize.MeritTerm{
+					Kind:        kind,
 					FieldAngle:  fieldAngle,
 					FieldDir:    []float64{0, 1},
 					FieldWeight: fieldWeight,
 					Wavelength:  mt.Wavelength,
+					Wavelength2: mt.Wavelength2,
 					WavWeight:   wavWeight,
 					Weight:      mt.Weight,
+					Target:      mt.Target,
 				})
 			}
-		}
-	}
-
-	if len(terms) == 0 && input.Optimization != nil {
-		for _, v := range input.Optimization.Variables {
-			_ = v
 		}
 	}
 
@@ -381,38 +382,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		var meritTerms []types.MeritTerm
 		if cfg.Merit != nil {
 			for _, mt := range cfg.Merit.Terms {
-				if mt.Kind != "spot_rms" {
-					continue
-				}
-				var fieldAngle, fieldWeight float64
-				for _, f := range cfg.Fields {
-					if f.ID == mt.Field {
-						fieldAngle = f.AngleDeg
-						fieldWeight = f.Weight
-						break
-					}
-				}
-				var wavWeight float64
-				for _, w := range cfg.Wavelengths {
-					if math.Abs(w.Value-mt.Wavelength) < 1e-12 {
-						wavWeight = w.Weight
-						break
-					}
-				}
-				if fieldWeight == 0 {
-					fieldWeight = 1.0
-				}
-				if wavWeight == 0 {
-					wavWeight = 1.0
-				}
-				meritTerms = append(meritTerms, types.MeritTerm{
-					Field:      mt.Field,
-					Wavelength: mt.Wavelength,
-					Weight:     mt.Weight,
-				})
-				_ = fieldAngle
-				_ = fieldWeight
-				_ = wavWeight
+				meritTerms = append(meritTerms, mt)
 			}
 		}
 
@@ -635,13 +605,19 @@ type jsonMultiLogger struct {
 	w *os.File
 }
 
-func (j *jsonMultiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+func (j *jsonMultiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	entry := iterLog{
 		Iter:        iter,
 		Merit:       safeF(merit),
 		Improvement: safeF(improvement),
 		StepNorm:    safeF(stepNorm),
 		Variables:   safeVars(variables),
+	}
+	if len(constraints) > 0 {
+		entry.Constraints = make([]constraintInfo, len(constraints))
+		for i, cs := range constraints {
+			entry.Constraints[i] = constraintInfo{Residual: cs.Residual}
+		}
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -651,12 +627,19 @@ func (j *jsonMultiLogger) LogIter(iter int, merit, improvement, stepNorm float64
 	fmt.Fprintln(j.w, string(data))
 }
 
-func (j *jsonMultiLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+func (j *jsonMultiLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	entry := finalLog{
 		Iter:      iter,
 		Merit:     safeF(merit),
+		StepNorm:  safeF(stepNorm),
 		Variables: safeVars(variables),
 		Status:    status,
+	}
+	if len(constraints) > 0 {
+		entry.Constraints = make([]constraintInfo, len(constraints))
+		for i, cs := range constraints {
+			entry.Constraints[i] = constraintInfo{Residual: cs.Residual}
+		}
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -670,32 +653,38 @@ type multiMultiLogger struct {
 	loggers []dls.Logger
 }
 
-func (m *multiMultiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+func (m *multiMultiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	for _, l := range m.loggers {
-		l.LogIter(iter, merit, improvement, stepNorm, variables)
+		l.LogIter(iter, merit, improvement, stepNorm, variables, constraints)
 	}
 }
 
-func (m *multiMultiLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+func (m *multiMultiLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	for _, l := range m.loggers {
-		l.LogFinal(iter, status, merit, stepNorm, variables)
+		l.LogFinal(iter, status, merit, stepNorm, variables, constraints)
 	}
+}
+
+type constraintInfo struct {
+	Residual float64 `json:"residual"`
 }
 
 type iterLog struct {
-	Iter        int       `json:"iter"`
-	Merit       float64   `json:"merit"`
-	Improvement float64   `json:"improvement"`
-	StepNorm    float64   `json:"step_norm"`
-	Variables   []float64 `json:"variables"`
+	Iter        int              `json:"iter"`
+	Merit       float64          `json:"merit"`
+	Improvement float64          `json:"improvement"`
+	StepNorm    float64          `json:"step_norm"`
+	Constraints []constraintInfo `json:"constraints,omitempty"`
+	Variables   []float64        `json:"variables"`
 }
 
 type finalLog struct {
-	Iter      int       `json:"iter"`
-	Merit     float64   `json:"merit"`
-	StepNorm  float64   `json:"step_norm"`
-	Variables []float64 `json:"variables"`
-	Status    string    `json:"status"`
+	Iter        int              `json:"iter"`
+	Merit       float64          `json:"merit"`
+	StepNorm    float64          `json:"step_norm"`
+	Constraints []constraintInfo `json:"constraints,omitempty"`
+	Variables   []float64        `json:"variables"`
+	Status      string           `json:"status"`
 }
 
 type jsonLogger struct {
@@ -717,13 +706,19 @@ func safeVars(v []float64) []float64 {
 	return s
 }
 
-func (j *jsonLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+func (j *jsonLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	entry := iterLog{
 		Iter:        iter,
 		Merit:       safeF(merit),
 		Improvement: safeF(improvement),
 		StepNorm:    safeF(stepNorm),
 		Variables:   safeVars(variables),
+	}
+	if len(constraints) > 0 {
+		entry.Constraints = make([]constraintInfo, len(constraints))
+		for i, cs := range constraints {
+			entry.Constraints[i] = constraintInfo{Residual: cs.Residual}
+		}
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -733,12 +728,19 @@ func (j *jsonLogger) LogIter(iter int, merit, improvement, stepNorm float64, var
 	fmt.Fprintln(j.w, string(data))
 }
 
-func (j *jsonLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+func (j *jsonLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	entry := finalLog{
 		Iter:      iter,
 		Merit:     safeF(merit),
+		StepNorm:  safeF(stepNorm),
 		Variables: safeVars(variables),
 		Status:    status,
+	}
+	if len(constraints) > 0 {
+		entry.Constraints = make([]constraintInfo, len(constraints))
+		for i, cs := range constraints {
+			entry.Constraints[i] = constraintInfo{Residual: cs.Residual}
+		}
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -752,14 +754,14 @@ type multiLogger struct {
 	loggers []dls.Logger
 }
 
-func (m *multiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64) {
+func (m *multiLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	for _, l := range m.loggers {
-		l.LogIter(iter, merit, improvement, stepNorm, variables)
+		l.LogIter(iter, merit, improvement, stepNorm, variables, constraints)
 	}
 }
 
-func (m *multiLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64) {
+func (m *multiLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	for _, l := range m.loggers {
-		l.LogFinal(iter, status, merit, stepNorm, variables)
+		l.LogFinal(iter, status, merit, stepNorm, variables, constraints)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
-
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -40,12 +39,15 @@ type Variable struct {
 }
 
 type MeritTerm struct {
+	Kind        string
 	FieldAngle  float64
 	FieldDir    []float64
 	FieldWeight float64
 	Wavelength  float64
+	Wavelength2 float64
 	WavWeight   float64
 	Weight      float64
+	Target      float64
 }
 
 type Result struct {
@@ -213,30 +215,39 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 
 	for pass := 0; pass < 2; pass++ {
 		for _, term := range o.meritTerms {
-			isExtreme := math.Abs(term.FieldAngle) == extremeAngle && extremeAngle > 0
-			if (pass == 0) != isExtreme {
-				continue
-			}
-
-			points, perSurf := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-
-			if isExtreme {
-				for id, e := range perSurf {
-					if e > extents[id] {
-						extents[id] = e
-					}
+			if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+				isExtreme := math.Abs(term.FieldAngle) == extremeAngle && extremeAngle > 0
+				if (pass == 0) != isExtreme {
+					continue
 				}
-				for id, e := range extents {
-					for i := range surfaces {
-						if surfaces[i].ID == id && surfaces[i].AutoAperture {
-							surfaces[i].Diameter = 2 * e
+
+				points, perSurf := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+
+				if isExtreme {
+					for id, e := range perSurf {
+						if e > extents[id] {
+							extents[id] = e
+						}
+					}
+					for id, e := range extents {
+						for i := range surfaces {
+							if surfaces[i].ID == id && surfaces[i].AutoAperture {
+								surfaces[i].Diameter = 2 * e
+							}
 						}
 					}
 				}
-			}
 
-			rms := dls.ComputeSpotRMS(points)
-			merit += term.Weight * term.FieldWeight * term.WavWeight * rms * rms
+				rms := dls.ComputeSpotRMS(points)
+				merit += term.Weight * term.FieldWeight * term.WavWeight * rms * rms
+			} else {
+				if pass == 1 {
+					continue
+				}
+				val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
+				diff := val - term.Target
+				merit += term.Weight * term.FieldWeight * term.WavWeight * diff * diff
+			}
 		}
 	}
 
@@ -255,9 +266,15 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 	}
 
 	for i, term := range o.meritTerms {
-		points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-		rms := dls.ComputeSpotRMS(points)
-		r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
+		if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+			points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+			rms := dls.ComputeSpotRMS(points)
+			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
+		} else {
+			val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
+			diff := val - term.Target
+			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * diff
+		}
 	}
 
 	return r
@@ -284,7 +301,12 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 			continue
 		}
 		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint)
-		c[j] = constraint.ComputeError(op.Kind, value, op)
+		err := constraint.ComputeError(op.Kind, value, op)
+		w := op.Weight
+		if w <= 0 {
+			w = 1.0
+		}
+		c[j] = math.Sqrt(w) * err
 	}
 
 	return c

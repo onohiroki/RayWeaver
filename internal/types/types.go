@@ -140,6 +140,7 @@ type RayResult struct {
 	ID         string          `yaml:"id"`
 	Wavelength float64         `yaml:"wavelength"`
 	Error      string          `yaml:"error,omitempty"`
+	ErrorCode  string          `yaml:"error_code,omitempty"`
 	Surfaces   []SurfaceResult `yaml:"surfaces"`
 	OPLTotal   float64         `yaml:"opl_total"`
 	IntensityS float64         `yaml:"intensity_s"`
@@ -209,6 +210,7 @@ type ChiefInput struct {
 	GridType         GridType           `yaml:"grid_type,omitempty"`
 	DumpMap          bool               `yaml:"dump_map,omitempty"`
 	PassThrough      *PassThroughTarget `yaml:"pass_through,omitempty"`
+	Wavelengths      []float64          `yaml:"wavelengths,omitempty"`
 }
 
 type RayInput struct {
@@ -238,11 +240,13 @@ type RayPath struct {
 }
 
 type MeritTerm struct {
-	Kind       string  `yaml:"kind"`
-	Field      int     `yaml:"field"`
-	Wavelength float64 `yaml:"wavelength"`
-	SurfaceSet []int   `yaml:"surface_set"`
-	Weight     float64 `yaml:"weight"`
+	Kind        string  `yaml:"kind"`
+	Field       int     `yaml:"field"`
+	Wavelength  float64 `yaml:"wavelength"`
+	Wavelength2 float64 `yaml:"wavelength2,omitempty"`
+	Target      float64 `yaml:"target,omitempty"`
+	SurfaceSet  []int   `yaml:"surface_set"`
+	Weight      float64 `yaml:"weight"`
 }
 
 type MeritFunction struct {
@@ -326,6 +330,7 @@ const (
 	MeasureEntrancePupilDiameter  ConstraintMeasure = "entrance_pupil_diameter"
 	MeasureEdgeThickness          ConstraintMeasure = "edge_thickness"
 	MeasureDiameter               ConstraintMeasure = "diameter"
+	MeasureFNumber                ConstraintMeasure = "f_number"
 )
 
 type ConstraintOperand struct {
@@ -405,6 +410,8 @@ type GridPoint struct {
 	ImageX    *float64 `yaml:"image_x"`
 	ImageY    *float64 `yaml:"image_y"`
 	Intensity float64  `yaml:"intensity"`
+	OPL       float64  `yaml:"opl,omitempty"`
+	ErrorCode string   `yaml:"error_code,omitempty"`
 	Origin    Vec3     `yaml:"-"`
 	Direction Vec3     `yaml:"-"`
 }
@@ -423,13 +430,32 @@ type SpotStats struct {
 	MaxY       float64 `yaml:"max_y"`
 }
 
+type FanPoint struct {
+	PupilX float64 `yaml:"px,omitempty"`
+	PupilY float64 `yaml:"py,omitempty"`
+	EX     float64 `yaml:"ex,omitempty"`
+	EY     float64 `yaml:"ey,omitempty"`
+}
+
+type RayFan struct {
+	Meridional []FanPoint `yaml:"meridional,omitempty"`
+	Sagittal   []FanPoint `yaml:"sagittal,omitempty"`
+}
+
+type WavelengthStats struct {
+	Value     float64   `yaml:"value"`
+	SpotStats SpotStats `yaml:"spot_stats"`
+}
+
 type ChiefRayResult struct {
-	FieldAngle    float64     `yaml:"field_angle"`
-	ChiefRay      Ray         `yaml:"chief_ray"`
-	ImageHeight   Vec3        `yaml:"image_height"`
-	EntrancePupil Pupil       `yaml:"entrance_pupil"`
-	GridPoints    []GridPoint `yaml:"grid_points,omitempty"`
-	SpotStats     *SpotStats  `yaml:"spot_stats,omitempty"`
+	FieldAngle    float64           `yaml:"field_angle"`
+	ChiefRay      Ray               `yaml:"chief_ray"`
+	ImageHeight   Vec3              `yaml:"image_height"`
+	EntrancePupil Pupil             `yaml:"entrance_pupil"`
+	GridPoints    []GridPoint       `yaml:"grid_points,omitempty"`
+	SpotStats     *SpotStats        `yaml:"spot_stats,omitempty"`
+	RayFan        *RayFan           `yaml:"ray_fan,omitempty"`
+	Wavelengths   []WavelengthStats `yaml:"wavelengths,omitempty"`
 }
 
 type Pupil struct {

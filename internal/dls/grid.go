@@ -81,7 +81,7 @@ func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle floa
 
 		if len(result.Surfaces) > 0 {
 			last := result.Surfaces[len(result.Surfaces)-1]
-			points = append(points, IPoint{X: last.Position.X, Y: last.Position.Y, OK: true})
+			points = append(points, IPoint{X: last.Position.X, Y: last.Position.Y, OPL: result.OPLTotal, OK: true})
 		} else {
 			points = append(points, IPoint{OK: false})
 		}

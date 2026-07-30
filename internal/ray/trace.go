@@ -10,6 +10,20 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
+type RayError string
+
+const (
+	ErrSurfaceNotFound RayError = "surface_not_found"
+	ErrMissedSurface   RayError = "missed_surface"
+	ErrApertureStop    RayError = "aperture_stop"
+	ErrTIR             RayError = "total_internal_reflection"
+	ErrGlassPathShort  RayError = "glass_path_too_short"
+	ErrGlassPathLong   RayError = "glass_path_too_long"
+)
+
+
+
+
 type Engine struct {
 	Glass   *glass.Catalog
 	Coating *coating.Catalog
@@ -65,6 +79,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 		currentSurf := findSurface(surfaces, currentID)
 		if currentSurf == nil {
 			result.Error = fmt.Sprintf("surface %d not found", currentID)
+			result.ErrorCode = string(ErrSurfaceNotFound)
 			return result
 		}
 
@@ -74,10 +89,12 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 		t, ok := intersect(currentSurf, localOrigin, localDir)
 		if !ok {
 			result.Error = "ray missed surface"
+			result.ErrorCode = string(ErrMissedSurface)
 			return result
 		}
 		if i == 0 && t < 1e-12 {
 			result.Error = fmt.Sprintf("ray missed surface (t=%.6e < 0 on first lens surface)", t)
+			result.ErrorCode = string(ErrMissedSurface)
 			return result
 		}
 
@@ -91,6 +108,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			h := math.Sqrt(hitPoint.X*hitPoint.X + hitPoint.Y*hitPoint.Y)
 			if h > currentSurf.Diameter/2 {
 				result.Error = "ray missed surface (aperture stop)"
+				result.ErrorCode = string(ErrApertureStop)
 				return result
 			}
 		}
@@ -117,6 +135,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			newDir, ok := raymath.Refract(localDir, normal, n1, n2)
 			if !ok {
 				result.Error = "total internal reflection"
+				result.ErrorCode = string(ErrTIR)
 				return result
 			}
 			state.Direction = newDir
@@ -154,14 +173,16 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			path := globalPos.Subtract(glassEntryPos).Length()
 			entrySurf := findSurface(surfaces, glassEntrySurfaceID)
 			if entrySurf != nil {
-				if entrySurf.MinGlassPath > 0 && path < entrySurf.MinGlassPath {
-					result.Error = "ray missed surface (glass path too short)"
-					return result
-				}
-				if entrySurf.MaxGlassPath > 0 && path > entrySurf.MaxGlassPath {
-					result.Error = "ray missed surface (glass path too long)"
-					return result
-				}
+			if entrySurf.MinGlassPath > 0 && path < entrySurf.MinGlassPath {
+				result.Error = "ray missed surface (glass path too short)"
+				result.ErrorCode = string(ErrGlassPathShort)
+				return result
+			}
+			if entrySurf.MaxGlassPath > 0 && path > entrySurf.MaxGlassPath {
+				result.Error = "ray missed surface (glass path too long)"
+				result.ErrorCode = string(ErrGlassPathLong)
+				return result
+			}
 			}
 		}
 		if currentSurf.Material != "AIR" {

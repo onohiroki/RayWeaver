@@ -467,6 +467,7 @@ func runChief(data []byte) {
 	clearApertureMargin := fs.Float64("clear-aperture-margin", 2.0, "beam diameter multiplier relative to entrance pupil (default 2 = 2× entrance pupil diameter)")
 	marginalRays := fs.Bool("marginal-rays", false, "from each field's grid points find the rays with max/min image Y (and X for off-axis fields) and append them as marginal rays to the output 'rays' section for piping into trace/plot")
 	passThrough := fs.Int("pass-through", 0, "constrain chief ray to pass through (0,0,0) center of surface N (overrides YAML pass_through.surface)")
+	rayFan := fs.Bool("ray-fan", false, "compute ray fan (transverse aberration) for each field")
 	wlFlag := fs.Float64("wl", 0.00058756, "wavelength (mm) for grid ray tracing")
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
@@ -533,6 +534,8 @@ func runChief(data []byte) {
 		input.Chief.DumpMap,
 		input.Chief.GridType,
 		pt,
+		*rayFan,
+		input.Chief.Wavelengths,
 	)
 
 	// --- --clear-aperture: scale grid points by entrance-pupil-based radius and set Diameter ---
@@ -654,6 +657,8 @@ func runChief(data []byte) {
 			ImageHeight:   r.ImageHeight,
 			EntrancePupil: r.EntrancePupil,
 			SpotStats:     r.SpotStats,
+			RayFan:        r.RayFan,
+			Wavelengths:   r.Wavelengths,
 		}
 		if dumpMap && len(r.GridPoints) > 0 {
 			cr.GridPoints = r.GridPoints
@@ -809,6 +814,7 @@ func runTrace(data []byte) {
 	fs := flag.NewFlagSet("trace", flag.ExitOnError)
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
+	traceVerbose := fs.Bool("verbose", false, "print per-ray trace info to stderr")
 	fs.Parse(args)
 
 	var input types.Input
@@ -848,6 +854,14 @@ func runTrace(data []byte) {
 		r.Jones = input.Rays.Polarization
 		ray.ResolveRay(r, surfaces, engine)
 		result := engine.TraceRay(*r, surfaces)
+		if result.Error != "" {
+			errMsg := fmt.Sprintf("{\"ray\":%q,\"error\":%q,\"error_code\":%q}\n", r.ID, result.Error, result.ErrorCode)
+			if *traceVerbose {
+				fmt.Fprint(os.Stderr, errMsg)
+			} else {
+				fmt.Fprintf(os.Stderr, "Warning: ray %q error: %s\n", r.ID, result.Error)
+			}
+		}
 		output.Results = append(output.Results, result)
 	}
 

@@ -1,5 +1,7 @@
 package dls
 
+const MeritSpotRMS = "spot_rms"
+
 type VariableInfo struct {
 	Name      string
 	SurfaceID int
@@ -45,9 +47,13 @@ type Options struct {
 	Logger         Logger
 }
 
+type ConstraintState struct {
+	Residual float64
+}
+
 type Logger interface {
-	LogIter(iter int, merit, improvement, stepNorm float64, variables []float64)
-	LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64)
+	LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []ConstraintState)
+	LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []ConstraintState)
 }
 
 type Model interface {

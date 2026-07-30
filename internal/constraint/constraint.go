@@ -35,6 +35,8 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 	case types.MeasureEdgeThickness:
 		backID := int(math.Round(op.Target))
 		return evaluateEdgeThickness(surfaces, op.Surface, backID)
+	case types.MeasureFNumber:
+		return evaluateFNumber(surfaces, gc)
 	default:
 		return 0
 	}
@@ -215,6 +217,12 @@ func evaluateEdgeThickness(surfaces []types.Surface, frontID, backID int) float6
 	center := front.Thickness
 	h := math.Min(front.Diameter, back.Diameter) / 2.0
 	return center + sagitta(back.Curvature, h) - sagitta(front.Curvature, h)
+}
+
+func evaluateFNumber(surfaces []types.Surface, gc *glass.Catalog) float64 {
+	sys := types.System{Surfaces: surfaces}
+	res := paraxial.Compute(sys, 0.0005876, gc, 0, nil)
+	return res.InfConjImageSpaceFNumber
 }
 
 func evaluateEntrancePupilDiameter(surfaces []types.Surface, gc *glass.Catalog) float64 {

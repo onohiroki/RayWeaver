@@ -8,6 +8,7 @@ import (
 
 type IPoint struct {
 	X, Y float64
+	OPL  float64
 	OK   bool
 }
 

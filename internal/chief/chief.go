@@ -19,7 +19,9 @@ type Result struct {
 	EntrancePupil   types.Pupil
 	GridPoints      []types.GridPoint
 	SpotStats       *types.SpotStats
+	RayFan          *types.RayFan
 	PerSurfaceMaxY  []float64
+	Wavelengths     []types.WavelengthStats
 }
 
 func DetermineChiefRays(
@@ -32,7 +34,7 @@ func DetermineChiefRays(
 	wavelength float64,
 	dumpMap bool,
 ) []Result {
-	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, types.GridPolar, nil)
+	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, types.GridPolar, nil, false, nil)
 }
 
 func DetermineChiefRaysGrid(
@@ -46,11 +48,13 @@ func DetermineChiefRaysGrid(
 	dumpMap bool,
 	gridType types.GridType,
 	passThrough *types.PassThroughTarget,
+	rayFan bool,
+	wavelengths []float64,
 ) []Result {
 	if gridType == "" {
 		gridType = types.GridPolar
 	}
-	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, gridType, passThrough)
+	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, gridType, passThrough, rayFan, wavelengths)
 }
 
 func determineChiefRays(
@@ -64,6 +68,8 @@ func determineChiefRays(
 	dumpMap bool,
 	gridType types.GridType,
 	passThrough *types.PassThroughTarget,
+	rayFan bool,
+	wavelengths []float64,
 ) []Result {
 	engine := ray.NewEngine(gc, nil)
 
@@ -125,6 +131,25 @@ func determineChiefRays(
 			result.FieldAngle = fd.Angle
 		}
 		result.FieldDir = types.Vec3{X: dx, Y: dy}
+
+		// Multi-wavelength spot stats
+		if len(wavelengths) > 0 {
+			result.Wavelengths = computeWavelengthStats(
+				engine, system, refSurfaceID, pol,
+				result.GridPoints, result.ImageHeight, wavelengths,
+			)
+		}
+
+		if rayFan {
+			result.RayFan = computeRayFan(
+				engine, system,
+				result.ChiefRay.Initial.Origin,
+				result.ChiefRay.Initial.Direction,
+				refSurfaceID, pol, wavelength,
+				apertureRadius, 256,
+			)
+		}
+
 		results = append(results, result)
 	}
 
@@ -757,6 +782,7 @@ func tracePupilGrid(
 				grid = append(grid, types.GridPoint{
 					PupilX: px, PupilY: py,
 					ImageX: nil, ImageY: nil, Intensity: 0,
+					ErrorCode: traceResult.ErrorCode,
 					Origin: rOrg, Direction: rDir,
 				})
 				mu.Unlock()
@@ -775,6 +801,7 @@ func tracePupilGrid(
 					grid = append(grid, types.GridPoint{
 						PupilX: px, PupilY: py,
 						ImageX: &ix, ImageY: &iy, Intensity: weight,
+						OPL:    traceResult.OPLTotal,
 						Origin: rOrg, Direction: rDir,
 					})
 					mu.Unlock()
@@ -838,6 +865,80 @@ func computeSpotStats(grid []types.GridPoint, cx, cy float64) *types.SpotStats {
 	return s
 }
 
+func computeWavelengthStats(
+	engine *ray.Engine,
+	system types.System,
+	refSurfaceID int,
+	pol types.JonesVector,
+	grid []types.GridPoint,
+	chiefImgHeight types.Vec3,
+	wavelengths []float64,
+) []types.WavelengthStats {
+	path := buildPath(system.Surfaces)
+	type wlResult struct {
+		index int
+		stats types.SpotStats
+	}
+	ch := make(chan wlResult, len(wavelengths))
+	var wg sync.WaitGroup
+
+	for i, wl := range wavelengths {
+		wg.Add(1)
+		go func(i int, wl float64) {
+			defer wg.Done()
+			var cx, cy float64
+			var sumW, wcx, wcy float64
+			var traced []types.GridPoint
+
+			for _, gp := range grid {
+				r := types.Ray{
+					Wavelength: wl,
+					Initial:    types.RayState{Origin: gp.Origin, Direction: gp.Direction},
+					Path:       path,
+					Jones:      pol,
+				}
+				tr := engine.TraceRay(r, system.Surfaces)
+				if tr.Error != "" {
+					traced = append(traced, types.GridPoint{
+						PupilX: gp.PupilX, PupilY: gp.PupilY,
+						ImageX: nil, ImageY: nil, Intensity: 0,
+					})
+					continue
+				}
+				for _, sr := range tr.Surfaces {
+					if sr.SurfaceID == refSurfaceID {
+						weight := (sr.IntensityS + sr.IntensityP) / 2.0
+						sumW += weight
+						wcx += sr.Position.X * weight
+						wcy += sr.Position.Y * weight
+						ix, iy := sr.Position.X, sr.Position.Y
+						traced = append(traced, types.GridPoint{
+							PupilX: gp.PupilX, PupilY: gp.PupilY,
+							ImageX: &ix, ImageY: &iy, Intensity: weight,
+						})
+						break
+					}
+				}
+			}
+			cx, cy = chiefImgHeight.X, chiefImgHeight.Y
+			if sumW > 0 {
+				cx = wcx / sumW
+				cy = wcy / sumW
+			}
+			ss := computeSpotStats(traced, cx, cy)
+			ch <- wlResult{i, *ss}
+		}(i, wl)
+	}
+	wg.Wait()
+	close(ch)
+
+	stats := make([]types.WavelengthStats, len(wavelengths))
+	for r := range ch {
+		stats[r.index] = types.WavelengthStats{Value: wavelengths[r.index], SpotStats: r.stats}
+	}
+	return stats
+}
+
 func buildResult(
 	engine *ray.Engine, system types.System,
 	origin, rayDir types.Vec3,
@@ -876,6 +977,98 @@ func buildResult(
 		res.SpotStats = computeSpotStats(grid, cx, cy)
 	}
 	return res
+}
+
+func computeRayFan(
+	engine *ray.Engine, system types.System,
+	origin, rayDir types.Vec3,
+	refSurfaceID int,
+	pol types.JonesVector,
+	wavelength float64,
+	apertureRadius float64,
+	numFan int,
+) *types.RayFan {
+	if numFan <= 0 {
+		numFan = 256
+	}
+
+	path := buildPath(system.Surfaces)
+	zStart := origin.Z
+
+	// Chief ray image point
+	chiefRay := types.Ray{
+		Wavelength: wavelength,
+		Initial:    types.RayState{Origin: origin, Direction: rayDir},
+		Path:       path,
+		Jones:      pol,
+	}
+	var chiefX, chiefY float64
+	if tr := engine.TraceRay(chiefRay, system.Surfaces); tr.Error == "" {
+		for _, sr := range tr.Surfaces {
+			if sr.SurfaceID == refSurfaceID {
+				chiefX = sr.Position.X
+				chiefY = sr.Position.Y
+			}
+		}
+	}
+
+	traceOne := func(px, py float64) (float64, float64, bool) {
+		rDir := rayDir
+		rOrg := types.Vec3{X: px, Y: py, Z: zStart}
+		r := types.Ray{
+			Wavelength: wavelength,
+			Initial:    types.RayState{Origin: rOrg, Direction: rDir},
+			Path:       path,
+			Jones:      pol,
+		}
+		tr := engine.TraceRay(r, system.Surfaces)
+		if tr.Error != "" {
+			return 0, 0, false
+		}
+		for _, sr := range tr.Surfaces {
+			if sr.SurfaceID == refSurfaceID {
+				return sr.Position.X, sr.Position.Y, true
+			}
+		}
+		return 0, 0, false
+	}
+
+	isOffAxis := math.Abs(rayDir.X) > 1e-12 || math.Abs(rayDir.Y) > 1e-12
+
+	fan := &types.RayFan{}
+
+	// Meridional: scan pupil Y at pupil X = 0
+	for k := 0; k < numFan; k++ {
+		py := -apertureRadius + (float64(k)+0.5)*2.0*apertureRadius/float64(numFan)
+		_, y, ok := traceOne(0, py)
+		if !ok {
+			continue
+		}
+		fan.Meridional = append(fan.Meridional, types.FanPoint{
+			PupilY: py,
+			EY:     y - chiefY,
+		})
+	}
+
+	// Sagittal (only for off-axis fields): scan pupil X at pupil Y = 0
+	if isOffAxis {
+		for k := 0; k < numFan; k++ {
+			px := -apertureRadius + (float64(k)+0.5)*2.0*apertureRadius/float64(numFan)
+			xVal, _, ok := traceOne(px, 0)
+			if !ok {
+				continue
+			}
+			fan.Sagittal = append(fan.Sagittal, types.FanPoint{
+				PupilX: px,
+				EX:     xVal - chiefX,
+			})
+		}
+	}
+
+	if len(fan.Meridional) == 0 && len(fan.Sagittal) == 0 {
+		return nil
+	}
+	return fan
 }
 
 func computeStopZ(surfaces []types.Surface) float64 {
