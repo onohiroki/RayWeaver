@@ -349,6 +349,12 @@ type ConstraintOperand struct {
 	Active     bool              `yaml:"active"`
 }
 
+type GlassHullConfig struct {
+	Enabled bool    `yaml:"enabled,omitempty"`
+	Margin  float64 `yaml:"margin,omitempty"`
+	Weight  float64 `yaml:"weight,omitempty"`
+}
+
 type OptimizationConfig struct {
 	Method          string                  `yaml:"method"`
 	Aggregate       string                  `yaml:"aggregate,omitempty"`
@@ -363,6 +369,7 @@ type OptimizationConfig struct {
 	SharedVariables []SharedVariable        `yaml:"shared_variables,omitempty"`
 	LocalVariables  []LocalVariableDef      `yaml:"local_variables,omitempty"`
 	Constraints     []ConstraintOperand     `yaml:"constraints,omitempty"`
+	GlassHull       *GlassHullConfig        `yaml:"glass_hull,omitempty"`
 }
 
 type MeritTermResult struct {
