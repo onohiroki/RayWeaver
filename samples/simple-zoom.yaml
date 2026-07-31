@@ -427,6 +427,13 @@ configs:
         softness: 5.0
         weight: 0.5
         active: true
+      - id: gap12
+        kind: inequality_lower
+        measure: thickness
+        surface: 2
+        lower: 5.0
+        weight: 10.0
+        active: true
 
   - id: config1
     name: Config1

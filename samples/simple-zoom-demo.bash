@@ -33,6 +33,8 @@ echo "=== Simple Zoom Lens Optimization Demo ==="
 echo
 echo "Configs: config0 (S2=20, S4=80), config1 (S2=50, S4=50), config2 (S2=80, S4=20)"
 echo
+echo "Constraint: config0 air gap between lens 1 and lens 2 >= 5mm"
+echo
 
 # ── 1. DLS multi-config optimization ──
 echo "=== DLS Multi-Config Optimization ==="
@@ -155,5 +157,46 @@ fi
 echo
 echo "  >>> Optimization passed: all configs on-axis RMS < $THRESHOLD mm"
 echo "  >>> Optimization passed: all configs on-axis RMS < $THRESHOLD mm" >> "$RESULT_FILE"
+
+# ── Lens 1-2 gap threshold check (config0) ──
+get_gap12() {
+  local yaml_file="$1"
+  local cfg="$2"
+  python3 -c "
+import sys, yaml
+d = yaml.safe_load(open('$yaml_file'))
+for c in d.get('configs', []):
+    if c.get('id') == '$cfg':
+        for s in c['surfaces']:
+            if s['id'] == 2:
+                print(s['thickness'])
+                sys.exit(0)
+print(-1)
+"
+}
+
+GAP_TARGET=5.0
+echo
+echo "=== Lens1-Lens2 gap threshold check (config0) ==="
+printf "  (threshold = $GAP_TARGET mm — air gap between lens 1 and lens 2 must be >= this)\n"
+gap_before=$(get_gap12 "$YAML" "config0")
+gap_after=$(get_gap12 "$RESULT" "config0")
+printf "  %-8s gap before = %8.4f mm\n" "config0" "$gap_before"
+printf "  %-8s gap after  = %8.4f mm" "config0" "$gap_after"
+{
+  echo "=== Lens1-Lens2 gap check (config0) ==="
+  echo "  (threshold = $GAP_TARGET mm)"
+  printf "  %-8s gap before = %8.4f mm\n" "config0" "$gap_before"
+  printf "  %-8s gap after  = %8.4f mm\n" "config0" "$gap_after"
+  echo
+} >> "$RESULT_FILE"
+if [ "$gap_after" != "-1" ] && (( $(echo "$gap_after < $GAP_TARGET" | bc -l) )); then
+  echo "   ✗"
+  echo "  >>> Optimization failed: config0 lens1-lens2 gap $(printf '%.4f' "$gap_after") mm < $GAP_TARGET mm" >> "$RESULT_FILE"
+  exit 1
+else
+  echo "   ✓"
+  echo "  >>> Optimization passed: config0 lens1-lens2 gap $(printf '%.4f' "$gap_after") mm >= $GAP_TARGET mm" >> "$RESULT_FILE"
+fi
 
 # (cleanup is handled at the top for --clean mode)
