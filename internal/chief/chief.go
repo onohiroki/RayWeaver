@@ -1072,14 +1072,7 @@ func computeRayFan(
 }
 
 func computeStopZ(surfaces []types.Surface) float64 {
-	stopID := 0
-	minD := math.MaxFloat64
-	for _, s := range surfaces {
-		if s.Diameter > 0 && s.Diameter < minD {
-			minD = s.Diameter
-			stopID = s.ID
-		}
-	}
+	stopID := findStopID(surfaces)
 	if stopID == 0 {
 		return 0
 	}
@@ -1091,6 +1084,28 @@ func computeStopZ(surfaces []types.Surface) float64 {
 		z += s.Thickness
 	}
 	return 0
+}
+
+func findStopID(surfaces []types.Surface) int {
+	stopID := 0
+	minD := math.MaxFloat64
+	for _, s := range surfaces {
+		if !s.AutoAperture && s.Diameter > 0 && s.Diameter < minD {
+			minD = s.Diameter
+			stopID = s.ID
+		}
+	}
+	if stopID != 0 {
+		return stopID
+	}
+	minD = math.MaxFloat64
+	for _, s := range surfaces {
+		if s.Diameter > 0 && s.Diameter < minD {
+			minD = s.Diameter
+			stopID = s.ID
+		}
+	}
+	return stopID
 }
 
 func computeTargetZ(surfaces []types.Surface, targetID int) float64 {
