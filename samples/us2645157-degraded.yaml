@@ -8,54 +8,7 @@ glass_catalog:
       vd: 33.84
 
 system:
-  surfaces:
-    - id: 1
-      type: "sphere"
-      curvature: 0.12
-      thickness: 1.524
-      material: "SK18"
-#      diameter: 10.0
-    - id: 2
-      type: "sphere"
-      radius: -239.3967954752
-      thickness: 2.3368
-      material: "AIR"
-#      diameter: 10.0
-    - id: 3
-      type: "sphere"
-      curvature: -0.05
-      thickness: 0.508
-      material: "SF12"
-#      diameter: 6.0
-    - id: 4
-      type: "sphere"
-      radius: 10.5917184406
-      thickness: 1.4986
-      material: "AIR"
-#      diameter: 6.0
-    - id: 5
-      type: "sphere"
-      radius: 0.0
-      thickness: 1.016
-      material: "AIR"
-      diameter: 3.7825297358
-    - id: 6
-      type: "sphere"
-      curvature: 0.025
-      thickness: 1.524
-      material: "SK18"
-#      diameter: 6.0
-    - id: 7
-      type: "sphere"
-      curvature: -0.15
-      thickness: 21.36695183553
-      material: "AIR"
-#      diameter: 6.0
-    - id: 8
-      type: "sphere"
-      radius: 0.0
-      thickness: 0.0
-      material: "AIR"
+  surfaces: []
 
 chief:
   fields:
@@ -130,6 +83,54 @@ configs:
       - id: 2
         value: 0.0006563
         weight: 1.0
+    surfaces:
+      - id: 1
+        type: "sphere"
+        curvature: 0.12
+        thickness: 1.524
+        material: "SK18"
+  #      diameter: 10.0
+      - id: 2
+        type: "sphere"
+        radius: -239.3967954752
+        thickness: 2.3368
+        material: "AIR"
+  #      diameter: 10.0
+      - id: 3
+        type: "sphere"
+        curvature: -0.05
+        thickness: 0.508
+        material: "SF12"
+  #      diameter: 6.0
+      - id: 4
+        type: "sphere"
+        radius: 10.5917184406
+        thickness: 1.4986
+        material: "AIR"
+  #      diameter: 6.0
+      - id: 5
+        type: "sphere"
+        radius: 0.0
+        thickness: 1.016
+        material: "AIR"
+        diameter: 3.7825297358
+      - id: 6
+        type: "sphere"
+        curvature: 0.025
+        thickness: 1.524
+        material: "SK18"
+  #      diameter: 6.0
+      - id: 7
+        type: "sphere"
+        curvature: -0.15
+        thickness: 21.36695183553
+        material: "AIR"
+  #      diameter: 6.0
+      - id: 8
+        type: "sphere"
+        radius: 0.0
+        thickness: 0.0
+        material: "AIR"
     merit:
       type: weighted_sum
       terms:

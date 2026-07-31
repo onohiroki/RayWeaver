@@ -170,7 +170,18 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		}
 	}
 
-	input.System.Surfaces = outputSurfaces
+	// Surface data lives in configs[].surfaces; system.surfaces is a read-only
+	// compatibility fallback and is never written.
+	if len(input.Configs) == 0 {
+		input.Configs = []types.Config{{
+			ID:     "config1",
+			Name:   "Config1",
+			Weight: 1.0,
+			Active: true,
+		}}
+	}
+	input.Configs[0].Surfaces = outputSurfaces
+	input.System.Surfaces = nil
 
 	for _, g := range newGlasses {
 		input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)

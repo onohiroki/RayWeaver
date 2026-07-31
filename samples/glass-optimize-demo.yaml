@@ -13,56 +13,7 @@ glass_catalog:
       vd: 30.0
 
 system:
-  surfaces:
-    - id: 1
-      type: "sphere"
-      curvature: 0.015
-      thickness: 6.0
-      material: "model1"
-      diameter: 15.0
-      auto_aperture: true
-      min_glass_path: 1.0
-    - id: 2
-      type: "sphere"
-      curvature: -0.01
-      thickness: 6.0
-      material: "AIR"
-      diameter: 15.0
-      auto_aperture: true
-    - id: 3
-      type: "sphere"
-      curvature: 0.0
-      thickness: 3.0
-      material: "model2"
-      diameter: 9.0
-      auto_aperture: false
-    - id: 4
-      type: "sphere"
-      curvature: 0.0
-      thickness: 3.0
-      material: "AIR"
-      diameter: 12.0
-      auto_aperture: true
-    - id: 5
-      type: "sphere"
-      curvature: 0.0
-      thickness: 3.0
-      material: "model3"
-      diameter: 12.0
-      auto_aperture: true
-      min_glass_path: 0.3
-    - id: 6
-      type: "sphere"
-      curvature: 0.0
-      thickness: 20.0
-      material: "AIR"
-      diameter: 12.0
-      auto_aperture: true
-    - id: 7
-      type: "sphere"
-      curvature: 0.0
-      thickness: 0.0
-      material: "AIR"
+  surfaces: []
 
 chief:
   fields:
@@ -247,6 +198,56 @@ configs:
       - id: 3
         value: 0.0006563
         weight: 1.0
+    surfaces:
+      - id: 1
+        type: "sphere"
+        curvature: 0.015
+        thickness: 6.0
+        material: "model1"
+        diameter: 15.0
+        auto_aperture: true
+        min_glass_path: 1.0
+      - id: 2
+        type: "sphere"
+        curvature: -0.01
+        thickness: 6.0
+        material: "AIR"
+        diameter: 15.0
+        auto_aperture: true
+      - id: 3
+        type: "sphere"
+        curvature: 0.0
+        thickness: 3.0
+        material: "model2"
+        diameter: 9.0
+        auto_aperture: false
+      - id: 4
+        type: "sphere"
+        curvature: 0.0
+        thickness: 3.0
+        material: "AIR"
+        diameter: 12.0
+        auto_aperture: true
+      - id: 5
+        type: "sphere"
+        curvature: 0.0
+        thickness: 3.0
+        material: "model3"
+        diameter: 12.0
+        auto_aperture: true
+        min_glass_path: 0.3
+      - id: 6
+        type: "sphere"
+        curvature: 0.0
+        thickness: 20.0
+        material: "AIR"
+        diameter: 12.0
+        auto_aperture: true
+      - id: 7
+        type: "sphere"
+        curvature: 0.0
+        thickness: 0.0
+        material: "AIR"
     merit:
       type: weighted_sum
       terms:

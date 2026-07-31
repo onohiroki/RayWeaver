@@ -117,7 +117,7 @@ Options:
   --pass-through N     constrain chief ray to pass through (0,0) centre of
                          surface N (overrides YAML pass_through.surface)
   --clear-aperture     trace grid rays (all fields) through every surface and
-                         set system.surfaces[].diameter = 2x max radial extent
+                         set surfaces[].diameter = 2x max radial extent
                          using entrance-pupil-based beam diameter
   --clear-aperture-margin 2.0   beam diameter multiplier relative to entrance
                          pupil (default 2 = 2× entrance pupil diameter)
@@ -480,7 +480,7 @@ func containsGlass(entries []types.Glass, g types.Glass) bool {
 
 func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
-	clearAperture := fs.Bool("clear-aperture", false, "trace grid rays (all fields, at entrance-pupil-based beam diameter) through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set system.surfaces[].diameter = 2x that extent")
+	clearAperture := fs.Bool("clear-aperture", false, "trace grid rays (all fields, at entrance-pupil-based beam diameter) through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set surfaces[].diameter = 2x that extent")
 	clearApertureMargin := fs.Float64("clear-aperture-margin", 2.0, "beam diameter multiplier relative to entrance pupil (default 2 = 2× entrance pupil diameter)")
 	marginalRays := fs.Bool("marginal-rays", false, "from each field's grid points find the rays with max/min image Y (and X for off-axis fields) and append them as marginal rays to the output 'rays' section for piping into trace/plot")
 	passThrough := fs.Int("pass-through", 0, "constrain chief ray to pass through (0,0,0) center of surface N (overrides YAML pass_through.surface)")
@@ -530,6 +530,24 @@ func runChief(data []byte) {
 	gc, _ := loadCatalogs(&input, *glassDir)
 
 	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
+	// system.surfaces is a read-only compatibility fallback; never write to it.
+	// When --clear-aperture mutates diameters, promote legacy system.surfaces
+	// into configs[0].surfaces first so the output echo carries no system.surfaces.
+	if *clearAperture && *configFlag == "" && len(input.System.Surfaces) > 0 {
+		if len(input.Configs) == 0 {
+			input.Configs = []types.Config{{
+				ID:     "config1",
+				Name:   "Config1",
+				Weight: 1.0,
+				Active: true,
+			}}
+		}
+		if len(input.Configs[0].Surfaces) == 0 {
+			input.Configs[0].Surfaces = input.System.Surfaces
+			input.System.Surfaces = nil
+			surfaces = input.Configs[0].Surfaces
+		}
+	}
 	surface.Precompute(surfaces)
 
 	selectedSys := input.System
@@ -811,6 +829,9 @@ func resolveConfig(configs []types.Config, val string) (int, string) {
 //   - if configFlag is set, returns the matching config's surfaces
 //   - else if system.surfaces is empty but configs exist, returns configs[0].surfaces
 //   - otherwise returns system.surfaces
+//
+// system.surfaces is a read-only compatibility fallback for hand-written YAML;
+// surface data is never written to it. Canonical storage is configs[].surfaces.
 func selectSurfaces(sysSurfaces []types.Surface, configs []types.Config, configFlag *string) []types.Surface {
 	if *configFlag != "" {
 		idx, err := resolveConfig(configs, *configFlag)
