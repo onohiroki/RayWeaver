@@ -295,41 +295,7 @@ func (o *MultiOptimizer) FinalApertures(x []float64) map[string]map[int]float64 
 			}
 		}
 		surface.Precompute(surfaces)
-
-		extremeAngle := 0.0
-		for _, term := range cfg.MeritTerms {
-			angle := o.fieldAngleForTerm(cfg, term, surfaces)
-			a := math.Abs(angle)
-			if a > extremeAngle {
-				extremeAngle = a
-			}
-		}
-
-		extents := make(map[int]float64)
-		for pass := 0; pass < 2; pass++ {
-			for _, term := range cfg.MeritTerms {
-				angle := o.fieldAngleForTerm(cfg, term, surfaces)
-				isExtreme := math.Abs(angle) == extremeAngle && extremeAngle > 0
-				if (pass == 0) != isExtreme {
-					continue
-				}
-				_, perSurf := o.traceFieldGrid(surfaces, cfg, term)
-				if isExtreme {
-					for id, e := range perSurf {
-						if e > extents[id] {
-							extents[id] = e
-						}
-					}
-					for id, e := range extents {
-						for i := range surfaces {
-							if surfaces[i].ID == id && surfaces[i].AutoAperture {
-								surfaces[i].Diameter = 2 * e
-							}
-						}
-					}
-				}
-			}
-		}
+		o.sizeAutoApertures(cfg, surfaces)
 
 		cfgResult := make(map[int]float64)
 		for i := range surfaces {
@@ -357,47 +323,14 @@ func (o *MultiOptimizer) evaluateMerit(x []float64) float64 {
 		}
 
 		surface.Precompute(surfaces)
+		o.sizeAutoApertures(cfg, surfaces)
 
-		extremeAngle := 0.0
-		for _, term := range cfg.MeritTerms {
-			angle := o.fieldAngleForTerm(cfg, term, surfaces)
-			a := math.Abs(angle)
-			if a > extremeAngle {
-				extremeAngle = a
-			}
-		}
-
-		extents := make(map[int]float64)
 		cfgMerit := 0.0
 
-		for pass := 0; pass < 2; pass++ {
-			for _, term := range cfg.MeritTerms {
-				angle := o.fieldAngleForTerm(cfg, term, surfaces)
-				isExtreme := math.Abs(angle) == extremeAngle && extremeAngle > 0
-				if (pass == 0) != isExtreme {
-					continue
-				}
-
-				points, perSurf := o.traceFieldGrid(surfaces, cfg, term)
-
-				if isExtreme {
-					for id, e := range perSurf {
-						if e > extents[id] {
-							extents[id] = e
-						}
-					}
-					for id, e := range extents {
-						for i := range surfaces {
-							if surfaces[i].ID == id && surfaces[i].AutoAperture {
-								surfaces[i].Diameter = 2 * e
-							}
-						}
-					}
-				}
-
-				rms := computeSpotRMS(points)
-				cfgMerit += term.Weight * fieldWeightForTerm(cfg, term) * wavWeightForTerm(cfg, term) * rms * rms
-			}
+		for _, term := range cfg.MeritTerms {
+			points, _ := o.traceFieldGrid(surfaces, cfg, term)
+			rms := computeSpotRMS(points)
+			cfgMerit += term.Weight * fieldWeightForTerm(cfg, term) * wavWeightForTerm(cfg, term) * rms * rms
 		}
 
 		merit += cfg.Weight * cfgMerit
@@ -592,47 +525,13 @@ func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 		}
 
 		surface.Precompute(surfaces)
-
-		extremeAngle := 0.0
-		for _, term := range cfg.MeritTerms {
-			angle := o.fieldAngleForTerm(cfg, term, surfaces)
-			a := math.Abs(angle)
-			if a > extremeAngle {
-				extremeAngle = a
-			}
-		}
-
-		extents := make(map[int]float64)
+		o.sizeAutoApertures(cfg, surfaces)
 
 		termR := make([]float64, len(cfg.MeritTerms))
-		for pass := 0; pass < 2; pass++ {
-			for ti, term := range cfg.MeritTerms {
-				angle := o.fieldAngleForTerm(cfg, term, surfaces)
-				isExtreme := math.Abs(angle) == extremeAngle && extremeAngle > 0
-				if (pass == 0) != isExtreme {
-					continue
-				}
-
-				points, perSurf := o.traceFieldGrid(surfaces, cfg, term)
-
-				if isExtreme {
-					for id, e := range perSurf {
-						if e > extents[id] {
-							extents[id] = e
-						}
-					}
-					for id, e := range extents {
-						for i := range surfaces {
-							if surfaces[i].ID == id && surfaces[i].AutoAperture {
-								surfaces[i].Diameter = 2 * e
-							}
-						}
-					}
-				}
-
-				rms := computeSpotRMS(points)
-				termR[ti] = math.Sqrt(cfg.Weight*term.Weight*fieldWeightForTerm(cfg, term)*wavWeightForTerm(cfg, term)) * rms
-			}
+		for ti, term := range cfg.MeritTerms {
+			points, _ := o.traceFieldGrid(surfaces, cfg, term)
+			rms := computeSpotRMS(points)
+			termR[ti] = math.Sqrt(cfg.Weight*term.Weight*fieldWeightForTerm(cfg, term)*wavWeightForTerm(cfg, term)) * rms
 		}
 
 		allR = append(allR, termR...)
@@ -647,6 +546,58 @@ func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 	}
 
 	return allR
+}
+
+func (o *MultiOptimizer) traceFieldGridExtents(surfaces []types.Surface, cfg ConfigInput, term types.MeritTerm) map[int]float64 {
+	gc := o.gc
+	if o.tempGC != nil {
+		gc = o.tempGC
+	}
+	fieldAngle := o.fieldAngleForTerm(cfg, term, surfaces)
+	return dls.TraceFieldGridExtents(gc, surfaces, fieldAngle, []float64{0, 1}, term.Wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+}
+
+// sizeAutoApertures measures the true geometric beam extent at the extreme
+// field angle (ignoring aperture clipping) and sizes every AutoAperture
+// surface so its diameter covers the full bundle. Callers must restore the
+// initial diameters and precompute the surfaces first.
+func (o *MultiOptimizer) sizeAutoApertures(cfg ConfigInput, surfaces []types.Surface) {
+	extremeAngle := 0.0
+	for _, term := range cfg.MeritTerms {
+		angle := o.fieldAngleForTerm(cfg, term, surfaces)
+		a := math.Abs(angle)
+		if a > extremeAngle {
+			extremeAngle = a
+		}
+	}
+	if extremeAngle <= 0 {
+		return
+	}
+
+	extents := make(map[int]float64)
+	for _, term := range cfg.MeritTerms {
+		if term.Kind != "" && term.Kind != dls.MeritSpotRMS {
+			continue
+		}
+		angle := o.fieldAngleForTerm(cfg, term, surfaces)
+		if math.Abs(angle) != extremeAngle {
+			continue
+		}
+		perSurf := o.traceFieldGridExtents(surfaces, cfg, term)
+		for id, e := range perSurf {
+			if e > extents[id] {
+				extents[id] = e
+			}
+		}
+	}
+
+	for id, e := range extents {
+		for i := range surfaces {
+			if surfaces[i].ID == id && surfaces[i].AutoAperture {
+				surfaces[i].Diameter = 2 * e
+			}
+		}
+	}
 }
 
 func (o *MultiOptimizer) ComputeConstraints(x []float64) []float64 {
@@ -669,6 +620,7 @@ func (o *MultiOptimizer) ComputeConstraints(x []float64) []float64 {
 		}
 
 		surface.Precompute(surfaces)
+		o.sizeAutoApertures(cfg, surfaces)
 
 		for _, c := range cfg.Constraints {
 			if !c.Active {

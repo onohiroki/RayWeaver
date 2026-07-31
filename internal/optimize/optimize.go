@@ -251,52 +251,20 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 		}
 	}
 
-	extremeAngle := 0.0
-	for _, term := range o.meritTerms {
-		a := math.Abs(term.FieldAngle)
-		if a > extremeAngle {
-			extremeAngle = a
-		}
-	}
+	o.sizeAutoApertures(surfaces)
 
-	extents := make(map[int]float64)
 	merit := 0.0
 
-	for pass := 0; pass < 2; pass++ {
-		for _, term := range o.meritTerms {
-			if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
-				isExtreme := math.Abs(term.FieldAngle) == extremeAngle && extremeAngle > 0
-				if (pass == 0) != isExtreme {
-					continue
-				}
+	for _, term := range o.meritTerms {
+		if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+			points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
 
-				points, perSurf := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-
-				if isExtreme {
-					for id, e := range perSurf {
-						if e > extents[id] {
-							extents[id] = e
-						}
-					}
-					for id, e := range extents {
-						for i := range surfaces {
-							if surfaces[i].ID == id && surfaces[i].AutoAperture {
-								surfaces[i].Diameter = 2 * e
-							}
-						}
-					}
-				}
-
-				rms := dls.ComputeSpotRMS(points)
-				merit += term.Weight * term.FieldWeight * term.WavWeight * rms * rms
-			} else {
-				if pass == 1 {
-					continue
-				}
-				val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
-				diff := val - term.Target
-				merit += term.Weight * term.FieldWeight * term.WavWeight * diff * diff
-			}
+			rms := dls.ComputeSpotRMS(points)
+			merit += term.Weight * term.FieldWeight * term.WavWeight * rms * rms
+		} else {
+			val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
+			diff := val - term.Target
+			merit += term.Weight * term.FieldWeight * term.WavWeight * diff * diff
 		}
 	}
 
@@ -316,51 +284,18 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 		}
 	}
 
-	extremeAngle := 0.0
-	for _, term := range o.meritTerms {
-		a := math.Abs(term.FieldAngle)
-		if a > extremeAngle {
-			extremeAngle = a
-		}
-	}
+	o.sizeAutoApertures(surfaces)
 
-	extents := make(map[int]float64)
+	for i, term := range o.meritTerms {
+		if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+			points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
 
-	for pass := 0; pass < 2; pass++ {
-		for i, term := range o.meritTerms {
-			if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
-				isExtreme := math.Abs(term.FieldAngle) == extremeAngle && extremeAngle > 0
-				if (pass == 0) != isExtreme {
-					continue
-				}
-
-				points, perSurf := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-
-				if isExtreme {
-					for id, e := range perSurf {
-						if e > extents[id] {
-							extents[id] = e
-						}
-					}
-					for id, e := range extents {
-						for j := range surfaces {
-							if surfaces[j].ID == id && surfaces[j].AutoAperture {
-								surfaces[j].Diameter = 2 * e
-							}
-						}
-					}
-				}
-
-				rms := dls.ComputeSpotRMS(points)
-				r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
-			} else {
-				if pass == 1 {
-					continue
-				}
-				val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
-				diff := val - term.Target
-				r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * diff
-			}
+			rms := dls.ComputeSpotRMS(points)
+			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
+		} else {
+			val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
+			diff := val - term.Target
+			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * diff
 		}
 	}
 
@@ -384,6 +319,8 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 			surfaces[i].Diameter = d
 		}
 	}
+
+	o.sizeAutoApertures(surfaces)
 
 	gcConstraint := o.gc
 	if o.tempGC != nil {
@@ -426,6 +363,10 @@ func (o *Optimizer) Optimize() Result {
 }
 
 func (o *Optimizer) FinalApertures(x []float64) map[int]float64 {
+	return o.finalAperturesImpl(x)
+}
+
+func (o *Optimizer) finalAperturesImpl(x []float64) map[int]float64 {
 	surfaces := o.applyVariables(x)
 
 	for i := range surfaces {
@@ -434,40 +375,7 @@ func (o *Optimizer) FinalApertures(x []float64) map[int]float64 {
 		}
 	}
 
-	extremeAngle := 0.0
-	for _, term := range o.meritTerms {
-		a := math.Abs(term.FieldAngle)
-		if a > extremeAngle {
-			extremeAngle = a
-		}
-	}
-
-	extents := make(map[int]float64)
-	for pass := 0; pass < 2; pass++ {
-		for _, term := range o.meritTerms {
-			if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
-				isExtreme := math.Abs(term.FieldAngle) == extremeAngle && extremeAngle > 0
-				if (pass == 0) != isExtreme {
-					continue
-				}
-				_, perSurf := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-				if isExtreme {
-					for id, e := range perSurf {
-						if e > extents[id] {
-							extents[id] = e
-						}
-					}
-					for id, e := range extents {
-						for i := range surfaces {
-							if surfaces[i].ID == id && surfaces[i].AutoAperture {
-								surfaces[i].Diameter = 2 * e
-							}
-						}
-					}
-				}
-			}
-		}
-	}
+	o.sizeAutoApertures(surfaces)
 
 	result := make(map[int]float64)
 	for i := range surfaces {
@@ -537,6 +445,55 @@ func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64,
 		gc = o.tempGC
 	}
 	return dls.TraceFieldGrid(gc, surfaces, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+}
+
+func (o *Optimizer) traceFieldGridExtents(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) map[int]float64 {
+	gc := o.gc
+	if o.tempGC != nil {
+		gc = o.tempGC
+	}
+	return dls.TraceFieldGridExtents(gc, surfaces, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+}
+
+// sizeAutoApertures measures the true geometric beam extent at the extreme
+// field angle (ignoring aperture clipping) and sizes every AutoAperture
+// surface so its diameter covers the full bundle. Callers must restore the
+// initial diameters first.
+func (o *Optimizer) sizeAutoApertures(surfaces []types.Surface) {
+	extremeAngle := 0.0
+	for _, term := range o.meritTerms {
+		a := math.Abs(term.FieldAngle)
+		if a > extremeAngle {
+			extremeAngle = a
+		}
+	}
+	if extremeAngle <= 0 {
+		return
+	}
+
+	extents := make(map[int]float64)
+	for _, term := range o.meritTerms {
+		if term.Kind != "" && term.Kind != dls.MeritSpotRMS {
+			continue
+		}
+		if math.Abs(term.FieldAngle) != extremeAngle {
+			continue
+		}
+		perSurf := o.traceFieldGridExtents(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+		for id, e := range perSurf {
+			if e > extents[id] {
+				extents[id] = e
+			}
+		}
+	}
+
+	for id, e := range extents {
+		for i := range surfaces {
+			if surfaces[i].ID == id && surfaces[i].AutoAperture {
+				surfaces[i].Diameter = 2 * e
+			}
+		}
+	}
 }
 
 func (o *Optimizer) getInitialState() []float64 {

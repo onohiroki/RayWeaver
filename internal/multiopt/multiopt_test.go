@@ -4,7 +4,9 @@ import (
 	"math"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -132,6 +134,50 @@ func TestMultiOptimizerApplyLocalVariables(t *testing.T) {
 	}
 	if !found {
 		t.Error("Surface 2 not found in wide config")
+	}
+}
+
+func TestMultiOptimizerSizeAutoAperturesGeometric(t *testing.T) {
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: "AIR", Diameter: 20.0, AutoAperture: true},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: "AIR", Diameter: 10.0, AutoAperture: true},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 100.0, Material: "AIR", Diameter: 8.0},
+	}
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	configs := []ConfigInput{
+		{
+			ID:       "wide",
+			Weight:   1.0,
+			Surfaces: surfaces,
+			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}, {ID: 1, AngleDeg: 16.0, Weight: 1.0}},
+			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+			MeritTerms: []types.MeritTerm{
+				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
+				{Field: 1, Wavelength: 0.00058756, Weight: 1.0},
+			},
+		},
+	}
+
+	opt := New(configs, nil, nil, gc, 10, 1.0, 1e-6, 1e-6, 1.0, 64, 100.0, nil, nil, 0, 0)
+
+	// True geometric beam extent at surface 2 for the extreme (16deg) field,
+	// measured without aperture clipping.
+	surface.Precompute(surfaces)
+	ext := dls.TraceFieldGridExtents(gc, surfaces, 16.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0)
+	geoExtent2 := ext[2]
+	if geoExtent2 <= 5.0 {
+		t.Fatalf("test setup: geometric extent at surface 2 = %.3f, want > 5.0 (initial aperture radius)", geoExtent2)
+	}
+
+	aps := opt.FinalApertures([]float64{})
+	dia2 := aps["wide"][2]
+	if dia2/2 < geoExtent2-1e-9 {
+		t.Errorf("auto aperture surface 2 diameter %.3f does not cover geometric beam extent %.3f", dia2, geoExtent2)
+	}
+	if dia2 <= 10.0 {
+		t.Errorf("auto aperture surface 2 diameter %.3f, want > initial 10.0 (aperture-checked sizing)", dia2)
 	}
 }
 
