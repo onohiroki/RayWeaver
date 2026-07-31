@@ -676,7 +676,7 @@ func (o *MultiOptimizer) ComputeConstraints(x []float64) []float64 {
 				continue
 			}
 			angle := o.fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field}, surfaces)
-			value := constraint.Evaluate(c, surfaces, angle, gc)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin)
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {

@@ -10,6 +10,19 @@ import (
 )
 
 func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64) ([]IPoint, map[int]float64) {
+	skipGlassPath := fieldAngle == 0
+	return traceGridRays(gc, surfaces, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath)
+}
+
+// TraceFieldGridExtents traces a pupil grid with aperture and glass-path
+// checks disabled, returning the true geometric max radial ray extent on each
+// surface, independent of any surface aperture clipping.
+func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64) map[int]float64 {
+	_, perSurfMax := traceGridRays(gc, surfaces, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true)
+	return perSurfMax
+}
+
+func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
@@ -50,7 +63,6 @@ func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle floa
 
 	perSurfMax := make(map[int]float64)
 	var points []IPoint
-	skipGlassPathCheck := fieldAngle == 0
 	for _, pt := range grid {
 		origin := types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}
 		r := types.Ray{
@@ -59,6 +71,7 @@ func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle floa
 			Path:               p,
 			Jones:              types.NewCircularJones(true),
 			SkipGlassPathCheck: skipGlassPathCheck,
+			SkipApertureCheck:  skipApertureCheck,
 		}
 
 		result := engine.TraceRay(r, surfaces)

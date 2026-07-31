@@ -120,8 +120,9 @@ type Ray struct {
 	Aim               *Vec3              `yaml:"aim,omitempty"`
 	PassThrough       *PassThroughTarget `yaml:"pass_through,omitempty"`
 	Path              []int              `yaml:"path"`
-	Jones             JonesVector        `yaml:"-"`
-	SkipGlassPathCheck bool              `yaml:"-"`
+	Jones              JonesVector        `yaml:"-"`
+	SkipGlassPathCheck bool               `yaml:"-"`
+	SkipApertureCheck  bool               `yaml:"-"`
 }
 
 type SurfaceResult struct {
@@ -331,6 +332,9 @@ const (
 	MeasureEdgeThickness          ConstraintMeasure = "edge_thickness"
 	MeasureDiameter               ConstraintMeasure = "diameter"
 	MeasureFNumber                ConstraintMeasure = "f_number"
+	MeasureBeamClearance          ConstraintMeasure = "beam_clearance"
+	MeasureVignettingFactor       ConstraintMeasure = "vignetting_factor"
+	MeasureBeamDiameter           ConstraintMeasure = "beam_diameter"
 )
 
 type ConstraintOperand struct {

@@ -104,7 +104,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			Z: localOrigin.Z + localDir.Z*t,
 		}
 
-		if currentSurf.Diameter > 0 && !(ray.SkipGlassPathCheck && currentSurf.AutoAperture) {
+		if currentSurf.Diameter > 0 && !ray.SkipApertureCheck && !(ray.SkipGlassPathCheck && currentSurf.AutoAperture) {
 			h := math.Sqrt(hitPoint.X*hitPoint.X + hitPoint.Y*hitPoint.Y)
 			if h > currentSurf.Diameter/2 {
 				result.Error = "ray missed surface (aperture stop)"

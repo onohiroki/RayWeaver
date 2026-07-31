@@ -3,6 +3,7 @@ package constraint
 import (
 	"math"
 
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
@@ -10,7 +11,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle float64, gc *glass.Catalog) float64 {
+func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle float64, gc *glass.Catalog, numRays int, apertureMargin float64) float64 {
 	if !op.Active {
 		return 0
 	}
@@ -37,6 +38,12 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 		return evaluateEdgeThickness(surfaces, op.Surface, backID)
 	case types.MeasureFNumber:
 		return evaluateFNumber(surfaces, gc)
+	case types.MeasureBeamClearance:
+		return evaluateBeamClearance(surfaces, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin)
+	case types.MeasureVignettingFactor:
+		return evaluateVignettingFactor(surfaces, fieldAngle, op.Wavelength, gc, numRays, apertureMargin)
+	case types.MeasureBeamDiameter:
+		return evaluateBeamDiameter(surfaces, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin)
 	default:
 		return 0
 	}
@@ -185,6 +192,55 @@ func evaluateDiameter(surfaces []types.Surface, id int) float64 {
 		}
 	}
 	return 0
+}
+
+func evaluateBeamClearance(surfaces []types.Surface, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
+	if wavelength == 0 {
+		wavelength = 0.0005876
+	}
+	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0)
+	if perSurfMax == nil {
+		return 0
+	}
+	for _, s := range surfaces {
+		if s.ID == surfaceID {
+			return s.Diameter/2 - perSurfMax[surfaceID]
+		}
+	}
+	return 0
+}
+
+func evaluateBeamDiameter(surfaces []types.Surface, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
+	if wavelength == 0 {
+		wavelength = 0.0005876
+	}
+	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0)
+	if perSurfMax == nil {
+		return 0
+	}
+	for _, s := range surfaces {
+		if s.ID == surfaceID {
+			return 2 * perSurfMax[surfaceID]
+		}
+	}
+	return 0
+}
+
+func evaluateVignettingFactor(surfaces []types.Surface, fieldAngle, wavelength float64, gc *glass.Catalog, numRays int, apertureMargin float64) float64 {
+	if wavelength == 0 {
+		wavelength = 0.0005876
+	}
+	points, _ := dls.TraceFieldGrid(gc, surfaces, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0)
+	if len(points) == 0 {
+		return 0
+	}
+	passCount := 0
+	for _, p := range points {
+		if p.OK {
+			passCount++
+		}
+	}
+	return float64(passCount) / float64(len(points))
 }
 
 func sagitta(curvature, semiDiam float64) float64 {

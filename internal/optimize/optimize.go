@@ -396,7 +396,7 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 			c[j] = 0
 			continue
 		}
-		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint)
+		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint, o.numRays, o.apertureMargin)
 		err := constraint.ComputeError(op.Kind, value, op)
 		w := op.Weight
 		if w <= 0 {
