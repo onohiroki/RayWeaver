@@ -19,7 +19,7 @@ type angleColorEntry struct {
 	color string
 }
 
-func buildRayPaths(results []types.RayResult, chiefRays []types.ChiefRayResult) []rayRenderData {
+func buildRayPaths(results []types.RayResult, chiefRays []types.ChiefRayResult, maxFanRays int) []rayRenderData {
 	var out []rayRenderData
 
 	colors := buildAngleColorMap(chiefRays)
@@ -41,6 +41,62 @@ func buildRayPaths(results []types.RayResult, chiefRays []types.ChiefRayResult) 
 		})
 	}
 
+	out = append(out, buildFanPaths(chiefRays, maxFanRays, colors)...)
+
+	return out
+}
+
+// buildFanPaths collects decimated meridional and rotated fan-ray paths for
+// the lens diagram. Sagittal fan rays (XZ plane) are skipped because they
+// project onto the optical axis in the YZ view.
+func buildFanPaths(chiefRays []types.ChiefRayResult, maxFanRays int, colors []angleColorEntry) []rayRenderData {
+	var out []rayRenderData
+	if maxFanRays <= 0 {
+		return out
+	}
+	for _, cr := range chiefRays {
+		if cr.RayFan == nil {
+			continue
+		}
+		col := fieldAngleColor(cr.FieldAngle, colors)
+		addFan := func(points []types.FanPoint) {
+			for _, fp := range sampleFanPoints(points, maxFanRays) {
+				if len(fp.Path) < 2 {
+					continue
+				}
+				path := buildRayPath(fp.Path)
+				if path == "" {
+					continue
+				}
+				out = append(out, rayRenderData{
+					path:       path,
+					color:      col,
+					fieldAngle: cr.FieldAngle,
+				})
+			}
+		}
+		addFan(cr.RayFan.Meridional)
+		for _, rf := range cr.RayFan.Rotated {
+			addFan(rf.Points)
+		}
+	}
+	return out
+}
+
+// sampleFanPoints uniformly samples up to max points from the fan.
+func sampleFanPoints(points []types.FanPoint, max int) []types.FanPoint {
+	if max <= 0 || len(points) <= max {
+		return points
+	}
+	step := float64(len(points)) / float64(max)
+	out := make([]types.FanPoint, 0, max)
+	for i := 0; i < max; i++ {
+		idx := int(float64(i) * step)
+		if idx >= len(points) {
+			idx = len(points) - 1
+		}
+		out = append(out, points[idx])
+	}
 	return out
 }
 

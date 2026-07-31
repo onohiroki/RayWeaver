@@ -18,7 +18,7 @@ import (
 func LensPNG(cfg Config) ([]byte, error) {
 	zPos := computeZPositions(cfg.Surfaces)
 	totalZ := computeTotalZ(cfg.Surfaces)
-	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays)
+	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays)
 
 	firstZ := zPos[0]
 	lastZ := zPos[len(zPos)-1]

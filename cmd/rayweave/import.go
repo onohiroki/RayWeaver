@@ -101,11 +101,11 @@ func runImport(data []byte) {
 	}
 
 	config := types.Config{
-		ID:     *configID,
-		Name:   *configName,
-		Weight: 1.0,
-		Active: true,
-		Fields: result.Fields,
+		ID:          *configID,
+		Name:        *configName,
+		Weight:      1.0,
+		Active:      true,
+		Fields:      result.Fields,
 		Wavelengths: result.Wavelengths,
 		RayPaths: []types.RayPath{{
 			ObjectSurface: 0,
@@ -182,7 +182,7 @@ func runImport(data []byte) {
 			true,
 			types.GridPolar,
 			pt,
-			false,
+			nil,
 			nil,
 		)
 

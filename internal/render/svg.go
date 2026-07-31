@@ -22,6 +22,7 @@ type Config struct {
 	RayWidth       float64
 	ScaleOverride  float64
 	RightMarginPct float64
+	MaxFanRays     int
 }
 
 const (
@@ -33,7 +34,7 @@ const (
 func LensSVG(cfg Config) string {
 	zPos := computeZPositions(cfg.Surfaces)
 	totalZ := computeTotalZ(cfg.Surfaces)
-	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays)
+	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays)
 
 	// Compute display Z span: if object plane is far, cap the
 	// object-side extent to min(lensLength, backFocalLength).
@@ -189,5 +190,3 @@ func computeScale(zSpan, maxY float64) float64 {
 	}
 	return s
 }
-
-

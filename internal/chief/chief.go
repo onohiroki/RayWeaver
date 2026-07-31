@@ -11,17 +11,17 @@ import (
 )
 
 type Result struct {
-	FieldAngle      float64
-	FieldHeight     float64
-	FieldDir        types.Vec3
-	ChiefRay        types.Ray
-	ImageHeight     types.Vec3
-	EntrancePupil   types.Pupil
-	GridPoints      []types.GridPoint
-	SpotStats       *types.SpotStats
-	RayFan          *types.RayFan
-	PerSurfaceMaxY  []float64
-	Wavelengths     []types.WavelengthStats
+	FieldAngle     float64
+	FieldHeight    float64
+	FieldDir       types.Vec3
+	ChiefRay       types.Ray
+	ImageHeight    types.Vec3
+	EntrancePupil  types.Pupil
+	GridPoints     []types.GridPoint
+	SpotStats      *types.SpotStats
+	RayFan         *types.RayFan
+	PerSurfaceMaxY []float64
+	Wavelengths    []types.WavelengthStats
 }
 
 func DetermineChiefRays(
@@ -34,7 +34,7 @@ func DetermineChiefRays(
 	wavelength float64,
 	dumpMap bool,
 ) []Result {
-	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, types.GridPolar, nil, false, nil)
+	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, types.GridPolar, nil, nil, nil)
 }
 
 func DetermineChiefRaysGrid(
@@ -48,13 +48,13 @@ func DetermineChiefRaysGrid(
 	dumpMap bool,
 	gridType types.GridType,
 	passThrough *types.PassThroughTarget,
-	rayFan bool,
+	fanCfg *types.RayFanConfig,
 	wavelengths []float64,
 ) []Result {
 	if gridType == "" {
 		gridType = types.GridPolar
 	}
-	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, gridType, passThrough, rayFan, wavelengths)
+	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, gridType, passThrough, fanCfg, wavelengths)
 }
 
 func determineChiefRays(
@@ -68,7 +68,7 @@ func determineChiefRays(
 	dumpMap bool,
 	gridType types.GridType,
 	passThrough *types.PassThroughTarget,
-	rayFan bool,
+	fanCfg *types.RayFanConfig,
 	wavelengths []float64,
 ) []Result {
 	engine := ray.NewEngine(gc, nil)
@@ -140,13 +140,13 @@ func determineChiefRays(
 			)
 		}
 
-		if rayFan {
+		if fanCfg != nil && len(fanCfg.Angles) > 0 {
 			result.RayFan = computeRayFan(
 				engine, system,
 				result.ChiefRay.Initial.Origin,
 				result.ChiefRay.Initial.Direction,
 				refSurfaceID, pol, wavelength,
-				apertureRadius, 256,
+				apertureRadius, fanCfg.Angles, fanCfg.NumRays,
 			)
 		}
 
@@ -783,7 +783,7 @@ func tracePupilGrid(
 					PupilX: px, PupilY: py,
 					ImageX: nil, ImageY: nil, Intensity: 0,
 					ErrorCode: traceResult.ErrorCode,
-					Origin: rOrg, Direction: rDir,
+					Origin:    rOrg, Direction: rDir,
 				})
 				mu.Unlock()
 				return
@@ -986,6 +986,7 @@ func computeRayFan(
 	pol types.JonesVector,
 	wavelength float64,
 	apertureRadius float64,
+	angles []float64,
 	numFan int,
 ) *types.RayFan {
 	if numFan <= 0 {
@@ -994,6 +995,15 @@ func computeRayFan(
 
 	path := buildPath(system.Surfaces)
 	zStart := origin.Z
+
+	// Fan rays sample the entrance pupil: scan positions are offset from the
+	// pupil center, which is the point at zStart where a ray parallel to the
+	// chief ray crosses the stop. Without this offset, off-axis fields would
+	// start fan rays near the axis and miss the lens aperture entirely.
+	rayDirN := rayDir.Normalize()
+	stopZ := computeStopZ(system.Surfaces)
+	pupilCenterX := -(stopZ - zStart) * rayDirN.X / rayDirN.Z
+	pupilCenterY := -(stopZ - zStart) * rayDirN.Y / rayDirN.Z
 
 	// Chief ray image point
 	chiefRay := types.Ray{
@@ -1012,9 +1022,9 @@ func computeRayFan(
 		}
 	}
 
-	traceOne := func(px, py float64) (float64, float64, bool) {
+	traceOne := func(px, py float64) (types.FanPoint, bool) {
 		rDir := rayDir
-		rOrg := types.Vec3{X: px, Y: py, Z: zStart}
+		rOrg := types.Vec3{X: pupilCenterX + px, Y: pupilCenterY + py, Z: zStart}
 		r := types.Ray{
 			Wavelength: wavelength,
 			Initial:    types.RayState{Origin: rOrg, Direction: rDir},
@@ -1023,49 +1033,55 @@ func computeRayFan(
 		}
 		tr := engine.TraceRay(r, system.Surfaces)
 		if tr.Error != "" {
-			return 0, 0, false
+			return types.FanPoint{}, false
+		}
+		fp := types.FanPoint{
+			PupilX: px,
+			PupilY: py,
 		}
 		for _, sr := range tr.Surfaces {
 			if sr.SurfaceID == refSurfaceID {
-				return sr.Position.X, sr.Position.Y, true
+				fp.EX = sr.Position.X - chiefX
+				fp.EY = sr.Position.Y - chiefY
 			}
 		}
-		return 0, 0, false
+		fp.Path = tr.Surfaces
+		return fp, true
 	}
-
-	isOffAxis := math.Abs(rayDir.X) > 1e-12 || math.Abs(rayDir.Y) > 1e-12
 
 	fan := &types.RayFan{}
 
-	// Meridional: scan pupil Y at pupil X = 0
-	for k := 0; k < numFan; k++ {
-		py := -apertureRadius + (float64(k)+0.5)*2.0*apertureRadius/float64(numFan)
-		_, y, ok := traceOne(0, py)
-		if !ok {
-			continue
-		}
-		fan.Meridional = append(fan.Meridional, types.FanPoint{
-			PupilY: py,
-			EY:     y - chiefY,
-		})
-	}
+	for _, angleDeg := range angles {
+		rad := angleDeg * math.Pi / 180.0
+		cosA := math.Cos(rad)
+		sinA := math.Sin(rad)
 
-	// Sagittal (only for off-axis fields): scan pupil X at pupil Y = 0
-	if isOffAxis {
+		points := make([]types.FanPoint, 0, numFan)
 		for k := 0; k < numFan; k++ {
-			px := -apertureRadius + (float64(k)+0.5)*2.0*apertureRadius/float64(numFan)
-			xVal, _, ok := traceOne(px, 0)
+			t := -apertureRadius + (float64(k)+0.5)*2.0*apertureRadius/float64(numFan)
+			px := t * cosA
+			py := t * sinA
+			fp, ok := traceOne(px, py)
 			if !ok {
 				continue
 			}
-			fan.Sagittal = append(fan.Sagittal, types.FanPoint{
-				PupilX: px,
-				EX:     xVal - chiefX,
+			points = append(points, fp)
+		}
+
+		switch {
+		case math.Abs(angleDeg-90) < 1e-9:
+			fan.Meridional = points
+		case math.Abs(angleDeg) < 1e-9:
+			fan.Sagittal = points
+		default:
+			fan.Rotated = append(fan.Rotated, types.RotatedFan{
+				AngleDeg: angleDeg,
+				Points:   points,
 			})
 		}
 	}
 
-	if len(fan.Meridional) == 0 && len(fan.Sagittal) == 0 {
+	if len(fan.Meridional) == 0 && len(fan.Sagittal) == 0 && len(fan.Rotated) == 0 {
 		return nil
 	}
 	return fan

@@ -74,7 +74,7 @@ func TestDetermineChiefRaysAngle(t *testing.T) {
 	fields := []types.FieldDef{
 		{Angle: 0.0, Direction: []float64{0, 1}},
 	}
-	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, false, nil)
+	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
 	}
@@ -89,7 +89,7 @@ func TestDetermineChiefRaysImageHeight(t *testing.T) {
 	fields := []types.FieldDef{
 		{ImageHeight: 5.0, Direction: []float64{0, 1}},
 	}
-	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, false, nil)
+	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
 	}
@@ -254,7 +254,7 @@ func TestDetermineChiefRaysImageHeightWithPassThrough(t *testing.T) {
 		{ImageHeight: 5.0, Direction: []float64{0, 1}},
 	}
 	results := DetermineChiefRaysGrid(sys, fields, 3, 16, gc, pol, 0.00058756,
-		false, types.GridPolar, pt, false, nil)
+		false, types.GridPolar, pt, nil, nil)
 	if len(results) != 2 {
 		t.Fatalf("Expected 2 results, got %d", len(results))
 	}
@@ -263,5 +263,53 @@ func TestDetermineChiefRaysImageHeightWithPassThrough(t *testing.T) {
 	}
 	if results[1].FieldAngle <= 0 {
 		t.Errorf("Off-axis field_angle = %v, want > 0", results[1].FieldAngle)
+	}
+}
+
+func TestComputeRayFanAngleMapping(t *testing.T) {
+	sys, gc := singletSystem()
+	engine := ray.NewEngine(gc, nil)
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+	origin := types.Vec3{X: 0, Y: 0, Z: -100}
+	dir := types.Vec3{X: 0, Y: 0, Z: 1}
+
+	fan := computeRayFan(engine, sys, origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90, 45}, 8)
+	if fan == nil {
+		t.Fatal("computeRayFan returned nil")
+	}
+	if len(fan.Meridional) == 0 {
+		t.Error("expected meridional (90deg) fan points")
+	}
+	if len(fan.Sagittal) == 0 {
+		t.Error("expected sagittal (0deg) fan points")
+	}
+	if len(fan.Rotated) != 1 {
+		t.Fatalf("expected 1 rotated fan, got %d", len(fan.Rotated))
+	}
+	if math.Abs(fan.Rotated[0].AngleDeg-45) > 1e-9 {
+		t.Errorf("rotated angle = %v, want 45", fan.Rotated[0].AngleDeg)
+	}
+	if len(fan.Rotated[0].Points) == 0 {
+		t.Error("expected rotated fan points")
+	}
+	// Each point must carry a full traced path for lens rendering.
+	for _, fp := range fan.Meridional {
+		if len(fp.Path) < 2 {
+			t.Errorf("meridional fan point has no traced path (surfaces=%d)", len(fp.Path))
+		}
+	}
+}
+
+func TestComputeRayFanDefaultBothPlanes(t *testing.T) {
+	sys, gc := singletSystem()
+	engine := ray.NewEngine(gc, nil)
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+	origin := types.Vec3{X: 0, Y: 0, Z: -100}
+	dir := types.Vec3{X: 0, Y: 0, Z: 1}
+
+	// On-axis field still produces both planes under the default config.
+	fan := computeRayFan(engine, sys, origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90}, 8)
+	if len(fan.Meridional) == 0 || len(fan.Sagittal) == 0 {
+		t.Error("default config must produce both meridional and sagittal for all fields")
 	}
 }

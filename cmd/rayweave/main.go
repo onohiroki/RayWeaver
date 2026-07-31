@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/coating"
@@ -123,6 +124,13 @@ Options:
                          pupil (default 2 = 2× entrance pupil diameter)
   --marginal-rays      extract marginal (max/min) rays from grid points and
                          append them for piping into trace/plot
+  --ray-fan            compute ray fan (transverse aberration) for each field
+                         (YZ + XZ planes, all fields)
+  --fan-plane yz|xz    compute only the YZ (meridional) or XZ (sagittal) fan
+                         (implies --ray-fan)
+  --fan-rotation DEG   compute fan(s) in planes rotated by DEG around Z
+                         (0 = XZ, 90 = YZ; implies --ray-fan; repeatable or
+                         space-separated: --fan-rotation 0 45 90)
   --wl 0.00058756      reference wavelength (mm)
 
 Input YAML — chief section:
@@ -485,10 +493,22 @@ func runChief(data []byte) {
 	marginalRays := fs.Bool("marginal-rays", false, "from each field's grid points find the rays with max/min image Y (and X for off-axis fields) and append them as marginal rays to the output 'rays' section for piping into trace/plot")
 	passThrough := fs.Int("pass-through", 0, "constrain chief ray to pass through (0,0,0) center of surface N (overrides YAML pass_through.surface)")
 	rayFan := fs.Bool("ray-fan", false, "compute ray fan (transverse aberration) for each field")
+	fanPlane := fs.String("fan-plane", "", "fan plane selection: yz | xz (implies --ray-fan)")
+	var fanRotation floatList
+	fs.Var(&fanRotation, "fan-rotation", "fan plane Z-rotation angle in degrees (implies --ray-fan; 0=XZ, 90=YZ; repeatable or space-separated)")
 	wlFlag := fs.Float64("wl", 0.00058756, "wavelength (mm) for grid ray tracing")
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	fs.Parse(os.Args[2:])
+	fs.Parse(expandFanRotationArgs(os.Args[2:]))
+
+	if *fanPlane != "" && len(fanRotation) > 0 {
+		errOut("Error: --fan-plane and --fan-rotation are mutually exclusive")
+		os.Exit(1)
+	}
+	if *fanPlane != "" && *fanPlane != "yz" && *fanPlane != "xz" {
+		errOut("Error: --fan-plane must be 'yz' or 'xz' (got %q)", *fanPlane)
+		os.Exit(1)
+	}
 
 	var input types.Input
 	if err := yaml.Unmarshal(data, &input); err != nil {
@@ -558,6 +578,8 @@ func runChief(data []byte) {
 		pol = input.Rays.Polarization
 	}
 
+	fanCfg := resolveRayFanConfig(*rayFan, *fanPlane, fanRotation)
+
 	results := chief.DetermineChiefRaysGrid(
 		selectedSys,
 		fields,
@@ -569,7 +591,7 @@ func runChief(data []byte) {
 		input.Chief.DumpMap,
 		input.Chief.GridType,
 		pt,
-		*rayFan,
+		fanCfg,
 		input.Chief.Wavelengths,
 	)
 
@@ -714,75 +736,7 @@ func runChief(data []byte) {
 
 	// --- --marginal-rays: extract marginal rays from grid points ---
 	if *marginalRays && len(results) > 0 {
-		for fi, r := range results {
-			var maxY, minY *types.GridPoint
-			var maxX, minX *types.GridPoint
-			hasX := math.Abs(r.FieldDir.X) > 1e-6 && math.Abs(r.FieldDir.Y) > 1e-6
-
-			for i := range r.GridPoints {
-				gp := &r.GridPoints[i]
-				if gp.ImageX == nil || gp.ImageY == nil {
-					continue
-				}
-				y := *gp.ImageY
-				if maxY == nil || y > *maxY.ImageY {
-					maxY = gp
-				}
-				if minY == nil || y < *minY.ImageY {
-					minY = gp
-				}
-				if hasX {
-					x := *gp.ImageX
-					if maxX == nil || x > *maxX.ImageX {
-						maxX = gp
-					}
-					if minX == nil || x < *minX.ImageX {
-						minX = gp
-					}
-				}
-			}
-
-			fid := fmt.Sprintf("f%d", fi)
-
-			if maxY != nil && *maxY.ImageY != 0 {
-				input.Rays.Rays = append(input.Rays.Rays, types.Ray{
-					ID:         fmt.Sprintf("marginal_%s_Yplus", fid),
-					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: maxY.Origin, Direction: maxY.Direction},
-					Path:       buildPath(surfaces),
-					Jones:      pol,
-				})
-			}
-			if minY != nil && *minY.ImageY != 0 {
-				input.Rays.Rays = append(input.Rays.Rays, types.Ray{
-					ID:         fmt.Sprintf("marginal_%s_Yminus", fid),
-					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: minY.Origin, Direction: minY.Direction},
-					Path:       buildPath(surfaces),
-					Jones:      pol,
-				})
-			}
-			if hasX {
-				if maxX != nil && *maxX.ImageX != 0 {
-					input.Rays.Rays = append(input.Rays.Rays, types.Ray{
-						ID:         fmt.Sprintf("marginal_%s_Xplus", fid),
-						Wavelength: wavelength,
-						Initial:    types.RayState{Origin: maxX.Origin, Direction: maxX.Direction},
-						Path:       buildPath(surfaces),
-						Jones:      pol,
-					})
-				}
-				if minX != nil && *minX.ImageX != 0 {
-					input.Rays.Rays = append(input.Rays.Rays, types.Ray{
-						ID:         fmt.Sprintf("marginal_%s_Xminus", fid),
-						Wavelength: wavelength,
-						Initial:    types.RayState{Origin: minX.Origin, Direction: minX.Direction},
-						Path:       buildPath(surfaces),
-						Jones:      pol,
-					})
-				}
-			}
-		}
+		input.Rays.Rays = append(input.Rays.Rays, extractMarginalRays(results, wavelength, surfaces, pol)...)
 	}
 
 	output := types.Output{
@@ -807,6 +761,142 @@ func buildPath(surfaces []types.Surface) []int {
 		}
 	}
 	return p
+}
+
+// extractMarginalRays finds the grid rays with max/min image Y (and X for
+// fields with an X direction component) and returns them as marginal rays.
+func extractMarginalRays(results []chief.Result, wavelength float64, surfaces []types.Surface, pol types.JonesVector) []types.Ray {
+	var rays []types.Ray
+	for fi, r := range results {
+		var maxY, minY *types.GridPoint
+		var maxX, minX *types.GridPoint
+		hasX := math.Abs(r.FieldDir.X) > 1e-6
+
+		for i := range r.GridPoints {
+			gp := &r.GridPoints[i]
+			if gp.ImageX == nil || gp.ImageY == nil {
+				continue
+			}
+			y := *gp.ImageY
+			if maxY == nil || y > *maxY.ImageY {
+				maxY = gp
+			}
+			if minY == nil || y < *minY.ImageY {
+				minY = gp
+			}
+			if hasX {
+				x := *gp.ImageX
+				if maxX == nil || x > *maxX.ImageX {
+					maxX = gp
+				}
+				if minX == nil || x < *minX.ImageX {
+					minX = gp
+				}
+			}
+		}
+
+		fid := fmt.Sprintf("f%d", fi)
+		path := buildPath(surfaces)
+
+		if maxY != nil && *maxY.ImageY != 0 {
+			rays = append(rays, types.Ray{
+				ID:         fmt.Sprintf("marginal_%s_Yplus", fid),
+				Wavelength: wavelength,
+				Initial:    types.RayState{Origin: maxY.Origin, Direction: maxY.Direction},
+				Path:       path,
+				Jones:      pol,
+			})
+		}
+		if minY != nil && *minY.ImageY != 0 {
+			rays = append(rays, types.Ray{
+				ID:         fmt.Sprintf("marginal_%s_Yminus", fid),
+				Wavelength: wavelength,
+				Initial:    types.RayState{Origin: minY.Origin, Direction: minY.Direction},
+				Path:       path,
+				Jones:      pol,
+			})
+		}
+		if hasX {
+			if maxX != nil && *maxX.ImageX != 0 {
+				rays = append(rays, types.Ray{
+					ID:         fmt.Sprintf("marginal_%s_Xplus", fid),
+					Wavelength: wavelength,
+					Initial:    types.RayState{Origin: maxX.Origin, Direction: maxX.Direction},
+					Path:       path,
+					Jones:      pol,
+				})
+			}
+			if minX != nil && *minX.ImageX != 0 {
+				rays = append(rays, types.Ray{
+					ID:         fmt.Sprintf("marginal_%s_Xminus", fid),
+					Wavelength: wavelength,
+					Initial:    types.RayState{Origin: minX.Origin, Direction: minX.Direction},
+					Path:       path,
+					Jones:      pol,
+				})
+			}
+		}
+	}
+	return rays
+}
+
+// floatList is a repeatable float64 flag value.
+type floatList []float64
+
+func (f *floatList) String() string {
+	return fmt.Sprint([]float64(*f))
+}
+
+func (f *floatList) Set(v string) error {
+	fv, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return err
+	}
+	*f = append(*f, fv)
+	return nil
+}
+
+// expandFanRotationArgs rewrites "--fan-rotation 0 45 90" into
+// "--fan-rotation 0 --fan-rotation 45 --fan-rotation 90" so the standard
+// flag package can accumulate all values via a repeatable flag.
+func expandFanRotationArgs(args []string) []string {
+	var out []string
+	i := 0
+	for i < len(args) {
+		a := args[i]
+		if a == "--fan-rotation" || a == "-fan-rotation" {
+			i++
+			for i < len(args) && !strings.HasPrefix(args[i], "-") {
+				out = append(out, "--fan-rotation", args[i])
+				i++
+			}
+			continue
+		}
+		out = append(out, a)
+		i++
+	}
+	return out
+}
+
+// resolveRayFanConfig converts --ray-fan / --fan-plane / --fan-rotation
+// into a *types.RayFanConfig. Returns nil when no fan is requested.
+func resolveRayFanConfig(rayFan bool, fanPlane string, fanRotation []float64) *types.RayFanConfig {
+	angles := []float64(nil)
+	switch {
+	case len(fanRotation) > 0:
+		angles = fanRotation
+	case fanPlane == "yz":
+		angles = []float64{90}
+	case fanPlane == "xz":
+		angles = []float64{0}
+	case rayFan:
+		// Default: both YZ and XZ for all fields.
+		angles = []float64{0, 90}
+	}
+	if len(angles) == 0 {
+		return nil
+	}
+	return &types.RayFanConfig{Angles: angles, NumRays: 256}
 }
 
 // resolveConfig finds the config whose id matches val (by string id or 0-based index).

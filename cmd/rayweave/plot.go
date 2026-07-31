@@ -20,6 +20,7 @@ func runPlot(data []byte) {
 
 	var outPath string
 	var lensWidth, rayWidth, scaleOverride, rightMarginPct float64
+	var fanRays int
 	var configFlag, glassDir string
 	args := os.Args[2:] // skip "plot"
 	fs := flag.NewFlagSet("plot", flag.ExitOnError)
@@ -29,6 +30,7 @@ func runPlot(data []byte) {
 	fs.Float64Var(&rayWidth, "ray-width", 0.1, "ray path stroke width (default 0.1)")
 	fs.Float64Var(&scaleOverride, "scale", 0, "SVG scale factor (0 = auto)")
 	fs.Float64Var(&rightMarginPct, "right-margin", 20, "right-side margin beyond image plane (% of lens length, default 20)")
+	fs.IntVar(&fanRays, "fan-rays", 11, "max fan rays drawn per field in the lens diagram (0 = hide fan rays)")
 	fs.StringVar(&configFlag, "config", "", "select config by id (multi-config mode)")
 	fs.StringVar(&glassDir, "glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(args)
@@ -76,6 +78,7 @@ func runPlot(data []byte) {
 		RayWidth:       rayWidth,
 		ScaleOverride:  scaleOverride,
 		RightMarginPct: rightMarginPct,
+		MaxFanRays:     fanRays,
 	}
 
 	if outPath != "" && strings.HasSuffix(strings.ToLower(outPath), ".png") {

@@ -41,11 +41,11 @@ const (
 type DispersionFormula string
 
 const (
-	Schott      DispersionFormula = "schott"
-	Sellmeier1  DispersionFormula = "sellmeier_1"
-	Extended2   DispersionFormula = "extended_2"
-	Extended3   DispersionFormula = "extended_3"
-	Constant    DispersionFormula = "constant"
+	Schott     DispersionFormula = "schott"
+	Sellmeier1 DispersionFormula = "sellmeier_1"
+	Extended2  DispersionFormula = "extended_2"
+	Extended3  DispersionFormula = "extended_3"
+	Constant   DispersionFormula = "constant"
 )
 
 type JonesVector struct {
@@ -67,29 +67,29 @@ func NewLinearJones(angleDeg float64) JonesVector {
 }
 
 type DecenterStep struct {
-	Shift Vec3  `yaml:"shift"`
-	Tilt  Vec3  `yaml:"tilt"`
+	Shift Vec3 `yaml:"shift"`
+	Tilt  Vec3 `yaml:"tilt"`
 }
 
 type Surface struct {
-	ID             int             `yaml:"id"`
-Type           SurfaceType    `yaml:"type"`
-	Curvature      float64        `yaml:"curvature,omitempty"`
-	Conic          float64        `yaml:"conic"`
-	Thickness      float64        `yaml:"thickness"`
-	Material       string         `yaml:"material"`
-	Diameter       float64        `yaml:"diameter,omitempty"`
-	Coefficients   []float64      `yaml:"coefficients,omitempty"`
-	NormRadius     float64        `yaml:"norm_radius,omitempty"`
-	Decenter       []DecenterStep `yaml:"decenter,omitempty"`
-	Coating        string         `yaml:"coating,omitempty"`
-	Role           string         `yaml:"role,omitempty"`
-	AutoAperture   bool           `yaml:"auto_aperture,omitempty"`
-	MinGlassPath   float64        `yaml:"min_glass_path,omitempty"`
-	MaxGlassPath   float64        `yaml:"max_glass_path,omitempty"`
+	ID           int            `yaml:"id"`
+	Type         SurfaceType    `yaml:"type"`
+	Curvature    float64        `yaml:"curvature,omitempty"`
+	Conic        float64        `yaml:"conic"`
+	Thickness    float64        `yaml:"thickness"`
+	Material     string         `yaml:"material"`
+	Diameter     float64        `yaml:"diameter,omitempty"`
+	Coefficients []float64      `yaml:"coefficients,omitempty"`
+	NormRadius   float64        `yaml:"norm_radius,omitempty"`
+	Decenter     []DecenterStep `yaml:"decenter,omitempty"`
+	Coating      string         `yaml:"coating,omitempty"`
+	Role         string         `yaml:"role,omitempty"`
+	AutoAperture bool           `yaml:"auto_aperture,omitempty"`
+	MinGlassPath float64        `yaml:"min_glass_path,omitempty"`
+	MaxGlassPath float64        `yaml:"max_glass_path,omitempty"`
 
-	LocalToGlobal  Mat4 `yaml:"-"`
-	GlobalToLocal  Mat4 `yaml:"-"`
+	LocalToGlobal  Mat4    `yaml:"-"`
+	GlobalToLocal  Mat4    `yaml:"-"`
 	ParaxialRadius float64 `yaml:"-"`
 
 	radiusUsed bool `yaml:"-"`
@@ -116,18 +116,18 @@ type RayState struct {
 }
 
 type PassThroughTarget struct {
-	Surface    int     `yaml:"surface"`
-	Coordinate Vec3    `yaml:"coordinate"`
-	Variable   string  `yaml:"variable,omitempty"` // "direction" (default) or "origin"
+	Surface    int    `yaml:"surface"`
+	Coordinate Vec3   `yaml:"coordinate"`
+	Variable   string `yaml:"variable,omitempty"` // "direction" (default) or "origin"
 }
 
 type Ray struct {
-	ID                string             `yaml:"id"`
-	Wavelength        float64            `yaml:"wavelength"`
-	Initial           RayState           `yaml:"initial"`
-	Aim               *Vec3              `yaml:"aim,omitempty"`
-	PassThrough       *PassThroughTarget `yaml:"pass_through,omitempty"`
-	Path              []int              `yaml:"path"`
+	ID                 string             `yaml:"id"`
+	Wavelength         float64            `yaml:"wavelength"`
+	Initial            RayState           `yaml:"initial"`
+	Aim                *Vec3              `yaml:"aim,omitempty"`
+	PassThrough        *PassThroughTarget `yaml:"pass_through,omitempty"`
+	Path               []int              `yaml:"path"`
 	Jones              JonesVector        `yaml:"-"`
 	SkipGlassPathCheck bool               `yaml:"-"`
 	SkipApertureCheck  bool               `yaml:"-"`
@@ -210,19 +210,19 @@ func (t RefractiveIndexTable) MarshalYAML() (interface{}, error) {
 }
 
 type Glass struct {
-	Type              GlassType              `yaml:"type,omitempty"`
-	Key               string                 `yaml:"key,omitempty"`
-	Name              string                 `yaml:"name,omitempty"`
-	Label             string                 `yaml:"label,omitempty"`
-	Manufacturer      string                 `yaml:"manufacturer,omitempty"`
-	DispersionFormula DispersionFormula      `yaml:"dispersion_formula,omitempty"`
-	ND                float64                `yaml:"nd,omitempty"`
-	VD                float64                `yaml:"vd,omitempty"`
-	Coefficients      []float64              `yaml:"coefficients,omitempty"`
-	WavelengthMin     float64                `yaml:"wavelength_range_min,omitempty"`
-	WavelengthMax     float64                `yaml:"wavelength_range_max,omitempty"`
-	Aliases           []string               `yaml:"aliases,omitempty"`
-	RefractiveIndices RefractiveIndexTable   `yaml:"refractive_indices,omitempty"`
+	Type              GlassType            `yaml:"type,omitempty"`
+	Key               string               `yaml:"key,omitempty"`
+	Name              string               `yaml:"name,omitempty"`
+	Label             string               `yaml:"label,omitempty"`
+	Manufacturer      string               `yaml:"manufacturer,omitempty"`
+	DispersionFormula DispersionFormula    `yaml:"dispersion_formula,omitempty"`
+	ND                float64              `yaml:"nd,omitempty"`
+	VD                float64              `yaml:"vd,omitempty"`
+	Coefficients      []float64            `yaml:"coefficients,omitempty"`
+	WavelengthMin     float64              `yaml:"wavelength_range_min,omitempty"`
+	WavelengthMax     float64              `yaml:"wavelength_range_max,omitempty"`
+	Aliases           []string             `yaml:"aliases,omitempty"`
+	RefractiveIndices RefractiveIndexTable `yaml:"refractive_indices,omitempty"`
 }
 
 type GlassCatalog struct {
@@ -312,16 +312,16 @@ type MeritFunction struct {
 }
 
 type Config struct {
-	ID          string               `yaml:"id"`
-	Name        string               `yaml:"name"`
-	Weight      float64              `yaml:"weight"`
-	Active      bool                 `yaml:"active"`
-	Fields      []FieldItem          `yaml:"fields"`
-	Wavelengths []WavelengthItem     `yaml:"wavelengths"`
-	RayPaths    []RayPath            `yaml:"ray_paths"`
-	Surfaces    []Surface            `yaml:"surfaces"`
-	Merit       *MeritFunction       `yaml:"merit,omitempty"`
-	Constraints []ConstraintOperand  `yaml:"constraints,omitempty"`
+	ID          string              `yaml:"id"`
+	Name        string              `yaml:"name"`
+	Weight      float64             `yaml:"weight"`
+	Active      bool                `yaml:"active"`
+	Fields      []FieldItem         `yaml:"fields"`
+	Wavelengths []WavelengthItem    `yaml:"wavelengths"`
+	RayPaths    []RayPath           `yaml:"ray_paths"`
+	Surfaces    []Surface           `yaml:"surfaces"`
+	Merit       *MeritFunction      `yaml:"merit,omitempty"`
+	Constraints []ConstraintOperand `yaml:"constraints,omitempty"`
 }
 
 type VariableTarget struct {
@@ -341,18 +341,18 @@ type OptimizationVariable struct {
 }
 
 type SharedVariableBinding struct {
-	Config      string  `yaml:"config"`
-	ID          int     `yaml:"id"`
-	Param       string  `yaml:"param"`
-	Scale       float64 `yaml:"scale,omitempty"`
-	Offset      float64 `yaml:"offset,omitempty"`
+	Config string  `yaml:"config"`
+	ID     int     `yaml:"id"`
+	Param  string  `yaml:"param"`
+	Scale  float64 `yaml:"scale,omitempty"`
+	Offset float64 `yaml:"offset,omitempty"`
 }
 
 type SharedVariable struct {
-	Name     string                `yaml:"name"`
-	Min      float64               `yaml:"min"`
-	Max      float64               `yaml:"max"`
-	Active   bool                  `yaml:"active"`
+	Name     string                  `yaml:"name"`
+	Min      float64                 `yaml:"min"`
+	Max      float64                 `yaml:"max"`
+	Active   bool                    `yaml:"active"`
 	Bindings []SharedVariableBinding `yaml:"bindings"`
 }
 
@@ -378,19 +378,19 @@ const (
 type ConstraintMeasure string
 
 const (
-	MeasureImageHeight            ConstraintMeasure = "image_height"
-	MeasureIncidentAngle          ConstraintMeasure = "incident_angle"
-	MeasureThickness              ConstraintMeasure = "thickness"
-	MeasureEFL                    ConstraintMeasure = "efl"
-	MeasureAbsEFL                 ConstraintMeasure = "abs_efl"
-	MeasureSystemLength           ConstraintMeasure = "system_length"
-	MeasureEntrancePupilDiameter  ConstraintMeasure = "entrance_pupil_diameter"
-	MeasureEdgeThickness          ConstraintMeasure = "edge_thickness"
-	MeasureDiameter               ConstraintMeasure = "diameter"
-	MeasureFNumber                ConstraintMeasure = "f_number"
-	MeasureBeamClearance          ConstraintMeasure = "beam_clearance"
-	MeasureVignettingFactor       ConstraintMeasure = "vignetting_factor"
-	MeasureBeamDiameter           ConstraintMeasure = "beam_diameter"
+	MeasureImageHeight           ConstraintMeasure = "image_height"
+	MeasureIncidentAngle         ConstraintMeasure = "incident_angle"
+	MeasureThickness             ConstraintMeasure = "thickness"
+	MeasureEFL                   ConstraintMeasure = "efl"
+	MeasureAbsEFL                ConstraintMeasure = "abs_efl"
+	MeasureSystemLength          ConstraintMeasure = "system_length"
+	MeasureEntrancePupilDiameter ConstraintMeasure = "entrance_pupil_diameter"
+	MeasureEdgeThickness         ConstraintMeasure = "edge_thickness"
+	MeasureDiameter              ConstraintMeasure = "diameter"
+	MeasureFNumber               ConstraintMeasure = "f_number"
+	MeasureBeamClearance         ConstraintMeasure = "beam_clearance"
+	MeasureVignettingFactor      ConstraintMeasure = "vignetting_factor"
+	MeasureBeamDiameter          ConstraintMeasure = "beam_diameter"
 )
 
 type ConstraintOperand struct {
@@ -416,20 +416,20 @@ type GlassHullConfig struct {
 }
 
 type OptimizationConfig struct {
-	Method          string                  `yaml:"method"`
-	Aggregate       string                  `yaml:"aggregate,omitempty"`
-	Mu              float64                 `yaml:"mu,omitempty"`
-	MaxIter         int                     `yaml:"max_iter,omitempty"`
-	Tol             float64                 `yaml:"tol,omitempty"`
-	Epsilon         float64                 `yaml:"epsilon,omitempty"`
-	NumRays         int                     `yaml:"num_rays,omitempty"`
-	MuConMax        float64                 `yaml:"mu_con_max,omitempty"`
-	ApertureMargin  float64                 `yaml:"aperture_margin,omitempty"`
-	Variables       []OptimizationVariable  `yaml:"variables,omitempty"`
-	SharedVariables []SharedVariable        `yaml:"shared_variables,omitempty"`
-	LocalVariables  []LocalVariableDef      `yaml:"local_variables,omitempty"`
-	Constraints     []ConstraintOperand     `yaml:"constraints,omitempty"`
-	GlassHull       *GlassHullConfig        `yaml:"glass_hull,omitempty"`
+	Method          string                 `yaml:"method"`
+	Aggregate       string                 `yaml:"aggregate,omitempty"`
+	Mu              float64                `yaml:"mu,omitempty"`
+	MaxIter         int                    `yaml:"max_iter,omitempty"`
+	Tol             float64                `yaml:"tol,omitempty"`
+	Epsilon         float64                `yaml:"epsilon,omitempty"`
+	NumRays         int                    `yaml:"num_rays,omitempty"`
+	MuConMax        float64                `yaml:"mu_con_max,omitempty"`
+	ApertureMargin  float64                `yaml:"aperture_margin,omitempty"`
+	Variables       []OptimizationVariable `yaml:"variables,omitempty"`
+	SharedVariables []SharedVariable       `yaml:"shared_variables,omitempty"`
+	LocalVariables  []LocalVariableDef     `yaml:"local_variables,omitempty"`
+	Constraints     []ConstraintOperand    `yaml:"constraints,omitempty"`
+	GlassHull       *GlassHullConfig       `yaml:"glass_hull,omitempty"`
 }
 
 type MeritTermResult struct {
@@ -463,15 +463,15 @@ type Provenance struct {
 }
 
 type Input struct {
-	GlassCatalog   *GlassCatalog        `yaml:"glass_catalog,omitempty"`
-	CoatingCatalog *CoatingCatalog      `yaml:"coating_catalog,omitempty"`
-	Version        int                  `yaml:"version,omitempty"`
-	System         System               `yaml:"system"`
-	Optimization   *OptimizationConfig  `yaml:"optimization,omitempty"`
-	Configs        []Config             `yaml:"configs,omitempty"`
-	Chief          *ChiefInput          `yaml:"chief,omitempty"`
-	Rays           *RayInput            `yaml:"rays,omitempty"`
-	Paraxial       *ParaxialInput       `yaml:"paraxial,omitempty"`
+	GlassCatalog   *GlassCatalog       `yaml:"glass_catalog,omitempty"`
+	CoatingCatalog *CoatingCatalog     `yaml:"coating_catalog,omitempty"`
+	Version        int                 `yaml:"version,omitempty"`
+	System         System              `yaml:"system"`
+	Optimization   *OptimizationConfig `yaml:"optimization,omitempty"`
+	Configs        []Config            `yaml:"configs,omitempty"`
+	Chief          *ChiefInput         `yaml:"chief,omitempty"`
+	Rays           *RayInput           `yaml:"rays,omitempty"`
+	Paraxial       *ParaxialInput      `yaml:"paraxial,omitempty"`
 }
 
 type GridPoint struct {
@@ -501,15 +501,27 @@ type SpotStats struct {
 }
 
 type FanPoint struct {
-	PupilX float64 `yaml:"px,omitempty"`
-	PupilY float64 `yaml:"py,omitempty"`
-	EX     float64 `yaml:"ex,omitempty"`
-	EY     float64 `yaml:"ey,omitempty"`
+	PupilX float64         `yaml:"px,omitempty"`
+	PupilY float64         `yaml:"py,omitempty"`
+	EX     float64         `yaml:"ex,omitempty"`
+	EY     float64         `yaml:"ey,omitempty"`
+	Path   []SurfaceResult `yaml:"path,omitempty"`
+}
+
+type RotatedFan struct {
+	AngleDeg float64    `yaml:"angle_deg"`
+	Points   []FanPoint `yaml:"points"`
 }
 
 type RayFan struct {
-	Meridional []FanPoint `yaml:"meridional,omitempty"`
-	Sagittal   []FanPoint `yaml:"sagittal,omitempty"`
+	Meridional []FanPoint   `yaml:"meridional,omitempty"`
+	Sagittal   []FanPoint   `yaml:"sagittal,omitempty"`
+	Rotated    []RotatedFan `yaml:"rotated,omitempty"`
+}
+
+type RayFanConfig struct {
+	Angles  []float64
+	NumRays int
 }
 
 type WavelengthStats struct {
@@ -567,12 +579,12 @@ type ParaxialInput struct {
 }
 
 type Output struct {
-	Input           `yaml:",inline"`
-	ChiefRays       []ChiefRayResult  `yaml:"chief_rays,omitempty"`
-	Results         []RayResult       `yaml:"results,omitempty"`
-	ParaxialResult  *ParaxialResult   `yaml:"paraxial_result,omitempty"`
-	OptResults      *OptimizationResult `yaml:"opt_results,omitempty"`
-	Provenance      *Provenance       `yaml:"provenance,omitempty"`
+	Input          `yaml:",inline"`
+	ChiefRays      []ChiefRayResult    `yaml:"chief_rays,omitempty"`
+	Results        []RayResult         `yaml:"results,omitempty"`
+	ParaxialResult *ParaxialResult     `yaml:"paraxial_result,omitempty"`
+	OptResults     *OptimizationResult `yaml:"opt_results,omitempty"`
+	Provenance     *Provenance         `yaml:"provenance,omitempty"`
 }
 
 type TMMInput struct {
