@@ -107,12 +107,17 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 
 	fields := loadFields(input)
 
+	constraints := input.Optimization.Constraints
+	if len(input.Configs) > 0 && len(input.Configs[0].Constraints) > 0 {
+		constraints = input.Configs[0].Constraints
+	}
+
 	cfg := optimize.Config{
 		Surfaces:     surfaces,
 		Variables:    variables,
 		MeritTerms:   meritTerms,
 		Fields:       fields,
-		Constraints:  input.Optimization.Constraints,
+		Constraints:  constraints,
 		GlassCatalog: gc,
 		Logger:       logger,
 		MaxIter:        input.Optimization.MaxIter,
