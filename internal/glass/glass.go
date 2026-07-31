@@ -201,28 +201,30 @@ func sortedKnots(indices map[string]IndexEntry) []IndexEntry {
 	return knots
 }
 
-func interpolateRefractiveIndex(entries []types.RefractiveIndexEntry, wavelength float64) (float64, error) {
+func interpolateRefractiveIndex(entries types.RefractiveIndexTable, wavelength float64) (float64, error) {
 	if len(entries) == 0 {
 		return 0, fmt.Errorf("no refractive index entries")
 	}
 
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].Wavelength < entries[j].Wavelength
+	sorted := make(types.RefractiveIndexTable, len(entries))
+	copy(sorted, entries)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].Wavelength < sorted[j].Wavelength
 	})
 
-	if wavelength <= entries[0].Wavelength {
-		return entries[0].Value, nil
+	if wavelength <= sorted[0].Wavelength {
+		return sorted[0].Value, nil
 	}
-	if wavelength >= entries[len(entries)-1].Wavelength {
-		return entries[len(entries)-1].Value, nil
+	if wavelength >= sorted[len(sorted)-1].Wavelength {
+		return sorted[len(sorted)-1].Value, nil
 	}
 
-	for i := 0; i < len(entries)-1; i++ {
-		if wavelength >= entries[i].Wavelength && wavelength <= entries[i+1].Wavelength {
-			t := (wavelength - entries[i].Wavelength) / (entries[i+1].Wavelength - entries[i].Wavelength)
-			return entries[i].Value + t*(entries[i+1].Value-entries[i].Value), nil
+	for i := 0; i < len(sorted)-1; i++ {
+		if wavelength >= sorted[i].Wavelength && wavelength <= sorted[i+1].Wavelength {
+			t := (wavelength - sorted[i].Wavelength) / (sorted[i+1].Wavelength - sorted[i].Wavelength)
+			return sorted[i].Value + t*(sorted[i+1].Value-sorted[i].Value), nil
 		}
 	}
 
-	return entries[len(entries)-1].Value, nil
+	return sorted[len(sorted)-1].Value, nil
 }

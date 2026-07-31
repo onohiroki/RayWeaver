@@ -1,6 +1,11 @@
 package types
 
-import "math"
+import (
+	"fmt"
+	"math"
+
+	"gopkg.in/yaml.v3"
+)
 
 type SurfaceType string
 
@@ -153,7 +158,55 @@ type RayResult struct {
 
 type RefractiveIndexEntry struct {
 	Wavelength float64 `yaml:"wavelength"`
-	Value      float64 `yaml:"value"`
+	Value      float64 `yaml:"index"`
+}
+
+type RefractiveIndexTable []RefractiveIndexEntry
+
+func (t *RefractiveIndexTable) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.SequenceNode:
+		var list []RefractiveIndexEntry
+		if err := node.Decode(&list); err != nil {
+			return err
+		}
+		*t = list
+		return nil
+	case yaml.MappingNode:
+		var compact struct {
+			Index      []float64 `yaml:"index"`
+			Wavelength []float64 `yaml:"wavelength"`
+		}
+		if err := node.Decode(&compact); err != nil {
+			return err
+		}
+		if len(compact.Index) != len(compact.Wavelength) {
+			return fmt.Errorf("refractive_indices: index and wavelength arrays must have same length (got %d vs %d)", len(compact.Index), len(compact.Wavelength))
+		}
+		*t = make(RefractiveIndexTable, len(compact.Index))
+		for i := range compact.Index {
+			(*t)[i] = RefractiveIndexEntry{
+				Wavelength: compact.Wavelength[i],
+				Value:      compact.Index[i],
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("refractive_indices must be a list of {wavelength, index} or a map with index and wavelength arrays")
+	}
+}
+
+func (t RefractiveIndexTable) MarshalYAML() (interface{}, error) {
+	index := make([]float64, len(t))
+	wavelength := make([]float64, len(t))
+	for i, e := range t {
+		index[i] = e.Value
+		wavelength[i] = e.Wavelength
+	}
+	return struct {
+		Index      []float64 `yaml:"index"`
+		Wavelength []float64 `yaml:"wavelength"`
+	}{Index: index, Wavelength: wavelength}, nil
 }
 
 type Glass struct {
@@ -169,7 +222,7 @@ type Glass struct {
 	WavelengthMin     float64                `yaml:"wavelength_range_min,omitempty"`
 	WavelengthMax     float64                `yaml:"wavelength_range_max,omitempty"`
 	Aliases           []string               `yaml:"aliases,omitempty"`
-	RefractiveIndices []RefractiveIndexEntry `yaml:"refractive_indices,omitempty"`
+	RefractiveIndices RefractiveIndexTable   `yaml:"refractive_indices,omitempty"`
 }
 
 type GlassCatalog struct {

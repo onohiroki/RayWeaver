@@ -146,7 +146,7 @@ type glassYAML struct {
 	WavelengthMin     float64                `yaml:"wavelength_range_min,omitempty"`
 	WavelengthMax     float64                `yaml:"wavelength_range_max,omitempty"`
 	Aliases           []string               `yaml:"aliases,omitempty"`
-	RefractiveIndices []RefractiveIndexEntry `yaml:"refractive_indices,omitempty"`
+	RefractiveIndices RefractiveIndexTable `yaml:"refractive_indices,omitempty"`
 }
 
 func ResolveGlassKey(g Glass) string {

@@ -192,7 +192,7 @@ func TestCalcRefractiveIndexTabulated(t *testing.T) {
 	g := &types.Glass{
 		Type:  types.GlassTypeTabulated,
 		Label: "test_table",
-		RefractiveIndices: []types.RefractiveIndexEntry{
+		RefractiveIndices: types.RefractiveIndexTable{
 			{Wavelength: 0.000486, Value: 1.522},
 			{Wavelength: 0.000656, Value: 1.514},
 		},
