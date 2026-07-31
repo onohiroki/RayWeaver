@@ -313,3 +313,40 @@ func TestComputeRayFanDefaultBothPlanes(t *testing.T) {
 		t.Error("default config must produce both meridional and sagittal for all fields")
 	}
 }
+
+func TestLongitudinalAberration(t *testing.T) {
+	cases := []struct {
+		name string
+		sr   types.SurfaceResult
+		cosA float64
+		sinA float64
+		want float64
+	}{
+		{
+			name: "meridional Y crossing",
+			sr:   types.SurfaceResult{Position: types.Vec3{X: 0, Y: 1, Z: 100}, Direction: types.Vec3{X: 0, Y: -0.5, Z: 0.866}},
+			cosA: 0, sinA: 1,
+			want: 100 + (1/0.5)*0.866 - 100, // t = -1/-0.5 = 2; z = 100+2*0.866
+		},
+		{
+			name: "sagittal X crossing",
+			sr:   types.SurfaceResult{Position: types.Vec3{X: -2, Y: 0, Z: 50}, Direction: types.Vec3{X: 0.3, Y: 0, Z: 0.954}},
+			cosA: 1, sinA: 0,
+			want: 50 + (2/0.3)*0.954 - 50, // t = 2/0.3; z = 50 + t*0.954
+		},
+		{
+			name: "degenerate parallel direction",
+			sr:   types.SurfaceResult{Position: types.Vec3{X: 0, Y: 1, Z: 100}, Direction: types.Vec3{X: 0, Y: 0, Z: 1}},
+			cosA: 0, sinA: 1,
+			want: 0,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := longitudinalAberration(c.sr, c.cosA, c.sinA)
+			if math.Abs(got-c.want) > 1e-9 {
+				t.Errorf("longitudinalAberration = %v, want %v", got, c.want)
+			}
+		})
+	}
+}

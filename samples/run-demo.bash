@@ -21,6 +21,7 @@ if [ "$CLEAN" = true ]; then
   rm -f "$OUTDIR"/us2645157-trace-result.yaml
   rm -f "$OUTDIR"/us2645157.svg "$OUTDIR"/us2645157.png
   rm -f "$OUTDIR"/spot-*.txt "$OUTDIR"/spot-*.png
+  rm -f "$OUTDIR"/aberr-*.txt "$OUTDIR"/aberr-*.png
   echo "  Removed generated files"
   exit 0
 fi
@@ -35,8 +36,8 @@ run_trace() {
 }
 
 # 1. Chief ray computation and grid data extraction
-echo "=== Chief ray computation ==="
-./rayweave chief < "$YAML" > "$CHIEF_RESULT"
+echo "=== Chief ray computation (with ray fan) ==="
+./rayweave chief --ray-fan < "$YAML" > "$CHIEF_RESULT"
 
 extract_spot() {
   local field_index=$1 label=$2
@@ -47,6 +48,19 @@ extract_spot() {
 extract_spot 0 "00"
 extract_spot 1 "f16"
 extract_spot 2 "f24"
+
+# 1b. Aberration data extraction (full-resolution fan rays from chief output)
+extract_aberration() {
+  local field_index=$1 label=$2
+  yq eval ".chief_rays[$field_index].ray_fan.meridional[] | [.py, .ey, (.long // 0)]" \
+    "$CHIEF_RESULT" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/aberr-${label}-m.txt"
+  yq eval ".chief_rays[$field_index].ray_fan.sagittal[] | [.px, .ex, (.long // 0)]" \
+    "$CHIEF_RESULT" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/aberr-${label}-s.txt"
+}
+
+extract_aberration 0 "00"
+extract_aberration 1 "f16"
+extract_aberration 2 "f24"
 
 # 2. PNG output
 export GNUTERM=pngcairo
@@ -72,6 +86,47 @@ done
 
 echo
 
+# 2b. Aberration graphs: transverse (横収差) + longitudinal (縦収差)
+if command -v yq &>/dev/null && command -v gnuplot &>/dev/null 2>&1; then
+  for field in 00 f16 f24; do
+    case $field in
+      00)  title="0° field";;
+      f16) title="16° field";;
+      f24) title="24° field";;
+    esac
+    gnuplot 2>/dev/null <<GPLOT
+      set terminal pngcairo size 900,900
+      set output "$OUTDIR/aberr-${field}.png"
+      set datafile separator ","
+      set multiplot layout 2,1 title "$title aberration"
+
+      set key top left
+      set grid xtics ytics lc rgb "#d0d0d0"
+
+      # Transverse ray aberration (横収差): pupil vs image error
+      set title "Transverse ray aberration"
+      set xlabel "pupil position (mm)"
+      set ylabel "image error EY/EX (mm)"
+      plot "$OUTDIR/aberr-${field}-m.txt" using 1:2 with lines lw 2 lc rgb "#1f77b4" title "meridional EY", \
+           "$OUTDIR/aberr-${field}-s.txt" using 1:2 with lines lw 2 lc rgb "#d62728" title "sagittal EX"
+
+      # Longitudinal aberration (縦収差): pupil vs axial focus shift
+      set title "Longitudinal aberration"
+      set xlabel "pupil position (mm)"
+      set ylabel "focus shift (mm)"
+      plot "$OUTDIR/aberr-${field}-m.txt" using 1:3 with lines lw 2 lc rgb "#1f77b4" title "meridional LONG", \
+           "$OUTDIR/aberr-${field}-s.txt" using 1:3 with lines lw 2 lc rgb "#d62728" title "sagittal LONG"
+
+      unset multiplot
+GPLOT
+    echo "Written: $OUTDIR/aberr-${field}.png"
+  done
+else
+  echo "  (aberration graphs skipped: yq or gnuplot not available)"
+fi
+
+echo
+
 # 3. Trace chief ray paths
 echo "=== Trace (post-chief) ==="
 run_trace "$CHIEF_RESULT" 0
@@ -86,8 +141,8 @@ echo 'with chief data:'
 
 echo
 echo "=== Raytrace diagram (SVG + PNG) ==="
-./rayweave chief --clear-aperture < "$YAML" \
-  | ./rayweave chief --marginal-rays \
+./rayweave chief --clear-aperture --ray-fan < "$YAML" \
+  | ./rayweave chief --marginal-rays --ray-fan \
   | ./rayweave trace \
   | tee "$OUTDIR/us2645157-trace-result.yaml" \
         >(./rayweave plot -o "$OUTDIR/us2645157.png" > /dev/null) \

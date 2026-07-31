@@ -1022,7 +1022,7 @@ func computeRayFan(
 		}
 	}
 
-	traceOne := func(px, py float64) (types.FanPoint, bool) {
+	traceOne := func(px, py, cosA, sinA float64) (types.FanPoint, bool) {
 		rDir := rayDir
 		rOrg := types.Vec3{X: pupilCenterX + px, Y: pupilCenterY + py, Z: zStart}
 		r := types.Ray{
@@ -1043,6 +1043,7 @@ func computeRayFan(
 			if sr.SurfaceID == refSurfaceID {
 				fp.EX = sr.Position.X - chiefX
 				fp.EY = sr.Position.Y - chiefY
+				fp.Long = longitudinalAberration(sr, cosA, sinA)
 			}
 		}
 		fp.Path = tr.Surfaces
@@ -1061,7 +1062,7 @@ func computeRayFan(
 			t := -apertureRadius + (float64(k)+0.5)*2.0*apertureRadius/float64(numFan)
 			px := t * cosA
 			py := t * sinA
-			fp, ok := traceOne(px, py)
+			fp, ok := traceOne(px, py, cosA, sinA)
 			if !ok {
 				continue
 			}
@@ -1085,6 +1086,22 @@ func computeRayFan(
 		return nil
 	}
 	return fan
+}
+
+// longitudinalAberration returns the axial distance from the reference
+// surface (sr.Position.Z) to where the ray's lateral offset along the fan
+// scan axis (cosA, sinA) becomes zero. For a meridional fan (cosA=0, sinA=1)
+// this is the Z-axis crossing in Y; for a sagittal fan (cosA=1, sinA=0) the
+// crossing in X. A positive value means the ray focuses beyond the reference
+// surface.
+func longitudinalAberration(sr types.SurfaceResult, cosA, sinA float64) float64 {
+	u := sr.Position.X*cosA + sr.Position.Y*sinA
+	du := sr.Direction.X*cosA + sr.Direction.Y*sinA
+	if math.Abs(du) < 1e-12 {
+		return 0
+	}
+	t := -u / du
+	return (sr.Position.Z + t*sr.Direction.Z) - sr.Position.Z
 }
 
 func computeStopZ(surfaces []types.Surface) float64 {

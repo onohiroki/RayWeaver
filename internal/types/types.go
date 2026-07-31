@@ -505,6 +505,7 @@ type FanPoint struct {
 	PupilY float64         `yaml:"py,omitempty"`
 	EX     float64         `yaml:"ex,omitempty"`
 	EY     float64         `yaml:"ey,omitempty"`
+	Long   float64         `yaml:"long,omitempty"`
 	Path   []SurfaceResult `yaml:"path,omitempty"`
 }
 
