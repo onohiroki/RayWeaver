@@ -45,6 +45,7 @@ echo "Vignetting control:"
 echo "  auto_aperture on surfaces 1,2,4,5,6"
 echo "  Surface 3: fixed stop (9mm)"
 echo "  min_glass_path: 1.0mm (model1), 0.3mm (model2, model3)"
+echo "  vignetting_factor >= 0.5 constraints on fields 10deg / 16deg"
 echo
 echo "Initial glass values (deliberately wrong):"
 echo "  model1: nd=1.500  vd=60.0  (crown)"
@@ -179,6 +180,20 @@ print(-1)
   echo
 } | tee "$RESULT_FILE"
 
+# ── Vignetting factor comparison (before vs after) ──
+{
+  echo "=== Vignetting Factor Comparison (primary λ=587.6nm) ==="
+  echo "  (fraction of pupil-grid rays that transmit the system)"
+  printf "  %-8s %6s  %10s  %10s\n" "Phase" "Field" "VF before" "VF after"
+  printf "  %-8s %6s  %10s  %10s\n" "-----" "-----" "--------" "--------"
+  for fi in 0 1 2; do
+    vf_before=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
+    vf_after=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
+    printf "  %-8s %6s  %10.4f  %10.4f\n" "optimize" "f$fi" "$vf_before" "$vf_after"
+  done
+  echo
+} | tee -a "$RESULT_FILE"
+
 # ── On-axis RMS threshold check ──
 THRESHOLD=0.3
 printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this)\n"
@@ -191,6 +206,21 @@ else
   msg="  >>> Optimization passed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm < $THRESHOLD mm"
   echo "$msg" | tee -a "$RESULT_FILE"
 fi
+
+# ── Vignetting threshold check (max field must keep >= 50% of center beam) ──
+VIG_THRESHOLD=0.5
+printf "  (threshold = $VIG_THRESHOLD — vignetting factor at 10deg/16deg must be >= this)\n"
+for fi in 1 2; do
+  vf=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
+  if [ "$vf" != "-1" ] && (( $(echo "$vf < $VIG_THRESHOLD" | bc -l) )); then
+    msg="  >>> Optimization failed: field $fi vignetting factor = $(printf '%.4f' "$vf") < $VIG_THRESHOLD"
+    echo "$msg" | tee -a "$RESULT_FILE"
+    exit 1
+  else
+    msg="  >>> Optimization passed: field $fi vignetting factor = $(printf '%.4f' "$vf") >= $VIG_THRESHOLD"
+    echo "$msg" | tee -a "$RESULT_FILE"
+  fi
+done
 
 echo "=== PNG diagrams ==="
 $RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" 2>/dev/null \
@@ -214,6 +244,14 @@ WL_NAMES=("g" "F" "d" "C")
 WL_VALUES=(0.0004358 0.0004861 0.0005876 0.0006563)
 WL_COLORS=("#1a237e" "#1565c0" "#2e7d32" "#c62828")
 NTN_NAMES=("g(436nm)" "F(486nm)" "d(588nm)" "C(656nm)")
+
+# Start from a clean slate: spot files are appended below, so stale data
+# from previous runs must be removed first.
+for phase in init opt; do
+  for fi in 0 1 2; do
+    rm -f "$OUTDIR/glass-spot-${phase}-f${fi}-all.txt"
+  done
+done
 
 # For each wavelength, run chief and extract spots
 for wli in 0 1 2 3; do

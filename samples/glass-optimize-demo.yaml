@@ -84,7 +84,7 @@ optimization:
   tol: 1e-4
   epsilon: 1e-4
   num_rays: 256
-  mu_con_max: 10.0
+  mu_con_max: 50.0
   aperture_margin: 1.0
   glass_hull:
     enabled: true
@@ -333,3 +333,18 @@ configs:
           field: 1
           wavelength: 0.0005876
           weight: 0.3
+    constraints:
+      - id: vig_f1
+        kind: inequality_lower
+        measure: vignetting_factor
+        field: 1
+        lower: 0.5
+        weight: 10.0
+        active: true
+      - id: vig_f2
+        kind: inequality_lower
+        measure: vignetting_factor
+        field: 2
+        lower: 0.55
+        weight: 100.0
+        active: true
