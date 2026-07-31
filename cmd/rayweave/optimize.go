@@ -26,12 +26,12 @@ const (
 func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 	var input types.Input
 	if err := yaml.Unmarshal(data, &input); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
+		errOut("Error parsing YAML: %v", err)
 		os.Exit(1)
 	}
 
 	if input.Optimization == nil {
-		fmt.Fprintf(os.Stderr, "Error: 'optimization' section is required\n")
+		errOut("Error: 'optimization' section is required")
 		os.Exit(1)
 	}
 
@@ -59,21 +59,21 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		surfaces = input.Configs[0].Surfaces
 	}
 	if len(surfaces) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no surfaces defined (add 'system.surfaces' or 'configs[0].surfaces')\n")
+		errOut("Error: no surfaces defined (add 'system.surfaces' or 'configs[0].surfaces')")
 		os.Exit(1)
 	}
 	surface.Precompute(surfaces)
 
 	variables := buildOptimizeVariables(input.Optimization, gc)
 	if len(variables) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no optimization variables defined\n")
+		errOut("Error: no optimization variables defined")
 		os.Exit(1)
 	}
 
 	meritTerms := buildMeritTerms(input)
 
 	if len(meritTerms) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no merit terms defined (add 'optimization.merit' or 'configs[].merit')\n")
+		errOut("Error: no merit terms defined (add 'optimization.merit' or 'configs[].merit')")
 		os.Exit(1)
 	}
 
@@ -91,7 +91,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 	if logFile != "" {
 		f, err := os.Create(logFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating log file: %v\n", err)
+			errOut("Error creating log file: %v", err)
 			os.Exit(1)
 		}
 		logWriters = append(logWriters, struct {
@@ -177,7 +177,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 
 	outData, err := yaml.Marshal(&output)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error marshaling output: %v\n", err)
+		errOut("Error marshaling output: %v", err)
 		os.Exit(1)
 	}
 	os.Stdout.Write(outData)
@@ -383,7 +383,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		}
 		surfaces := cfg.Surfaces
 		if len(surfaces) == 0 {
-			fmt.Fprintf(os.Stderr, "Error: config %q has no surfaces defined\n", cfg.ID)
+			errOut("Error: config %q has no surfaces defined", cfg.ID)
 			os.Exit(1)
 		}
 
@@ -430,7 +430,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 	}
 
 	if len(configs) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: no active configs found\n")
+		errOut("Error: no active configs found")
 		os.Exit(1)
 	}
 
@@ -475,7 +475,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 	if logFile != "" {
 		f, err := os.Create(logFile)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error creating log file: %v\n", err)
+			errOut("Error creating log file: %v", err)
 			os.Exit(1)
 		}
 		logWriters = append(logWriters, struct {
@@ -550,7 +550,7 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 
 	outData, err := yaml.Marshal(&output)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error marshaling output: %v\n", err)
+		errOut("Error marshaling output: %v", err)
 		os.Exit(1)
 	}
 	os.Stdout.Write(outData)
@@ -563,7 +563,7 @@ func applyMultiVars(input types.Input, x []float64, gc *glass.Catalog) map[strin
 	for ci := range input.Configs {
 		cfg := &input.Configs[ci]
 		if len(cfg.Surfaces) == 0 {
-			fmt.Fprintf(os.Stderr, "Error: config %q has no surfaces defined\n", cfg.ID)
+			errOut("Error: config %q has no surfaces defined", cfg.ID)
 			os.Exit(1)
 		}
 		s := make([]types.Surface, len(cfg.Surfaces))

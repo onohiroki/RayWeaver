@@ -14,6 +14,13 @@ import (
 
 var knownManufacturers = []string{"HOYA", "HIKARI", "OHARA", "SUMITA", "SCHOTT"}
 
+// Warnf reports a non-fatal warning to stderr. The cmd/rayweave binary
+// overrides it (via errOut) so warnings are attributed to the active
+// subcommand in a pipeline.
+var Warnf = func(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+}
+
 func ParseAGF(data []byte, sourceName ...string) ([]types.Glass, error) {
 	data = decodeAGFContent(data)
 	text := normalizeLineEndings(string(data))
@@ -210,12 +217,12 @@ func LoadAGFDir(dir string) ([]types.Glass, error) {
 		path := filepath.Join(dir, e.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cannot read AGF file %s: %v\n", path, err)
+			Warnf("Warning: cannot read AGF file %s: %v", path, err)
 			continue
 		}
 		glasses, err := ParseAGF(data, filepath.Base(path))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cannot parse AGF file %s: %v\n", path, err)
+			Warnf("Warning: cannot parse AGF file %s: %v", path, err)
 			continue
 		}
 		allGlasses = append(allGlasses, glasses...)

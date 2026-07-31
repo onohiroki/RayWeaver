@@ -18,6 +18,21 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// currentCmd holds the active subcommand so stderr output can be attributed
+// to the right pipeline stage (e.g. "rayweave[chief]:").
+var currentCmd string
+
+// errOut writes a tagged line to stderr. The tag identifies the subcommand
+// that produced the message, which is essential when commands are piped
+// (e.g. "rayweave chief | rayweave trace | rayweave plot").
+func errOut(format string, args ...any) {
+	prefix := "rayweave"
+	if currentCmd != "" {
+		prefix = "rayweave[" + currentCmd + "]"
+	}
+	fmt.Fprintf(os.Stderr, prefix+": "+format+"\n", args...)
+}
+
 func main() {
 	args := os.Args[1:]
 
@@ -52,6 +67,7 @@ func main() {
 	optLogFile := ""
 	optGlassDir := ""
 	subcommand := args[0]
+	currentCmd = subcommand
 	if subcommand == "optimize" {
 		fs := flag.NewFlagSet("optimize", flag.ContinueOnError)
 		fs.BoolVar(&optVerbose, "verbose", false, "print per-iteration progress to stderr")
@@ -63,7 +79,7 @@ func main() {
 
 	data, err := readStdin()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error reading stdin: %v\n", err)
+		errOut("Error reading stdin: %v", err)
 		os.Exit(1)
 	}
 
@@ -83,8 +99,8 @@ func main() {
 	case "import":
 		runImport(data)
 	default:
-		fmt.Fprintf(os.Stderr, "Error: unknown subcommand %q\n", subcommand)
-		fmt.Fprintf(os.Stderr, "Run 'rayweave --help' for usage.\n")
+		errOut("Error: unknown subcommand %q", subcommand)
+		errOut("Run 'rayweave --help' for usage.")
 		os.Exit(1)
 	}
 }
@@ -391,6 +407,7 @@ func readStdin() ([]byte, error) {
 }
 
 func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coating.Catalog) {
+	glass.Warnf = errOut
 	gc := glass.NewCatalog()
 	if input.GlassCatalog == nil {
 		input.GlassCatalog = &types.GlassCatalog{}
@@ -410,7 +427,7 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 	if agfPath != "" {
 		agfGlasses, err := glass.LoadAGFDir(agfPath)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cannot load AGF directory %s: %v\n", agfPath, err)
+			errOut("Warning: cannot load AGF directory %s: %v", agfPath, err)
 		}
 		for _, g := range agfGlasses {
 			gc.Add(g)
@@ -424,12 +441,12 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 		for _, path := range input.GlassCatalog.Files {
 			agfData, err := os.ReadFile(path)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: cannot read AGF file %s: %v\n", path, err)
+				errOut("Warning: cannot read AGF file %s: %v", path, err)
 				continue
 			}
 			glasses, err := glass.ParseAGF(agfData)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: cannot parse AGF file %s: %v\n", path, err)
+				errOut("Warning: cannot parse AGF file %s: %v", path, err)
 				continue
 			}
 			for _, g := range glasses {
@@ -475,12 +492,12 @@ func runChief(data []byte) {
 
 	var input types.Input
 	if err := yaml.Unmarshal(data, &input); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
+		errOut("Error parsing YAML: %v", err)
 		os.Exit(1)
 	}
 
 	if input.Chief == nil {
-		fmt.Fprintf(os.Stderr, "Error: 'chief' section is required\n")
+		errOut("Error: 'chief' section is required")
 		os.Exit(1)
 	}
 
@@ -504,7 +521,7 @@ func runChief(data []byte) {
 		}
 	}
 	if len(fields) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: 'fields' or 'field_angles' is required\n")
+		errOut("Error: 'fields' or 'field_angles' is required")
 		os.Exit(1)
 	}
 
@@ -757,7 +774,7 @@ func runChief(data []byte) {
 
 	outData, err := yaml.Marshal(&output)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error marshaling output: %v\n", err)
+		errOut("Error marshaling output: %v", err)
 		os.Exit(1)
 	}
 	os.Stdout.Write(outData)
@@ -798,7 +815,7 @@ func selectSurfaces(sysSurfaces []types.Surface, configs []types.Config, configF
 	if *configFlag != "" {
 		idx, err := resolveConfig(configs, *configFlag)
 		if idx < 0 {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			errOut("Error: %s", err)
 			os.Exit(1)
 		}
 		return configs[idx].Surfaces
@@ -819,12 +836,12 @@ func runTrace(data []byte) {
 
 	var input types.Input
 	if err := yaml.Unmarshal(data, &input); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
+		errOut("Error parsing YAML: %v", err)
 		os.Exit(1)
 	}
 
 	if input.Rays == nil || len(input.Rays.Rays) == 0 {
-		fmt.Fprintf(os.Stderr, "Error: 'rays' section is required\n")
+		errOut("Error: 'rays' section is required")
 		os.Exit(1)
 	}
 
@@ -859,7 +876,7 @@ func runTrace(data []byte) {
 			if *traceVerbose {
 				fmt.Fprint(os.Stderr, errMsg)
 			} else {
-				fmt.Fprintf(os.Stderr, "Warning: ray %q error: %s\n", r.ID, result.Error)
+				errOut("Warning: ray %q error: %s", r.ID, result.Error)
 			}
 		}
 		output.Results = append(output.Results, result)
@@ -867,7 +884,7 @@ func runTrace(data []byte) {
 
 	outData, err := yaml.Marshal(&output)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error marshaling output: %v\n", err)
+		errOut("Error marshaling output: %v", err)
 		os.Exit(1)
 	}
 	os.Stdout.Write(outData)
@@ -882,7 +899,7 @@ func runParaxial(data []byte) {
 
 	var input types.Input
 	if err := yaml.Unmarshal(data, &input); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
+		errOut("Error parsing YAML: %v", err)
 		os.Exit(1)
 	}
 
@@ -919,7 +936,7 @@ func runParaxial(data []byte) {
 
 	outData, err := yaml.Marshal(&output)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error marshaling output: %v\n", err)
+		errOut("Error marshaling output: %v", err)
 		os.Exit(1)
 	}
 	os.Stdout.Write(outData)
@@ -928,7 +945,7 @@ func runParaxial(data []byte) {
 func runTMM(data []byte) {
 	var input types.TMMInput
 	if err := yaml.Unmarshal(data, &input); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
+		errOut("Error parsing YAML: %v", err)
 		os.Exit(1)
 	}
 
@@ -961,7 +978,7 @@ func runTMM(data []byte) {
 
 	outData, err := yaml.Marshal(&output)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error marshaling output: %v\n", err)
+		errOut("Error marshaling output: %v", err)
 		os.Exit(1)
 	}
 	os.Stdout.Write(outData)

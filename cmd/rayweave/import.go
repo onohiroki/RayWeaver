@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
 	"math"
 	"os"
 
@@ -25,7 +24,8 @@ func runImport(data []byte) {
 	fs.Parse(os.Args[2:])
 
 	if *format == "" {
-		log.Fatal("--format is required (zemax|oslo|codev)")
+		errOut("Error: --format is required (zemax|oslo|codev)")
+		os.Exit(1)
 	}
 
 	var result *importer.ParseResult
@@ -38,19 +38,23 @@ func runImport(data []byte) {
 	case "codev":
 		result, err = importer.ParseCodeV(string(data))
 	default:
-		log.Fatalf("unknown format %q", *format)
+		errOut("Error: unknown format %q", *format)
+		os.Exit(1)
 	}
 	if err != nil {
-		log.Fatalf("parse error: %v", err)
+		errOut("Error: parse error: %v", err)
+		os.Exit(1)
 	}
 	if len(result.Surfaces) == 0 {
-		log.Fatal("no surfaces found in input")
+		errOut("Error: no surfaces found in input")
+		os.Exit(1)
 	}
 
 	if *glassDir != "" {
 		agfGlasses, err := glass.LoadAGFDir(*glassDir)
 		if err != nil {
-			log.Fatalf("error loading AGF files: %v", err)
+			errOut("Error loading AGF files: %v", err)
+			os.Exit(1)
 		}
 		result.GlassEntries = importer.EnhanceGlassEntriesFromAGF(
 			result.GlassEntries, agfGlasses, *format,
@@ -239,7 +243,8 @@ func runImport(data []byte) {
 
 	outData, err := yaml.Marshal(&outputOut)
 	if err != nil {
-		log.Fatalf("error marshaling output: %v", err)
+		errOut("Error marshaling output: %v", err)
+		os.Exit(1)
 	}
 	os.Stdout.Write(outData)
 }

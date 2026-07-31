@@ -2,7 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 	"strings"
 
@@ -15,7 +14,7 @@ import (
 func runPlot(data []byte) {
 	var output types.Output
 	if err := yaml.Unmarshal(data, &output); err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing YAML: %v\n", err)
+		errOut("Error parsing YAML: %v", err)
 		os.Exit(1)
 	}
 
@@ -37,7 +36,7 @@ func runPlot(data []byte) {
 	if glassDir != "" {
 		agfGlasses, err := glass.LoadAGFDir(glassDir)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: cannot load AGF directory %s: %v\n", glassDir, err)
+			errOut("Warning: cannot load AGF directory %s: %v", glassDir, err)
 		} else {
 			if output.GlassCatalog == nil {
 				output.GlassCatalog = &types.GlassCatalog{}
@@ -54,14 +53,14 @@ func runPlot(data []byte) {
 	if configFlag != "" {
 		idx, err := resolveConfig(output.Configs, configFlag)
 		if idx < 0 {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+			errOut("Error: %s", err)
 			os.Exit(1)
 		}
 		surfaces = output.Configs[idx].Surfaces
 	} else if len(surfaces) == 0 && len(output.Configs) > 0 {
 		surfaces = output.Configs[0].Surfaces
 		if len(surfaces) == 0 {
-			fmt.Fprintf(os.Stderr, "Error: no surfaces to plot (use --config <id> or define system.surfaces or configs[].surfaces)\n")
+			errOut("Error: no surfaces to plot (use --config <id> or define system.surfaces or configs[].surfaces)")
 			os.Exit(1)
 		}
 	}
@@ -82,11 +81,11 @@ func runPlot(data []byte) {
 	if outPath != "" && strings.HasSuffix(strings.ToLower(outPath), ".png") {
 		pngData, err := render.LensPNG(cfg)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error rendering PNG: %v\n", err)
+			errOut("Error rendering PNG: %v", err)
 			os.Exit(1)
 		}
 		if err := os.WriteFile(outPath, pngData, 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing PNG: %v\n", err)
+			errOut("Error writing PNG: %v", err)
 			os.Exit(1)
 		}
 		os.Stdout.Write(data)
@@ -97,7 +96,7 @@ func runPlot(data []byte) {
 
 	if outPath != "" {
 		if err := os.WriteFile(outPath, []byte(svg), 0644); err != nil {
-			fmt.Fprintf(os.Stderr, "Error writing SVG: %v\n", err)
+			errOut("Error writing SVG: %v", err)
 			os.Exit(1)
 		}
 		os.Stdout.Write(data)
