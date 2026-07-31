@@ -465,6 +465,8 @@ optimization:
 chief:
   reference_surface: 12
   num_rays: 256
+  grid_type: hex
+  dump_map: true
   fields:
   - image_height: 0.0
   - image_height: 10.0
@@ -498,7 +500,7 @@ configs:
     curvature: 0.008
     thickness: 10.0
     material: BK7
-    diameter: 40.0
+    diameter: 20.0
   - id: 2
     type: sphere
     curvature: -0.01
@@ -617,8 +619,20 @@ configs:
     active: true
   - kind: equality
     measure: entrance_pupil_diameter
-    target: 7.5
+    target: 20
     weight: 1.0
+    active: true
+  - kind: inequality_lower
+    measure: vignetting_factor
+    field: 1
+    lower: 0.5
+    weight: 10.0
+    active: true
+  - kind: inequality_lower
+    measure: vignetting_factor
+    field: 2
+    lower: 0.5
+    weight: 10.0
     active: true
 - id: config1
   name: Mid
@@ -648,7 +662,7 @@ configs:
     curvature: 0.008
     thickness: 10.0
     material: BK7
-    diameter: 40.0
+    diameter: 20.0
   - id: 2
     type: sphere
     curvature: -0.01
@@ -767,8 +781,20 @@ configs:
     active: true
   - kind: equality
     measure: entrance_pupil_diameter
-    target: 7.5
+    target: 20
     weight: 1.0
+    active: true
+  - kind: inequality_lower
+    measure: vignetting_factor
+    field: 1
+    lower: 0.5
+    weight: 10.0
+    active: true
+  - kind: inequality_lower
+    measure: vignetting_factor
+    field: 2
+    lower: 0.5
+    weight: 10.0
     active: true
 - id: config2
   name: Tele
@@ -798,7 +824,7 @@ configs:
     curvature: 0.008
     thickness: 10.0
     material: BK7
-    diameter: 40.0
+    diameter: 20.0
   - id: 2
     type: sphere
     curvature: -0.01
@@ -917,6 +943,18 @@ configs:
     active: true
   - kind: equality
     measure: entrance_pupil_diameter
-    target: 7.5
+    target: 20
     weight: 1.0
+    active: true
+  - kind: inequality_lower
+    measure: vignetting_factor
+    field: 1
+    lower: 0.5
+    weight: 10.0
+    active: true
+  - kind: inequality_lower
+    measure: vignetting_factor
+    field: 2
+    lower: 0.5
+    weight: 10.0
     active: true

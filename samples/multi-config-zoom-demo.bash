@@ -35,6 +35,10 @@ echo "Layout: 3 configs (config0 / config1 / config2)"
 echo "Shared variables: variables following simple-zoom pattern"
 echo "Local variables: 2 air gaps per config"
 echo
+echo "Aperture / vignetting control:"
+echo "  Entrance pupil diameter = 20mm (equality constraint, all configs)"
+echo "  vignetting_factor >= 0.5 on 10mm / 15mm image-height fields"
+echo
 
 echo "=== DLS Multi-Config Optimization ==="
 $RAYWEAVE optimize --verbose --log "$LOG" < "$YAML" > "$RESULT"
@@ -92,8 +96,8 @@ echo
 
 {
   echo "=== Performance comparison ==="
-  printf "  %-8s %6s  %10s  %10s\n" "Config" "Field" "RMS bef" "RMS aft"
-  printf "  %-8s %6s  %10s  %10s\n" "------" "-----" "-------" "-------"
+  printf "  %-8s %6s  %10s  %10s  %9s  %9s\n" "Config" "Field" "RMS bef" "RMS aft" "EPD bef" "EPD aft"
+  printf "  %-8s %6s  %10s  %10s  %9s  %9s\n" "------" "-----" "-------" "-------" "-------" "-------"
   for cfg in config0 config1 config2; do
     # Extract field angles and RMS before/after
     bef=$(cat "$YAML" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
@@ -102,7 +106,11 @@ echo
       | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)printf "%.3f %.4f\n", ang, r; in_spot=0}')
     efl=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
       | awk -F': ' '/focal_length:/{printf "%.1f",$2; exit}')
-    # Show each field with before/after RMS
+    epd_bef=$(cat "$YAML" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
+      | awk -F': ' '/entrance_pupil_diameter:/{printf "%.3f",$2; exit}')
+    epd_aft=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
+      | awk -F': ' '/entrance_pupil_diameter:/{printf "%.3f",$2; exit}')
+    # Show each field with before/after RMS + EPD on the header line
     line_no=0
     while IFS= read -r bline; do
       aline=$(echo "$aft" | sed -n "$((line_no+1))p")
@@ -110,7 +118,7 @@ echo
       br=$(echo "$bline" | awk '{print $2}')
       ar=$(echo "$aline" | awk '{print $2}')
       if [ "$line_no" -eq 0 ]; then
-        printf "  %-8s %5s°  %8.4f  %8.4f    EFL=%smm\n" "$cfg" "$fa" "$br" "$ar" "$efl"
+        printf "  %-8s %5s°  %8.4f  %8.4f  %7.3f  %7.3f    EFL=%smm\n" "$cfg" "$fa" "$br" "$ar" "$epd_bef" "$epd_aft" "$efl"
       else
         printf "  %-8s %5s°  %8.4f  %8.4f\n" "" "$fa" "$br" "$ar"
       fi
@@ -157,12 +165,77 @@ for cfg in config0 config1 config2; do
   fi
 done
 
+# ── Vignetting factor comparison (before vs after) ──
+get_vf() {
+  local yaml_file="$1"
+  local cfg="$2"
+  local field="$3"
+  python3 -c "
+import sys, yaml
+d = yaml.safe_load(sys.stdin)
+r = d['chief_rays']
+p = r[$field].get('grid_points', [])
+ok = [g for g in p if g.get('image_x') is not None]
+print(len(ok)/len(p) if p else -1)
+" < <($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null)
+}
+
+{
+  echo "=== Vignetting Factor Comparison (per config, primary λ=587.6nm) ==="
+  echo "  (fraction of pupil-grid rays that transmit the system)"
+  printf "  %-8s %6s  %10s  %10s\n" "Config" "Field" "VF before" "VF after"
+  printf "  %-8s %6s  %10s  %10s\n" "------" "-----" "--------" "--------"
+  for cfg in config0 config1 config2; do
+    for fi in 0 1 2; do
+      vf_before=$(get_vf "$YAML" "$cfg" "$fi")
+      vf_after=$(get_vf "$RESULT" "$cfg" "$fi")
+      printf "  %-8s %6s  %10.4f  %10.4f\n" "$cfg" "f$fi" "$vf_before" "$vf_after"
+    done
+  done
+  echo
+} | tee -a "$RESULT_FILE"
+
+# ── Entrance pupil diameter threshold check (all configs) ──
+EPD_TARGET=20
+EPD_TOL=0.1
+echo "=== Entrance pupil diameter threshold check ==="
+printf "  (target = $EPD_TARGET mm ± $EPD_TOL — all configs EPD must be within this)\n"
+for cfg in config0 config1 config2; do
+  epd=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
+    | awk -F': ' '/entrance_pupil_diameter:/{printf "%.4f",$2; exit}')
+  epd_ok=$(echo "$epd" | python3 -c "import sys; v=float(sys.stdin.read()); print('1' if abs(v-$EPD_TARGET)<=$EPD_TOL else '0')")
+  printf "  %-8s EPD = %8.4f mm" "$cfg" "$epd"
+  if [ "$epd_ok" = "1" ]; then
+    echo "   ✓"
+  else
+    echo "   ✗"
+    failed=true
+  fi
+done
+
+# ── Vignetting threshold check (off-axis fields must keep >= 50% of center beam) ──
+VIG_THRESHOLD=0.5
+echo "=== Vignetting factor threshold check ==="
+printf "  (threshold = $VIG_THRESHOLD — 10mm / 15mm image-height fields must keep >= this)\n"
+for cfg in config0 config1 config2; do
+  for fi in 1 2; do
+    vf=$(get_vf "$RESULT" "$cfg" "$fi")
+    printf "  %-8s field %d VF = %8.4f" "$cfg" "$fi" "$vf"
+    if [ "$vf" != "-1" ] && (( $(echo "$vf < $VIG_THRESHOLD" | bc -l) )); then
+      echo "   ✗"
+      failed=true
+    else
+      echo "   ✓"
+    fi
+  done
+done
+
 {
   echo
   if [ "$failed" = true ]; then
-    echo "  >>> Optimization failed: not all configs on-axis RMS < $THRESHOLD mm"
+    echo "  >>> Optimization failed: gates not met (on-axis RMS, EPD, or vignetting factor)"
   else
-    echo "  >>> Optimization passed: all configs on-axis RMS < $THRESHOLD mm"
+    echo "  >>> Optimization passed: all configs on-axis RMS < $THRESHOLD mm, EPD ≈ ${EPD_TARGET}mm, vignetting factor >= $VIG_THRESHOLD"
   fi
   echo
 } | tee -a "$RESULT_FILE"
