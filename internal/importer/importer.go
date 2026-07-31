@@ -9,6 +9,7 @@ type ParseResult struct {
 	StopSurface  int
 	ImageSurface int
 	GlassEntries []types.Glass
+	FNO          float64
 }
 
 var commonGlass = map[string]struct {

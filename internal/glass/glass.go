@@ -23,6 +23,9 @@ func (c *Catalog) Add(glass types.Glass) {
 	g := glass
 	g.Key = key
 	c.ByName[key] = &g
+	if g.Label != "" && g.Label != key {
+		c.ByName[g.Label] = &g
+	}
 	for _, alias := range glass.Aliases {
 		c.ByName[alias] = &g
 	}
@@ -60,9 +63,18 @@ func CalcRefractiveIndex(g *types.Glass, wavelength float64) (float64, error) {
 		switch g.DispersionFormula {
 		case types.Sellmeier1:
 			return sellmeier1(g.Coefficients, wavelength)
+		case types.Schott:
+			return schott(g.Coefficients, wavelength)
+		case types.Extended3:
+			return extended3(g.Coefficients, wavelength)
+		case types.Extended2:
+			return extended2(g.Coefficients, wavelength)
 		case types.Constant:
 			return g.ND, nil
 		default:
+			if g.ND > 0 && g.VD > 0 {
+				return RefractiveIndexFromNDVD(g.ND, g.VD, wavelength)
+			}
 			return 0, fmt.Errorf("catalog glass %q has unknown dispersion formula", g.Key)
 		}
 	case types.GlassTypeModel:
@@ -93,6 +105,58 @@ func sellmeier1(coeffs []float64, lambda float64) (float64, error) {
 	}
 	if n2 <= 0 {
 		return 0, fmt.Errorf("invalid sellmeier result")
+	}
+	return math.Sqrt(n2), nil
+}
+
+func schott(coeffs []float64, lambda float64) (float64, error) {
+	if len(coeffs) < 6 {
+		return 0, fmt.Errorf("schott requires 6 coefficients")
+	}
+	lsq := lambda * lambda
+	l2 := 1.0 / lsq
+	l4 := l2 * l2
+	l6 := l4 * l2
+	l8 := l6 * l2
+	n2 := coeffs[0] + coeffs[1]*lsq + coeffs[2]*l2 + coeffs[3]*l4 + coeffs[4]*l6 + coeffs[5]*l8
+	if n2 <= 0 {
+		return 0, fmt.Errorf("invalid schott result")
+	}
+	return math.Sqrt(n2), nil
+}
+
+func extended3(coeffs []float64, lambda float64) (float64, error) {
+	if len(coeffs) < 9 {
+		return 0, fmt.Errorf("extended_3 requires 9 coefficients")
+	}
+	lsq := lambda * lambda
+	l4 := lsq * lsq
+	l2 := 1.0 / lsq
+	l4i := l2 * l2
+	l6i := l4i * l2
+	l8i := l6i * l2
+	l10i := l8i * l2
+	l12i := l10i * l2
+	n2 := coeffs[0] + coeffs[1]*lsq + coeffs[2]*l4 + coeffs[3]*l2 + coeffs[4]*l4i + coeffs[5]*l6i + coeffs[6]*l8i + coeffs[7]*l10i + coeffs[8]*l12i
+	if n2 <= 0 {
+		return 0, fmt.Errorf("invalid extended_3 result")
+	}
+	return math.Sqrt(n2), nil
+}
+
+func extended2(coeffs []float64, lambda float64) (float64, error) {
+	if len(coeffs) < 10 {
+		return 0, fmt.Errorf("extended_2 requires 10 coefficients")
+	}
+	lsq := lambda * lambda
+	n2 := 1.0
+	for i := 0; i < 5; i++ {
+		b := coeffs[2*i]
+		c := coeffs[2*i+1]
+		n2 += b * lsq / (lsq - c)
+	}
+	if n2 <= 0 {
+		return 0, fmt.Errorf("invalid extended_2 result")
 	}
 	return math.Sqrt(n2), nil
 }

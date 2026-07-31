@@ -36,8 +36,11 @@ const (
 type DispersionFormula string
 
 const (
-	Sellmeier1 DispersionFormula = "sellmeier_1"
-	Constant   DispersionFormula = "constant"
+	Schott      DispersionFormula = "schott"
+	Sellmeier1  DispersionFormula = "sellmeier_1"
+	Extended2   DispersionFormula = "extended_2"
+	Extended3   DispersionFormula = "extended_3"
+	Constant    DispersionFormula = "constant"
 )
 
 type JonesVector struct {
@@ -195,7 +198,7 @@ type System struct {
 }
 
 type FieldDef struct {
-	Angle       float64   `yaml:"angle,omitempty"`
+	Angle       float64   `yaml:"angle"`
 	ImageHeight float64   `yaml:"image_height,omitempty"`
 	Height      float64   `yaml:"height,omitempty"`
 	ObjectZ     float64   `yaml:"object_z,omitempty"`

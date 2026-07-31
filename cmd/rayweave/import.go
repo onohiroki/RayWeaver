@@ -9,6 +9,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/importer"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
@@ -74,6 +75,29 @@ func runImport(data []byte) {
 	stopSurface := result.StopSurface
 	if stopSurface <= 0 {
 		stopSurface = surfaces[0].ID
+	}
+
+	if result.FNO > 0 {
+		hasDiam := false
+		for _, s := range surfaces {
+			if s.Diameter > 0 {
+				hasDiam = true
+				break
+			}
+		}
+		if !hasDiam {
+			wl := firstWavelength(result.Wavelengths)
+			pr := paraxial.Compute(types.System{Surfaces: surfaces}, wl, gc, 0, nil)
+			if pr.FocalLength > 0 {
+				epDiam := pr.FocalLength / result.FNO
+				for i := range surfaces {
+					if surfaces[i].ID == stopSurface {
+						surfaces[i].Diameter = epDiam
+						break
+					}
+				}
+			}
+		}
 	}
 
 	config := types.Config{

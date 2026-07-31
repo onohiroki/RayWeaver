@@ -108,6 +108,10 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			}
 			continue
 		}
+		if strings.HasPrefix(upper, "FNO ") && len(tokens) >= 2 {
+			result.FNO = parseCodeVFloat(tokens[1])
+			continue
+		}
 		if strings.HasPrefix(upper, "DIM ") && len(tokens) >= 2 {
 			if strings.ToUpper(tokens[1]) == "I" {
 				inchMode = true
@@ -173,6 +177,11 @@ func ParseCodeV(input string) (*ParseResult, error) {
 					result.Fields[i].Weight = ws[i]
 				}
 			}
+			continue
+		}
+
+		if strings.HasPrefix(upper, "FNO ") && len(tokens) >= 2 {
+			result.FNO = parseCodeVFloat(tokens[1])
 			continue
 		}
 
@@ -304,6 +313,21 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			}
 			inAspBlock = false
 			continue
+		}
+
+		if compactMode && lastSurfNum > 0 {
+			switch first {
+			case "CCY":
+				if len(tokens) >= 2 {
+					surf := getOrCreateCodeVSurf(surfMap, lastSurfNum)
+					surf.Conic = parseCodeVFloat(tokens[1])
+				}
+				inAspBlock = false
+				continue
+			case "THC":
+				inAspBlock = false
+				continue
+			}
 		}
 
 		switch first {

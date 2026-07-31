@@ -56,7 +56,7 @@ func ParseAGF(data []byte, sourceName ...string) ([]types.Glass, error) {
 						current.Coefficients = append(current.Coefficients, v)
 					}
 				}
-				if len(current.Coefficients) > 0 {
+				if len(current.Coefficients) > 0 && current.DispersionFormula == "" {
 					current.DispersionFormula = types.Sellmeier1
 				}
 			}
@@ -64,10 +64,6 @@ func ParseAGF(data []byte, sourceName ...string) ([]types.Glass, error) {
 		}
 
 		if strings.HasPrefix(line, "ED") {
-			if current != nil {
-				glasses = append(glasses, *current)
-				current = nil
-			}
 			continue
 		}
 
@@ -83,6 +79,9 @@ func ParseAGF(data []byte, sourceName ...string) ([]types.Glass, error) {
 					Key:     name,
 					Name:    name,
 					Aliases: []string{},
+				}
+				if len(fields) >= 3 {
+					current.DispersionFormula = agfDispersionFormula(fields[2])
 				}
 				if len(fields) >= 6 {
 					if nd, err := strconv.ParseFloat(fields[4], 64); err == nil {
@@ -148,7 +147,9 @@ func ParseAGF(data []byte, sourceName ...string) ([]types.Glass, error) {
 					current.Coefficients = append(current.Coefficients, v)
 				}
 			}
-			current.DispersionFormula = types.Sellmeier1
+			if len(current.Coefficients) > 0 && current.DispersionFormula == "" {
+				current.DispersionFormula = types.Sellmeier1
+			}
 			continue
 		}
 
@@ -233,18 +234,11 @@ func LoadAGFDir(dir string) ([]types.Glass, error) {
 func detectManufacturer(lines []string, sourceName string) string {
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "CC") {
+		if strings.HasPrefix(trimmed, "CC") || strings.HasPrefix(trimmed, "CA") {
 			upper := strings.ToUpper(trimmed)
 			for _, km := range knownManufacturers {
 				if strings.Contains(upper, km) {
 					return km
-				}
-			}
-			rest := strings.TrimSpace(trimmed[2:])
-			if rest != "" {
-				tokens := strings.Fields(rest)
-				if len(tokens) > 0 {
-					return tokens[0]
 				}
 			}
 		}
@@ -257,6 +251,22 @@ func detectManufacturer(lines []string, sourceName string) string {
 				return km
 			}
 		}
+	}
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "CC") || strings.HasPrefix(trimmed, "CA") {
+			rest := strings.TrimSpace(trimmed[2:])
+			if rest != "" {
+				tokens := strings.Fields(rest)
+				if len(tokens) > 0 {
+					return tokens[0]
+				}
+			}
+		}
+	}
+
+	if sourceName != "" {
 		base := strings.TrimSuffix(sourceName, filepath.Ext(sourceName))
 		base = strings.TrimSuffix(base, ".AGF")
 		base = strings.TrimSuffix(base, ".agf")
@@ -293,6 +303,21 @@ func decodeAGFContent(raw []byte) []byte {
 		return raw[3:]
 	}
 	return raw
+}
+
+func agfDispersionFormula(code string) types.DispersionFormula {
+	switch code {
+	case "1":
+		return types.Schott
+	case "2":
+		return types.Sellmeier1
+	case "12":
+		return types.Extended2
+	case "13":
+		return types.Extended3
+	default:
+		return "_unknown"
+	}
 }
 
 func normalizeLineEndings(s string) string {
