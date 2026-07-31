@@ -7,6 +7,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -85,6 +86,7 @@ type VariableState struct {
 
 type imagePoint struct {
 	X, Y float64
+	OPL  float64
 	OK   bool
 }
 
@@ -328,9 +330,17 @@ func (o *MultiOptimizer) evaluateMerit(x []float64) float64 {
 		cfgMerit := 0.0
 
 		for _, term := range cfg.MeritTerms {
-			points, _ := o.traceFieldGrid(surfaces, cfg, term)
-			rms := computeSpotRMS(points)
-			cfgMerit += term.Weight * fieldWeightForTerm(cfg, term) * wavWeightForTerm(cfg, term) * rms * rms
+			fw := fieldWeightForTerm(cfg, term)
+			ww := wavWeightForTerm(cfg, term)
+			if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+				points, _ := o.traceFieldGrid(surfaces, cfg, term)
+				rms := computeSpotRMS(points)
+				cfgMerit += term.Weight * fw * ww * rms * rms
+			} else {
+				val := o.evaluateKindTerm(cfg, term, surfaces)
+				diff := val - term.Target
+				cfgMerit += term.Weight * fw * ww * diff * diff
+			}
 		}
 
 		merit += cfg.Weight * cfgMerit
@@ -501,7 +511,7 @@ func (o *MultiOptimizer) traceFieldGrid(surfaces []types.Surface, cfg ConfigInpu
 
 		if len(result.Surfaces) > 0 {
 			last := result.Surfaces[len(result.Surfaces)-1]
-			points = append(points, imagePoint{X: last.Position.X, Y: last.Position.Y, OK: true})
+			points = append(points, imagePoint{X: last.Position.X, Y: last.Position.Y, OPL: result.OPLTotal, OK: true})
 		} else {
 			points = append(points, imagePoint{OK: false})
 		}
@@ -529,9 +539,17 @@ func (o *MultiOptimizer) computeResiduals(x []float64) []float64 {
 
 		termR := make([]float64, len(cfg.MeritTerms))
 		for ti, term := range cfg.MeritTerms {
-			points, _ := o.traceFieldGrid(surfaces, cfg, term)
-			rms := computeSpotRMS(points)
-			termR[ti] = math.Sqrt(cfg.Weight*term.Weight*fieldWeightForTerm(cfg, term)*wavWeightForTerm(cfg, term)) * rms
+			fw := fieldWeightForTerm(cfg, term)
+			ww := wavWeightForTerm(cfg, term)
+			if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+				points, _ := o.traceFieldGrid(surfaces, cfg, term)
+				rms := computeSpotRMS(points)
+				termR[ti] = math.Sqrt(cfg.Weight*term.Weight*fw*ww) * rms
+			} else {
+				val := o.evaluateKindTerm(cfg, term, surfaces)
+				diff := val - term.Target
+				termR[ti] = math.Sqrt(cfg.Weight*term.Weight*fw*ww) * diff
+			}
 		}
 
 		allR = append(allR, termR...)
@@ -766,6 +784,35 @@ func (o *MultiOptimizer) buildVariableStates(x []float64) []VariableState {
 		states[i] = st
 	}
 	return states
+}
+
+// evaluateKindTerm evaluates a non-spot merit term (e.g. seidel_distortion,
+// lateral_color, opd_rms) for the given config. Returns 0 for unknown kinds.
+func (o *MultiOptimizer) evaluateKindTerm(cfg ConfigInput, term types.MeritTerm, surfaces []types.Surface) float64 {
+	gc := o.gc
+	if o.tempGC != nil {
+		gc = o.tempGC
+	}
+
+	switch term.Kind {
+	case optimize.MeritOPDRMS:
+		points, _ := o.traceFieldGrid(surfaces, cfg, term)
+		pts := make([]dls.IPoint, len(points))
+		for i, p := range points {
+			pts[i] = dls.IPoint{X: p.X, Y: p.Y, OPL: p.OPL, OK: p.OK}
+		}
+		return optimize.ComputeOPDRMS(pts)
+	default:
+		ot := optimize.MeritTerm{
+			Kind:        term.Kind,
+			FieldAngle:  o.fieldAngleForTerm(cfg, term, surfaces),
+			FieldDir:    []float64{0, 1},
+			Wavelength:  term.Wavelength,
+			Wavelength2: term.Wavelength2,
+			Target:      term.Target,
+		}
+		return optimize.EvaluateMeritKind(term.Kind, ot, surfaces, gc, nil)
+	}
 }
 
 func (o *MultiOptimizer) fieldAngleForTerm(cfg ConfigInput, term types.MeritTerm, surfaces []types.Surface) float64 {

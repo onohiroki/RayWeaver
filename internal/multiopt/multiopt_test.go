@@ -6,6 +6,7 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -14,6 +15,44 @@ func singletSurfaces() []types.Surface {
 	return []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
 		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+	}
+}
+
+// TestMultiOptimizerSeidelDistortionKind verifies merit term kinds are honored
+// in multi-config mode: with target = current S5 the merit must be ~0. Before
+// kind support, the term was evaluated as spot RMS (far from 0).
+func TestMultiOptimizerSeidelDistortionKind(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	surfaces := singletSurfaces()
+	surface.Precompute(surfaces)
+
+	s5 := paraxial.ComputeSeidel(surfaces, 10, 0.00058756, gc).Distortion
+
+	configs := []ConfigInput{
+		{
+			ID:       "cfg1",
+			Weight:   1.0,
+			Surfaces: singletSurfaces(),
+			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 10.0, Weight: 1.0}},
+			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+			MeritTerms: []types.MeritTerm{{
+				Kind:       "seidel_distortion",
+				Field:      0,
+				Wavelength: 0.00058756,
+				Target:     s5,
+				Weight:     1.0,
+			}},
+		},
+	}
+
+	opt := New(configs, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
+	x := []float64{0.0}
+	merit := opt.evaluateMerit(x)
+
+	if merit > 1e-12 {
+		t.Errorf("merit with target = current S5 = %v, want ~0", merit)
 	}
 }
 

@@ -262,7 +262,7 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 			rms := dls.ComputeSpotRMS(points)
 			merit += term.Weight * term.FieldWeight * term.WavWeight * rms * rms
 		} else {
-			val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
+			val := EvaluateMeritKind(term.Kind, term, surfaces, o.currentGC(), o)
 			diff := val - term.Target
 			merit += term.Weight * term.FieldWeight * term.WavWeight * diff * diff
 		}
@@ -293,7 +293,7 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 			rms := dls.ComputeSpotRMS(points)
 			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
 		} else {
-			val := EvaluateMeritKind(term.Kind, term, surfaces, o.gc, o)
+			val := EvaluateMeritKind(term.Kind, term, surfaces, o.currentGC(), o)
 			diff := val - term.Target
 			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * diff
 		}
@@ -440,18 +440,21 @@ func (o *Optimizer) applyVariables(x []float64) []types.Surface {
 }
 
 func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) ([]dls.IPoint, map[int]float64) {
-	gc := o.gc
-	if o.tempGC != nil {
-		gc = o.tempGC
-	}
+	gc := o.currentGC()
 	return dls.TraceFieldGrid(gc, surfaces, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
 }
 
-func (o *Optimizer) traceFieldGridExtents(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) map[int]float64 {
-	gc := o.gc
+// currentGC returns the glass catalog reflecting any in-flight nd/vd variable
+// overrides (o.tempGC), falling back to the base catalog.
+func (o *Optimizer) currentGC() *glass.Catalog {
 	if o.tempGC != nil {
-		gc = o.tempGC
+		return o.tempGC
 	}
+	return o.gc
+}
+
+func (o *Optimizer) traceFieldGridExtents(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) map[int]float64 {
+	gc := o.currentGC()
 	return dls.TraceFieldGridExtents(gc, surfaces, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
 }
 

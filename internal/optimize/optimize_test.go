@@ -6,6 +6,8 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -13,6 +15,43 @@ func singletSurfaces() []types.Surface {
 	return []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
 		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+	}
+}
+
+// TestOptimizerSeidelDistortionKind verifies the seidel_distortion merit kind
+// is evaluated via the distortion coefficient: with target = current S5 the
+// merit must be ~0 (a spot_rms evaluation of the singlet would be far from 0).
+func TestOptimizerSeidelDistortionKind(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	surfaces := singletSurfaces()
+	surface.Precompute(surfaces)
+
+	s5 := paraxial.ComputeSeidel(surfaces, 10, 0.00058756, gc).Distortion
+
+	cfg := Config{
+		Surfaces: surfaces,
+		Variables: []Variable{},
+		MeritTerms: []MeritTerm{{
+			Kind:        MeritSeidelDistortion,
+			FieldAngle:  10.0,
+			FieldWeight: 1.0,
+			Wavelength:  0.00058756,
+			WavWeight:   1.0,
+			Weight:      1.0,
+			Target:      s5,
+		}},
+		GlassCatalog: gc,
+		NumRays:      16,
+	}
+
+	opt := NewOptimizer(cfg)
+	x := opt.getInitialState()
+	merit := opt.EvaluateMerit(x)
+
+	if merit > 1e-12 {
+		t.Errorf("merit with target = current S5 = %v, want ~0", merit)
 	}
 }
 

@@ -12,6 +12,7 @@ type SeidelCoefficients struct {
 	Coma        float64 `yaml:"coma"`
 	Astigmatism float64 `yaml:"astigmatism"`
 	Petzval     float64 `yaml:"petzval"`
+	Distortion  float64 `yaml:"distortion"`
 }
 
 func traceChiefForward(surfaces []types.Surface, nIndex []float64, fieldSlope float64) []rayState {
@@ -54,7 +55,7 @@ func ComputeSeidel(surfaces []types.Surface, fieldAngleDeg float64, wavelength f
 		n = len(chiefVerts)
 	}
 
-	var S1, S2, S3, S4 float64
+	var S1, S2, S3, S4, S5 float64
 
 	for i := 0; i < n; i++ {
 		y := margVerts[i].Y
@@ -87,15 +88,30 @@ func ComputeSeidel(surfaces []types.Surface, fieldAngleDeg float64, wavelength f
 		rNAfter := 1.0 / nAfter
 		deltaUN := uAfter*rNAfter - uBefore*rNBefore
 
-		S1 += A * A * y * deltaUN
-		S2 += A * Ap * y * deltaUN
-		S3 += Ap * Ap * y * deltaUN
+		s1 := A * A * y * deltaUN
+		s2 := A * Ap * y * deltaUN
+		s3 := Ap * Ap * y * deltaUN
 
 		H := nBefore * (y*upBefore - yp*uBefore)
-		S4 += H * H * c * (rNAfter - rNBefore)
+		s4 := H * H * c * (rNAfter - rNBefore)
+
+		// Distortion (S5): per-surface contribution (Ap/A)*(S3 + S4).
+		// A == 0 (normal incidence of the marginal ray) is a degenerate case;
+		// skip the surface to avoid a division by zero.
+		var s5 float64
+		if math.Abs(A) > 1e-12 {
+			s5 = (Ap / A) * (s3 + s4)
+		}
+
+		S1 += s1
+		S2 += s2
+		S3 += s3
+		S4 += s4
+		S5 += s5
 	}
 
-	// Standard ZEMAX sign convention: positive coefficients
+	// Standard ZEMAX sign convention: positive coefficients.
+	// S5 (distortion) keeps its sign since barrel/pincushion is meaningful.
 	if S1 < 0 {
 		S1 = -S1
 	}
@@ -114,5 +130,6 @@ func ComputeSeidel(surfaces []types.Surface, fieldAngleDeg float64, wavelength f
 		Coma:        S2,
 		Astigmatism: S3,
 		Petzval:     S4,
+		Distortion:  S5,
 	}
 }

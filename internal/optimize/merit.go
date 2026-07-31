@@ -18,6 +18,7 @@ const (
 	MeritSeidelSpherical  = "seidel_spherical"
 	MeritSeidelComa       = "seidel_coma"
 	MeritSeidelAstigmatism = "seidel_astigmatism"
+	MeritSeidelDistortion = "seidel_distortion"
 	MeritOPDRMS           = "opd_rms"
 )
 
@@ -39,6 +40,8 @@ func EvaluateMeritKind(kind string, term MeritTerm, surfaces []types.Surface, gc
 		return evaluateSeidel(term, surfaces, gc).Coma
 	case MeritSeidelAstigmatism:
 		return evaluateSeidel(term, surfaces, gc).Astigmatism
+	case MeritSeidelDistortion:
+		return evaluateSeidel(term, surfaces, gc).Distortion
 	case MeritOPDRMS:
 		return evaluateOPDRMS(term, surfaces, gc, o)
 	default:
@@ -137,10 +140,12 @@ func evaluateOPDRMS(term MeritTerm, surfaces []types.Surface, gc *glass.Catalog,
 	if len(points) == 0 {
 		return 1e6
 	}
-	return computeOPDRMS(points)
+	return ComputeOPDRMS(points)
 }
 
-func computeOPDRMS(points []dls.IPoint) float64 {
+// ComputeOPDRMS returns the RMS of the optical path difference across a pupil
+// grid, referenced to the mean OPL of the accepted rays.
+func ComputeOPDRMS(points []dls.IPoint) float64 {
 	var chiefOPL float64
 	var chiefCount int
 	for _, p := range points {
