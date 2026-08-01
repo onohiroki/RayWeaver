@@ -1,0 +1,90 @@
+glass_catalog:
+  entries:
+  - type: model
+    name: N-BK7
+    nd: 1.5168
+    vd: 64.17
+chief:
+  fields:
+  - angle: 0.0
+    direction:
+    - 0
+    - 1
+  - angle: 5.0
+    direction:
+    - 0
+    - 1
+  reference_surface: 3
+  num_rays: 256
+  grid_type: hex
+  dump_map: true
+optimization:
+  method: dls
+  max_iter: 300
+  num_rays: 256
+  aperture_margin: 1.0
+  variables:
+  - name: s1_curv
+    target:
+      type: surface
+      id: 1
+      param: curvature
+    min: -0.08
+    max: 0.08
+    active: true
+  - name: s2_curv
+    target:
+      type: surface
+      id: 2
+      param: curvature
+    min: -0.08
+    max: 0.08
+    active: true
+configs:
+- id: cfg1
+  active: true
+  fields:
+  - id: 0
+    angle_deg: 0.0
+    weight: 1.0
+  - id: 1
+    angle_deg: 5.0
+    weight: 1.0
+  wavelengths:
+  - id: 0
+    value: 0.0005876
+    weight: 1.0
+  surfaces:
+  - id: 1
+    type: asphere_polynomial
+    curvature: 0.02
+    conic: 0.0
+    coefficients:
+    - 0.0
+    - 0.0
+    thickness: 6.0
+    material: N-BK7
+    diameter: 12.5
+  - id: 2
+    type: sphere
+    curvature: -0.04
+    thickness: 45.0
+    material: AIR
+    diameter: 12.5
+  - id: 3
+    type: sphere
+    curvature: 0.0
+    thickness: 0.0
+    material: AIR
+    diameter: 44.0
+  merit:
+    type: weighted_sum
+    terms:
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms
+      field: 1
+      wavelength: 0.0005876
+      weight: 1.0
