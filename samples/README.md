@@ -20,6 +20,10 @@ This directory contains sample optical system data and demo scripts for the
 | `scale-demo.bash` | Demonstrates the `scale` subcommand: resizes the 25 mm triplet to a 50 mm standard (EFL exact, f/# preserved). |
 | `doublegauss-demo.bash` | AI-assisted design demonstration: optimises the 6-element double-Gauss with 256 rays / 500 iterations (36 variables including glass nd/vd). Reports spot RMS / EFL / f-number / distortion before and after, draws raytrace diagrams, and checks the on-axis RMS stays below 0.1 mm. |
 | `asphere-optimize-demo.bash` | Asphere-optimisation demo using `asphere-optimize.yaml`: optimizes `conic`/`a4`/`a6` and reports the coefficients before/after in the result file. |
+| `schmidt-flattener.yaml` | Folded Schmidt camera: corrector plate + spherical primary + 2-element field flattener. Demonstrates the **fold model** — positive thicknesses only, the fold is carried by the primary's `decenter: [{tilt: [0, 180, 0], reflect: true}]`. Physical Z: corrector/stop at 0, primary at 800, flat sensor at 400 (EFL≈386, F/1.93, D=200). |
+| `schmidt-lensless.yaml` | Folded spherical primary alone (no corrector plate), showing the fold model geometry; the uncorrected mirror leaves large spherical-aberration spots. |
+| `schmidt-optimize.yaml` | DLS optimisation of the folded Schmidt: corrector asphere (a4/a6) + field-flattener curvatures against spot RMS (4 fields). |
+| `schmidt-demo.bash` | Folded-Schmidt demo: chief rays, per-field spot RMS, paraxial analysis (EFL / f/# / pupil / track), and SVG/PNG raytrace diagrams. |
 
 ## External dependencies
 
@@ -90,6 +94,15 @@ installed, the scripts print a message and skip those renderings.
 | `glass-spot-f1.png` | Spot diagram for field 1 (10°), before vs after, 4-wavelength overlay. |
 | `glass-spot-f2.png` | Spot diagram for field 2 (16°), before vs after, 4-wavelength overlay. |
 
+### Output of `schmidt-demo.bash`
+
+| File | Description |
+|---|---|
+| `schmidt-chief-result.yaml` | Chief-ray computation with pupil grid and per-field spot statistics. |
+| `schmidt-trace-result.yaml` | Traced rays with per-field spot RMS. |
+| `schmidt-demo-result.txt` | Per-field spot RMS and paraxial summary. |
+| `schmidt.svg` / `schmidt.png` | Folded-layout raytrace diagram (beam to primary at 800, back to sensor at 400). |
+
 ## Run the demos
 
 ```sh
@@ -99,6 +112,9 @@ bash samples/run-demo.bash
 
 # Glass optimisation demo (runs DLS, generates SVGs + spot diagrams)
 bash samples/glass-optimize-demo.bash
+
+# Folded Schmidt demo (chief + trace + paraxial + diagrams)
+bash samples/schmidt-demo.bash
 ```
 
 ## What `run-demo.bash` does
