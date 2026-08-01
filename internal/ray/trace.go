@@ -122,7 +122,9 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 		}
 
 		interaction := types.Transmit
-		if i+1 < len(ray.Path) {
+		if currentSurf.Reflects() {
+			interaction = types.Reflect
+		} else if i+1 < len(ray.Path) {
 			interaction = raymath.DetermineInteraction(prevID, currentID, ray.Path[i+1])
 		}
 
@@ -141,14 +143,22 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			state.Direction = newDir
 		}
 
+		globalDir := currentSurf.LocalToGlobal.MultiplyVector(state.Direction).Normalize()
+		state.Direction = globalDir
+
 		cosTheta2 := math.Sqrt(1 - (n1/n2)*(n1/n2)*(1-cosTheta1*cosTheta1))
 
 		rs, rp, ts, tp := raymath.FresnelAmplitude(n1, n2, cosTheta1, cosTheta2)
 
 		var intensityS, intensityP float64
 		if interaction == types.Reflect {
-			intensityS = rs * rs
-			intensityP = rp * rp
+			if currentSurf.Material == "AIR" {
+				intensityS = 1.0
+				intensityP = 1.0
+			} else {
+				intensityS = rs * rs
+				intensityP = rp * rp
+			}
 		} else {
 			intensityS = ts * ts * (n2 * cosTheta2) / (n1 * cosTheta1)
 			intensityP = tp * tp * (n2 * cosTheta2) / (n1 * cosTheta1)
@@ -156,18 +166,19 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 
 		if currentSurf.Coating != "" && e.Coating != nil {
 			if entry, ok := e.Coating.Lookup(currentSurf.Coating); ok {
-				nSub := n2
+				tmmResult := coating.ComputeTMM(n1, n2, entry.Layers, ray.Wavelength, math.Acos(cosTheta1))
 				if interaction == types.Reflect {
-					nSub = n1
+					intensityS = tmmResult.Rs
+					intensityP = tmmResult.Rp
+				} else {
+					intensityS *= tmmResult.Ts
+					intensityP *= tmmResult.Tp
 				}
-				tmmResult := coating.ComputeTMM(n1, nSub, entry.Layers, ray.Wavelength, math.Acos(cosTheta1))
-				intensityS *= tmmResult.Ts
-				intensityP *= tmmResult.Tp
 			}
 		}
 
 		globalPos := currentSurf.LocalToGlobal.MultiplyPoint(hitPoint)
-		globalDir := currentSurf.LocalToGlobal.MultiplyVector(state.Direction).Normalize()
+		globalDir = state.Direction
 
 		if !ray.SkipGlassPathCheck && glassEntrySurfaceID > 0 {
 			path := globalPos.Subtract(glassEntryPos).Length()
@@ -185,7 +196,9 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			}
 			}
 		}
-		if currentSurf.Material != "AIR" {
+		if interaction == types.Reflect {
+			glassEntrySurfaceID = 0
+		} else if currentSurf.Material != "AIR" {
 			glassEntryPos = globalPos
 			glassEntrySurfaceID = currentID
 		} else {
@@ -242,7 +255,24 @@ func getPrevMaterial(surfaces []types.Surface, prevID int) string {
 	if s == nil {
 		return "AIR"
 	}
+	idx := indexOfSurface(surfaces, prevID)
+	for idx > 0 && s.Reflects() {
+		idx--
+		s = &surfaces[idx]
+	}
+	if s.Reflects() {
+		return "AIR"
+	}
 	return s.Material
+}
+
+func indexOfSurface(surfaces []types.Surface, id int) int {
+	for i := range surfaces {
+		if surfaces[i].ID == id {
+			return i
+		}
+	}
+	return -1
 }
 
 func intersect(surf *types.Surface, origin, dir types.Vec3) (float64, bool) {
