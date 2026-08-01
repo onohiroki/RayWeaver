@@ -9,20 +9,20 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64) ([]IPoint, map[int]float64) {
+func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64) ([]IPoint, map[int]float64) {
 	skipGlassPath := fieldAngle == 0
-	return traceGridRays(gc, surfaces, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath)
+	return traceGridRays(gc, surfaces, stopID, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath)
 }
 
 // TraceFieldGridExtents traces a pupil grid with aperture and glass-path
 // checks disabled, returning the true geometric max radial ray extent on each
 // surface, independent of any surface aperture clipping.
-func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64) map[int]float64 {
-	_, perSurfMax := traceGridRays(gc, surfaces, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true)
+func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64) map[int]float64 {
+	_, perSurfMax := traceGridRays(gc, surfaces, stopID, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true)
 	return perSurfMax
 }
 
-func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool) ([]IPoint, map[int]float64) {
+func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
@@ -49,7 +49,7 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, fieldAngle float
 	zStart := -100.0
 	grid := generatePupilGrid(numRays, apertureRadius, rotationOffset)
 
-	stopZ := computeStopZ(surfaces)
+	stopZ := computeStopZ(surfaces, stopID)
 	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
 	if rayDir.Z > 1e-12 && tanComponent > 1e-12 {
 		tanComponent /= rayDir.Z
@@ -122,17 +122,17 @@ func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float
 	return pts
 }
 
-func computeStopZ(surfaces []types.Surface) float64 {
-	stopID := findStopID(surfaces)
+func computeStopZ(surfaces []types.Surface, stopID int) float64 {
+	if stopID <= 0 {
+		stopID = findStopID(surfaces)
+	}
 	if stopID == 0 {
 		return 0
 	}
-	z := 0.0
 	for _, s := range surfaces {
 		if s.ID == stopID {
-			return z
+			return s.PhysicalZ
 		}
-		z += s.Thickness
 	}
 	return 0
 }

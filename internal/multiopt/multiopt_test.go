@@ -204,7 +204,7 @@ func TestMultiOptimizerSizeAutoAperturesGeometric(t *testing.T) {
 	// True geometric beam extent at surface 2 for the extreme (16deg) field,
 	// measured without aperture clipping.
 	surface.Precompute(surfaces)
-	ext := dls.TraceFieldGridExtents(gc, surfaces, 16.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0)
+	ext := dls.TraceFieldGridExtents(gc, surfaces, 0, 16.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0)
 	geoExtent2 := ext[2]
 	if geoExtent2 <= 5.0 {
 		t.Fatalf("test setup: geometric extent at surface 2 = %.3f, want > 5.0 (initial aperture radius)", geoExtent2)

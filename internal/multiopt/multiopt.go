@@ -17,6 +17,7 @@ import (
 type ConfigInput struct {
 	ID          string
 	Weight      float64
+	StopSurface int
 	Surfaces    []types.Surface
 	Fields      []types.FieldItem
 	Wavelengths []types.WavelengthItem
@@ -514,7 +515,7 @@ func (o *MultiOptimizer) traceFieldGrid(surfaces []types.Surface, cfg ConfigInpu
 	zStart := -100.0
 	grid := generatePupilGrid(o.numRays, apertureRadius, o.gridRotation)
 
-	stopZ := computeStopZ(surfaces)
+	stopZ := computeStopZ(surfaces, cfg.StopSurface)
 	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
 	if rayDir.Z > 1e-12 && tanComponent > 1e-12 {
 		tanComponent /= rayDir.Z
@@ -619,7 +620,7 @@ func (o *MultiOptimizer) traceFieldGridExtents(surfaces []types.Surface, cfg Con
 		gc = o.tempGC
 	}
 	fieldAngle := o.fieldAngleForTerm(cfg, term, surfaces)
-	return dls.TraceFieldGridExtents(gc, surfaces, fieldAngle, []float64{0, 1}, term.Wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+	return dls.TraceFieldGridExtents(gc, surfaces, cfg.StopSurface, fieldAngle, []float64{0, 1}, term.Wavelength, o.apertureMargin, o.numRays, o.gridRotation)
 }
 
 // sizeAutoApertures measures the true geometric beam extent at the extreme
@@ -704,7 +705,7 @@ func (o *MultiOptimizer) FinalConstraintViolations(x []float64, tol float64) []C
 				continue
 			}
 			angle := o.fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field}, surfaces)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.StopSurface)
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {
@@ -753,7 +754,7 @@ func (o *MultiOptimizer) ComputeConstraints(x []float64) []float64 {
 				continue
 			}
 			angle := o.fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field}, surfaces)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.StopSurface)
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {
@@ -1172,17 +1173,17 @@ func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float
 	return pts
 }
 
-func computeStopZ(surfaces []types.Surface) float64 {
-	stopID := findStopID(surfaces)
+func computeStopZ(surfaces []types.Surface, stopID int) float64 {
+	if stopID <= 0 {
+		stopID = findStopID(surfaces)
+	}
 	if stopID == 0 {
 		return 0
 	}
-	z := 0.0
 	for _, s := range surfaces {
 		if s.ID == stopID {
-			return z
+			return s.PhysicalZ
 		}
-		z += s.Thickness
 	}
 	return 0
 }

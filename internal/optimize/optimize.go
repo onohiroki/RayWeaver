@@ -20,6 +20,7 @@ type Config struct {
 	Constraints    []types.ConstraintOperand
 	GlassCatalog   *glass.Catalog
 	CoatingCatalog interface{}
+	StopSurface    int
 	MaxIter        int
 	Mu             float64
 	Tol            float64
@@ -94,6 +95,7 @@ type Optimizer struct {
 	numRays          int
 	apertureMargin   float64
 	muConMax         float64
+	stopSurface      int
 	gridRotation     float64
 	logger           dls.Logger
 	hull             *glass.ConvexHull
@@ -182,6 +184,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		apertureMargin:   apertureMargin,
 		muConMax:         cfg.MuConMax,
 		logger:           cfg.Logger,
+		stopSurface:      cfg.StopSurface,
 		hull:             cfg.Hull,
 		hullMargin:       cfg.HullMargin,
 		hullWeight:       cfg.HullWeight,
@@ -374,7 +377,7 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 			c[j] = 0
 			continue
 		}
-		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint, o.numRays, o.apertureMargin)
+		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint, o.numRays, o.apertureMargin, o.stopSurface)
 		err := constraint.ComputeError(op.Kind, value, op)
 		w := op.Weight
 		if w <= 0 {
@@ -417,7 +420,7 @@ func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []Constr
 		if !op.Active {
 			continue
 		}
-		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint, o.numRays, o.apertureMargin)
+		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint, o.numRays, o.apertureMargin, o.stopSurface)
 		err := constraint.ComputeError(op.Kind, value, op)
 		w := op.Weight
 		if w <= 0 {
@@ -564,7 +567,7 @@ func (o *Optimizer) applyVariables(x []float64) []types.Surface {
 
 func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) ([]dls.IPoint, map[int]float64) {
 	gc := o.currentGC()
-	return dls.TraceFieldGrid(gc, surfaces, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+	return dls.TraceFieldGrid(gc, surfaces, o.stopSurface, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
 }
 
 // currentGC returns the glass catalog reflecting any in-flight nd/vd variable
@@ -578,7 +581,7 @@ func (o *Optimizer) currentGC() *glass.Catalog {
 
 func (o *Optimizer) traceFieldGridExtents(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) map[int]float64 {
 	gc := o.currentGC()
-	return dls.TraceFieldGridExtents(gc, surfaces, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+	return dls.TraceFieldGridExtents(gc, surfaces, o.stopSurface, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
 }
 
 // sizeAutoApertures measures the true geometric beam extent at the extreme
