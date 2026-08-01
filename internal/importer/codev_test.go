@@ -10,6 +10,11 @@ func parseSEQ(t *testing.T, path string) *ParseResult {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// Fixtures are gitignored (*.seq) and may be absent on a fresh
+			// checkout; skip instead of failing.
+			t.Skipf("fixture %s not present (gitignored); skipping", path)
+		}
 		t.Fatal(err)
 	}
 	result, err := ParseCodeV(string(data))
