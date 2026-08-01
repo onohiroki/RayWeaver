@@ -99,6 +99,8 @@ func main() {
 		runOptimize(data, optVerbose, optLogFile, optGlassDir)
 	case "import":
 		runImport(data)
+	case "scale":
+		runScale(data)
 	default:
 		errOut("Error: unknown subcommand %q", subcommand)
 		errOut("Run 'rayweave --help' for usage.")
@@ -365,6 +367,25 @@ Examples:
   rayweave import --format oslo < lens.len | rayweave trace
   rayweave import --format zemax < lens.zmx | rayweave plot -o lens.svg
 `)
+	case "scale":
+		fmt.Print(`Usage: rayweave scale --efl TARGET [--config ID] < system.yaml > scaled.yaml
+
+Scales a system so its effective focal length equals TARGET (mm). A uniform
+scale of every length (radii, thicknesses, diameters, asphere coefficients and
+normalization radii) by s = TARGET / current_EFL scales the EFL exactly by s,
+preserving the f-number and the normalized aberration balance.
+
+Useful for building a starting point at a target focal length before
+optimizing (e.g. a 25 mm patent lens scaled to a 50 mm standard).
+
+Options:
+  --efl TARGET     target effective focal length (mm, required)
+  --config ID      select config by id (multi-config mode); its EFL sets the
+                     scale factor applied to every config
+
+Example:
+  rayweave scale --efl 50 < ref25.yaml | rayweave optimize > optimized.yaml
+`)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml
 
@@ -395,6 +416,7 @@ Subcommands:
   tmm        Thin-film coating analysis (transfer-matrix method)
   plot       Generate SVG cross-section drawing
   optimize   DLS optimization of lens surfaces
+  scale      Scale a system so its EFL equals --efl TARGET
   import     Import ZEMAX/OSLO/CODE V lens files
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
