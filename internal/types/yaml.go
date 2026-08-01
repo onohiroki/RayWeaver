@@ -83,6 +83,14 @@ func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
 	if err := node.Decode(&raw); err != nil {
 		return err
 	}
+	if raw.Thickness < 0 {
+		return fmt.Errorf("surface %d: negative thickness %.6g is not allowed", raw.ID, raw.Thickness)
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == "reflect" {
+			return errors.New("top-level surface `reflect` is removed; use decenter: [{tilt: [0, 180, 0], reflect: true}]")
+		}
+	}
 	s.ID = raw.ID
 	s.Type = raw.Type
 	s.Conic = raw.Conic

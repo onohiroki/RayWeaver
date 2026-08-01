@@ -44,9 +44,9 @@ func ComputeDecenterTransform(decenter []types.DecenterStep) types.Mat4 {
 	m := types.NewIdentity()
 	for _, step := range decenter {
 		t := types.NewTranslation(step.Shift)
-		rx := types.NewRotationX(step.Tilt.X)
-		ry := types.NewRotationY(step.Tilt.Y)
-		rz := types.NewRotationZ(step.Tilt.Z)
+		rx := types.NewRotationX(step.Tilt.X * math.Pi / 180.0)
+		ry := types.NewRotationY(step.Tilt.Y * math.Pi / 180.0)
+		rz := types.NewRotationZ(step.Tilt.Z * math.Pi / 180.0)
 		local := t.Multiply(rx).Multiply(ry).Multiply(rz)
 		m = m.Multiply(local)
 	}

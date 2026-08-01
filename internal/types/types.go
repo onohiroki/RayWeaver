@@ -67,8 +67,9 @@ func NewLinearJones(angleDeg float64) JonesVector {
 }
 
 type DecenterStep struct {
-	Shift Vec3 `yaml:"shift"`
-	Tilt  Vec3 `yaml:"tilt"`
+	Shift   Vec3 `yaml:"shift"`
+	Tilt    Vec3 `yaml:"tilt"`
+	Reflect bool `yaml:"reflect,omitempty"`
 }
 
 type Surface struct {
@@ -91,6 +92,7 @@ type Surface struct {
 	LocalToGlobal  Mat4    `yaml:"-"`
 	GlobalToLocal  Mat4    `yaml:"-"`
 	ParaxialRadius float64 `yaml:"-"`
+	PhysicalZ      float64 `yaml:"-"`
 
 	radiusUsed bool `yaml:"-"`
 }
@@ -108,6 +110,15 @@ func (s *Surface) SetRadius(r float64) {
 	} else {
 		s.Curvature = 1.0 / r
 	}
+}
+
+func (s Surface) Reflects() bool {
+	for _, d := range s.Decenter {
+		if d.Reflect {
+			return true
+		}
+	}
+	return false
 }
 
 type RayState struct {
@@ -247,7 +258,8 @@ type CoatingCatalog struct {
 }
 
 type System struct {
-	Surfaces []Surface `yaml:"surfaces"`
+	Surfaces    []Surface `yaml:"surfaces"`
+	StopSurface int       `yaml:"-"`
 }
 
 type FieldDef struct {
@@ -256,6 +268,7 @@ type FieldDef struct {
 	Height      float64   `yaml:"height,omitempty"`
 	ObjectZ     float64   `yaml:"object_z,omitempty"`
 	Direction   []float64 `yaml:"direction,omitempty"`
+	Path        []int     `yaml:"path,omitempty"`
 }
 
 type ChiefInput struct {
@@ -580,6 +593,12 @@ type ParaxialInput struct {
 	ObjectHeight float64 `yaml:"object_height,omitempty"`
 }
 
+type StopInfo struct {
+	SurfaceID int     `yaml:"surface_id"`
+	PhysicalZ float64 `yaml:"physical_z"`
+	Diameter  float64 `yaml:"diameter"`
+}
+
 type Output struct {
 	Input          `yaml:",inline"`
 	ChiefRays      []ChiefRayResult    `yaml:"chief_rays,omitempty"`
@@ -587,6 +606,7 @@ type Output struct {
 	ParaxialResult *ParaxialResult     `yaml:"paraxial_result,omitempty"`
 	OptResults     *OptimizationResult `yaml:"opt_results,omitempty"`
 	Provenance     *Provenance         `yaml:"provenance,omitempty"`
+	Stop           *StopInfo           `yaml:"stop,omitempty"`
 }
 
 type TMMInput struct {
