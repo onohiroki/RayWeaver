@@ -77,7 +77,6 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		os.Exit(1)
 	}
 
-
 	var logger dls.Logger
 	logWriters := []struct {
 		name string
@@ -112,19 +111,30 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		constraints = input.Configs[0].Constraints
 	}
 
+	// aperture_margin < 1.0 makes the pupil grid smaller than the aperture,
+	// which clips rays at surface edges and stalls DLS convergence. Clamp it.
+	apertureMargin := input.Optimization.ApertureMargin
+	if apertureMargin <= 0 {
+		apertureMargin = 1.0
+	}
+	if apertureMargin < 1.0 {
+		errOut("Warning: aperture_margin %.3f < 1.0 is not recommended (pupil grid smaller than the aperture stalls DLS); clamping to 1.0", apertureMargin)
+		apertureMargin = 1.0
+	}
+
 	cfg := optimize.Config{
-		Surfaces:     surfaces,
-		Variables:    variables,
-		MeritTerms:   meritTerms,
-		Fields:       fields,
-		Constraints:  constraints,
-		GlassCatalog: gc,
-		Logger:       logger,
+		Surfaces:       surfaces,
+		Variables:      variables,
+		MeritTerms:     meritTerms,
+		Fields:         fields,
+		Constraints:    constraints,
+		GlassCatalog:   gc,
+		Logger:         logger,
 		MaxIter:        input.Optimization.MaxIter,
 		Tol:            input.Optimization.Tol,
 		Epsilon:        input.Optimization.Epsilon,
 		NumRays:        input.Optimization.NumRays,
-		ApertureMargin: input.Optimization.ApertureMargin,
+		ApertureMargin: apertureMargin,
 		MuConMax:       input.Optimization.MuConMax,
 	}
 
@@ -142,6 +152,24 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 
 	opt := optimize.NewOptimizer(cfg)
 	result := opt.Optimize()
+
+	// Emit a per-term merit breakdown so the reported merit value can be
+	// reconciled against an external evaluation (e.g. `chief` spot RMS).
+	if len(logWriters) > 0 || verbose {
+		xFinal := make([]float64, len(result.Variables))
+		for i, vs := range result.Variables {
+			xFinal[i] = vs.After
+		}
+		bd := opt.MeritBreakdown(xFinal)
+		data, _ := json.Marshal(map[string]interface{}{"event": "breakdown", "terms": bd})
+		line := string(data)
+		if verbose {
+			fmt.Fprintln(os.Stderr, line)
+		}
+		for _, lw := range logWriters {
+			fmt.Fprintln(lw.w, line)
+		}
+	}
 
 	for _, lw := range logWriters {
 		lw.w.Close()
@@ -163,6 +191,17 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 	for i, vs := range result.Variables {
 		xFinal[i] = vs.After
 	}
+
+	// Warn about constraints that could not be satisfied (e.g. unreachable
+	// targets). The optimization itself still optimises the objective.
+	if violations := opt.FinalConstraintViolations(xFinal, 0.1); len(violations) > 0 {
+		fmt.Fprintf(os.Stderr, "  WARNING: constraint(s) not satisfied (target may be unreachable):\n")
+		for _, v := range violations {
+			fmt.Fprintf(os.Stderr, "    %s (kind=%s measure=%s): residual=%.4g\n",
+				v.ID, v.Kind, v.Measure, v.Residual)
+		}
+	}
+
 	finalAps := opt.FinalApertures(xFinal)
 	for i := range outputSurfaces {
 		if d, ok := finalAps[outputSurfaces[i].ID]; ok {
@@ -213,6 +252,16 @@ func buildOptimizeVariables(opt *types.OptimizationConfig, gc *glass.Catalog) []
 				switch v.Target.Param {
 				case "curvature":
 					min, max = -0.5, 0.5
+				case "conic":
+					min, max = -1.0, 1.0
+				case "a4", "coefficient_0":
+					min, max = -1e-2, 1e-2
+				case "a6", "coefficient_1":
+					min, max = -1e-3, 1e-3
+				case "a8", "coefficient_2":
+					min, max = -1e-4, 1e-4
+				case "a10", "coefficient_3", "a12", "coefficient_4":
+					min, max = -1e-5, 1e-5
 				case "thickness":
 					min, max = 0.1, 50.0
 				case "nd":
@@ -332,9 +381,9 @@ func applyVariableStates(surfaces []types.Surface, states []optimize.VariableSta
 	surface.Precompute(result)
 
 	type glassAccum struct {
-		nd, vd     float64
+		nd, vd       float64
 		hasND, hasVD bool
-		origLabel  string
+		origLabel    string
 	}
 	glassMap := map[string]*glassAccum{}
 	for _, st := range states {
@@ -397,6 +446,10 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 		if !cfg.Active {
 			continue
 		}
+		// Note: configs[].ray_paths is intentionally ignored here. Ray paths
+		// describe the object→stop→image ordering for rendering/plotting only
+		// (see internal/render); the optimizer determines the aperture from the
+		// surface diameters and its own chief-ray grid.
 		surfaces := cfg.Surfaces
 		if len(surfaces) == 0 {
 			errOut("Error: config %q has no surfaces defined", cfg.ID)
@@ -477,6 +530,12 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 	if apertureMargin <= 0 {
 		apertureMargin = 1.0
 	}
+	// aperture_margin < 1.0 makes the pupil grid smaller than the aperture,
+	// which clips rays at surface edges and stalls DLS convergence. Clamp it.
+	if apertureMargin < 1.0 {
+		errOut("Warning: aperture_margin %.3f < 1.0 is not recommended (pupil grid smaller than the aperture stalls DLS); clamping to 1.0", apertureMargin)
+		apertureMargin = 1.0
+	}
 
 	var logger dls.Logger
 	logWriters := []struct {
@@ -521,6 +580,21 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 	opt := multiopt.New(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, logger, hull, hullMargin, hullWeight)
 	result := opt.Optimize()
 
+	// Emit a per-term merit breakdown so the reported merit value can be
+	// reconciled against an external evaluation (e.g. `chief` spot RMS).
+	if len(logWriters) > 0 || verbose {
+		finalX := getFinalX(opt, result.Variables)
+		bd := opt.MeritBreakdown(finalX)
+		data, _ := json.Marshal(map[string]interface{}{"event": "breakdown", "terms": bd})
+		line := string(data)
+		if verbose {
+			fmt.Fprintln(os.Stderr, line)
+		}
+		for _, lw := range logWriters {
+			fmt.Fprintln(lw.w, line)
+		}
+	}
+
 	for _, lw := range logWriters {
 		lw.w.Close()
 	}
@@ -538,6 +612,16 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 	// Re-apply final variable values to all configs' surfaces
 	finalX := getFinalX(opt, result.Variables)
 	configSurfaces := applyMultiVars(input, finalX, gc)
+
+	// Warn about constraints that could not be satisfied (e.g. unreachable
+	// targets). The optimization itself still optimises the objective.
+	if violations := opt.FinalConstraintViolations(finalX, 0.1); len(violations) > 0 {
+		fmt.Fprintf(os.Stderr, "  WARNING: constraint(s) not satisfied (target may be unreachable):\n")
+		for _, v := range violations {
+			fmt.Fprintf(os.Stderr, "    %s (config %q, kind=%s measure=%s): residual=%.4g\n",
+				v.ID, v.Config, v.Kind, v.Measure, v.Residual)
+		}
+	}
 
 	// Apply final auto_aperture diameters
 	finalAps := opt.FinalApertures(finalX)

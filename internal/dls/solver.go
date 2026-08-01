@@ -56,18 +56,19 @@ func Solve(m Model) Result {
 	lambdas := make([]float64, nCon)
 	cPrev := make([]float64, nCon)
 	copy(cPrev, c0)
-	muCon := 0.01
-
+	// Per-constraint penalty weight. Each constraint's penalty grows
+	// independently so a satisfiable constraint is enforced tightly while an
+	// infeasible one can be relaxed (see below) instead of dominating the
+	// merit and freezing the solve.
+	muConJ := make([]float64, nCon)
+	for j := range muConJ {
+		muConJ[j] = 0.01
+	}
 	merit := m.EvaluateMerit(xPhys0)
 	meritOnly := merit
 	if hasConstraints {
 		for j, cj := range c0 {
-			term := lambdas[j]*cj + 0.5*muCon*cj*cj
-			if term < 0 {
-				lambdas[j] = 0
-				term = 0.5 * muCon * cj * cj
-			}
-			merit += term
+			merit += constraintTerm(j, cj, lambdas, muConJ)
 		}
 	}
 	if merit < meritOnly {
@@ -88,6 +89,7 @@ func Solve(m Model) Result {
 	status := "max_iterations"
 	totalIter := 0
 	consecStall := 0
+	noImprove := 0
 
 	bestKnownNorm := make([]float64, nVars)
 	copy(bestKnownNorm, xNorm)
@@ -98,7 +100,7 @@ func Solve(m Model) Result {
 
 		J, r := J_opt, r_opt
 		if hasConstraints {
-			J, r = buildAugmented(J_opt, r_opt, J_con, c_con, lambdas, muCon)
+			J, r = buildAugmented(J_opt, r_opt, J_con, c_con, lambdas, muConJ)
 		}
 
 		g := make([]float64, nVars)
@@ -196,11 +198,7 @@ func Solve(m Model) Result {
 		if hasConstraints {
 			cNew = m.ComputeConstraints(xPhysNew)
 			for j, cj := range cNew {
-				term := lambdas[j]*cj + 0.5*muCon*cj*cj
-				if term < 0 {
-					term = 0.5 * muCon * cj * cj
-				}
-				meritNew += term
+				meritNew += constraintTerm(j, cj, lambdas, muConJ)
 			}
 		}
 		if meritNew < meritNewOnly {
@@ -238,11 +236,7 @@ func Solve(m Model) Result {
 				if hasConstraints {
 					cTest = m.ComputeConstraints(xTestPhys)
 					for j, cj := range cTest {
-						term := lambdas[j]*cj + 0.5*muCon*cj*cj
-						if term < 0 {
-							term = 0.5 * muCon * cj * cj
-						}
-						meritTest += term
+						meritTest += constraintTerm(j, cj, lambdas, muConJ)
 					}
 				}
 				if meritTest < meritTestOnly {
@@ -296,22 +290,16 @@ func Solve(m Model) Result {
 			merit = meritNew
 			if hasConstraints && cNew != nil {
 				for j, cj := range cNew {
-					lambdas[j] += muCon * cj
+					lambdas[j] += muConJ[j] * cj
 				}
-				cNewNorm := 0.0
-				for _, cj := range cNew {
-					cNewNorm += cj * cj
-				}
-				cNewNorm = math.Sqrt(cNewNorm)
-				cPrevNorm := 0.0
-				for _, cj := range cPrev {
-					cPrevNorm += cj * cj
-				}
-				cPrevNorm = math.Sqrt(cPrevNorm)
-				if cPrevNorm > 1e-12 && cNewNorm > 0.25*cPrevNorm {
-					muCon *= 10.0
-					if muCon > opts.MuConMax {
-						muCon = opts.MuConMax
+				for j, cj := range cNew {
+					// Enforce harder when this constraint's violation persists
+					// or grows on an accepted step.
+					if math.Abs(cj) > 0.25*math.Abs(cPrev[j]) && math.Abs(cj) > 1e-4 {
+						muConJ[j] *= 10.0
+						if muConJ[j] > opts.MuConMax {
+							muConJ[j] = opts.MuConMax
+						}
 					}
 				}
 				copy(cPrev, cNew)
@@ -342,18 +330,42 @@ func Solve(m Model) Result {
 			opts.Logger.LogIter(totalIter+1, merit, actualReduction, stepNorm, currVars, constr)
 		}
 
-			if actualReduction > 0 {
+		if actualReduction > 0 {
 			consecStall = 0
 		} else {
 			consecStall++
 		}
 
-		if stepNorm < opts.Tol && actualReduction < 1e-8*merit {
-			status = "converged"
-			break
+		// Converge when the merit has not improved over a window and the step
+		// is small, and only while every non-relaxed constraint is satisfied
+		// (a plateau from an infeasible constraint keeps constraints violated,
+		// so it does not converge prematurely; the constraint is relaxed in
+		// the stall-escape below and the objective then gets optimised).
+		if stepNorm < opts.Tol {
+			constraintsOK := true
+			if hasConstraints {
+				for _, cj := range cPrev {
+					if math.Abs(cj) > 1e-4 {
+						constraintsOK = false
+						break
+					}
+				}
+			}
+			if merit >= bestMerit && constraintsOK {
+				noImprove++
+			} else {
+				noImprove = 0
+			}
+			if noImprove >= 8 && constraintsOK {
+				status = "converged"
+				break
+			}
 		}
 
-		// Stall escape: when stuck for many iterations, perturb the state and reset damping
+		// Stall escape: when stuck for many iterations, perturb the state and
+		// reset damping. A plateau can be caused by an unsatisfiable constraint
+		// (its penalty dominates the merit with no descent direction), a
+		// vignetting discontinuity, or a degenerate spot evaluation.
 		if consecStall >= 30 && totalIter < opts.MaxIter-10 {
 			// Reset to best known state before perturbing
 			copy(xNorm, bestKnownNorm)
@@ -380,12 +392,7 @@ func Solve(m Model) Result {
 				cNew := m.ComputeConstraints(xPhys)
 				for j, cj := range cNew {
 					cPrev[j] = cj
-					term := lambdas[j]*cj + 0.5*muCon*cj*cj
-					if term < 0 {
-						lambdas[j] = 0
-						term = 0.5 * muCon * cj * cj
-					}
-					meritNew += term
+					meritNew += constraintTerm(j, cj, lambdas, muConJ)
 				}
 			}
 			if meritNew < meritNewOnly {
@@ -493,7 +500,20 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 	return J_opt, r0, J_con, c0
 }
 
-func buildAugmented(J_opt [][]float64, r_opt []float64, J_con [][]float64, c_con []float64, lambdas []float64, muCon float64) ([][]float64, []float64) {
+// constraintTerm returns the augmented-Lagrangian penalty contribution of
+// constraint j to the merit function: lambdas[j]*cj + 0.5*muConJ[j]*cj^2.
+// An infeasible constraint contributes zero so the objective is not held
+// hostage by it; its violation is reported via the residuals.
+func constraintTerm(j int, cj float64, lambdas []float64, muConJ []float64) float64 {
+	term := lambdas[j]*cj + 0.5*muConJ[j]*cj*cj
+	if term < 0 {
+		lambdas[j] = 0
+		term = 0.5 * muConJ[j] * cj * cj
+	}
+	return term
+}
+
+func buildAugmented(J_opt [][]float64, r_opt []float64, J_con [][]float64, c_con []float64, lambdas []float64, muConJ []float64) ([][]float64, []float64) {
 	nOpt := len(r_opt)
 	nCon := len(c_con)
 	nVars := len(J_opt[0])
@@ -507,9 +527,15 @@ func buildAugmented(J_opt [][]float64, r_opt []float64, J_con [][]float64, c_con
 		copy(JAug[i], J_opt[i])
 	}
 
-	sqrtMu := math.Sqrt(muCon)
+	// The merit penalty term is lambdas[j]*cj + 0.5*muConJ[j]*cj^2 (see
+	// Solve). Square the augmented residual to reproduce that gradient:
+	//   r^2 = (muConJ[j]/2)*(cj + lambda/muConJ[j])^2
+	//       = 0.5*muConJ[j]*cj^2 + lambdas[j]*cj + lambda^2/(2*muConJ[j])
+	// The constant term is irrelevant for minimisation, and the gradient
+	// (muConJ[j]*cj + lambdas[j]) matches the merit penalty's gradient.
 	for j := 0; j < nCon; j++ {
-		rAug[nOpt+j] = sqrtMu * (c_con[j] + lambdas[j]/muCon)
+		sqrtMu := math.Sqrt(muConJ[j] / 2.0)
+		rAug[nOpt+j] = sqrtMu * (c_con[j] + lambdas[j]/muConJ[j])
 		JAug[nOpt+j] = make([]float64, nVars)
 		for k := 0; k < nVars; k++ {
 			JAug[nOpt+j][k] = sqrtMu * J_con[j][k]

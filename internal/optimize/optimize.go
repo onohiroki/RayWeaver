@@ -157,6 +157,11 @@ func NewOptimizer(cfg Config) *Optimizer {
 	if apertureMargin <= 0 {
 		apertureMargin = 1.0
 	}
+	// aperture_margin < 1.0 makes the pupil grid smaller than the aperture,
+	// which clips rays at surface edges and stalls DLS convergence.
+	if apertureMargin < 1.0 {
+		apertureMargin = 1.0
+	}
 
 	hullPairs := buildHullPairs(cfg.Variables)
 
@@ -272,6 +277,42 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 	return merit
 }
 
+// MeritBreakdown evaluates the merit at x and returns the contribution of each
+// merit term (and the objective total), so the value reported by DLS can be
+// reconciled against an external evaluation (e.g. `chief` spot RMS).
+func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
+	surfaces := o.applyVariables(x)
+	for i := range surfaces {
+		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
+			surfaces[i].Diameter = d
+		}
+	}
+	o.sizeAutoApertures(surfaces)
+
+	out := make(map[string]float64)
+	total := 0.0
+	for _, term := range o.meritTerms {
+		var contrib float64
+		if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+			points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+			rms := dls.ComputeSpotRMS(points)
+			contrib = term.Weight * term.FieldWeight * term.WavWeight * rms * rms
+		} else {
+			val := EvaluateMeritKind(term.Kind, term, surfaces, o.currentGC(), o)
+			diff := val - term.Target
+			contrib = term.Weight * term.FieldWeight * term.WavWeight * diff * diff
+		}
+		kind := term.Kind
+		if kind == "" {
+			kind = dls.MeritSpotRMS
+		}
+		out[fmt.Sprintf("%s(f%.1f,%.6f)", kind, term.FieldAngle, term.Wavelength)] = contrib
+		total += contrib
+	}
+	out["objective_total"] = total
+	return out
+}
+
 func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 	surfaces := o.applyVariables(x)
 	nTerms := len(o.meritTerms)
@@ -345,6 +386,56 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 	return c
 }
 
+// ConstraintViolation reports an active constraint whose weighted residual
+// magnitude exceeds tol at the final state.
+type ConstraintViolation struct {
+	ID       string
+	Kind     string
+	Measure  string
+	Residual float64
+}
+
+// FinalConstraintViolations evaluates the active constraints at x and returns
+// those whose weighted residual magnitude exceeds tol.
+func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []ConstraintViolation {
+	surfaces := o.applyVariables(x)
+
+	for i := range surfaces {
+		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
+			surfaces[i].Diameter = d
+		}
+	}
+	o.sizeAutoApertures(surfaces)
+
+	gcConstraint := o.gc
+	if o.tempGC != nil {
+		gcConstraint = o.tempGC
+	}
+
+	var out []ConstraintViolation
+	for _, op := range o.constraints {
+		if !op.Active {
+			continue
+		}
+		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint, o.numRays, o.apertureMargin)
+		err := constraint.ComputeError(op.Kind, value, op)
+		w := op.Weight
+		if w <= 0 {
+			w = 1.0
+		}
+		residual := math.Sqrt(w) * err
+		if math.Abs(residual) > tol {
+			out = append(out, ConstraintViolation{
+				ID:       op.ID,
+				Kind:     string(op.Kind),
+				Measure:  string(op.Measure),
+				Residual: residual,
+			})
+		}
+	}
+	return out
+}
+
 func (o *Optimizer) Optimize() Result {
 	dlsResult := dls.Solve(o)
 
@@ -386,14 +477,44 @@ func (o *Optimizer) finalAperturesImpl(x []float64) map[int]float64 {
 	return result
 }
 
+// asphereCoefIndex maps an asphere coefficient parameter name (a4/a6/a8/a10/
+// a12, or the array aliases coefficient_0..coefficient_4) to the index in
+// types.Surface.Coefficients.
+func asphereCoefIndex(param string) (int, bool) {
+	switch param {
+	case "a4", "coefficient_0":
+		return 0, true
+	case "a6", "coefficient_1":
+		return 1, true
+	case "a8", "coefficient_2":
+		return 2, true
+	case "a10", "coefficient_3":
+		return 3, true
+	case "a12", "coefficient_4":
+		return 4, true
+	}
+	return 0, false
+}
+
 func (o *Optimizer) applyVariables(x []float64) []types.Surface {
 	result := make([]types.Surface, len(o.surfaces))
 	copy(result, o.surfaces)
 
 	needTempGC := false
 	for i, v := range o.variables {
+		if idx, ok := asphereCoefIndex(v.Param); ok {
+			si := dls.SurfaceIndex(result, v.SurfaceID)
+			if si < 0 {
+				continue
+			}
+			for len(result[si].Coefficients) <= idx {
+				result[si].Coefficients = append(result[si].Coefficients, 0)
+			}
+			result[si].Coefficients[idx] = x[i]
+			continue
+		}
 		switch v.Param {
-		case "curvature", "thickness":
+		case "curvature", "conic", "thickness":
 			idx := dls.SurfaceIndex(result, v.SurfaceID)
 			if idx < 0 {
 				continue
@@ -401,6 +522,8 @@ func (o *Optimizer) applyVariables(x []float64) []types.Surface {
 			switch v.Param {
 			case "curvature":
 				result[idx].Curvature = x[i]
+			case "conic":
+				result[idx].Conic = x[i]
 			case "thickness":
 				result[idx].Thickness = x[i]
 			}
@@ -502,8 +625,17 @@ func (o *Optimizer) sizeAutoApertures(surfaces []types.Surface) {
 func (o *Optimizer) getInitialState() []float64 {
 	x := make([]float64, len(o.variables))
 	for i, v := range o.variables {
+		if idx, ok := asphereCoefIndex(v.Param); ok {
+			si := dls.SurfaceIndex(o.surfaces, v.SurfaceID)
+			if si >= 0 && idx < len(o.surfaces[si].Coefficients) {
+				x[i] = o.surfaces[si].Coefficients[idx]
+			} else {
+				x[i] = (v.Min + v.Max) / 2
+			}
+			continue
+		}
 		switch v.Param {
-		case "curvature", "thickness":
+		case "curvature", "conic", "thickness":
 			idx := dls.SurfaceIndex(o.surfaces, v.SurfaceID)
 			if idx < 0 {
 				x[i] = (v.Min + v.Max) / 2
@@ -512,6 +644,8 @@ func (o *Optimizer) getInitialState() []float64 {
 			switch v.Param {
 			case "curvature":
 				x[i] = o.surfaces[idx].Curvature
+			case "conic":
+				x[i] = o.surfaces[idx].Conic
 			case "thickness":
 				x[i] = o.surfaces[idx].Thickness
 			}
@@ -548,12 +682,21 @@ func (o *Optimizer) buildVariableStates(x []float64) []VariableState {
 			After:     x[i],
 		}
 
+		if idx, ok := asphereCoefIndex(v.Param); ok {
+			if si := dls.SurfaceIndex(o.surfaces, v.SurfaceID); si >= 0 && idx < len(o.surfaces[si].Coefficients) {
+				st.Before = o.surfaces[si].Coefficients[idx]
+			}
+			states[i] = st
+			continue
+		}
 		switch v.Param {
-		case "curvature", "thickness":
+		case "curvature", "conic", "thickness":
 			if idx := dls.SurfaceIndex(o.surfaces, v.SurfaceID); idx >= 0 {
 				switch v.Param {
 				case "curvature":
 					st.Before = o.surfaces[idx].Curvature
+				case "conic":
+					st.Before = o.surfaces[idx].Conic
 				case "thickness":
 					st.Before = o.surfaces[idx].Thickness
 				}

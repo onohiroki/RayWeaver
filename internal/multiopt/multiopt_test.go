@@ -32,10 +32,10 @@ func TestMultiOptimizerSeidelDistortionKind(t *testing.T) {
 
 	configs := []ConfigInput{
 		{
-			ID:       "cfg1",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 10.0, Weight: 1.0}},
+			ID:          "cfg1",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 10.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{{
 				Kind:       "seidel_distortion",
@@ -59,9 +59,9 @@ func TestMultiOptimizerSeidelDistortionKind(t *testing.T) {
 func TestMultiOptimizerApplySharedVariables(t *testing.T) {
 	sharedVars := []types.SharedVariable{
 		{
-			Name:  "curvature_shift",
-			Min:   -0.1,
-			Max:   0.1,
+			Name:   "curvature_shift",
+			Min:    -0.1,
+			Max:    0.1,
 			Active: true,
 			Bindings: []types.SharedVariableBinding{
 				{Config: "wide", ID: 1, Param: "curvature", Scale: 1.0, Offset: 0.0},
@@ -72,20 +72,20 @@ func TestMultiOptimizerApplySharedVariables(t *testing.T) {
 
 	configs := []ConfigInput{
 		{
-			ID:       "wide",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			ID:          "wide",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
 			},
 		},
 		{
-			ID:       "tele",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			ID:          "tele",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
@@ -144,10 +144,10 @@ func TestMultiOptimizerApplyLocalVariables(t *testing.T) {
 
 	configs := []ConfigInput{
 		{
-			ID:       "wide",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			ID:          "wide",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
@@ -187,10 +187,10 @@ func TestMultiOptimizerSizeAutoAperturesGeometric(t *testing.T) {
 
 	configs := []ConfigInput{
 		{
-			ID:       "wide",
-			Weight:   1.0,
-			Surfaces: surfaces,
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}, {ID: 1, AngleDeg: 16.0, Weight: 1.0}},
+			ID:          "wide",
+			Weight:      1.0,
+			Surfaces:    surfaces,
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}, {ID: 1, AngleDeg: 16.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
@@ -223,9 +223,9 @@ func TestMultiOptimizerSizeAutoAperturesGeometric(t *testing.T) {
 func TestMultiOptimizerEvaluateMerit(t *testing.T) {
 	sharedVars := []types.SharedVariable{
 		{
-			Name:  "curvature_shift",
-			Min:   -0.1,
-			Max:   0.1,
+			Name:   "curvature_shift",
+			Min:    -0.1,
+			Max:    0.1,
 			Active: true,
 			Bindings: []types.SharedVariableBinding{
 				{Config: "wide", ID: 1, Param: "curvature", Scale: 1.0, Offset: 0.0},
@@ -236,20 +236,20 @@ func TestMultiOptimizerEvaluateMerit(t *testing.T) {
 
 	configs := []ConfigInput{
 		{
-			ID:       "wide",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			ID:          "wide",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
 			},
 		},
 		{
-			ID:       "tele",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			ID:          "tele",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
@@ -275,9 +275,9 @@ func TestMultiOptimizerEvaluateMerit(t *testing.T) {
 func TestMultiOptimizerGetInitialState(t *testing.T) {
 	sharedVars := []types.SharedVariable{
 		{
-			Name:  "curvature_shift",
-			Min:   -0.1,
-			Max:   0.1,
+			Name:   "curvature_shift",
+			Min:    -0.1,
+			Max:    0.1,
 			Active: true,
 			Bindings: []types.SharedVariableBinding{
 				{Config: "wide", ID: 1, Param: "curvature", Scale: 1.0, Offset: 0.0},
@@ -298,10 +298,10 @@ func TestMultiOptimizerGetInitialState(t *testing.T) {
 
 	configs := []ConfigInput{
 		{
-			ID:       "wide",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			ID:          "wide",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
@@ -331,9 +331,9 @@ func TestMultiOptimizerGetInitialState(t *testing.T) {
 func TestMultiOptimizerBuildVariableStates(t *testing.T) {
 	sharedVars := []types.SharedVariable{
 		{
-			Name:  "curvature_shift",
-			Min:   -0.1,
-			Max:   0.1,
+			Name:   "curvature_shift",
+			Min:    -0.1,
+			Max:    0.1,
 			Active: true,
 			Bindings: []types.SharedVariableBinding{
 				{Config: "wide", ID: 1, Param: "curvature", Scale: 1.0, Offset: 0.0},
@@ -343,10 +343,10 @@ func TestMultiOptimizerBuildVariableStates(t *testing.T) {
 
 	configs := []ConfigInput{
 		{
-			ID:       "wide",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			ID:          "wide",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
@@ -380,9 +380,9 @@ func TestMultiOptimizerNoGlassCatalog(t *testing.T) {
 
 	sharedVars := []types.SharedVariable{
 		{
-			Name:  "curvature_shift",
-			Min:   -0.1,
-			Max:   0.1,
+			Name:   "curvature_shift",
+			Min:    -0.1,
+			Max:    0.1,
 			Active: true,
 			Bindings: []types.SharedVariableBinding{
 				{Config: "wide", ID: 1, Param: "curvature", Scale: 1.0, Offset: 0.0},
@@ -392,10 +392,10 @@ func TestMultiOptimizerNoGlassCatalog(t *testing.T) {
 
 	configs := []ConfigInput{
 		{
-			ID:       "wide",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			ID:          "wide",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
@@ -418,9 +418,9 @@ func TestMultiOptimizerNoGlassCatalog(t *testing.T) {
 func TestMultiOptimizerResultHasExpectedFields(t *testing.T) {
 	sharedVars := []types.SharedVariable{
 		{
-			Name:  "curvature_shift",
-			Min:   -0.1,
-			Max:   0.1,
+			Name:   "curvature_shift",
+			Min:    -0.1,
+			Max:    0.1,
 			Active: true,
 			Bindings: []types.SharedVariableBinding{
 				{Config: "wide", ID: 1, Param: "curvature", Scale: 1.0, Offset: 0.0},
@@ -430,10 +430,10 @@ func TestMultiOptimizerResultHasExpectedFields(t *testing.T) {
 
 	configs := []ConfigInput{
 		{
-			ID:       "wide",
-			Weight:   1.0,
-			Surfaces: singletSurfaces(),
-			Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			ID:          "wide",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 			MeritTerms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
@@ -458,5 +458,213 @@ func TestMultiOptimizerResultHasExpectedFields(t *testing.T) {
 	}
 	if result.AfterMerit <= 0 {
 		t.Errorf("AfterMerit = %v, want positive", result.AfterMerit)
+	}
+}
+
+// tripletEqualityConfigs returns a US2645157-triplet config with 2 equality
+// constraints (abs_efl and entrance_pupil_diameter) on the given targets.
+func tripletEqualityConfigs(eflTarget, epdTarget float64) []ConfigInput {
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 1 / 10.2871491742, Thickness: 1.524, Material: "SK18", Diameter: 10.0},
+		{ID: 2, Type: types.Sphere, Curvature: 1 / -239.3967954752, Thickness: 2.3368, Material: "AIR", Diameter: 10.0},
+		{ID: 3, Type: types.Sphere, Curvature: 1 / -12.8269871730, Thickness: 0.508, Material: "SF12", Diameter: 6.0},
+		{ID: 4, Type: types.Sphere, Curvature: 1 / 10.5917184406, Thickness: 1.4986, Material: "AIR", Diameter: 6.0},
+		{ID: 5, Type: types.Sphere, Curvature: 0.0, Thickness: 1.016, Material: "AIR", Diameter: 3.78},
+		{ID: 6, Type: types.Sphere, Curvature: 1 / 61.8456294200, Thickness: 1.524, Material: "SK18", Diameter: 6.0},
+		{ID: 7, Type: types.Sphere, Curvature: 1 / -10.0074859032, Thickness: 21.36695183553, Material: "AIR", Diameter: 6.0},
+		{ID: 8, Type: types.Sphere, Curvature: 0.0, Thickness: 0.0, Material: "AIR", Diameter: 44.0},
+	}
+	return []ConfigInput{{
+		ID:          "cfg1",
+		Weight:      1.0,
+		Surfaces:    surfaces,
+		Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}, {ID: 1, AngleDeg: 16.0, Weight: 1.0}, {ID: 2, AngleDeg: 24.0, Weight: 0.5}},
+		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+		MeritTerms: []types.MeritTerm{
+			{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
+			{Field: 1, Wavelength: 0.00058756, Weight: 1.0},
+			{Field: 2, Wavelength: 0.00058756, Weight: 0.5},
+		},
+		Constraints: []types.ConstraintOperand{
+			{Kind: types.ConstraintEquality, Measure: types.MeasureAbsEFL, Target: eflTarget, Weight: 1.0, Active: true},
+			{Kind: types.ConstraintEquality, Measure: types.MeasureEntrancePupilDiameter, Target: epdTarget, Weight: 1.0, Active: true},
+		},
+	}}
+}
+
+func tripletGC() *glass.Catalog {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SK18", ND: 1.63854, VD: 55.42})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SF12", ND: 1.64831, VD: 33.84})
+	return gc
+}
+
+// TestMultiOptimizerSatisfiableEqualityConstraints is a regression test for
+// the DLS freeze reported in the improvement report (3.1): multiple equality
+// constraints used to freeze the solver (flat merit, no movement). With
+// satisfiable targets the solver must make progress and satisfy both
+// constraints.
+func TestMultiOptimizerSatisfiableEqualityConstraints(t *testing.T) {
+	configs := tripletEqualityConfigs(25.0, 4.61)
+	localVars := []types.LocalVariableDef{
+		{Name: "s1_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature"}, Min: 0.05, Max: 0.2, Active: true},
+		{Name: "s3_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "curvature"}, Min: -0.15, Max: -0.01, Active: true},
+		{Name: "s6_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 6, Param: "curvature"}, Min: 0.0, Max: 0.05, Active: true},
+		{Name: "s7_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 7, Param: "curvature"}, Min: -0.2, Max: -0.01, Active: true},
+	}
+
+	opt := New(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
+	result := opt.Optimize()
+
+	if result.AfterMerit >= result.BeforeMerit {
+		t.Errorf("AfterMerit=%v not < BeforeMerit=%v: solver made no progress (freeze?)", result.AfterMerit, result.BeforeMerit)
+	}
+
+	x := make([]float64, len(result.Variables))
+	for i, vs := range result.Variables {
+		x[i] = vs.After
+	}
+	c := opt.ComputeConstraints(x)
+	if len(c) != 2 {
+		t.Fatalf("expected 2 constraint residuals, got %d", len(c))
+	}
+	if math.Abs(c[0]) > 0.05 {
+		t.Errorf("abs_efl residual = %v, want ~0 (constraint not satisfied)", c[0])
+	}
+	if math.Abs(c[1]) > 0.05 {
+		t.Errorf("entrance_pupil_diameter residual = %v, want ~0 (constraint not satisfied)", c[1])
+	}
+}
+
+// TestMultiOptimizerUnsatisfiableConstraintWarns verifies that an
+// unreachable equality constraint does not silently "converge": the solver
+// keeps running (or converges only once other constraints are satisfied) and
+// the violation is reported by FinalConstraintViolations.
+func TestMultiOptimizerUnsatisfiableConstraintWarns(t *testing.T) {
+	// EPD target 8 is far beyond what this triplet can reach (~4.6).
+	configs := tripletEqualityConfigs(25.0, 8.0)
+	localVars := []types.LocalVariableDef{
+		{Name: "s1_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature"}, Min: 0.05, Max: 0.2, Active: true},
+		{Name: "s3_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "curvature"}, Min: -0.15, Max: -0.01, Active: true},
+		{Name: "s6_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 6, Param: "curvature"}, Min: 0.0, Max: 0.05, Active: true},
+		{Name: "s7_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 7, Param: "curvature"}, Min: -0.2, Max: -0.01, Active: true},
+	}
+
+	opt := New(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
+	result := opt.Optimize()
+
+	if result.Status == "converged" {
+		t.Errorf("status = converged although the EPD constraint is unreachable")
+	}
+
+	x := make([]float64, len(result.Variables))
+	for i, vs := range result.Variables {
+		x[i] = vs.After
+	}
+	viol := opt.FinalConstraintViolations(x, 0.1)
+	found := false
+	for _, v := range viol {
+		if v.Measure == string(types.MeasureEntrancePupilDiameter) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an entrance_pupil_diameter violation to be reported, got %+v", viol)
+	}
+}
+
+// TestMultiOptimizerApertureMarginClamp is a regression test for the DLS
+// stall reported in the improvement report (3.2): aperture_margin < 1.0
+// makes the pupil grid smaller than the aperture and stalls convergence.
+// The constructor must clamp it to 1.0.
+func TestMultiOptimizerApertureMarginClamp(t *testing.T) {
+	configs := []ConfigInput{{
+		ID:          "cfg1",
+		Weight:      1.0,
+		Surfaces:    singletSurfaces(),
+		Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+		MeritTerms:  []types.MeritTerm{{Field: 0, Wavelength: 0.00058756, Weight: 1.0}},
+	}}
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	opt := New(configs, nil, nil, gc, 10, 0.01, 1e-6, 1e-6, 0.8, 64, 100, nil, nil, 0, 0)
+	if got := opt.Options().ApertureMargin; got != 1.0 {
+		t.Errorf("ApertureMargin = %v, want 1.0 (clamped)", got)
+	}
+}
+
+// TestMultiOptimizerAsphereVariables is a regression test for the improvement
+// report (3.7): asphere coefficients (conic + a4..a12 / coefficient_N) must be
+// usable as optimization variables.
+func TestMultiOptimizerAsphereVariables(t *testing.T) {
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.AspherePolynomial, Curvature: 0.01, Conic: 0.0, Coefficients: []float64{1e-5, 0, 0}, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+	}
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	configs := []ConfigInput{{
+		ID:          "cfg1",
+		Weight:      1.0,
+		Surfaces:    surfaces,
+		Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+		MeritTerms:  []types.MeritTerm{{Field: 0, Wavelength: 0.00058756, Weight: 1.0}},
+	}}
+	localVars := []types.LocalVariableDef{
+		{Name: "s1_conic", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "conic"}, Min: -1, Max: 1, Active: true},
+		{Name: "s1_a4", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "a4"}, Min: -1e-3, Max: 1e-3, Active: true},
+		{Name: "s1_coef1", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "coefficient_1"}, Min: -1e-3, Max: 1e-3, Active: true},
+	}
+
+	opt := New(configs, nil, localVars, gc, 5, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
+
+	// Initial state must read the surface values (a4 = 1e-5, coefficient_1 = 0).
+	x := opt.getInitialState()
+	if math.Abs(x[1]-1e-5) > 1e-12 {
+		t.Errorf("initial a4 = %v, want 1e-5", x[1])
+	}
+	if math.Abs(x[2]) > 1e-12 {
+		t.Errorf("initial coefficient_1 = %v, want 0", x[2])
+	}
+
+	// Changing the a4 coefficient must change the merit (the asphere sag
+	// affects the traced rays).
+	base := opt.evaluateMerit(x)
+	x[1] = 5e-4
+	pert := opt.evaluateMerit(x)
+	if math.Abs(pert-base) < 1e-12 {
+		t.Errorf("merit unchanged when a4 changes (%v vs %v): asphere variable not applied", base, pert)
+	}
+}
+
+// TestMultiOptimizerMeritBreakdown is a regression test for the improvement
+// report (3.10): MeritBreakdown must decompose the merit into per-term
+// contributions whose total matches EvaluateMerit, so the DLS merit value can
+// be reconciled with an external evaluation.
+func TestMultiOptimizerMeritBreakdown(t *testing.T) {
+	configs := tripletEqualityConfigs(25.0, 4.61)
+	localVars := []types.LocalVariableDef{
+		{Name: "s1_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature"}, Min: 0.05, Max: 0.2, Active: true},
+		{Name: "s3_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "curvature"}, Min: -0.15, Max: -0.01, Active: true},
+	}
+	opt := New(configs, nil, localVars, tripletGC(), 10, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
+
+	x := opt.getInitialState()
+	bd := opt.MeritBreakdown(x)
+	total, ok := bd["objective_total"]
+	if !ok {
+		t.Fatalf("MeritBreakdown missing objective_total: %v", bd)
+	}
+	merit := opt.evaluateMerit(x)
+	if math.Abs(total-merit) > 1e-9 {
+		t.Errorf("objective_total = %v, want %v (EvaluateMerit)", total, merit)
+	}
+	// There must be one contribution per merit term.
+	if n := len(bd) - 1; n != len(configs[0].MeritTerms) {
+		t.Errorf("MeritBreakdown has %d terms, want %d", n, len(configs[0].MeritTerms))
 	}
 }

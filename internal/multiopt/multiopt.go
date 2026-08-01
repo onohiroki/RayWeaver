@@ -65,8 +65,6 @@ type MultiOptimizer struct {
 	hullPairs        []hullPair
 }
 
-
-
 type Result struct {
 	BeforeMerit float64         `yaml:"before_merit"`
 	AfterMerit  float64         `yaml:"after_merit"`
@@ -106,6 +104,11 @@ func New(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []t
 	}
 	if numRays <= 0 {
 		numRays = 64
+	}
+	// aperture_margin < 1.0 makes the pupil grid smaller than the aperture,
+	// which clips rays at surface edges and stalls DLS convergence.
+	if apertureMargin < 1.0 {
+		apertureMargin = 1.0
 	}
 
 	var variables []VariableInfo
@@ -262,6 +265,50 @@ func (o *MultiOptimizer) InitialState() []float64 {
 
 func (o *MultiOptimizer) EvaluateMerit(x []float64) float64 {
 	return o.evaluateMerit(x)
+}
+
+// MeritBreakdown evaluates the merit at x and returns the contribution of each
+// merit term (and the objective total), so the value reported by DLS can be
+// reconciled against an external evaluation (e.g. `chief` spot RMS).
+func (o *MultiOptimizer) MeritBreakdown(x []float64) map[string]float64 {
+	configSurfaces := o.applyVariables(x)
+	out := make(map[string]float64)
+	objTotal := 0.0
+	for _, cfg := range o.configs {
+		surfaces := configSurfaces[cfg.ID]
+		for i := range surfaces {
+			key := cfgSurfKey(cfg.ID, surfaces[i].ID)
+			if d, ok := o.initialDiameters[key]; ok {
+				surfaces[i].Diameter = d
+			}
+		}
+		surface.Precompute(surfaces)
+		o.sizeAutoApertures(cfg, surfaces)
+
+		for _, term := range cfg.MeritTerms {
+			fw := fieldWeightForTerm(cfg, term)
+			ww := wavWeightForTerm(cfg, term)
+			var contrib float64
+			if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
+				points, _ := o.traceFieldGrid(surfaces, cfg, term)
+				rms := computeSpotRMS(points)
+				contrib = term.Weight * fw * ww * rms * rms
+			} else {
+				val := o.evaluateKindTerm(cfg, term, surfaces)
+				diff := val - term.Target
+				contrib = term.Weight * fw * ww * diff * diff
+			}
+			kind := term.Kind
+			if kind == "" {
+				kind = dls.MeritSpotRMS
+			}
+			key := fmt.Sprintf("config:%s %s(f%d,%.6f)", cfg.ID, kind, term.Field, term.Wavelength)
+			out[key] = contrib
+			objTotal += cfg.Weight * contrib
+		}
+	}
+	out["objective_total"] = objTotal
+	return out
 }
 
 func (o *MultiOptimizer) ComputeResiduals(x []float64) []float64 {
@@ -484,10 +531,10 @@ func (o *MultiOptimizer) traceFieldGrid(surfaces []types.Surface, cfg ConfigInpu
 	for _, pt := range grid {
 		origin := types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}
 		r := types.Ray{
-			Wavelength:        wavelength,
-			Initial:           types.RayState{Origin: origin, Direction: rayDir},
-			Path:              path,
-			Jones:             types.NewCircularJones(true),
+			Wavelength:         wavelength,
+			Initial:            types.RayState{Origin: origin, Direction: rayDir},
+			Path:               path,
+			Jones:              types.NewCircularJones(true),
 			SkipGlassPathCheck: fieldAngle == 0,
 		}
 
@@ -618,6 +665,66 @@ func (o *MultiOptimizer) sizeAutoApertures(cfg ConfigInput, surfaces []types.Sur
 	}
 }
 
+// ConstraintViolation reports an active constraint whose weighted residual
+// magnitude exceeds a tolerance at the final state.
+type ConstraintViolation struct {
+	ID       string
+	Config   string
+	Kind     string
+	Measure  string
+	Residual float64
+}
+
+// FinalConstraintViolations evaluates the active constraints at x and returns
+// those whose weighted residual magnitude exceeds tol.
+func (o *MultiOptimizer) FinalConstraintViolations(x []float64, tol float64) []ConstraintViolation {
+	configSurfaces := o.applyVariables(x)
+
+	gc := o.gc
+	if o.tempGC != nil {
+		gc = o.tempGC
+	}
+
+	var out []ConstraintViolation
+	for _, cfg := range o.configs {
+		surfaces := configSurfaces[cfg.ID]
+
+		for i := range surfaces {
+			key := cfgSurfKey(cfg.ID, surfaces[i].ID)
+			if d, ok := o.initialDiameters[key]; ok {
+				surfaces[i].Diameter = d
+			}
+		}
+
+		surface.Precompute(surfaces)
+		o.sizeAutoApertures(cfg, surfaces)
+
+		for _, c := range cfg.Constraints {
+			if !c.Active {
+				continue
+			}
+			angle := o.fieldAngleForTerm(cfg, types.MeritTerm{Field: c.Field}, surfaces)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin)
+			err := constraint.ComputeError(c.Kind, value, c)
+			w := c.Weight
+			if w <= 0 {
+				w = 1.0
+			}
+			residual := math.Sqrt(w) * err
+			if math.Abs(residual) > tol {
+				out = append(out, ConstraintViolation{
+					ID:       c.ID,
+					Config:   cfg.ID,
+					Kind:     string(c.Kind),
+					Measure:  string(c.Measure),
+					Residual: residual,
+				})
+			}
+		}
+	}
+	return out
+}
+
 func (o *MultiOptimizer) ComputeConstraints(x []float64) []float64 {
 	configSurfaces := o.applyVariables(x)
 
@@ -692,17 +799,12 @@ func (o *MultiOptimizer) getInitialState() []float64 {
 			}
 		} else {
 			switch v.Target.Param {
-			case "curvature", "thickness":
+			case "curvature", "conic", "thickness", "diameter", "a4", "a6", "a8", "a10", "a12", "coefficient_0", "coefficient_1", "coefficient_2", "coefficient_3", "coefficient_4":
 				for _, cfg := range o.configs {
 					if cfg.ID == v.Config {
 						idx := surfaceIndex(cfg.Surfaces, v.Target.ID)
 						if idx >= 0 {
-							switch v.Target.Param {
-							case "curvature":
-								x[i] = cfg.Surfaces[idx].Curvature
-							case "thickness":
-								x[i] = cfg.Surfaces[idx].Thickness
-							}
+							x[i] = getParam(cfg.Surfaces[idx], v.Target.Param)
 						} else {
 							x[i] = (v.Min + v.Max) / 2
 						}
@@ -850,10 +952,10 @@ func (o *MultiOptimizer) imageHeightToFieldAngle(cfg ConfigInput, surfaces []typ
 
 		origin := types.Vec3{X: 0, Y: 0, Z: -100.0}
 		r := types.Ray{
-			Wavelength:        wavelength,
-			Initial:           types.RayState{Origin: origin, Direction: dir},
-			Path:              path,
-			Jones:             pol,
+			Wavelength:         wavelength,
+			Initial:            types.RayState{Origin: origin, Direction: dir},
+			Path:               path,
+			Jones:              pol,
 			SkipGlassPathCheck: mid == 0,
 		}
 		result := engine.TraceRay(r, surfaces)
@@ -907,10 +1009,38 @@ func cfgSurfKey(configID string, surfID int) string {
 	return configID + ":" + fmt.Sprint(surfID)
 }
 
+// asphereCoefIndex maps an asphere coefficient parameter name (a4/a6/a8/a10/
+// a12, or the array aliases coefficient_0..coefficient_4) to the index in
+// types.Surface.Coefficients, which holds the h^(2i+4) coefficients.
+func asphereCoefIndex(param string) (int, bool) {
+	switch param {
+	case "a4", "coefficient_0":
+		return 0, true
+	case "a6", "coefficient_1":
+		return 1, true
+	case "a8", "coefficient_2":
+		return 2, true
+	case "a10", "coefficient_3":
+		return 3, true
+	case "a12", "coefficient_4":
+		return 4, true
+	}
+	return 0, false
+}
+
 func setParam(s *types.Surface, param string, val float64) {
+	if idx, ok := asphereCoefIndex(param); ok {
+		for len(s.Coefficients) <= idx {
+			s.Coefficients = append(s.Coefficients, 0)
+		}
+		s.Coefficients[idx] = val
+		return
+	}
 	switch param {
 	case "curvature":
 		s.Curvature = val
+	case "conic":
+		s.Conic = val
 	case "thickness":
 		s.Thickness = val
 	case "diameter":
@@ -925,9 +1055,17 @@ func setParam(s *types.Surface, param string, val float64) {
 }
 
 func getParam(s types.Surface, param string) float64 {
+	if idx, ok := asphereCoefIndex(param); ok {
+		if idx < len(s.Coefficients) {
+			return s.Coefficients[idx]
+		}
+		return 0
+	}
 	switch param {
 	case "curvature":
 		return s.Curvature
+	case "conic":
+		return s.Conic
 	case "thickness":
 		return s.Thickness
 	case "diameter":
@@ -1024,7 +1162,7 @@ func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
 			r := (float64(i) + 0.5) / float64(n) * apertureRadius
-			theta := 2 * math.Pi * (float64(j) + 0.5) / float64(n) + rotationOffset
+			theta := 2*math.Pi*(float64(j)+0.5)/float64(n) + rotationOffset
 			pts = append(pts, pupilPoint{
 				X: r * math.Cos(theta),
 				Y: r * math.Sin(theta),
