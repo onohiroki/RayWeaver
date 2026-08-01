@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -13,9 +14,21 @@ type rayState struct {
 	U float64
 }
 
+func surfacePower(s types.Surface, nBefore, nAfter, R float64) float64 {
+	if s.Reflects() {
+		return -2.0 * nBefore / R
+	}
+	return (nAfter - nBefore) / R
+}
+
+// traceForward walks the paraxial marginal ray in the unfolded local frame.
+// Surfaces are separated by their local path length (thickness), which is
+// positive in the fold model; reflections flip the index sign and the power
+// formula uses the local (beam-frame) radius. Physical Z is only used for the
+// reported vertex positions.
 func traceForward(surfaces []types.Surface, nIndex []float64, y0, u0 float64) ([]rayState, rayState) {
+	physZ := surface.PhysicalZ(surfaces)
 	vertices := make([]rayState, 0, len(surfaces))
-	z := 0.0
 	y, u := y0, u0
 	for i := 0; i < len(surfaces); i++ {
 		nBefore := 1.0
@@ -23,29 +36,36 @@ func traceForward(surfaces []types.Surface, nIndex []float64, y0, u0 float64) ([
 			nBefore = nIndex[i-1]
 		}
 		nAfter := nIndex[i]
+		if surfaces[i].Reflects() {
+			nAfter = -nBefore
+		}
 		R := surfaces[i].ParaxialRadius
 
 		if R != 0 {
-			phi := (nAfter - nBefore) / R
+			phi := surfacePower(surfaces[i], nBefore, nAfter, R)
 			u = (nBefore*u - y*phi) / nAfter
 		}
 
-		vertices = append(vertices, rayState{Z: z, Y: y, U: u})
+		vertices = append(vertices, rayState{Z: physZ[i], Y: y, U: u})
 
-		y = y + surfaces[i].Thickness*u
-		z += surfaces[i].Thickness
+		if i+1 < len(surfaces) {
+			y += surfaces[i].Thickness * u
+		} else {
+			y += surfaces[i].Thickness * u
+		}
 	}
-	final := rayState{Z: z, Y: y, U: u}
+	final := rayState{Z: surfaces[len(surfaces)-1].PhysicalZ, Y: y, U: u}
 	return vertices, final
 }
 
 func traceReversed(surfaces []types.Surface, nIndex []float64, y0, u0 float64) ([]rayState, rayState) {
+	physZ := surface.PhysicalZ(surfaces)
 	vertices := make([]rayState, 0, len(surfaces))
-	z := totalTrack(surfaces)
+	z := physZ[len(physZ)-1]
 	y, u := y0, u0
 	for i := len(surfaces) - 1; i >= 0; i-- {
 		t := -surfaces[i].Thickness
-		y = y + t*u
+		y += t * u
 		z += t
 
 		nBefore := nIndex[i]
@@ -53,10 +73,13 @@ func traceReversed(surfaces []types.Surface, nIndex []float64, y0, u0 float64) (
 		if i > 0 {
 			nAfter = nIndex[i-1]
 		}
+		if surfaces[i].Reflects() {
+			nAfter = -nBefore
+		}
 
 		R := surfaces[i].ParaxialRadius
 		if R != 0 {
-			phi := (nAfter - nBefore) / R
+			phi := surfacePower(surfaces[i], nBefore, nAfter, R)
 			u = (nBefore*u - y*phi) / nAfter
 		}
 
@@ -74,14 +97,21 @@ func tracePupilForward(surfaces []types.Surface, nIndex []float64, startIdx int,
 			nBefore = nIndex[i-1]
 		}
 		nAfter := nIndex[i]
+		if surfaces[i].Reflects() {
+			nAfter = -nBefore
+		}
 		R := surfaces[i].ParaxialRadius
 
 		if R != 0 {
-			phi := (nAfter - nBefore) / R
+			phi := surfacePower(surfaces[i], nBefore, nAfter, R)
 			u = (nBefore*u - y*phi) / nAfter
 		}
 
-		y = y + surfaces[i].Thickness*u
+		if i+1 < len(surfaces) {
+			y += surfaces[i].Thickness * u
+		} else {
+			y += surfaces[i].Thickness * u
+		}
 	}
 	return rayState{Y: y, U: u}
 }
@@ -102,17 +132,27 @@ func tracePupilBackward(surfaces []types.Surface, nIndex []float64, startIdx int
 		if i > 0 {
 			nAfter = nIndex[i-1] // forward's n_before
 		}
+		if surfaces[i].Reflects() {
+			nAfter = -nBefore
+		}
 
 		R := surfaces[i].ParaxialRadius
 		if R != 0 {
-			phi := (nAfter - nBefore) / R
+			phi := surfacePower(surfaces[i], nBefore, nAfter, R)
 			u = (nBefore*u - y*phi) / nAfter
 		}
 	}
 	return rayState{Y: y, U: u}
 }
 
-func stopSurfaceID(surfaces []types.Surface) int {
+func stopSurfaceID(surfaces []types.Surface, explicitID int) int {
+	if explicitID > 0 {
+		for _, s := range surfaces {
+			if s.ID == explicitID {
+				return explicitID
+			}
+		}
+	}
 	stopID := 0
 	minD := math.MaxFloat64
 	for _, s := range surfaces {
@@ -134,8 +174,8 @@ func stopSurfaceID(surfaces []types.Surface) int {
 	return stopID
 }
 
-func stopSurfaceIndex(surfaces []types.Surface) int {
-	stopID := stopSurfaceID(surfaces)
+func stopSurfaceIndex(surfaces []types.Surface, explicitID int) int {
+	stopID := stopSurfaceID(surfaces, explicitID)
 	for i, s := range surfaces {
 		if s.ID == stopID {
 			return i
@@ -144,12 +184,42 @@ func stopSurfaceIndex(surfaces []types.Surface) int {
 	return -1
 }
 
-func totalTrack(surfaces []types.Surface) float64 {
-	z := 0.0
-	for _, s := range surfaces {
-		z += s.Thickness
+func computeStopZ(surfaces []types.Surface, stopID int) float64 {
+	if stopID <= 0 {
+		stopID = stopSurfaceID(surfaces, 0)
 	}
-	return z
+	if stopID == 0 {
+		return 0
+	}
+	for _, s := range surfaces {
+		if s.ID == stopID {
+			return s.PhysicalZ
+		}
+	}
+	return 0
+}
+
+// totalTrack is the physical distance from the first surface vertex to the
+// image plane. The image lies at the last surface vertex advanced along its
+// local Z by the last thickness; after an odd number of reflections the local
+// Z points toward global -Z.
+func totalTrack(surfaces []types.Surface) float64 {
+	z := surface.PhysicalZ(surfaces)
+	if len(z) == 0 {
+		return 0
+	}
+	sign := 1.0
+	reflectCount := 0
+	for _, s := range surfaces {
+		if s.Reflects() {
+			reflectCount++
+		}
+	}
+	if reflectCount%2 == 1 {
+		sign = -1.0
+	}
+	imgZ := z[len(z)-1] + surfaces[len(surfaces)-1].Thickness*sign
+	return imgZ - z[0]
 }
 
 func resolveIndices(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) []float64 {
@@ -160,6 +230,20 @@ func resolveIndices(surfaces []types.Surface, wavelength float64, gc *glass.Cata
 			v = 1.0
 		}
 		n[i] = v
+	}
+	for i := range surfaces {
+		if !surfaces[i].Reflects() {
+			continue
+		}
+		j := i - 1
+		for j >= 0 && surfaces[j].Reflects() {
+			j--
+		}
+		if j < 0 {
+			n[i] = 1.0
+		} else {
+			n[i] = n[j]
+		}
 	}
 	return n
 }
@@ -181,7 +265,7 @@ func Compute(
 	}
 
 	tt := totalTrack(surfaces)
-	stopIdx := stopSurfaceIndex(surfaces)
+	stopIdx := stopSurfaceIndex(surfaces, system.StopSurface)
 
 	var r types.ParaxialResult
 
