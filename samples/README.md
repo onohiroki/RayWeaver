@@ -14,9 +14,11 @@ This directory contains sample optical system data and demo scripts for the
 | `multi-config-zoom.yaml` | 3-config zoom demo. Uses `entrance_pupil_diameter` **equality** constraints (now supported), `edge_thickness` with the `surface2` back-surface field, and vignetting constraints. |
 | `simple-zoom.yaml` | 3-config zoom with fuzzy image-height / incident-angle constraints and `ray_paths` (render-only metadata). |
 | `asphere-optimize.yaml` | Singlet whose first surface is `asphere_polynomial`; optimizes `conic` and `a4`/`a6` coefficients (asphere variables). |
+| `doublegauss-init.yaml` | 6-element symmetric double-Gauss starting point for a 35mm-format 50 mm f/2.8 standard lens. The structure was synthesised by an AI agent (see `design/REPORT_designs.md` appendix) via curvature-scale search to hit EFL ≈ 50 mm, then handed to DLS optimisation. The optimised result reaches on-axis RMS < 0.1 mm (see `doublegauss-demo.bash`). |
 | `run-demo.bash` | End-to-end demo script using `us2645157.yaml`. |
 | `glass-optimize-demo.bash` | Glass optimisation demo using `glass-optimize-demo.yaml`. |
 | `scale-demo.bash` | Demonstrates the `scale` subcommand: resizes the 25 mm triplet to a 50 mm standard (EFL exact, f/# preserved). |
+| `doublegauss-demo.bash` | AI-assisted design demonstration: optimises the 6-element double-Gauss with 256 rays / 500 iterations (36 variables including glass nd/vd). Reports spot RMS / EFL / f-number / distortion before and after, draws raytrace diagrams, and checks the on-axis RMS stays below 0.1 mm. |
 | `asphere-optimize-demo.bash` | Asphere-optimisation demo using `asphere-optimize.yaml`: optimizes `conic`/`a4`/`a6` and reports the coefficients before/after in the result file. |
 
 ## External dependencies
@@ -47,6 +49,16 @@ installed, the scripts print a message and skip those renderings.
 |---|---|
 | `us2645157-chief-result.yaml` | Chief-ray computation result with pupil grid and spot statistics. |
 | `us2645157.svg` | SVG cross-section raytrace diagram. |
+
+### Output of `doublegauss-demo.bash`
+
+| File | Description |
+|---|---|
+| `doublegauss-result.yaml` | Optimised 6-element double-Gauss system YAML. |
+| `doublegauss-log.jsonl` | Per-iteration log plus `{"event":"breakdown"}` merit decomposition (256 rays × 500 iters). |
+| `doublegauss-demo-result.txt` | Spot RMS, EFL, f-number, and distortion before/after, plus threshold check (on-axis < 0.1 mm). |
+| `doublegauss-init.png` | Raytrace diagram before optimisation. |
+| `doublegauss-opt.png` | Raytrace diagram after optimisation. |
 
 ### Output of `glass-optimize-demo.bash`
 
