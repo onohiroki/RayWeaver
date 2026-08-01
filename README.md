@@ -33,14 +33,19 @@ bash samples/optimize-demo.bash
 
 ## Subcommands
 
-| Subcommand | Description |
-|---|---|
-| `chief` | Determine chief ray and pupil grid for each field. Flags: `--clear-aperture`, `--marginal-rays`, `--pass-through N`, `--config ID`, `--wl`. Optional YAML `pass_through` field constrains the chief ray to pass through a specific surface coordinate. |
-| `trace` | Trace ray(s) through the system and output intersection data per surface. |
-| `paraxial` | First-order properties: EFL, BFL, FFL, principal points, pupil positions, f/#. |
-| `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. |
-| `plot` | Generate SVG or PNG cross-section diagram. Flags: `-o file.svg|.png`, `--lens-width`, `--ray-width`, `--scale`, `--right-margin`, `--config`. |
-| `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. |
+Subcommands are grouped by their role in the data flow
+`system → ray bundle → quantities`, with each stage piping YAML to the next.
+
+| Category | Subcommand | Role | Input → Output |
+|---|---|---|---|
+| Data | `import` | Convert an external lens file into the internal YAML format. | ZMX / SEQ / LEN → YAML system |
+| Propagation | `trace` | Trace individual rays and report per-surface intersection data (low-level). | rays → per-surface results |
+| Propagation | `chief` | Sample the beam for each field: chief ray, pupil grid, marginal rays, spot statistics and OPL. Flags: `--clear-aperture` (compute the beam footprint; `--shrink` to also reduce diameters to it, `--clear-aperture-margin-mm`, `--clear-aperture-rays`), `--marginal-rays`, `--pass-through N`, `--config ID`, `--wl`. | system + fields → chief_rays / grid |
+| Analysis | `paraxial` | First-order / cardinal properties: EFL, BFL, FFL, principal points, pupil positions, f/#. | system → paraxial_result |
+| Analysis | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. | system + coating → R/T/phase |
+| Transform | `scale` | Uniformly scale a system so its EFL equals `--efl TARGET` (exact; preserves f/#). Useful for building a starting point before optimizing. | system → scaled system |
+| Synthesis | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. `--verbose` also emits a per-term merit breakdown. | system + merit → optimized system |
+| Presentation | `plot` | Render an SVG or PNG cross-section diagram. Flags: `-o file.svg|.png`, `--lens-width`, `--ray-width`, `--scale`, `--right-margin`, `--config`. | system + rays → diagram |
 
 ## Pipeline examples
 
@@ -82,9 +87,37 @@ cat samples/us2645157.yaml \
 # DLS optimization with progress logged to a file (JSONL)
 ./rayweave optimize --log /tmp/opt-progress.jsonl < samples/optimize-demo.yaml > optimized.yaml
 
+# Scale a reference design to a target focal length, then optimize it
+cat reference25mm.yaml | ./rayweave scale --efl 50 | ./rayweave optimize > optimized.yaml
+
 # TMM coating analysis
 ./rayweave tmm < samples/ar-coating.yaml
 ```
+
+## Optimization variables
+
+`optimize` accepts `curvature`, `thickness`, `diameter`, `nd`/`vd` (glass), and —
+on aspheric surfaces (`asphere_polynomial`) — `conic` and the even polynomial
+coefficients `a4`/`a6`/`a8`/`a10`/`a12` (also addressable as
+`coefficient_0`…`coefficient_4`). For example:
+
+```yaml
+optimization:
+  variables:
+    - {name: s1_conic, target: {type: surface, id: 1, param: conic}, min: -1, max: 1, active: true}
+    - {name: s1_a4,    target: {type: surface, id: 1, param: a4},    min: -1e-3, max: 1e-3, active: true}
+```
+
+Notes:
+
+- Constraint kinds: `equality`, `inequality_upper`, `inequality_lower`, `band`,
+  `fuzzy`. Multiple `equality` constraints are supported (satisfiable targets
+  converge; an unreachable target is reported with a warning).
+- `optimization.aperture_margin` is clamped to ≥ 1.0 (smaller values make the
+  pupil grid smaller than the aperture and stall DLS).
+- `configs[].ray_paths` is render-only metadata; the optimizer ignores it.
+- `edge_thickness` constraints take the back surface explicitly via `surface2`.
+
 
 ## Sample data
 
