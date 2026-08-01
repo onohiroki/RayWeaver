@@ -488,8 +488,10 @@ func containsGlass(entries []types.Glass, g types.Glass) bool {
 
 func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
-	clearAperture := fs.Bool("clear-aperture", false, "trace grid rays (all fields, at entrance-pupil-based beam diameter) through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set surfaces[].diameter = 2x that extent")
-	clearApertureMargin := fs.Float64("clear-aperture-margin", 2.0, "beam diameter multiplier relative to entrance pupil (default 2 = 2× entrance pupil diameter)")
+	clearAperture := fs.Bool("clear-aperture", false, "trace grid rays (all fields, through the aperture stop) through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set surfaces[].diameter = 2x that extent")
+	clearApertureShrink := fs.Bool("shrink", false, "with --clear-aperture, also shrink diameters down to the beam footprint (default: only grow); the aperture stop keeps its diameter")
+	clearApertureMarginMM := fs.Float64("clear-aperture-margin-mm", 0.2, "with --clear-aperture --shrink, extra clearance added to each side of the beam footprint (mm)")
+	clearApertureRays := fs.Int("clear-aperture-rays", 0, "ray count for --clear-aperture beam tracing (0 = use chief.num_rays); use a dense grid for accurate footprints")
 	marginalRays := fs.Bool("marginal-rays", false, "from each field's grid points find the rays with max/min image Y (and X for off-axis fields) and append them as marginal rays to the output 'rays' section for piping into trace/plot")
 	passThrough := fs.Int("pass-through", 0, "constrain chief ray to pass through (0,0,0) center of surface N (overrides YAML pass_through.surface)")
 	rayFan := fs.Bool("ray-fan", false, "compute ray fan (transverse aberration) for each field")
@@ -597,35 +599,15 @@ func runChief(data []byte) {
 
 	// --- --clear-aperture: scale grid points by entrance-pupil-based radius and set Diameter ---
 	if *clearAperture && len(results) > 0 {
-		// Compute entrance pupil diameter via paraxial
-		chiefRayResults := make([]types.ChiefRayResult, len(results))
-		for i, r := range results {
-			chiefRayResults[i] = types.ChiefRayResult{
-				FieldAngle:    r.FieldAngle,
-				ChiefRay:      r.ChiefRay,
-				ImageHeight:   r.ImageHeight,
-				EntrancePupil: r.EntrancePupil,
-			}
+		if *clearApertureRays > 0 && *clearApertureRays != input.Chief.NumRays {
+			// Re-trace with a denser grid so the beam footprint is accurate.
+			results = chief.DetermineChiefRaysGrid(
+				selectedSys, fields, input.Chief.ReferenceSurface, *clearApertureRays,
+				gc, pol, wavelength, false, input.Chief.GridType, pt, fanCfg, input.Chief.Wavelengths,
+			)
 		}
-		paraxResult := paraxial.Compute(selectedSys, wavelength, gc, 0, chiefRayResults)
-
-		// Determine beam radius = (entrance pupil radius) × margin
-		var newRadius float64
-		if paraxResult.EntrancePupilDiameter > 0 {
-			newRadius = (paraxResult.EntrancePupilDiameter / 2) * (*clearApertureMargin)
-		}
-		oldRadius := chief.FindMinApertureRadius(surfaces)
-		if newRadius <= 0 {
-			newRadius = oldRadius
-		}
-
-		// Precompute scale factor (constant for all grid points)
-		useScale := oldRadius > 0 && newRadius > 0
-		var scale float64
-		if useScale {
-			scale = newRadius / oldRadius
-		}
-
+		// The chief grid points already fill the aperture stop, so trace them
+		// as-is through every surface to get the true beam envelope.
 		engine2 := ray.NewEngine(gc, nil)
 		surface.Precompute(surfaces)
 		path := buildPath(surfaces)
@@ -642,30 +624,9 @@ func runChief(data []byte) {
 				if gp.ImageX == nil {
 					continue
 				}
-				origin := gp.Origin
-				dir := gp.Direction
-				if useScale && r.FieldHeight > 0 {
-					var t float64
-					if math.Abs(dir.X) > 1e-12 {
-						t = (gp.PupilX - origin.X) / dir.X
-					} else {
-						t = (gp.PupilY - origin.Y) / dir.Y
-					}
-					zStart := origin.Z + dir.Z*t
-					aim := types.Vec3{X: gp.PupilX * scale, Y: gp.PupilY * scale, Z: zStart}
-					dir = types.Vec3{
-						X: aim.X - origin.X,
-						Y: aim.Y - origin.Y,
-						Z: aim.Z - origin.Z,
-					}.Normalize()
-				} else if useScale {
-					fc := r.ChiefRay.Initial.Origin
-					origin.X = fc.X + (gp.PupilX-fc.X)*scale
-					origin.Y = fc.Y + (gp.PupilY-fc.Y)*scale
-				}
 				ray := types.Ray{
 					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: origin, Direction: dir},
+					Initial:    types.RayState{Origin: gp.Origin, Direction: gp.Direction},
 					Path:       path,
 					Jones:      pol,
 				}
@@ -691,13 +652,17 @@ func runChief(data []byte) {
 		}
 
 		refID := input.Chief.ReferenceSurface
+		stopID := findApertureStopID(surfaces)
 		for i := range surfaces {
-			if surfaces[i].ID == refID {
+			if surfaces[i].ID == refID || surfaces[i].ID == stopID {
 				continue
 			}
 			if perSurfaceMaxY[i] > 0 {
 				computedDiam := perSurfaceMaxY[i] * 2
-				if computedDiam > surfaces[i].Diameter {
+				if *clearApertureShrink {
+					computedDiam += 2 * *clearApertureMarginMM
+					surfaces[i].Diameter = computedDiam
+				} else if computedDiam > surfaces[i].Diameter {
 					surfaces[i].Diameter = computedDiam
 				}
 			}
@@ -761,6 +726,20 @@ func buildPath(surfaces []types.Surface) []int {
 		}
 	}
 	return p
+}
+
+// findApertureStopID returns the ID of the aperture stop surface: the
+// smallest non-auto-aperture diameter (mirrors chief.FindMinApertureRadius).
+func findApertureStopID(surfaces []types.Surface) int {
+	stopID := 0
+	minD := math.MaxFloat64
+	for _, s := range surfaces {
+		if !s.AutoAperture && s.Diameter > 0 && s.Diameter < minD {
+			minD = s.Diameter
+			stopID = s.ID
+		}
+	}
+	return stopID
 }
 
 // extractMarginalRays finds the grid rays with max/min image Y (and X for
