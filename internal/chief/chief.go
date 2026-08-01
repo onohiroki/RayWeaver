@@ -73,7 +73,18 @@ func determineChiefRays(
 ) []Result {
 	engine := ray.NewEngine(gc, nil)
 
+	stopID := system.StopSurface
+	if stopID <= 0 {
+		stopID = findStopID(system.Surfaces)
+	}
 	apertureRadius := FindMinApertureRadius(system.Surfaces)
+	if stopID > 0 {
+		for _, s := range system.Surfaces {
+			if s.ID == stopID && s.Diameter > 0 {
+				apertureRadius = s.Diameter / 2
+			}
+		}
+	}
 	if apertureRadius <= 0 {
 		return nil
 	}
@@ -90,6 +101,14 @@ func determineChiefRays(
 			}
 		}
 
+		path := buildPath(system.Surfaces)
+		if len(fd.Path) > 0 {
+			path = append([]int{}, fd.Path...)
+			if path[0] != 0 {
+				path = append([]int{0}, path...)
+			}
+		}
+
 		var result Result
 		switch {
 		case math.Abs(fd.ImageHeight) > 1e-12:
@@ -97,10 +116,10 @@ func determineChiefRays(
 				dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType, passThrough)
 			thetaRad := angle * math.Pi / 180.0
 			if passThrough != nil && passThrough.Surface > 0 {
-				result = computeChiefRayAngleGridWithPassThrough(system, engine, thetaRad, dx, dy,
+				result = computeChiefRayAngleGridWithPassThrough(system, engine, path, thetaRad, dx, dy,
 					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough)
 			} else {
-				result = computeChiefRayAngleGrid(system, engine, thetaRad, dx, dy,
+				result = computeChiefRayAngleGrid(system, engine, path, thetaRad, dx, dy,
 					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType)
 			}
 			result.FieldAngle = angle
@@ -111,10 +130,10 @@ func determineChiefRays(
 				objectZ = -1000.0
 			}
 			if passThrough != nil && passThrough.Surface > 0 {
-				result = computeChiefRayHeightGridWithPassThrough(system, engine, fd.Height, dx, dy,
+				result = computeChiefRayHeightGridWithPassThrough(system, engine, path, fd.Height, dx, dy,
 					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough)
 			} else {
-				result = computeChiefRayHeightGrid(system, engine, fd.Height, dx, dy,
+				result = computeChiefRayHeightGrid(system, engine, path, fd.Height, dx, dy,
 					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType)
 			}
 			result.FieldHeight = fd.Height
@@ -122,10 +141,10 @@ func determineChiefRays(
 		default:
 			thetaRad := fd.Angle * math.Pi / 180.0
 			if passThrough != nil && passThrough.Surface > 0 {
-				result = computeChiefRayAngleGridWithPassThrough(system, engine, thetaRad, dx, dy,
+				result = computeChiefRayAngleGridWithPassThrough(system, engine, path, thetaRad, dx, dy,
 					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough)
 			} else {
-				result = computeChiefRayAngleGrid(system, engine, thetaRad, dx, dy,
+				result = computeChiefRayAngleGrid(system, engine, path, thetaRad, dx, dy,
 					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType)
 			}
 			result.FieldAngle = fd.Angle
@@ -135,14 +154,14 @@ func determineChiefRays(
 		// Multi-wavelength spot stats
 		if len(wavelengths) > 0 {
 			result.Wavelengths = computeWavelengthStats(
-				engine, system, refSurfaceID, pol,
+				engine, system, path, refSurfaceID, pol,
 				result.GridPoints, result.ImageHeight, wavelengths,
 			)
 		}
 
 		if fanCfg != nil && len(fanCfg.Angles) > 0 {
 			result.RayFan = computeRayFan(
-				engine, system,
+				engine, system, path,
 				result.ChiefRay.Initial.Origin,
 				result.ChiefRay.Initial.Direction,
 				refSurfaceID, pol, wavelength,
@@ -173,12 +192,13 @@ func computeChiefRayAngle(
 	wavelength float64,
 	dumpMap bool,
 ) Result {
-	return computeChiefRayAngleGrid(system, engine, thetaRad, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar)
+	return computeChiefRayAngleGrid(system, engine, buildPath(system.Surfaces), thetaRad, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar)
 }
 
 func computeChiefRayAngleGrid(
 	system types.System,
 	engine *ray.Engine,
+	path []int,
 	thetaRad, dx, dy float64,
 	refSurfaceID int,
 	numRays int,
@@ -198,27 +218,27 @@ func computeChiefRayAngleGrid(
 		Z: cosT,
 	}.Normalize()
 
-	stopZ := computeStopZ(system.Surfaces)
+	stopZ := computeStopZ(system.Surfaces, system.StopSurface)
 	tanT := sinT / cosT
 	pupilCenterX := -(stopZ - zStart) * tanT * dx
 	pupilCenterY := -(stopZ - zStart) * tanT * dy
 
-	cx, cy, grid := tracePupilGrid(system, engine, numRays, apertureRadius,
+	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
 		refSurfaceID, pol, wavelength, dumpMap, gridType)
 
 	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, refSurfaceID, cy,
-		buildPath(system.Surfaces), wavelength, pol, engine, system.Surfaces, false,
+		path, wavelength, pol, engine, system.Surfaces, system.StopSurface, false,
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
 	originX := 0.0
 	if math.Abs(rayDir.X) > 1e-12 {
 		originX = searchOriginForTarget(rayDir.X, rayDir, zStart, refSurfaceID, cx,
-			buildPath(system.Surfaces), wavelength, pol, engine, system.Surfaces, true,
+			path, wavelength, pol, engine, system.Surfaces, system.StopSurface, true,
 			func(sr types.SurfaceResult) float64 { return sr.Position.X })
 	}
 
 	origin := types.Vec3{X: originX, Y: originY, Z: zStart}
-	return buildResult(engine, system, origin, rayDir, refSurfaceID, pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
+	return buildResult(engine, system, path, origin, rayDir, refSurfaceID, pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
 }
 
 // --- pass-through constrained chief ray (angle-based) ---
@@ -226,6 +246,7 @@ func computeChiefRayAngleGrid(
 func computeChiefRayAngleGridWithPassThrough(
 	system types.System,
 	engine *ray.Engine,
+	path []int,
 	thetaRad, dx, dy float64,
 	refSurfaceID int,
 	numRays int,
@@ -246,32 +267,31 @@ func computeChiefRayAngleGridWithPassThrough(
 		Z: cosT,
 	}.Normalize()
 
-	path := buildPath(system.Surfaces)
 	ptCoord := pt.Coordinate
 
 	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, pt.Surface, ptCoord.Y,
-		path, wavelength, pol, engine, system.Surfaces, false,
+		path, wavelength, pol, engine, system.Surfaces, system.StopSurface, false,
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
 
 	originX := 0.0
 	if math.Abs(rayDir.X) > 1e-12 || math.Abs(ptCoord.X) > 1e-12 {
 		originX = searchOriginForTarget(rayDir.X, rayDir, zStart, pt.Surface, ptCoord.X,
-			path, wavelength, pol, engine, system.Surfaces, true,
+			path, wavelength, pol, engine, system.Surfaces, system.StopSurface, true,
 			func(sr types.SurfaceResult) float64 { return sr.Position.X })
 	}
 
 	origin := types.Vec3{X: originX, Y: originY, Z: zStart}
 
-	stopZ := computeStopZ(system.Surfaces)
+	stopZ := computeStopZ(system.Surfaces, system.StopSurface)
 	t := (stopZ - origin.Z) / rayDir.Z
 	pupilCenterX := origin.X + t*rayDir.X
 	pupilCenterY := origin.Y + t*rayDir.Y
 
-	cx, cy, grid := tracePupilGrid(system, engine, numRays, apertureRadius,
+	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
 		refSurfaceID, pol, wavelength, dumpMap, gridType)
 
-	return buildResult(engine, system, origin, rayDir, refSurfaceID,
+	return buildResult(engine, system, path, origin, rayDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
 }
 
@@ -280,6 +300,7 @@ func computeChiefRayAngleGridWithPassThrough(
 func computeChiefRayHeightGridWithPassThrough(
 	system types.System,
 	engine *ray.Engine,
+	path []int,
 	height, dx, dy, objectZ float64,
 	refSurfaceID int,
 	numRays int,
@@ -291,7 +312,6 @@ func computeChiefRayHeightGridWithPassThrough(
 	pt *types.PassThroughTarget,
 ) Result {
 	objectPoint := types.Vec3{X: height * dx, Y: height * dy, Z: objectZ}
-	path := buildPath(system.Surfaces)
 	zStart := objectZ + (0.0-objectZ)*0.5
 	ptCoord := pt.Coordinate
 
@@ -312,11 +332,11 @@ func computeChiefRayHeightGridWithPassThrough(
 			func(sr types.SurfaceResult) float64 { return sr.Position.X })
 	}
 
-	cx, cy, grid := tracePupilGrid(system, engine, numRays, apertureRadius,
+	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		0, 0, zStart, refinedDir, objectPoint,
 		refSurfaceID, pol, wavelength, dumpMap, gridType)
 
-	return buildResult(engine, system, objectPoint, refinedDir, refSurfaceID,
+	return buildResult(engine, system, path, objectPoint, refinedDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
 }
 
@@ -333,12 +353,13 @@ func computeChiefRayHeight(
 	wavelength float64,
 	dumpMap bool,
 ) Result {
-	return computeChiefRayHeightGrid(system, engine, height, dx, dy, objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar)
+	return computeChiefRayHeightGrid(system, engine, buildPath(system.Surfaces), height, dx, dy, objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar)
 }
 
 func computeChiefRayHeightGrid(
 	system types.System,
 	engine *ray.Engine,
+	path []int,
 	height, dx, dy, objectZ float64,
 	refSurfaceID int,
 	numRays int,
@@ -349,7 +370,6 @@ func computeChiefRayHeightGrid(
 	gridType types.GridType,
 ) Result {
 	objectPoint := types.Vec3{X: height * dx, Y: height * dy, Z: objectZ}
-	path := buildPath(system.Surfaces)
 
 	// Estimate pupil plane between object and first surface.
 	zStart := objectZ + (0.0-objectZ)*0.5
@@ -362,7 +382,7 @@ func computeChiefRayHeightGrid(
 	}.Normalize()
 
 	// Sample grid and get centroid.
-	cx, cy, grid := tracePupilGrid(system, engine, numRays, apertureRadius,
+	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		0, 0, zStart, baseDir, objectPoint,
 		refSurfaceID, pol, wavelength, dumpMap, gridType)
 
@@ -371,7 +391,7 @@ func computeChiefRayHeightGrid(
 		path, wavelength, pol, engine, system.Surfaces,
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
 
-	return buildResult(engine, system, objectPoint, refinedDir, refSurfaceID,
+	return buildResult(engine, system, path, objectPoint, refinedDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
 }
 
@@ -386,13 +406,14 @@ func searchOriginForTarget(
 	zStart float64, targetID int, targetVal float64, path []int,
 	wavelength float64, pol types.JonesVector,
 	engine *ray.Engine, surfaces []types.Surface,
+	stopID int,
 	isX bool, getPos func(types.SurfaceResult) float64,
 ) float64 {
 	if math.Abs(dirComp) < 1e-12 {
 		return 0
 	}
 
-	stopZ := computeStopZ(surfaces)
+	stopZ := computeStopZ(surfaces, stopID)
 	tanComp := dirComp / math.Sqrt(1-dirComp*dirComp)
 	geoEst := -(stopZ - zStart) * tanComp
 
@@ -724,6 +745,7 @@ func GenerateGridPoints(numRays int, apertureRadius float64, gridType types.Grid
 func tracePupilGrid(
 	system types.System,
 	engine *ray.Engine,
+	path []int,
 	numRays int,
 	apertureRadius float64,
 	pupilCenterX, pupilCenterY, zStart float64,
@@ -737,7 +759,6 @@ func tracePupilGrid(
 	var totalWeight float64
 	var weightedX, weightedY float64
 
-	path := buildPath(system.Surfaces)
 	isHeightBased := rayOrigin.Z != 0 || rayOrigin.X != 0 || rayOrigin.Y != 0
 
 	var mu sync.Mutex
@@ -868,13 +889,13 @@ func computeSpotStats(grid []types.GridPoint, cx, cy float64) *types.SpotStats {
 func computeWavelengthStats(
 	engine *ray.Engine,
 	system types.System,
+	path []int,
 	refSurfaceID int,
 	pol types.JonesVector,
 	grid []types.GridPoint,
 	chiefImgHeight types.Vec3,
 	wavelengths []float64,
 ) []types.WavelengthStats {
-	path := buildPath(system.Surfaces)
 	type wlResult struct {
 		index int
 		stats types.SpotStats
@@ -941,6 +962,7 @@ func computeWavelengthStats(
 
 func buildResult(
 	engine *ray.Engine, system types.System,
+	path []int,
 	origin, rayDir types.Vec3,
 	refSurfaceID int,
 	pol types.JonesVector,
@@ -949,7 +971,6 @@ func buildResult(
 	grid []types.GridPoint,
 	dumpMap bool,
 ) Result {
-	path := buildPath(system.Surfaces)
 	chiefRay := types.Ray{
 		Wavelength: wavelength,
 		Initial:    types.RayState{Origin: origin, Direction: rayDir},
@@ -981,6 +1002,7 @@ func buildResult(
 
 func computeRayFan(
 	engine *ray.Engine, system types.System,
+	path []int,
 	origin, rayDir types.Vec3,
 	refSurfaceID int,
 	pol types.JonesVector,
@@ -993,7 +1015,6 @@ func computeRayFan(
 		numFan = 256
 	}
 
-	path := buildPath(system.Surfaces)
 	zStart := origin.Z
 
 	// Fan rays sample the entrance pupil: scan positions are offset from the
@@ -1001,7 +1022,7 @@ func computeRayFan(
 	// chief ray crosses the stop. Without this offset, off-axis fields would
 	// start fan rays near the axis and miss the lens aperture entirely.
 	rayDirN := rayDir.Normalize()
-	stopZ := computeStopZ(system.Surfaces)
+	stopZ := computeStopZ(system.Surfaces, system.StopSurface)
 	pupilCenterX := -(stopZ - zStart) * rayDirN.X / rayDirN.Z
 	pupilCenterY := -(stopZ - zStart) * rayDirN.Y / rayDirN.Z
 
@@ -1104,17 +1125,17 @@ func longitudinalAberration(sr types.SurfaceResult, cosA, sinA float64) float64 
 	return (sr.Position.Z + t*sr.Direction.Z) - sr.Position.Z
 }
 
-func computeStopZ(surfaces []types.Surface) float64 {
-	stopID := findStopID(surfaces)
+func computeStopZ(surfaces []types.Surface, stopID int) float64 {
+	if stopID == 0 {
+		stopID = findStopID(surfaces)
+	}
 	if stopID == 0 {
 		return 0
 	}
-	z := 0.0
 	for _, s := range surfaces {
 		if s.ID == stopID {
-			return z
+			return s.PhysicalZ
 		}
-		z += s.Thickness
 	}
 	return 0
 }
@@ -1142,14 +1163,12 @@ func findStopID(surfaces []types.Surface) int {
 }
 
 func computeTargetZ(surfaces []types.Surface, targetID int) float64 {
-	z := 0.0
 	for _, s := range surfaces {
 		if s.ID == targetID {
-			return z
+			return s.PhysicalZ
 		}
-		z += s.Thickness
 	}
-	return z
+	return 0
 }
 
 func FindMinApertureRadius(surfaces []types.Surface) float64 {
@@ -1195,12 +1214,12 @@ func imageHeightForAngle(
 	zStart := -100.0
 	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
 
-	stopZ := computeStopZ(system.Surfaces)
+	stopZ := computeStopZ(system.Surfaces, system.StopSurface)
 	tanT := sinT / cosT
 	pupilCenterX := -(stopZ - zStart) * tanT * dx
 	pupilCenterY := -(stopZ - zStart) * tanT * dy
 
-	cx, cy, grid := tracePupilGrid(system, engine, numRays, apertureRadius,
+	cx, cy, grid := tracePupilGrid(system, engine, buildPath(system.Surfaces), numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
 		refSurfaceID, pol, wavelength, false, gridType)
 
@@ -1326,13 +1345,13 @@ func imageHeightForAnglePT(
 	path := buildPath(system.Surfaces)
 
 	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, pt.Surface, pt.Coordinate.Y,
-		path, wavelength, pol, engine, system.Surfaces, false,
+		path, wavelength, pol, engine, system.Surfaces, system.StopSurface, false,
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
 
 	originX := 0.0
 	if math.Abs(rayDir.X) > 1e-12 || math.Abs(pt.Coordinate.X) > 1e-12 {
 		originX = searchOriginForTarget(rayDir.X, rayDir, zStart, pt.Surface, pt.Coordinate.X,
-			path, wavelength, pol, engine, system.Surfaces, true,
+			path, wavelength, pol, engine, system.Surfaces, system.StopSurface, true,
 			func(sr types.SurfaceResult) float64 { return sr.Position.X })
 	}
 

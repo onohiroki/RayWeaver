@@ -596,6 +596,7 @@ func runChief(data []byte) {
 
 	selectedSys := input.System
 	selectedSys.Surfaces = surfaces
+	selectedSys.StopSurface = input.Chief.StopSurface
 
 	pol := types.NewCircularJones(true)
 	if input.Rays != nil {
@@ -674,7 +675,7 @@ func runChief(data []byte) {
 		}
 
 		refID := input.Chief.ReferenceSurface
-		stopID := findApertureStopID(surfaces)
+		stopID := findApertureStopID(surfaces, input.Chief.StopSurface)
 		for i := range surfaces {
 			if surfaces[i].ID == refID || surfaces[i].ID == stopID {
 				continue
@@ -731,6 +732,23 @@ func runChief(data []byte) {
 		ChiefRays: chiefRays,
 	}
 
+	stopID := input.Chief.StopSurface
+	if stopID <= 0 {
+		stopID = findApertureStopID(surfaces, 0)
+	}
+	if stopID > 0 {
+		for _, s := range surfaces {
+			if s.ID == stopID {
+				output.Stop = &types.StopInfo{
+					SurfaceID: stopID,
+					PhysicalZ: s.PhysicalZ,
+					Diameter:  s.Diameter,
+				}
+				break
+			}
+		}
+	}
+
 	outData, err := yaml.Marshal(&output)
 	if err != nil {
 		errOut("Error marshaling output: %v", err)
@@ -751,8 +769,16 @@ func buildPath(surfaces []types.Surface) []int {
 }
 
 // findApertureStopID returns the ID of the aperture stop surface: the
-// smallest non-auto-aperture diameter (mirrors chief.FindMinApertureRadius).
-func findApertureStopID(surfaces []types.Surface) int {
+// explicit stop_surface if given, otherwise the smallest non-auto-aperture
+// diameter (mirrors chief's fallback).
+func findApertureStopID(surfaces []types.Surface, explicitID int) int {
+	if explicitID > 0 {
+		for _, s := range surfaces {
+			if s.ID == explicitID {
+				return explicitID
+			}
+		}
+	}
 	stopID := 0
 	minD := math.MaxFloat64
 	for _, s := range surfaces {
@@ -1022,6 +1048,9 @@ func runParaxial(data []byte) {
 
 	selectedSys := input.System
 	selectedSys.Surfaces = surfaces
+	if input.Chief != nil {
+		selectedSys.StopSurface = input.Chief.StopSurface
+	}
 
 	wavelength := 0.00058756
 	objectHeight := 0.0

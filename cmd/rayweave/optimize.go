@@ -122,6 +122,11 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		apertureMargin = 1.0
 	}
 
+	stopSurface := 0
+	if input.Chief != nil {
+		stopSurface = input.Chief.StopSurface
+	}
+
 	cfg := optimize.Config{
 		Surfaces:       surfaces,
 		Variables:      variables,
@@ -129,6 +134,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		Fields:         fields,
 		Constraints:    constraints,
 		GlassCatalog:   gc,
+		StopSurface:    stopSurface,
 		Logger:         logger,
 		MaxIter:        input.Optimization.MaxIter,
 		Tol:            input.Optimization.Tol,
@@ -487,9 +493,15 @@ func runMultiConfigOptimize(input types.Input, gc *glass.Catalog, verbose bool, 
 			constraints = cfg.Constraints
 		}
 
-		configs = append(configs, multiopt.ConfigInput{
-			ID:          cfg.ID,
-			Weight:      cfg.Weight,
+	stopSurface := 0
+	if input.Chief != nil {
+		stopSurface = input.Chief.StopSurface
+	}
+
+	configs = append(configs, multiopt.ConfigInput{
+		ID:          cfg.ID,
+		Weight:      cfg.Weight,
+		StopSurface: stopSurface,
 			Surfaces:    surfaces,
 			Fields:      fields,
 			Wavelengths: wavelengths,

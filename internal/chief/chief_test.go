@@ -143,12 +143,12 @@ func TestSearchOriginForTargetAsphereRecovery(t *testing.T) {
 		rayDir.Y, rayDir, -100.0, 3, 0,
 		path, 0.00058756,
 		types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)},
-		engine, surfaces, false,
+		engine, surfaces, 3, false,
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y },
 	)
 
 	// Should find a non-zero origin (the ray must be off-axis)
-	geoEst := -(computeStopZ(surfaces) - (-100.0)) * (rayDir.Y / math.Sqrt(1-rayDir.Y*rayDir.Y))
+	geoEst := -(computeStopZ(surfaces, 3) - (-100.0)) * (rayDir.Y / math.Sqrt(1-rayDir.Y*rayDir.Y))
 	if math.Abs(result) < 1e-12 || math.Abs(result-geoEst) < 1e-6 {
 		t.Errorf("searchOriginForTarget returned %v (geoEst=%v), want a valid recovered origin", result, geoEst)
 	}
@@ -181,7 +181,7 @@ func TestSearchOriginForTargetVignettingRecovery(t *testing.T) {
 	rayDir := types.Vec3{X: 0, Y: math.Sin(thetaRad), Z: math.Cos(thetaRad)}.Normalize()
 
 	// For this system: stopZ = z of surface 3 (semi=10, the smallest)
-	stopZ := computeStopZ(surfaces)
+	stopZ := computeStopZ(surfaces, 3)
 	tanComp := rayDir.Y / math.Sqrt(1-rayDir.Y*rayDir.Y)
 	geoEst := -(stopZ - (-100.0)) * tanComp
 
@@ -194,7 +194,7 @@ func TestSearchOriginForTargetVignettingRecovery(t *testing.T) {
 	result := searchOriginForTarget(rayDir.Y, rayDir, -100.0, 3, 0,
 		buildPath(surfaces), 0.00058756,
 		types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)},
-		engine, surfaces, false,
+		engine, surfaces, 3, false,
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
 
 	// The result should be non-zero (since the ray has a non-zero field angle)
@@ -266,6 +266,69 @@ func TestDetermineChiefRaysImageHeightWithPassThrough(t *testing.T) {
 	}
 }
 
+// TestFieldExplicitPath verifies that a field's `path` is honored: a valid
+// fold path is prepended with the implicit object plane and traces to the
+// image, while a path that stops at the mirror (no reflection back to the
+// image) leaves the grid points un-traced.
+func TestFieldExplicitPath(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: "AIR", Diameter: 200.0},
+		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0,
+			Decenter: []types.DecenterStep{{Tilt: types.Vec3{Y: 180}, Reflect: true}}},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 60.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 50.0},
+	}
+	surface.Precompute(surfaces)
+	sys := types.System{Surfaces: surfaces}
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+
+	// Valid explicit path (no leading object-plane 0; the code prepends it).
+	fields := []types.FieldDef{
+		{Angle: 0, Direction: []float64{0, 1}, Path: []int{1, 2, 3, 4}},
+	}
+	results := DetermineChiefRaysGrid(sys, fields, 4, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	gotPath := results[0].ChiefRay.Path
+	wantPath := []int{0, 1, 2, 3, 4}
+	if len(gotPath) != len(wantPath) {
+		t.Fatalf("chief ray path = %v, want %v", gotPath, wantPath)
+	}
+	for i := range wantPath {
+		if gotPath[i] != wantPath[i] {
+			t.Fatalf("chief ray path = %v, want %v", gotPath, wantPath)
+		}
+	}
+	// All on-axis grid points must reach the image plane.
+	for _, gp := range results[0].GridPoints {
+		if gp.ImageX == nil || gp.ImageY == nil {
+			t.Errorf("on-axis grid point not traced: pupil=(%.1f,%.1f)", gp.PupilX, gp.PupilY)
+		}
+	}
+
+	// A path that stops at the mirror cannot return to the image: the grid
+	// points must fail to trace.
+	badFields := []types.FieldDef{
+		{Angle: 0, Direction: []float64{0, 1}, Path: []int{0, 1, 2}},
+	}
+	bad := DetermineChiefRaysGrid(sys, badFields, 4, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	if len(bad) != 1 {
+		t.Fatalf("expected 1 bad result, got %d", len(bad))
+	}
+	traced := 0
+	for _, gp := range bad[0].GridPoints {
+		if gp.ImageX != nil && gp.ImageY != nil {
+			traced++
+		}
+	}
+	if traced != 0 {
+		t.Errorf("bad path traced %d/%d grid points, want 0 (image unreachable)", traced, len(bad[0].GridPoints))
+	}
+}
+
 func TestComputeRayFanAngleMapping(t *testing.T) {
 	sys, gc := singletSystem()
 	engine := ray.NewEngine(gc, nil)
@@ -273,7 +336,7 @@ func TestComputeRayFanAngleMapping(t *testing.T) {
 	origin := types.Vec3{X: 0, Y: 0, Z: -100}
 	dir := types.Vec3{X: 0, Y: 0, Z: 1}
 
-	fan := computeRayFan(engine, sys, origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90, 45}, 8)
+	fan := computeRayFan(engine, sys, buildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90, 45}, 8)
 	if fan == nil {
 		t.Fatal("computeRayFan returned nil")
 	}
@@ -308,7 +371,7 @@ func TestComputeRayFanDefaultBothPlanes(t *testing.T) {
 	dir := types.Vec3{X: 0, Y: 0, Z: 1}
 
 	// On-axis field still produces both planes under the default config.
-	fan := computeRayFan(engine, sys, origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90}, 8)
+	fan := computeRayFan(engine, sys, buildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90}, 8)
 	if len(fan.Meridional) == 0 || len(fan.Sagittal) == 0 {
 		t.Error("default config must produce both meridional and sagittal for all fields")
 	}
