@@ -1,0 +1,108 @@
+# Schmidt camera — folded primary + corrector + field flattener
+#
+# Fold model: all thicknesses are positive; the fold is carried by the
+# primary's `decenter: [{tilt: [0, 180, 0], reflect: true}]`.  After the
+# mirror the beam travels back toward the stop, so the physical Z of the FF
+# surfaces and image is smaller than the mirror's.
+#
+# Layout (physical Z, mm): corrector/stop at 0, mirror at 800, FF front at
+# ~460, flat image at 400.  Full 35mm full-frame coverage (half-diagonal
+# 21.63 mm) reached at half-angle 3.22 deg; the FF (84 mm diameter) passes
+# the whole bundle at the extreme field.
+#
+# Radii after the mirror are given in the beam frame (the fold flips the
+# sign of the physical radius), which is how the paraxial/chief trace
+# consumes them.
+#
+# Spot RMS after DLS optimization (f/1.93, 587 nm, single wavelength):
+# ~27-79 um across the field.  The f/1.93 mirror is fast; the two-term
+# corrector compensates the mirror + FF spherical aberration but leaves a
+# visible residual at the full aperture.
+
+glass_catalog:
+  entries:
+    - name: "N-BK7"
+      nd: 1.5168
+      vd: 64.17
+
+system:
+  surfaces: []
+
+configs:
+  - id: config1
+    name: Schmidt folded (corrector + mirror + field flattener)
+    weight: 1
+    active: true
+    surfaces:
+      - id: 1
+        type: "asphere_polynomial"
+        radius: 0.0
+        thickness: 5.0
+        material: "N-BK7"
+        diameter: 200.0
+        coefficients: [-7.012596538707627e-10, -1.8934227166178542e-14]
+        role: "stop"
+      - id: 2
+        type: "sphere"
+        radius: 0.0
+        thickness: 795.0
+        material: "AIR"
+        diameter: 200.0
+      - id: 3
+        type: "sphere"
+        radius: 800.0
+        thickness: 340.0
+        material: "AIR"
+        diameter: 300.0
+        decenter: [{tilt: [0, 180, 0], reflect: true}]
+        role: "primary"
+      - id: 4
+        type: "sphere"
+        radius: 1097.9971323070158
+        thickness: 3.00737900841865
+        material: "N-BK7"
+        diameter: 84.0
+      - id: 5
+        type: "sphere"
+        radius: 4527.917674010644
+        thickness: 12.0
+        material: "AIR"
+        diameter: 84.0
+      - id: 6
+        type: "sphere"
+        radius: 1208.2550812192317
+        thickness: 3.007046907695411
+        material: "N-BK7"
+        diameter: 84.0
+      - id: 7
+        type: "sphere"
+        radius: 4873.116517849829
+        thickness: 42.0
+        material: "AIR"
+        diameter: 84.0
+      - id: 8
+        type: "sphere"
+        radius: 0.0
+        thickness: 0.0
+        material: "AIR"
+        role: "image"
+
+chief:
+  stop_surface: 1
+  fields:
+    - angle: 0.0
+      direction: [0, 1]
+      path: [1, 2, 3, 4, 5, 6, 7, 8]
+    - angle: 1.0
+      direction: [0, 1]
+      path: [1, 2, 3, 4, 5, 6, 7, 8]
+    - angle: 2.0
+      direction: [0, 1]
+      path: [1, 2, 3, 4, 5, 6, 7, 8]
+    - angle: 3.22
+      direction: [0, 1]
+      path: [1, 2, 3, 4, 5, 6, 7, 8]
+  reference_surface: 8
+  num_rays: 200
+  grid_type: hex
+  dump_map: true
