@@ -17,7 +17,7 @@ import (
 
 func LensPNG(cfg Config) ([]byte, error) {
 	zPos := computeZPositions(cfg.Surfaces)
-	totalZ := computeTotalZ(cfg.Surfaces)
+	maxSurfZ := maxSurfaceZ(cfg.Surfaces)
 	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays)
 
 	firstZ := zPos[0]
@@ -52,10 +52,10 @@ func LensPNG(cfg Config) ([]byte, error) {
 	if cfg.RightMarginPct > 0 {
 		rightFrac = cfg.RightMarginPct / 100.0
 	}
-	maxZ := totalZ * (1 + rightFrac)
+	maxZ := maxSurfZ * (1 + rightFrac)
 	zSpan := maxZ - minZ
 	if zSpan <= 0 {
-		zSpan = totalZ
+		zSpan = maxSurfZ
 	}
 
 	maxY := computeMaxYInRange(cfg.Surfaces, cfg.Results, minZ, maxZ)
@@ -73,7 +73,7 @@ func LensPNG(cfg Config) ([]byte, error) {
 
 	// Axis (rendered first = behind everything)
 	// SVG renders axis as "M 0,0 L axisLen,0": world z=0 to z=axisLen.
-	axisLen := totalZ * (1 + rightFrac)
+	axisLen := maxSurfZ * (1 + rightFrac)
 	ras.Reset(canvasW, canvasH)
 	dashedLine(ras, 0, axisLen, 0, 0.3, scale, midZ, 3, 3)
 	ras.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{160, 160, 160, 128}), image.Point{})
@@ -86,6 +86,14 @@ func LensPNG(cfg Config) ([]byte, error) {
 	for _, rp := range rayPaths {
 		col := parseRGB(rp.color, 179)
 		drawRayPath(ras, img, rp.path, rayWidth, scale, midZ, col)
+	}
+
+	// Mirror surfaces (drawn as curved lines above the rays)
+	mirrorCol := color.NRGBA{130, 130, 130, 153}
+	for _, p := range buildMirrorPaths(cfg.Surfaces, zPos) {
+		ras.Reset(canvasW, canvasH)
+		drawSagPathFromSVG(ras, p, scale, midZ)
+		ras.Draw(img, img.Bounds(), image.NewUniform(mirrorCol), image.Point{})
 	}
 
 	// Lens bodies (on top of rays)
@@ -203,19 +211,51 @@ func drawRayPath(ras *vector.Rasterizer, img *image.RGBA, svgPath string, width,
 	}
 }
 
+// drawSagPathFromSVG strokes a polyline path (e.g. a mirror surface) given in
+// the same "M z,y L z,y ..." format used by the SVG renderer.
+func drawSagPathFromSVG(ras *vector.Rasterizer, svgPath string, scale, midZ float64) {
+	s := svgPath
+	if !strings.HasPrefix(s, "M ") {
+		return
+	}
+	s = s[2:]
+	var prevZ, prevY float64
+	first := true
+	parts := strings.Fields(s)
+	for i := 0; i < len(parts); i++ {
+		tok := parts[i]
+		if tok == "L" {
+			continue
+		}
+		idx := strings.IndexByte(tok, ',')
+		if idx < 0 {
+			continue
+		}
+		z := parseF64(tok[:idx])
+		y := parseF64(tok[idx+1:])
+		if first {
+			prevZ, prevY = z, y
+			first = false
+			continue
+		}
+		strokeLine(ras, prevZ, prevY, z, y, 0.3, scale, midZ)
+		prevZ, prevY = z, y
+	}
+}
+
 func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ float64, c color.NRGBA) {
 	h := e.h
 	if h <= 0 {
 		return
 	}
-	sag1h := sagFuncForSurface(e.r1Surf)(h)
+	sag1h := globalSag(e.r1Surf, h)
 	ras.Reset(canvasW, canvasH)
 	px, py := worldPt(z1+sag1h, h, midZ, scale)
 	ras.MoveTo(px, py)
 
 	sampleSagPath(ras, e.r1Surf, h, -h, z1, scale, midZ)
 
-	sag2h := sagFuncForSurface(e.r2Surf)(h)
+	sag2h := globalSag(e.r2Surf, h)
 	px2, py2 := worldPt(z2+sag2h, -h, midZ, scale)
 	ras.LineTo(px2, py2)
 
@@ -230,10 +270,10 @@ func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2,
 	if h <= 0 {
 		return
 	}
-	sag1h := sagFuncForSurface(e.r1Surf)(h)
-	sag1mh := sagFuncForSurface(e.r1Surf)(-h)
-	sag2h := sagFuncForSurface(e.r2Surf)(h)
-	sag2mh := sagFuncForSurface(e.r2Surf)(-h)
+	sag1h := globalSag(e.r1Surf, h)
+	sag1mh := globalSag(e.r1Surf, -h)
+	sag2h := globalSag(e.r2Surf, h)
+	sag2mh := globalSag(e.r2Surf, -h)
 
 	ras.Reset(canvasW, canvasH)
 	// Left curved surface (top → bottom)
@@ -249,13 +289,12 @@ func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2,
 
 func strokeSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset, scale, midZ, width float64) {
 	n := 20
-	sagFn := sagFuncForSurface(surf)
 	hPrev := hStart
-	sPrev := sagFn(hPrev)
+	sPrev := globalSag(surf, hPrev)
 	for i := 1; i <= n; i++ {
 		t := float64(i) / float64(n)
 		h := hStart + (hEnd-hStart)*t
-		s := sagFn(h)
+		s := globalSag(surf, h)
 		strokeLine(r, zOffset+sPrev, hPrev, zOffset+s, h, width, scale, midZ)
 		hPrev, sPrev = h, s
 	}
@@ -263,11 +302,10 @@ func strokeSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffs
 
 func sampleSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset, scale, midZ float64) {
 	n := 20
-	sagFn := sagFuncForSurface(surf)
 	for i := 1; i <= n; i++ {
 		t := float64(i) / float64(n)
 		h := hStart + (hEnd-hStart)*t
-		s := sagFn(h)
+		s := globalSag(surf, h)
 		px, py := worldPt(zOffset+s, h, midZ, scale)
 		r.LineTo(px, py)
 	}

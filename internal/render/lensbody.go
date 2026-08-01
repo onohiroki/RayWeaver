@@ -28,13 +28,25 @@ func buildLensBodies(surfaces []types.Surface, zPos []float64, globalMaxH float6
 }
 
 func computeZPositions(surfaces []types.Surface) []float64 {
+	precomputed := false
+	for _, s := range surfaces {
+		if s.PhysicalZ != 0 {
+			precomputed = true
+			break
+		}
+	}
+	if precomputed {
+		z := make([]float64, len(surfaces))
+		for i, s := range surfaces {
+			z[i] = s.PhysicalZ
+		}
+		return z
+	}
 	z := make([]float64, len(surfaces))
 	var acc float64
 	for i := 0; i < len(surfaces); i++ {
 		z[i] = acc
-		if i < len(surfaces) {
-			acc += surfaces[i].Thickness
-		}
+		acc += surfaces[i].Thickness
 	}
 	return z
 }
@@ -78,7 +90,7 @@ func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 }
 
 func buildElemPath(e element, z1, z2 float64) string {
-	sag2 := sagFuncForSurface(e.r2Surf)(e.h)
+	sag2 := globalSag(e.r2Surf, e.h)
 	x2 := z2 + sag2
 
 	var b strings.Builder
@@ -104,8 +116,7 @@ func buildAirLines(surfaces []types.Surface, zPos []float64) []string {
 		mat := surfaces[i].Material
 		if mat == "" || mat == "1" || strings.EqualFold(mat, "air") {
 			h := surfaces[i].Diameter / 2
-			sag := sagFuncForSurface(surfaces[i])(h)
-			x := zPos[i] + sag
+			x := zPos[i] + globalSag(surfaces[i], h)
 			out = append(out, fmt.Sprintf("M %.6f,%.6f L %.6f,%.6f", x, h, x, -h))
 		}
 	}
@@ -119,7 +130,7 @@ func buildStopLines(surfaces []types.Surface, zPos []float64) []string {
 			continue
 		}
 		z := zPos[i]
-		sag := sagFuncForSurface(surfaces[i])(0)
+		sag := globalSag(surfaces[i], 0)
 		x := z + sag
 		h := surfaces[i].Diameter / 2
 		tick := h * 0.2
@@ -128,6 +139,36 @@ func buildStopLines(surfaces []types.Surface, zPos []float64) []string {
 		}
 		out = append(out, fmt.Sprintf(`<path class="stop" d="M %.6f,%.6f L %.6f,%.6f M %.6f,%.6f L %.6f,%.6f"/>`,
 			x, h, x, h+tick, x, -h, x, -h-tick))
+	}
+	return out
+}
+
+// buildMirrorPaths returns sag-curved paths for reflect (mirror) surfaces.
+// They are drawn as a curved line spanning the mirror semi-diameter, with a
+// light hatch on the reflective side so the fold is visible.
+func buildMirrorPaths(surfaces []types.Surface, zPos []float64) []string {
+	var out []string
+	for i := 0; i < len(surfaces); i++ {
+		s := surfaces[i]
+		if !s.Reflects() || s.Diameter <= 0 {
+			continue
+		}
+		h := s.Diameter / 2
+		var b strings.Builder
+		b.WriteString("M ")
+		b.WriteString(f64str(zPos[i] + globalSag(s, h)))
+		b.WriteByte(',')
+		b.WriteString(f64str(h))
+		n := 20
+		for j := 1; j <= n; j++ {
+			t := float64(j) / float64(n)
+			y := h - 2*h*t
+			b.WriteString(" L ")
+			b.WriteString(f64str(zPos[i] + globalSag(s, y)))
+			b.WriteByte(',')
+			b.WriteString(f64str(y))
+		}
+		out = append(out, b.String())
 	}
 	return out
 }

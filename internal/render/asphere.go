@@ -2,7 +2,6 @@ package render
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
@@ -31,8 +30,27 @@ func sagFuncForSurface(surf types.Surface) func(float64) float64 {
 	}
 }
 
+// globalSag returns the global Z offset of the surface sag at height y,
+// relative to the surface vertex (PhysicalZ). It accounts for frame folds so
+// folded surfaces render with their sag mirrored. When the surface has not been
+// precomputed (LocalToGlobal is identity), it degrades to the local sag.
+func globalSag(surf types.Surface, y float64) float64 {
+	sag := sagFuncForSurface(surf)(y)
+	p := surf.LocalToGlobal.MultiplyPoint(types.Vec3{Y: y, Z: sag})
+	return p.Z - surf.PhysicalZ
+}
+
+func surfaceFrameFlip(surf types.Surface, h float64) bool {
+	ls := sagFuncForSurface(surf)(h)
+	gs := globalSag(surf, h)
+	if ls == 0 {
+		return false
+	}
+	return (gs > 0) != (ls > 0)
+}
+
 func surfaceDownPath(surf types.Surface, h, zOffset float64) string {
-	sag := sagFuncForSurface(surf)(h)
+	sag := globalSag(surf, h)
 	if h <= 0 {
 		return fmt.Sprintf("M %.6f,0", zOffset+sag)
 	}
@@ -42,20 +60,18 @@ func surfaceDownPath(surf types.Surface, h, zOffset float64) string {
 			return fmt.Sprintf("M %.6f,%.6f L %.6f,%.6f",
 				zOffset+sag, h, zOffset+sag, -h)
 		}
-		r := math.Abs(surf.Radius())
-		sweep := "1"
-		if surf.Radius() < 0 {
-			sweep = "0"
-		}
-		return fmt.Sprintf("M %.6f,%.6f a %s,%s 0 0 %s 0,-%.6f",
-			zOffset+sag, h, f64str(r), f64str(r), sweep, 2*h)
+		// Sample the fold-aware sag into a Catmull-Rom curve instead of an
+		// SVG elliptical arc: arcs with a huge radius relative to the chord
+		// (nearly flat folded surfaces) render the wrong sweep as a giant
+		// loop that fills the whole diagram.
+		return bezierDownAt(surf, h, zOffset)
 	default:
 		return bezierDownAt(surf, h, zOffset)
 	}
 }
 
 func surfaceUpPath(surf types.Surface, h, zOffset float64) string {
-	sag := sagFuncForSurface(surf)(h)
+	sag := globalSag(surf, h)
 	if h <= 0 {
 		return fmt.Sprintf("L %.6f,0", zOffset+sag)
 	}
@@ -65,13 +81,8 @@ func surfaceUpPath(surf types.Surface, h, zOffset float64) string {
 			return fmt.Sprintf("L %.6f,%.6f L %.6f,%.6f",
 				zOffset+sag, -h, zOffset+sag, h)
 		}
-		r := math.Abs(surf.Radius())
-		sweep := "0"
-		if surf.Radius() < 0 {
-			sweep = "1"
-		}
-		return fmt.Sprintf("a %s,%s 0 0 %s 0,%.6f",
-			f64str(r), f64str(r), sweep, 2*h)
+		// See surfaceDownPath: sampled Catmull-Rom instead of an SVG arc.
+		return bezierUpAt(surf, h, zOffset)
 	default:
 		return bezierUpAt(surf, h, zOffset)
 	}
@@ -82,12 +93,11 @@ func f64str(v float64) string {
 }
 
 func evalSagPoints(surf types.Surface, hMax float64) []vec2 {
-	fn := sagFuncForSurface(surf)
 	n := 20
 	pts := make([]vec2, n+1)
 	for i := 0; i <= n; i++ {
 		h := hMax * float64(i) / float64(n)
-		pts[i] = vec2{X: fn(h), Y: h}
+		pts[i] = vec2{X: globalSag(surf, h), Y: h}
 	}
 	return pts
 }

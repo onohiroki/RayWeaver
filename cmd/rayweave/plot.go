@@ -7,6 +7,7 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/render"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
 )
@@ -66,6 +67,8 @@ func runPlot(data []byte) {
 			os.Exit(1)
 		}
 	}
+
+	surface.Precompute(surfaces)
 
 	glassMap := buildGlassMap(output)
 

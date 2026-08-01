@@ -33,7 +33,7 @@ const (
 
 func LensSVG(cfg Config) string {
 	zPos := computeZPositions(cfg.Surfaces)
-	totalZ := computeTotalZ(cfg.Surfaces)
+	maxSurfZ := maxSurfaceZ(cfg.Surfaces)
 	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays)
 
 	// Compute display Z span: if object plane is far, cap the
@@ -70,10 +70,10 @@ func LensSVG(cfg Config) string {
 	if cfg.RightMarginPct > 0 {
 		rightFrac = cfg.RightMarginPct / 100.0
 	}
-	maxZ := totalZ * (1 + rightFrac)
+	maxZ := maxSurfZ * (1 + rightFrac)
 	zSpan := maxZ - minZ
 	if zSpan <= 0 {
-		zSpan = totalZ
+		zSpan = maxSurfZ
 	}
 
 	maxY := computeMaxYInRange(cfg.Surfaces, cfg.Results, minZ, maxZ)
@@ -98,10 +98,10 @@ func LensSVG(cfg Config) string {
 	}
 	b.WriteString("<defs><style>\n")
 	b.WriteString(fmt.Sprintf(".lens-body{stroke:rgb(180,180,180);stroke-width:%.1f;opacity:0.75}\n", lw))
-	b.WriteString(".air-line{stroke:rgb(130,130,130);stroke-width:0.3;opacity:0.6}\n")
+	b.WriteString(".air-line{fill:none;stroke:rgb(130,130,130);stroke-width:0.3;opacity:0.6}\n")
 	b.WriteString(fmt.Sprintf(".ray{fill:none;stroke-width:%.1f;opacity:0.7}\n", rw))
-	b.WriteString(".axis{stroke:rgb(160,160,160);stroke-width:0.3;stroke-dasharray:3,3;opacity:0.5}\n")
-	b.WriteString(".stop{stroke:rgb(80,80,80);stroke-width:0.6}\n")
+	b.WriteString(".axis{fill:none;stroke:rgb(160,160,160);stroke-width:0.3;stroke-dasharray:3,3;opacity:0.5}\n")
+	b.WriteString(".stop{fill:none;stroke:rgb(80,80,80);stroke-width:0.6}\n")
 	b.WriteString("</style></defs>")
 
 	// Main group: center the full content span (minZ..maxZ) in the viewport
@@ -113,12 +113,17 @@ func LensSVG(cfg Config) string {
 	b.WriteString(fmt.Sprintf(`<g transform="scale(%.6f) translate(%.6f,0)">`, scale, -midZ))
 
 	// Optical axis
-	axisLen := totalZ * (1 + rightFrac)
+	axisLen := maxSurfZ * (1 + rightFrac)
 	b.WriteString(fmt.Sprintf(`<path class="axis" d="M 0,0 L %.6f,0"/>`, axisLen))
 
 	// Rays (rendered first so they appear behind lenses)
 	for _, r := range rayPaths {
 		b.WriteString(fmt.Sprintf(`<path class="ray" d="%s" stroke="%s"/>`, r.path, r.color))
+	}
+
+	// Mirror surfaces (drawn as curved lines above the rays)
+	for _, p := range buildMirrorPaths(cfg.Surfaces, zPos) {
+		b.WriteString(fmt.Sprintf(`<path class="air-line" d="%s"/>`, p))
 	}
 
 	// Lens bodies (colored by glass type, drawn on top of rays)
@@ -141,15 +146,21 @@ func LensSVG(cfg Config) string {
 	return b.String()
 }
 
-func computeTotalZ(surfaces []types.Surface) float64 {
-	var acc float64
-	for i := 0; i < len(surfaces)-1; i++ {
-		acc += surfaces[i].Thickness
+// maxSurfaceZ returns the largest physical Z reached by any surface vertex,
+// using the fold-aware physical positions so folded (mirror) systems are sized
+// correctly.
+func maxSurfaceZ(surfaces []types.Surface) float64 {
+	zPos := computeZPositions(surfaces)
+	var maxZ float64
+	for _, z := range zPos {
+		if z > maxZ {
+			maxZ = z
+		}
 	}
-	if acc <= 0 {
-		acc = 10
+	if maxZ <= 0 {
+		maxZ = 10
 	}
-	return acc
+	return maxZ
 }
 
 func computeMaxYInRange(surfaces []types.Surface, results []types.RayResult, minZ, maxZ float64) float64 {
