@@ -111,16 +111,16 @@ echo
 # Compute diffraction limit (best-effort)
 FNO=$($RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | grep "inf_conj_image_space_f_number" | sed 's/.*f_number: //' || echo "")
 if [ -n "$FNO" ]; then
-  AIRY=$(echo "scale=6; 1.22 * 0.0005876 * $FNO" | bc -l 2>/dev/null || echo "0")
+  AIRY=$(python3 -c "print('%.6f' % (1.22 * 0.0005876 * $FNO))" 2>/dev/null || echo "0")
   MERIT=$(grep '"merit"' "$OPT_LOG" 2>/dev/null | tail -2 | head -1 | sed 's/.*"merit"://;s/,.*//' || echo "0")
   NTERMS=12
-  RMS_R=$(echo "scale=6; sqrt($MERIT / $NTERMS)" | bc -l 2>/dev/null || echo "0")
+  RMS_R=$(python3 -c "import math; print('%.6f' % math.sqrt($MERIT / $NTERMS))" 2>/dev/null || echo "0")
   if [ "$RMS_R" != "0" ]; then
     echo "--- Diffraction limit ---"
     printf "  F-number:         %s\n" "$FNO"
     printf "  Airy disk radius: %.6f mm (1.22λF#)\n" "$AIRY"
     printf "  RMS spot radius:  %.6f mm\n" "$RMS_R"
-    RATIO=$(echo "scale=1; $RMS_R / $AIRY" | bc -l 2>/dev/null || echo "0")
+    RATIO=$(python3 -c "print('%.1f' % ($RMS_R / $AIRY))" 2>/dev/null || echo "0")
     echo "  Spot / Airy:      ${RATIO}x"
     echo
   fi
@@ -137,7 +137,7 @@ AFTER_CHIEF=$($RAYWEAVE chief < "$OPT_RESULT" 2>/dev/null)
     rms_before=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[$fi].get('spot_stats',{}).get('rms_r',-1))")
     rms_after=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[$fi].get('spot_stats',{}).get('rms_r',-1))")
     printf "  %-8s %6s  %10.4f  %10.4f" "optimize" "f$fi" "$rms_before" "$rms_after"
-    if [ "$(echo "$rms_after < $rms_before" | bc -l 2>/dev/null)" = "1" ]; then
+    if [ "$(python3 -c "print('1' if $rms_after < $rms_before else '0')")" = "1" ]; then
       echo "   ✓"
     else
       echo "   ✗"
@@ -198,7 +198,7 @@ print(-1)
 THRESHOLD=0.3
 printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this)\n"
 rms_onaxis=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[0].get('spot_stats',{}).get('rms_r',-1))")
-if [ "$rms_onaxis" != "-1" ] && (( $(echo "$rms_onaxis >= $THRESHOLD" | bc -l) )); then
+if [ "$rms_onaxis" != "-1" ] && [ "$(python3 -c "print('1' if $rms_onaxis >= $THRESHOLD else '0')")" = "1" ]; then
   msg="  >>> Optimization failed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
   echo "$msg" | tee -a "$RESULT_FILE"
   exit 1
@@ -212,7 +212,7 @@ VIG_THRESHOLD=0.5
 printf "  (threshold = $VIG_THRESHOLD — vignetting factor at 10deg/16deg must be >= this)\n"
 for fi in 1 2; do
   vf=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
-  if [ "$vf" != "-1" ] && (( $(echo "$vf < $VIG_THRESHOLD" | bc -l) )); then
+  if [ "$vf" != "-1" ] && [ "$(python3 -c "print('1' if $vf < $VIG_THRESHOLD else '0')")" = "1" ]; then
     msg="  >>> Optimization failed: field $fi vignetting factor = $(printf '%.4f' "$vf") < $VIG_THRESHOLD"
     echo "$msg" | tee -a "$RESULT_FILE"
     exit 1

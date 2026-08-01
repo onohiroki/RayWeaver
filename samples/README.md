@@ -11,8 +11,33 @@ This directory contains sample optical system data and demo scripts for the
 | `ar-coating.yaml` | Single-layer MgF2 anti-reflection coating on N-SK16 glass, quarter-wave at 550 nm. |
 | `dielectric-mirror.yaml` | 9-layer quarter-wave Bragg reflector (SiO2/TiO2) on glass, design wavelength 550 nm. |
 | `glass-optimize-demo.yaml` | 3-lens 7-surface system with glass-model variables (nd/vd) intended for DLS optimisation. 3 fields (0°, 10°, 16°), 4 wavelengths (g/F/d/C). |
+| `multi-config-zoom.yaml` | 3-config zoom demo. Uses `entrance_pupil_diameter` **equality** constraints (now supported), `edge_thickness` with the `surface2` back-surface field, and vignetting constraints. |
+| `simple-zoom.yaml` | 3-config zoom with fuzzy image-height / incident-angle constraints and `ray_paths` (render-only metadata). |
+| `asphere-optimize.yaml` | Singlet whose first surface is `asphere_polynomial`; optimizes `conic` and `a4`/`a6` coefficients (asphere variables). |
 | `run-demo.bash` | End-to-end demo script using `us2645157.yaml`. |
 | `glass-optimize-demo.bash` | Glass optimisation demo using `glass-optimize-demo.yaml`. |
+| `scale-demo.bash` | Demonstrates the `scale` subcommand: resizes the 25 mm triplet to a 50 mm standard (EFL exact, f/# preserved). |
+| `asphere-optimize-demo.bash` | Asphere-optimisation demo using `asphere-optimize.yaml`: optimizes `conic`/`a4`/`a6` and reports the coefficients before/after in the result file. |
+
+## External dependencies
+
+The demo scripts use `python3` (with `PyYAML`) for YAML parsing and comparison;
+`yq`, `csvtk` and `bc` are **not** required. `gnuplot` is used only for the
+optional PNG renderings (spot diagrams, aberration graphs): if it is not
+installed, the scripts print a message and skip those renderings.
+
+## Optimisation-related notes (current syntax)
+
+- Multiple `equality` constraints are supported (satisfiable targets converge;
+  an unreachable target is reported with a WARNING instead of freezing).
+- `optimization.aperture_margin` is clamped to ≥ 1.0 (smaller values stall DLS).
+- `configs[].ray_paths` is render-only metadata; the optimizer ignores it.
+- `edge_thickness` constraints specify the back surface explicitly with
+  `surface2` (the old `target`-as-back-surface usage is gone).
+- Asphere variables: `conic`, `a4`/`a6`/`a8`/`a10`/`a12` (aliases
+  `coefficient_0`…`coefficient_4`).
+- `chief --clear-aperture --shrink` sizes diameters down to the beam footprint.
+- `optimize --verbose` / `--log` also emits a per-term `{"event":"breakdown"}` line.
 
 ## Generated files
 
@@ -32,6 +57,24 @@ This directory contains sample optical system data and demo scripts for the
 | `glass-optimize-init.svg` | SVG raytrace diagram before optimisation. |
 | `glass-optimize-opt.svg` | SVG raytrace diagram after optimisation. |
 | `glass-spot-f0.png` | Spot diagram for field 0° (on-axis), before vs after, 4-wavelength overlay. |
+
+### Output of `asphere-optimize-demo.bash`
+
+| File | Description |
+|---|---|
+| `asphere-optimize-result.yaml` | Optimised system YAML (asphere coefficients, curvatures). |
+| `asphere-optimize-log.jsonl` | Per-iteration optimisation log (merit, status) plus a `{"event":"breakdown"}` line with the per-term merit contributions. |
+| `asphere-optimize-demo-result.txt` | Two-stage comparison: asphere coefficients (before / spherical-opt / asphere-opt), spot RMS and OPD RMS (before / spherical / asphere), and threshold check. |
+| `asphere-optimize-init.png` | Raytrace diagram before optimisation. |
+| `asphere-optimize-opt.png` | Raytrace diagram after optimisation. |
+
+### Output of `scale-demo.bash`
+
+| File | Description |
+|---|---|
+| `us2645157-scaled50.yaml` | The 25 mm triplet uniformly scaled to EFL = 50 mm. |
+| `us2645157-scaled50.svg` | Raytrace diagram of the scaled system. |
+| `scale-demo-result.txt` | EFL / f-number before and after scaling. |
 | `glass-spot-f1.png` | Spot diagram for field 1 (10°), before vs after, 4-wavelength overlay. |
 | `glass-spot-f2.png` | Spot diagram for field 2 (16°), before vs after, 4-wavelength overlay. |
 

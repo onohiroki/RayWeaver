@@ -35,17 +35,22 @@ echo
 
 echo "--- PNG diagrams ---"
 echo "=== Initial diagram ==="
-./rayweave chief --clear-aperture --ray-fan < "$YAML" | ./rayweave chief --marginal-rays \
+./rayweave chief --clear-aperture --shrink --ray-fan < "$YAML" | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
-  | ./rayweave plot -o "$OUTDIR/optimize-demo-init.png"
+  | ./rayweave plot -o "$OUTDIR/optimize-demo-init.png" >/dev/null
 echo "Written: $OUTDIR/optimize-demo-init.png"
 echo
 
 echo "=== Optimized diagram ==="
-yq '.chief = {"fields": [{"angle": 0.0, "direction": [0, 1]}, {"angle": 16.0, "direction": [0, 1]}, {"angle": 24.0, "direction": [0, 1]}], "reference_surface": 8, "num_rays": 512, "grid_type": "hex", "dump_map": false}' "$OPT_RESULT" > "$OPT_WITH_CHIEF"
-./rayweave chief --clear-aperture --ray-fan < "$OPT_WITH_CHIEF" | ./rayweave chief --marginal-rays \
+python3 -c "
+import sys, yaml
+d = yaml.safe_load(sys.stdin)
+d['chief'] = {'fields': [{'angle': 0.0, 'direction': [0, 1]}, {'angle': 16.0, 'direction': [0, 1]}, {'angle': 24.0, 'direction': [0, 1]}], 'reference_surface': 8, 'num_rays': 512, 'grid_type': 'hex', 'dump_map': False}
+yaml.safe_dump(d, sys.stdout, sort_keys=False)
+" < "$OPT_RESULT" > "$OPT_WITH_CHIEF"
+./rayweave chief --clear-aperture --shrink --ray-fan < "$OPT_WITH_CHIEF" | ./rayweave chief --marginal-rays \
   | ./rayweave trace \
-  | ./rayweave plot -o "$OUTDIR/optimize-demo-opt.png"
+  | ./rayweave plot -o "$OUTDIR/optimize-demo-opt.png" >/dev/null
 echo "Written: $OUTDIR/optimize-demo-opt.png"
 echo
 
@@ -71,8 +76,11 @@ else: print(-1)
   for fi in 0 1 2; do
     rms_before=$(rms_field "$YAML" "$fi")
     rms_after=$(rms_field "$OPT_WITH_CHIEF" "$fi")
-    mark=""; [ "$rms_before" != "-1" ] && [ "$rms_after" != "-1" ] \
-      && [ "$(echo "$rms_after < $rms_before" | bc -l 2>/dev/null)" = "1" ] && mark="   ✓" || mark="   ✗"
+    mark=""
+    if [ "$rms_before" != "-1" ] && [ "$rms_after" != "-1" ]; then
+      improved=$(python3 -c "print('1' if $rms_after < $rms_before else '0')")
+      [ "$improved" = "1" ] && mark="   ✓" || mark="   ✗"
+    fi
     printf "  %-8s %6s  %10.4f  %10.4f%s\n" "optimize" "f$fi" "$rms_before" "$rms_after" "$mark"
   done
   echo
@@ -82,7 +90,7 @@ else: print(-1)
 THRESHOLD=0.3
 printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this)\n"
 rms_onaxis=$(rms_field "$OPT_WITH_CHIEF" 0)
-if [ "$rms_onaxis" != "-1" ] && (( $(echo "$rms_onaxis >= $THRESHOLD" | bc -l) )); then
+if [ "$rms_onaxis" != "-1" ] && [ "$(python3 -c "print('1' if $rms_onaxis >= $THRESHOLD else '0')")" = "1" ]; then
   msg="  >>> Optimization failed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
   echo "$msg" | tee -a "$RESULT_FILE"
   exit 1

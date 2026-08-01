@@ -29,5 +29,7 @@ samples/*-optimized.yaml
 samples/glass-chief-init-w*.yaml
 samples/optimize-demo-*
 samples/glass-chief-opt-w*.yaml
-HandbookCamFig16.zmx
-US06122111.zmx
+samples/us2645157-scaled50.yaml
+design
+untrack-*
+*-untrack.*

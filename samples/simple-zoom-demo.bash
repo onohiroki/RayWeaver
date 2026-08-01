@@ -81,9 +81,14 @@ echo
 
 # ── 4. Focal length (before and after) ──
 echo "=== Focal Length (EFL) ==="
+get_efl() {
+  local yaml_file="$1" cfg="$2"
+  cat "$yaml_file" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
+    | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d.get('paraxial_result',{}).get('focal_length',-1))"
+}
 for cfg in config0 config1 config2; do
-  efl_before=$(cat "$YAML" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null | yq '.paraxial_result.focal_length' 2>/dev/null)
-  efl_after=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null | yq '.paraxial_result.focal_length' 2>/dev/null)
+  efl_before=$(get_efl "$YAML" "$cfg")
+  efl_after=$(get_efl "$RESULT" "$cfg")
   printf "  %-8s before=%8.2f mm  after=%8.2f mm\n" "$cfg" "$efl_before" "$efl_after"
 done
 echo
@@ -122,14 +127,14 @@ for cfg in config0 config1 config2; do
   rms_after=$(get_onaxis_rms "$RESULT" "$cfg")
   printf "  %-8s %12.4f %12.4f" "$cfg" "$rms_before" "$rms_after"
   if [ "$rms_before" != "-1" ] && [ "$rms_after" != "-1" ]; then
-    if (( $(echo "$rms_after < $rms_before" | bc -l) )); then
+    if [ "$(python3 -c "print('1' if $rms_after < $rms_before else '0')")" = "1" ]; then
       printf "   ✓"
     else
       printf "   ✗"
     fi
   fi
   echo
-  if [ "$rms_after" != "-1" ] && (( $(echo "$rms_after >= $THRESHOLD" | bc -l) )); then
+  if [ "$rms_after" != "-1" ] && [ "$(python3 -c "print('1' if $rms_after >= $THRESHOLD else '0')")" = "1" ]; then
     failed=true
   fi
 done
@@ -190,7 +195,7 @@ printf "  %-8s gap after  = %8.4f mm" "config0" "$gap_after"
   printf "  %-8s gap after  = %8.4f mm\n" "config0" "$gap_after"
   echo
 } >> "$RESULT_FILE"
-if [ "$gap_after" != "-1" ] && (( $(echo "$gap_after < $GAP_TARGET" | bc -l) )); then
+if [ "$gap_after" != "-1" ] && [ "$(python3 -c "print('1' if $gap_after < $GAP_TARGET else '0')")" = "1" ]; then
   echo "   ✗"
   echo "  >>> Optimization failed: config0 lens1-lens2 gap $(printf '%.4f' "$gap_after") mm < $GAP_TARGET mm" >> "$RESULT_FILE"
   exit 1

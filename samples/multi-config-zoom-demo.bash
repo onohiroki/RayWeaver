@@ -157,7 +157,7 @@ failed=false
 for cfg in config0 config1 config2; do
   rms_after=$(get_onaxis_rms "$RESULT" "$cfg")
   printf "  %-8s on-axis RMS = %8.4f mm" "$cfg" "$rms_after"
-  if [ "$rms_after" != "-1" ] && (( $(echo "$rms_after >= $THRESHOLD" | bc -l) )); then
+  if [ "$rms_after" != "-1" ] && [ "$(python3 -c "print('1' if $rms_after >= $THRESHOLD else '0')")" = "1" ]; then
     echo "   ✗"
     failed=true
   else
@@ -221,7 +221,7 @@ for cfg in config0 config1 config2; do
   for fi in 1 2; do
     vf=$(get_vf "$RESULT" "$cfg" "$fi")
     printf "  %-8s field %d VF = %8.4f" "$cfg" "$fi" "$vf"
-    if [ "$vf" != "-1" ] && (( $(echo "$vf < $VIG_THRESHOLD" | bc -l) )); then
+    if [ "$vf" != "-1" ] && [ "$(python3 -c "print('1' if $vf < $VIG_THRESHOLD else '0')")" = "1" ]; then
       echo "   ✗"
       failed=true
     else

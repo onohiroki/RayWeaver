@@ -142,11 +142,10 @@ echo 'with chief data:'
 echo
 echo "=== Raytrace diagram (SVG + PNG) ==="
 ./rayweave chief --clear-aperture --ray-fan < "$YAML" \
+  | ./rayweave plot -o "$OUTDIR/us2645157.png" \
+  | ./rayweave plot -o "$OUTDIR/us2645157.svg" \
   | ./rayweave chief --marginal-rays --ray-fan \
-  | ./rayweave trace \
-  | tee "$OUTDIR/us2645157-trace-result.yaml" \
-        >(./rayweave plot -o "$OUTDIR/us2645157.png" > /dev/null) \
-  | ./rayweave plot -o "$OUTDIR/us2645157.svg" > /dev/null
+  | ./rayweave trace > "$OUTDIR/us2645157-trace-result.yaml"
 echo "Written: $OUTDIR/us2645157.svg and $OUTDIR/us2645157.png"
 
 echo
