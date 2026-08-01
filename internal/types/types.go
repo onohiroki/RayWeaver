@@ -277,7 +277,7 @@ type RayInput struct {
 
 type FieldItem struct {
 	ID          int     `yaml:"id"`
-	AngleDeg    float64 `yaml:"angle_deg,omitempty"`
+	AngleDeg    float64 `yaml:"angle_deg"`
 	ImageHeight float64 `yaml:"image_height,omitempty"`
 	Weight      float64 `yaml:"weight"`
 }
@@ -400,6 +400,7 @@ type ConstraintOperand struct {
 	Field      int               `yaml:"field,omitempty"`
 	Wavelength float64           `yaml:"wavelength,omitempty"`
 	Surface    int               `yaml:"surface,omitempty"`
+	Surface2   int               `yaml:"surface2,omitempty"`
 	Target     float64           `yaml:"target,omitempty"`
 	Lower      float64           `yaml:"lower,omitempty"`
 	Upper      float64           `yaml:"upper,omitempty"`

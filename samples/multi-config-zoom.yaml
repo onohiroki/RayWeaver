@@ -592,31 +592,31 @@ configs:
   - kind: inequality_lower
     measure: edge_thickness
     surface: 1
-    target: 2.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 2
   - kind: inequality_lower
     measure: edge_thickness
     surface: 4
-    target: 5.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 5
   - kind: inequality_lower
     measure: edge_thickness
     surface: 7
-    target: 8.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 8
   - kind: inequality_lower
     measure: edge_thickness
     surface: 10
-    target: 11.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 11
   - kind: equality
     measure: entrance_pupil_diameter
     target: 20
@@ -754,31 +754,31 @@ configs:
   - kind: inequality_lower
     measure: edge_thickness
     surface: 1
-    target: 2.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 2
   - kind: inequality_lower
     measure: edge_thickness
     surface: 4
-    target: 5.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 5
   - kind: inequality_lower
     measure: edge_thickness
     surface: 7
-    target: 8.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 8
   - kind: inequality_lower
     measure: edge_thickness
     surface: 10
-    target: 11.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 11
   - kind: equality
     measure: entrance_pupil_diameter
     target: 20
@@ -916,31 +916,31 @@ configs:
   - kind: inequality_lower
     measure: edge_thickness
     surface: 1
-    target: 2.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 2
   - kind: inequality_lower
     measure: edge_thickness
     surface: 4
-    target: 5.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 5
   - kind: inequality_lower
     measure: edge_thickness
     surface: 7
-    target: 8.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 8
   - kind: inequality_lower
     measure: edge_thickness
     surface: 10
-    target: 11.0
     lower: 1.0
     weight: 1.0
     active: true
+    surface2: 11
   - kind: equality
     measure: entrance_pupil_diameter
     target: 20

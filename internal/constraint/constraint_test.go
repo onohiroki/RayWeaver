@@ -130,3 +130,39 @@ func TestNewMeasuresInactive(t *testing.T) {
 		}
 	}
 }
+
+// TestEdgeThicknessSurface2 is a regression test for the improvement report
+// (3.4): the edge_thickness constraint previously reused `target` as the back
+// surface ID. It now uses the explicit `surface2` field.
+func TestEdgeThicknessSurface2(t *testing.T) {
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 5.0, Material: "N-BK7", Diameter: 20.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 20.0},
+	}
+	surface.Precompute(surfaces)
+
+	// edge = front.Thickness + sag(back) - sag(front) at h = 10.
+	h := 10.0
+	sag := func(c float64) float64 {
+		if c == 0 {
+			return 0
+		}
+		R := 1 / c
+		return h * h / (R * (1 + math.Sqrt(1-h*h/(R*R))))
+	}
+	want := 5.0 + sag(-0.01) - sag(0.01)
+
+	op := types.ConstraintOperand{
+		Kind:     types.ConstraintInequalityLower,
+		Measure:  types.MeasureEdgeThickness,
+		Surface:  1,
+		Surface2: 2,
+		Lower:    1.0,
+		Weight:   1.0,
+		Active:   true,
+	}
+	got := evaluateEdgeThickness(surfaces, op.Surface, op.Surface2)
+	if math.Abs(got-want) > 1e-9 {
+		t.Errorf("evaluateEdgeThickness(s1,s2) = %v, want %v", got, want)
+	}
+}

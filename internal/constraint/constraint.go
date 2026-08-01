@@ -34,7 +34,11 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 	case types.MeasureDiameter:
 		return evaluateDiameter(surfaces, op.Surface)
 	case types.MeasureEdgeThickness:
-		backID := int(math.Round(op.Target))
+		backID := op.Surface2
+		if backID == 0 {
+			// fall back to the adjacent surface
+			backID = op.Surface + 1
+		}
 		return evaluateEdgeThickness(surfaces, op.Surface, backID)
 	case types.MeasureFNumber:
 		return evaluateFNumber(surfaces, gc)

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"bytes"
 	"math"
 	"testing"
 
@@ -166,5 +167,19 @@ func TestJonesVectorYAMLSequence(t *testing.T) {
 	want := JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
 	if j != want {
 		t.Errorf("Unmarshal = %v, want %v", j, want)
+	}
+}
+
+// TestFieldItemZeroAngleMarshals is a regression test for the improvement
+// report (3.11): angle_deg: 0 must not be dropped by omitempty, otherwise the
+// on-axis (0°) field disappears from optimized output.
+func TestFieldItemZeroAngleMarshals(t *testing.T) {
+	f := FieldItem{ID: 0, AngleDeg: 0.0, Weight: 1.0}
+	out, err := yaml.Marshal(f)
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if !bytes.Contains(out, []byte("angle_deg: 0")) {
+		t.Errorf("angle_deg: 0 missing from marshaled FieldItem: %s", out)
 	}
 }
