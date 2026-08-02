@@ -15,9 +15,11 @@ Tests: `go test ./...` (12 test files across all packages, no CI).
 
 ## Subcommands
 
-`chief` | `trace` | `paraxial` | `tmm` | `plot` | `optimize` | `import`
+`chief` | `trace` | `paraxial` | `tmm` | `plot` | `optimize` | `escape` | `import`
 
 Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, writes YAML to stdout. `--config ID` on chief/trace/paraxial/plot for multi-config selection.
+
+`escape` (sub-subcommands: `escape` run, `escape extract --index N`) is the Ishiki-Ono style escape-function global optimiser: DLS cycles with merit-function bumps at discovered local minima. Outputs the best solution pipeline-compatible plus `escape_result.minima[]` (full surfaces per minimum).
 
 ## Key conventions
 
@@ -28,6 +30,7 @@ Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, write
 - Surface 0 = implicit object plane (no intersection/refraction). Ray `path` must start with `0`.
 - New surface fields: `auto_aperture` (vignetting), `min_glass_path`/`max_glass_path` (edge-thickness constraints).
 - `optimize --verbose` outputs JSONL on stderr; `--log FILE` writes to file.
+- Escape functions act in the normalised variable space (each variable scaled by Min..Max); fixed vars (Min==Max) are excluded from the escape distance. `escape` disables the DLS internal stall perturbation via `Options.DisableStallEscape`.
 - `internal/rayio/` is dead code — never imported. `perllens/` is legacy Perl.
 - Z = optical axis (positive right). All units in mm (coating thicknesses in nm, converted internally).
 
