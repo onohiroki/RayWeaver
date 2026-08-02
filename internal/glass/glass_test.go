@@ -2,6 +2,7 @@ package glass
 
 import (
 	"math"
+	"sync"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/types"
@@ -519,4 +520,60 @@ ED
 	if len(g.Coefficients) < 6 {
 		t.Errorf("expected ≥6 coefficients, got %d", len(g.Coefficients))
 	}
+}
+
+// TestCatalogRefractiveIndexCache verifies the per-(glass, nd/vd, wavelength)
+// cache distinguishes model glasses whose nd/vd change between evaluations
+// (as happens during nd/vd optimisation), while still returning correct values.
+func TestCatalogRefractiveIndexCache(t *testing.T) {
+	c := NewCatalog()
+	c.Add(types.Glass{Type: types.GlassTypeModel, Label: "MOD", ND: 1.5, VD: 60})
+
+	n1, err := c.RefractiveIndex("MOD", 0.00058756)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n2, err := c.RefractiveIndex("MOD", 0.00058756)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n1 != n2 {
+		t.Errorf("cached and fresh index differ: %v vs %v", n1, n2)
+	}
+
+	// Simulate an nd/vd optimisation step: the surface material key is stable
+	// but the underlying model glass changes. The cache key includes nd/vd so
+	// the new value must not be shadowed by the old cached one.
+	c.ByName["MOD"].ND = 1.8
+	n3, err := c.RefractiveIndex("MOD", 0.00058756)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(n3-n1) < 1e-6 {
+		t.Errorf("changed nd did not invalidate cache: n = %v (old %v)", n3, n1)
+	}
+}
+
+// TestCatalogRefractiveIndexCacheConcurrent exercises the sync.Map cache from
+// multiple goroutines to confirm no races or corrupt values.
+func TestCatalogRefractiveIndexCacheConcurrent(t *testing.T) {
+	c := NewCatalog()
+	for i := 0; i < 8; i++ {
+		c.Add(types.Glass{Type: types.GlassTypeModel, Label: "G", ND: 1.5 + float64(i)*0.01, VD: 60})
+	}
+
+	var wg sync.WaitGroup
+	for w := 0; w < 8; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 200; i++ {
+				if _, err := c.RefractiveIndex("G", 0.00058756); err != nil {
+					t.Errorf("RefractiveIndex: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

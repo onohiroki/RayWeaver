@@ -6,8 +6,10 @@ import (
 	"io"
 	"math"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/coating"
@@ -693,36 +695,78 @@ func runChief(data []byte) {
 			surfIDtoIdx[s.ID] = i
 		}
 
-		perSurfaceMaxY := make([]float64, len(surfaces))
-
+		type gridJob struct {
+			origin    types.Vec3
+			direction types.Vec3
+		}
+		var jobs []gridJob
 		for _, r := range results {
 			for _, gp := range r.GridPoints {
 				if gp.ImageX == nil {
 					continue
 				}
-				ray := types.Ray{
-					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: gp.Origin, Direction: gp.Direction},
-					Path:       path,
-					Jones:      pol,
-				}
-				tr := engine2.TraceRay(ray, surfaces)
-				if tr.Error != "" {
-					continue
-				}
-				for _, sr := range tr.Surfaces {
-					idx, ok := surfIDtoIdx[sr.SurfaceID]
-					if !ok {
+				jobs = append(jobs, gridJob{origin: gp.Origin, direction: gp.Direction})
+			}
+		}
+
+		workers := runtime.GOMAXPROCS(0)
+		if workers > len(jobs) {
+			workers = len(jobs)
+		}
+		if workers < 1 {
+			workers = 1
+		}
+		perWorkerMax := make([][]float64, workers)
+		for w := 0; w < workers; w++ {
+			perWorkerMax[w] = make([]float64, len(surfaces))
+		}
+		var wg sync.WaitGroup
+		jobCh := make(chan int)
+		for w := 0; w < workers; w++ {
+			wg.Add(1)
+			go func(w int) {
+				defer wg.Done()
+				local := perWorkerMax[w]
+				for i := range jobCh {
+					gp := jobs[i]
+					ray := types.Ray{
+						Wavelength: wavelength,
+						Initial:    types.RayState{Origin: gp.origin, Direction: gp.direction},
+						Path:       path,
+						Jones:      pol,
+					}
+					tr := engine2.TraceRay(ray, surfaces)
+					if tr.Error != "" {
 						continue
 					}
-					ay := math.Abs(sr.Position.Y)
-					ax := math.Abs(sr.Position.X)
-					if ay > perSurfaceMaxY[idx] {
-						perSurfaceMaxY[idx] = ay
+					for _, sr := range tr.Surfaces {
+						idx, ok := surfIDtoIdx[sr.SurfaceID]
+						if !ok {
+							continue
+						}
+						ay := math.Abs(sr.Position.Y)
+						ax := math.Abs(sr.Position.X)
+						if ay > local[idx] {
+							local[idx] = ay
+						}
+						if ax > local[idx] {
+							local[idx] = ax
+						}
 					}
-					if ax > perSurfaceMaxY[idx] {
-						perSurfaceMaxY[idx] = ax
-					}
+				}
+			}(w)
+		}
+		for i := range jobs {
+			jobCh <- i
+		}
+		close(jobCh)
+		wg.Wait()
+
+		perSurfaceMaxY := make([]float64, len(surfaces))
+		for w := 0; w < workers; w++ {
+			for idx, e := range perWorkerMax[w] {
+				if e > perSurfaceMaxY[idx] {
+					perSurfaceMaxY[idx] = e
 				}
 			}
 		}
@@ -965,25 +1009,48 @@ func runTrace(data []byte) {
 
 	output := types.Output{
 		Input:     input,
-		Results:   make([]types.RayResult, 0, len(input.Rays.Rays)),
+		Results:   make([]types.RayResult, len(input.Rays.Rays)),
 		ChiefRays: chiefRays,
 	}
 
-	for i := range input.Rays.Rays {
-		r := &input.Rays.Rays[i]
-		r.Jones = input.Rays.Polarization
-		ray.ResolveRay(r, surfaces, engine)
-		result := engine.TraceRay(*r, surfaces)
-		if result.Error != "" {
-			errMsg := fmt.Sprintf("{\"ray\":%q,\"error\":%q,\"error_code\":%q}\n", r.ID, result.Error, result.ErrorCode)
-			if *traceVerbose {
-				fmt.Fprint(os.Stderr, errMsg)
-			} else {
-				errOut("Warning: ray %q error: %s", r.ID, result.Error)
-			}
-		}
-		output.Results = append(output.Results, result)
+	results := make([]types.RayResult, len(input.Rays.Rays))
+	var errorsMu sync.Mutex
+	var wg sync.WaitGroup
+	workers := runtime.GOMAXPROCS(0)
+	if workers > len(input.Rays.Rays) {
+		workers = len(input.Rays.Rays)
 	}
+	jobs := make(chan int)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				r := &input.Rays.Rays[i]
+				r.Jones = input.Rays.Polarization
+				ray.ResolveRay(r, surfaces, engine)
+				result := engine.TraceRay(*r, surfaces)
+				if result.Error != "" {
+					errMsg := fmt.Sprintf("{\"ray\":%q,\"error\":%q,\"error_code\":%q}\n", r.ID, result.Error, result.ErrorCode)
+					errorsMu.Lock()
+					if *traceVerbose {
+						fmt.Fprint(os.Stderr, errMsg)
+					} else {
+						errOut("Warning: ray %q error: %s", r.ID, result.Error)
+					}
+					errorsMu.Unlock()
+				}
+				results[i] = result
+			}
+		}()
+	}
+	for i := range input.Rays.Rays {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
+	output.Results = results
 
 	writeYAML(&output)
 }

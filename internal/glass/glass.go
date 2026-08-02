@@ -4,12 +4,17 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
 type Catalog struct {
 	ByName map[string]*types.Glass
+
+	indexCache sync.Map
 }
 
 func NewCatalog() *Catalog {
@@ -54,7 +59,33 @@ func (c *Catalog) RefractiveIndex(material string, wavelength float64) (float64,
 		return 0, fmt.Errorf("glass not found: %s", material)
 	}
 
-	return CalcRefractiveIndex(g, wavelength)
+	// Cache the computed index per (glass, nd/vd, wavelength). Model glasses
+	// optimised by nd/vd change values between evaluations, so those are part
+	// of the key; catalog/tabulated glasses use zero nd/vd markers that are
+	// stable across calls.
+	key := c.cacheKey(g, material, wavelength)
+	if v, ok := c.indexCache.Load(key); ok {
+		return v.(float64), nil
+	}
+
+	n, err := CalcRefractiveIndex(g, wavelength)
+	if err != nil {
+		return 0, err
+	}
+	c.indexCache.Store(key, n)
+	return n, nil
+}
+
+func (c *Catalog) cacheKey(g *types.Glass, material string, wavelength float64) string {
+	var sb strings.Builder
+	sb.WriteString(material)
+	sb.WriteByte('|')
+	sb.WriteString(strconv.FormatFloat(g.ND, 'g', -1, 64))
+	sb.WriteByte('|')
+	sb.WriteString(strconv.FormatFloat(g.VD, 'g', -1, 64))
+	sb.WriteByte('|')
+	sb.WriteString(strconv.FormatFloat(wavelength, 'g', -1, 64))
+	return sb.String()
 }
 
 func CalcRefractiveIndex(g *types.Glass, wavelength float64) (float64, error) {

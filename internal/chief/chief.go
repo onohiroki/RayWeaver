@@ -1076,32 +1076,66 @@ func computeRayFan(
 
 	fan := &types.RayFan{}
 
-	for _, angleDeg := range angles {
-		rad := raymath.DegToRad(angleDeg)
-		cosA := math.Cos(rad)
-		sinA := math.Sin(rad)
+	type fanResult struct {
+		points       []types.FanPoint
+		isMeridional bool
+		isSagittal   bool
+	}
+	results := make([]fanResult, len(angles))
+	var wg sync.WaitGroup
+	workers := runtime.NumCPU()
+	if workers > len(angles) {
+		workers = len(angles)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	jobCh := make(chan int)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for ai := range jobCh {
+				angleDeg := angles[ai]
+				rad := raymath.DegToRad(angleDeg)
+				cosA := math.Cos(rad)
+				sinA := math.Sin(rad)
 
-		points := make([]types.FanPoint, 0, numFan)
-		for k := 0; k < numFan; k++ {
-			t := -apertureRadius + (float64(k)+0.5)*2.0*apertureRadius/float64(numFan)
-			px := t * cosA
-			py := t * sinA
-			fp, ok := traceOne(px, py, cosA, sinA)
-			if !ok {
-				continue
+				points := make([]types.FanPoint, 0, numFan)
+				for k := 0; k < numFan; k++ {
+					t := -apertureRadius + (float64(k)+0.5)*2.0*apertureRadius/float64(numFan)
+					px := t * cosA
+					py := t * sinA
+					fp, ok := traceOne(px, py, cosA, sinA)
+					if !ok {
+						continue
+					}
+					points = append(points, fp)
+				}
+				results[ai] = fanResult{
+					points:       points,
+					isMeridional: math.Abs(angleDeg-90) < 1e-9,
+					isSagittal:   math.Abs(angleDeg) < 1e-9,
+				}
 			}
-			points = append(points, fp)
-		}
+		}()
+	}
+	for i := range angles {
+		jobCh <- i
+	}
+	close(jobCh)
+	wg.Wait()
 
+	for i, res := range results {
 		switch {
-		case math.Abs(angleDeg-90) < 1e-9:
-			fan.Meridional = points
-		case math.Abs(angleDeg) < 1e-9:
-			fan.Sagittal = points
+		case res.isMeridional:
+			fan.Meridional = res.points
+		case res.isSagittal:
+			fan.Sagittal = res.points
 		default:
 			fan.Rotated = append(fan.Rotated, types.RotatedFan{
-				AngleDeg: angleDeg,
-				Points:   points,
+				AngleDeg: angles[i],
+				Points:   res.points,
 			})
 		}
 	}

@@ -197,7 +197,7 @@ func TestMultiOptimizerSizeAutoAperturesGeometric(t *testing.T) {
 	// True geometric beam extent at surface 2 for the extreme (16deg) field,
 	// measured without aperture clipping.
 	surface.Precompute(surfaces)
-	ext := dls.TraceFieldGridExtents(gc, surfaces, 0, 16.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0)
+	ext := dls.TraceFieldGridExtents(gc, surfaces, 0, 16.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 1)
 	geoExtent2 := ext[2]
 	if geoExtent2 <= 5.0 {
 		t.Fatalf("test setup: geometric extent at surface 2 = %.3f, want > 5.0 (initial aperture radius)", geoExtent2)
@@ -658,5 +658,33 @@ func TestMultiOptimizerMeritBreakdown(t *testing.T) {
 	// There must be one contribution per merit term.
 	if n := len(bd) - 1; n != len(configs[0].MeritTerms) {
 		t.Errorf("MeritBreakdown has %d terms, want %d", n, len(configs[0].MeritTerms))
+	}
+}
+
+// TestTraceFieldGridParallelDeterminism verifies the grid-ray worker loop
+// produces identical points and per-surface extents regardless of worker
+// count, matching the determinism guarantee of the Jacobian columns.
+func TestTraceFieldGridParallelDeterminism(t *testing.T) {
+	configs := tripletEqualityConfigs(25.0, 4.61)
+	surfaces := configs[0].Surfaces
+	gc := tripletGC()
+	surface.Precompute(surfaces)
+
+	pts1, ext1 := dls.TraceFieldGrid(gc, surfaces, 0, 10.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 1)
+	pts4, ext4 := dls.TraceFieldGrid(gc, surfaces, 0, 10.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 4)
+
+	if len(pts1) != len(pts4) {
+		t.Fatalf("worker=1 gives %d points, worker=4 gives %d", len(pts1), len(pts4))
+	}
+	for i := range pts1 {
+		a, b := pts1[i], pts4[i]
+		if a.OK != b.OK || a.X != b.X || a.Y != b.Y || a.OPL != b.OPL {
+			t.Errorf("point %d differs: %+v vs %+v", i, a, b)
+		}
+	}
+	for id, e := range ext1 {
+		if ext4[id] != e {
+			t.Errorf("extent[%d] differs: worker=1 %.15g, worker=4 %.15g", id, e, ext4[id])
+		}
 	}
 }

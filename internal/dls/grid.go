@@ -11,20 +11,20 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64) ([]IPoint, map[int]float64) {
+func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int) ([]IPoint, map[int]float64) {
 	skipGlassPath := fieldAngle == 0
-	return traceGridRays(gc, surfaces, stopID, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath)
+	return traceGridRays(gc, surfaces, stopID, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, workers)
 }
 
 // TraceFieldGridExtents traces a pupil grid with aperture and glass-path
 // checks disabled, returning the true geometric max radial ray extent on each
 // surface, independent of any surface aperture clipping.
-func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64) map[int]float64 {
-	_, perSurfMax := traceGridRays(gc, surfaces, stopID, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true)
+func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int) map[int]float64 {
+	_, perSurfMax := traceGridRays(gc, surfaces, stopID, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers)
 	return perSurfMax
 }
 
-func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool) ([]IPoint, map[int]float64) {
+func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
@@ -63,9 +63,11 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fiel
 		}
 	}
 
-	perSurfMax := make(map[int]float64)
-	var points []IPoint
-	for _, pt := range grid {
+	points := make([]IPoint, len(grid))
+	perRayMax := make([]map[int]float64, len(grid))
+
+	trace := func(i int) {
+		pt := grid[i]
 		origin := types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}
 		r := types.Ray{
 			Wavelength:         wavelength,
@@ -78,10 +80,11 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fiel
 
 		result := engine.TraceRay(r, surfaces)
 		if result.Error != "" {
-			points = append(points, IPoint{OK: false})
-			continue
+			points[i] = IPoint{OK: false}
+			return
 		}
 
+		local := make(map[int]float64, len(result.Surfaces))
 		for _, sr := range result.Surfaces {
 			ax := math.Abs(sr.Position.X)
 			ay := math.Abs(sr.Position.Y)
@@ -89,16 +92,28 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fiel
 			if ay > e {
 				e = ay
 			}
-			if e > perSurfMax[sr.SurfaceID] {
-				perSurfMax[sr.SurfaceID] = e
+			if e > local[sr.SurfaceID] {
+				local[sr.SurfaceID] = e
 			}
 		}
+		perRayMax[i] = local
 
 		if len(result.Surfaces) > 0 {
 			last := result.Surfaces[len(result.Surfaces)-1]
-			points = append(points, IPoint{X: last.Position.X, Y: last.Position.Y, OPL: result.OPLTotal, OK: true})
+			points[i] = IPoint{X: last.Position.X, Y: last.Position.Y, OPL: result.OPLTotal, OK: true}
 		} else {
-			points = append(points, IPoint{OK: false})
+			points[i] = IPoint{OK: false}
+		}
+	}
+
+	parallelColumns(len(grid), workers, trace)
+
+	perSurfMax := make(map[int]float64)
+	for _, local := range perRayMax {
+		for id, e := range local {
+			if e > perSurfMax[id] {
+				perSurfMax[id] = e
+			}
 		}
 	}
 

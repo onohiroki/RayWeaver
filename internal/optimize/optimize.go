@@ -610,8 +610,19 @@ func (o *Optimizer) constraintFieldAngle(cfg *config, c types.ConstraintOperand,
 // points.
 func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
-	points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+	points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
 	return points
+}
+
+// gridWorkers returns the number of goroutines for grid-ray parallelism. The
+// Jacobian column loop already runs o.workers goroutines per residual call, so
+// the grid workers are capped so the two levels do not oversubscribe the CPU.
+func (o *Optimizer) gridWorkers() int {
+	w := runtime.GOMAXPROCS(0) / o.workers
+	if w < 1 {
+		w = 1
+	}
+	return w
 }
 
 // imageHeightToFieldAngle finds the field angle that lands the chief ray at
@@ -690,7 +701,7 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 		if math.Abs(angle) != extremeAngle {
 			continue
 		}
-		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
 		for id, e := range perSurf {
 			if e > extents[id] {
 				extents[id] = e
