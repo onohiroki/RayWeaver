@@ -184,7 +184,7 @@ func TestBuildParamsExcludesFixedVariables(t *testing.T) {
 func TestCycleFindsTwoMinima(t *testing.T) {
 	cfg := types.EscapeConfig{
 		MaxCycles:         10,
-		NumWorkers:        1,
+		EscapeWorkers:     1,
 		DistanceThreshold: 0.1,
 		HInitial:          0.5,
 		WInitial:          0.5,
@@ -218,7 +218,7 @@ func TestCycleFindsTwoMinima(t *testing.T) {
 func TestParallelEscapeFindsBothWells(t *testing.T) {
 	cfg := types.EscapeConfig{
 		MaxCycles:         8,
-		NumWorkers:        2,
+		EscapeWorkers:     2,
 		DistanceThreshold: 0.1,
 		HInitial:          0.5,
 		WInitial:          0.5,

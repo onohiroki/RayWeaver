@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"runtime"
 
 	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/dls"
@@ -32,6 +33,7 @@ type Config struct {
 	NumRays        int
 	ApertureMargin float64
 	MuConMax       float64
+	Workers        int
 	Logger         dls.Logger
 	Hull           *glass.ConvexHull
 	HullMargin     float64
@@ -147,6 +149,7 @@ type Optimizer struct {
 	numRays          int
 	apertureMargin   float64
 	muConMax         float64
+	workers          int
 	gridRotation     float64
 	logger           dls.Logger
 	hull             *glass.ConvexHull
@@ -193,14 +196,14 @@ func NewOptimizer(cfg Config) *Optimizer {
 	return newOptimizer(
 		[]config{c}, variables, cfg.GlassCatalog,
 		cfg.MaxIter, cfg.Mu, cfg.Tol, cfg.Epsilon, cfg.ApertureMargin, cfg.NumRays,
-		cfg.MuConMax, cfg.Logger, cfg.Hull, cfg.HullMargin, cfg.HullWeight,
+		cfg.MuConMax, cfg.Workers, cfg.Logger, cfg.Hull, cfg.HullMargin, cfg.HullWeight,
 	)
 }
 
 // NewMultiOptimizer builds a unified Optimizer over one or more configs,
 // with shared variables (one x driving many bindings) and local variables
 // (one x driving a single surface of one config).
-func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64) *Optimizer {
+func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64) *Optimizer {
 	internal := make([]config, len(configs))
 	for i, ci := range configs {
 		c := config{
@@ -256,7 +259,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 	return newOptimizer(
 		internal, variables, gc,
 		maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax,
-		logger, hull, hullMargin, hullWeight,
+		workers, logger, hull, hullMargin, hullWeight,
 	)
 }
 
@@ -295,7 +298,7 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 	return mt
 }
 
-func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64) *Optimizer {
+func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64) *Optimizer {
 	if maxIter <= 0 {
 		maxIter = 100
 	}
@@ -315,6 +318,9 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 	// which clips rays at surface edges and stalls DLS convergence.
 	if apertureMargin < 1.0 {
 		apertureMargin = 1.0
+	}
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
 	}
 
 	// Config weights default to 1.0 so a single-config YAML that omits
@@ -380,6 +386,7 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 		numRays:          numRays,
 		apertureMargin:   apertureMargin,
 		muConMax:         muConMax,
+		workers:          workers,
 		logger:           logger,
 		hull:             hull,
 		hullMargin:       hullMargin,
@@ -438,6 +445,7 @@ func (o *Optimizer) Options() dls.Options {
 		NumRays:        o.numRays,
 		ApertureMargin: o.apertureMargin,
 		MuConMax:       o.muConMax,
+		Workers:        o.workers,
 		Logger:         o.logger,
 	}
 }
@@ -469,6 +477,11 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 	}
 
 	needTempGC := false
+	localOverrides := make(map[string]*types.Glass, len(o.glassOverrides))
+	for k, g := range o.glassOverrides {
+		cp := *g
+		localOverrides[k] = &cp
+	}
 	for vi, v := range o.variables {
 		val := x[vi]
 
@@ -524,7 +537,7 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 			}
 		case "nd", "vd":
 			key := resolveGlassKeyFromSurface(surfaces, o.gc, v.SurfaceID)
-			if g, ok := o.glassOverrides[key]; ok {
+			if g, ok := localOverrides[key]; ok {
 				switch v.Param {
 				case "nd":
 					g.ND = val
@@ -545,7 +558,7 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 				tempGC.Add(cp)
 			}
 		}
-		for _, ov := range o.glassOverrides {
+		for _, ov := range localOverrides {
 			cp := *ov
 			tempGC.Add(cp)
 		}

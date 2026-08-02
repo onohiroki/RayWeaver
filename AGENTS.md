@@ -30,6 +30,8 @@ Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, write
 - Surface 0 = implicit object plane (no intersection/refraction). Ray `path` must start with `0`.
 - New surface fields: `auto_aperture` (vignetting), `min_glass_path`/`max_glass_path` (edge-thickness constraints).
 - `optimize --verbose` outputs JSONL on stderr; `--log FILE` writes to file.
+- DLS Jacobian parallelisation: `optimization.jacobian_workers` (default GOMAXPROCS). The Jacobian loop in `internal/dls/solver.go` (`computeJacobians`/`parallelColumns`) is embarrassingly parallel and deterministic — identical results for any worker count. `applyVariables` must stay pure (no `Optimizer` mutation) for this to hold.
+- `optimization.escape.escape_workers` is the top-level parallel escape goroutines (default 4). Total goroutines = `escape_workers × jacobian_workers`; recommend `jacobian_workers: 1` for many escape workers.
 - Escape functions act in the normalised variable space (each variable scaled by Min..Max); fixed vars (Min==Max) are excluded from the escape distance. `escape` disables the DLS internal stall perturbation via `Options.DisableStallEscape`.
 - `internal/rayio/` is dead code — never imported. `perllens/` is legacy Perl.
 - Z = optical axis (positive right). All units in mm (coating thicknesses in nm, converted internally).

@@ -439,6 +439,7 @@ type OptimizationConfig struct {
 	NumRays         int                    `yaml:"num_rays,omitempty"`
 	MuConMax        float64                `yaml:"mu_con_max,omitempty"`
 	ApertureMargin  float64                `yaml:"aperture_margin,omitempty"`
+	JacobianWorkers int                    `yaml:"jacobian_workers,omitempty"`
 	Variables       []OptimizationVariable `yaml:"variables,omitempty"`
 	SharedVariables []SharedVariable       `yaml:"shared_variables,omitempty"`
 	LocalVariables  []LocalVariableDef     `yaml:"local_variables,omitempty"`
@@ -451,7 +452,7 @@ type OptimizationConfig struct {
 // (Ishiki-Ono style local-minimum escape for DLS).
 type EscapeConfig struct {
 	MaxCycles         int                `yaml:"max_cycles,omitempty"`
-	NumWorkers        int                `yaml:"num_workers,omitempty"`
+	EscapeWorkers     int                `yaml:"escape_workers,omitempty"`
 	DistanceThreshold float64            `yaml:"distance_threshold,omitempty"`
 	HInitial          float64            `yaml:"h_initial,omitempty"`
 	WInitial          float64            `yaml:"w_initial,omitempty"`
@@ -503,7 +504,7 @@ type EscapeParamsInfo struct {
 	WMult             float64            `yaml:"w_mult"`
 	DistanceThreshold float64            `yaml:"distance_threshold"`
 	MaxCycles         int                `yaml:"max_cycles"`
-	NumWorkers        int                `yaml:"num_workers,omitempty"`
+	EscapeWorkers     int                `yaml:"escape_workers,omitempty"`
 	VariableWeights   map[string]float64 `yaml:"variable_weights,omitempty"`
 }
 

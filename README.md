@@ -116,6 +116,14 @@ Notes:
   converge; an unreachable target is reported with a warning).
 - `optimization.aperture_margin` is clamped to ≥ 1.0 (smaller values make the
   pupil grid smaller than the aperture and stall DLS).
+- `optimization.jacobian_workers` sets the number of goroutines used for the
+  DLS finite-difference Jacobian (default `GOMAXPROCS`). The Jacobian is
+  deterministic: the result is identical for any worker count.
+- `optimization.escape.escape_workers` sets the top-level parallel escape
+  goroutines (default 4). Each escape worker runs a DLS solve that itself
+  parallelises its Jacobian across `jacobian_workers`, so the total goroutine
+  count is `escape_workers × jacobian_workers`; set `jacobian_workers: 1` when
+  running many escape workers to avoid oversubscription.
 - `configs[].ray_paths` is render-only metadata; the optimizer ignores it.
 - `edge_thickness` constraints take the back surface explicitly via `surface2`.
 

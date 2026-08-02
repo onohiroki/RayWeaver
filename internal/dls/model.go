@@ -45,6 +45,7 @@ type Options struct {
 	NumRays            int
 	ApertureMargin     float64
 	MuConMax           float64
+	Workers            int
 	DisableStallEscape bool
 	Logger             Logger
 }

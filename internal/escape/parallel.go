@@ -61,13 +61,13 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 	return p
 }
 
-// ParallelEscape runs the escape loop across numWorkers goroutines, each with
+// ParallelEscape runs the escape loop across escapeWorkers goroutines, each with
 // its own freshly-built model (via the factory) so the shared catalog and
 // surface state stay race-free. All workers share one Store.
 func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig) Result {
 	params := BuildParams(cfg, newModel().Variables())
 
-	numWorkers := cfg.NumWorkers
+	numWorkers := cfg.EscapeWorkers
 	if numWorkers <= 0 {
 		numWorkers = 4
 	}

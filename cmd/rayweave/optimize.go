@@ -215,7 +215,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		}
 	}
 
-	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, logger, hull, hullMargin, hullWeight)
+	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight)
 	result := opt.Optimize()
 
 	// Emit a per-term merit breakdown so the reported merit value can be

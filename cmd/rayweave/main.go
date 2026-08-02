@@ -298,6 +298,7 @@ Input YAML — optimization section:
 Single-config mode:
   optimization:
     method: dls
+    jacobian_workers: 8       # parallel Jacobian goroutines (default GOMAXPROCS)
     variables:
       - name: s2_curvature
         target:
@@ -383,7 +384,7 @@ Input YAML — optimization.escape section:
     variables: [...]          # same variable definitions as 'optimize'
     escape:
       max_cycles: 10          # DLS cycles per worker
-      num_workers: 4          # parallel goroutines (default 4)
+      escape_workers: 4       # top-level parallel goroutines (default 4)
       distance_threshold: 0.1 # normalised distance to call a point "new"
       h_initial: 0.1          # escape bump height
       w_initial: 0.5          # escape bump width
@@ -394,6 +395,11 @@ Input YAML — optimization.escape section:
         thickness: 1
         nd: 10
         vd: 1
+
+The DLS solve inside each worker parallelises the Jacobian across jacobian_workers
+(optimization.jacobian_workers, default GOMAXPROCS). With escape_workers > 1 the
+total goroutines are escape_workers * jacobian_workers; set jacobian_workers: 1 to
+avoid oversubscription.
 
 Escape parameters act in the normalised variable space: each variable is
 scaled by its min..max range. Variables with min == max are excluded from the

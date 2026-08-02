@@ -106,6 +106,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog) {
 		NumRays:        input.Optimization.NumRays,
 		ApertureMargin: apertureMargin,
 		MuConMax:       input.Optimization.MuConMax,
+		Workers:        input.Optimization.JacobianWorkers,
 	}
 	if input.Optimization.GlassHull != nil && input.Optimization.GlassHull.Enabled {
 		cfg.Hull = glass.NewDefaultConvexHull()
@@ -271,7 +272,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog) {
 	factory := func() dls.Model {
 		configsCopy := make([]optimize.ConfigInput, len(configs))
 		copy(configsCopy, configs)
-		return optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, nil, hull, hullMargin, hullWeight)
+		return optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, input.Optimization.JacobianWorkers, nil, hull, hullMargin, hullWeight)
 	}
 
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape)
@@ -328,7 +329,7 @@ func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum) *type
 			WMult:             res.Params.WMult,
 			DistanceThreshold: res.Params.Dt,
 			MaxCycles:         res.Cycles,
-			NumWorkers:        res.Workers,
+			EscapeWorkers:     res.Workers,
 		},
 		Minima: minima,
 	}

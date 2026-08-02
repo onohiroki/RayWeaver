@@ -2,6 +2,8 @@ package dls
 
 import (
 	"math"
+	"runtime"
+	"sync"
 )
 
 const (
@@ -30,6 +32,9 @@ func Solve(m Model) Result {
 	}
 	if opts.MuConMax <= 0 {
 		opts.MuConMax = 100.0
+	}
+	if opts.Workers <= 0 {
+		opts.Workers = runtime.GOMAXPROCS(0)
 	}
 
 	variables := m.Variables()
@@ -96,7 +101,7 @@ func Solve(m Model) Result {
 	bestKnownMerit := merit
 
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
-		J_opt, r_opt, J_con, c_con := computeJacobians(m, xNorm, variables, scales, opts.Epsilon)
+		J_opt, r_opt, J_con, c_con := computeJacobians(m, xNorm, variables, scales, opts.Epsilon, opts.Workers)
 
 		J, r := J_opt, r_opt
 		if hasConstraints {
@@ -455,7 +460,11 @@ func Solve(m Model) Result {
 	}
 }
 
-func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales []float64, epsilon float64) ([][]float64, []float64, [][]float64, []float64) {
+// computeJacobians evaluates the finite-difference Jacobian of the residuals
+// and constraints with respect to every variable. Each perturbed evaluation
+// writes a distinct column of J_opt/J_con, so the loop is embarrassingly
+// parallel and produces bit-identical results regardless of worker count.
+func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales []float64, epsilon float64, workers int) ([][]float64, []float64, [][]float64, []float64) {
 	nVars := len(xNorm)
 	xPhys := denormalize(xNorm, variables, scales)
 
@@ -479,7 +488,7 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 		J_con[i] = make([]float64, nVars)
 	}
 
-	for j := 0; j < nVars; j++ {
+	column := func(j int) {
 		xPert := make([]float64, nVars)
 		copy(xPert, xPhys)
 		xPert[j] += epsilon * scales[j]
@@ -497,7 +506,38 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 		}
 	}
 
+	if workers > 1 && nVars > 1 {
+		parallelColumns(nVars, workers, column)
+	} else {
+		for j := 0; j < nVars; j++ {
+			column(j)
+		}
+	}
+
 	return J_opt, r0, J_con, c0
+}
+
+// parallelColumns runs work(j) for j in [0, n) across up to workers goroutines.
+func parallelColumns(n, workers int, work func(j int)) {
+	if workers > n {
+		workers = n
+	}
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				work(j)
+			}
+		}()
+	}
+	for j := 0; j < n; j++ {
+		jobs <- j
+	}
+	close(jobs)
+	wg.Wait()
 }
 
 // constraintTerm returns the augmented-Lagrangian penalty contribution of

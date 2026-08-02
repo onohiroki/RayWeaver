@@ -25,7 +25,7 @@ optimization:
   max_iter: 200
   escape:
     max_cycles: 4
-    num_workers: 3
+    escape_workers: 3
     distance_threshold: 0.15
     h_initial: 0.5
     w_initial: 0.4
