@@ -444,6 +444,20 @@ type OptimizationConfig struct {
 	LocalVariables  []LocalVariableDef     `yaml:"local_variables,omitempty"`
 	Constraints     []ConstraintOperand    `yaml:"constraints,omitempty"`
 	GlassHull       *GlassHullConfig       `yaml:"glass_hull,omitempty"`
+	Escape          *EscapeConfig          `yaml:"escape,omitempty"`
+}
+
+// EscapeConfig configures the escape-function global optimisation loop
+// (Ishiki-Ono style local-minimum escape for DLS).
+type EscapeConfig struct {
+	MaxCycles         int                `yaml:"max_cycles,omitempty"`
+	NumWorkers        int                `yaml:"num_workers,omitempty"`
+	DistanceThreshold float64            `yaml:"distance_threshold,omitempty"`
+	HInitial          float64            `yaml:"h_initial,omitempty"`
+	WInitial          float64            `yaml:"w_initial,omitempty"`
+	HMult             float64            `yaml:"h_mult,omitempty"`
+	WMult             float64            `yaml:"w_mult,omitempty"`
+	VariableWeights   map[string]float64 `yaml:"variable_weights,omitempty"`
 }
 
 type MeritTermResult struct {
@@ -469,6 +483,47 @@ type OptimizationResult struct {
 	Status            string            `yaml:"status"`
 	Iterations        int               `yaml:"iterations"`
 	Reason            string            `yaml:"reason,omitempty"`
+}
+
+// EscapeResult is the escape-function global optimisation report. The best
+// solution's surfaces live in the top-level system/configs (pipeline-compatible);
+// every discovered local minimum is listed here with its full surface data.
+type EscapeResult struct {
+	BestIndex int              `yaml:"best_index"`
+	BestMerit float64          `yaml:"best_merit"`
+	Params    EscapeParamsInfo `yaml:"params"`
+	Minima    []EscapeMinimum  `yaml:"minima"`
+}
+
+// EscapeParamsInfo records the escape parameter values actually used.
+type EscapeParamsInfo struct {
+	HInitial          float64            `yaml:"h_initial"`
+	WInitial          float64            `yaml:"w_initial"`
+	HMult             float64            `yaml:"h_mult"`
+	WMult             float64            `yaml:"w_mult"`
+	DistanceThreshold float64            `yaml:"distance_threshold"`
+	MaxCycles         int                `yaml:"max_cycles"`
+	NumWorkers        int                `yaml:"num_workers,omitempty"`
+	VariableWeights   map[string]float64 `yaml:"variable_weights,omitempty"`
+}
+
+// EscapeMinimum is one discovered local minimum. Single-config runs populate
+// Surfaces; multi-config runs populate Configs.
+type EscapeMinimum struct {
+	Index     int              `yaml:"index"`
+	Merit     float64          `yaml:"merit"`
+	Configs   []Config         `yaml:"configs,omitempty"`
+	Surfaces  []Surface        `yaml:"surfaces,omitempty"`
+	Variables []EscapeVarState `yaml:"variables"`
+}
+
+// EscapeVarState records the variable values at a local minimum.
+type EscapeVarState struct {
+	Name   string  `yaml:"name"`
+	Config string  `yaml:"config,omitempty"`
+	Surf   int     `yaml:"surf,omitempty"`
+	Param  string  `yaml:"param"`
+	After  float64 `yaml:"after"`
 }
 
 type Provenance struct {
@@ -605,6 +660,7 @@ type Output struct {
 	Results        []RayResult         `yaml:"results,omitempty"`
 	ParaxialResult *ParaxialResult     `yaml:"paraxial_result,omitempty"`
 	OptResults     *OptimizationResult `yaml:"opt_results,omitempty"`
+	EscapeResult   *EscapeResult       `yaml:"escape_result,omitempty"`
 	Provenance     *Provenance         `yaml:"provenance,omitempty"`
 	Stop           *StopInfo           `yaml:"stop,omitempty"`
 }
