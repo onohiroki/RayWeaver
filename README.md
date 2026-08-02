@@ -13,7 +13,9 @@ RayWeaver is a CLI ray tracing engine for optical systems, written in Go.
 - Folded systems (mirrors): positive thicknesses only, fold via `decenter: [{tilt: [0, 180, 0], reflect: true}]`, fold-aware paraxial/chief/ray tracing
 - Glass dispersion via Sellmeier or Cauchy models
 - Jones-matrix polarization tracking
-- Parallel computation for pupil grids
+- DLS (damped least squares) local optimization of lens surfaces
+- Escape-function global optimization that finds multiple local minima
+- Parallel computation for pupil grids and optimization Jacobians
 - YAML-based input/output, pipeable between subcommands
 
 ## Build
@@ -46,8 +48,31 @@ Subcommands are grouped by their role in the data flow
 | Analysis | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. | system + coating → R/T/phase |
 | Transform | `scale` | Uniformly scale a system so its EFL equals `--efl TARGET` (exact; preserves f/#). Useful for building a starting point before optimizing. | system → scaled system |
 | Synthesis | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. `--verbose` also emits a per-term merit breakdown. `--exclude-param` drops target params (e.g. asphere coefficients) from the variable set. | system + merit → optimized system |
+| Synthesis | `escape` | Escape-function global optimization (Ishiki-Ono style): repeatedly run DLS, adding a smooth merit-function bump at each discovered local minimum so the next run escapes the valley and finds other minima. Sub-command `escape extract --index N` pulls one minimum out as a clean lens. Flags: `--glass-dir`, `--index N` (extract). See `docs/escape.md`. | system + merit → best solution + `escape_result` |
 | Presentation | `plot` | Render an SVG or PNG cross-section diagram. Flags: `-o file.svg|.png`, `--lens-width`, `--ray-width`, `--scale`, `--right-margin`, `--config`. | system + rays → diagram |
 | Tooling | `query` | Read-only YAML/JSONL selector: extract values, iterate arrays, aggregate, evaluate expressions and pass-gates from a shell pipeline. Replaces `python3 + PyYAML` / `yq` in the sample demos. See `docs/query.md`. | YAML/JSONL → plain text / YAML / JSON / CSV |
+
+## Documentation
+
+Per-subcommand usage manuals live in [`docs/`](docs/):
+
+| Document | Covers |
+|---|---|
+| [docs/import.md](docs/import.md) | ZEMAX / OSLO / CODE V import |
+| [docs/trace.md](docs/trace.md) | low-level ray tracing |
+| [docs/chief.md](docs/chief.md) | chief rays, pupil grids, spot stats, ray fans, clear aperture |
+| [docs/paraxial.md](docs/paraxial.md) | first-order / cardinal analysis |
+| [docs/tmm.md](docs/tmm.md) | thin-film coating analysis |
+| [docs/plot.md](docs/plot.md) | SVG / PNG diagrams |
+| [docs/scale.md](docs/scale.md) | EFL scaling |
+| [docs/optimize.md](docs/optimize.md) | DLS optimization |
+| [docs/escape.md](docs/escape.md) | escape-function global optimization |
+| [docs/query.md](docs/query.md) | YAML/JSONL selector |
+
+The numerical methods behind the analyses and optimizations are described
+separately in [`docs/methods/`](docs/methods/README.md) (ray tracing, chief-ray
+and spot computation, paraxial optics, merit functions, DLS, escape functions,
+glass dispersion, thin-film TMM, and EFL scaling).
 
 ## Pipeline examples
 
@@ -89,6 +114,13 @@ cat samples/us2645157.yaml \
 # DLS optimization with progress logged to a file (JSONL)
 ./rayweave optimize --log /tmp/opt-progress.jsonl < samples/optimize-demo.yaml > optimized.yaml
 
+# Escape-function global optimization (finds multiple local minima)
+./rayweave escape < samples/escape-demo.yaml | tee escape-result.yaml
+
+# Extract local minimum N as a clean lens YAML
+./rayweave escape extract --index 1 < escape-result.yaml > min1.yaml
+./rayweave escape extract --index 1 < escape-result.yaml | rayweave trace | rayweave plot -o min1.svg
+
 # Scale a reference design to a target focal length, then optimize it
 cat reference25mm.yaml | ./rayweave scale --efl 50 | ./rayweave optimize > optimized.yaml
 
@@ -127,6 +159,11 @@ Notes:
   running many escape workers to avoid oversubscription.
 - `configs[].ray_paths` is render-only metadata; the optimizer ignores it.
 - `edge_thickness` constraints take the back surface explicitly via `surface2`.
+- `optimization.escape` enables the escape-function global optimizer (see
+  `docs/escape.md` and `docs/methods/escape-function.md`). It wraps the same
+  `variables`/`merit` definitions as `optimize`; the best solution is written
+  to the top-level configs (pipeline-compatible) and every discovered local
+  minimum is listed in the `escape_result` section.
 
 
 ## Sample data

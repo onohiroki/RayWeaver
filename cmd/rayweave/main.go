@@ -573,6 +573,7 @@ Subcommands:
   tmm        Thin-film coating analysis (transfer-matrix method)
   plot       Generate SVG cross-section drawing
   optimize   DLS optimization of lens surfaces
+  escape     Escape-function global optimization (multiple local minima)
   scale      Scale a system so its EFL equals --efl TARGET
   import     Import ZEMAX/OSLO/CODE V lens files
   query      Read-only YAML/JSONL selector (replace python3/PyYAML in demos)
