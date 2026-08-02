@@ -78,6 +78,21 @@ func main() {
 		args = append([]string{"optimize"}, fs.Args()...)
 	}
 
+	// Escape has two sub-subcommands: run (default) and extract.
+	escapeExtractMode := false
+	escapeExtractIndex := 0
+	optEscapeGlassDir := ""
+	if subcommand == "escape" {
+		if len(args) >= 2 && args[1] == "extract" {
+			escapeExtractMode = true
+			escapeExtractIndex = parseEscapeExtractFlags(args[2:])
+		} else {
+			fs := flag.NewFlagSet("escape", flag.ContinueOnError)
+			fs.StringVar(&optEscapeGlassDir, "glass-dir", "", "AGF glass catalog directory")
+			fs.Parse(args[1:])
+		}
+	}
+
 	data, err := readStdin()
 	if err != nil {
 		errOut("Error reading stdin: %v", err)
@@ -97,6 +112,12 @@ func main() {
 		runPlot(data)
 	case "optimize":
 		runOptimize(data, optVerbose, optLogFile, optGlassDir)
+	case "escape":
+		if escapeExtractMode {
+			runEscapeExtract(data, escapeExtractIndex)
+		} else {
+			runEscape(data, optEscapeGlassDir)
+		}
 	case "import":
 		runImport(data)
 	case "scale":
@@ -339,6 +360,52 @@ Merit terms are evaluated per-config and summed weighted by config weight.
 A CONF operand selects which config's merit terms are active for each rule.
 
 Output: optimized YAML with updated surface parameters in each config.
+ `)
+	case "escape":
+		fmt.Print(`Usage: rayweave escape [--glass-dir DIR] < input.yaml
+       rayweave escape extract --index N < escape-output.yaml
+
+Escape-function global optimisation (Ishiki-Ono style). DLS repeatedly
+converges to local minima; after each convergence a smooth bump is added to
+the merit function around that minimum, pushing the next DLS run out of the
+valley to discover other local minima.
+
+Options:
+  --glass-dir DIR    AGF glass catalog directory
+
+Sub-commands:
+  escape (default)       run the global optimisation loop
+  escape extract --index N   extract local minimum N as a clean lens YAML
+
+Input YAML — optimization.escape section:
+  optimization:
+    method: dls
+    variables: [...]          # same variable definitions as 'optimize'
+    escape:
+      max_cycles: 10          # DLS cycles per worker
+      num_workers: 4          # parallel goroutines (default 4)
+      distance_threshold: 0.1 # normalised distance to call a point "new"
+      h_initial: 0.1          # escape bump height
+      w_initial: 0.5          # escape bump width
+      h_mult: 2.0             # strengthen factor when a minimum repeats
+      w_mult: 1.3             # widen factor when a minimum repeats
+      variable_weights:       # optional per-param weight (default 1.0)
+        curvature: 1000
+        thickness: 1
+        nd: 10
+        vd: 1
+
+Escape parameters act in the normalised variable space: each variable is
+scaled by its min..max range. Variables with min == max are excluded from the
+escape distance. distance_threshold is a fraction of the normalised range
+(default 0.1).
+
+Output: best solution in configs[].surfaces (pipeline-compatible with
+"rayweave trace"/"rayweave plot"), plus an escape_result section listing
+every discovered local minimum with its full surfaces.
+
+  rayweave escape < input.yaml | rayweave trace | rayweave plot
+  rayweave escape extract --index 1 < escape-output.yaml > min1.yaml
  `)
 	case "import":
 		fmt.Print(`Usage: rayweave import --format zemax < lens.zmx > system.yaml
