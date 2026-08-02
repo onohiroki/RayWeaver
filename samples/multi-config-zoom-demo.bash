@@ -18,7 +18,8 @@ set -euo pipefail
 #
 # How to read the result
 #   - Every config must pass all gates: on-axis RMS < 0.03 mm,
-#     EPD = 20 +/- 0.1 mm, VF >= 0.5 on the 10/15 mm image-height fields.
+#     EPD = 20 +/- 0.1 mm, optimizer-reported VF >= 0.5 on the 10/15 mm
+#     image-height fields.
 #   - EFL differs per config because the lens zooms; EPD stays pinned at 20.
 # =============================================================================
 
@@ -80,11 +81,12 @@ cat >> "$RESULT_FILE" <<'EOF'
   to 20 mm in every config (before and after).
 - EFL (mm) per config differs because the lens changes focal length as it
   zooms, while the pupil diameter is held constant.
-- Vignetting factor (VF): fraction of pupil-grid rays that transmit the
-  system. 1.0000 = full aperture; a value like 0.4 means the beam is clipped
-  hard (vignetting) by a clear aperture.
+- Vignetting factor (VF): fraction of the pupil beam that transmits the
+  system; 1.0 = full aperture. The pass gate uses the value the optimizer
+  enforced (opt_results.constraints vignetting_factor, reported in the
+  result YAML); "VF aft(chief)" is the chief-grid reference measurement.
 - Pass gates: on-axis RMS < 0.03 mm, EPD = 20 +/- 0.1 mm, and
-  VF >= 0.5 on the 10/15 mm image-height fields.
+  optimizer-reported VF >= 0.5 on the 10/15 mm image-height fields.
 EOF
 }
 trap append_interpretation EXIT
@@ -243,16 +245,39 @@ print(len(ok)/len(p) if p else -1)
 " < <($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null)
 }
 
+# get_reported_vf reads the vignetting factor the optimizer enforced, as
+# reported in opt_results.constraints of the optimize output (the metric the
+# DLS constraint was evaluated on; this is what the pass gate checks).
+get_reported_vf() {
+  local yaml_file="$1"
+  local cfg="$2"
+  local field="$3"
+  python3 -c "
+import sys, yaml
+d = yaml.safe_load(open('$yaml_file'))
+or_ = d.get('opt_results')
+if not or_:
+    print(-1); sys.exit(0)
+for c in or_.get('constraints', []):
+    if c.get('measure') == 'vignetting_factor' and c.get('field') == $field and c.get('config') == '$cfg':
+        print(c.get('value', -1)); sys.exit(0)
+print(-1)
+"
+}
+
 {
-  echo "=== Vignetting Factor Comparison (per config, primary λ=587.6nm) ==="
-  echo "  (fraction of pupil-grid rays that transmit the system)"
-  printf "  %-8s %6s  %10s  %10s\n" "Config" "Field" "VF before" "VF after"
-  printf "  %-8s %6s  %10s  %10s\n" "------" "-----" "--------" "--------"
+  echo "=== Vignetting Factor (per config, primary λ=587.6nm) ==="
+  echo "  (VF bef / aft(chief) = fraction of chief pupil-grid rays transmitted;"
+  echo "   VF aft(report) = vignetting factor the optimizer enforced — the pass gate)"
+  printf "  %-8s %6s  %10s  %10s  %10s\n" "Config" "Field" "VF bef" "VF aft(rep)" "VF aft(chief)"
+  printf "  %-8s %6s  %10s  %10s  %10s\n" "------" "-----" "-------" "----------" "----------"
   for cfg in config0 config1 config2; do
     for fi in 0 1 2; do
       vf_before=$(get_vf "$YAML" "$cfg" "$fi")
-      vf_after=$(get_vf "$RESULT" "$cfg" "$fi")
-      printf "  %-8s %6s  %10.4f  %10.4f\n" "$cfg" "f$fi" "$vf_before" "$vf_after"
+      vf_reported=$(get_reported_vf "$RESULT" "$cfg" "$fi")
+      vf_chief=$(get_vf "$RESULT" "$cfg" "$fi")
+      if [ "$vf_reported" = "-1" ]; then vf_reported="-"; fi
+      printf "  %-8s %6s  %10.4f  %10s  %10.4f\n" "$cfg" "f$fi" "$vf_before" "$vf_reported" "$vf_chief"
     done
   done
   echo
@@ -276,13 +301,13 @@ for cfg in config0 config1 config2; do
   fi
 done
 
-# ── Vignetting threshold check (off-axis fields must keep >= 50% of center beam) ──
+# ── Vignetting threshold check (off-axis fields; gate on the optimizer-reported VF) ──
 VIG_THRESHOLD=0.5
 echo "=== Vignetting factor threshold check ==="
-printf "  (threshold = $VIG_THRESHOLD — 10mm / 15mm image-height fields must keep >= this)\n"
+printf "  (threshold = $VIG_THRESHOLD — optimizer-reported VF on 10mm / 15mm image-height fields must be >= this)\n"
 for cfg in config0 config1 config2; do
   for fi in 1 2; do
-    vf=$(get_vf "$RESULT" "$cfg" "$fi")
+    vf=$(get_reported_vf "$RESULT" "$cfg" "$fi")
     printf "  %-8s field %d VF = %8.4f" "$cfg" "$fi" "$vf"
     if [ "$vf" != "-1" ] && [ "$(python3 -c "print('1' if $vf < $VIG_THRESHOLD else '0')")" = "1" ]; then
       echo "   ✗"

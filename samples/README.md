@@ -46,6 +46,12 @@ installed, the scripts print a message and skip those renderings.
   `coefficient_0`…`coefficient_4`).
 - `chief --clear-aperture --shrink` sizes diameters down to the beam footprint.
 - `optimize --verbose` / `--log` also emits a per-term `{"event":"breakdown"}` line.
+- The `optimize` output YAML gains an `opt_results.constraints` block: the final
+  measured `value` and `residual` of every active constraint (e.g. the
+  `vignetting_factor` the DLS constraint enforced). The multi-config and glass
+  demo gates check the optimizer-reported vignetting factor; the `chief`-based
+  vignetting printed in the result files is a reference measurement with a
+  different pupil-grid sampling.
 
 ## Generated files
 

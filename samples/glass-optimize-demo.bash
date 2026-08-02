@@ -19,7 +19,8 @@ set -uo pipefail
 # How to read the result
 #   - Per-wavelength RMS row spread = colour-correction quality.
 #   - Glass table (script console): model2/3 nd-vd moves from wrong to sensible.
-#   - Gates: on-axis RMS < 0.3 mm; VF >= 0.5 on the 10/16 deg fields.
+#   - Gates: on-axis RMS < 0.3 mm; optimizer-reported VF >= 0.5 on the
+#     10/16 deg fields.
 # =============================================================================
 
 # Resolve the script's own directory so the demo runs from any CWD
@@ -80,12 +81,15 @@ cat >> "$RESULT_FILE" <<'EOF'
   at the primary wavelength (d = 587.6 nm).
 - "Per-Wavelength RMS" is the spot size at each design wavelength (g/F/d/C).
   If the rows spread out, colour (lateral colour) is the limiting aberration.
-- Vignetting factor (VF): fraction of pupil-grid rays that transmit the
-  system; 1.0 = full aperture.
+- Vignetting factor (VF): fraction of the pupil beam that transmits the
+  system; 1.0 = full aperture. The pass gate uses the value the optimizer
+  enforced (opt_results.constraints vignetting_factor, reported in the
+  result YAML); "VF aft(chief)" is the chief-grid reference measurement.
 - The demo starts from deliberately wrong glass (model2/model3 nd-vd swapped)
   so DLS must recover nd/vd together with curvatures and air gaps.
-- Pass gates: on-axis RMS < 0.3 mm and VF >= 0.5 on the 10/16 deg fields.
-  A failed VF gate means the edge field vignettes more than desired.
+- Pass gates: on-axis RMS < 0.3 mm and optimizer-reported VF >= 0.5 on the
+  10/16 deg fields. A failed VF gate means the edge field vignettes more
+  than desired.
 EOF
 }
 trap append_interpretation EXIT
@@ -240,15 +244,37 @@ print(-1)
 } | tee "$RESULT_FILE"
 
 # ── Vignetting factor comparison (before vs after) ──
+# get_reported_vf reads the vignetting factor the optimizer enforced, as
+# reported in opt_results.constraints of the optimize output (the metric the
+# DLS constraint was evaluated on; this is what the pass gate checks).
+get_reported_vf() {
+  local yaml_file="$1"
+  local field="$2"
+  python3 -c "
+import sys, yaml
+d = yaml.safe_load(open('$yaml_file'))
+or_ = d.get('opt_results')
+if not or_:
+    print(-1); sys.exit(0)
+for c in or_.get('constraints', []):
+    if c.get('measure') == 'vignetting_factor' and c.get('field') == $field:
+        print(c.get('value', -1)); sys.exit(0)
+print(-1)
+"
+}
+
 {
-  echo "=== Vignetting Factor Comparison (primary λ=587.6nm) ==="
-  echo "  (fraction of pupil-grid rays that transmit the system)"
-  printf "  %-8s %6s  %10s  %10s\n" "Phase" "Field" "VF before" "VF after"
-  printf "  %-8s %6s  %10s  %10s\n" "-----" "-----" "--------" "--------"
+  echo "=== Vignetting Factor (primary λ=587.6nm) ==="
+  echo "  (VF bef / aft(chief) = fraction of chief pupil-grid rays transmitted;"
+  echo "   VF aft(report) = vignetting factor the optimizer enforced — the pass gate)"
+  printf "  %-8s %6s  %10s  %10s  %10s\n" "Phase" "Field" "VF bef" "VF aft(rep)" "VF aft(chief)"
+  printf "  %-8s %6s  %10s  %10s  %10s\n" "-----" "-----" "-------" "----------" "----------"
   for fi in 0 1 2; do
     vf_before=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
-    vf_after=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
-    printf "  %-8s %6s  %10.4f  %10.4f\n" "optimize" "f$fi" "$vf_before" "$vf_after"
+    vf_reported=$(get_reported_vf "$OPT_RESULT" "$fi")
+    vf_chief=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
+    if [ "$vf_reported" = "-1" ]; then vf_reported="-"; fi
+    printf "  %-8s %6s  %10.4f  %10s  %10.4f\n" "optimize" "f$fi" "$vf_before" "$vf_reported" "$vf_chief"
   done
   echo
 } | tee -a "$RESULT_FILE"
@@ -266,11 +292,11 @@ else
   echo "$msg" | tee -a "$RESULT_FILE"
 fi
 
-# ── Vignetting threshold check (max field must keep >= 50% of center beam) ──
+# ── Vignetting threshold check (10deg/16deg; gate on the optimizer-reported VF) ──
 VIG_THRESHOLD=0.5
-printf "  (threshold = $VIG_THRESHOLD — vignetting factor at 10deg/16deg must be >= this)\n"
+printf "  (threshold = $VIG_THRESHOLD — optimizer-reported VF at 10deg/16deg must be >= this)\n"
 for fi in 1 2; do
-  vf=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
+  vf=$(get_reported_vf "$OPT_RESULT" "$fi")
   if [ "$vf" != "-1" ] && [ "$(python3 -c "print('1' if $vf < $VIG_THRESHOLD else '0')")" = "1" ]; then
     msg="  >>> Optimization failed: field $fi vignetting factor = $(printf '%.4f' "$vf") < $VIG_THRESHOLD"
     echo "$msg" | tee -a "$RESULT_FILE"

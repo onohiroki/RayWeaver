@@ -300,6 +300,14 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		Input: input,
 	}
 
+	// Report the final measured value of every active constraint (e.g. the
+	// vignetting factor) so callers can gate on what the optimizer enforced.
+	output.OptResults = &types.OptimizationResult{
+		Status:      result.Status,
+		Iterations:  result.Iterations,
+		Constraints: opt.FinalConstraintMeasurements(finalX),
+	}
+
 	writeYAML(&output)
 }
 

@@ -482,11 +482,26 @@ type MeritBeforeAfter struct {
 }
 
 type OptimizationResult struct {
-	TotalMerit        *MeritBeforeAfter `yaml:"total_merit"`
-	ConstraintPenalty *MeritBeforeAfter `yaml:"constraint_penalty,omitempty"`
-	Status            string            `yaml:"status"`
-	Iterations        int               `yaml:"iterations"`
-	Reason            string            `yaml:"reason,omitempty"`
+	TotalMerit        *MeritBeforeAfter       `yaml:"total_merit"`
+	ConstraintPenalty *MeritBeforeAfter       `yaml:"constraint_penalty,omitempty"`
+	Status            string                  `yaml:"status"`
+	Iterations        int                     `yaml:"iterations"`
+	Reason            string                  `yaml:"reason,omitempty"`
+	Constraints       []ConstraintMeasurement `yaml:"constraints,omitempty"`
+}
+
+// ConstraintMeasurement records the final measured value and residual of one
+// active constraint at the optimisation result. Value is the raw constraint
+// measure (e.g. the vignetting factor for MeasureVignettingFactor), residual is
+// the weighted error (0 when the constraint is satisfied).
+type ConstraintMeasurement struct {
+	ID       string  `yaml:"id"`
+	Config   string  `yaml:"config,omitempty"`
+	Kind     string  `yaml:"kind"`
+	Measure  string  `yaml:"measure"`
+	Field    int     `yaml:"field,omitempty"`
+	Value    float64 `yaml:"value"`
+	Residual float64 `yaml:"residual"`
 }
 
 // EscapeResult is the escape-function global optimisation report. The best

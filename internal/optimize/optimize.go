@@ -908,6 +908,48 @@ func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []Constr
 	return out
 }
 
+// FinalConstraintMeasurements evaluates every active constraint at x and
+// returns its measured value and weighted residual. Unlike
+// FinalConstraintViolations it reports all constraints, not just the violated
+// ones, so callers (e.g. the optimize command) can record the actual value the
+// constraint reached (for example the final vignetting factor).
+func (o *Optimizer) FinalConstraintMeasurements(x []float64) []types.ConstraintMeasurement {
+	configSurfaces, tempGC := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+
+	var out []types.ConstraintMeasurement
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc)
+
+		for _, c := range cfg.constraints {
+			if !c.Active {
+				continue
+			}
+			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface)
+			err := constraint.ComputeError(c.Kind, value, c)
+			w := c.Weight
+			if w <= 0 {
+				w = 1.0
+			}
+			out = append(out, types.ConstraintMeasurement{
+				ID:       c.ID,
+				Config:   cfg.id,
+				Kind:     string(c.Kind),
+				Measure:  string(c.Measure),
+				Field:    c.Field,
+				Value:    value,
+				Residual: math.Sqrt(w) * err,
+			})
+		}
+	}
+	return out
+}
+
 func (o *Optimizer) Optimize() Result {
 	dlsResult := dls.Solve(o)
 
