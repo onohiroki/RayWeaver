@@ -6,28 +6,22 @@ import (
 	"strings"
 
 	"github.com/hiroki/rayweaver/internal/raymath"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
 type vec2 struct{ X, Y float64 }
 
 func sagFuncForSurface(surf types.Surface) func(float64) float64 {
-	switch surf.Type {
-	case types.Sphere:
+	if surf.Type == types.AspherePolynomial || surf.Type == types.AsphereZernike {
+		return surface.SagFunc(surf)
+	}
+	if surf.Type == types.Sphere {
 		return func(h float64) float64 {
 			return raymath.PolynomialAsphereSag(h, surf.Radius(), 0, nil)
 		}
-	case types.AspherePolynomial:
-		return func(h float64) float64 {
-			return raymath.PolynomialAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients)
-		}
-	case types.AsphereZernike:
-		return func(h float64) float64 {
-			return raymath.ZernikeAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients, surf.NormRadius)
-		}
-	default:
-		return func(float64) float64 { return 0 }
 	}
+	return func(float64) float64 { return 0 }
 }
 
 // globalSag returns the global Z offset of the surface sag at height y,

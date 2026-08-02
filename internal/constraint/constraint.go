@@ -8,6 +8,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -118,7 +119,7 @@ func traceChiefRay(surfaces []types.Surface, fieldAngle, wavelength float64, gc 
 
 func evaluateImageHeight(surfaces []types.Surface, fieldAngle, wavelength float64, gc *glass.Catalog) float64 {
 	if wavelength == 0 {
-		wavelength = 0.0005876
+		wavelength = types.DefaultWavelength
 	}
 	result := traceChiefRay(surfaces, fieldAngle, wavelength, gc)
 	if result.Error != "" || len(result.Surfaces) == 0 {
@@ -133,7 +134,7 @@ func evaluateIncidentAngle(surfaces []types.Surface, fieldAngle, wavelength floa
 		return 0
 	}
 	if wavelength == 0 {
-		wavelength = 0.0005876
+		wavelength = types.DefaultWavelength
 	}
 	result := traceChiefRay(surfaces, fieldAngle, wavelength, gc)
 	if result.Error != "" || len(result.Surfaces) == 0 {
@@ -185,7 +186,7 @@ func evaluateThickness(surfaces []types.Surface, targetSurface int) float64 {
 
 func evaluateEFL(surfaces []types.Surface, gc *glass.Catalog) float64 {
 	sys := types.System{Surfaces: surfaces}
-	res := paraxial.Compute(sys, 0.0005876, gc, 0, nil)
+	res := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
 	return res.FocalLength
 }
 
@@ -200,7 +201,7 @@ func evaluateDiameter(surfaces []types.Surface, id int) float64 {
 
 func evaluateBeamClearance(surfaces []types.Surface, stopID int, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
 	if wavelength == 0 {
-		wavelength = 0.0005876
+		wavelength = types.DefaultWavelength
 	}
 	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, stopID, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0)
 	if perSurfMax == nil {
@@ -216,7 +217,7 @@ func evaluateBeamClearance(surfaces []types.Surface, stopID int, fieldAngle, wav
 
 func evaluateBeamDiameter(surfaces []types.Surface, stopID int, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
 	if wavelength == 0 {
-		wavelength = 0.0005876
+		wavelength = types.DefaultWavelength
 	}
 	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, stopID, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0)
 	if perSurfMax == nil {
@@ -232,7 +233,7 @@ func evaluateBeamDiameter(surfaces []types.Surface, stopID int, fieldAngle, wave
 
 func evaluateVignettingFactor(surfaces []types.Surface, stopID int, fieldAngle, wavelength float64, gc *glass.Catalog, numRays int, apertureMargin float64) float64 {
 	if wavelength == 0 {
-		wavelength = 0.0005876
+		wavelength = types.DefaultWavelength
 	}
 	points, _ := dls.TraceFieldGrid(gc, surfaces, stopID, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0)
 	if len(points) == 0 {
@@ -281,13 +282,13 @@ func evaluateEdgeThickness(surfaces []types.Surface, frontID, backID int) float6
 
 func evaluateFNumber(surfaces []types.Surface, gc *glass.Catalog) float64 {
 	sys := types.System{Surfaces: surfaces}
-	res := paraxial.Compute(sys, 0.0005876, gc, 0, nil)
+	res := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
 	return res.InfConjImageSpaceFNumber
 }
 
 func evaluateEntrancePupilDiameter(surfaces []types.Surface, gc *glass.Catalog) float64 {
 	sys := types.System{Surfaces: surfaces}
-	res := paraxial.Compute(sys, 0.0005876, gc, 0, nil)
+	res := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
 	return res.EntrancePupilDiameter
 }
 
@@ -309,26 +310,5 @@ func findSurfaceByID(surfaces []types.Surface, id int) *types.Surface {
 }
 
 func computeNormal(surf *types.Surface, p types.Vec3) types.Vec3 {
-	switch surf.Type {
-	case types.Sphere:
-		if surf.Radius() == 0 {
-			return types.Vec3{0, 0, 1}
-		}
-		return raymath.SphereNormal(p, surf.Radius())
-	case types.AspherePolynomial:
-		sagFunc := func(h float64) float64 {
-			return raymath.PolynomialAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients)
-		}
-		return raymath.AsphereNormal(p, sagFunc)
-	case types.AsphereZernike:
-		sagFunc := func(h float64) float64 {
-			return raymath.ZernikeAsphereSag(h, surf.Radius(), surf.Conic, surf.Coefficients, surf.NormRadius)
-		}
-		return raymath.AsphereNormal(p, sagFunc)
-	default:
-		if surf.Radius() == 0 {
-			return types.Vec3{0, 0, 1}
-		}
-		return raymath.SphereNormal(p, surf.Radius())
-	}
+	return surface.Normal(*surf, p)
 }

@@ -4,28 +4,13 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
 // decodeBOM strips a UTF-8/UTF-16 BOM and decodes UTF-16LE content.
 func decodeBOM(input string) string {
-	raw := []byte(input)
-	if len(raw) < 2 {
-		return input
-	}
-	if raw[0] == 0xFF && raw[1] == 0xFE {
-		u16 := make([]uint16, 0, len(raw)/2)
-		for i := 2; i+1 < len(raw); i += 2 {
-			u16 = append(u16, uint16(raw[i])|uint16(raw[i+1])<<8)
-		}
-		return string(utf16.Decode(u16))
-	}
-	if len(raw) >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {
-		return string(raw[3:])
-	}
-	return input
+	return string(types.DecodeBOM([]byte(input)))
 }
 
 // parseFloat parses a numeric token, treating INF/INFINITY/INFINITE as +Inf

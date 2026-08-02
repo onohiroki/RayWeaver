@@ -1,6 +1,6 @@
 package glass
 
-import "math"
+import "github.com/hiroki/rayweaver/internal/raymath"
 
 type Cauchy struct {
 	A, B, C, D float64
@@ -40,7 +40,7 @@ func FitCauchy(knots []IndexEntry, terms int) Cauchy {
 		}
 	}
 
-	solveLinear(m, matrix, rhs)
+	raymath.SolveLinear(matrix, rhs)
 
 	c := Cauchy{Terms: terms}
 	if m >= 1 {
@@ -66,37 +66,4 @@ func (c *Cauchy) Eval(lambda float64) float64 {
 		n += c.D * x2 * x
 	}
 	return n
-}
-
-func solveLinear(n int, a [][]float64, b []float64) {
-	for col := 0; col < n; col++ {
-		pivot := col
-		maxVal := math.Abs(a[col][col])
-		for row := col + 1; row < n; row++ {
-			if v := math.Abs(a[row][col]); v > maxVal {
-				maxVal = v
-				pivot = row
-			}
-		}
-		if pivot != col {
-			a[col], a[pivot] = a[pivot], a[col]
-			b[col], b[pivot] = b[pivot], b[col]
-		}
-
-		for row := col + 1; row < n; row++ {
-			factor := a[row][col] / a[col][col]
-			for j := col; j < n; j++ {
-				a[row][j] -= factor * a[col][j]
-			}
-			b[row] -= factor * b[col]
-		}
-	}
-
-	for i := n - 1; i >= 0; i-- {
-		sum := b[i]
-		for j := i + 1; j < n; j++ {
-			sum -= a[i][j] * b[j]
-		}
-		b[i] = sum / a[i][i]
-	}
 }

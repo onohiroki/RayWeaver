@@ -106,9 +106,9 @@ func TestFindMinApertureRadius(t *testing.T) {
 		{Diameter: 0.0},
 		{Diameter: 20.0},
 	}
-	r := FindMinApertureRadius(surfaces)
+	r := surface.MinApertureRadius(surfaces)
 	if r != 10.0 {
-		t.Errorf("FindMinApertureRadius = %v, want 10", r)
+		t.Errorf("MinApertureRadius = %v, want 10", r)
 	}
 }
 

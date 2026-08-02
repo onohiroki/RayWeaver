@@ -130,9 +130,9 @@ func ApertureRadiusForGrid(surfaces []types.Surface, wavelength float64, gc *gla
 	if r := paraxialEntranceRadius(surfaces, wavelength, gc, margin); r > 0 {
 		return r
 	}
-	r := findFixedApertureRadius(surfaces)
+	r := surface.FixedMinApertureRadius(surfaces)
 	if r <= 0 {
-		r = findMinApertureRadius(surfaces)
+		r = surface.MinApertureRadius(surfaces)
 	}
 	return r
 }
@@ -144,30 +144,4 @@ func paraxialEntranceRadius(surfaces []types.Surface, wavelength float64, gc *gl
 		return (res.EntrancePupilDiameter / 2) * margin
 	}
 	return 0
-}
-
-func findFixedApertureRadius(surfaces []types.Surface) float64 {
-	minR := math.MaxFloat64
-	for _, s := range surfaces {
-		if !s.AutoAperture && s.Diameter > 0 && s.Diameter/2 < minR {
-			minR = s.Diameter / 2
-		}
-	}
-	if minR == math.MaxFloat64 {
-		return 0
-	}
-	return minR
-}
-
-func findMinApertureRadius(surfaces []types.Surface) float64 {
-	minR := math.MaxFloat64
-	for _, s := range surfaces {
-		if s.Diameter > 0 && s.Diameter/2 < minR {
-			minR = s.Diameter / 2
-		}
-	}
-	if minR == math.MaxFloat64 {
-		return 0
-	}
-	return minR
 }

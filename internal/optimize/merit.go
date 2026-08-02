@@ -90,7 +90,7 @@ func EvaluateMeritKind(kind string, term MeritTerm, surfaces []types.Surface, gc
 
 func evaluateDistortionPct(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if wavelength == 0 {
-		wavelength = 0.0005876
+		wavelength = types.DefaultWavelength
 	}
 
 	yChief := traceChiefImageHeight(surfaces, fieldAngle, wavelength, gc)
@@ -110,7 +110,7 @@ func evaluateDistortionPct(fieldAngle, wavelength float64, surfaces []types.Surf
 
 func evaluateLateralColor(fieldAngle, wl1, wl2 float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if wl1 == 0 {
-		wl1 = 0.0005876
+		wl1 = types.DefaultWavelength
 	}
 	if wl2 == 0 {
 		return 0
@@ -123,7 +123,7 @@ func evaluateLateralColor(fieldAngle, wl1, wl2 float64, surfaces []types.Surface
 
 func evaluateLongitudinalColor(wl1, wl2 float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if wl1 == 0 {
-		wl1 = 0.0005876
+		wl1 = types.DefaultWavelength
 	}
 	if wl2 == 0 {
 		return 0

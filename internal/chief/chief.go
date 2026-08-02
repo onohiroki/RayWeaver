@@ -80,7 +80,7 @@ func determineChiefRays(
 	if stopID <= 0 {
 		stopID = surface.FindStopID(system.Surfaces)
 	}
-	apertureRadius := FindMinApertureRadius(system.Surfaces)
+	apertureRadius := surface.MinApertureRadius(system.Surfaces)
 	if stopID > 0 {
 		for _, s := range system.Surfaces {
 			if s.ID == stopID && s.Diameter > 0 {
@@ -1139,19 +1139,6 @@ func computeTargetZ(surfaces []types.Surface, targetID int) float64 {
 		}
 	}
 	return 0
-}
-
-func FindMinApertureRadius(surfaces []types.Surface) float64 {
-	minR := math.MaxFloat64
-	for _, s := range surfaces {
-		if s.Diameter > 0 && s.Diameter/2 < minR {
-			minR = s.Diameter / 2
-		}
-	}
-	if minR == math.MaxFloat64 {
-		return 0
-	}
-	return minR
 }
 
 // imageHeightForAngle returns the projected centroid (dx*cx + dy*cy) at the

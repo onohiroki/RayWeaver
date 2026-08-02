@@ -48,3 +48,33 @@ func ComputeStopZ(surfaces []types.Surface, stopID int) float64 {
 	}
 	return 0
 }
+
+// MinApertureRadius returns the smallest aperture radius (diameter/2) over all
+// surfaces with a positive diameter, or 0 when none exists.
+func MinApertureRadius(surfaces []types.Surface) float64 {
+	minR := math.MaxFloat64
+	for _, s := range surfaces {
+		if s.Diameter > 0 && s.Diameter/2 < minR {
+			minR = s.Diameter / 2
+		}
+	}
+	if minR == math.MaxFloat64 {
+		return 0
+	}
+	return minR
+}
+
+// FixedMinApertureRadius returns the smallest aperture radius over surfaces
+// with a positive diameter that are not auto_aperture, or 0 when none exists.
+func FixedMinApertureRadius(surfaces []types.Surface) float64 {
+	minR := math.MaxFloat64
+	for _, s := range surfaces {
+		if !s.AutoAperture && s.Diameter > 0 && s.Diameter/2 < minR {
+			minR = s.Diameter / 2
+		}
+	}
+	if minR == math.MaxFloat64 {
+		return 0
+	}
+	return minR
+}

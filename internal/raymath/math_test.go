@@ -260,3 +260,22 @@ func TestDirectionFromAngle(t *testing.T) {
 		t.Errorf("DirectionFromAngle not normalized: |v|^2 = %v", mag)
 	}
 }
+
+func TestSolveLinear(t *testing.T) {
+	a := [][]float64{{2, 1}, {1, 3}}
+	b := []float64{3, 5}
+	if !SolveLinear(a, b) {
+		t.Fatal("SolveLinear returned false for nonsingular system")
+	}
+	if math.Abs(b[0]-0.8) > 1e-10 || math.Abs(b[1]-1.4) > 1e-10 {
+		t.Errorf("SolveLinear = %v, want [0.8 1.4]", b)
+	}
+}
+
+func TestSolveLinearSingular(t *testing.T) {
+	a := [][]float64{{1, 2}, {2, 4}}
+	b := []float64{1, 2}
+	if SolveLinear(a, b) {
+		t.Error("SolveLinear should report false for a singular matrix")
+	}
+}

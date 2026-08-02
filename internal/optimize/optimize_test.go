@@ -202,13 +202,13 @@ func TestOptimizerCanImproveDegradedSystem(t *testing.T) {
 
 	terms := []MeritTerm{
 		{FieldAngle: 0.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0004861, WavWeight: 1.0, Weight: 1.0},
-		{FieldAngle: 0.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0005876, WavWeight: 1.0, Weight: 1.0},
+		{FieldAngle: 0.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: types.DefaultWavelength, WavWeight: 1.0, Weight: 1.0},
 		{FieldAngle: 0.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0006563, WavWeight: 1.0, Weight: 1.0},
 		{FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0004861, WavWeight: 1.0, Weight: 1.0},
-		{FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0005876, WavWeight: 1.0, Weight: 1.0},
+		{FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: types.DefaultWavelength, WavWeight: 1.0, Weight: 1.0},
 		{FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0006563, WavWeight: 1.0, Weight: 1.0},
 		{FieldAngle: 24.0, FieldDir: []float64{0, 1}, FieldWeight: 0.5, Wavelength: 0.0004861, WavWeight: 0.5, Weight: 0.5},
-		{FieldAngle: 24.0, FieldDir: []float64{0, 1}, FieldWeight: 0.5, Wavelength: 0.0005876, WavWeight: 0.5, Weight: 0.5},
+		{FieldAngle: 24.0, FieldDir: []float64{0, 1}, FieldWeight: 0.5, Wavelength: types.DefaultWavelength, WavWeight: 0.5, Weight: 0.5},
 		{FieldAngle: 24.0, FieldDir: []float64{0, 1}, FieldWeight: 0.5, Wavelength: 0.0006563, WavWeight: 0.5, Weight: 0.5},
 	}
 
@@ -436,7 +436,7 @@ func TestOptimizerLoggerCalled(t *testing.T) {
 
 	terms := []MeritTerm{
 		{FieldAngle: 0.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0004861, WavWeight: 1.0, Weight: 1.0},
-		{FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0005876, WavWeight: 1.0, Weight: 1.0},
+		{FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: types.DefaultWavelength, WavWeight: 1.0, Weight: 1.0},
 	}
 
 	variables := []Variable{
