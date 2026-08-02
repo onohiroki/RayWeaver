@@ -52,7 +52,7 @@ func runPlot(data []byte) {
 		}
 	}
 
-	surfaces := output.System.Surfaces
+	surfaces := output.Configs[0].Surfaces
 	if configFlag != "" {
 		idx, err := resolveConfig(output.Configs, configFlag)
 		if idx < 0 {
@@ -60,12 +60,10 @@ func runPlot(data []byte) {
 			os.Exit(1)
 		}
 		surfaces = output.Configs[idx].Surfaces
-	} else if len(surfaces) == 0 && len(output.Configs) > 0 {
-		surfaces = output.Configs[0].Surfaces
-		if len(surfaces) == 0 {
-			errOut("Error: no surfaces to plot (use --config <id> or define system.surfaces or configs[].surfaces)")
-			os.Exit(1)
-		}
+	}
+	if len(surfaces) == 0 {
+		errOut("Error: no surfaces to plot (define configs[].surfaces)")
+		os.Exit(1)
 	}
 
 	surface.Precompute(surfaces)

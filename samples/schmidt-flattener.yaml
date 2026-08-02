@@ -25,9 +25,6 @@ glass_catalog:
       nd: 1.5168
       vd: 64.17
 
-system:
-  surfaces: []
-
 configs:
   - id: config1
     name: Schmidt folded (corrector + mirror + field flattener)

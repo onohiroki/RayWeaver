@@ -258,7 +258,7 @@ type CoatingCatalog struct {
 }
 
 type System struct {
-	Surfaces    []Surface `yaml:"surfaces"`
+	Surfaces    []Surface `yaml:"-"`
 	StopSurface int       `yaml:"-"`
 }
 
@@ -535,7 +535,7 @@ type Input struct {
 	GlassCatalog   *GlassCatalog       `yaml:"glass_catalog,omitempty"`
 	CoatingCatalog *CoatingCatalog     `yaml:"coating_catalog,omitempty"`
 	Version        int                 `yaml:"version,omitempty"`
-	System         System              `yaml:"system"`
+	System         System              `yaml:"-"`
 	Optimization   *OptimizationConfig `yaml:"optimization,omitempty"`
 	Configs        []Config            `yaml:"configs,omitempty"`
 	Chief          *ChiefInput         `yaml:"chief,omitempty"`

@@ -8,10 +8,14 @@ import (
 	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
+// Config is the single-configuration optimisation input. It is an adapter
+// over the unified Optimizer: the configuration becomes config "config1" and
+// the variables become local variables of that config.
 type Config struct {
 	Surfaces       []types.Surface
 	Variables      []Variable
@@ -34,6 +38,24 @@ type Config struct {
 	HullWeight     float64
 }
 
+// ConfigInput describes one configuration (zoom position) of a
+// multi-configuration optimisation.
+type ConfigInput struct {
+	ID          string
+	Weight      float64
+	StopSurface int
+	Surfaces    []types.Surface
+	Fields      []types.FieldItem
+	Wavelengths []types.WavelengthItem
+	MeritTerms  []types.MeritTerm
+	Constraints []types.ConstraintOperand
+}
+
+// Variable is one optimisation variable. It binds one component of the
+// variable vector to either:
+//   - a single surface parameter of one config (Config, SurfaceID, Param), or
+//   - many surface parameters across configs via scale/offset bindings
+//     (IsShared + Bindings).
 type Variable struct {
 	Name      string
 	SurfaceID int
@@ -41,8 +63,13 @@ type Variable struct {
 	Param     string
 	Min       float64
 	Max       float64
+	IsShared  bool
+	Bindings  []types.SharedVariableBinding
+	Config    string
 }
 
+// MeritTerm is a pre-resolved single-config merit term (weights and field
+// angle already matched against the fields/wavelengths).
 type MeritTerm struct {
 	Kind        string
 	FieldAngle  float64
@@ -65,6 +92,7 @@ type Result struct {
 
 type VariableState struct {
 	Name      string
+	Config    string
 	SurfaceID int
 	GlassName string
 	Param     string
@@ -78,16 +106,40 @@ type glassPair struct {
 	name    string
 }
 
+// config is the internal per-configuration state of the unified Optimizer.
+type config struct {
+	id          string
+	weight      float64
+	stopSurface int
+	surfaces    []types.Surface
+	fields      []types.FieldItem
+	wavelengths []types.WavelengthItem
+	meritTerms  []meritTerm
+	constraints []types.ConstraintOperand
+}
+
+// meritTerm is the unified merit term: weights and (for angle fields) the
+// field angle are resolved at construction; image-height fields are converted
+// to an angle per evaluation because they depend on the current surfaces.
+type meritTerm struct {
+	kind           string
+	fieldAngle     float64
+	useImageHeight bool
+	imageHeight    float64
+	fieldWeight    float64
+	wavelength     float64
+	wavelength2    float64
+	wavWeight      float64
+	weight         float64
+	target         float64
+}
+
 type Optimizer struct {
-	surfaces         []types.Surface
+	configs          []config
 	variables        []Variable
-	meritTerms       []MeritTerm
-	fields           []types.FieldItem
-	constraints      []types.ConstraintOperand
 	gc               *glass.Catalog
 	glassOverrides   map[string]*types.Glass
-	tempGC           *glass.Catalog
-	initialDiameters map[int]float64
+	initialDiameters map[string]float64
 	maxIter          int
 	mu               float64
 	tol              float64
@@ -95,7 +147,6 @@ type Optimizer struct {
 	numRays          int
 	apertureMargin   float64
 	muConMax         float64
-	stopSurface      int
 	gridRotation     float64
 	logger           dls.Logger
 	hull             *glass.ConvexHull
@@ -104,60 +155,161 @@ type Optimizer struct {
 	hullPairs        []glassPair
 }
 
+// NewOptimizer builds a single-configuration Optimizer (backward-compatible
+// entry point).
 func NewOptimizer(cfg Config) *Optimizer {
-	maxIter := cfg.MaxIter
+	c := config{
+		id:          "config1",
+		weight:      1.0,
+		stopSurface: cfg.StopSurface,
+		surfaces:    cfg.Surfaces,
+		fields:      cfg.Fields,
+		constraints: cfg.Constraints,
+	}
+	for _, t := range cfg.MeritTerms {
+		c.meritTerms = append(c.meritTerms, meritTerm{
+			kind:        t.Kind,
+			fieldAngle:  t.FieldAngle,
+			fieldWeight: t.FieldWeight,
+			wavelength:  t.Wavelength,
+			wavelength2: t.Wavelength2,
+			wavWeight:   t.WavWeight,
+			weight:      t.Weight,
+			target:      t.Target,
+		})
+	}
+	variables := make([]Variable, len(cfg.Variables))
+	for i, v := range cfg.Variables {
+		variables[i] = Variable{
+			Name:      v.Name,
+			SurfaceID: v.SurfaceID,
+			GlassName: v.GlassName,
+			Param:     v.Param,
+			Min:       v.Min,
+			Max:       v.Max,
+			Config:    "config1",
+		}
+	}
+	return newOptimizer(
+		[]config{c}, variables, cfg.GlassCatalog,
+		cfg.MaxIter, cfg.Mu, cfg.Tol, cfg.Epsilon, cfg.ApertureMargin, cfg.NumRays,
+		cfg.MuConMax, cfg.Logger, cfg.Hull, cfg.HullMargin, cfg.HullWeight,
+	)
+}
+
+// NewMultiOptimizer builds a unified Optimizer over one or more configs,
+// with shared variables (one x driving many bindings) and local variables
+// (one x driving a single surface of one config).
+func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64) *Optimizer {
+	internal := make([]config, len(configs))
+	for i, ci := range configs {
+		c := config{
+			id:          ci.ID,
+			weight:      ci.Weight,
+			stopSurface: ci.StopSurface,
+			surfaces:    ci.Surfaces,
+			fields:      ci.Fields,
+			wavelengths: ci.Wavelengths,
+			constraints: ci.Constraints,
+		}
+		for _, t := range ci.MeritTerms {
+			c.meritTerms = append(c.meritTerms, buildMeritTermFromTypes(t, ci))
+		}
+		internal[i] = c
+	}
+
+	var variables []Variable
+	for si, sv := range sharedVars {
+		if !sv.Active {
+			continue
+		}
+		name := sv.Name
+		if name == "" {
+			name = fmt.Sprintf("shared_%d", si)
+		}
+		variables = append(variables, Variable{
+			Name:     name,
+			IsShared: true,
+			Bindings: sv.Bindings,
+			Min:      sv.Min,
+			Max:      sv.Max,
+		})
+	}
+	for li, lv := range localVars {
+		if !lv.Active {
+			continue
+		}
+		name := lv.Name
+		if name == "" {
+			name = fmt.Sprintf("local_%d", li)
+		}
+		variables = append(variables, Variable{
+			Name:      name,
+			SurfaceID: lv.Target.ID,
+			Param:     lv.Target.Param,
+			Min:       lv.Min,
+			Max:       lv.Max,
+			Config:    lv.Config,
+		})
+	}
+
+	return newOptimizer(
+		internal, variables, gc,
+		maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax,
+		logger, hull, hullMargin, hullWeight,
+	)
+}
+
+func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
+	mt := meritTerm{
+		kind:        t.Kind,
+		wavelength:  t.Wavelength,
+		wavelength2: t.Wavelength2,
+		weight:      t.Weight,
+		target:      t.Target,
+		fieldWeight: 1.0,
+		wavWeight:   1.0,
+	}
+	for _, f := range ci.Fields {
+		if f.ID == t.Field {
+			if f.AngleDeg != 0 || f.ImageHeight == 0 {
+				mt.fieldAngle = f.AngleDeg
+			} else {
+				mt.useImageHeight = true
+				mt.imageHeight = f.ImageHeight
+			}
+			if f.Weight > 0 {
+				mt.fieldWeight = f.Weight
+			}
+			break
+		}
+	}
+	for _, w := range ci.Wavelengths {
+		if math.Abs(w.Value-t.Wavelength) < 1e-12 {
+			if w.Weight > 0 {
+				mt.wavWeight = w.Weight
+			}
+			break
+		}
+	}
+	return mt
+}
+
+func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64) *Optimizer {
 	if maxIter <= 0 {
 		maxIter = 100
 	}
-	mu := cfg.Mu
 	if mu <= 0 {
 		mu = 1.0
 	}
-	tol := cfg.Tol
 	if tol <= 0 {
 		tol = 1e-6
 	}
-	epsilon := cfg.Epsilon
 	if epsilon <= 0 {
 		epsilon = 1e-6
 	}
-	numRays := cfg.NumRays
 	if numRays <= 0 {
 		numRays = 64
-	}
-
-	glassOverrides := make(map[string]*types.Glass)
-	if cfg.GlassCatalog != nil {
-		for i := range cfg.Variables {
-			v := &cfg.Variables[i]
-			if v.Param == "nd" || v.Param == "vd" {
-				key := resolveGlassKeyFromSurface(cfg.Surfaces, cfg.GlassCatalog, *v)
-				v.GlassName = key
-				if key != "" {
-					if g, ok := cfg.GlassCatalog.Lookup(key); ok {
-						cp := *g
-						cp.Label = key
-						if cp.Type == types.GlassTypeCatalog {
-							cp.Type = types.GlassTypeModel
-							cp.DispersionFormula = ""
-						}
-						glassOverrides[key] = &cp
-					}
-				}
-			}
-		}
-	}
-
-	initialDiameters := make(map[int]float64)
-	for _, s := range cfg.Surfaces {
-		if s.AutoAperture {
-			initialDiameters[s.ID] = s.Diameter
-		}
-	}
-
-	apertureMargin := cfg.ApertureMargin
-	if apertureMargin <= 0 {
-		apertureMargin = 1.0
 	}
 	// aperture_margin < 1.0 makes the pupil grid smaller than the aperture,
 	// which clips rays at surface edges and stalls DLS convergence.
@@ -165,15 +317,60 @@ func NewOptimizer(cfg Config) *Optimizer {
 		apertureMargin = 1.0
 	}
 
-	hullPairs := buildHullPairs(cfg.Variables)
+	// Config weights default to 1.0 so a single-config YAML that omits
+	// configs[].weight still contributes its full merit.
+	for i := range configs {
+		if configs[i].weight <= 0 {
+			configs[i].weight = 1.0
+		}
+	}
+
+	variablesCopy := make([]Variable, len(variables))
+	copy(variablesCopy, variables)
+
+	glassOverrides := make(map[string]*types.Glass)
+	for i := range variablesCopy {
+		v := &variablesCopy[i]
+		if v.IsShared {
+			continue
+		}
+		if v.Param == "nd" || v.Param == "vd" {
+			cfg := findConfigByID(configs, v.Config)
+			if cfg == nil {
+				continue
+			}
+			key := resolveGlassKeyFromSurface(cfg.surfaces, gc, v.SurfaceID)
+			v.GlassName = key
+			if key != "" {
+				if g, ok := gc.Lookup(key); ok {
+					cp := *g
+					cp.Label = key
+					if cp.Type == types.GlassTypeCatalog {
+						cp.Type = types.GlassTypeModel
+						cp.DispersionFormula = ""
+					}
+					glassOverrides[key] = &cp
+				}
+			}
+		}
+	}
+
+	initialDiameters := make(map[string]float64)
+	for ci := range configs {
+		cfg := &configs[ci]
+		for _, s := range cfg.surfaces {
+			if s.AutoAperture {
+				initialDiameters[cfgSurfKey(cfg.id, s.ID)] = s.Diameter
+			}
+		}
+	}
+
+	hullPairs := buildHullPairs(variablesCopy)
 
 	return &Optimizer{
-		surfaces:         cfg.Surfaces,
-		variables:        cfg.Variables,
-		meritTerms:       cfg.MeritTerms,
-		fields:           cfg.Fields,
-		constraints:      cfg.Constraints,
-		gc:               cfg.GlassCatalog,
+		configs:          configs,
+		variables:        variablesCopy,
+		gc:               gc,
 		glassOverrides:   glassOverrides,
 		initialDiameters: initialDiameters,
 		maxIter:          maxIter,
@@ -182,24 +379,49 @@ func NewOptimizer(cfg Config) *Optimizer {
 		epsilon:          epsilon,
 		numRays:          numRays,
 		apertureMargin:   apertureMargin,
-		muConMax:         cfg.MuConMax,
-		logger:           cfg.Logger,
-		stopSurface:      cfg.StopSurface,
-		hull:             cfg.Hull,
-		hullMargin:       cfg.HullMargin,
-		hullWeight:       cfg.HullWeight,
+		muConMax:         muConMax,
+		logger:           logger,
+		hull:             hull,
+		hullMargin:       hullMargin,
+		hullWeight:       hullWeight,
 		hullPairs:        hullPairs,
 	}
+}
+
+func findConfigByID(configs []config, id string) *config {
+	for i := range configs {
+		if configs[i].id == id {
+			return &configs[i]
+		}
+	}
+	return nil
+}
+
+// primaryConfig returns the first config, used by the public single-term
+// evaluator which has no config context.
+func (o *Optimizer) primaryConfig() *config {
+	if len(o.configs) == 0 {
+		return &config{}
+	}
+	return &o.configs[0]
 }
 
 func (o *Optimizer) Variables() []dls.VariableInfo {
 	result := make([]dls.VariableInfo, len(o.variables))
 	for i, v := range o.variables {
+		var param string
+		if v.IsShared {
+			if len(v.Bindings) > 0 {
+				param = v.Bindings[0].Param
+			}
+		} else {
+			param = v.Param
+		}
 		result[i] = dls.VariableInfo{
 			Name:      v.Name,
 			SurfaceID: v.SurfaceID,
 			GlassName: v.GlassName,
-			Param:     v.Param,
+			Param:     param,
 			Min:       v.Min,
 			Max:       v.Max,
 		}
@@ -224,175 +446,399 @@ func (o *Optimizer) InitialState() []float64 {
 	return o.getInitialState()
 }
 
-func (o *Optimizer) addHullPenalty(merit float64, x []float64) float64 {
-	if o.hull == nil || len(o.hullPairs) == 0 {
-		return merit
+// effectiveGC returns the glass catalog reflecting any in-flight nd/vd
+// overrides (tempGC), falling back to the base catalog.
+func effectiveGC(base, temp *glass.Catalog) *glass.Catalog {
+	if temp != nil {
+		return temp
 	}
-	for _, pair := range o.hullPairs {
-		nd := x[pair.ndIndex]
-		vd := x[pair.vdIndex]
-		pen := o.hull.Penalty(nd, vd, o.hullMargin, o.hullWeight)
-		merit += pen
-	}
-	return merit
+	return base
 }
 
-func (o *Optimizer) makeHullResiduals(x []float64) []float64 {
-	if o.hull == nil || len(o.hullPairs) == 0 {
-		return nil
+// applyVariables maps the variable vector x onto the surfaces of every config
+// and returns the updated surfaces plus the glass catalog reflecting any
+// in-flight nd/vd overrides (nil when no override is active). It is pure: no
+// Optimizer state is mutated, so the DLS Jacobian loop can be parallelised.
+func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *glass.Catalog) {
+	configSurfaces := make(map[string][]types.Surface, len(o.configs))
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		s := make([]types.Surface, len(cfg.surfaces))
+		copy(s, cfg.surfaces)
+		configSurfaces[cfg.id] = s
 	}
-	res := make([]float64, len(o.hullPairs))
-	for i, pair := range o.hullPairs {
-		nd := x[pair.ndIndex]
-		vd := x[pair.vdIndex]
-		res[i] = o.hull.Residual(nd, vd, o.hullMargin, o.hullWeight)
+
+	needTempGC := false
+	for vi, v := range o.variables {
+		val := x[vi]
+
+		if v.IsShared {
+			for _, b := range v.Bindings {
+				surfaces, ok := configSurfaces[b.Config]
+				if !ok {
+					continue
+				}
+				idx := surfaceIndex(surfaces, b.ID)
+				if idx < 0 {
+					continue
+				}
+				scale := b.Scale
+				if scale == 0 {
+					scale = 1.0
+				}
+				setSurfaceParam(&surfaces[idx], b.Param, scale*val+b.Offset)
+			}
+			continue
+		}
+
+		surfaces, ok := configSurfaces[v.Config]
+		if !ok {
+			continue
+		}
+		idx := surfaceIndex(surfaces, v.SurfaceID)
+		if idx < 0 {
+			continue
+		}
+
+		if ai, ok := asphereCoefIndex(v.Param); ok {
+			for len(surfaces[idx].Coefficients) <= ai {
+				surfaces[idx].Coefficients = append(surfaces[idx].Coefficients, 0)
+			}
+			surfaces[idx].Coefficients[ai] = val
+			continue
+		}
+		switch v.Param {
+		case "curvature":
+			surfaces[idx].Curvature = val
+		case "conic":
+			surfaces[idx].Conic = val
+		case "thickness":
+			surfaces[idx].Thickness = val
+		case "diameter":
+			surfaces[idx].Diameter = val
+		case "radius":
+			if val == 0 {
+				surfaces[idx].Curvature = 0
+			} else {
+				surfaces[idx].Curvature = 1.0 / val
+			}
+		case "nd", "vd":
+			key := resolveGlassKeyFromSurface(surfaces, o.gc, v.SurfaceID)
+			if g, ok := o.glassOverrides[key]; ok {
+				switch v.Param {
+				case "nd":
+					g.ND = val
+				case "vd":
+					g.VD = val
+				}
+				needTempGC = true
+			}
+		}
 	}
-	return res
+
+	var tempGC *glass.Catalog
+	if needTempGC {
+		tempGC = glass.NewCatalog()
+		if o.gc != nil {
+			for _, g := range o.gc.ByName {
+				cp := *g
+				tempGC.Add(cp)
+			}
+		}
+		for _, ov := range o.glassOverrides {
+			cp := *ov
+			tempGC.Add(cp)
+		}
+	}
+
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surface.Precompute(configSurfaces[cfg.id])
+	}
+
+	return configSurfaces, tempGC
+}
+
+// restoreDiameters resets auto_aperture surfaces to their initial diameters
+// so sizeAutoApertures can measure the true geometric extent.
+func (o *Optimizer) restoreDiameters(cfg *config, surfaces []types.Surface) {
+	for i := range surfaces {
+		key := cfgSurfKey(cfg.id, surfaces[i].ID)
+		if d, ok := o.initialDiameters[key]; ok {
+			surfaces[i].Diameter = d
+		}
+	}
+}
+
+// termFieldAngle returns the field angle for a merit term, converting
+// image-height fields via ray tracing (surfaces-dependent).
+func (o *Optimizer) termFieldAngle(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	if !term.useImageHeight {
+		return term.fieldAngle
+	}
+	return o.imageHeightToFieldAngle(cfg, surfaces, term.imageHeight, term.wavelength, gc)
+}
+
+// constraintFieldAngle resolves the field angle of a constraint operand.
+func (o *Optimizer) constraintFieldAngle(cfg *config, c types.ConstraintOperand, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	for _, f := range cfg.fields {
+		if f.ID == c.Field {
+			if f.AngleDeg != 0 || f.ImageHeight == 0 {
+				return f.AngleDeg
+			}
+			return o.imageHeightToFieldAngle(cfg, surfaces, f.ImageHeight, 0, gc)
+		}
+	}
+	return 0
+}
+
+// traceFieldGrid traces the pupil grid for a merit term and returns the spot
+// points.
+func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
+	angle := o.termFieldAngle(cfg, term, surfaces, gc)
+	points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+	return points
+}
+
+// imageHeightToFieldAngle finds the field angle that lands the chief ray at
+// the target image height, via bisection on the image-plane intersection.
+func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surface, targetHeight, wavelength float64, gc *glass.Catalog) float64 {
+	path := dls.BuildPath(surfaces)
+	engine := ray.NewEngine(gc, nil)
+
+	apertureRadius := dls.ApertureRadiusForGrid(surfaces, wavelength, gc, o.apertureMargin)
+	if apertureRadius <= 0 {
+		return 0
+	}
+
+	pol := types.NewCircularJones(true)
+
+	lo, hi := 0.0, 45.0
+	for iter := 0; iter < 30; iter++ {
+		mid := (lo + hi) / 2
+		thetaRad := mid * math.Pi / 180.0
+		dir := types.Vec3{X: 0, Y: math.Sin(thetaRad), Z: math.Cos(thetaRad)}.Normalize()
+
+		origin := types.Vec3{X: 0, Y: 0, Z: -100.0}
+		r := types.Ray{
+			Wavelength:         wavelength,
+			Initial:            types.RayState{Origin: origin, Direction: dir},
+			Path:               path,
+			Jones:              pol,
+			SkipGlassPathCheck: mid == 0,
+		}
+		result := engine.TraceRay(r, surfaces)
+		if result.Error != "" {
+			hi = mid
+			continue
+		}
+		if len(result.Surfaces) == 0 {
+			return 0
+		}
+		last := result.Surfaces[len(result.Surfaces)-1]
+		y := last.Position.Y
+
+		if math.Abs(y-targetHeight) < 1e-6 {
+			return mid
+		}
+		if y < targetHeight {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	return (lo + hi) / 2
+}
+
+// sizeAutoApertures measures the true geometric beam extent at the extreme
+// field angle (ignoring aperture clipping) and sizes every AutoAperture
+// surface so its diameter covers the full bundle. Callers must restore the
+// initial diameters first.
+func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog) {
+	extremeAngle := 0.0
+	for ti := range cfg.meritTerms {
+		term := &cfg.meritTerms[ti]
+		a := math.Abs(o.termFieldAngle(cfg, term, surfaces, gc))
+		if a > extremeAngle {
+			extremeAngle = a
+		}
+	}
+	if extremeAngle <= 0 {
+		return
+	}
+
+	extents := make(map[int]float64)
+	for ti := range cfg.meritTerms {
+		term := &cfg.meritTerms[ti]
+		if term.kind != "" && term.kind != dls.MeritSpotRMS {
+			continue
+		}
+		angle := o.termFieldAngle(cfg, term, surfaces, gc)
+		if math.Abs(angle) != extremeAngle {
+			continue
+		}
+		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation)
+		for id, e := range perSurf {
+			if e > extents[id] {
+				extents[id] = e
+			}
+		}
+	}
+
+	for id, e := range extents {
+		for i := range surfaces {
+			if surfaces[i].ID == id && surfaces[i].AutoAperture {
+				surfaces[i].Diameter = 2 * e
+			}
+		}
+	}
 }
 
 func (o *Optimizer) EvaluateMerit(x []float64) float64 {
-	surfaces := o.applyVariables(x)
-
-	for i := range surfaces {
-		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
-			surfaces[i].Diameter = d
-		}
-	}
-
-	o.sizeAutoApertures(surfaces)
+	configSurfaces, tempGC := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
 
 	merit := 0.0
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
 
-	for _, term := range o.meritTerms {
-		if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
-			points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc)
 
-			rms := dls.ComputeSpotRMS(points)
-			merit += term.Weight * term.FieldWeight * term.WavWeight * rms * rms
-		} else {
-			val := EvaluateMeritKind(term.Kind, term, surfaces, o.currentGC(), o)
-			diff := val - term.Target
-			merit += term.Weight * term.FieldWeight * term.WavWeight * diff * diff
+		cfgMerit := 0.0
+		for ti := range cfg.meritTerms {
+			term := &cfg.meritTerms[ti]
+			if term.kind == "" || term.kind == dls.MeritSpotRMS {
+				points := o.traceFieldGrid(gc, surfaces, cfg, term)
+				rms := dls.ComputeSpotRMS(points)
+				cfgMerit += term.weight * term.fieldWeight * term.wavWeight * rms * rms
+			} else {
+				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
+				diff := val - term.target
+				cfgMerit += term.weight * term.fieldWeight * term.wavWeight * diff * diff
+			}
 		}
+		merit += cfg.weight * cfgMerit
 	}
 
-	merit = o.addHullPenalty(merit, x)
+	if o.hull != nil {
+		for _, pair := range o.hullPairs {
+			merit += o.hull.Penalty(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight)
+		}
+	}
 	return merit
 }
 
-// MeritBreakdown evaluates the merit at x and returns the contribution of each
-// merit term (and the objective total), so the value reported by DLS can be
-// reconciled against an external evaluation (e.g. `chief` spot RMS).
+// MeritBreakdown evaluates the merit at x and returns the contribution of
+// each merit term (and the objective total), so the value reported by DLS can
+// be reconciled against an external evaluation (e.g. `chief` spot RMS).
 func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
-	surfaces := o.applyVariables(x)
-	for i := range surfaces {
-		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
-			surfaces[i].Diameter = d
-		}
-	}
-	o.sizeAutoApertures(surfaces)
+	configSurfaces, tempGC := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
 
 	out := make(map[string]float64)
-	total := 0.0
-	for _, term := range o.meritTerms {
-		var contrib float64
-		if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
-			points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-			rms := dls.ComputeSpotRMS(points)
-			contrib = term.Weight * term.FieldWeight * term.WavWeight * rms * rms
-		} else {
-			val := EvaluateMeritKind(term.Kind, term, surfaces, o.currentGC(), o)
-			diff := val - term.Target
-			contrib = term.Weight * term.FieldWeight * term.WavWeight * diff * diff
+	objTotal := 0.0
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc)
+
+		for ti := range cfg.meritTerms {
+			term := &cfg.meritTerms[ti]
+			var contrib float64
+			if term.kind == "" || term.kind == dls.MeritSpotRMS {
+				points := o.traceFieldGrid(gc, surfaces, cfg, term)
+				rms := dls.ComputeSpotRMS(points)
+				contrib = term.weight * term.fieldWeight * term.wavWeight * rms * rms
+			} else {
+				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
+				diff := val - term.target
+				contrib = term.weight * term.fieldWeight * term.wavWeight * diff * diff
+			}
+			kind := term.kind
+			if kind == "" {
+				kind = dls.MeritSpotRMS
+			}
+			key := fmt.Sprintf("config:%s %s(f%.1f,%.6f)", cfg.id, kind, o.termFieldAngle(cfg, term, surfaces, gc), term.wavelength)
+			out[key] = contrib
+			objTotal += cfg.weight * contrib
 		}
-		kind := term.Kind
-		if kind == "" {
-			kind = dls.MeritSpotRMS
-		}
-		out[fmt.Sprintf("%s(f%.1f,%.6f)", kind, term.FieldAngle, term.Wavelength)] = contrib
-		total += contrib
 	}
-	out["objective_total"] = total
+	out["objective_total"] = objTotal
 	return out
 }
 
 func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
-	surfaces := o.applyVariables(x)
-	nTerms := len(o.meritTerms)
-	nHull := len(o.hullPairs)
-	r := make([]float64, nTerms+nHull)
+	configSurfaces, tempGC := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
 
-	for i := range surfaces {
-		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
-			surfaces[i].Diameter = d
+	var allR []float64
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc)
+
+		for ti := range cfg.meritTerms {
+			term := &cfg.meritTerms[ti]
+			w := math.Sqrt(cfg.weight * term.weight * term.fieldWeight * term.wavWeight)
+			if term.kind == "" || term.kind == dls.MeritSpotRMS {
+				points := o.traceFieldGrid(gc, surfaces, cfg, term)
+				allR = append(allR, w*dls.ComputeSpotRMS(points))
+			} else {
+				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
+				allR = append(allR, w*(val-term.target))
+			}
 		}
 	}
 
-	o.sizeAutoApertures(surfaces)
-
-	for i, term := range o.meritTerms {
-		if term.Kind == "" || term.Kind == dls.MeritSpotRMS {
-			points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-
-			rms := dls.ComputeSpotRMS(points)
-			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * rms
-		} else {
-			val := EvaluateMeritKind(term.Kind, term, surfaces, o.currentGC(), o)
-			diff := val - term.Target
-			r[i] = math.Sqrt(term.Weight*term.FieldWeight*term.WavWeight) * diff
-		}
-	}
-
-	// Append hull residuals at the end
 	if o.hull != nil {
-		for i, pair := range o.hullPairs {
-			nd := x[pair.ndIndex]
-			vd := x[pair.vdIndex]
-			r[nTerms+i] = o.hull.Residual(nd, vd, o.hullMargin, o.hullWeight)
+		for _, pair := range o.hullPairs {
+			allR = append(allR, o.hull.Residual(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight))
 		}
 	}
-
-	return r
+	return allR
 }
 
 func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
-	surfaces := o.applyVariables(x)
+	configSurfaces, tempGC := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
 
-	for i := range surfaces {
-		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
-			surfaces[i].Diameter = d
+	var allC []float64
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc)
+
+		for _, c := range cfg.constraints {
+			if !c.Active {
+				allC = append(allC, 0)
+				continue
+			}
+			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface)
+			err := constraint.ComputeError(c.Kind, value, c)
+			w := c.Weight
+			if w <= 0 {
+				w = 1.0
+			}
+			allC = append(allC, math.Sqrt(w)*err)
 		}
 	}
-
-	o.sizeAutoApertures(surfaces)
-
-	gcConstraint := o.gc
-	if o.tempGC != nil {
-		gcConstraint = o.tempGC
-	}
-
-	c := make([]float64, len(o.constraints))
-	for j, op := range o.constraints {
-		if !op.Active {
-			c[j] = 0
-			continue
-		}
-		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint, o.numRays, o.apertureMargin, o.stopSurface)
-		err := constraint.ComputeError(op.Kind, value, op)
-		w := op.Weight
-		if w <= 0 {
-			w = 1.0
-		}
-		c[j] = math.Sqrt(w) * err
-	}
-
-	return c
+	return allC
 }
 
 // ConstraintViolation reports an active constraint whose weighted residual
-// magnitude exceeds tol at the final state.
+// magnitude exceeds a tolerance at the final state.
 type ConstraintViolation struct {
 	ID       string
+	Config   string
 	Kind     string
 	Measure  string
 	Residual float64
@@ -401,39 +847,38 @@ type ConstraintViolation struct {
 // FinalConstraintViolations evaluates the active constraints at x and returns
 // those whose weighted residual magnitude exceeds tol.
 func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []ConstraintViolation {
-	surfaces := o.applyVariables(x)
-
-	for i := range surfaces {
-		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
-			surfaces[i].Diameter = d
-		}
-	}
-	o.sizeAutoApertures(surfaces)
-
-	gcConstraint := o.gc
-	if o.tempGC != nil {
-		gcConstraint = o.tempGC
-	}
+	configSurfaces, tempGC := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
 
 	var out []ConstraintViolation
-	for _, op := range o.constraints {
-		if !op.Active {
-			continue
-		}
-		value := constraint.Evaluate(op, surfaces, o.resolveFieldAngle(op.Field), gcConstraint, o.numRays, o.apertureMargin, o.stopSurface)
-		err := constraint.ComputeError(op.Kind, value, op)
-		w := op.Weight
-		if w <= 0 {
-			w = 1.0
-		}
-		residual := math.Sqrt(w) * err
-		if math.Abs(residual) > tol {
-			out = append(out, ConstraintViolation{
-				ID:       op.ID,
-				Kind:     string(op.Kind),
-				Measure:  string(op.Measure),
-				Residual: residual,
-			})
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc)
+
+		for _, c := range cfg.constraints {
+			if !c.Active {
+				continue
+			}
+			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface)
+			err := constraint.ComputeError(c.Kind, value, c)
+			w := c.Weight
+			if w <= 0 {
+				w = 1.0
+			}
+			residual := math.Sqrt(w) * err
+			if math.Abs(residual) > tol {
+				out = append(out, ConstraintViolation{
+					ID:       c.ID,
+					Config:   cfg.id,
+					Kind:     string(c.Kind),
+					Measure:  string(c.Measure),
+					Residual: residual,
+				})
+			}
 		}
 	}
 	return out
@@ -456,33 +901,110 @@ func (o *Optimizer) Optimize() Result {
 	}
 }
 
-func (o *Optimizer) FinalApertures(x []float64) map[int]float64 {
-	return o.finalAperturesImpl(x)
-}
+// FinalApertures returns the sized auto_aperture diameters of every config
+// after applying x.
+func (o *Optimizer) FinalApertures(x []float64) map[string]map[int]float64 {
+	configSurfaces, tempGC := o.applyVariables(x)
+	result := make(map[string]map[int]float64)
 
-func (o *Optimizer) finalAperturesImpl(x []float64) map[int]float64 {
-	surfaces := o.applyVariables(x)
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
 
-	for i := range surfaces {
-		if d, ok := o.initialDiameters[surfaces[i].ID]; ok {
-			surfaces[i].Diameter = d
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, effectiveGC(o.gc, tempGC))
+
+		cfgResult := make(map[int]float64)
+		for i := range surfaces {
+			if surfaces[i].AutoAperture {
+				cfgResult[surfaces[i].ID] = surfaces[i].Diameter
+			}
 		}
-	}
-
-	o.sizeAutoApertures(surfaces)
-
-	result := make(map[int]float64)
-	for i := range surfaces {
-		if surfaces[i].AutoAperture {
-			result[surfaces[i].ID] = surfaces[i].Diameter
-		}
+		result[cfg.id] = cfgResult
 	}
 	return result
 }
 
+// FinalConfigs returns the surfaces of every config after applying x, with
+// nd/vd-optimised model glasses materialised (surface materials rewritten to
+// the new glass keys) and the new glass entries to append to the catalog.
+func (o *Optimizer) FinalConfigs(x []float64) (map[string][]types.Surface, []types.Glass) {
+	configSurfaces, _ := o.applyVariables(x)
+	newGlasses := o.materializeGlasses(configSurfaces, x)
+	return configSurfaces, newGlasses
+}
+
+// materializeGlasses collects the optimised nd/vd pairs into model glass
+// entries and rewrites the affected surface materials to the new glass keys.
+func (o *Optimizer) materializeGlasses(configSurfaces map[string][]types.Surface, x []float64) []types.Glass {
+	type glassAccum struct {
+		nd, vd       float64
+		hasND, hasVD bool
+		origLabel    string
+	}
+	glassMap := map[string]*glassAccum{}
+	for i, v := range o.variables {
+		if v.IsShared || (v.Param != "nd" && v.Param != "vd") {
+			continue
+		}
+		key := v.GlassName
+		if key == "" {
+			continue
+		}
+		acc, ok := glassMap[key]
+		if !ok {
+			acc = &glassAccum{}
+			if o.gc != nil {
+				if g, ok2 := o.gc.Lookup(key); ok2 {
+					acc.origLabel = g.Label
+					acc.nd = g.ND
+					acc.vd = g.VD
+					acc.hasND = true
+					acc.hasVD = true
+				}
+			}
+			glassMap[key] = acc
+		}
+		switch v.Param {
+		case "nd":
+			acc.nd = x[i]
+			acc.hasND = true
+		case "vd":
+			acc.vd = x[i]
+			acc.hasVD = true
+		}
+	}
+
+	var newGlasses []types.Glass
+	for origKey, acc := range glassMap {
+		if !acc.hasND || !acc.hasVD {
+			continue
+		}
+		g := types.Glass{
+			Type: types.GlassTypeModel,
+			ND:   acc.nd,
+			VD:   acc.vd,
+		}
+		if acc.origLabel != "" {
+			g.Label = acc.origLabel
+		}
+		newKey := types.ResolveGlassKey(g)
+		newGlasses = append(newGlasses, g)
+		for ci := range o.configs {
+			cfgID := o.configs[ci].id
+			for i := range configSurfaces[cfgID] {
+				if configSurfaces[cfgID][i].Material == origKey {
+					configSurfaces[cfgID][i].Material = newKey
+				}
+			}
+		}
+	}
+	return newGlasses
+}
+
 // asphereCoefIndex maps an asphere coefficient parameter name (a4/a6/a8/a10/
 // a12, or the array aliases coefficient_0..coefficient_4) to the index in
-// types.Surface.Coefficients.
+// types.Surface.Coefficients, which holds the h^(2i+4) coefficients.
 func asphereCoefIndex(param string) (int, bool) {
 	switch param {
 	case "a4", "coefficient_0":
@@ -499,172 +1021,110 @@ func asphereCoefIndex(param string) (int, bool) {
 	return 0, false
 }
 
-func (o *Optimizer) applyVariables(x []float64) []types.Surface {
-	result := make([]types.Surface, len(o.surfaces))
-	copy(result, o.surfaces)
-
-	needTempGC := false
-	for i, v := range o.variables {
-		if idx, ok := asphereCoefIndex(v.Param); ok {
-			si := dls.SurfaceIndex(result, v.SurfaceID)
-			if si < 0 {
-				continue
-			}
-			for len(result[si].Coefficients) <= idx {
-				result[si].Coefficients = append(result[si].Coefficients, 0)
-			}
-			result[si].Coefficients[idx] = x[i]
-			continue
+func setSurfaceParam(s *types.Surface, param string, val float64) {
+	if ai, ok := asphereCoefIndex(param); ok {
+		for len(s.Coefficients) <= ai {
+			s.Coefficients = append(s.Coefficients, 0)
 		}
-		switch v.Param {
-		case "curvature", "conic", "thickness":
-			idx := dls.SurfaceIndex(result, v.SurfaceID)
-			if idx < 0 {
-				continue
-			}
-			switch v.Param {
-			case "curvature":
-				result[idx].Curvature = x[i]
-			case "conic":
-				result[idx].Conic = x[i]
-			case "thickness":
-				result[idx].Thickness = x[i]
-			}
-		case "nd", "vd":
-			g, ok := o.glassOverrides[v.GlassName]
-			if !ok {
-				continue
-			}
-			switch v.Param {
-			case "nd":
-				g.ND = x[i]
-			case "vd":
-				g.VD = x[i]
-			}
-			needTempGC = true
-		}
-	}
-
-	if needTempGC {
-		o.tempGC = glass.NewCatalog()
-		if o.gc != nil {
-			for _, g := range o.gc.ByName {
-				cp := *g
-				o.tempGC.Add(cp)
-			}
-		}
-		for _, ov := range o.glassOverrides {
-			cp := *ov
-			o.tempGC.Add(cp)
-		}
-	} else {
-		o.tempGC = nil
-	}
-
-	surface.Precompute(result)
-	return result
-}
-
-func (o *Optimizer) traceFieldGrid(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) ([]dls.IPoint, map[int]float64) {
-	gc := o.currentGC()
-	return dls.TraceFieldGrid(gc, surfaces, o.stopSurface, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
-}
-
-// currentGC returns the glass catalog reflecting any in-flight nd/vd variable
-// overrides (o.tempGC), falling back to the base catalog.
-func (o *Optimizer) currentGC() *glass.Catalog {
-	if o.tempGC != nil {
-		return o.tempGC
-	}
-	return o.gc
-}
-
-func (o *Optimizer) traceFieldGridExtents(surfaces []types.Surface, fieldAngle float64, fieldDir []float64, wavelength float64) map[int]float64 {
-	gc := o.currentGC()
-	return dls.TraceFieldGridExtents(gc, surfaces, o.stopSurface, fieldAngle, fieldDir, wavelength, o.apertureMargin, o.numRays, o.gridRotation)
-}
-
-// sizeAutoApertures measures the true geometric beam extent at the extreme
-// field angle (ignoring aperture clipping) and sizes every AutoAperture
-// surface so its diameter covers the full bundle. Callers must restore the
-// initial diameters first.
-func (o *Optimizer) sizeAutoApertures(surfaces []types.Surface) {
-	extremeAngle := 0.0
-	for _, term := range o.meritTerms {
-		a := math.Abs(term.FieldAngle)
-		if a > extremeAngle {
-			extremeAngle = a
-		}
-	}
-	if extremeAngle <= 0 {
+		s.Coefficients[ai] = val
 		return
 	}
-
-	extents := make(map[int]float64)
-	for _, term := range o.meritTerms {
-		if term.Kind != "" && term.Kind != dls.MeritSpotRMS {
-			continue
-		}
-		if math.Abs(term.FieldAngle) != extremeAngle {
-			continue
-		}
-		perSurf := o.traceFieldGridExtents(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-		for id, e := range perSurf {
-			if e > extents[id] {
-				extents[id] = e
-			}
-		}
-	}
-
-	for id, e := range extents {
-		for i := range surfaces {
-			if surfaces[i].ID == id && surfaces[i].AutoAperture {
-				surfaces[i].Diameter = 2 * e
-			}
+	switch param {
+	case "curvature":
+		s.Curvature = val
+	case "conic":
+		s.Conic = val
+	case "thickness":
+		s.Thickness = val
+	case "diameter":
+		s.Diameter = val
+	case "radius":
+		if val == 0 {
+			s.Curvature = 0
+		} else {
+			s.Curvature = 1.0 / val
 		}
 	}
+}
+
+func getSurfaceParam(s types.Surface, param string) float64 {
+	if ai, ok := asphereCoefIndex(param); ok {
+		if ai < len(s.Coefficients) {
+			return s.Coefficients[ai]
+		}
+		return 0
+	}
+	switch param {
+	case "curvature":
+		return s.Curvature
+	case "conic":
+		return s.Conic
+	case "thickness":
+		return s.Thickness
+	case "diameter":
+		return s.Diameter
+	case "radius":
+		return s.Radius()
+	}
+	return 0
 }
 
 func (o *Optimizer) getInitialState() []float64 {
 	x := make([]float64, len(o.variables))
 	for i, v := range o.variables {
-		if idx, ok := asphereCoefIndex(v.Param); ok {
-			si := dls.SurfaceIndex(o.surfaces, v.SurfaceID)
-			if si >= 0 && idx < len(o.surfaces[si].Coefficients) {
-				x[i] = o.surfaces[si].Coefficients[idx]
-			} else {
-				x[i] = (v.Min + v.Max) / 2
+		if v.IsShared {
+			if v.Min == 0 && v.Max == 0 {
+				v.Min, v.Max = -1, 1
+			}
+			x[i] = (v.Min + v.Max) / 2
+			if len(v.Bindings) > 0 {
+				b := v.Bindings[0]
+				if cfg := findConfigByID(o.configs, b.Config); cfg != nil {
+					if idx := surfaceIndex(cfg.surfaces, b.ID); idx >= 0 {
+						if v0 := getSurfaceParam(cfg.surfaces[idx], b.Param); v0 != 0 {
+							x[i] = v0
+						}
+					}
+				}
+			}
+			if x[i] < v.Min {
+				x[i] = v.Min
+			} else if x[i] > v.Max {
+				x[i] = v.Max
 			}
 			continue
 		}
+
+		cfg := findConfigByID(o.configs, v.Config)
 		switch v.Param {
-		case "curvature", "conic", "thickness":
-			idx := dls.SurfaceIndex(o.surfaces, v.SurfaceID)
-			if idx < 0 {
-				x[i] = (v.Min + v.Max) / 2
-				continue
-			}
-			switch v.Param {
-			case "curvature":
-				x[i] = o.surfaces[idx].Curvature
-			case "conic":
-				x[i] = o.surfaces[idx].Conic
-			case "thickness":
-				x[i] = o.surfaces[idx].Thickness
-			}
-		case "nd", "vd":
-			if o.gc == nil || v.GlassName == "" {
-				x[i] = (v.Min + v.Max) / 2
-				continue
-			}
-			if g, ok := o.gc.Lookup(v.GlassName); ok {
-				switch v.Param {
-				case "nd":
-					x[i] = g.ND
-				case "vd":
-					x[i] = g.VD
+		case "curvature", "conic", "thickness", "diameter", "radius",
+			"a4", "a6", "a8", "a10", "a12",
+			"coefficient_0", "coefficient_1", "coefficient_2", "coefficient_3", "coefficient_4":
+			if cfg != nil {
+				if idx := surfaceIndex(cfg.surfaces, v.SurfaceID); idx >= 0 {
+					x[i] = getSurfaceParam(cfg.surfaces[idx], v.Param)
+				} else {
+					x[i] = (v.Min + v.Max) / 2
 				}
 			} else {
+				x[i] = (v.Min + v.Max) / 2
+			}
+		case "nd", "vd":
+			key := v.GlassName
+			if key == "" && cfg != nil {
+				key = resolveGlassKeyFromSurface(cfg.surfaces, o.gc, v.SurfaceID)
+			}
+			if o.gc != nil && key != "" {
+				if g, ok := o.gc.Lookup(key); ok {
+					switch v.Param {
+					case "nd":
+						x[i] = g.ND
+					case "vd":
+						x[i] = g.VD
+					}
+				}
+			}
+			if x[i] == 0 {
 				x[i] = (v.Min + v.Max) / 2
 			}
 		default:
@@ -678,40 +1138,52 @@ func (o *Optimizer) buildVariableStates(x []float64) []VariableState {
 	states := make([]VariableState, len(o.variables))
 	for i, v := range o.variables {
 		st := VariableState{
-			Name:      v.Name,
-			SurfaceID: v.SurfaceID,
-			GlassName: v.GlassName,
-			Param:     v.Param,
-			After:     x[i],
+			Name:   v.Name,
+			Config: v.Config,
+			After:  x[i],
 		}
 
-		if idx, ok := asphereCoefIndex(v.Param); ok {
-			if si := dls.SurfaceIndex(o.surfaces, v.SurfaceID); si >= 0 && idx < len(o.surfaces[si].Coefficients) {
-				st.Before = o.surfaces[si].Coefficients[idx]
+		if v.IsShared {
+			if len(v.Bindings) > 0 {
+				st.SurfaceID = v.Bindings[0].ID
+				st.Param = v.Bindings[0].Param
 			}
-			states[i] = st
-			continue
-		}
-		switch v.Param {
-		case "curvature", "conic", "thickness":
-			if idx := dls.SurfaceIndex(o.surfaces, v.SurfaceID); idx >= 0 {
-				switch v.Param {
-				case "curvature":
-					st.Before = o.surfaces[idx].Curvature
-				case "conic":
-					st.Before = o.surfaces[idx].Conic
-				case "thickness":
-					st.Before = o.surfaces[idx].Thickness
+			for _, cfg := range o.configs {
+				for _, b := range v.Bindings {
+					if b.Config == cfg.id {
+						if idx := surfaceIndex(cfg.surfaces, b.ID); idx >= 0 {
+							st.Before = getSurfaceParam(cfg.surfaces[idx], b.Param)
+						}
+						break
+					}
+				}
+				if st.Before != 0 {
+					break
 				}
 			}
-		case "nd", "vd":
-			if o.gc != nil && v.GlassName != "" {
-				if g, ok := o.gc.Lookup(v.GlassName); ok {
-					switch v.Param {
-					case "nd":
-						st.Before = g.ND
-					case "vd":
-						st.Before = g.VD
+		} else {
+			st.SurfaceID = v.SurfaceID
+			st.Param = v.Param
+			st.GlassName = v.GlassName
+			if cfg := findConfigByID(o.configs, v.Config); cfg != nil {
+				if idx := surfaceIndex(cfg.surfaces, v.SurfaceID); idx >= 0 {
+					if v.Param == "nd" || v.Param == "vd" {
+						key := v.GlassName
+						if key == "" {
+							key = resolveGlassKeyFromSurface(cfg.surfaces, o.gc, v.SurfaceID)
+						}
+						if o.gc != nil && key != "" {
+							if g, ok := o.gc.Lookup(key); ok {
+								switch v.Param {
+								case "nd":
+									st.Before = g.ND
+								case "vd":
+									st.Before = g.VD
+								}
+							}
+						}
+					} else {
+						st.Before = getSurfaceParam(cfg.surfaces[idx], v.Param)
 					}
 				}
 			}
@@ -722,22 +1194,13 @@ func (o *Optimizer) buildVariableStates(x []float64) []VariableState {
 	return states
 }
 
-func (o *Optimizer) resolveFieldAngle(fieldID int) float64 {
-	if fieldID == 0 {
-		return 0
-	}
-	for _, f := range o.fields {
-		if f.ID == fieldID {
-			return f.AngleDeg
-		}
-	}
-	return 0
-}
-
 func buildHullPairs(variables []Variable) []glassPair {
 	ndMap := make(map[string]int)
 	vdMap := make(map[string]int)
 	for i, v := range variables {
+		if v.IsShared {
+			continue
+		}
 		switch v.Param {
 		case "nd":
 			ndMap[v.GlassName] = i
@@ -754,9 +1217,9 @@ func buildHullPairs(variables []Variable) []glassPair {
 	return pairs
 }
 
-func resolveGlassKeyFromSurface(surfaces []types.Surface, gc *glass.Catalog, v Variable) string {
+func resolveGlassKeyFromSurface(surfaces []types.Surface, gc *glass.Catalog, id int) string {
 	for _, s := range surfaces {
-		if s.ID == v.SurfaceID {
+		if s.ID == id {
 			if s.Material == "" || s.Material == "AIR" {
 				return ""
 			}
@@ -764,6 +1227,19 @@ func resolveGlassKeyFromSurface(surfaces []types.Surface, gc *glass.Catalog, v V
 		}
 	}
 	return ""
+}
+
+func surfaceIndex(surfaces []types.Surface, id int) int {
+	for i, s := range surfaces {
+		if s.ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
+func cfgSurfKey(configID string, surfID int) string {
+	return configID + ":" + fmt.Sprint(surfID)
 }
 
 func Debugf(format string, args ...interface{}) {

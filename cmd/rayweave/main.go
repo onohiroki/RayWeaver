@@ -640,25 +640,7 @@ func runChief(data []byte) {
 
 	gc, _ := loadCatalogs(&input, *glassDir)
 
-	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
-	// system.surfaces is a read-only compatibility fallback; never write to it.
-	// When --clear-aperture mutates diameters, promote legacy system.surfaces
-	// into configs[0].surfaces first so the output echo carries no system.surfaces.
-	if *clearAperture && *configFlag == "" && len(input.System.Surfaces) > 0 {
-		if len(input.Configs) == 0 {
-			input.Configs = []types.Config{{
-				ID:     "config1",
-				Name:   "Config1",
-				Weight: 1.0,
-				Active: true,
-			}}
-		}
-		if len(input.Configs[0].Surfaces) == 0 {
-			input.Configs[0].Surfaces = input.System.Surfaces
-			input.System.Surfaces = nil
-			surfaces = input.Configs[0].Surfaces
-		}
-	}
+	surfaces := configSurfaces(input.Configs, configFlag)
 	surface.Precompute(surfaces)
 
 	selectedSys := input.System
@@ -1009,14 +991,12 @@ func resolveConfig(configs []types.Config, val string) (int, string) {
 	return -1, fmt.Sprintf("config %q not found", val)
 }
 
-// selectSurfaces resolves which surface list to use:
+// configSurfaces resolves the surface list for a command:
 //   - if configFlag is set, returns the matching config's surfaces
-//   - else if system.surfaces is empty but configs exist, returns configs[0].surfaces
-//   - otherwise returns system.surfaces
+//   - otherwise returns configs[0].surfaces
 //
-// system.surfaces is a read-only compatibility fallback for hand-written YAML;
-// surface data is never written to it. Canonical storage is configs[].surfaces.
-func selectSurfaces(sysSurfaces []types.Surface, configs []types.Config, configFlag *string) []types.Surface {
+// Canonical surface storage is configs[].surfaces.
+func configSurfaces(configs []types.Config, configFlag *string) []types.Surface {
 	if *configFlag != "" {
 		idx, err := resolveConfig(configs, *configFlag)
 		if idx < 0 {
@@ -1025,10 +1005,10 @@ func selectSurfaces(sysSurfaces []types.Surface, configs []types.Config, configF
 		}
 		return configs[idx].Surfaces
 	}
-	if len(sysSurfaces) == 0 && len(configs) > 0 && len(configs[0].Surfaces) > 0 {
+	if len(configs) > 0 {
 		return configs[0].Surfaces
 	}
-	return sysSurfaces
+	return nil
 }
 
 func runTrace(data []byte) {
@@ -1051,7 +1031,7 @@ func runTrace(data []byte) {
 	}
 
 	gc, cc := loadCatalogs(&input, *glassDir)
-	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
+	surfaces := configSurfaces(input.Configs, configFlag)
 	surface.Precompute(surfaces)
 
 	engine := ray.NewEngine(gc, cc)
@@ -1110,7 +1090,7 @@ func runParaxial(data []byte) {
 
 	gc, _ := loadCatalogs(&input, *glassDir)
 
-	surfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
+	surfaces := configSurfaces(input.Configs, configFlag)
 	surface.Precompute(surfaces)
 
 	selectedSys := input.System

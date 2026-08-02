@@ -96,7 +96,8 @@ func TestOptimizerApplyVariablesCurvature(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	surfacesAfter := opt.applyVariables([]float64{0.02})
+	surfacesMap, _ := opt.applyVariables([]float64{0.02})
+	surfacesAfter := surfacesMap["config1"]
 
 	found := false
 	for _, s := range surfacesAfter {
@@ -129,7 +130,8 @@ func TestOptimizerApplyVariablesThickness(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	surfacesAfter := opt.applyVariables([]float64{50.0})
+	surfacesMap, _ := opt.applyVariables([]float64{50.0})
+	surfacesAfter := surfacesMap["config1"]
 
 	found := false
 	for _, s := range surfacesAfter {
@@ -297,11 +299,11 @@ func TestOptimizerApplyVariablesND(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	opt.applyVariables([]float64{1.7})
+	_, effectiveGC := opt.applyVariables([]float64{1.7})
 
-	g, ok := opt.tempGC.Lookup("N-BK7")
+	g, ok := effectiveGC.Lookup("N-BK7")
 	if !ok {
-		t.Fatal("N-BK7 not found in tempGC after applyVariables")
+		t.Fatal("N-BK7 not found in effective catalog after applyVariables")
 	}
 	if g.ND != 1.7 {
 		t.Errorf("N-BK7 ND = %v, want 1.7", g.ND)
@@ -323,11 +325,11 @@ func TestOptimizerApplyVariablesVD(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	opt.applyVariables([]float64{50.0})
+	_, effectiveGC := opt.applyVariables([]float64{50.0})
 
-	g, ok := opt.tempGC.Lookup("N-BK7")
+	g, ok := effectiveGC.Lookup("N-BK7")
 	if !ok {
-		t.Fatal("N-BK7 not found in tempGC after applyVariables")
+		t.Fatal("N-BK7 not found in effective catalog after applyVariables")
 	}
 	if g.VD != 50.0 {
 		t.Errorf("N-BK7 VD = %v, want 50.0", g.VD)

@@ -1,4 +1,4 @@
-package multiopt
+package optimize
 
 import (
 	"math"
@@ -10,13 +10,6 @@ import (
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
-
-func singletSurfaces() []types.Surface {
-	return []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
-	}
-}
 
 // TestMultiOptimizerSeidelDistortionKind verifies merit term kinds are honored
 // in multi-config mode: with target = current S5 the merit must be ~0. Before
@@ -47,9 +40,9 @@ func TestMultiOptimizerSeidelDistortionKind(t *testing.T) {
 		},
 	}
 
-	opt := New(configs, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
-	x := []float64{0.0}
-	merit := opt.evaluateMerit(x)
+	opt := NewMultiOptimizer(configs, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
+	x := []float64{}
+	merit := opt.EvaluateMerit(x)
 
 	if merit > 1e-12 {
 		t.Errorf("merit with target = current S5 = %v, want ~0", merit)
@@ -96,10 +89,10 @@ func TestMultiOptimizerApplySharedVariables(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 
 	x := []float64{0.05}
-	configSurfaces := opt.applyVariables(x)
+	configSurfaces, _ := opt.applyVariables(x)
 
 	wideSurf := configSurfaces["wide"]
 	teleSurf := configSurfaces["tele"]
@@ -157,9 +150,9 @@ func TestMultiOptimizerApplyLocalVariables(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := New(configs, nil, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, nil, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := []float64{75.0}
-	configSurfaces := opt.applyVariables(x)
+	configSurfaces, _ := opt.applyVariables(x)
 
 	wideSurf := configSurfaces["wide"]
 	found := false
@@ -199,7 +192,7 @@ func TestMultiOptimizerSizeAutoAperturesGeometric(t *testing.T) {
 		},
 	}
 
-	opt := New(configs, nil, nil, gc, 10, 1.0, 1e-6, 1e-6, 1.0, 64, 100.0, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, nil, nil, gc, 10, 1.0, 1e-6, 1e-6, 1.0, 64, 100.0, nil, nil, 0, 0)
 
 	// True geometric beam extent at surface 2 for the extreme (16deg) field,
 	// measured without aperture clipping.
@@ -260,15 +253,15 @@ func TestMultiOptimizerEvaluateMerit(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := []float64{0.0}
-	merit := opt.evaluateMerit(x)
+	merit := opt.EvaluateMerit(x)
 
 	if math.IsInf(merit, 0) || math.IsNaN(merit) {
-		t.Fatalf("evaluateMerit returned non-finite value: %v", merit)
+		t.Fatalf("EvaluateMerit returned non-finite value: %v", merit)
 	}
 	if merit < 0 {
-		t.Fatalf("evaluateMerit returned negative value: %v", merit)
+		t.Fatalf("EvaluateMerit returned negative value: %v", merit)
 	}
 }
 
@@ -311,7 +304,7 @@ func TestMultiOptimizerGetInitialState(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := New(configs, sharedVars, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, sharedVars, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := opt.getInitialState()
 
 	if len(x) != 2 {
@@ -321,8 +314,7 @@ func TestMultiOptimizerGetInitialState(t *testing.T) {
 	if math.Abs(x[0]-0.01) > 1e-10 {
 		t.Errorf("Shared variable initial = %v, want 0.01", x[0])
 	}
-	// Local variable initial value should be midpoint of [0.1, 200] if not found
-	// But since curvature of surface 2 is -0.01, thickness should be 100
+	// Local variable initial value reads the surface thickness (100).
 	if math.Abs(x[1]-100.0) > 1e-10 {
 		t.Errorf("Local variable initial = %v, want 100.0", x[1])
 	}
@@ -356,7 +348,7 @@ func TestMultiOptimizerBuildVariableStates(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := []float64{0.03}
 	states := opt.buildVariableStates(x)
 
@@ -403,15 +395,15 @@ func TestMultiOptimizerNoGlassCatalog(t *testing.T) {
 		},
 	}
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	x := []float64{0.0}
-	merit := opt.evaluateMerit(x)
+	merit := opt.EvaluateMerit(x)
 
 	if math.IsInf(merit, 0) || math.IsNaN(merit) {
-		t.Fatalf("evaluateMerit returned non-finite value: %v", merit)
+		t.Fatalf("EvaluateMerit returned non-finite value: %v", merit)
 	}
 	if merit < 0 {
-		t.Fatalf("evaluateMerit returned negative value: %v", merit)
+		t.Fatalf("EvaluateMerit returned negative value: %v", merit)
 	}
 }
 
@@ -444,7 +436,7 @@ func TestMultiOptimizerResultHasExpectedFields(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := New(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, nil, nil, 0, 0)
 	result := opt.Optimize()
 
 	if result.Status != "max_iterations" {
@@ -513,7 +505,7 @@ func TestMultiOptimizerSatisfiableEqualityConstraints(t *testing.T) {
 		{Name: "s7_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 7, Param: "curvature"}, Min: -0.2, Max: -0.01, Active: true},
 	}
 
-	opt := New(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
 	result := opt.Optimize()
 
 	if result.AfterMerit >= result.BeforeMerit {
@@ -550,7 +542,7 @@ func TestMultiOptimizerUnsatisfiableConstraintWarns(t *testing.T) {
 		{Name: "s7_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 7, Param: "curvature"}, Min: -0.2, Max: -0.01, Active: true},
 	}
 
-	opt := New(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
 	result := opt.Optimize()
 
 	if result.Status == "converged" {
@@ -589,7 +581,7 @@ func TestMultiOptimizerApertureMarginClamp(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := New(configs, nil, nil, gc, 10, 0.01, 1e-6, 1e-6, 0.8, 64, 100, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, nil, nil, gc, 10, 0.01, 1e-6, 1e-6, 0.8, 64, 100, nil, nil, 0, 0)
 	if got := opt.Options().ApertureMargin; got != 1.0 {
 		t.Errorf("ApertureMargin = %v, want 1.0 (clamped)", got)
 	}
@@ -620,7 +612,7 @@ func TestMultiOptimizerAsphereVariables(t *testing.T) {
 		{Name: "s1_coef1", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "coefficient_1"}, Min: -1e-3, Max: 1e-3, Active: true},
 	}
 
-	opt := New(configs, nil, localVars, gc, 5, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, nil, localVars, gc, 5, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
 
 	// Initial state must read the surface values (a4 = 1e-5, coefficient_1 = 0).
 	x := opt.getInitialState()
@@ -633,9 +625,9 @@ func TestMultiOptimizerAsphereVariables(t *testing.T) {
 
 	// Changing the a4 coefficient must change the merit (the asphere sag
 	// affects the traced rays).
-	base := opt.evaluateMerit(x)
+	base := opt.EvaluateMerit(x)
 	x[1] = 5e-4
-	pert := opt.evaluateMerit(x)
+	pert := opt.EvaluateMerit(x)
 	if math.Abs(pert-base) < 1e-12 {
 		t.Errorf("merit unchanged when a4 changes (%v vs %v): asphere variable not applied", base, pert)
 	}
@@ -651,7 +643,7 @@ func TestMultiOptimizerMeritBreakdown(t *testing.T) {
 		{Name: "s1_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature"}, Min: 0.05, Max: 0.2, Active: true},
 		{Name: "s3_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "curvature"}, Min: -0.15, Max: -0.01, Active: true},
 	}
-	opt := New(configs, nil, localVars, tripletGC(), 10, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
+	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 10, 0.01, 1e-6, 1e-6, 1.0, 64, 100, nil, nil, 0, 0)
 
 	x := opt.getInitialState()
 	bd := opt.MeritBreakdown(x)
@@ -659,7 +651,7 @@ func TestMultiOptimizerMeritBreakdown(t *testing.T) {
 	if !ok {
 		t.Fatalf("MeritBreakdown missing objective_total: %v", bd)
 	}
-	merit := opt.evaluateMerit(x)
+	merit := opt.EvaluateMerit(x)
 	if math.Abs(total-merit) > 1e-9 {
 		t.Errorf("objective_total = %v, want %v (EvaluateMerit)", total, merit)
 	}

@@ -173,7 +173,11 @@ configs:
 				w.Close()
 				ew.Close()
 			}()
-			runMultiConfigOptimize(input, gc, false, "")
+			outYAML, err := yaml.Marshal(&input)
+			if err != nil {
+				t.Fatalf("yaml.Marshal: %v", err)
+			}
+			runOptimize(outYAML, false, "", "")
 		}()
 		io.Copy(&out, r)
 		r.Close()

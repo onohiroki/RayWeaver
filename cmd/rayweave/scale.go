@@ -37,7 +37,7 @@ func runScale(data []byte) {
 
 	gc, _ := loadCatalogs(&input, *glassDir)
 
-	refSurfaces := selectSurfaces(input.System.Surfaces, input.Configs, configFlag)
+	refSurfaces := configSurfaces(input.Configs, configFlag)
 	if len(refSurfaces) == 0 {
 		errOut("Error: no surfaces defined")
 		os.Exit(1)

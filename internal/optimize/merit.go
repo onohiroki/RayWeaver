@@ -11,58 +11,95 @@ import (
 )
 
 const (
-	MeritSpotRMS          = "spot_rms"
-	MeritDistortionPct    = "distortion_pct"
-	MeritLateralColor     = "lateral_color"
+	MeritSpotRMS           = "spot_rms"
+	MeritDistortionPct     = "distortion_pct"
+	MeritLateralColor      = "lateral_color"
 	MeritLongitudinalColor = "longitudinal_color"
-	MeritSeidelSpherical  = "seidel_spherical"
-	MeritSeidelComa       = "seidel_coma"
+	MeritSeidelSpherical   = "seidel_spherical"
+	MeritSeidelComa        = "seidel_coma"
 	MeritSeidelAstigmatism = "seidel_astigmatism"
-	MeritSeidelDistortion = "seidel_distortion"
-	MeritOPDRMS           = "opd_rms"
+	MeritSeidelDistortion  = "seidel_distortion"
+	MeritOPDRMS            = "opd_rms"
 )
 
-func EvaluateMeritKind(kind string, term MeritTerm, surfaces []types.Surface, gc *glass.Catalog, o *Optimizer) float64 {
+// evaluateKindTerm evaluates a non-spot merit term for the given config,
+// returning 0 for unknown kinds.
+func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	switch term.kind {
+	case MeritOPDRMS:
+		points := o.traceFieldGrid(gc, surfaces, cfg, term)
+		if len(points) == 0 {
+			return 1e6
+		}
+		return ComputeOPDRMS(points)
+	default:
+		return evaluateKindValue(term.kind, term, surfaces, gc)
+	}
+}
+
+func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if gc == nil {
 		gc = glass.NewCatalog()
 	}
-
 	switch kind {
 	case MeritDistortionPct:
-		return evaluateDistortionPct(term, surfaces, gc)
+		return evaluateDistortionPct(term.fieldAngle, term.wavelength, surfaces, gc)
 	case MeritLateralColor:
-		return evaluateLateralColor(term, surfaces, gc)
+		return evaluateLateralColor(term.fieldAngle, term.wavelength, term.wavelength2, surfaces, gc)
 	case MeritLongitudinalColor:
-		return evaluateLongitudinalColor(term, surfaces, gc)
+		return evaluateLongitudinalColor(term.wavelength, term.wavelength2, surfaces, gc)
 	case MeritSeidelSpherical:
-		return evaluateSeidel(term, surfaces, gc).Spherical
+		return evaluateSeidel(term.fieldAngle, term.wavelength, surfaces, gc).Spherical
 	case MeritSeidelComa:
-		return evaluateSeidel(term, surfaces, gc).Coma
+		return evaluateSeidel(term.fieldAngle, term.wavelength, surfaces, gc).Coma
 	case MeritSeidelAstigmatism:
-		return evaluateSeidel(term, surfaces, gc).Astigmatism
+		return evaluateSeidel(term.fieldAngle, term.wavelength, surfaces, gc).Astigmatism
 	case MeritSeidelDistortion:
-		return evaluateSeidel(term, surfaces, gc).Distortion
-	case MeritOPDRMS:
-		return evaluateOPDRMS(term, surfaces, gc, o)
+		return evaluateSeidel(term.fieldAngle, term.wavelength, surfaces, gc).Distortion
 	default:
 		return 0
 	}
 }
 
-func evaluateDistortionPct(term MeritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
-	wl := term.Wavelength
-	if wl == 0 {
-		wl = 0.0005876
+// EvaluateMeritKind is the public wrapper over the merit-kind evaluator,
+// kept for callers that do not go through the unified Optimizer evaluation
+// loop (e.g. external tools evaluating a single term). OPD_RMS requires an
+// Optimizer to trace the grid and returns 0 when o is nil.
+func EvaluateMeritKind(kind string, term MeritTerm, surfaces []types.Surface, gc *glass.Catalog, o *Optimizer) float64 {
+	if kind == MeritOPDRMS {
+		if o == nil {
+			return 0
+		}
+		cfg := o.primaryConfig()
+		mt := meritTerm{
+			kind:       MeritOPDRMS,
+			fieldAngle: term.FieldAngle,
+			wavelength: term.Wavelength,
+		}
+		return o.evaluateKindTerm(cfg, &mt, surfaces, gc)
+	}
+	mt := meritTerm{
+		kind:        kind,
+		fieldAngle:  term.FieldAngle,
+		wavelength:  term.Wavelength,
+		wavelength2: term.Wavelength2,
+	}
+	return evaluateKindValue(kind, &mt, surfaces, gc)
+}
+
+func evaluateDistortionPct(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	if wavelength == 0 {
+		wavelength = 0.0005876
 	}
 
-	yChief := traceChiefImageHeight(surfaces, term.FieldAngle, wl, gc)
+	yChief := traceChiefImageHeight(surfaces, fieldAngle, wavelength, gc)
 	if yChief == 0 {
 		return 0
 	}
 
 	sys := types.System{Surfaces: surfaces}
-	pr := paraxial.Compute(sys, wl, gc, 0, nil)
-	yParax := pr.FocalLength * math.Tan(term.FieldAngle*math.Pi/180.0)
+	pr := paraxial.Compute(sys, wavelength, gc, 0, nil)
+	yParax := pr.FocalLength * math.Tan(fieldAngle*math.Pi/180.0)
 
 	if math.Abs(yParax) < 1e-15 {
 		return 0
@@ -70,9 +107,7 @@ func evaluateDistortionPct(term MeritTerm, surfaces []types.Surface, gc *glass.C
 	return 100.0 * (yChief - yParax) / yParax
 }
 
-func evaluateLateralColor(term MeritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
-	wl1 := term.Wavelength
-	wl2 := term.Wavelength2
+func evaluateLateralColor(fieldAngle, wl1, wl2 float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if wl1 == 0 {
 		wl1 = 0.0005876
 	}
@@ -80,14 +115,12 @@ func evaluateLateralColor(term MeritTerm, surfaces []types.Surface, gc *glass.Ca
 		return 0
 	}
 
-	y1 := traceChiefImageHeight(surfaces, term.FieldAngle, wl1, gc)
-	y2 := traceChiefImageHeight(surfaces, term.FieldAngle, wl2, gc)
+	y1 := traceChiefImageHeight(surfaces, fieldAngle, wl1, gc)
+	y2 := traceChiefImageHeight(surfaces, fieldAngle, wl2, gc)
 	return y2 - y1
 }
 
-func evaluateLongitudinalColor(term MeritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
-	wl1 := term.Wavelength
-	wl2 := term.Wavelength2
+func evaluateLongitudinalColor(wl1, wl2 float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if wl1 == 0 {
 		wl1 = 0.0005876
 	}
@@ -101,13 +134,13 @@ func evaluateLongitudinalColor(term MeritTerm, surfaces []types.Surface, gc *gla
 	return pr2.FocalLength - pr1.FocalLength
 }
 
-func evaluateSeidel(term MeritTerm, surfaces []types.Surface, gc *glass.Catalog) paraxial.SeidelCoefficients {
-	return paraxial.ComputeSeidel(surfaces, term.FieldAngle, term.Wavelength, gc)
+func evaluateSeidel(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) paraxial.SeidelCoefficients {
+	return paraxial.ComputeSeidel(surfaces, fieldAngle, wavelength, gc)
 }
 
 func traceChiefImageHeight(surfaces []types.Surface, fieldAngleDeg float64, wavelength float64, gc *glass.Catalog) float64 {
 	engine := ray.NewEngine(gc, nil)
-	path := buildPath(surfaces)
+	path := dls.BuildPath(surfaces)
 
 	thetaRad := fieldAngleDeg * math.Pi / 180.0
 	sinT := math.Sin(thetaRad)
@@ -130,17 +163,6 @@ func traceChiefImageHeight(surfaces []types.Surface, fieldAngleDeg float64, wave
 	}
 	last := result.Surfaces[len(result.Surfaces)-1]
 	return last.Position.Y
-}
-
-func evaluateOPDRMS(term MeritTerm, surfaces []types.Surface, gc *glass.Catalog, o *Optimizer) float64 {
-	if o == nil {
-		return 0
-	}
-	points, _ := o.traceFieldGrid(surfaces, term.FieldAngle, term.FieldDir, term.Wavelength)
-	if len(points) == 0 {
-		return 1e6
-	}
-	return ComputeOPDRMS(points)
 }
 
 // ComputeOPDRMS returns the RMS of the optical path difference across a pupil
@@ -175,15 +197,3 @@ func ComputeOPDRMS(points []dls.IPoint) float64 {
 	mean := sumSq / float64(count)
 	return math.Sqrt(mean)
 }
-
-func buildPath(surfaces []types.Surface) []int {
-	path := []int{0}
-	for _, s := range surfaces {
-		if s.ID > 0 {
-			path = append(path, s.ID)
-		}
-	}
-	return path
-}
-
-

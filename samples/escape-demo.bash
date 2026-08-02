@@ -43,7 +43,7 @@ echo
 
 echo "--- PNG diagrams ---"
 echo "=== Initial diagram ==="
-./rayweave chief --clear-aperture --shrink < "$YAML" | ./rayweave trace \
+./rayweave chief --clear-aperture --shrink --ray-fan < "$YAML" | ./rayweave trace \
   | ./rayweave plot -o "$OUTDIR/escape-demo-init.png" >/dev/null
 echo "Written: $OUTDIR/escape-demo-init.png"
 

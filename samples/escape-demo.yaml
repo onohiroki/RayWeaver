@@ -7,9 +7,6 @@ glass_catalog:
       nd: 1.64831
       vd: 33.84
 
-system:
-  surfaces: []
-
 chief:
   fields:
     - angle: 0.0

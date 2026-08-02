@@ -8,8 +8,6 @@ glass_catalog:
     name: SF12
     nd: 1.64831
     vd: 33.84
-system:
-  surfaces: []
 optimization:
   method: dls
   max_iter: 500

@@ -7,9 +7,6 @@ glass_catalog:
       nd: 1.64831
       vd: 33.84
 
-system:
-  surfaces: []
-
 optimization:
   method: dls
   aperture_margin: 1.0

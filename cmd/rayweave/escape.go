@@ -8,7 +8,6 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/escape"
 	"github.com/hiroki/rayweaver/internal/glass"
-	"github.com/hiroki/rayweaver/internal/multiopt"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -53,12 +52,12 @@ func runEscape(data []byte, glassDir string) {
 }
 
 func runEscapeSingle(input types.Input, gc *glass.Catalog) {
-	surfaces := input.System.Surfaces
-	if len(input.Configs) > 0 && len(input.Configs[0].Surfaces) > 0 {
+	var surfaces []types.Surface
+	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
 	}
 	if len(surfaces) == 0 {
-		errOut("Error: no surfaces defined (add 'system.surfaces' or 'configs[0].surfaces')")
+		errOut("Error: no surfaces defined (add 'configs[0].surfaces')")
 		os.Exit(1)
 	}
 	surface.Precompute(surfaces)
@@ -160,7 +159,6 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog) {
 		}}
 	}
 	input.Configs[0].Surfaces = bestSurfaces
-	input.System.Surfaces = nil
 
 	for _, g := range bestGlasses {
 		input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
@@ -172,7 +170,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog) {
 }
 
 func runEscapeMulti(input types.Input, gc *glass.Catalog) {
-	var configs []multiopt.ConfigInput
+	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
 			continue
@@ -209,7 +207,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog) {
 		if input.Chief != nil {
 			stopSurface = input.Chief.StopSurface
 		}
-		configs = append(configs, multiopt.ConfigInput{
+		configs = append(configs, optimize.ConfigInput{
 			ID:          cfg.ID,
 			Weight:      cfg.Weight,
 			StopSurface: stopSurface,
@@ -271,9 +269,9 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog) {
 	}
 
 	factory := func() dls.Model {
-		configsCopy := make([]multiopt.ConfigInput, len(configs))
+		configsCopy := make([]optimize.ConfigInput, len(configs))
 		copy(configsCopy, configs)
-		return multiopt.New(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, nil, hull, hullMargin, hullWeight)
+		return optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, nil, hull, hullMargin, hullWeight)
 	}
 
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape)
@@ -650,7 +648,6 @@ func runEscapeExtract(data []byte, index int) {
 				}
 			}
 		}
-		output.System.Surfaces = nil
 	} else if len(min.Surfaces) > 0 {
 		if len(output.Configs) == 0 {
 			output.Configs = []types.Config{{
@@ -661,7 +658,6 @@ func runEscapeExtract(data []byte, index int) {
 			}}
 		}
 		output.Configs[0].Surfaces = min.Surfaces
-		output.System.Surfaces = nil
 	} else {
 		errOut("Error: local minimum %d has no surface data", index)
 		os.Exit(1)
