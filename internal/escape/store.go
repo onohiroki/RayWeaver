@@ -1,0 +1,161 @@
+package escape
+
+import (
+	"math"
+	"sort"
+	"sync"
+)
+
+// Store is a thread-safe collection of recorded local minima. Multiple worker
+// goroutines share one Store; the escape strength of a minimum grows when DLS
+// keeps returning to it.
+type Store struct {
+	mu     sync.RWMutex
+	points []Point
+	params Params
+}
+
+// NewStore creates an empty store.
+func NewStore(params Params) *Store {
+	return &Store{params: params}
+}
+
+// Distance returns the normalised distance between x and a recorded point
+// (same metric as the escape function, without weights applied to the scale).
+func (s *Store) Distance(x []float64, p Point) float64 {
+	n := len(s.params.Active)
+	if n == 0 {
+		return 0
+	}
+	sum := 0.0
+	for _, j := range s.params.Active {
+		scale := s.params.Scales[j]
+		if scale <= 0 {
+			scale = 1.0
+		}
+		wt := 1.0
+		if j < len(s.params.Weights) && s.params.Weights[j] != 0 {
+			wt = s.params.Weights[j]
+		}
+		du := (x[j] - p.X[j]) / scale
+		sum += wt * du * du
+	}
+	return math.Sqrt(sum / float64(n))
+}
+
+// FindNearest returns the distance to the closest recorded point and its index,
+// or (0, -1) if the store is empty.
+func (s *Store) FindNearest(x []float64) (float64, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	bestD := math.Inf(1)
+	bestIdx := -1
+	for i := range s.points {
+		d := s.Distance(x, s.points[i])
+		if d < bestD {
+			bestD = d
+			bestIdx = i
+		}
+	}
+	return bestD, bestIdx
+}
+
+// Add appends a new point and returns its index. The caller is responsible
+// for checking distance against Dt beforehand (see IsNew).
+func (s *Store) Add(p Point) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p.H = s.params.H
+	p.W = s.params.W
+	s.points = append(s.points, p)
+	return len(s.points) - 1
+}
+
+// IsNew reports whether x is far enough from every recorded point to be
+// treated as a distinct local minimum.
+func (s *Store) IsNew(x []float64) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := range s.points {
+		if s.Distance(x, s.points[i]) < s.params.Dt {
+			return false
+		}
+	}
+	return true
+}
+
+// Strengthen grows the escape height and width of the point at idx.
+func (s *Store) Strengthen(idx int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if idx < 0 || idx >= len(s.points) {
+		return
+	}
+	p := &s.points[idx]
+	if s.params.HMult != 0 {
+		p.H *= s.params.HMult
+	}
+	if s.params.WMult != 0 {
+		p.W *= s.params.WMult
+	}
+}
+
+// All returns a snapshot of all recorded points.
+func (s *Store) All() []Point {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]Point, len(s.points))
+	copy(out, s.points)
+	return out
+}
+
+// Len returns the number of recorded points.
+func (s *Store) Len() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.points)
+}
+
+// Best returns a copy of the lowest-merit point and its index. Returns a zero
+// point and -1 when empty.
+func (s *Store) Best() (Point, int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.points) == 0 {
+		return Point{}, -1
+	}
+	idx := 0
+	for i := 1; i < len(s.points); i++ {
+		if s.points[i].Merit < s.points[idx].Merit {
+			idx = i
+		}
+	}
+	p := s.points[idx]
+	return p, idx
+}
+
+// SortedByMerit returns all points ordered by merit (lowest first) with their
+// original store indices.
+type sortedPoint struct {
+	p   Point
+	idx int
+}
+
+// SortedByMerit returns points ordered by merit ascending, along with their
+// store indices.
+func (s *Store) SortedByMerit() ([]Point, []int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sp := make([]sortedPoint, len(s.points))
+	for i, p := range s.points {
+		sp[i] = sortedPoint{p: p, idx: i}
+	}
+	sort.Slice(sp, func(a, b int) bool { return sp[a].p.Merit < sp[b].p.Merit })
+	points := make([]Point, len(sp))
+	idx := make([]int, len(sp))
+	for i := range sp {
+		points[i] = sp[i].p
+		idx[i] = sp[i].idx
+	}
+	return points, idx
+}
