@@ -1,12 +1,110 @@
 package main
 
 import (
+	"fmt"
 	"math"
+	"os"
 
+	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/types"
+	"gopkg.in/yaml.v3"
 )
+
+// parseYAML unmarshals a document into a value of type T, exiting on error.
+func parseYAML[T any](data []byte) T {
+	var out T
+	if err := yaml.Unmarshal(data, &out); err != nil {
+		errOut("Error parsing YAML: %v", err)
+		os.Exit(1)
+	}
+	return out
+}
+
+// writeYAML marshals a value to stdout, exiting on error.
+func writeYAML(v any) {
+	outData, err := yaml.Marshal(v)
+	if err != nil {
+		errOut("Error marshaling output: %v", err)
+		os.Exit(1)
+	}
+	os.Stdout.Write(outData)
+}
+
+// marginalRaysForField extracts the grid rays with max/min image Y (and X for
+// fields with an X direction component) for one chief result and returns them
+// as marginal rays.
+func marginalRaysForField(fi int, r chief.Result, wavelength float64, path []int, pol types.JonesVector) []types.Ray {
+	var maxY, minY *types.GridPoint
+	var maxX, minX *types.GridPoint
+	hasX := math.Abs(r.FieldDir.X) > 1e-6
+
+	for i := range r.GridPoints {
+		gp := &r.GridPoints[i]
+		if gp.ImageX == nil || gp.ImageY == nil {
+			continue
+		}
+		y := *gp.ImageY
+		if maxY == nil || y > *maxY.ImageY {
+			maxY = gp
+		}
+		if minY == nil || y < *minY.ImageY {
+			minY = gp
+		}
+		if hasX {
+			x := *gp.ImageX
+			if maxX == nil || x > *maxX.ImageX {
+				maxX = gp
+			}
+			if minX == nil || x < *minX.ImageX {
+				minX = gp
+			}
+		}
+	}
+
+	fid := fmt.Sprintf("f%d", fi)
+	var rays []types.Ray
+	if maxY != nil && *maxY.ImageY != 0 {
+		rays = append(rays, types.Ray{
+			ID:         fmt.Sprintf("marginal_%s_Yplus", fid),
+			Wavelength: wavelength,
+			Initial:    types.RayState{Origin: maxY.Origin, Direction: maxY.Direction},
+			Path:       path,
+			Jones:      pol,
+		})
+	}
+	if minY != nil && *minY.ImageY != 0 {
+		rays = append(rays, types.Ray{
+			ID:         fmt.Sprintf("marginal_%s_Yminus", fid),
+			Wavelength: wavelength,
+			Initial:    types.RayState{Origin: minY.Origin, Direction: minY.Direction},
+			Path:       path,
+			Jones:      pol,
+		})
+	}
+	if hasX {
+		if maxX != nil && *maxX.ImageX != 0 {
+			rays = append(rays, types.Ray{
+				ID:         fmt.Sprintf("marginal_%s_Xplus", fid),
+				Wavelength: wavelength,
+				Initial:    types.RayState{Origin: maxX.Origin, Direction: maxX.Direction},
+				Path:       path,
+				Jones:      pol,
+			})
+		}
+		if minX != nil && *minX.ImageX != 0 {
+			rays = append(rays, types.Ray{
+				ID:         fmt.Sprintf("marginal_%s_Xminus", fid),
+				Wavelength: wavelength,
+				Initial:    types.RayState{Origin: minX.Origin, Direction: minX.Direction},
+				Path:       path,
+				Jones:      pol,
+			})
+		}
+	}
+	return rays
+}
 
 // buildOptimizeVariables converts single-config `optimization.variables` into
 // the unified Optimizer variable list (surface targets only).

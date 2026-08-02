@@ -11,6 +11,23 @@ func Reflect(d, n types.Vec3) types.Vec3 {
 	return d.Subtract(n.Scale(2 * dot))
 }
 
+// DegToRad converts an angle from degrees to radians.
+func DegToRad(deg float64) float64 {
+	return deg * math.Pi / 180.0
+}
+
+// RadToDeg converts an angle from radians to degrees.
+func RadToDeg(rad float64) float64 {
+	return rad * 180.0 / math.Pi
+}
+
+// DirectionFromAngle returns a normalized direction in the XY plane at the
+// given field angle (degrees), pointing toward +Z.
+func DirectionFromAngle(angleDeg float64) types.Vec3 {
+	rad := DegToRad(angleDeg)
+	return types.Vec3{X: 0, Y: math.Sin(rad), Z: math.Cos(rad)}.Normalize()
+}
+
 func Refract(d, n types.Vec3, n1, n2 float64) (types.Vec3, bool) {
 	cosTheta1 := -d.Dot(n)
 	eta := n1 / n2
@@ -44,9 +61,9 @@ func ComputeDecenterTransform(decenter []types.DecenterStep) types.Mat4 {
 	m := types.NewIdentity()
 	for _, step := range decenter {
 		t := types.NewTranslation(step.Shift)
-		rx := types.NewRotationX(step.Tilt.X * math.Pi / 180.0)
-		ry := types.NewRotationY(step.Tilt.Y * math.Pi / 180.0)
-		rz := types.NewRotationZ(step.Tilt.Z * math.Pi / 180.0)
+		rx := types.NewRotationX(DegToRad(step.Tilt.X))
+		ry := types.NewRotationY(DegToRad(step.Tilt.Y))
+		rz := types.NewRotationZ(DegToRad(step.Tilt.Z))
 		local := t.Multiply(rx).Multiply(ry).Multiply(rz)
 		m = m.Multiply(local)
 	}

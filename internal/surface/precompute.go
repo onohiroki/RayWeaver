@@ -1,8 +1,6 @@
 package surface
 
 import (
-	"math"
-
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -13,9 +11,9 @@ func foldRotation(s types.Surface) types.Mat4 {
 		if !d.Reflect {
 			continue
 		}
-		rx := types.NewRotationX(d.Tilt.X * math.Pi / 180.0)
-		ry := types.NewRotationY(d.Tilt.Y * math.Pi / 180.0)
-		rz := types.NewRotationZ(d.Tilt.Z * math.Pi / 180.0)
+		rx := types.NewRotationX(raymath.DegToRad(d.Tilt.X))
+		ry := types.NewRotationY(raymath.DegToRad(d.Tilt.Y))
+		rz := types.NewRotationZ(raymath.DegToRad(d.Tilt.Z))
 		m = m.Multiply(rx).Multiply(ry).Multiply(rz)
 	}
 	return m

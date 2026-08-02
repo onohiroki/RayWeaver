@@ -9,15 +9,10 @@ import (
 	"github.com/hiroki/rayweaver/internal/render"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
-	"gopkg.in/yaml.v3"
 )
 
 func runPlot(data []byte) {
-	var output types.Output
-	if err := yaml.Unmarshal(data, &output); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
-	}
+	output := parseYAML[types.Output](data)
 
 	var outPath string
 	var lensWidth, rayWidth, scaleOverride, rightMarginPct float64

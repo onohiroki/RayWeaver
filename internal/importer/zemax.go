@@ -1,41 +1,21 @@
 package importer
 
 import (
-	"math"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func decodeZMXContent(input string) string {
-	raw := []byte(input)
-	if len(raw) < 2 {
-		return input
-	}
-	if raw[0] == 0xFF && raw[1] == 0xFE {
-		u16 := make([]uint16, 0, len(raw)/2)
-		for i := 2; i+1 < len(raw); i += 2 {
-			u16 = append(u16, uint16(raw[i])|uint16(raw[i+1])<<8)
-		}
-		return string(utf16.Decode(u16))
-	}
-	if len(raw) >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {
-		return string(raw[3:])
-	}
-	return input
-}
-
 func ParseZemax(input string) (*ParseResult, error) {
-	input = decodeZMXContent(input)
+	input = decodeBOM(input)
 	lines := strings.Split(input, "\n")
 
 	result := &ParseResult{
-		Surfaces:    nil,
-		Wavelengths: nil,
-		Fields:      nil,
-		StopSurface: 0,
+		Surfaces:     nil,
+		Wavelengths:  nil,
+		Fields:       nil,
+		StopSurface:  0,
 		GlassEntries: nil,
 	}
 
@@ -119,25 +99,7 @@ func ParseZemax(input string) (*ParseResult, error) {
 		if mat == "" || isAir(mat) {
 			mat = "AIR"
 		} else {
-			found := false
-			for _, g := range result.GlassEntries {
-				if strings.EqualFold(g.Label, mat) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				nd, vd, ok := LookupGlass(mat)
-				entry := types.Glass{
-					Type:  types.GlassTypeModel,
-					Label: mat,
-				}
-				if ok {
-					entry.ND = nd
-					entry.VD = vd
-				}
-				result.GlassEntries = append(result.GlassEntries, entry)
-			}
+			addGlassEntry(result, mat)
 		}
 		s.Material = mat
 
@@ -155,17 +117,7 @@ func ParseZemax(input string) (*ParseResult, error) {
 		result.StopSurface = result.Surfaces[0].ID
 	}
 
-	if len(result.Wavelengths) == 0 {
-		result.Wavelengths = []types.WavelengthItem{
-			{ID: 0, Value: 0.00058756, Weight: 1.0},
-		}
-	}
-
-	if len(result.Fields) == 0 {
-		result.Fields = []types.FieldItem{
-			{ID: 0, AngleDeg: 0, Weight: 1.0},
-		}
-	}
+	fillDefaults(result)
 
 	return result, nil
 }
@@ -193,7 +145,7 @@ func parseZemaxSurfaceParam(s *zemaxSurface, keyword string, args []string) {
 		}
 	case "THIC", "DISZ":
 		if len(args) > 0 {
-			s.Thickness = parseThickness(args[0])
+			s.Thickness = parseThickness(parseFloat(args[0]))
 		}
 	case "GLAS":
 		if len(args) > 0 {
@@ -295,29 +247,3 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 func splitLine(line string) []string {
 	return strings.Fields(line)
 }
-
-func parseFloat(s string) float64 {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
-	}
-	upper := strings.ToUpper(s)
-	if upper == "INFINITY" || upper == "INF" {
-		return math.Inf(1)
-	}
-	val, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0
-	}
-	return val
-}
-
-func parseThickness(s string) float64 {
-	v := parseFloat(s)
-	if math.IsInf(v, 1) {
-		return 0
-	}
-	return v
-}
-
-

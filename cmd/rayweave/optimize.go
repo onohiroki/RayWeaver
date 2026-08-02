@@ -10,7 +10,6 @@ import (
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/types"
-	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -22,11 +21,7 @@ const (
 )
 
 func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
-	var input types.Input
-	if err := yaml.Unmarshal(data, &input); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
-	}
+	input := parseYAML[types.Input](data)
 
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
@@ -305,12 +300,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		Input: input,
 	}
 
-	outData, err := yaml.Marshal(&output)
-	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(outData)
+	writeYAML(&output)
 }
 
 // firstConfigSurfaces returns the surfaces of the first config (used when no

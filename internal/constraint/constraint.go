@@ -94,7 +94,7 @@ func ComputeError(kind types.ConstraintKind, value float64, op types.ConstraintO
 func traceChiefRay(surfaces []types.Surface, fieldAngle, wavelength float64, gc *glass.Catalog) types.RayResult {
 	engine := ray.NewEngine(gc, nil)
 
-	thetaRad := fieldAngle * math.Pi / 180.0
+	thetaRad := raymath.DegToRad(fieldAngle)
 	sinT := math.Sin(thetaRad)
 	cosT := math.Cos(thetaRad)
 
@@ -104,7 +104,7 @@ func traceChiefRay(surfaces []types.Surface, fieldAngle, wavelength float64, gc 
 	zStart := -100.0
 	origin := types.Vec3{X: 0, Y: 0, Z: zStart}
 
-	path := buildPath(surfaces)
+	path := dls.BuildPath(surfaces)
 
 	r := types.Ray{
 		Wavelength: wavelength,
@@ -297,16 +297,6 @@ func evaluateSystemLength(surfaces []types.Surface) float64 {
 		total += s.Thickness
 	}
 	return total
-}
-
-func buildPath(surfaces []types.Surface) []int {
-	path := []int{0}
-	for _, s := range surfaces {
-		if s.ID > 0 {
-			path = append(path, s.ID)
-		}
-	}
-	return path
 }
 
 func findSurfaceByID(surfaces []types.Surface, id int) *types.Surface {

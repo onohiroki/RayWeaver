@@ -7,6 +7,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
+	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -99,7 +100,7 @@ func evaluateDistortionPct(fieldAngle, wavelength float64, surfaces []types.Surf
 
 	sys := types.System{Surfaces: surfaces}
 	pr := paraxial.Compute(sys, wavelength, gc, 0, nil)
-	yParax := pr.FocalLength * math.Tan(fieldAngle*math.Pi/180.0)
+	yParax := pr.FocalLength * math.Tan(raymath.DegToRad(fieldAngle))
 
 	if math.Abs(yParax) < 1e-15 {
 		return 0
@@ -142,10 +143,7 @@ func traceChiefImageHeight(surfaces []types.Surface, fieldAngleDeg float64, wave
 	engine := ray.NewEngine(gc, nil)
 	path := dls.BuildPath(surfaces)
 
-	thetaRad := fieldAngleDeg * math.Pi / 180.0
-	sinT := math.Sin(thetaRad)
-	cosT := math.Cos(thetaRad)
-	dir := types.Vec3{X: 0, Y: sinT, Z: cosT}.Normalize()
+	dir := raymath.DirectionFromAngle(fieldAngleDeg)
 
 	zStart := -100.0
 	origin := types.Vec3{X: 0, Y: 0, Z: zStart}

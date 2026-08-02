@@ -9,7 +9,6 @@ import (
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
-	"gopkg.in/yaml.v3"
 )
 
 // runScale scales a system so its effective focal length equals --efl.
@@ -29,11 +28,7 @@ func runScale(data []byte) {
 		os.Exit(1)
 	}
 
-	var input types.Input
-	if err := yaml.Unmarshal(data, &input); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
-	}
+	input := parseYAML[types.Input](data)
 
 	gc, _ := loadCatalogs(&input, *glassDir)
 
@@ -44,7 +39,7 @@ func runScale(data []byte) {
 	}
 	surface.Precompute(refSurfaces)
 
-	wavelength := 0.00058756
+	wavelength := types.DefaultWavelength
 	refSys := types.System{Surfaces: refSurfaces}
 	cur := paraxial.Compute(refSys, wavelength, gc, 0, nil).FocalLength
 	if math.Abs(cur) < 1e-9 {
@@ -66,12 +61,7 @@ func runScale(data []byte) {
 	output := types.Output{
 		Input: input,
 	}
-	outData, err := yaml.Marshal(&output)
-	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(outData)
+	writeYAML(&output)
 
 	fmt.Fprintf(os.Stderr, "=== Scale complete ===\n")
 	fmt.Fprintf(os.Stderr, "  EFL:      %.4f -> %.4f mm\n", cur, *eflTarget)

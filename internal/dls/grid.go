@@ -6,6 +6,8 @@ import (
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
+	"github.com/hiroki/rayweaver/internal/raymath"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -26,7 +28,7 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fiel
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
-	thetaRad := fieldAngle * math.Pi / 180.0
+	thetaRad := raymath.DegToRad(fieldAngle)
 	sinT := math.Sin(thetaRad)
 	cosT := math.Cos(thetaRad)
 
@@ -49,7 +51,7 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fiel
 	zStart := -100.0
 	grid := generatePupilGrid(numRays, apertureRadius, rotationOffset)
 
-	stopZ := computeStopZ(surfaces, stopID)
+	stopZ := surface.ComputeStopZ(surfaces, stopID)
 	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
 	if rayDir.Z > 1e-12 && tanComponent > 1e-12 {
 		tanComponent /= rayDir.Z
@@ -122,47 +124,8 @@ func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float
 	return pts
 }
 
-func computeStopZ(surfaces []types.Surface, stopID int) float64 {
-	if stopID <= 0 {
-		stopID = findStopID(surfaces)
-	}
-	if stopID == 0 {
-		return 0
-	}
-	for _, s := range surfaces {
-		if s.ID == stopID {
-			return s.PhysicalZ
-		}
-	}
-	return 0
-}
-
-// findStopID returns the aperture stop: the fixed (non-auto_aperture) surface
-// with the smallest diameter, since auto_aperture surfaces are sized by the
-// beam and must never define the stop. Falls back to the smallest diameter
-// overall when every surface is auto_aperture.
-func findStopID(surfaces []types.Surface) int {
-	stopID := 0
-	minD := math.MaxFloat64
-	for _, s := range surfaces {
-		if !s.AutoAperture && s.Diameter > 0 && s.Diameter < minD {
-			minD = s.Diameter
-			stopID = s.ID
-		}
-	}
-	if stopID != 0 {
-		return stopID
-	}
-	minD = math.MaxFloat64
-	for _, s := range surfaces {
-		if s.Diameter > 0 && s.Diameter < minD {
-			minD = s.Diameter
-			stopID = s.ID
-		}
-	}
-	return stopID
-}
-
+// ApertureRadiusForGrid returns the entrance-pupil radius used for grid
+// traces, preferring the paraxial value.
 func ApertureRadiusForGrid(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, margin float64) float64 {
 	if r := paraxialEntranceRadius(surfaces, wavelength, gc, margin); r > 0 {
 		return r

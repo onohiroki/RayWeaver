@@ -48,6 +48,9 @@ const (
 	Constant   DispersionFormula = "constant"
 )
 
+// DefaultWavelength is the fallback design wavelength (587.56 nm) in mm.
+const DefaultWavelength = 0.00058756
+
 type JonesVector struct {
 	Ex, Ey complex128
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/ray"
+	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -499,7 +500,7 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 				if scale == 0 {
 					scale = 1.0
 				}
-				setSurfaceParam(&surfaces[idx], b.Param, scale*val+b.Offset)
+				SetSurfaceParam(&surfaces[idx], b.Param, scale*val+b.Offset)
 			}
 			continue
 		}
@@ -513,7 +514,7 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 			continue
 		}
 
-		if ai, ok := asphereCoefIndex(v.Param); ok {
+		if ai, ok := AsphereCoefIndex(v.Param); ok {
 			for len(surfaces[idx].Coefficients) <= ai {
 				surfaces[idx].Coefficients = append(surfaces[idx].Coefficients, 0)
 			}
@@ -629,8 +630,7 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 	lo, hi := 0.0, 45.0
 	for iter := 0; iter < 30; iter++ {
 		mid := (lo + hi) / 2
-		thetaRad := mid * math.Pi / 180.0
-		dir := types.Vec3{X: 0, Y: math.Sin(thetaRad), Z: math.Cos(thetaRad)}.Normalize()
+		dir := raymath.DirectionFromAngle(mid)
 
 		origin := types.Vec3{X: 0, Y: 0, Z: -100.0}
 		r := types.Ray{
@@ -950,75 +950,29 @@ func (o *Optimizer) FinalConfigs(x []float64) (map[string][]types.Surface, []typ
 // materializeGlasses collects the optimised nd/vd pairs into model glass
 // entries and rewrites the affected surface materials to the new glass keys.
 func (o *Optimizer) materializeGlasses(configSurfaces map[string][]types.Surface, x []float64) []types.Glass {
-	type glassAccum struct {
-		nd, vd       float64
-		hasND, hasVD bool
-		origLabel    string
-	}
-	glassMap := map[string]*glassAccum{}
-	for i, v := range o.variables {
-		if v.IsShared || (v.Param != "nd" && v.Param != "vd") {
-			continue
-		}
-		key := v.GlassName
-		if key == "" {
-			continue
-		}
-		acc, ok := glassMap[key]
-		if !ok {
-			acc = &glassAccum{}
-			if o.gc != nil {
-				if g, ok2 := o.gc.Lookup(key); ok2 {
-					acc.origLabel = g.Label
-					acc.nd = g.ND
-					acc.vd = g.VD
-					acc.hasND = true
-					acc.hasVD = true
+	return MaterializeGlassEntries(o.variables, x, o.gc,
+		func(v Variable) (string, bool) {
+			if v.IsShared {
+				return "", false
+			}
+			return v.GlassName, v.GlassName != ""
+		},
+		func(origKey, newKey string) {
+			for ci := range o.configs {
+				cfgID := o.configs[ci].id
+				for i := range configSurfaces[cfgID] {
+					if configSurfaces[cfgID][i].Material == origKey {
+						configSurfaces[cfgID][i].Material = newKey
+					}
 				}
 			}
-			glassMap[key] = acc
-		}
-		switch v.Param {
-		case "nd":
-			acc.nd = x[i]
-			acc.hasND = true
-		case "vd":
-			acc.vd = x[i]
-			acc.hasVD = true
-		}
-	}
-
-	var newGlasses []types.Glass
-	for origKey, acc := range glassMap {
-		if !acc.hasND || !acc.hasVD {
-			continue
-		}
-		g := types.Glass{
-			Type: types.GlassTypeModel,
-			ND:   acc.nd,
-			VD:   acc.vd,
-		}
-		if acc.origLabel != "" {
-			g.Label = acc.origLabel
-		}
-		newKey := types.ResolveGlassKey(g)
-		newGlasses = append(newGlasses, g)
-		for ci := range o.configs {
-			cfgID := o.configs[ci].id
-			for i := range configSurfaces[cfgID] {
-				if configSurfaces[cfgID][i].Material == origKey {
-					configSurfaces[cfgID][i].Material = newKey
-				}
-			}
-		}
-	}
-	return newGlasses
+		})
 }
 
-// asphereCoefIndex maps an asphere coefficient parameter name (a4/a6/a8/a10/
+// AsphereCoefIndex maps an asphere coefficient parameter name (a4/a6/a8/a10/
 // a12, or the array aliases coefficient_0..coefficient_4) to the index in
 // types.Surface.Coefficients, which holds the h^(2i+4) coefficients.
-func asphereCoefIndex(param string) (int, bool) {
+func AsphereCoefIndex(param string) (int, bool) {
 	switch param {
 	case "a4", "coefficient_0":
 		return 0, true
@@ -1034,8 +988,9 @@ func asphereCoefIndex(param string) (int, bool) {
 	return 0, false
 }
 
-func setSurfaceParam(s *types.Surface, param string, val float64) {
-	if ai, ok := asphereCoefIndex(param); ok {
+// SetSurfaceParam sets a single surface parameter by name.
+func SetSurfaceParam(s *types.Surface, param string, val float64) {
+	if ai, ok := AsphereCoefIndex(param); ok {
 		for len(s.Coefficients) <= ai {
 			s.Coefficients = append(s.Coefficients, 0)
 		}
@@ -1061,7 +1016,7 @@ func setSurfaceParam(s *types.Surface, param string, val float64) {
 }
 
 func getSurfaceParam(s types.Surface, param string) float64 {
-	if ai, ok := asphereCoefIndex(param); ok {
+	if ai, ok := AsphereCoefIndex(param); ok {
 		if ai < len(s.Coefficients) {
 			return s.Coefficients[ai]
 		}

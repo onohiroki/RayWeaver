@@ -1,10 +1,8 @@
 package importer
 
 import (
-	"math"
 	"strconv"
 	"strings"
-	"unicode/utf16"
 
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -43,7 +41,6 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 	lines := strings.Split(input, "\n")
 
 	result := &ParseResult{StopSurface: 0}
-	seenGlasses := make(map[string]bool)
 
 	inLens := false
 	var surfaces []nxtSurface
@@ -94,15 +91,15 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 			continue
 		}
 		if strings.HasPrefix(upper, "RD ") {
-			current.Radius = parseOsloFloat(line[3:])
+			current.Radius = parseFloat(line[3:])
 			continue
 		}
 		if strings.HasPrefix(upper, "TH ") {
-			current.Thickness = parseOsloFloat(line[3:])
+			current.Thickness = parseFloat(line[3:])
 			continue
 		}
 		if strings.HasPrefix(upper, "AP ") {
-			current.ApertureRadius = parseOsloFloat(line[3:])
+			current.ApertureRadius = parseFloat(line[3:])
 			continue
 		}
 		if strings.HasPrefix(upper, "PY ") {
@@ -112,7 +109,7 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 			parts := strings.Fields(line[2:])
 			wvValues = nil
 			for _, p := range parts {
-				val := parseOsloFloat(p)
+				val := parseFloat(p)
 				if val > 0 {
 					wvValues = append(wvValues, val)
 				}
@@ -122,7 +119,7 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 		if strings.HasPrefix(upper, "WW ") || strings.HasPrefix(upper, "WW\t") {
 			parts := strings.Fields(line[2:])
 			for i, p := range parts {
-				weight := parseOsloFloat(p)
+				weight := parseFloat(p)
 				if weight <= 0 {
 					weight = 1.0
 				}
@@ -158,35 +155,20 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 			mat = "AIR"
 		}
 
-		curv := 0.0
-		if s.Radius != 0 {
-			curv = 1.0 / s.Radius
-		}
+		curv := radiusToCurvature(s.Radius)
 
 		diam := 0.0
 		if s.ApertureRadius > 0 {
 			diam = s.ApertureRadius * 2
 		}
 
-		if mat != "" && !isAir(mat) && !seenGlasses[mat] {
-			seenGlasses[mat] = true
-			nd, vd, ok := LookupGlass(mat)
-			entry := types.Glass{
-				Type:  types.GlassTypeModel,
-				Label: mat,
-			}
-			if ok {
-				entry.ND = nd
-				entry.VD = vd
-			}
-			result.GlassEntries = append(result.GlassEntries, entry)
-		}
+		addGlassEntry(result, mat)
 
 		surf := types.Surface{
 			ID:        id,
 			Type:      types.Sphere,
 			Curvature: curv,
-			Thickness: parseOsloThickness(s.Thickness),
+			Thickness: parseThickness(s.Thickness),
 			Material:  mat,
 			Diameter:  diam,
 		}
@@ -204,16 +186,7 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 		result.StopSurface = surfList[0].ID
 	}
 
-	if len(result.Wavelengths) == 0 {
-		result.Wavelengths = []types.WavelengthItem{
-			{ID: 0, Value: 0.00058756, Weight: 1.0},
-		}
-	}
-	if len(result.Fields) == 0 {
-		result.Fields = []types.FieldItem{
-			{ID: 0, AngleDeg: 0, Weight: 1.0},
-		}
-	}
+	fillDefaults(result)
 
 	return result, nil
 }
@@ -234,11 +207,11 @@ func parseOsloWVLine(line string) []types.WavelengthItem {
 	parts := strings.Fields(rest)
 	var out []types.WavelengthItem
 	for i, p := range parts {
-		val := parseOsloFloat(p)
+		val := parseFloat(p)
 		if val > 0 {
 			out = append(out, types.WavelengthItem{
-				ID:    i,
-				Value: val,
+				ID:     i,
+				Value:  val,
 				Weight: 1.0,
 			})
 		}
@@ -252,8 +225,6 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 	result := &ParseResult{
 		StopSurface: 0,
 	}
-	seenGlasses := make(map[string]bool)
-
 	inLens := false
 	surfMap := make(map[int]*osloSurface)
 	stopID := 0
@@ -308,7 +279,7 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 					curSurf = -1
 				case label == "IMS" || label == "IMG":
 					curSurf = nextID
-					s := getOrCreateSurface(surfMap, curSurf)
+					s := getOrCreate(surfMap, curSurf)
 					if len(tokens) >= 3 {
 						parseOsloKV(s, tokens[2:])
 					}
@@ -316,7 +287,7 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 				case label == "AST" || label == "STOP" || label == "STO" || label == "A":
 					curSurf = nextID
 					stopID = curSurf
-					s := getOrCreateSurface(surfMap, curSurf)
+					s := getOrCreate(surfMap, curSurf)
 					s.isAST = true
 					if len(tokens) >= 3 {
 						parseOsloKV(s, tokens[2:])
@@ -329,7 +300,7 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 						if n >= nextID {
 							nextID = n + 1
 						}
-						s := getOrCreateSurface(surfMap, n)
+						s := getOrCreate(surfMap, n)
 						if len(tokens) >= 3 {
 							parseOsloKV(s, tokens[2:])
 						}
@@ -342,48 +313,14 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 		if curSurf >= 0 {
 			val := parseOsloBlockParam(line, curSurf)
 			if val != nil {
-				surf := getOrCreateSurface(surfMap, val.surface)
-				switch val.name {
-				case "RD", "RADIUS":
-					if val.value != 0 {
-						surf.Curvature = 1.0 / val.value
-					} else {
-						surf.Curvature = 0
-					}
-				case "CV", "CURV", "CURVATURE":
-					surf.Curvature = val.value
-				case "TH", "THICKNESS":
-					surf.Thickness = parseOsloThickness(val.value)
-				case "GL", "GLASS":
-					surf.Material = val.strValue
-				case "AP", "APERTURE_RADIUS", "APERTURE":
-					surf.Diameter = val.value * 2
-				case "CONI", "CONIC":
-					surf.Conic = val.value
-				}
+				surf := getOrCreate(surfMap, val.surface)
+				applyOsloCommand(surf, val)
 			}
 		}
 
 		if cmd := tryCommandFormat(line); cmd != nil {
-			surf := getOrCreateSurface(surfMap, cmd.surface)
-			switch cmd.name {
-			case "RD", "RADIUS":
-				if cmd.value != 0 {
-					surf.Curvature = 1.0 / cmd.value
-				} else {
-					surf.Curvature = 0
-				}
-			case "CV", "CURV", "CURVATURE":
-				surf.Curvature = cmd.value
-			case "TH", "THICKNESS":
-				surf.Thickness = parseOsloThickness(cmd.value)
-			case "GL", "GLASS":
-				surf.Material = cmd.strValue
-			case "AP", "APERTURE_RADIUS", "APERTURE":
-				surf.Diameter = cmd.value * 2
-			case "CONI", "CONIC":
-				surf.Conic = cmd.value
-			}
+			surf := getOrCreate(surfMap, cmd.surface)
+			applyOsloCommand(surf, cmd)
 			if cmd.surface > nextID {
 				nextID = cmd.surface + 1
 			}
@@ -398,9 +335,9 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 		}
 	}
 
-	for _, s := range surfMap {
+	for id, s := range surfMap {
 		if s.isAST {
-			stopID = s.ID
+			stopID = id
 		}
 	}
 
@@ -416,21 +353,7 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 		}
 
 		mat := s.Material
-		if mat != "" && !isAir(mat) {
-			if !seenGlasses[mat] {
-				seenGlasses[mat] = true
-				nd, vd, ok := LookupGlass(mat)
-				entry := types.Glass{
-					Type:  types.GlassTypeModel,
-					Label: mat,
-				}
-				if ok {
-					entry.ND = nd
-					entry.VD = vd
-				}
-				result.GlassEntries = append(result.GlassEntries, entry)
-			}
-		}
+		addGlassEntry(result, mat)
 
 		surf := types.Surface{
 			ID:        id,
@@ -449,22 +372,12 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 		result.ImageSurface = last.ID
 	}
 
-	if len(result.Wavelengths) == 0 {
-		result.Wavelengths = []types.WavelengthItem{
-			{ID: 0, Value: 0.00058756, Weight: 1.0},
-		}
-	}
-	if len(result.Fields) == 0 {
-		result.Fields = []types.FieldItem{
-			{ID: 0, AngleDeg: 0, Weight: 1.0},
-		}
-	}
+	fillDefaults(result)
 
 	return result, nil
 }
 
 type osloSurface struct {
-	ID        int
 	Curvature float64
 	Thickness float64
 	Material  string
@@ -478,33 +391,6 @@ type osloCommand struct {
 	surface  int
 	value    float64
 	strValue string
-}
-
-func decodeBOM(input string) string {
-	raw := []byte(input)
-	if len(raw) < 2 {
-		return input
-	}
-	if raw[0] == 0xFF && raw[1] == 0xFE {
-		u16 := make([]uint16, 0, len(raw)/2)
-		for i := 2; i+1 < len(raw); i += 2 {
-			u16 = append(u16, uint16(raw[i])|uint16(raw[i+1])<<8)
-		}
-		return string(utf16.Decode(u16))
-	}
-	if len(raw) >= 3 && raw[0] == 0xEF && raw[1] == 0xBB && raw[2] == 0xBF {
-		return string(raw[3:])
-	}
-	return input
-}
-
-func getOrCreateSurface(m map[int]*osloSurface, id int) *osloSurface {
-	if s, ok := m[id]; ok {
-		return s
-	}
-	s := &osloSurface{ID: id}
-	m[id] = s
-	return s
 }
 
 func parseOsloSurfName(s string) int {
@@ -542,50 +428,58 @@ func parseOsloKV(s *osloSurface, tokens []string) {
 	}
 	key := strings.ToUpper(tokens[0])
 	val := tokens[1]
-	switch key {
-	case "RADIUS", "RD":
-		r := parseOsloFloat(val)
-		if r != 0 {
-			s.Curvature = 1.0 / r
-		} else {
-			s.Curvature = 0
-		}
-	case "CURVATURE", "CV", "CURV":
-		s.Curvature = parseOsloFloat(val)
-	case "THICKNESS", "TH":
-		s.Thickness = parseOsloThickness(parseOsloFloat(val))
-	case "GLASS", "GL":
-		s.Material = val
-	case "APERTURE_RADIUS", "APERTURE", "AP":
-		s.Diameter = parseOsloFloat(val) * 2
-	case "CONIC", "CONI":
-		s.Conic = parseOsloFloat(val)
-	case "DIAMETER":
-		s.Diameter = parseOsloFloat(val)
+	if key == "DIAMETER" {
+		s.Diameter = parseFloat(val)
+		return
 	}
+	cmd := &osloCommand{name: key}
+	if key == "GLASS" || key == "GL" {
+		cmd.strValue = val
+	} else {
+		cmd.value = parseFloat(val)
+	}
+	applyOsloCommand(s, cmd)
 }
 
-func tryCommandFormat(line string) *osloCommand {
+// osloPrefixes maps keyword prefixes to whether they carry a string value.
+var osloPrefixes = []struct {
+	key      string
+	hasValue bool
+}{
+	{"RD ", false}, {"RADIUS ", false},
+	{"CV ", false}, {"CURVATURE ", false},
+	{"TH ", false}, {"THICKNESS ", false},
+	{"GL ", true}, {"GLASS ", true},
+	{"AP ", false}, {"APERTURE_RADIUS ", false}, {"APERTURE ", false},
+	{"CONI ", false}, {"CONIC ", false},
+}
+
+// matchOsloCommand scans a line for a keyword prefix. When surfID >= 0 the
+// value is the first field (block format); otherwise the surface number is
+// parsed from the line (command format).
+func matchOsloCommand(line string, surfID int) *osloCommand {
 	upper := strings.ToUpper(strings.TrimSpace(line))
-
-	prefixes := []struct {
-		key string
-		hasValue bool
-	}{
-		{"RD ", false}, {"RADIUS ", false},
-		{"CV ", false}, {"CURVATURE ", false},
-		{"TH ", false}, {"THICKNESS ", false},
-		{"GL ", true}, {"GLASS ", true},
-		{"AP ", false}, {"APERTURE_RADIUS ", false}, {"APERTURE ", false},
-		{"CONI ", false}, {"CONIC ", false},
-	}
-
-	for _, p := range prefixes {
+	for _, p := range osloPrefixes {
 		if !strings.HasPrefix(upper, p.key) {
 			continue
 		}
 		rest := strings.TrimSpace(line[len(p.key):])
 		fields := strings.Fields(rest)
+		if len(fields) < 1 {
+			continue
+		}
+		cmd := &osloCommand{
+			name:    strings.TrimSpace(p.key),
+			surface: surfID,
+		}
+		if surfID >= 0 {
+			if p.hasValue {
+				cmd.strValue = fields[0]
+			} else {
+				cmd.value = parseFloat(fields[0])
+			}
+			return cmd
+		}
 		if len(fields) < 2 {
 			continue
 		}
@@ -593,16 +487,37 @@ func tryCommandFormat(line string) *osloCommand {
 		if surf < 0 {
 			continue
 		}
-		cmd := &osloCommand{
-			name:    strings.TrimSpace(p.key),
-			surface: surf,
-		}
+		cmd.surface = surf
 		if p.hasValue {
 			cmd.strValue = fields[1]
-			cmd.value = 0
 		} else {
-			cmd.value = parseOsloFloat(fields[1])
+			cmd.value = parseFloat(fields[1])
 		}
+		return cmd
+	}
+	return nil
+}
+
+// applyOsloCommand writes a parsed command onto a surface.
+func applyOsloCommand(s *osloSurface, cmd *osloCommand) {
+	switch cmd.name {
+	case "RD", "RADIUS":
+		s.Curvature = radiusToCurvature(cmd.value)
+	case "CV", "CURV", "CURVATURE":
+		s.Curvature = cmd.value
+	case "TH", "THICKNESS":
+		s.Thickness = parseThickness(cmd.value)
+	case "GL", "GLASS":
+		s.Material = cmd.strValue
+	case "AP", "APERTURE_RADIUS", "APERTURE":
+		s.Diameter = cmd.value * 2
+	case "CONI", "CONIC":
+		s.Conic = cmd.value
+	}
+}
+
+func tryCommandFormat(line string) *osloCommand {
+	if cmd := matchOsloCommand(line, -1); cmd != nil {
 		return cmd
 	}
 
@@ -623,7 +538,7 @@ func tryCommandFormat(line string) *osloCommand {
 		}
 		valStr := strings.TrimSpace(args[1])
 		valStr = strings.Trim(valStr, "\"")
-		cmd.value = parseOsloFloat(valStr)
+		cmd.value = parseFloat(valStr)
 		if cmdName == "GL" || cmdName == "GLASS" || strings.HasPrefix(cmdName, "GL") {
 			cmd.strValue = valStr
 		}
@@ -646,7 +561,7 @@ func parseOsloPILine(line string) *types.WavelengthItem {
 	if len(parts) < 1 {
 		return nil
 	}
-	val := parseOsloFloat(parts[0])
+	val := parseFloat(parts[0])
 	if val <= 0 {
 		return nil
 	}
@@ -673,10 +588,10 @@ func parseOsloAngleField(line string) *types.FieldItem {
 	if len(parts) < 1 {
 		return nil
 	}
-	angle := parseOsloFloat(parts[0])
+	angle := parseFloat(parts[0])
 	w := 1.0
 	if len(parts) >= 2 {
-		w = parseOsloFloat(parts[1])
+		w = parseFloat(parts[1])
 	}
 	return &types.FieldItem{
 		AngleDeg: angle,
@@ -685,62 +600,7 @@ func parseOsloAngleField(line string) *types.FieldItem {
 }
 
 func parseOsloBlockParam(line string, surfID int) *osloCommand {
-	upper := strings.ToUpper(strings.TrimSpace(line))
-	prefixes := []struct {
-		key      string
-		hasValue bool
-	}{
-		{"RD ", false}, {"RADIUS ", false},
-		{"CV ", false}, {"CURVATURE ", false},
-		{"TH ", false}, {"THICKNESS ", false},
-		{"GL ", true}, {"GLASS ", true},
-		{"AP ", false}, {"APERTURE_RADIUS ", false}, {"APERTURE ", false},
-		{"CONI ", false}, {"CONIC ", false},
-	}
-	for _, p := range prefixes {
-		if !strings.HasPrefix(upper, p.key) {
-			continue
-		}
-		rest := strings.TrimSpace(line[len(p.key):])
-		fields := strings.Fields(rest)
-		if len(fields) < 1 {
-			continue
-		}
-		cmd := &osloCommand{
-			name:    strings.TrimSpace(p.key),
-			surface: surfID,
-		}
-		if p.hasValue {
-			cmd.strValue = fields[0]
-		} else {
-			cmd.value = parseOsloFloat(fields[0])
-		}
-		return cmd
-	}
-	return nil
-}
-
-func parseOsloFloat(s string) float64 {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return 0
-	}
-	upper := strings.ToUpper(s)
-	if upper == "INF" || upper == "INFINITY" || upper == "INFINITE" {
-		return math.Inf(1)
-	}
-	val, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0
-	}
-	return val
-}
-
-func parseOsloThickness(v float64) float64 {
-	if math.IsInf(v, 1) {
-		return 0
-	}
-	return v
+	return matchOsloCommand(line, surfID)
 }
 
 func stripComment(line string) string {

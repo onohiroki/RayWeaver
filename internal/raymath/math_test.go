@@ -233,3 +233,30 @@ func TestAsphereNormalOnAxis(t *testing.T) {
 		t.Errorf("AsphereNormal on-axis = %v, want %v", n, want)
 	}
 }
+
+func TestDegToRadRadToDeg(t *testing.T) {
+	if math.Abs(DegToRad(180)-math.Pi) > 1e-12 {
+		t.Errorf("DegToRad(180) = %v, want %v", DegToRad(180), math.Pi)
+	}
+	if math.Abs(RadToDeg(math.Pi)-180) > 1e-12 {
+		t.Errorf("RadToDeg(pi) = %v, want 180", RadToDeg(math.Pi))
+	}
+	if math.Abs(RadToDeg(DegToRad(37.5))-37.5) > 1e-12 {
+		t.Error("RadToDeg(DegToRad(x)) != x")
+	}
+}
+
+func TestDirectionFromAngle(t *testing.T) {
+	dir := DirectionFromAngle(0)
+	if math.Abs(dir.X) > 1e-12 || math.Abs(dir.Y) > 1e-12 || math.Abs(dir.Z-1) > 1e-12 {
+		t.Errorf("DirectionFromAngle(0) = %v, want (0,0,1)", dir)
+	}
+	dir = DirectionFromAngle(90)
+	if math.Abs(dir.X) > 1e-12 || math.Abs(dir.Y-1) > 1e-12 || math.Abs(dir.Z) > 1e-12 {
+		t.Errorf("DirectionFromAngle(90) = %v, want (0,1,0)", dir)
+	}
+	mag := dir.X*dir.X + dir.Y*dir.Y + dir.Z*dir.Z
+	if math.Abs(mag-1) > 1e-12 {
+		t.Errorf("DirectionFromAngle not normalized: |v|^2 = %v", mag)
+	}
+}

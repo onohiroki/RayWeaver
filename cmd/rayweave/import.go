@@ -3,16 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
-	"math"
 	"os"
 
 	"github.com/hiroki/rayweaver/internal/chief"
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/importer"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
-	"gopkg.in/yaml.v3"
 )
 
 func runImport(data []byte) {
@@ -188,7 +187,7 @@ func runImport(data []byte) {
 
 		outputOut.ChiefRays = make([]types.ChiefRayResult, len(chiefResults))
 		rayList := make([]types.Ray, 0, len(chiefResults)*3)
-		path := buildPath(surfaces)
+		path := dls.BuildPath(surfaces)
 
 		for fi, r := range chiefResults {
 			cr := types.ChiefRayResult{
@@ -209,48 +208,7 @@ func runImport(data []byte) {
 			chiefRay.Jones = pol
 			rayList = append(rayList, chiefRay)
 
-			maxY, minY := findMarginalY(r.GridPoints)
-			if maxY != nil && maxY.ImageY != nil && *maxY.ImageY != 0 {
-				rayList = append(rayList, types.Ray{
-					ID:         fmt.Sprintf("marginal_%d_Yplus", fi),
-					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: maxY.Origin, Direction: maxY.Direction},
-					Path:       path,
-					Jones:      pol,
-				})
-			}
-			if minY != nil && minY.ImageY != nil && *minY.ImageY != 0 {
-				rayList = append(rayList, types.Ray{
-					ID:         fmt.Sprintf("marginal_%d_Yminus", fi),
-					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: minY.Origin, Direction: minY.Direction},
-					Path:       path,
-					Jones:      pol,
-				})
-			}
-
-			hasX := math.Abs(r.FieldDir.X) > 1e-6
-			if hasX {
-				maxX, minX := findMarginalX(r.GridPoints)
-				if maxX != nil && maxX.ImageX != nil && *maxX.ImageX != 0 {
-					rayList = append(rayList, types.Ray{
-						ID:         fmt.Sprintf("marginal_%d_Xplus", fi),
-						Wavelength: wavelength,
-						Initial:    types.RayState{Origin: maxX.Origin, Direction: maxX.Direction},
-						Path:       path,
-						Jones:      pol,
-					})
-				}
-				if minX != nil && minX.ImageX != nil && *minX.ImageX != 0 {
-					rayList = append(rayList, types.Ray{
-						ID:         fmt.Sprintf("marginal_%d_Xminus", fi),
-						Wavelength: wavelength,
-						Initial:    types.RayState{Origin: minX.Origin, Direction: minX.Direction},
-						Path:       path,
-						Jones:      pol,
-					})
-				}
-			}
+			rayList = append(rayList, marginalRaysForField(fi, r, wavelength, path, pol)...)
 		}
 
 		outputOut.Rays = &types.RayInput{
@@ -265,12 +223,7 @@ func runImport(data []byte) {
 		outputOut.Chief.PassThrough = pt
 	}
 
-	outData, err := yaml.Marshal(&outputOut)
-	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(outData)
+	writeYAML(&outputOut)
 }
 
 func firstWavelength(wavelengths []types.WavelengthItem) float64 {
@@ -279,37 +232,5 @@ func firstWavelength(wavelengths []types.WavelengthItem) float64 {
 			return w.Value
 		}
 	}
-	return 0.00058756
-}
-
-func findMarginalY(points []types.GridPoint) (max, min *types.GridPoint) {
-	for i := range points {
-		gp := &points[i]
-		if gp.ImageY == nil {
-			continue
-		}
-		if max == nil || *gp.ImageY > *max.ImageY {
-			max = gp
-		}
-		if min == nil || *gp.ImageY < *min.ImageY {
-			min = gp
-		}
-	}
-	return
-}
-
-func findMarginalX(points []types.GridPoint) (max, min *types.GridPoint) {
-	for i := range points {
-		gp := &points[i]
-		if gp.ImageX == nil {
-			continue
-		}
-		if max == nil || *gp.ImageX > *max.ImageX {
-			max = gp
-		}
-		if min == nil || *gp.ImageX < *min.ImageX {
-			min = gp
-		}
-	}
-	return
+	return types.DefaultWavelength
 }

@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -42,7 +43,7 @@ func traceChiefForward(surfaces []types.Surface, nIndex []float64, fieldSlope fl
 func ComputeSeidel(surfaces []types.Surface, fieldAngleDeg float64, wavelength float64, gc *glass.Catalog) SeidelCoefficients {
 	nIndex := resolveIndices(surfaces, wavelength, gc)
 
-	fieldSlope := math.Tan(fieldAngleDeg * math.Pi / 180.0)
+	fieldSlope := math.Tan(raymath.DegToRad(fieldAngleDeg))
 
 	margVerts, _ := traceForward(surfaces, nIndex, 1.0, 0.0)
 	chiefVerts := traceChiefForward(surfaces, nIndex, fieldSlope)

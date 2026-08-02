@@ -11,9 +11,11 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/coating"
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
+	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
@@ -593,7 +595,7 @@ func runChief(data []byte) {
 	fanPlane := fs.String("fan-plane", "", "fan plane selection: yz | xz (implies --ray-fan)")
 	var fanRotation floatList
 	fs.Var(&fanRotation, "fan-rotation", "fan plane Z-rotation angle in degrees (implies --ray-fan; 0=XZ, 90=YZ; repeatable or space-separated)")
-	wlFlag := fs.Float64("wl", 0.00058756, "wavelength (mm) for grid ray tracing")
+	wlFlag := fs.Float64("wl", types.DefaultWavelength, "wavelength (mm) for grid ray tracing")
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(expandFanRotationArgs(os.Args[2:]))
@@ -607,11 +609,7 @@ func runChief(data []byte) {
 		os.Exit(1)
 	}
 
-	var input types.Input
-	if err := yaml.Unmarshal(data, &input); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
-	}
+	input := parseYAML[types.Input](data)
 
 	if input.Chief == nil {
 		errOut("Error: 'chief' section is required")
@@ -688,7 +686,7 @@ func runChief(data []byte) {
 		// as-is through every surface to get the true beam envelope.
 		engine2 := ray.NewEngine(gc, nil)
 		surface.Precompute(surfaces)
-		path := buildPath(surfaces)
+		path := dls.BuildPath(surfaces)
 
 		surfIDtoIdx := make(map[int]int)
 		for i, s := range surfaces {
@@ -804,23 +802,7 @@ func runChief(data []byte) {
 		}
 	}
 
-	outData, err := yaml.Marshal(&output)
-	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(outData)
-}
-
-// buildPath replicates chief.buildPath for marginal ray construction.
-func buildPath(surfaces []types.Surface) []int {
-	p := []int{0}
-	for _, s := range surfaces {
-		if s.ID > 0 {
-			p = append(p, s.ID)
-		}
-	}
-	return p
+	writeYAML(&output)
 }
 
 // findApertureStopID returns the ID of the aperture stop surface: the
@@ -849,75 +831,9 @@ func findApertureStopID(surfaces []types.Surface, explicitID int) int {
 // fields with an X direction component) and returns them as marginal rays.
 func extractMarginalRays(results []chief.Result, wavelength float64, surfaces []types.Surface, pol types.JonesVector) []types.Ray {
 	var rays []types.Ray
+	path := dls.BuildPath(surfaces)
 	for fi, r := range results {
-		var maxY, minY *types.GridPoint
-		var maxX, minX *types.GridPoint
-		hasX := math.Abs(r.FieldDir.X) > 1e-6
-
-		for i := range r.GridPoints {
-			gp := &r.GridPoints[i]
-			if gp.ImageX == nil || gp.ImageY == nil {
-				continue
-			}
-			y := *gp.ImageY
-			if maxY == nil || y > *maxY.ImageY {
-				maxY = gp
-			}
-			if minY == nil || y < *minY.ImageY {
-				minY = gp
-			}
-			if hasX {
-				x := *gp.ImageX
-				if maxX == nil || x > *maxX.ImageX {
-					maxX = gp
-				}
-				if minX == nil || x < *minX.ImageX {
-					minX = gp
-				}
-			}
-		}
-
-		fid := fmt.Sprintf("f%d", fi)
-		path := buildPath(surfaces)
-
-		if maxY != nil && *maxY.ImageY != 0 {
-			rays = append(rays, types.Ray{
-				ID:         fmt.Sprintf("marginal_%s_Yplus", fid),
-				Wavelength: wavelength,
-				Initial:    types.RayState{Origin: maxY.Origin, Direction: maxY.Direction},
-				Path:       path,
-				Jones:      pol,
-			})
-		}
-		if minY != nil && *minY.ImageY != 0 {
-			rays = append(rays, types.Ray{
-				ID:         fmt.Sprintf("marginal_%s_Yminus", fid),
-				Wavelength: wavelength,
-				Initial:    types.RayState{Origin: minY.Origin, Direction: minY.Direction},
-				Path:       path,
-				Jones:      pol,
-			})
-		}
-		if hasX {
-			if maxX != nil && *maxX.ImageX != 0 {
-				rays = append(rays, types.Ray{
-					ID:         fmt.Sprintf("marginal_%s_Xplus", fid),
-					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: maxX.Origin, Direction: maxX.Direction},
-					Path:       path,
-					Jones:      pol,
-				})
-			}
-			if minX != nil && *minX.ImageX != 0 {
-				rays = append(rays, types.Ray{
-					ID:         fmt.Sprintf("marginal_%s_Xminus", fid),
-					Wavelength: wavelength,
-					Initial:    types.RayState{Origin: minX.Origin, Direction: minX.Direction},
-					Path:       path,
-					Jones:      pol,
-				})
-			}
-		}
+		rays = append(rays, marginalRaysForField(fi, r, wavelength, path, pol)...)
 	}
 	return rays
 }
@@ -1025,11 +941,7 @@ func runTrace(data []byte) {
 	traceVerbose := fs.Bool("verbose", false, "print per-ray trace info to stderr")
 	fs.Parse(args)
 
-	var input types.Input
-	if err := yaml.Unmarshal(data, &input); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
-	}
+	input := parseYAML[types.Input](data)
 
 	if input.Rays == nil || len(input.Rays.Rays) == 0 {
 		errOut("Error: 'rays' section is required")
@@ -1073,12 +985,7 @@ func runTrace(data []byte) {
 		output.Results = append(output.Results, result)
 	}
 
-	outData, err := yaml.Marshal(&output)
-	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(outData)
+	writeYAML(&output)
 }
 
 func runParaxial(data []byte) {
@@ -1088,11 +995,7 @@ func runParaxial(data []byte) {
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(args)
 
-	var input types.Input
-	if err := yaml.Unmarshal(data, &input); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
-	}
+	input := parseYAML[types.Input](data)
 
 	gc, _ := loadCatalogs(&input, *glassDir)
 
@@ -1105,7 +1008,7 @@ func runParaxial(data []byte) {
 		selectedSys.StopSurface = input.Chief.StopSurface
 	}
 
-	wavelength := 0.00058756
+	wavelength := types.DefaultWavelength
 	objectHeight := 0.0
 	if input.Paraxial != nil {
 		objectHeight = input.Paraxial.ObjectHeight
@@ -1128,20 +1031,11 @@ func runParaxial(data []byte) {
 		ParaxialResult: &result,
 	}
 
-	outData, err := yaml.Marshal(&output)
-	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(outData)
+	writeYAML(&output)
 }
 
 func runTMM(data []byte) {
-	var input types.TMMInput
-	if err := yaml.Unmarshal(data, &input); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
-	}
+	input := parseYAML[types.TMMInput](data)
 
 	// Resolve layer refractive indices: try glass_catalog, then direct n:
 	if input.GlassCatalog != nil {
@@ -1159,7 +1053,7 @@ func runTMM(data []byte) {
 		}
 	}
 
-	thetaRad := input.ThetaDeg * 3.141592653589793 / 180.0
+	thetaRad := raymath.DegToRad(input.ThetaDeg)
 	result := coating.ComputeTMM(input.NAir, input.NSub, input.Layers, input.Lambda, thetaRad)
 
 	output := types.TMMOutput{
@@ -1170,10 +1064,5 @@ func runTMM(data []byte) {
 		Tp:    result.Tp,
 	}
 
-	outData, err := yaml.Marshal(&output)
-	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(outData)
+	writeYAML(&output)
 }

@@ -11,18 +11,13 @@ import (
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
-	"gopkg.in/yaml.v3"
 )
 
 // runEscape runs the escape-function global optimisation and writes the best
 // solution (pipeline-compatible) plus all discovered local minima in the
 // escape_result section.
 func runEscape(data []byte, glassDir string) {
-	var input types.Input
-	if err := yaml.Unmarshal(data, &input); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
-	}
+	input := parseYAML[types.Input](data)
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
 		os.Exit(1)
@@ -358,7 +353,7 @@ func applyEscapeX(surfaces []types.Surface, variables []optimize.Variable, x []f
 
 	for i, v := range variables {
 		val := x[i]
-		if ai, ok := escapeAsphereCoefIndex(v.Param); ok {
+		if ai, ok := optimize.AsphereCoefIndex(v.Param); ok {
 			idx := dls.SurfaceIndex(result, v.SurfaceID)
 			if idx < 0 {
 				continue
@@ -375,7 +370,7 @@ func applyEscapeX(surfaces []types.Surface, variables []optimize.Variable, x []f
 			if idx < 0 {
 				continue
 			}
-			escapeSetSurfaceParam(&result[idx], v.Param, val)
+			optimize.SetSurfaceParam(&result[idx], v.Param, val)
 		}
 	}
 
@@ -388,104 +383,21 @@ func applyEscapeX(surfaces []types.Surface, variables []optimize.Variable, x []f
 // applyGlassOverrides rewrites surface materials for optimised nd/vd model
 // glasses, mirroring the single-config optimize output behaviour.
 func applyGlassOverrides(result *[]types.Surface, variables []optimize.Variable, x []float64, gc *glass.Catalog) []types.Glass {
-	type glassAccum struct {
-		nd, vd       float64
-		hasND, hasVD bool
-		origLabel    string
-	}
-	glassMap := map[string]*glassAccum{}
-	for i, v := range variables {
-		if v.Param != "nd" && v.Param != "vd" {
-			continue
-		}
-		idx := dls.SurfaceIndex(*result, v.SurfaceID)
-		if idx < 0 || (*result)[idx].Material == "" {
-			continue
-		}
-		key := (*result)[idx].Material
-		acc, ok := glassMap[key]
-		if !ok {
-			acc = &glassAccum{}
-			if gc != nil {
-				if g, ok2 := gc.Lookup(key); ok2 {
-					acc.origLabel = g.Label
-					acc.nd = g.ND
-					acc.vd = g.VD
-					acc.hasND = true
-					acc.hasVD = true
+	return optimize.MaterializeGlassEntries(variables, x, gc,
+		func(v optimize.Variable) (string, bool) {
+			idx := dls.SurfaceIndex(*result, v.SurfaceID)
+			if idx < 0 || (*result)[idx].Material == "" {
+				return "", false
+			}
+			return (*result)[idx].Material, true
+		},
+		func(origKey, newKey string) {
+			for i := range *result {
+				if (*result)[i].Material == origKey {
+					(*result)[i].Material = newKey
 				}
 			}
-			glassMap[key] = acc
-		}
-		switch v.Param {
-		case "nd":
-			acc.nd = x[i]
-			acc.hasND = true
-		case "vd":
-			acc.vd = x[i]
-			acc.hasVD = true
-		}
-	}
-
-	var newGlasses []types.Glass
-	for origKey, acc := range glassMap {
-		if !acc.hasND || !acc.hasVD {
-			continue
-		}
-		g := types.Glass{
-			Type: types.GlassTypeModel,
-			ND:   acc.nd,
-			VD:   acc.vd,
-		}
-		if acc.origLabel != "" {
-			g.Label = acc.origLabel
-		}
-		newKey := types.ResolveGlassKey(g)
-		newGlasses = append(newGlasses, g)
-		for i := range *result {
-			if (*result)[i].Material == origKey {
-				(*result)[i].Material = newKey
-			}
-		}
-	}
-	return newGlasses
-}
-
-// escapeAsphereCoefIndex maps an asphere coefficient param name to its index.
-func escapeAsphereCoefIndex(param string) (int, bool) {
-	switch param {
-	case "a4", "coefficient_0":
-		return 0, true
-	case "a6", "coefficient_1":
-		return 1, true
-	case "a8", "coefficient_2":
-		return 2, true
-	case "a10", "coefficient_3":
-		return 3, true
-	case "a12", "coefficient_4":
-		return 4, true
-	}
-	return 0, false
-}
-
-// escapeSetSurfaceParam sets a single surface parameter by name.
-func escapeSetSurfaceParam(s *types.Surface, param string, val float64) {
-	switch param {
-	case "curvature":
-		s.Curvature = val
-	case "conic":
-		s.Conic = val
-	case "thickness":
-		s.Thickness = val
-	case "diameter":
-		s.Diameter = val
-	case "radius":
-		if val == 0 {
-			s.Curvature = 0
-		} else {
-			s.Curvature = 1.0 / val
-		}
-	}
+		})
 }
 
 // applyEscapeMulti projects a flat variable vector onto all configs' surfaces.
@@ -511,7 +423,7 @@ func applyEscapeMulti(configs []types.Config, opt *types.OptimizationConfig, x [
 			if !ok {
 				continue
 			}
-			idx := surfaceIDIndex(surfaces, b.ID)
+			idx := dls.SurfaceIndex(surfaces, b.ID)
 			if idx < 0 {
 				continue
 			}
@@ -519,7 +431,7 @@ func applyEscapeMulti(configs []types.Config, opt *types.OptimizationConfig, x [
 			if scale == 0 {
 				scale = 1.0
 			}
-			escapeSetSurfaceParam(&surfaces[idx], b.Param, scale*val+b.Offset)
+			optimize.SetSurfaceParam(&surfaces[idx], b.Param, scale*val+b.Offset)
 		}
 	}
 	for _, lv := range opt.LocalVariables {
@@ -532,11 +444,11 @@ func applyEscapeMulti(configs []types.Config, opt *types.OptimizationConfig, x [
 		if !ok {
 			continue
 		}
-		idx := surfaceIDIndex(surfaces, lv.Target.ID)
+		idx := dls.SurfaceIndex(surfaces, lv.Target.ID)
 		if idx < 0 {
 			continue
 		}
-		escapeSetSurfaceParam(&surfaces[idx], lv.Target.Param, val)
+		optimize.SetSurfaceParam(&surfaces[idx], lv.Target.Param, val)
 	}
 
 	for _, cfg := range configs {
@@ -583,15 +495,6 @@ func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.Esc
 	return states
 }
 
-func surfaceIDIndex(surfaces []types.Surface, id int) int {
-	for i, s := range surfaces {
-		if s.ID == id {
-			return i
-		}
-	}
-	return -1
-}
-
 // reportEscape prints a concise summary to stderr (never stdout, so the YAML
 // pipeline stays intact).
 func reportEscape(res escape.Result) {
@@ -615,22 +518,13 @@ func writeEscapeOutput(input types.Input, escResult *types.EscapeResult) {
 		Input:        input,
 		EscapeResult: escResult,
 	}
-	outData, err := yaml.Marshal(&output)
-	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(outData)
+	writeYAML(&output)
 }
 
 // runEscapeExtract pulls one local minimum out of a previous escape output
 // and emits a clean lens YAML with that minimum as the top-level solution.
 func runEscapeExtract(data []byte, index int) {
-	var output types.Output
-	if err := yaml.Unmarshal(data, &output); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
-	}
+	output := parseYAML[types.Output](data)
 	if output.EscapeResult == nil {
 		errOut("Error: input has no 'escape_result' section (was it produced by 'rayweave escape'?)")
 		os.Exit(1)
@@ -664,12 +558,7 @@ func runEscapeExtract(data []byte, index int) {
 		os.Exit(1)
 	}
 
-	outData, err := yaml.Marshal(&output)
-	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
-	}
-	os.Stdout.Write(outData)
+	writeYAML(&output)
 }
 
 // parseEscapeExtractFlags parses `--index N` for the extract subcommand.

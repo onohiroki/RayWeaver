@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -138,7 +139,7 @@ func TestSearchOriginForTargetAsphereRecovery(t *testing.T) {
 	thetaRad := thetaDeg * math.Pi / 180.0
 	rayDir := types.Vec3{X: 0, Y: math.Sin(thetaRad), Z: math.Cos(thetaRad)}.Normalize()
 
-	path := buildPath(surfaces)
+	path := dls.BuildPath(surfaces)
 	result := searchOriginForTarget(
 		rayDir.Y, rayDir, -100.0, 3, 0,
 		path, 0.00058756,
@@ -192,7 +193,7 @@ func TestSearchOriginForTargetVignettingRecovery(t *testing.T) {
 	// But we need the search to find an origin that gives Y=0 at the stop (surface 3).
 	// Test the function and verify the result is reasonable.
 	result := searchOriginForTarget(rayDir.Y, rayDir, -100.0, 3, 0,
-		buildPath(surfaces), 0.00058756,
+		dls.BuildPath(surfaces), 0.00058756,
 		types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)},
 		engine, surfaces, 3, false,
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
@@ -207,7 +208,7 @@ func TestSearchOriginForTargetVignettingRecovery(t *testing.T) {
 	r := types.Ray{
 		Wavelength: 0.00058756,
 		Initial:    types.RayState{Origin: orig, Direction: rayDir},
-		Path:       buildPath(surfaces),
+		Path:       dls.BuildPath(surfaces),
 		Jones:      types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)},
 	}
 	traceResult := engine.TraceRay(r, surfaces)
@@ -336,7 +337,7 @@ func TestComputeRayFanAngleMapping(t *testing.T) {
 	origin := types.Vec3{X: 0, Y: 0, Z: -100}
 	dir := types.Vec3{X: 0, Y: 0, Z: 1}
 
-	fan := computeRayFan(engine, sys, buildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90, 45}, 8)
+	fan := computeRayFan(engine, sys, dls.BuildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90, 45}, 8)
 	if fan == nil {
 		t.Fatal("computeRayFan returned nil")
 	}
@@ -371,7 +372,7 @@ func TestComputeRayFanDefaultBothPlanes(t *testing.T) {
 	dir := types.Vec3{X: 0, Y: 0, Z: 1}
 
 	// On-axis field still produces both planes under the default config.
-	fan := computeRayFan(engine, sys, buildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90}, 8)
+	fan := computeRayFan(engine, sys, dls.BuildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90}, 8)
 	if len(fan.Meridional) == 0 || len(fan.Sagittal) == 0 {
 		t.Error("default config must produce both meridional and sagittal for all fields")
 	}
