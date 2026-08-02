@@ -366,7 +366,7 @@ func Solve(m Model) Result {
 		// reset damping. A plateau can be caused by an unsatisfiable constraint
 		// (its penalty dominates the merit with no descent direction), a
 		// vignetting discontinuity, or a degenerate spot evaluation.
-		if consecStall >= 30 && totalIter < opts.MaxIter-10 {
+		if consecStall >= 30 && totalIter < opts.MaxIter-10 && !opts.DisableStallEscape {
 			// Reset to best known state before perturbing
 			copy(xNorm, bestKnownNorm)
 			merit = bestKnownMerit

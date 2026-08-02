@@ -38,14 +38,15 @@ type VariableState struct {
 }
 
 type Options struct {
-	MaxIter        int
-	Mu             float64
-	Tol            float64
-	Epsilon        float64
-	NumRays        int
-	ApertureMargin float64
-	MuConMax       float64
-	Logger         Logger
+	MaxIter            int
+	Mu                 float64
+	Tol                float64
+	Epsilon            float64
+	NumRays            int
+	ApertureMargin     float64
+	MuConMax           float64
+	DisableStallEscape bool
+	Logger             Logger
 }
 
 type ConstraintState struct {
