@@ -1,6 +1,33 @@
 #!/bin/bash
 set -euo pipefail
 
+# =============================================================================
+# doublegauss-demo.bash — DLS design of a 6-element 50 mm f/2.8 double-Gauss
+#
+# Purpose: optimise a realistic standard lens (36 variables including glass
+# nd/vd) from a synthesised starting point and report the key performance
+# figures — EFL, f-number, spot RMS and distortion — before and after.
+#
+# Steps
+#   1. paraxial           : EFL / f# before
+#   2. chief              : spot RMS + distortion per field before
+#   3. optimize --verbose : DLS (256 rays, 500 iterations)
+#   4. paraxial + chief   : the same figures after
+#   5. plot               : raytrace diagrams before/after
+#
+# How to read the result
+#   - Spot RMS per field is the geometric spot radius; on-axis < 0.1 mm gate.
+#   - Distortion is the deviation of the chief image height from f*tan(theta);
+#     negative = barrel, positive = pincushion. A little distortion is the
+#     normal trade-off for a fast standard lens.
+#   - EFL/f# staying near 50 / 2.8 confirms the constraints held.
+# =============================================================================
+
+# Resolve the script's own directory so the demo runs from any CWD
+# (repo root, `cd samples`, or a copied location). All data files are read
+# from and all outputs are written to this directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # CLI options
 CLEAN=false
 while [[ $# -gt 0 ]]; do
@@ -10,12 +37,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-YAML="samples/doublegauss-init.yaml"
-OUTDIR="samples"
+YAML="$SCRIPT_DIR/doublegauss-init.yaml"
+OUTDIR="$SCRIPT_DIR"
 OPT_RESULT="$OUTDIR/doublegauss-result.yaml"
 OPT_LOG="$OUTDIR/doublegauss-log.jsonl"
 RESULT_FILE="$OUTDIR/doublegauss-demo-result.txt"
-RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 # Clean-only mode
 if [ "$CLEAN" = true ]; then
@@ -25,6 +51,39 @@ if [ "$CLEAN" = true ]; then
   echo "  Removed generated files"
   exit 0
 fi
+
+# Locate the rayweave binary: an explicit RAYWEAVE env value wins, then a
+# binary next to the script or one directory up (samples/ -> repo root),
+# then any rayweave on PATH.
+if [[ -z "${RAYWEAVE:-}" ]]; then
+  for cand in "$SCRIPT_DIR/rayweave" "$SCRIPT_DIR/../rayweave"; do
+    if [[ -x "$cand" ]]; then RAYWEAVE="$cand"; break; fi
+  done
+  RAYWEAVE="${RAYWEAVE:-$(command -v rayweave || true)}"
+  if [[ -z "${RAYWEAVE:-}" ]]; then
+    echo "error: rayweave binary not found; set RAYWEAVE or put rayweave on PATH" >&2
+    exit 1
+  fi
+fi
+
+# ── Interpretation notes: appended to the result file on exit, so they stay
+# as the closing section even when a gate check exits early. ──
+append_interpretation() {
+cat >> "$RESULT_FILE" <<'EOF'
+
+=== How to interpret this result ===
+- EFL (mm) and f/#: DLS keeps them near the design targets (50 mm, f/2.8).
+  f/# = EFL / entrance-pupil diameter, so it confirms the aperture held.
+- Spot RMS (mm): geometric RMS spot radius per field (0/10/16/23 deg).
+  On-axis should drop below 0.1 mm; the off-axis fields improve too.
+- Distortion (%): deviation of the chief-ray image height from the paraxial
+  value f*tan(theta). Negative = barrel (image smaller than paraxial),
+  positive = pincushion. A fast standard lens normally trades a little
+  distortion for better spot sizes.
+- Pass gate: on-axis RMS < 0.1 mm.
+EOF
+}
+trap append_interpretation EXIT
 
 echo "=== Double-Gauss optimization demo: 6-element 50 mm f/2.8 standard lens ==="
 echo

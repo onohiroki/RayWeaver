@@ -60,7 +60,7 @@ Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, write
 | `multi-config-zoom-demo.bash` | Multi-config zoom with per-config comparison table |
 | `glass-optimize-demo.bash` | Glass model variables (nd/vd) as optimisation targets, 4-wavelength spot diagrams |
 
-Demo scripts use `set -euo pipefail`, `RAYWEAVE="${RAYWEAVE:-./rayweave}"`, and `--clean` flag. `yq` + `gnuplot` for post-processing (not required by Go build).
+Demo scripts use `set -euo pipefail` and a `--clean` flag. They are location-independent: every path (input data, outputs) resolves against the script's own directory (`SCRIPT_DIR`), and the binary is found as `RAYWEAVE` env → `$SCRIPT_DIR/rayweave` → `$SCRIPT_DIR/../rayweave` (repo root) → `rayweave` on PATH → error. So they run from the repo root (`bash samples/foo.bash`), from `cd samples`, or from a copied directory (data files must be copied alongside the script). `yq` + `gnuplot` for post-processing (not required by Go build).
 
 ## Glass catalog
 

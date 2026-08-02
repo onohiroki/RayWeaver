@@ -115,10 +115,27 @@ installed, the scripts print a message and skip those renderings.
 
 ## Run the demos
 
+The demo scripts are location-independent: run them from the repo root, from
+`cd samples`, or from a copied directory (the input data files must live next
+to the script). Output files are always written next to the script.
+
+The `rayweave` binary is located in this order: the `RAYWEAVE` environment
+variable → `rayweave` next to the script → `../rayweave` (repo root) →
+`rayweave` on `PATH`.
+
 ```sh
-# Basic raytrace and demo
+# Basic raytrace and demo (from the repo root)
 ./rayweave trace < samples/us2645157.yaml
 bash samples/run-demo.bash
+
+# Also works from inside samples/ (uses ../rayweave) ...
+cd samples && bash run-demo.bash
+
+# ... or with the binary on PATH, e.g. after `go install ./cmd/rayweave`
+# or `PATH=$PWD:$PATH bash run-demo.bash`.
+
+# Point at a specific binary explicitly
+RAYWEAVE=/path/to/rayweave bash samples/run-demo.bash
 
 # Glass optimisation demo (runs DLS, generates SVGs + spot diagrams)
 bash samples/glass-optimize-demo.bash

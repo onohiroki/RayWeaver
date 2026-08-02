@@ -1,6 +1,38 @@
 #!/bin/bash
 set -euo pipefail
 
+# =============================================================================
+# run-demo.bash — end-to-end ray-tracing demo (US2645157 patent triplet)
+#
+# Purpose: walk through the standard pipeline `chief -> trace -> plot` plus
+# spot diagrams, aberration graphs, paraxial analysis and thin-film (TMM)
+# coating evaluation, all on a single input file.
+#
+# Pipeline steps
+#   1. chief --ray-fan      : chief ray + hexagonal pupil grid per field
+#                             (0/16/24 deg) -> us2645157-chief-result.yaml
+#   2. spot-*.txt + gnuplot : PNG spot diagram per field
+#   3. aberr-*.txt + gnuplot: transverse (EY/EX) and longitudinal (focus
+#                             shift) aberration graphs per field
+#   4. trace                : ray-path tables (surface-by-surface coordinates)
+#   5. paraxial             : EFL, f/#, pupils (with and without chief data)
+#   6. plot                 : SVG/PNG raytrace diagram
+#   7. tmm                  : AR-coating (MgF2) and dielectric-mirror
+#                             reflectance via the transfer-matrix method
+#
+# How to read the output
+#   - Spot PNGs: the tighter the point cloud, the better the imaging.
+#   - Aberration PNGs: flat lines through zero = perfect correction.
+#   - Trace tables: y/z of the ray at every surface.
+#   - Paraxial block: check the EFL (~25 mm) and the entrance/exit pupils.
+#   - TMM: AR coating rs/rp ~ 0 at 550 nm; mirror rs/rp ~ 1.
+# =============================================================================
+
+# Resolve the script's own directory so the demo runs from any CWD
+# (repo root, `cd samples`, or a copied location). All data files are read
+# from and all outputs are written to this directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # CLI options
 CLEAN=false
 while [[ $# -gt 0 ]]; do
@@ -10,8 +42,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-YAML="samples/us2645157.yaml"
-OUTDIR="samples"
+YAML="$SCRIPT_DIR/us2645157.yaml"
+OUTDIR="$SCRIPT_DIR"
 CHIEF_RESULT="$OUTDIR/us2645157-chief-result.yaml"
 
 # Clean-only mode: remove generated files and exit
@@ -26,10 +58,24 @@ if [ "$CLEAN" = true ]; then
   exit 0
 fi
 
+# Locate the rayweave binary: an explicit RAYWEAVE env value wins, then a
+# binary next to the script or one directory up (samples/ -> repo root),
+# then any rayweave on PATH.
+if [[ -z "${RAYWEAVE:-}" ]]; then
+  for cand in "$SCRIPT_DIR/rayweave" "$SCRIPT_DIR/../rayweave"; do
+    if [[ -x "$cand" ]]; then RAYWEAVE="$cand"; break; fi
+  done
+  RAYWEAVE="${RAYWEAVE:-$(command -v rayweave || true)}"
+  if [[ -z "${RAYWEAVE:-}" ]]; then
+    echo "error: rayweave binary not found; set RAYWEAVE or put rayweave on PATH" >&2
+    exit 1
+  fi
+fi
+
 run_trace() {
   local input=$1 idx=$2
   echo "=== Trace: ray paths through surfaces ==="
-  ./rayweave trace < "$input" \
+  $RAYWEAVE trace < "$input" \
     | yq '[.results[]|[.surfaces[] | {"s": .surface_id, "x": .position[0], "y": .position[1], "z": .position[2] }]] | .['$idx']' -o=csv \
     | csvtk csv2md
   echo
@@ -37,7 +83,7 @@ run_trace() {
 
 # 1. Chief ray computation and grid data extraction
 echo "=== Chief ray computation (with ray fan) ==="
-./rayweave chief --ray-fan < "$YAML" > "$CHIEF_RESULT"
+$RAYWEAVE chief --ray-fan < "$YAML" > "$CHIEF_RESULT"
 
 extract_spot() {
   local field_index=$1 label=$2
@@ -135,23 +181,23 @@ run_trace "$CHIEF_RESULT" 2
 
 echo "=== Paraxial analysis ==="
 echo 'without chief data:'
-./rayweave paraxial < "$YAML" | yq '.paraxial_result'
+$RAYWEAVE paraxial < "$YAML" | yq '.paraxial_result'
 echo 'with chief data:'
-./rayweave paraxial < "$CHIEF_RESULT" | yq '.paraxial_result'
+$RAYWEAVE paraxial < "$CHIEF_RESULT" | yq '.paraxial_result'
 
 echo
 echo "=== Raytrace diagram (SVG + PNG) ==="
-./rayweave chief --clear-aperture --ray-fan < "$YAML" \
-  | ./rayweave plot -o "$OUTDIR/us2645157.png" \
-  | ./rayweave plot -o "$OUTDIR/us2645157.svg" \
-  | ./rayweave chief --marginal-rays --ray-fan \
-  | ./rayweave trace > "$OUTDIR/us2645157-trace-result.yaml"
+$RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" \
+  | $RAYWEAVE plot -o "$OUTDIR/us2645157.png" \
+  | $RAYWEAVE plot -o "$OUTDIR/us2645157.svg" \
+  | $RAYWEAVE chief --marginal-rays --ray-fan \
+  | $RAYWEAVE trace > "$OUTDIR/us2645157-trace-result.yaml"
 echo "Written: $OUTDIR/us2645157.svg and $OUTDIR/us2645157.png"
 
 echo
 echo "=== TMM: single-layer AR coating (MgF2 on N-SK16, lambda=550nm) ==="
-./rayweave tmm < "$OUTDIR/ar-coating.yaml" | yq '.rs, .rp'
+$RAYWEAVE tmm < "$OUTDIR/ar-coating.yaml" | yq '.rs, .rp'
 
 echo
 echo "=== TMM: 9-layer dielectric mirror (SiO2/TiO2 on glass) ==="
-./rayweave tmm < "$OUTDIR/dielectric-mirror.yaml" | yq '.rs, .rp'
+$RAYWEAVE tmm < "$OUTDIR/dielectric-mirror.yaml" | yq '.rs, .rp'

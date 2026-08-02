@@ -1,6 +1,34 @@
 #!/bin/bash
 set -euo pipefail
 
+# =============================================================================
+# ghost-demo.bash — ghost-ray tracing (Ono et al. surface-sequence encoding)
+#
+# Purpose: trace a double-reflection ghost path through the optimised
+# double-Gauss and quantify how much fainter it is than the normal image.
+# Each ray carries an ordered surface-ID list; a direction reversal in the
+# list means reflection, so [0,1,2,3,4,3,2,3,4,...,14] reflects at surface 4,
+# refracts backwards through surface 3, reflects at surface 2, then returns
+# forward to the image (surface 14).
+#
+# Steps
+#   1. chief --clear-aperture --shrink : re-size lens diameters to the beam
+#   2. trace                           : trace the ghost + normal reference rays
+#   3. python                          : per-surface table + Fresnel intensities
+#   4. plot                            : SVG diagram of the ghost path
+#
+# How to read the result
+#   - Ghost relative intensity = product of the two Fresnel reflectances
+#     (~0.004): a double reflection is ~250x fainter than the image.
+#   - The ghost lands near the on-axis image point (the double reflection
+#     keeps it close to the axis), so it appears as a faint halo.
+# =============================================================================
+
+# Resolve the script's own directory so the demo runs from any CWD
+# (repo root, `cd samples`, or a copied location). All data files are read
+# from and all outputs are written to this directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # CLI options
 CLEAN=false
 while [[ $# -gt 0 ]]; do
@@ -10,12 +38,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-YAML="samples/doublegauss-ghost.yaml"
-OUTDIR="samples"
+YAML="$SCRIPT_DIR/doublegauss-ghost.yaml"
+OUTDIR="$SCRIPT_DIR"
 TRACE_RESULT="$OUTDIR/doublegauss-ghost-trace-result.yaml"
 RESULT_FILE="$OUTDIR/ghost-demo-result.txt"
 SVG="$OUTDIR/doublegauss-ghost.svg"
-RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 # Clean-only mode
 if [ "$CLEAN" = true ]; then
@@ -23,6 +50,20 @@ if [ "$CLEAN" = true ]; then
   rm -f "$TRACE_RESULT" "$RESULT_FILE" "$SVG"
   echo "  Removed generated files"
   exit 0
+fi
+
+# Locate the rayweave binary: an explicit RAYWEAVE env value wins, then a
+# binary next to the script or one directory up (samples/ -> repo root),
+# then any rayweave on PATH.
+if [[ -z "${RAYWEAVE:-}" ]]; then
+  for cand in "$SCRIPT_DIR/rayweave" "$SCRIPT_DIR/../rayweave"; do
+    if [[ -x "$cand" ]]; then RAYWEAVE="$cand"; break; fi
+  done
+  RAYWEAVE="${RAYWEAVE:-$(command -v rayweave || true)}"
+  if [[ -z "${RAYWEAVE:-}" ]]; then
+    echo "error: rayweave binary not found; set RAYWEAVE or put rayweave on PATH" >&2
+    exit 1
+  fi
 fi
 
 echo "=== Double-Gauss ghost ray tracing demo ==="
@@ -107,6 +148,20 @@ for r in d.get("results", []):
         print("    Is = %.3e   Ip = %.3e" % (refl_prod_s, refl_prod_p))
     print("  cumulative intensity (all surfaces): Is = %.4e  Ip = %.4e" % (prod_s, prod_p))
     print()
+print()
+print("=== How to interpret this result ===")
+print("- Two rays through the re-sized double-Gauss:")
+print("  - ghost_reflect_s4_s2: forward to surface 4, reflect there, reversed")
+print("    refraction through surface 3, reflect at surface 2, then forward to")
+print("    the image (surface 14).")
+print("  - normal_reference: the same field's normal refraction-only ray.")
+print("- The two REFLECT rows are the ghost reflections; every other surface is")
+print("  a Fresnel transmission (Is/Ip ~ 0.94).")
+print("- Ghost relative intensity (Is/Ip) is the product of the two Fresnel")
+print("  reflectances (~0.004): the ghost is a few hundredths of one percent of")
+print("  the normal image brightness.")
+print("- Cumulative intensity: transmitted light left after all surfaces")
+print("  (~0.48 for the normal ray vs ~0.0015 for the ghost).")
 PYEOF
 echo "Written: $RESULT_FILE"
 echo

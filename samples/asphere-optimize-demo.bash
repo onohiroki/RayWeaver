@@ -1,6 +1,30 @@
 #!/bin/bash
 set -euo pipefail
 
+# =============================================================================
+# asphere-optimize-demo.bash — aspheric-surface optimisation (two stages)
+#
+# Purpose: compare a spherical-only optimisation with one that also varies the
+# asphere coefficients (conic, a4, a6) of the front surface of a singlet.
+#
+# Steps
+#   1. Stage 1 (spherical): optimize curvatures only (asphere vars fixed at 0)
+#   2. Stage 2 (asphere):   additionally optimize conic/a4/a6
+#   3. chief                : spot RMS and OPD RMS per field for before /
+#                             spherical / asphere
+#
+# How to read the result
+#   - The coefficient table shows the asphere terms only move in stage 2.
+#   - Spot RMS (mm) and OPD RMS (mm) should both drop before -> asphere.
+#   - OPD RMS ~ 1e-3 mm is near the diffraction limit at 587.6 nm.
+#   - Gate: asphere-opt on-axis RMS < 0.3 mm.
+# =============================================================================
+
+# Resolve the script's own directory so the demo runs from any CWD
+# (repo root, `cd samples`, or a copied location). All data files are read
+# from and all outputs are written to this directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # CLI options
 CLEAN=false
 while [[ $# -gt 0 ]]; do
@@ -10,15 +34,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-YAML="samples/asphere-optimize.yaml"
-OUTDIR="samples"
+YAML="$SCRIPT_DIR/asphere-optimize.yaml"
+OUTDIR="$SCRIPT_DIR"
 SPHERICAL_YAML="$OUTDIR/asphere-optimize-spherical.yaml"
 SPH_RESULT="$OUTDIR/asphere-optimize-spherical-result.yaml"
 SPH_LOG="$OUTDIR/asphere-optimize-spherical-log.jsonl"
 ASP_RESULT="$OUTDIR/asphere-optimize-result.yaml"
 ASP_LOG="$OUTDIR/asphere-optimize-log.jsonl"
 RESULT_FILE="$OUTDIR/asphere-optimize-demo-result.txt"
-RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 # Clean-only mode: remove generated files and exit
 if [ "$CLEAN" = true ]; then
@@ -28,6 +51,40 @@ if [ "$CLEAN" = true ]; then
   echo "  Removed generated files"
   exit 0
 fi
+
+# Locate the rayweave binary: an explicit RAYWEAVE env value wins, then a
+# binary next to the script or one directory up (samples/ -> repo root),
+# then any rayweave on PATH.
+if [[ -z "${RAYWEAVE:-}" ]]; then
+  for cand in "$SCRIPT_DIR/rayweave" "$SCRIPT_DIR/../rayweave"; do
+    if [[ -x "$cand" ]]; then RAYWEAVE="$cand"; break; fi
+  done
+  RAYWEAVE="${RAYWEAVE:-$(command -v rayweave || true)}"
+  if [[ -z "${RAYWEAVE:-}" ]]; then
+    echo "error: rayweave binary not found; set RAYWEAVE or put rayweave on PATH" >&2
+    exit 1
+  fi
+fi
+
+# ── Interpretation notes: appended to the result file on exit, so they stay
+# as the closing section even when a gate check exits early. ──
+append_interpretation() {
+cat >> "$RESULT_FILE" <<'EOF'
+
+=== How to interpret this result ===
+- Two optimisation stages on a singlet with an aspheric front surface:
+  spherical-opt varies only curvatures; asphere-opt also varies conic/a4/a6.
+- Coef table: the asphere coefficients stay 0 in the spherical stage (they
+  are not variables) and pick up small non-zero values in the asphere stage.
+- Spot RMS (mm): geometric RMS spot radius; the asphere stage reaches the
+  smallest on-axis value.
+- OPD RMS (mm): RMS of (optical path length - mean OPL) across the pupil, a
+  wavefront-quality measure. Values ~1e-3 mm are near the diffraction limit
+  at 587.6 nm (about lambda/4).
+- Pass gate: asphere-opt on-axis RMS < 0.3 mm.
+EOF
+}
+trap append_interpretation EXIT
 
 echo "=== Asphere optimization demo: singlet with aspheric front surface ==="
 echo

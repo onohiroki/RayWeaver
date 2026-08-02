@@ -1,6 +1,32 @@
 #!/bin/bash
 set -euo pipefail
 
+# =============================================================================
+# multi-config-zoom-demo.bash — zoom lens with equality + vignetting gates
+#
+# Purpose: show DLS multi-config optimisation under hard engineering gates:
+# the entrance pupil is pinned by an equality constraint (EPD = 20 mm) and
+# off-axis vignetting is kept above a floor (VF >= 0.5) via vignetting
+# constraints, alongside the usual on-axis spot-RMS merit.
+#
+# Steps
+#   1. optimize --verbose --log : DLS multi-config optimisation
+#   2. chief                    : RMS + vignetting factor per config/field,
+#                                 before vs after
+#   3. paraxial                 : EFL and EPD per config
+#   4. plot                     : ray-overlaid layouts before/after
+#
+# How to read the result
+#   - Every config must pass all gates: on-axis RMS < 0.03 mm,
+#     EPD = 20 +/- 0.1 mm, VF >= 0.5 on the 10/15 mm image-height fields.
+#   - EFL differs per config because the lens zooms; EPD stays pinned at 20.
+# =============================================================================
+
+# Resolve the script's own directory so the demo runs from any CWD
+# (repo root, `cd samples`, or a copied location). All data files are read
+# from and all outputs are written to this directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # CLI options
 CLEAN=false
 while [[ $# -gt 0 ]]; do
@@ -10,12 +36,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-YAML="samples/multi-config-zoom.yaml"
-OUTDIR="samples"
+YAML="$SCRIPT_DIR/multi-config-zoom.yaml"
+OUTDIR="$SCRIPT_DIR"
 RESULT="$OUTDIR/multi-config-zoom-result.yaml"
 LOG="$OUTDIR/multi-config-zoom-log.jsonl"
 RESULT_FILE="$OUTDIR/multi-config-zoom-demo-result.txt"
-RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 # Clean-only mode: remove generated files and exit
 if [ "$CLEAN" = true ]; then
@@ -28,6 +53,41 @@ if [ "$CLEAN" = true ]; then
   echo "  Removed: PNGs, $RESULT, $LOG, $RESULT_FILE"
   exit 0
 fi
+
+# Locate the rayweave binary: an explicit RAYWEAVE env value wins, then a
+# binary next to the script or one directory up (samples/ -> repo root),
+# then any rayweave on PATH.
+if [[ -z "${RAYWEAVE:-}" ]]; then
+  for cand in "$SCRIPT_DIR/rayweave" "$SCRIPT_DIR/../rayweave"; do
+    if [[ -x "$cand" ]]; then RAYWEAVE="$cand"; break; fi
+  done
+  RAYWEAVE="${RAYWEAVE:-$(command -v rayweave || true)}"
+  if [[ -z "${RAYWEAVE:-}" ]]; then
+    echo "error: rayweave binary not found; set RAYWEAVE or put rayweave on PATH" >&2
+    exit 1
+  fi
+fi
+
+# ── Interpretation notes: appended to the result file on exit, so they stay
+# as the closing section even when a gate check exits early. ──
+append_interpretation() {
+cat >> "$RESULT_FILE" <<'EOF'
+
+=== How to interpret this result ===
+- RMS bef/aft: geometric RMS spot radius (mm) per config and field, before
+  and after DLS. The on-axis (0 deg) row is the primary imaging gate.
+- EPD bef/aft: entrance pupil diameter (mm). The equality constraint pins it
+  to 20 mm in every config (before and after).
+- EFL (mm) per config differs because the lens changes focal length as it
+  zooms, while the pupil diameter is held constant.
+- Vignetting factor (VF): fraction of pupil-grid rays that transmit the
+  system. 1.0000 = full aperture; a value like 0.4 means the beam is clipped
+  hard (vignetting) by a clear aperture.
+- Pass gates: on-axis RMS < 0.03 mm, EPD = 20 +/- 0.1 mm, and
+  VF >= 0.5 on the 10/15 mm image-height fields.
+EOF
+}
+trap append_interpretation EXIT
 
 echo "=== Multi-Config Zoom Lens Demo ==="
 echo
@@ -93,6 +153,9 @@ for cfg in config0 config1 config2; do
   echo "    Written: $OUTDIR/multi-config-zoom-${cfg}-init-rays.png"
 done
 echo
+
+# Start the result file fresh (the sections below append with tee -a).
+: > "$RESULT_FILE"
 
 {
   echo "=== Performance comparison ==="
@@ -230,6 +293,7 @@ for cfg in config0 config1 config2; do
   done
 done
 
+# ── Final verdict ──
 {
   echo
   if [ "$failed" = true ]; then

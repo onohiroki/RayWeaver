@@ -1,6 +1,31 @@
 #!/bin/bash
 set -euo pipefail
 
+# =============================================================================
+# simple-zoom-demo.bash — multi-config (shared-variable) zoom optimisation
+#
+# Purpose: demonstrate a 3-configuration zoom lens (wide / mid / tele) being
+# optimised with one set of shared variables plus per-config local air gaps.
+#
+# Configs: config0 (S2=20, S4=80), config1 (S2=50, S4=50), config2 (S2=80, S4=20)
+#
+# Steps
+#   1. optimize --verbose --log : DLS multi-config optimisation
+#   2. chief | trace | plot     : ray-overlaid layout per config, before/after
+#   3. paraxial                 : EFL per config, before/after
+#   4. chief                    : on-axis RMS per config, before/after
+#   5. geometry check           : config0 lens1-lens2 air gap >= 5 mm
+#
+# How to read the result
+#   - All configs must be simultaneously good: on-axis RMS < 0.3 mm each.
+#   - The gap check guards against lens elements colliding.
+# =============================================================================
+
+# Resolve the script's own directory so the demo runs from any CWD
+# (repo root, `cd samples`, or a copied location). All data files are read
+# from and all outputs are written to this directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # CLI options
 CLEAN=false
 while [[ $# -gt 0 ]]; do
@@ -10,12 +35,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-YAML="samples/simple-zoom.yaml"
-OUTDIR="samples"
+YAML="$SCRIPT_DIR/simple-zoom.yaml"
+OUTDIR="$SCRIPT_DIR"
 RESULT="$OUTDIR/simple-zoom-optimized.yaml"
 LOG="$OUTDIR/simple-zoom-log.jsonl"
 RESULT_FILE="$OUTDIR/simple-zoom-demo-result.txt"
-RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 # Clean-only mode: remove generated files and exit
 if [ "$CLEAN" = true ]; then
@@ -28,6 +52,38 @@ if [ "$CLEAN" = true ]; then
   echo "  Removed: PNGs, $RESULT, $LOG, $RESULT_FILE"
   exit 0
 fi
+
+# Locate the rayweave binary: an explicit RAYWEAVE env value wins, then a
+# binary next to the script or one directory up (samples/ -> repo root),
+# then any rayweave on PATH.
+if [[ -z "${RAYWEAVE:-}" ]]; then
+  for cand in "$SCRIPT_DIR/rayweave" "$SCRIPT_DIR/../rayweave"; do
+    if [[ -x "$cand" ]]; then RAYWEAVE="$cand"; break; fi
+  done
+  RAYWEAVE="${RAYWEAVE:-$(command -v rayweave || true)}"
+  if [[ -z "${RAYWEAVE:-}" ]]; then
+    echo "error: rayweave binary not found; set RAYWEAVE or put rayweave on PATH" >&2
+    exit 1
+  fi
+fi
+
+# ── Interpretation notes: appended to the result file on exit, so they stay
+# as the closing section even when a gate check exits early. ──
+append_interpretation() {
+cat >> "$RESULT_FILE" <<'EOF'
+
+=== How to interpret this result ===
+- Simple 3-config zoom lens; config0/1/2 are the wide / mid / tele positions.
+- RMS before/after = on-axis (0 deg) geometric RMS spot radius (mm) per
+  config, evaluated before and after the shared-variable DLS run.
+- Pass gate: every config on-axis RMS < 0.3 mm.
+- The lens1-lens2 gap check confirms the config0 air gap stays >= 5 mm
+  (a geometric anti-collision guard).
+- The point of multi-config optimisation is that all three configs must be
+  good simultaneously, not just one.
+EOF
+}
+trap append_interpretation EXIT
 
 echo "=== Simple Zoom Lens Optimization Demo ==="
 echo

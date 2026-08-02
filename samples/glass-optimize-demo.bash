@@ -1,6 +1,32 @@
 #!/bin/bash
 set -uo pipefail
 
+# =============================================================================
+# glass-optimize-demo.bash — glass-model (nd/vd) optimisation
+#
+# Purpose: show that DLS can optimise the refractive index and Abbe number
+# of glass models alongside curvatures and air gaps. The demo starts with
+# deliberately wrong glass (model2/model3 nd-vd swapped) and 4 design
+# wavelengths (g/F/d/C), so the merit must balance colour as well as focus.
+#
+# Steps
+#   1. optimize --verbose --log : DLS on 14 variables (6 curvatures,
+#                                 6 nd/vd values, 2 air gaps)
+#   2. paraxial                 : f-number for the diffraction-limit check
+#   3. chief --wl               : RMS and vignetting per field/wavelength
+#   4. gnuplot                  : 4-wavelength spot diagrams, before vs after
+#
+# How to read the result
+#   - Per-wavelength RMS row spread = colour-correction quality.
+#   - Glass table (script console): model2/3 nd-vd moves from wrong to sensible.
+#   - Gates: on-axis RMS < 0.3 mm; VF >= 0.5 on the 10/16 deg fields.
+# =============================================================================
+
+# Resolve the script's own directory so the demo runs from any CWD
+# (repo root, `cd samples`, or a copied location). All data files are read
+# from and all outputs are written to this directory.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # CLI options
 CLEAN=false
 while [[ $# -gt 0 ]]; do
@@ -10,13 +36,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-YAML="samples/glass-optimize-demo.yaml"
-OUTDIR="samples"
+YAML="$SCRIPT_DIR/glass-optimize-demo.yaml"
+OUTDIR="$SCRIPT_DIR"
 OPT_RESULT="$OUTDIR/glass-optimize-result.yaml"
 OPT_CHIEF="$OUTDIR/glass-optimize-chief.yaml"
 OPT_LOG="$OUTDIR/glass-optimize-log.jsonl"
 RESULT_FILE="$OUTDIR/glass-optimize-demo-result.txt"
-RAYWEAVE="${RAYWEAVE:-./rayweave}"
 
 # Clean-only mode: remove generated files and exit
 if [ "$CLEAN" = true ]; then
@@ -30,6 +55,40 @@ if [ "$CLEAN" = true ]; then
   echo "  Removed generated files"
   exit 0
 fi
+
+# Locate the rayweave binary: an explicit RAYWEAVE env value wins, then a
+# binary next to the script or one directory up (samples/ -> repo root),
+# then any rayweave on PATH.
+if [[ -z "${RAYWEAVE:-}" ]]; then
+  for cand in "$SCRIPT_DIR/rayweave" "$SCRIPT_DIR/../rayweave"; do
+    if [[ -x "$cand" ]]; then RAYWEAVE="$cand"; break; fi
+  done
+  RAYWEAVE="${RAYWEAVE:-$(command -v rayweave || true)}"
+  if [[ -z "${RAYWEAVE:-}" ]]; then
+    echo "error: rayweave binary not found; set RAYWEAVE or put rayweave on PATH" >&2
+    exit 1
+  fi
+fi
+
+# ── Interpretation notes: appended to the result file on exit, so they stay
+# as the closing section even when a gate check exits early. ──
+append_interpretation() {
+cat >> "$RESULT_FILE" <<'EOF'
+
+=== How to interpret this result ===
+- "RMS before / RMS after" is the geometric RMS spot radius (mm) per field
+  at the primary wavelength (d = 587.6 nm).
+- "Per-Wavelength RMS" is the spot size at each design wavelength (g/F/d/C).
+  If the rows spread out, colour (lateral colour) is the limiting aberration.
+- Vignetting factor (VF): fraction of pupil-grid rays that transmit the
+  system; 1.0 = full aperture.
+- The demo starts from deliberately wrong glass (model2/model3 nd-vd swapped)
+  so DLS must recover nd/vd together with curvatures and air gaps.
+- Pass gates: on-axis RMS < 0.3 mm and VF >= 0.5 on the 10/16 deg fields.
+  A failed VF gate means the edge field vignettes more than desired.
+EOF
+}
+trap append_interpretation EXIT
 
 echo "=== Glass optimization demo: 35mm-format 3-lens system ==="
 echo
