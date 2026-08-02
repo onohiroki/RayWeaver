@@ -41,12 +41,13 @@ Subcommands are grouped by their role in the data flow
 |---|---|---|---|
 | Data | `import` | Convert an external lens file into the internal YAML format. | ZMX / SEQ / LEN → YAML system |
 | Propagation | `trace` | Trace individual rays and report per-surface intersection data (low-level). | rays → per-surface results |
-| Propagation | `chief` | Sample the beam for each field: chief ray, pupil grid, marginal rays, spot statistics and OPL. Flags: `--clear-aperture` (compute the beam footprint; `--shrink` to also reduce diameters to it, `--clear-aperture-margin-mm`, `--clear-aperture-rays`), `--marginal-rays`, `--pass-through N`, `--config ID`, `--wl`. | system + fields → chief_rays / grid |
+| Propagation | `chief` | Sample the beam for each field: chief ray, pupil grid, marginal rays, spot statistics and OPL. Flags: `--clear-aperture` (compute the beam footprint; `--shrink` to also reduce diameters to it, `--clear-aperture-margin-mm`, `--clear-aperture-rays`), `--preserve-rays` (keep the existing rays section during aperture adjustment), `--marginal-rays`, `--pass-through N`, `--config ID`, `--wl`. | system + fields → chief_rays / grid |
 | Analysis | `paraxial` | First-order / cardinal properties: EFL, BFL, FFL, principal points, pupil positions, f/#. | system → paraxial_result |
 | Analysis | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. | system + coating → R/T/phase |
 | Transform | `scale` | Uniformly scale a system so its EFL equals `--efl TARGET` (exact; preserves f/#). Useful for building a starting point before optimizing. | system → scaled system |
-| Synthesis | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. `--verbose` also emits a per-term merit breakdown. | system + merit → optimized system |
+| Synthesis | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. `--verbose` also emits a per-term merit breakdown. `--exclude-param` drops target params (e.g. asphere coefficients) from the variable set. | system + merit → optimized system |
 | Presentation | `plot` | Render an SVG or PNG cross-section diagram. Flags: `-o file.svg|.png`, `--lens-width`, `--ray-width`, `--scale`, `--right-margin`, `--config`. | system + rays → diagram |
+| Tooling | `query` | Read-only YAML/JSONL selector: extract values, iterate arrays, aggregate, evaluate expressions and pass-gates from a shell pipeline. Replaces `python3 + PyYAML` / `yq` in the sample demos. See `docs/query.md`. | YAML/JSONL → plain text / YAML / JSON / CSV |
 
 ## Pipeline examples
 

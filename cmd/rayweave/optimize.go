@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strings"
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -20,12 +21,32 @@ const (
 	defaultNumRays = 64
 )
 
-func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
+func runOptimize(data []byte, verbose bool, logFile string, glassDir string, excludeParams string) {
 	input := parseYAML[types.Input](data)
 
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
 		os.Exit(1)
+	}
+
+	excluded := map[string]bool{}
+	for _, p := range strings.Split(excludeParams, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			excluded[p] = true
+		}
+	}
+
+	// Drop excluded target params from the echoed variables too, so the
+	// output YAML reflects the reduced variable set.
+	if len(excluded) > 0 {
+		kept := input.Optimization.Variables[:0]
+		for _, v := range input.Optimization.Variables {
+			if !excluded[v.Target.Param] {
+				kept = append(kept, v)
+			}
+		}
+		input.Optimization.Variables = kept
 	}
 
 	gc, _ := loadCatalogs(&input, glassDir)
@@ -108,6 +129,9 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string) {
 		cfgID := configs[0].ID
 		for _, v := range input.Optimization.Variables {
 			if !v.Active {
+				continue
+			}
+			if excluded[v.Target.Param] {
 				continue
 			}
 			switch v.Target.Type {

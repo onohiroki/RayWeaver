@@ -29,10 +29,12 @@ This directory contains sample optical system data and demo scripts for the
 
 ## External dependencies
 
-The demo scripts use `python3` (with `PyYAML`) for YAML parsing and comparison;
-`yq`, `csvtk` and `bc` are **not** required. `gnuplot` is used only for the
-optional PNG renderings (spot diagrams, aberration graphs): if it is not
-installed, the scripts print a message and skip those renderings.
+The demo scripts depend only on the `rayweave` binary (built with `go build
+-o rayweave ./cmd/rayweave` from the repository root). YAML/JSONL parsing and
+numeric comparison use the built-in `rayweave query` subcommand (see
+`docs/query.md`). `gnuplot` is used only for the optional PNG renderings
+(spot diagrams, aberration graphs): if it is not installed, the scripts print
+a message and skip those renderings.
 
 ## Optimisation-related notes (current syntax)
 
@@ -173,7 +175,7 @@ bash samples/ghost-demo.bash
 
 3. **SVG raytrace diagrams** — Two SVG diagrams (`init` and `opt`) generated via `chief --clear-aperture | chief --marginal-rays | trace | plot`.
 
-4. **Multi-wavelength spot diagrams** — For each of 4 wavelengths (g/F/d/C), `rayweave chief --wl <wl>` traces a hexagonal pupil grid. Grid-point `image_x`/`image_y` coordinates are extracted via yq and rendered by gnuplot as a before-vs-after comparison with colour-coded wavelength overlay.
+4. **Multi-wavelength spot diagrams** — For each of 4 wavelengths (g/F/d/C), `rayweave chief --wl <wl>` traces a hexagonal pupil grid. Grid-point `image_x`/`image_y` coordinates are extracted with `rayweave query --csv` and rendered by gnuplot as a before-vs-after comparison with colour-coded wavelength overlay.
 
 ## Notes
 

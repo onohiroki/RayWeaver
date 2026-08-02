@@ -100,29 +100,25 @@ echo
 
 # ── Evaluate before state ──
 echo "--- Initial state ---"
-EFL_BEFORE=$( $RAYWEAVE paraxial < "$YAML" 2>/dev/null | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); p=d.get('paraxial_result',{}); print(p.get('focal_length',-1))" )
-FNO_BEFORE=$( $RAYWEAVE paraxial < "$YAML" 2>/dev/null | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); p=d.get('paraxial_result',{}); print(p.get('image_space_f_number',-1))" )
+EFL_BEFORE=$( $RAYWEAVE paraxial < "$YAML" 2>/dev/null | $RAYWEAVE query -r paraxial_result.focal_length )
+FNO_BEFORE=$( $RAYWEAVE paraxial < "$YAML" 2>/dev/null | $RAYWEAVE query -r paraxial_result.image_space_f_number )
 BEFORE_CHIEF=$( $RAYWEAVE chief < "$YAML" 2>/dev/null )
 
 rms_field() {
   local chief="$1" fi="$2"
-  echo "$chief" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[$fi].get('spot_stats',{}).get('rms_r',-1))"
+  echo "$chief" | $RAYWEAVE query -r "chief_rays[$fi].spot_stats.rms_r"
 }
 distortion() {
   local chief="$1" fi="$2" efl="$3"
-  echo "$chief" | python3 -c "
-import sys, yaml, math
-d=yaml.safe_load(sys.stdin)
-r=d['chief_rays'][$fi]
-ih=r.get('image_height',[0,0,0])[1]
-fa=math.radians(r.get('field_angle',0))
-ph=math.tan(fa)*$efl if fa else 0
-print(100*(ih-ph)/ph if ph else 0)
-"
+  echo "$chief" | $RAYWEAVE query \
+    --set a="chief_rays[$fi].field_angle" \
+    --set ih="chief_rays[$fi].image_height[1]" \
+    --set efl="$efl" \
+    --expr 'a < 1e-9 ? 0 : 100*(ih-efl*tan(radians(a)))/(efl*tan(radians(a)))'
 }
 
 for fi in 0 1 2 3; do
-  ang=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d['chief_rays'][$fi].get('field_angle','?'))")
+  ang=$(echo "$BEFORE_CHIEF" | $RAYWEAVE query --default '?' -r "chief_rays[$fi].field_angle")
   printf "  field %s°  RMS = %.4f mm\n" "$ang" "$(rms_field "$BEFORE_CHIEF" "$fi")"
 done
 printf "  EFL = %.2f mm   f/%.2f\n" "$EFL_BEFORE" "$FNO_BEFORE"
@@ -136,12 +132,12 @@ echo
 
 # ── Evaluate after state ──
 echo "--- Optimized state ---"
-EFL_AFTER=$( $RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); p=d.get('paraxial_result',{}); print(p.get('focal_length',-1))" )
-FNO_AFTER=$( $RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); p=d.get('paraxial_result',{}); print(p.get('image_space_f_number',-1))" )
+EFL_AFTER=$( $RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | $RAYWEAVE query -r paraxial_result.focal_length )
+FNO_AFTER=$( $RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | $RAYWEAVE query -r paraxial_result.image_space_f_number )
 AFTER_CHIEF=$( $RAYWEAVE chief < "$OPT_RESULT" 2>/dev/null )
 
 for fi in 0 1 2 3; do
-  ang=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d['chief_rays'][$fi].get('field_angle','?'))")
+  ang=$(echo "$AFTER_CHIEF" | $RAYWEAVE query --default '?' -r "chief_rays[$fi].field_angle")
   printf "  field %s°  RMS = %.4f mm\n" "$ang" "$(rms_field "$AFTER_CHIEF" "$fi")"
 done
 printf "  EFL = %.2f mm   f/%.2f\n" "$EFL_AFTER" "$FNO_AFTER"
@@ -149,24 +145,19 @@ echo
 
 # ── Stage summary from log ──
 echo "--- Stage summary ---"
-python3 -c "
-import json
-merits=[]; status=''
-for line in open('$OPT_LOG'):
-    line=line.strip()
-    if not line.startswith('{'): continue
-    d=json.loads(line)
-    if 'merit' in d: merits.append(d['merit'])
-    if 'status' in d: status=d['status']
-first=merits[0] if merits else 0
-last=merits[-1] if merits else 0
-improve=(1-last/first)*100 if first>0 else 0
-print(f'  Status:      {status}')
-print(f'  Iterations:  {len(merits)}')
-print(f'  Merit init:  {first:.6e}')
-print(f'  Merit final: {last:.6e}')
-print(f'  Improvement: {improve:.1f}%')
-"
+{
+  status=$( $RAYWEAVE query --jsonl --where 'has("status")' -r status < "$OPT_LOG" 2>/dev/null )
+  merit_first=$( $RAYWEAVE query --jsonl --where 'has("merit")' --first -r merit < "$OPT_LOG" 2>/dev/null )
+  merit_last=$( $RAYWEAVE query --jsonl --where 'has("merit")' -r merit < "$OPT_LOG" 2>/dev/null )
+  merit_count=$( $RAYWEAVE query --jsonl --where 'has("merit")' --count '[]' < "$OPT_LOG" 2>/dev/null )
+  improvement=$( $RAYWEAVE query --set f="$merit_first" --set l="$merit_last" \
+      --expr 'f > 0 ? (1-l/f)*100 : 0' < /dev/null )
+  echo "  Status:      ${status:-unknown}"
+  echo "  Iterations:  ${merit_count:-0}"
+  printf "  Merit init:  %.6e\n" "$merit_first"
+  printf "  Merit final: %.6e\n" "$merit_last"
+  printf "  Improvement: %.1f%%\n" "$improvement"
+}
 echo
 
 # ── Result file ──
@@ -183,7 +174,7 @@ echo
   printf "  %-6s %6s  %10s  %10s\n" "Field" "Angle" "before" "after"
   printf "  %-6s %6s  %10s  %10s\n" "-----" "-----" "--------" "-------"
   for fi in 0 1 2 3; do
-    ang=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d['chief_rays'][$fi].get('field_angle','?'))")
+    ang=$(echo "$BEFORE_CHIEF" | $RAYWEAVE query --default '?' -r "chief_rays[$fi].field_angle")
     bef=$(rms_field "$BEFORE_CHIEF" "$fi")
     aft=$(rms_field "$AFTER_CHIEF" "$fi")
     printf "  %-6s %5s°  %10.4f  %10.4f\n" "f$fi" "$ang" "$bef" "$aft"
@@ -193,7 +184,7 @@ echo
   printf "  %-6s %6s  %10s  %10s\n" "Field" "Angle" "before" "after"
   printf "  %-6s %6s  %10s  %10s\n" "-----" "-----" "--------" "-------"
   for fi in 0 1 2 3; do
-    ang=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d['chief_rays'][$fi].get('field_angle','?'))")
+    ang=$(echo "$BEFORE_CHIEF" | $RAYWEAVE query --default '?' -r "chief_rays[$fi].field_angle")
     d1=$(distortion "$BEFORE_CHIEF" "$fi" "$EFL_BEFORE")
     d2=$(distortion "$AFTER_CHIEF" "$fi" "$EFL_AFTER")
     printf "  %-6s %5s°  %9.2f%%  %9.2f%%\n" "f$fi" "$ang" "$d1" "$d2"
@@ -212,16 +203,8 @@ echo "  (full spot RMS and distortion tables in $RESULT_FILE)"
 # ── Merit breakdown ──
 if [ -f "$OPT_LOG" ]; then
   echo "--- Merit breakdown (final state) ---"
-  python3 -c "
-import json
-for line in open('$OPT_LOG'):
-    line=line.strip()
-    if not line.startswith('{'): continue
-    d=json.loads(line)
-    if d.get('event') == 'breakdown':
-        for k, v in d['terms'].items():
-            print(f'  {k}: {v:.6e}')
-" 2>/dev/null || true
+  $RAYWEAVE query --jsonl --where 'event=="breakdown"' \
+    --each 'terms:key,value' --printf '  %s: %.6e' < "$OPT_LOG" 2>/dev/null || true
   echo
 fi
 
@@ -244,7 +227,7 @@ echo
 THRESHOLD=0.1
 printf "  (threshold = %.1f mm — on-axis RMS must be below this)\n" "$THRESHOLD"
 rms_onaxis=$(rms_field "$AFTER_CHIEF" 0)
-if [ "$rms_onaxis" != "-1" ] && [ "$(python3 -c "print('1' if $rms_onaxis >= $THRESHOLD else '0')")" = "1" ]; then
+if [ "$rms_onaxis" != "-1" ] && $RAYWEAVE query --gate "rms >= $THRESHOLD" --set rms="$rms_onaxis" < /dev/null > /dev/null; then
   msg="  >>> Optimization failed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
   echo "$msg" | tee -a "$RESULT_FILE"
   exit 1

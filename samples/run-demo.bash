@@ -75,9 +75,12 @@ fi
 run_trace() {
   local input=$1 idx=$2
   echo "=== Trace: ray paths through surfaces ==="
+  echo
+  echo "| s | x (mm) | y (mm) | z (mm) |"
+  echo "|---|--------|--------|--------|"
   $RAYWEAVE trace < "$input" \
-    | yq '[.results[]|[.surfaces[] | {"s": .surface_id, "x": .position[0], "y": .position[1], "z": .position[2] }]] | .['$idx']' -o=csv \
-    | csvtk csv2md
+    | $RAYWEAVE query --each "results[$idx].surfaces[]:surface_id,position[0],position[1],position[2]" \
+        --printf '| %d | %.4f | %.4f | %.4f |'
   echo
 }
 
@@ -87,8 +90,8 @@ $RAYWEAVE chief --ray-fan < "$YAML" > "$CHIEF_RESULT"
 
 extract_spot() {
   local field_index=$1 label=$2
-  yq eval ".chief_rays[$field_index].grid_points[] | select(.image_x != null) | [.image_x, .image_y, .intensity]" \
-    "$CHIEF_RESULT" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/spot-${label}.txt"
+  $RAYWEAVE query --csv "chief_rays[$field_index].grid_points[]:image_x,image_y,intensity" \
+    < "$CHIEF_RESULT" > "$OUTDIR/spot-${label}.txt"
 }
 
 extract_spot 0 "00"
@@ -98,10 +101,10 @@ extract_spot 2 "f24"
 # 1b. Aberration data extraction (full-resolution fan rays from chief output)
 extract_aberration() {
   local field_index=$1 label=$2
-  yq eval ".chief_rays[$field_index].ray_fan.meridional[] | [.py, .ey, (.long // 0)]" \
-    "$CHIEF_RESULT" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/aberr-${label}-m.txt"
-  yq eval ".chief_rays[$field_index].ray_fan.sagittal[] | [.px, .ex, (.long // 0)]" \
-    "$CHIEF_RESULT" -o=csv 2>/dev/null | tail -n +2 > "$OUTDIR/aberr-${label}-s.txt"
+  $RAYWEAVE query --csv "chief_rays[$field_index].ray_fan.meridional[]:py,ey,long" \
+    < "$CHIEF_RESULT" > "$OUTDIR/aberr-${label}-m.txt"
+  $RAYWEAVE query --csv "chief_rays[$field_index].ray_fan.sagittal[]:px,ex,long" \
+    < "$CHIEF_RESULT" > "$OUTDIR/aberr-${label}-s.txt"
 }
 
 extract_aberration 0 "00"
@@ -133,7 +136,7 @@ done
 echo
 
 # 2b. Aberration graphs: transverse (横収差) + longitudinal (縦収差)
-if command -v yq &>/dev/null && command -v gnuplot &>/dev/null 2>&1; then
+if command -v gnuplot &>/dev/null 2>&1; then
   for field in 00 f16 f24; do
     case $field in
       00)  title="0° field";;
@@ -168,7 +171,7 @@ GPLOT
     echo "Written: $OUTDIR/aberr-${field}.png"
   done
 else
-  echo "  (aberration graphs skipped: yq or gnuplot not available)"
+  echo "  (aberration graphs skipped: gnuplot not available)"
 fi
 
 echo
@@ -181,9 +184,9 @@ run_trace "$CHIEF_RESULT" 2
 
 echo "=== Paraxial analysis ==="
 echo 'without chief data:'
-$RAYWEAVE paraxial < "$YAML" | yq '.paraxial_result'
+$RAYWEAVE paraxial < "$YAML" | $RAYWEAVE query --yaml paraxial_result
 echo 'with chief data:'
-$RAYWEAVE paraxial < "$CHIEF_RESULT" | yq '.paraxial_result'
+$RAYWEAVE paraxial < "$CHIEF_RESULT" | $RAYWEAVE query --yaml paraxial_result
 
 echo
 echo "=== Raytrace diagram (SVG + PNG) ==="
@@ -196,8 +199,10 @@ echo "Written: $OUTDIR/us2645157.svg and $OUTDIR/us2645157.png"
 
 echo
 echo "=== TMM: single-layer AR coating (MgF2 on N-SK16, lambda=550nm) ==="
-$RAYWEAVE tmm < "$OUTDIR/ar-coating.yaml" | yq '.rs, .rp'
+AR=$($RAYWEAVE tmm < "$OUTDIR/ar-coating.yaml")
+echo "rs=$($RAYWEAVE query -r rs <<< "$AR")  rp=$($RAYWEAVE query -r rp <<< "$AR")"
 
 echo
 echo "=== TMM: 9-layer dielectric mirror (SiO2/TiO2 on glass) ==="
-$RAYWEAVE tmm < "$OUTDIR/dielectric-mirror.yaml" | yq '.rs, .rp'
+MIRROR=$($RAYWEAVE tmm < "$OUTDIR/dielectric-mirror.yaml")
+echo "rs=$($RAYWEAVE query -r rs <<< "$MIRROR")  rp=$($RAYWEAVE query -r rp <<< "$MIRROR")"

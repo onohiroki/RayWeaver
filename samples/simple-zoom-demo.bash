@@ -140,7 +140,7 @@ echo "=== Focal Length (EFL) ==="
 get_efl() {
   local yaml_file="$1" cfg="$2"
   cat "$yaml_file" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
-    | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d.get('paraxial_result',{}).get('focal_length',-1))"
+    | $RAYWEAVE query -r paraxial_result.focal_length
 }
 for cfg in config0 config1 config2; do
   efl_before=$(get_efl "$YAML" "$cfg")
@@ -157,21 +157,8 @@ printf "  %-8s %12s %12s\n" "Config" "RMS before" "RMS after"
 get_onaxis_rms() {
   local yaml_file="$1"
   local cfg="$2"
-  # Use python3 to safely parse the YAML chief output
-  python3 -c "
-import sys, yaml
-with open('/dev/stdin') as f:
-    data = yaml.safe_load(f)
-if data and 'chief_rays' in data:
-    for ray in data['chief_rays']:
-        if ray.get('field_angle') == 0 or abs(ray.get('field_angle', 1)) < 1e-10:
-            ss = ray.get('spot_stats', {})
-            rms = ss.get('rms_r', -1)
-            if rms > 0:
-                print(rms)
-                sys.exit(0)
-print(-1)
-" < <($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null)
+  $RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null \
+    | $RAYWEAVE query -r "chief_rays[field_angle=0].spot_stats.rms_r"
 }
 
 THRESHOLD=0.3
@@ -183,14 +170,14 @@ for cfg in config0 config1 config2; do
   rms_after=$(get_onaxis_rms "$RESULT" "$cfg")
   printf "  %-8s %12.4f %12.4f" "$cfg" "$rms_before" "$rms_after"
   if [ "$rms_before" != "-1" ] && [ "$rms_after" != "-1" ]; then
-    if [ "$(python3 -c "print('1' if $rms_after < $rms_before else '0')")" = "1" ]; then
+    if $RAYWEAVE query --gate "a < b" --set a="$rms_after" --set b="$rms_before" < /dev/null > /dev/null; then
       printf "   ✓"
     else
       printf "   ✗"
     fi
   fi
   echo
-  if [ "$rms_after" != "-1" ] && [ "$(python3 -c "print('1' if $rms_after >= $THRESHOLD else '0')")" = "1" ]; then
+  if [ "$rms_after" != "-1" ] && $RAYWEAVE query --gate "rms >= $THRESHOLD" --set rms="$rms_after" < /dev/null > /dev/null; then
     failed=true
   fi
 done
@@ -223,17 +210,7 @@ echo "  >>> Optimization passed: all configs on-axis RMS < $THRESHOLD mm" >> "$R
 get_gap12() {
   local yaml_file="$1"
   local cfg="$2"
-  python3 -c "
-import sys, yaml
-d = yaml.safe_load(open('$yaml_file'))
-for c in d.get('configs', []):
-    if c.get('id') == '$cfg':
-        for s in c['surfaces']:
-            if s['id'] == 2:
-                print(s['thickness'])
-                sys.exit(0)
-print(-1)
-"
+  $RAYWEAVE query -r "configs[id=$cfg].surfaces[id=2].thickness" < "$yaml_file"
 }
 
 GAP_TARGET=5.0
@@ -251,7 +228,7 @@ printf "  %-8s gap after  = %8.4f mm" "config0" "$gap_after"
   printf "  %-8s gap after  = %8.4f mm\n" "config0" "$gap_after"
   echo
 } >> "$RESULT_FILE"
-if [ "$gap_after" != "-1" ] && [ "$(python3 -c "print('1' if $gap_after < $GAP_TARGET else '0')")" = "1" ]; then
+if [ "$gap_after" != "-1" ] && $RAYWEAVE query --gate "gap < $GAP_TARGET" --set gap="$gap_after" < /dev/null > /dev/null; then
   echo "   ✗"
   echo "  >>> Optimization failed: config0 lens1-lens2 gap $(printf '%.4f' "$gap_after") mm < $GAP_TARGET mm" >> "$RESULT_FILE"
   exit 1

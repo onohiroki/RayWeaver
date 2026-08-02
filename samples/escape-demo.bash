@@ -84,15 +84,17 @@ $RAYWEAVE escape --verbose < "$YAML" > "$RESULT"
 echo
 
 echo "--- Local minima summary ---"
-python3 -c "
-import sys, yaml
-d = yaml.safe_load(sys.stdin)
-er = d.get('escape_result', {})
-print(f'  Best index: {er.get(\"best_index\")}  Best merit: {er.get(\"best_merit\", 0):.6e}')
-for m in er.get('minima', []):
-    mark = '*' if m.get('index') == er.get('best_index') else ' '
-    print(f'  {mark}[{m.get(\"index\")}] merit={m.get(\"merit\", 0):.6e}')
-" < "$RESULT" | tee "$RESULT_FILE"
+{
+  BEST_IDX=$($RAYWEAVE query -r escape_result.best_index < "$RESULT")
+  BEST_MERIT=$($RAYWEAVE query --printf '%.6e' escape_result.best_merit < "$RESULT")
+  echo "  Best index: $BEST_IDX  Best merit: $BEST_MERIT"
+  $RAYWEAVE query --each 'escape_result.minima[]:index,merit' --printf '%d %.6e' < "$RESULT" \
+    | while read -r idx merit; do
+        mark=" "
+        [ "$idx" = "$BEST_IDX" ] && mark="*"
+        printf "  %s[%s] merit=%s\n" "$mark" "$idx" "$merit"
+      done
+} | tee "$RESULT_FILE"
 echo
 
 echo "--- PNG diagrams ---"
@@ -102,12 +104,7 @@ $RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$YAML" | $RAYWEAVE trace 
 echo "Written: $OUTDIR/escape-demo-init.png"
 
 echo "=== Best-solution diagram ==="
-python3 -c "
-import sys, yaml
-d = yaml.safe_load(sys.stdin)
-d['chief'] = {'fields': [{'angle': 0.0, 'direction': [0, 1]}, {'angle': 16.0, 'direction': [0, 1]}, {'angle': 24.0, 'direction': [0, 1]}], 'reference_surface': 8, 'num_rays': 512, 'grid_type': 'hex', 'dump_map': False}
-yaml.safe_dump(d, sys.stdout, sort_keys=False)
-" < "$RESULT" | $RAYWEAVE chief --clear-aperture --shrink --ray-fan | $RAYWEAVE trace \
+$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$RESULT" | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/escape-demo-best.png" >/dev/null
 echo "Written: $OUTDIR/escape-demo-best.png"
 

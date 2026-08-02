@@ -12,9 +12,10 @@ set -euo pipefail
 # forward to the image (surface 14).
 #
 # Steps
-#   1. chief --clear-aperture --shrink : re-size lens diameters to the beam
+#   1. chief --clear-aperture --shrink --preserve-rays : re-size lens
+#      diameters to the beam while keeping the ghost/normal rays
 #   2. trace                           : trace the ghost + normal reference rays
-#   3. python                          : per-surface table + Fresnel intensities
+#   3. query                           : per-surface table + Fresnel intensities
 #   4. plot                            : SVG diagram of the ghost path
 #
 # How to read the result
@@ -77,116 +78,98 @@ echo "  - forward again to the image (surface 14)"
 echo
 
 # ── Re-adjust lens clear apertures to the beam footprint ──
-# `chief --clear-aperture --shrink` re-computes every surface's effective
-# diameter from the traced grid beams (the aperture stop keeps its diameter).
-# It replaces the `rays` section with its own chief rays, so the ghost/normal
-# rays are re-attached afterwards before tracing.
-TMP_ADJ="$(mktemp "${TMPDIR:-/tmp}/doublegauss-ghost-adjusted.XXXXXX.yaml")"
-trap 'rm -f "$TMP_ADJ"' EXIT
-echo "=== Re-adjusting lens effective diameters (chief --clear-aperture --shrink) ==="
-$RAYWEAVE chief --clear-aperture --shrink --clear-aperture-rays 1024 < "$YAML" > "$TMP_ADJ"
-python3 - "$TMP_ADJ" "$YAML" <<'PYEOF' | $RAYWEAVE trace > "$TRACE_RESULT"
-import sys
-import yaml
-
-adj = yaml.safe_load(open(sys.argv[1]))
-orig = yaml.safe_load(open(sys.argv[2]))
-adj["rays"] = orig["rays"]
-adj.pop("chief_rays", None)
-yaml.safe_dump(adj, sys.stdout, default_flow_style=None, sort_keys=False)
-PYEOF
+# `chief --clear-aperture --shrink --preserve-rays` re-computes every
+# surface's effective diameter from the traced grid beams (the aperture stop
+# keeps its diameter), while keeping the ghost/normal rays for the trace.
+echo "=== Re-adjusting lens effective diameters (chief --clear-aperture --shrink --preserve-rays) ==="
+$RAYWEAVE chief --clear-aperture --shrink --clear-aperture-rays 1024 --preserve-rays < "$YAML" \
+  | $RAYWEAVE trace > "$TRACE_RESULT"
 echo "  Written: $TRACE_RESULT"
 echo
 
 # ── Adjusted diameters ──
 echo "--- Effective diameters after adjustment ---"
-python3 - "$YAML" "$TRACE_RESULT" <<'PYEOF'
-import sys
-import yaml
-
-before = {s["id"]: s.get("diameter", 0) for s in yaml.safe_load(open(sys.argv[1]))["configs"][0]["surfaces"]}
-after = {s["id"]: s.get("diameter", 0) for s in yaml.safe_load(open(sys.argv[2]))["configs"][0]["surfaces"]}
-for sid in sorted(before):
-    if after.get(sid) != before.get(sid):
-        print("  s%-2d  %6.2f -> %6.2f mm" % (sid, before[sid], after[sid]))
-PYEOF
+while read -r sid before_d; do
+  after_d=$( $RAYWEAVE query --default 0 -r "configs[0].surfaces[id=$sid].diameter" < "$TRACE_RESULT" )
+  if $RAYWEAVE query --gate "abs(a-b) > 1e-6" --set a="$after_d" --set b="$before_d" < /dev/null > /dev/null; then
+    printf "  s%-2d  %6.2f -> %6.2f mm\n" "$sid" "$before_d" "$after_d"
+  fi
+done < <( $RAYWEAVE query --each 'configs[0].surfaces[]:id,diameter' --default 0 --printf '%d %f' < "$YAML" )
 echo
 
 # ── Per-surface table and ghost intensity ──
-python3 - "$TRACE_RESULT" > "$RESULT_FILE" <<'PYEOF'
-import sys
-import yaml
-
-d = yaml.safe_load(open(sys.argv[1]))
-paths = {r["id"]: r.get("path", []) for r in d.get("rays", {}).get("rays", [])}
-
-for r in d.get("results", []):
-    rid = r["id"]
-    print("ray: %s" % rid)
-    print("  path: %s" % paths.get(rid))
-    print("  %-3s %-9s %12s %12s %12s %10s %10s" %
-          ("surf", "interact", "y (mm)", "z (mm)", "thick", "Is", "Ip"))
-    prod_s, prod_p = 1.0, 1.0
-    reflect = []
-    for s in r.get("surfaces", []):
-        marker = ""
-        if s["interaction"] == "REFLECT":
-            marker = "  <-- ghost reflection"
-            reflect.append(s)
-        print("  %-3d %-9s %12.4f %12.4f %12.4f %10.4f %10.4f%s" %
-              (s["surface_id"], s["interaction"], s["position"][1], s["position"][2],
-               s["thickness"], s["intensity_s"], s["intensity_p"], marker))
-        prod_s *= s["intensity_s"]
-        prod_p *= s["intensity_p"]
-    if rid.startswith("ghost"):
-        refl_prod_s = 1.0
-        refl_prod_p = 1.0
-        for s in reflect:
-            refl_prod_s *= s["intensity_s"]
-            refl_prod_p *= s["intensity_p"]
-        print("  ghost relative intensity (product of Fresnel reflectances):")
-        print("    Is = %.3e   Ip = %.3e" % (refl_prod_s, refl_prod_p))
-    print("  cumulative intensity (all surfaces): Is = %.4e  Ip = %.4e" % (prod_s, prod_p))
-    print()
-print()
-print("=== How to interpret this result ===")
-print("- Two rays through the re-sized double-Gauss:")
-print("  - ghost_reflect_s4_s2: forward to surface 4, reflect there, reversed")
-print("    refraction through surface 3, reflect at surface 2, then forward to")
-print("    the image (surface 14).")
-print("  - normal_reference: the same field's normal refraction-only ray.")
-print("- The two REFLECT rows are the ghost reflections; every other surface is")
-print("  a Fresnel transmission (Is/Ip ~ 0.94).")
-print("- Ghost relative intensity (Is/Ip) is the product of the two Fresnel")
-print("  reflectances (~0.004): the ghost is a few hundredths of one percent of")
-print("  the normal image brightness.")
-print("- Cumulative intensity: transmitted light left after all surfaces")
-print("  (~0.48 for the normal ray vs ~0.0015 for the ghost).")
-PYEOF
+{
+  for ridx in 0 1; do
+    id=$( $RAYWEAVE query -r "results[$ridx].id" < "$TRACE_RESULT" )
+    path=$( $RAYWEAVE query -r "rays.rays[$ridx].path" < "$TRACE_RESULT" )
+    path="${path// /, }"
+    echo "ray: $id"
+    echo "  path: $path"
+    printf "  %-3s %-9s %12s %12s %12s %10s %10s\n" \
+      "surf" "interact" "y (mm)" "z (mm)" "thick" "Is" "Ip"
+    $RAYWEAVE query --each "results[$ridx].surfaces[]:surface_id,interaction,position[1],position[2],thickness,intensity_s,intensity_p" \
+        --printf '%d %s %f %f %f %f %f' < "$TRACE_RESULT" \
+      | while read -r sid inter y z thk is ip; do
+          marker=""
+          [ "$inter" = "REFLECT" ] && marker="  <-- ghost reflection"
+          printf "  %-3s %-9s %12.4f %12.4f %12.4f %10.4f %10.4f%s\n" \
+            "$sid" "$inter" "$y" "$z" "$thk" "$is" "$ip" "$marker"
+        done
+    is_refl=$( $RAYWEAVE query --product "results[$ridx].surfaces[interaction=REFLECT].intensity_s" --printf '%.3e' < "$TRACE_RESULT" )
+    ip_refl=$( $RAYWEAVE query --product "results[$ridx].surfaces[interaction=REFLECT].intensity_p" --printf '%.3e' < "$TRACE_RESULT" )
+    cum_s=$( $RAYWEAVE query --product "results[$ridx].surfaces[].intensity_s" --printf '%.4e' < "$TRACE_RESULT" )
+    cum_p=$( $RAYWEAVE query --product "results[$ridx].surfaces[].intensity_p" --printf '%.4e' < "$TRACE_RESULT" )
+    case "$id" in
+      ghost*)
+        echo "  ghost relative intensity (product of Fresnel reflectances):"
+        echo "    Is = $is_refl   Ip = $ip_refl"
+        ;;
+    esac
+    echo "  cumulative intensity (all surfaces): Is = $cum_s  Ip = $cum_p"
+    echo
+  done
+  echo
+  echo "=== How to interpret this result ==="
+  echo "- Two rays through the re-sized double-Gauss:"
+  echo "  - ghost_reflect_s4_s2: forward to surface 4, reflect there, reversed"
+  echo "    refraction through surface 3, reflect at surface 2, then forward to"
+  echo "    the image (surface 14)."
+  echo "  - normal_reference: the same field's normal refraction-only ray."
+  echo "- The two REFLECT rows are the ghost reflections; every other surface is"
+  echo "  a Fresnel transmission (Is/Ip ~ 0.94)."
+  echo "- Ghost relative intensity (Is/Ip) is the product of the two Fresnel"
+  echo "  reflectances (~0.004): the ghost is a few hundredths of one percent of"
+  echo "  the normal image brightness."
+  echo "- Cumulative intensity: transmitted light left after all surfaces"
+  echo "  (~0.48 for the normal ray vs ~0.0015 for the ghost)."
+} > "$RESULT_FILE"
 echo "Written: $RESULT_FILE"
 echo
 
 # ── Console summary ──
 echo "--- Console summary ---"
-python3 - "$TRACE_RESULT" <<'PYEOF'
-import sys
-import yaml
-
-d = yaml.safe_load(open(sys.argv[1]))
-for r in d.get("results", []):
-    if not r["id"].startswith("ghost"):
-        continue
-    err = r.get("error")
-    status = "traced OK" if not err else "error: %s" % err
-    print("  ghost ray: %s" % status)
-    for s in r.get("surfaces", []):
-        if s["interaction"] == "REFLECT":
-            print("    reflect at surface %-2d  Is = %.4f  Ip = %.4f" %
-                  (s["surface_id"], s["intensity_s"], s["intensity_p"]))
-    last = r.get("surfaces", [])[-1]
-    print("    final hit: surface %d at (y, z) = (%.2f, %.2f) mm" %
-          (last["surface_id"], last["position"][1], last["position"][2]))
-PYEOF
+for ridx in 0 1; do
+  id=$( $RAYWEAVE query -r "results[$ridx].id" < "$TRACE_RESULT" )
+  case "$id" in
+    ghost*)
+      err=$( $RAYWEAVE query --default '' -r "results[$ridx].error" < "$TRACE_RESULT" )
+      if [ -n "$err" ]; then
+        echo "  ghost ray: error: $err"
+      else
+        echo "  ghost ray: traced OK"
+      fi
+      $RAYWEAVE query --each "results[$ridx].surfaces[interaction=REFLECT]:surface_id,intensity_s,intensity_p" \
+          --printf '%d %f %f' < "$TRACE_RESULT" \
+        | while read -r sid is ip; do
+            printf "    reflect at surface %-2d  Is = %.4f  Ip = %.4f\n" "$sid" "$is" "$ip"
+          done
+      last_sid=$( $RAYWEAVE query -r "results[$ridx].surfaces[-1].surface_id" < "$TRACE_RESULT" )
+      last_y=$( $RAYWEAVE query -r "results[$ridx].surfaces[-1].position[1]" < "$TRACE_RESULT" )
+      last_z=$( $RAYWEAVE query -r "results[$ridx].surfaces[-1].position[2]" < "$TRACE_RESULT" )
+      printf "    final hit: surface %d at (y, z) = (%.2f, %.2f) mm\n" "$last_sid" "$last_y" "$last_z"
+      ;;
+  esac
+done
 echo
 
 # ── Diagram ──

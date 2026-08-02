@@ -19,8 +19,7 @@ set -uo pipefail
 # How to read the result
 #   - Per-wavelength RMS row spread = colour-correction quality.
 #   - Glass table (script console): model2/3 nd-vd moves from wrong to sensible.
-#   - Gates: on-axis RMS < 0.3 mm; optimizer-reported VF >= 0.5 on the
-#     10/16 deg fields.
+#   - Gates: on-axis RMS < 0.3 mm; VF >= 0.5 on the 10/16 deg fields.
 # =============================================================================
 
 # Resolve the script's own directory so the demo runs from any CWD
@@ -127,10 +126,9 @@ $RAYWEAVE optimize --verbose --log "$OPT_LOG" < "$YAML" > "$OPT_RESULT"
 echo
 echo "--- Optimization results ---"
 echo -n "  Status:      "
-grep '"status"' "$OPT_LOG" | tail -1 | sed 's/.*"status":"//;s/".*//'
+$RAYWEAVE query --jsonl --where 'has("status")' -r status < "$OPT_LOG"
 echo -n "  Iterations:  "
-grep "finalLog\|status" "$OPT_LOG" | tail -1 | sed 's/.*"iter"://;s/,.*//'
-grep -E "^=== |Status|Merit|Improvement" "$OPT_RESULT" 2>/dev/null | head -10
+$RAYWEAVE query --jsonl --where 'has("status")' -r iter < "$OPT_LOG"
 echo
 
 echo "--- Glass before → after ---"
@@ -138,7 +136,7 @@ extract_glass_value() {
   local yaml="$1"
   local label="$2"
   local field="$3"
-  grep -A3 "name: \"$label\"" "$yaml" | grep "$field:" | sed 's/.*'"$field"': *//' | head -1
+  $RAYWEAVE query -r "glass_catalog.entries[name=$label].$field" < "$yaml"
 }
 INIT_ND1=$(extract_glass_value "$YAML" model1 nd)
 INIT_VD1=$(extract_glass_value "$YAML" model1 vd)
@@ -146,15 +144,12 @@ INIT_ND2=$(extract_glass_value "$YAML" model2 nd)
 INIT_VD2=$(extract_glass_value "$YAML" model2 vd)
 INIT_ND3=$(extract_glass_value "$YAML" model3 nd)
 INIT_VD3=$(extract_glass_value "$YAML" model3 vd)
-# Optimized glasses: extract the last 3 nd/vd pairs from the result
-OPT_NDS=$(grep -E "^\s+nd: [0-9]" "$OPT_RESULT" | tail -3)
-OPT_VDS=$(grep -E "^\s+vd: [0-9]" "$OPT_RESULT" | tail -3)
-OPT_ND1=$(echo "$OPT_NDS" | sed -n '1p' | sed 's/.*nd: *//')
-OPT_VD1=$(echo "$OPT_VDS" | sed -n '1p' | sed 's/.*vd: *//')
-OPT_ND2=$(echo "$OPT_NDS" | sed -n '2p' | sed 's/.*nd: *//')
-OPT_VD2=$(echo "$OPT_VDS" | sed -n '2p' | sed 's/.*vd: *//')
-OPT_ND3=$(echo "$OPT_NDS" | sed -n '3p' | sed 's/.*nd: *//')
-OPT_VD3=$(echo "$OPT_VDS" | sed -n '3p' | sed 's/.*vd: *//')
+OPT_ND1=$(extract_glass_value "$OPT_RESULT" model1 nd)
+OPT_VD1=$(extract_glass_value "$OPT_RESULT" model1 vd)
+OPT_ND2=$(extract_glass_value "$OPT_RESULT" model2 nd)
+OPT_VD2=$(extract_glass_value "$OPT_RESULT" model2 vd)
+OPT_ND3=$(extract_glass_value "$OPT_RESULT" model3 nd)
+OPT_VD3=$(extract_glass_value "$OPT_RESULT" model3 vd)
 echo "  model1: nd $INIT_ND1 → $OPT_ND1  vd $INIT_VD1 → $OPT_VD1"
 echo "  model2: nd $INIT_ND2 → $OPT_ND2  vd $INIT_VD2 → $OPT_VD2"
 echo "  model3: nd $INIT_ND3 → $OPT_ND3  vd $INIT_VD3 → $OPT_VD3"
@@ -163,27 +158,26 @@ echo
 echo "--- Surface curvatures and diameters ---"
 echo "  Surface  curv       diameter  material"
 for ID in 1 2 3 4 5 6; do
-  BLOCK=$(grep -A8 "id: $ID$" "$OPT_RESULT" 2>/dev/null || true)
-  CV=$(echo "$BLOCK" | grep -E "curvature:|radius:" | sed 's/.*: //' 2>/dev/null || echo "?")
-  DIAM=$(echo "$BLOCK" | grep "diameter:" | sed 's/.*diameter: //' 2>/dev/null || echo "?")
-  MAT=$(echo "$BLOCK" | grep "material:" | sed 's/.*material: //' 2>/dev/null || echo "?")
+  CV=$( $RAYWEAVE query --default '?' -r "configs[0].surfaces[id=$ID].curvature" < "$OPT_RESULT" )
+  DIAM=$( $RAYWEAVE query --default '?' -r "configs[0].surfaces[id=$ID].diameter" < "$OPT_RESULT" )
+  MAT=$( $RAYWEAVE query --default '?' -r "configs[0].surfaces[id=$ID].material" < "$OPT_RESULT" )
   printf "  %-7s %-10s %-8s  %s\n" "S$ID" "$CV" "${DIAM:-?}" "$MAT"
 done
 echo
 
 # Compute diffraction limit (best-effort)
-FNO=$($RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | grep "inf_conj_image_space_f_number" | sed 's/.*f_number: //' || echo "")
-if [ -n "$FNO" ]; then
-  AIRY=$(python3 -c "print('%.6f' % (1.22 * 0.0005876 * $FNO))" 2>/dev/null || echo "0")
-  MERIT=$(grep '"merit"' "$OPT_LOG" 2>/dev/null | tail -2 | head -1 | sed 's/.*"merit"://;s/,.*//' || echo "0")
+FNO=$($RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | $RAYWEAVE query -r paraxial_result.inf_conj_image_space_f_number)
+if [ "$FNO" != "-1" ]; then
+  AIRY=$($RAYWEAVE query --set fno="$FNO" --expr '1.22*0.0005876*fno' --printf '%.6f' < /dev/null 2>/dev/null || echo "0")
+  MERIT=$($RAYWEAVE query --jsonl --where 'has("merit")' -r merit < "$OPT_LOG" 2>/dev/null || echo "0")
   NTERMS=12
-  RMS_R=$(python3 -c "import math; print('%.6f' % math.sqrt($MERIT / $NTERMS))" 2>/dev/null || echo "0")
+  RMS_R=$($RAYWEAVE query --set m="$MERIT" --set nt="$NTERMS" --expr 'sqrt(m/nt)' --printf '%.6f' < /dev/null 2>/dev/null || echo "0")
   if [ "$RMS_R" != "0" ]; then
     echo "--- Diffraction limit ---"
     printf "  F-number:         %s\n" "$FNO"
-    printf "  Airy disk radius: %.6f mm (1.22λF#)\n" "$AIRY"
-    printf "  RMS spot radius:  %.6f mm\n" "$RMS_R"
-    RATIO=$(python3 -c "print('%.1f' % ($RMS_R / $AIRY))" 2>/dev/null || echo "0")
+    printf "  Airy disk radius: %s mm (1.22λF#)\n" "$AIRY"
+    printf "  RMS spot radius:  %s mm\n" "$RMS_R"
+    RATIO=$($RAYWEAVE query --set r="$RMS_R" --set a="$AIRY" --expr 'r/a' --printf '%.1f' < /dev/null 2>/dev/null || echo "0")
     echo "  Spot / Airy:      ${RATIO}x"
     echo
   fi
@@ -192,15 +186,30 @@ fi
 # ── Spot RMS comparison (before vs after) ──
 BEFORE_CHIEF=$($RAYWEAVE chief < "$YAML" 2>/dev/null)
 AFTER_CHIEF=$($RAYWEAVE chief < "$OPT_RESULT" 2>/dev/null)
+rms_field() {
+  local chief="$1" fi="$2"
+  echo "$chief" | $RAYWEAVE query -r "chief_rays[$fi].spot_stats.rms_r"
+}
+vf_chief() {
+  local chief="$1" fi="$2"
+  local n d
+  n=$(echo "$chief" | $RAYWEAVE query --count "chief_rays[$fi].grid_points[].image_x")
+  d=$(echo "$chief" | $RAYWEAVE query --len "chief_rays[$fi].grid_points")
+  if [ "$d" = "-1" ] || [ "$d" = "0" ]; then
+    echo "-1"
+  else
+    $RAYWEAVE query --set n="$n" --set d="$d" --expr 'n/d' < /dev/null
+  fi
+}
 {
   echo "=== Spot RMS Comparison (primary λ=587.6nm) ==="
   printf "  %-8s %6s  %10s  %10s\n" "Phase" "Field" "RMS before" "RMS after"
   printf "  %-8s %6s  %10s  %10s\n" "-----" "-----" "--------" "--------"
   for fi in 0 1 2; do
-    rms_before=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[$fi].get('spot_stats',{}).get('rms_r',-1))")
-    rms_after=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[$fi].get('spot_stats',{}).get('rms_r',-1))")
+    rms_before=$(rms_field "$BEFORE_CHIEF" "$fi")
+    rms_after=$(rms_field "$AFTER_CHIEF" "$fi")
     printf "  %-8s %6s  %10.4f  %10.4f" "optimize" "f$fi" "$rms_before" "$rms_after"
-    if [ "$(python3 -c "print('1' if $rms_after < $rms_before else '0')")" = "1" ]; then
+    if $RAYWEAVE query --gate "a < b" --set a="$rms_after" --set b="$rms_before" < /dev/null > /dev/null; then
       echo "   ✓"
     else
       echo "   ✗"
@@ -221,17 +230,7 @@ AFTER_CHIEF=$($RAYWEAVE chief < "$OPT_RESULT" 2>/dev/null)
   for fi in 0 1 2; do
     printf "  %-6s" "f$fi"
     for wl in 0.0004358 0.0004861 0.0005876 0.0006563; do
-      r=$(echo "$AFTER_CHIEF" | python3 -c "
-import sys,yaml
-d=yaml.safe_load(sys.stdin)
-cr=d['chief_rays']
-wls=cr[$fi].get('wavelengths',[])
-for w in wls:
-    if abs(w['value']-$wl)<1e-12:
-        print(w['spot_stats'].get('rms_r',-1))
-        sys.exit(0)
-print(-1)
-")
+      r=$(echo "$AFTER_CHIEF" | $RAYWEAVE query -r "chief_rays[$fi].wavelengths[value=$wl].spot_stats.rms_r")
       if [ "$r" != "-1" ]; then
         printf "  %10.4f" "$r"
       else
@@ -250,17 +249,7 @@ print(-1)
 get_reported_vf() {
   local yaml_file="$1"
   local field="$2"
-  python3 -c "
-import sys, yaml
-d = yaml.safe_load(open('$yaml_file'))
-or_ = d.get('opt_results')
-if not or_:
-    print(-1); sys.exit(0)
-for c in or_.get('constraints', []):
-    if c.get('measure') == 'vignetting_factor' and c.get('field') == $field:
-        print(c.get('value', -1)); sys.exit(0)
-print(-1)
-"
+  $RAYWEAVE query -r "opt_results.constraints[measure=vignetting_factor][field=$field].value" < "$yaml_file"
 }
 
 {
@@ -270,11 +259,11 @@ print(-1)
   printf "  %-8s %6s  %10s  %10s  %10s\n" "Phase" "Field" "VF bef" "VF aft(rep)" "VF aft(chief)"
   printf "  %-8s %6s  %10s  %10s  %10s\n" "-----" "-----" "-------" "----------" "----------"
   for fi in 0 1 2; do
-    vf_before=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
+    vf_before=$(vf_chief "$BEFORE_CHIEF" "$fi")
     vf_reported=$(get_reported_vf "$OPT_RESULT" "$fi")
-    vf_chief=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; p=r[$fi].get('grid_points',[]); ok=[g for g in p if g.get('image_x') is not None]; print(len(ok)/len(p) if p else -1)")
+    vf_chief_val=$(vf_chief "$AFTER_CHIEF" "$fi")
     if [ "$vf_reported" = "-1" ]; then vf_reported="-"; fi
-    printf "  %-8s %6s  %10.4f  %10s  %10.4f\n" "optimize" "f$fi" "$vf_before" "$vf_reported" "$vf_chief"
+    printf "  %-8s %6s  %10.4f  %10s  %10.4f\n" "optimize" "f$fi" "$vf_before" "$vf_reported" "$vf_chief_val"
   done
   echo
 } | tee -a "$RESULT_FILE"
@@ -282,8 +271,8 @@ print(-1)
 # ── On-axis RMS threshold check ──
 THRESHOLD=0.3
 printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this)\n"
-rms_onaxis=$(echo "$AFTER_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[0].get('spot_stats',{}).get('rms_r',-1))")
-if [ "$rms_onaxis" != "-1" ] && [ "$(python3 -c "print('1' if $rms_onaxis >= $THRESHOLD else '0')")" = "1" ]; then
+rms_onaxis=$(rms_field "$AFTER_CHIEF" 0)
+if [ "$rms_onaxis" != "-1" ] && $RAYWEAVE query --gate "rms >= $THRESHOLD" --set rms="$rms_onaxis" < /dev/null > /dev/null; then
   msg="  >>> Optimization failed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
   echo "$msg" | tee -a "$RESULT_FILE"
   exit 1
@@ -297,7 +286,7 @@ VIG_THRESHOLD=0.5
 printf "  (threshold = $VIG_THRESHOLD — optimizer-reported VF at 10deg/16deg must be >= this)\n"
 for fi in 1 2; do
   vf=$(get_reported_vf "$OPT_RESULT" "$fi")
-  if [ "$vf" != "-1" ] && [ "$(python3 -c "print('1' if $vf < $VIG_THRESHOLD else '0')")" = "1" ]; then
+  if [ "$vf" != "-1" ] && $RAYWEAVE query --gate "vf < $VIG_THRESHOLD" --set vf="$vf" < /dev/null > /dev/null; then
     msg="  >>> Optimization failed: field $fi vignetting factor = $(printf '%.4f' "$vf") < $VIG_THRESHOLD"
     echo "$msg" | tee -a "$RESULT_FILE"
     exit 1
@@ -321,7 +310,7 @@ $RAYWEAVE chief --clear-aperture --ray-fan < "$OPT_RESULT" 2>/dev/null \
 echo "Written: $OUTDIR/glass-optimize-opt.png"
 echo
 
-if command -v yq &>/dev/null && command -v gnuplot &>/dev/null 2>&1; then
+if command -v gnuplot &>/dev/null 2>&1; then
 
 echo "=== Spot diagrams (4 wavelengths, before vs after) ==="
 
@@ -349,8 +338,9 @@ for wli in 0 1 2 3; do
     CHIEF_OUT="$OUTDIR/glass-chief-${phase}-wl${wli}.yaml"
     $RAYWEAVE chief --wl "$wl" < "$INPUT" > "$CHIEF_OUT" 2>/dev/null || true
     for fi in 0 1 2; do
-      yq eval ".chief_rays[$fi].grid_points[] | select(.image_x != null) | [.image_x, .image_y, $wli]" \
-        "$CHIEF_OUT" -o=csv 2>/dev/null | tail -n +2 \
+      $RAYWEAVE query --csv "chief_rays[$fi].grid_points[]:image_x,image_y" \
+        < "$CHIEF_OUT" 2>/dev/null \
+        | sed "s/$/,$wli/" \
         >> "$OUTDIR/glass-spot-${phase}-f${fi}-all.txt" || true
     done
   done
@@ -424,7 +414,7 @@ done
 echo
 
 else
-  echo "  (spot diagrams skipped: yq or gnuplot not available)"
+  echo "  (spot diagrams skipped: gnuplot not available)"
 fi
 
 echo "=== Iteration log saved: $OPT_LOG ==="

@@ -91,7 +91,7 @@ echo
 get_parax() {
   local key=$1
   $RAYWEAVE paraxial < "$2" 2>/dev/null \
-    | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d.get('paraxial_result',{}).get('$key',-1))"
+    | $RAYWEAVE query -r "paraxial_result.$key"
 }
 
 EFL_BEFORE=$(get_parax focal_length "$YAML")
@@ -115,7 +115,7 @@ FNO_AFTER=$(get_parax image_space_f_number "$SCALED")
 } | tee "$RESULT_FILE"
 
 # Check the EFL landed on target.
-if [ "$(python3 -c "print('1' if abs($EFL_AFTER - 50.0) <= 0.01 else '0')")" = "1" ]; then
+if $RAYWEAVE query --gate "abs(efl-50.0)<=0.01" --set efl="$EFL_AFTER" < /dev/null; then
   echo "  >>> Scale passed: EFL = $EFL_AFTER mm (~50 mm)" | tee -a "$RESULT_FILE"
 else
   echo "  >>> Scale failed: EFL = $EFL_AFTER mm (expected 50)" | tee -a "$RESULT_FILE"

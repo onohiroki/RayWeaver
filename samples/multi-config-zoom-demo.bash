@@ -18,8 +18,7 @@ set -euo pipefail
 #
 # How to read the result
 #   - Every config must pass all gates: on-axis RMS < 0.03 mm,
-#     EPD = 20 +/- 0.1 mm, optimizer-reported VF >= 0.5 on the 10/15 mm
-#     image-height fields.
+#     EPD = 20 +/- 0.1 mm, VF >= 0.5 on the 10/15 mm image-height fields.
 #   - EFL differs per config because the lens zooms; EPD stays pinned at 20.
 # =============================================================================
 
@@ -81,12 +80,11 @@ cat >> "$RESULT_FILE" <<'EOF'
   to 20 mm in every config (before and after).
 - EFL (mm) per config differs because the lens changes focal length as it
   zooms, while the pupil diameter is held constant.
-- Vignetting factor (VF): fraction of the pupil beam that transmits the
-  system; 1.0 = full aperture. The pass gate uses the value the optimizer
-  enforced (opt_results.constraints vignetting_factor, reported in the
-  result YAML); "VF aft(chief)" is the chief-grid reference measurement.
+- Vignetting factor (VF): fraction of pupil-grid rays that transmit the
+  system. 1.0000 = full aperture; a value like 0.4 means the beam is clipped
+  hard (vignetting) by a clear aperture.
 - Pass gates: on-axis RMS < 0.03 mm, EPD = 20 +/- 0.1 mm, and
-  optimizer-reported VF >= 0.5 on the 10/15 mm image-height fields.
+  VF >= 0.5 on the 10/15 mm image-height fields.
 EOF
 }
 trap append_interpretation EXIT
@@ -117,17 +115,8 @@ for cfg in config0 config1 config2; do
     [ "$label" = "Before" ] && src="$YAML" || src="$RESULT"
     echo "    $label:"
     cat "$src" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
-      | awk '
-        BEGIN{ang=""; in_spot=0}
-        /field_angle:/{ ang = $NF }
-        /spot_stats:/{ in_spot = 1; rms = "" }
-        in_spot && /rms_r:/{ rms = $NF }
-        in_spot && /traced_rays:/ && rms != "" {
-          tr = $NF
-          if (tr + 0 > 0)
-            printf "      field %.3f° RMS=%.4fmm (%d rays)\n", ang, rms + 0, tr
-          in_spot = 0
-        }'
+      | $RAYWEAVE query --each 'chief_rays[]:field_angle,spot_stats.rms_r,spot_stats.traced_rays' \
+          --printf '      field %.3f° RMS=%.4fmm (%d rays)'
   done
 done
 echo
@@ -166,22 +155,20 @@ echo
   for cfg in config0 config1 config2; do
     # Extract field angles and RMS before/after
     bef=$(cat "$YAML" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
-      | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)printf "%.3f %.4f\n", ang, r; in_spot=0}')
+      | $RAYWEAVE query --each 'chief_rays[]:field_angle,spot_stats.rms_r' --printf '%.3f %.4f')
     aft=$(cat "$RESULT" | $RAYWEAVE chief --config "$cfg" 2>/dev/null \
-      | awk 'BEGIN{ang=""; r=0} /field_angle:/{ang=$NF} /spot_stats:/{in_spot=1; r=0} in_spot&&/rms_r:/{r=$NF} in_spot&&/traced_rays:/{if(r+0>0 && $NF+0>0)printf "%.3f %.4f\n", ang, r; in_spot=0}')
+      | $RAYWEAVE query --each 'chief_rays[]:field_angle,spot_stats.rms_r' --printf '%.3f %.4f')
     efl=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
-      | awk -F': ' '/focal_length:/{printf "%.1f",$2; exit}')
+      | $RAYWEAVE query --printf '%.1f' paraxial_result.focal_length)
     epd_bef=$(cat "$YAML" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
-      | awk -F': ' '/entrance_pupil_diameter:/{printf "%.3f",$2; exit}')
+      | $RAYWEAVE query --printf '%.3f' paraxial_result.entrance_pupil_diameter)
     epd_aft=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
-      | awk -F': ' '/entrance_pupil_diameter:/{printf "%.3f",$2; exit}')
+      | $RAYWEAVE query --printf '%.3f' paraxial_result.entrance_pupil_diameter)
     # Show each field with before/after RMS + EPD on the header line
     line_no=0
     while IFS= read -r bline; do
-      aline=$(echo "$aft" | sed -n "$((line_no+1))p")
-      fa=$(echo "$bline" | awk '{print $1}')
-      br=$(echo "$bline" | awk '{print $2}')
-      ar=$(echo "$aline" | awk '{print $2}')
+      read -r fa br <<< "$bline"
+      read -r _fa2 ar <<< "$(echo "$aft" | sed -n "$((line_no+1))p")"
       if [ "$line_no" -eq 0 ]; then
         printf "  %-8s %5s°  %8.4f  %8.4f  %7.3f  %7.3f    EFL=%smm\n" "$cfg" "$fa" "$br" "$ar" "$epd_bef" "$epd_aft" "$efl"
       else
@@ -189,7 +176,6 @@ echo
       fi
       line_no=$((line_no + 1))
     done <<< "$bef"
-
   done
   echo
 } | tee -a "$RESULT_FILE"
@@ -202,27 +188,15 @@ printf "  (threshold = $THRESHOLD mm — all configs on-axis RMS must be below t
 get_onaxis_rms() {
   local yaml_file="$1"
   local cfg="$2"
-  python3 -c "
-import sys, yaml
-with open('/dev/stdin') as f:
-    data = yaml.safe_load(f)
-if data and 'chief_rays' in data:
-    for ray in data['chief_rays']:
-        if ray.get('field_angle') == 0 or abs(ray.get('field_angle', 1)) < 1e-10:
-            ss = ray.get('spot_stats', {})
-            rms = ss.get('rms_r', -1)
-            if rms > 0:
-                print(rms)
-                sys.exit(0)
-print(-1)
-" < <($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null)
+  $RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null \
+    | $RAYWEAVE query -r "chief_rays[field_angle=0].spot_stats.rms_r"
 }
 
 failed=false
 for cfg in config0 config1 config2; do
   rms_after=$(get_onaxis_rms "$RESULT" "$cfg")
   printf "  %-8s on-axis RMS = %8.4f mm" "$cfg" "$rms_after"
-  if [ "$rms_after" != "-1" ] && [ "$(python3 -c "print('1' if $rms_after >= $THRESHOLD else '0')")" = "1" ]; then
+  if [ "$rms_after" != "-1" ] && $RAYWEAVE query --gate "rms >= $THRESHOLD" --set rms="$rms_after" < /dev/null > /dev/null; then
     echo "   ✗"
     failed=true
   else
@@ -235,49 +209,28 @@ get_vf() {
   local yaml_file="$1"
   local cfg="$2"
   local field="$3"
-  python3 -c "
-import sys, yaml
-d = yaml.safe_load(sys.stdin)
-r = d['chief_rays']
-p = r[$field].get('grid_points', [])
-ok = [g for g in p if g.get('image_x') is not None]
-print(len(ok)/len(p) if p else -1)
-" < <($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null)
-}
-
-# get_reported_vf reads the vignetting factor the optimizer enforced, as
-# reported in opt_results.constraints of the optimize output (the metric the
-# DLS constraint was evaluated on; this is what the pass gate checks).
-get_reported_vf() {
-  local yaml_file="$1"
-  local cfg="$2"
-  local field="$3"
-  python3 -c "
-import sys, yaml
-d = yaml.safe_load(open('$yaml_file'))
-or_ = d.get('opt_results')
-if not or_:
-    print(-1); sys.exit(0)
-for c in or_.get('constraints', []):
-    if c.get('measure') == 'vignetting_factor' and c.get('field') == $field and c.get('config') == '$cfg':
-        print(c.get('value', -1)); sys.exit(0)
-print(-1)
-"
+  local n d
+  n=$($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null \
+      | $RAYWEAVE query --count "chief_rays[$field].grid_points[].image_x")
+  d=$($RAYWEAVE chief --config "$cfg" < "$yaml_file" 2>/dev/null \
+      | $RAYWEAVE query --len "chief_rays[$field].grid_points")
+  if [ "$d" = "-1" ] || [ "$d" = "0" ]; then
+    echo "-1"
+  else
+    $RAYWEAVE query --set n="$n" --set d="$d" --expr 'n/d' < /dev/null
+  fi
 }
 
 {
-  echo "=== Vignetting Factor (per config, primary λ=587.6nm) ==="
-  echo "  (VF bef / aft(chief) = fraction of chief pupil-grid rays transmitted;"
-  echo "   VF aft(report) = vignetting factor the optimizer enforced — the pass gate)"
-  printf "  %-8s %6s  %10s  %10s  %10s\n" "Config" "Field" "VF bef" "VF aft(rep)" "VF aft(chief)"
-  printf "  %-8s %6s  %10s  %10s  %10s\n" "------" "-----" "-------" "----------" "----------"
+  echo "=== Vignetting Factor Comparison (per config, primary λ=587.6nm) ==="
+  echo "  (fraction of pupil-grid rays that transmit the system)"
+  printf "  %-8s %6s  %10s  %10s\n" "Config" "Field" "VF before" "VF after"
+  printf "  %-8s %6s  %10s  %10s\n" "------" "-----" "--------" "--------"
   for cfg in config0 config1 config2; do
     for fi in 0 1 2; do
       vf_before=$(get_vf "$YAML" "$cfg" "$fi")
-      vf_reported=$(get_reported_vf "$RESULT" "$cfg" "$fi")
-      vf_chief=$(get_vf "$RESULT" "$cfg" "$fi")
-      if [ "$vf_reported" = "-1" ]; then vf_reported="-"; fi
-      printf "  %-8s %6s  %10.4f  %10s  %10.4f\n" "$cfg" "f$fi" "$vf_before" "$vf_reported" "$vf_chief"
+      vf_after=$(get_vf "$RESULT" "$cfg" "$fi")
+      printf "  %-8s %6s  %10.4f  %10.4f\n" "$cfg" "f$fi" "$vf_before" "$vf_after"
     done
   done
   echo
@@ -290,10 +243,9 @@ echo "=== Entrance pupil diameter threshold check ==="
 printf "  (target = $EPD_TARGET mm ± $EPD_TOL — all configs EPD must be within this)\n"
 for cfg in config0 config1 config2; do
   epd=$(cat "$RESULT" | $RAYWEAVE paraxial --config "$cfg" 2>/dev/null \
-    | awk -F': ' '/entrance_pupil_diameter:/{printf "%.4f",$2; exit}')
-  epd_ok=$(echo "$epd" | python3 -c "import sys; v=float(sys.stdin.read()); print('1' if abs(v-$EPD_TARGET)<=$EPD_TOL else '0')")
+    | $RAYWEAVE query -r paraxial_result.entrance_pupil_diameter)
   printf "  %-8s EPD = %8.4f mm" "$cfg" "$epd"
-  if [ "$epd_ok" = "1" ]; then
+  if $RAYWEAVE query --gate "abs(epd-$EPD_TARGET)<=$EPD_TOL" --set epd="$epd" < /dev/null > /dev/null; then
     echo "   ✓"
   else
     echo "   ✗"
@@ -301,15 +253,15 @@ for cfg in config0 config1 config2; do
   fi
 done
 
-# ── Vignetting threshold check (off-axis fields; gate on the optimizer-reported VF) ──
+# ── Vignetting threshold check (off-axis fields must keep >= 50% of center beam) ──
 VIG_THRESHOLD=0.5
 echo "=== Vignetting factor threshold check ==="
-printf "  (threshold = $VIG_THRESHOLD — optimizer-reported VF on 10mm / 15mm image-height fields must be >= this)\n"
+printf "  (threshold = $VIG_THRESHOLD — 10mm / 15mm image-height fields must keep >= this)\n"
 for cfg in config0 config1 config2; do
   for fi in 1 2; do
-    vf=$(get_reported_vf "$RESULT" "$cfg" "$fi")
+    vf=$(get_vf "$RESULT" "$cfg" "$fi")
     printf "  %-8s field %d VF = %8.4f" "$cfg" "$fi" "$vf"
-    if [ "$vf" != "-1" ] && [ "$(python3 -c "print('1' if $vf < $VIG_THRESHOLD else '0')")" = "1" ]; then
+    if [ "$vf" != "-1" ] && $RAYWEAVE query --gate "vf < $VIG_THRESHOLD" --set vf="$vf" < /dev/null > /dev/null; then
       echo "   ✗"
       failed=true
     else

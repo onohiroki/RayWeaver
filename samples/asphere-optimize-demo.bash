@@ -8,7 +8,8 @@ set -euo pipefail
 # asphere coefficients (conic, a4, a6) of the front surface of a singlet.
 #
 # Steps
-#   1. Stage 1 (spherical): optimize curvatures only (asphere vars fixed at 0)
+#   1. Stage 1 (spherical): optimize curvatures only (asphere vars excluded
+#      via --exclude-param)
 #   2. Stage 2 (asphere):   additionally optimize conic/a4/a6
 #   3. chief                : spot RMS and OPD RMS per field for before /
 #                             spherical / asphere
@@ -36,7 +37,6 @@ done
 
 YAML="$SCRIPT_DIR/asphere-optimize.yaml"
 OUTDIR="$SCRIPT_DIR"
-SPHERICAL_YAML="$OUTDIR/asphere-optimize-spherical.yaml"
 SPH_RESULT="$OUTDIR/asphere-optimize-spherical-result.yaml"
 SPH_LOG="$OUTDIR/asphere-optimize-spherical-log.jsonl"
 ASP_RESULT="$OUTDIR/asphere-optimize-result.yaml"
@@ -46,7 +46,7 @@ RESULT_FILE="$OUTDIR/asphere-optimize-demo-result.txt"
 # Clean-only mode: remove generated files and exit
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
-  rm -f "$SPHERICAL_YAML" "$SPH_RESULT" "$SPH_LOG" "$ASP_RESULT" "$ASP_LOG" "$RESULT_FILE"
+  rm -f "$SPH_RESULT" "$SPH_LOG" "$ASP_RESULT" "$ASP_LOG" "$RESULT_FILE"
   rm -f "$OUTDIR"/asphere-optimize-init.png "$OUTDIR"/asphere-optimize-spherical.png "$OUTDIR"/asphere-optimize-opt.png
   echo "  Removed generated files"
   exit 0
@@ -98,18 +98,10 @@ echo "  Surface 1: asphere_polynomial (N-BK7),  Surface 2: sphere,  Surface 3: i
 echo "  Fields: 0 deg / 5 deg, wavelength d (587.6 nm)"
 echo
 
-# ── Stage 1: spherical-only variant (asphere coefficients are NOT variables) ──
-python3 -c "
-import yaml
-d = yaml.safe_load(open('$YAML'))
-d['optimization']['variables'] = [
-    v for v in d['optimization']['variables']
-    if v['target']['param'] not in ('conic', 'a4', 'a6', 'coefficient_0', 'coefficient_1')
-]
-yaml.safe_dump(d, open('$SPHERICAL_YAML', 'w'), sort_keys=False)
-"
+# ── Stage 1: spherical-only (asphere parameters are excluded from the
+# optimization variables via --exclude-param) ──
 echo "=== Stage 1: optimize with curvature only (no asphere variables) ==="
-$RAYWEAVE optimize --log "$SPH_LOG" < "$SPHERICAL_YAML" > "$SPH_RESULT"
+$RAYWEAVE optimize --exclude-param conic,a4,a6,coefficient_0,coefficient_1 --log "$SPH_LOG" < "$YAML" > "$SPH_RESULT"
 echo "  Written: $SPH_RESULT"
 echo
 
@@ -122,18 +114,10 @@ echo
 # already after the first step, so only the final merit is shown) ──
 log_summary() {
   local logfile=$1
-  python3 -c "
-import json
-merits = []; status = ''
-for line in open('$logfile'):
-    line = line.strip()
-    if not line.startswith('{'): continue
-    d = json.loads(line)
-    if 'merit' in d: merits.append(d['merit'])
-    if 'status' in d: status = d['status']
-last = merits[-1] if merits else 0
-print(f'{last:.6e} {status}')
-"
+  local merit status
+  merit=$($RAYWEAVE query --jsonl --where 'has("merit")' -r merit < "$logfile")
+  status=$($RAYWEAVE query --jsonl --where 'has("status")' -r status < "$logfile")
+  printf '%s %s\n' "$merit" "$status"
 }
 read -r SPH_AFTER SPH_STATUS < <(log_summary "$SPH_LOG")
 read -r ASP_AFTER ASP_STATUS < <(log_summary "$ASP_LOG")
@@ -141,15 +125,9 @@ read -r ASP_AFTER ASP_STATUS < <(log_summary "$ASP_LOG")
 # ── Asphere coefficients (before / spherical-opt / asphere-opt) ──
 extract_coeffs() {
   local yaml="$1"
-  python3 -c "
-import yaml
-d = yaml.safe_load(open('$yaml'))
-s = d['configs'][0]['surfaces'][0]
-c = s.get('coefficients', [0, 0])
-print(f'{s.get(\"conic\", 0):.6f}')
-print(f'{c[0] if len(c) > 0 else 0:.6e}')
-print(f'{c[1] if len(c) > 1 else 0:.6e}')
-"
+  $RAYWEAVE query --default 0 --printf '%.6f' 'configs[0].surfaces[0].conic' < "$yaml"
+  $RAYWEAVE query --default 0 --printf '%.6e' 'configs[0].surfaces[0].coefficients[0]' < "$yaml"
+  $RAYWEAVE query --default 0 --printf '%.6e' 'configs[0].surfaces[0].coefficients[1]' < "$yaml"
 }
 readarray -t COEF_BEFORE < <(extract_coeffs "$YAML")
 readarray -t COEF_SPH    < <(extract_coeffs "$SPH_RESULT")
@@ -161,23 +139,13 @@ SPH_CHIEF=$($RAYWEAVE chief < "$SPH_RESULT" 2>/dev/null)
 ASP_CHIEF=$($RAYWEAVE chief < "$ASP_RESULT" 2>/dev/null)
 rms_field() {
   local chief="$1" fi="$2"
-  echo "$chief" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); r=d['chief_rays']; print(r[$fi].get('spot_stats',{}).get('rms_r',-1))"
+  echo "$chief" | $RAYWEAVE query -r "chief_rays[$fi].spot_stats.rms_r"
 }
 
-# OPD RMS = RMS of (OPL - mean OPL) over the accepted pupil-grid rays.
+# OPD RMS = population stddev of OPL over the accepted pupil-grid rays.
 opd_field() {
   local chief="$1" fi="$2"
-  echo "$chief" | python3 -c "
-import sys, yaml, math
-d = yaml.safe_load(sys.stdin)
-cr = d['chief_rays'][$fi]
-op = [g['opl'] for g in cr['grid_points'] if g.get('opl') is not None and g.get('image_x') is not None]
-if not op:
-    print(-1)
-else:
-    m = sum(op)/len(op)
-    print(math.sqrt(sum((o-m)**2 for o in op)/len(op)))
-"
+  echo "$chief" | $RAYWEAVE query --stdev "chief_rays[$fi].grid_points[].opl"
 }
 
 {
@@ -194,7 +162,7 @@ else:
   printf "  %-6s %6s  %10s  %10s  %10s\n" "Field" "Angle" "before" "spherical" "asphere"
   printf "  %-6s %6s  %10s  %10s  %10s\n" "-----" "-----" "--------" "---------" "-------"
   for fi in 0 1; do
-    ang=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d['chief_rays'][$fi].get('field_angle','?'))")
+    ang=$(echo "$BEFORE_CHIEF" | $RAYWEAVE query --default '?' -r "chief_rays[$fi].field_angle")
     printf "  %-6s %5s°  %10.4f  %10.4f  %10.4f\n" "f$fi" "$ang" \
       "$(rms_field "$BEFORE_CHIEF" "$fi")" \
       "$(rms_field "$SPH_CHIEF" "$fi")" \
@@ -205,7 +173,7 @@ else:
   printf "  %-6s %6s  %12s  %12s  %12s\n" "Field" "Angle" "before" "spherical" "asphere"
   printf "  %-6s %6s  %12s  %12s  %12s\n" "-----" "-----" "--------" "---------" "-------"
   for fi in 0 1; do
-    ang=$(echo "$BEFORE_CHIEF" | python3 -c "import sys,yaml; d=yaml.safe_load(sys.stdin); print(d['chief_rays'][$fi].get('field_angle','?'))")
+    ang=$(echo "$BEFORE_CHIEF" | $RAYWEAVE query --default '?' -r "chief_rays[$fi].field_angle")
     printf "  %-6s %5s°  %12.3e  %12.3e  %12.3e\n" "f$fi" "$ang" \
       "$(opd_field "$BEFORE_CHIEF" "$fi")" \
       "$(opd_field "$SPH_CHIEF" "$fi")" \
@@ -223,16 +191,8 @@ echo
 # ── Merit breakdown (asphere stage) from the log ──
 if [ -f "$ASP_LOG" ]; then
   echo "--- Merit breakdown (asphere stage, final state) ---"
-  python3 -c "
-import json
-for line in open('$ASP_LOG'):
-    line=line.strip()
-    if not line.startswith('{'): continue
-    d=json.loads(line)
-    if d.get('event') == 'breakdown':
-        for k, v in d['terms'].items():
-            print(f'  {k}: {v:.6e}')
-" 2>/dev/null || true
+  $RAYWEAVE query --jsonl --where 'event=="breakdown"' \
+    --each 'terms:key,value' --printf '  %s: %.6e' < "$ASP_LOG" 2>/dev/null || true
   echo
 fi
 
@@ -261,7 +221,7 @@ echo
 THRESHOLD=0.3
 printf "  (threshold = $THRESHOLD mm — asphere-opt on-axis RMS must be below this)\n"
 rms_onaxis=$(rms_field "$ASP_CHIEF" 0)
-if [ "$rms_onaxis" != "-1" ] && [ "$(python3 -c "print('1' if $rms_onaxis >= $THRESHOLD else '0')")" = "1" ]; then
+if [ "$rms_onaxis" != "-1" ] && $RAYWEAVE query --gate "rms >= $THRESHOLD" --set rms="$rms_onaxis" < /dev/null > /dev/null; then
   msg="  >>> Optimization failed: asphere on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
   echo "$msg" | tee -a "$RESULT_FILE"
   exit 1

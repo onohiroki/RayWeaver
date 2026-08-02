@@ -79,64 +79,58 @@ echo
 # ── Trace (spot RMS per field) ──
 echo "--- Spot RMS per field (587.6 nm, full aperture) ---"
 $RAYWEAVE trace < "$CHIEF" > "$TRACE" 2>/dev/null
-python3 -c "
-import yaml
-d = yaml.safe_load(open('$TRACE'))
-lines = []
-for cr in d.get('chief_rays', []):
-    sr = cr.get('spot_stats')
-    if sr:
-        lines.append('  field %4.1f deg: rms_r %8.5f mm  (%d rays)' % (cr['field_angle'], sr['rms_r'], sr.get('traced_rays', 0)))
-print('\n'.join(lines) if lines else '  (no spot stats)')
-"
+$RAYWEAVE query --each 'chief_rays[]:field_angle,spot_stats.rms_r,spot_stats.traced_rays' \
+    --printf '  field %4.1f deg: rms_r %8.5f mm  (%d rays)' < "$TRACE" \
+  || true
+echo
 echo
 
 # ── Paraxial analysis ──
 echo "--- Paraxial analysis ---"
-$RAYWEAVE paraxial < "$CHIEF" | python3 -c "
-import yaml, sys
-p = yaml.safe_load(sys.stdin.read())['paraxial_result']
-print('  EFL            = %.1f mm' % p['focal_length'])
-print('  F/#            = %.2f' % p['image_space_f_number'])
-print('  entrance pupil = %.0f mm diameter' % p['entrance_pupil_diameter'])
-print('  total track    = %.1f mm' % p['total_track'])
-"
+PAX=$( $RAYWEAVE paraxial < "$CHIEF" 2>/dev/null )
+echo "  EFL            = $(echo "$PAX" | $RAYWEAVE query --printf '%.1f' paraxial_result.focal_length) mm"
+echo "  F/#            = $(echo "$PAX" | $RAYWEAVE query --printf '%.2f' paraxial_result.image_space_f_number)"
+echo "  entrance pupil = $(echo "$PAX" | $RAYWEAVE query --printf '%.0f' paraxial_result.entrance_pupil_diameter) mm diameter"
+echo "  total track    = $(echo "$PAX" | $RAYWEAVE query --printf '%.1f' paraxial_result.total_track) mm"
 echo
 
 # ── Raytrace diagram: ray fans for all field angles only ──
 echo "--- Raytrace diagram (ray fans, all fields) ---"
+FAN_TMP="$(mktemp "${TMPDIR:-/tmp}/schmidt-fan.XXXXXX.yaml")"
+trap 'rm -f "$FAN_TMP"' EXIT
 "$RAYWEAVE" chief --ray-fan < "$YAML" 2>/dev/null \
-  | "$RAYWEAVE" trace 2>/dev/null > /tmp/schmidt-fan.yaml
-"$RAYWEAVE" plot -o "$PNG" < /tmp/schmidt-fan.yaml >/dev/null 2>/dev/null
-"$RAYWEAVE" plot -o "$SVG" < /tmp/schmidt-fan.yaml >/dev/null 2>/dev/null
+  | "$RAYWEAVE" trace 2>/dev/null > "$FAN_TMP"
+"$RAYWEAVE" plot -o "$PNG" < "$FAN_TMP" >/dev/null 2>/dev/null
+"$RAYWEAVE" plot -o "$SVG" < "$FAN_TMP" >/dev/null 2>/dev/null
 echo "  Written: $SVG and $PNG"
 echo
 
 # ── Result summary ──
-python3 -c "
-import yaml
-d = yaml.safe_load(open('$CHIEF'))
-with open('$RESULT_FILE', 'w') as f:
-    f.write('Schmidt camera (D=200, EFL~386, F/1.93, 35mm full-frame)\n')
-    f.write('Fold model: positive thicknesses; primary decenter [{tilt: [0, 180, 0], reflect: true}]\n')
-    f.write('Corrector plate (BK7 asphere a4/a6) + spherical primary + 2-element field flattener.\n')
-    f.write('Physical Z: corrector/stop at 0, primary at 800, flat sensor at 400.\n\n')
-    f.write('%-8s %12s\n' % ('field', 'RMS spot'))
-    for r in d['chief_rays']:
-        g = [pt for pt in r['grid_points'] if pt.get('image_y') is not None]
-        if g:
-            import statistics
-            rms = statistics.pstdev([pt['image_y'] for pt in g])
-            f.write('%-8.1f %10.5f mm\n' % (r['field_angle'], rms))
-    f.write('\nResult written: $CHIEF\n')
-    f.write('\n=== How to interpret this result ===\n')
-    f.write('- RMS spot (mm) per field for the folded Schmidt (D=200, F/1.93).\n')
-    f.write('- All fields stay near diffraction-limited (0.02-0.04 mm) because the\n')
-    f.write('  corrector plate removes the spherical aberration of the fast primary.\n')
-    f.write('- Fold model: all thicknesses are positive; the primary decenter\n')
-    f.write('  [{tilt: [0, 180, 0], reflect: true}] folds the beam back to the flat\n')
-    f.write('  sensor at Z=400 (primary at Z=800).\n')
-    f.write('- The largest field (3.2 deg = 35 mm full-frame half-diagonal) shows a\n')
-    f.write('  slightly larger RMS: the natural field-curvature / astigmatism limit.\n')
-"
+{
+  echo "Schmidt camera (D=200, EFL~386, F/1.93, 35mm full-frame)"
+  echo "Fold model: positive thicknesses; primary decenter [{tilt: [0, 180, 0], reflect: true}]"
+  echo "Corrector plate (BK7 asphere a4/a6) + spherical primary + 2-element field flattener."
+  echo "Physical Z: corrector/stop at 0, primary at 800, flat sensor at 400."
+  echo
+  printf "%-8s %12s\n" "field" "RMS spot"
+  for fi in 0 1 2 3; do
+    ang=$( $RAYWEAVE query -r "chief_rays[$fi].field_angle" < "$CHIEF" )
+    rms=$( $RAYWEAVE query --stdev "chief_rays[$fi].grid_points[].image_y" --printf '%.5f' < "$CHIEF" )
+    if [ "$rms" != "-1" ]; then
+      printf "%-8.1f %10.5f mm\n" "$ang" "$rms"
+    fi
+  done
+  echo
+  echo "Result written: $CHIEF"
+  echo
+  echo "=== How to interpret this result ==="
+  echo "- RMS spot (mm) per field for the folded Schmidt (D=200, F/1.93)."
+  echo "- All fields stay near diffraction-limited (0.02-0.04 mm) because the"
+  echo "  corrector plate removes the spherical aberration of the fast primary."
+  echo "- Fold model: all thicknesses are positive; the primary decenter"
+  echo "  [{tilt: [0, 180, 0], reflect: true}] folds the beam back to the flat"
+  echo "  sensor at Z=400 (primary at Z=800)."
+  echo "- The largest field (3.2 deg = 35 mm full-frame half-diagonal) shows a"
+  echo "  slightly larger RMS: the natural field-curvature / astigmatism limit."
+} > "$RESULT_FILE"
 echo "Result summary: $RESULT_FILE"

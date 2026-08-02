@@ -71,6 +71,7 @@ func main() {
 	optVerbose := false
 	optLogFile := ""
 	optGlassDir := ""
+	optExcludeParams := ""
 	subcommand := args[0]
 	currentCmd = subcommand
 	if subcommand == "optimize" {
@@ -78,6 +79,7 @@ func main() {
 		fs.BoolVar(&optVerbose, "verbose", false, "print per-iteration progress to stderr")
 		fs.StringVar(&optLogFile, "log", "", "write per-iteration progress to file (JSONL)")
 		fs.StringVar(&optGlassDir, "glass-dir", "", "AGF glass catalog directory")
+		fs.StringVar(&optExcludeParams, "exclude-param", "", "comma-separated target param names to drop from the optimization variables (e.g. conic,a4,a6)")
 		fs.Parse(args[1:])
 		args = append([]string{"optimize"}, fs.Args()...)
 	}
@@ -99,8 +101,13 @@ func main() {
 
 	data, err := readStdin()
 	if err != nil {
-		errOut("Error reading stdin: %v", err)
-		os.Exit(1)
+		// `query` can evaluate literal expressions / bindings without any
+		// document, so an interactive terminal is not an error for it.
+		if subcommand != "query" {
+			errOut("Error reading stdin: %v", err)
+			os.Exit(1)
+		}
+		data = nil
 	}
 
 	switch subcommand {
@@ -115,7 +122,7 @@ func main() {
 	case "plot":
 		runPlot(data)
 	case "optimize":
-		runOptimize(data, optVerbose, optLogFile, optGlassDir)
+		runOptimize(data, optVerbose, optLogFile, optGlassDir, optExcludeParams)
 	case "escape":
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
@@ -126,11 +133,19 @@ func main() {
 		runImport(data)
 	case "scale":
 		runScale(data)
+	case "query":
+		runQuery(data)
 	default:
 		errOut("Error: unknown subcommand %q", subcommand)
 		errOut("Run 'rayweave --help' for usage.")
 		os.Exit(1)
 	}
+}
+
+// printHelpText writes a help string verbatim (wrapping fmt.Print so go vet's
+// printf check does not mistake format directives in the text for a Printf).
+func printHelpText(s string) {
+	fmt.Print(s)
 }
 
 func printHelp(cmd string) {
@@ -481,6 +496,71 @@ Input YAML:
 
 Output: Rs, Ts, Rp, Tp (s- and p-polarisation reflectance/transmittance)
 `)
+	case "query":
+		printHelpText(`Usage: rayweave query [flags] [SELECTOR] < input.yaml
+
+Read-only YAML/JSONL selector: prints one plain-text value per invocation
+(the value the demo scripts used to fetch with python3 + PyYAML). Works on
+any YAML on stdin, including output of the other subcommands.
+
+SELECTOR is an expression; paths are a subset of it:
+  paraxial_result.focal_length
+  chief_rays[0].spot_stats.rms_r
+  chief_rays[field_angle=0].spot_stats.rms_r     (filter by equality)
+  configs[id=config1].surfaces[id=2].thickness
+  results[].surfaces[interaction=REFLECT].intensity_s
+
+Expressions also support arithmetic (+ - * / %), comparisons, &&/||/!,
+{...}/[...] literals, and the functions abs sqrt pow min max sin cos tan
+asin acos atan atan2 radians degrees exp log floor ceil round len has.
+
+Output modes:
+  default   scalar -> raw text line; a single-element array unwraps; a
+            larger array prints as [a b c]
+  --yaml    serialize the result as YAML (subtree dump, records, lists)
+  --json    serialize the result as JSON
+  --csv     PATH:col1,col2,... -> CSV rows, skipping rows with missing
+            columns (add --csv-header for a header)
+  --gate    evaluate EXPR, print the value and exit 0/1 by truthiness
+
+Iteration and aggregates:
+  --each 'PATH:col1,col2,...'   one row per element (format with --printf)
+  --count PATH   non-null element count   --len PATH   array length
+  --sum PATH     sum of numeric values    --product PATH  product
+  --stdev PATH   population standard deviation of numeric values
+
+Bindings (evaluated in order; later ones can reference earlier ones):
+  --set VAR=EXPR   a PATH, a number, or an arithmetic expression
+  --yaml --set a=... --set b=...        emit a {a:.., b:..} record
+
+Input:
+  YAML on stdin (default). With --jsonl read one JSON object per line
+  (e.g. "optimize --log" output); --where EXPR keeps matching lines,
+  --first uses the first match instead of the last, and --count '[]'
+  counts the matching lines.
+
+Options:
+  --default STR    value printed when a scalar is missing/null (default -1)
+  --printf FMT     Go fmt format string (e.g. '%.4f') for the output value
+  -r, --raw        raw text output (the default for scalars)
+  --expr EXPR      same as the positional SELECTOR
+
+Examples:
+  rayweave paraxial < lens.yaml | rayweave query -r paraxial_result.focal_length
+  rayweave chief < lens.yaml \
+    | rayweave query --expr '100*(ih-efl*tan(radians(a)))/(efl*tan(radians(a)))' \
+        --set ih=chief_rays[1].image_height[1] --set a=chief_rays[1].field_angle \
+        --set efl=50.0
+  rayweave optimize --log opt.jsonl < lens.yaml > out.yaml
+  rayweave query --jsonl --where 'has("status")' -r status < opt.jsonl
+  rayweave query --jsonl --where 'event=="breakdown"' \
+    --each 'terms:key,value' --printf '  %s: %.6e' < opt.jsonl
+  rayweave query --count 'chief_rays[0].grid_points[].image_x' < chief.yaml
+  rayweave query --len 'chief_rays[0].grid_points' < chief.yaml
+  rayweave query --gate 'abs(efl-50.0)<=0.01' --set efl=paraxial_result.focal_length
+
+See docs/query.md for the full manual.
+`)
 	default:
 		fmt.Print(`Usage: rayweave <subcommand> [< input.yaml]
 
@@ -495,6 +575,7 @@ Subcommands:
   optimize   DLS optimization of lens surfaces
   scale      Scale a system so its EFL equals --efl TARGET
   import     Import ZEMAX/OSLO/CODE V lens files
+  query      Read-only YAML/JSONL selector (replace python3/PyYAML in demos)
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
   for detailed options and YAML structure.
@@ -592,6 +673,7 @@ func runChief(data []byte) {
 	clearApertureMarginMM := fs.Float64("clear-aperture-margin-mm", 0.2, "with --clear-aperture --shrink, extra clearance added to each side of the beam footprint (mm)")
 	clearApertureRays := fs.Int("clear-aperture-rays", 0, "ray count for --clear-aperture beam tracing (0 = use chief.num_rays); use a dense grid for accurate footprints")
 	marginalRays := fs.Bool("marginal-rays", false, "from each field's grid points find the rays with max/min image Y (and X for off-axis fields) and append them as marginal rays to the output 'rays' section for piping into trace/plot")
+	preserveRays := fs.Bool("preserve-rays", false, "with --clear-aperture, keep the existing 'rays' section instead of replacing it with chief rays, and omit chief_rays from the output (aperture adjustment only)")
 	passThrough := fs.Int("pass-through", 0, "constrain chief ray to pass through (0,0,0) center of surface N (overrides YAML pass_through.surface)")
 	rayFan := fs.Bool("ray-fan", false, "compute ray fan (transverse aberration) for each field")
 	fanPlane := fs.String("fan-plane", "", "fan plane selection: yz | xz (implies --ray-fan)")
@@ -814,9 +896,11 @@ func runChief(data []byte) {
 		rayList[i] = cr.ChiefRay
 		rayList[i].ID = fmt.Sprintf("chief_%.0fdeg", cr.FieldAngle)
 	}
-	input.Rays = &types.RayInput{
-		Polarization: pol,
-		Rays:         rayList,
+	if !*preserveRays {
+		input.Rays = &types.RayInput{
+			Polarization: pol,
+			Rays:         rayList,
+		}
 	}
 
 	// --- --marginal-rays: extract marginal rays from grid points ---
@@ -827,6 +911,9 @@ func runChief(data []byte) {
 	output := types.Output{
 		Input:     input,
 		ChiefRays: chiefRays,
+	}
+	if *preserveRays {
+		output.ChiefRays = nil
 	}
 
 	stopID := input.Chief.StopSurface
