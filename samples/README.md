@@ -15,6 +15,7 @@ This directory contains sample optical system data and demo scripts for the
 | `simple-zoom.yaml` | 3-config zoom with fuzzy image-height / incident-angle constraints and `ray_paths` (render-only metadata). |
 | `asphere-optimize.yaml` | Singlet whose first surface is `asphere_polynomial`; optimizes `conic` and `a4`/`a6` coefficients (asphere variables). |
 | `doublegauss-init.yaml` | 6-element symmetric double-Gauss starting point for a 35mm-format 50 mm f/2.8 standard lens. The structure was synthesised by an AI agent (see `design/REPORT_designs.md` appendix) via curvature-scale search to hit EFL ≈ 50 mm, then handed to DLS optimisation. The optimised result reaches on-axis RMS < 0.1 mm (see `doublegauss-demo.bash`). |
+| `doublegauss-ghost.yaml` | Ghost-ray trace sample on the optimised double-Gauss. Uses the surface-sequence encoding of Ono et al. (Optical Review 32:402-411): each ray carries an ordered surface-ID list; a direction reversal in the list means reflection. One ghost path `[0,1,2,3,4,3,2,3,4,...,14]` (reflect at surface 4, reversed refraction through surface 3, reflect at surface 2) plus a normal reference ray, and a `chief` section for re-adjusting the lens effective diameters. See `ghost-demo.bash`. |
 | `run-demo.bash` | End-to-end demo script using `us2645157.yaml`. |
 | `glass-optimize-demo.bash` | Glass optimisation demo using `glass-optimize-demo.yaml`. |
 | `scale-demo.bash` | Demonstrates the `scale` subcommand: resizes the 25 mm triplet to a 50 mm standard (EFL exact, f/# preserved). |
@@ -24,6 +25,7 @@ This directory contains sample optical system data and demo scripts for the
 | `schmidt-lensless.yaml` | Folded spherical primary alone (no corrector plate), showing the fold model geometry; the uncorrected mirror leaves large spherical-aberration spots. |
 | `schmidt-optimize.yaml` | DLS optimisation of the folded Schmidt: corrector asphere (a4/a6) + field-flattener curvatures against spot RMS (4 fields). |
 | `schmidt-demo.bash` | Folded-Schmidt demo: chief rays, per-field spot RMS, paraxial analysis (EFL / f/# / pupil / track), and SVG/PNG raytrace diagrams. |
+| `ghost-demo.bash` | Ghost-ray demo on the optimised double-Gauss (`doublegauss-ghost.yaml`): re-adjusts the lens effective diameters with `chief --clear-aperture --shrink`, traces the ghost path and a normal reference ray through the re-sized system, prints the per-surface interaction / Fresnel-intensity table with the accumulated ghost intensity, and draws an SVG diagram. |
 
 ## External dependencies
 
@@ -103,6 +105,14 @@ installed, the scripts print a message and skip those renderings.
 | `schmidt-demo-result.txt` | Per-field spot RMS and paraxial summary. |
 | `schmidt.svg` / `schmidt.png` | Folded-layout raytrace diagram (beam to primary at 800, back to sensor at 400). |
 
+### Output of `ghost-demo.bash`
+
+| File | Description |
+|---|---|
+| `doublegauss-ghost-trace-result.yaml` | System with re-adjusted effective diameters plus the traced rays: the ghost path and the normal reference path, with per-surface interaction, direction, OPL and Fresnel intensity. |
+| `ghost-demo-result.txt` | Per-surface trace table for both rays, ghost relative intensity (product of the two Fresnel reflectances), and cumulative intensity. |
+| `doublegauss-ghost.svg` | Raytrace diagram of the re-sized lens showing the ghost ray doubling back through surface 3. |
+
 ## Run the demos
 
 ```sh
@@ -115,6 +125,9 @@ bash samples/glass-optimize-demo.bash
 
 # Folded Schmidt demo (chief + trace + paraxial + diagrams)
 bash samples/schmidt-demo.bash
+
+# Ghost-ray demo on the optimised double-Gauss (trace + intensity table + SVG)
+bash samples/ghost-demo.bash
 ```
 
 ## What `run-demo.bash` does
@@ -145,3 +158,4 @@ bash samples/schmidt-demo.bash
 - Surface 0 (object plane) is implicit.
 - In `us2645157.yaml` the stop is on surface 5. ZEMAX DIAM values are semi-diameters; the YAML stores full diameters.
 - The glass optimisation demo starts with deliberately wrong glass values (model2 and model3 are swapped) to demonstrate DLS convergence.
+- Ghost paths are expressed as explicit surface-ID sequences in `rays[].path` (and `chief.fields[].path`): a direction reversal in the sequence means reflection at that surface, a continuous ascent/descent means refraction. Backward (reversed-direction) refraction through a surface uses the physically correct incident/emergent media; path-encoded reflections at lens surfaces report the Fresnel reflectance (ideal `intensity = 1.0` is reserved for fold-mirror surfaces).

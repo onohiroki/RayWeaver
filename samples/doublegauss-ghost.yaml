@@ -1,0 +1,171 @@
+# doublegauss-ghost.yaml
+#
+# Ghost-ray trace sample on the optimised double-Gauss system
+# (samples/doublegauss-result.yaml, 6 elements / 14 surfaces, 50 mm f/2.8).
+#
+# Surface-sequence encoding of ghost paths (after Ono, Matsumura & Ushiyama,
+# "Exploring ghost ray tracing in a massively parallel fast ray tracing within
+# a cloud computing environment", Optical Review 32:402-411, 2025):
+#   - each ray carries an ordered list of surface IDs as an attribute
+#   - a continuous ascent/descent of the list means REFRACTION at that surface
+#   - a direction reversal in the list means REFLECTION at that surface
+#
+# Ghost path configured below: [0,1,2,3,4,3,2,3,4,...,14]
+#   - forward to surface 4, reflect there (pattern 3,4,3)
+#   - travel back through surface 3 (reversed refraction), reflect at surface 2
+#     (pattern 3,2,3), then forward again to the image (surface 14).
+# The ray also traces the corresponding normal path for comparison.
+#
+# The `chief` section is used by samples/ghost-demo.bash to re-adjust the lens
+# effective diameters (`chief --clear-aperture --shrink`) before plotting.
+# Run:  rayweave trace < samples/doublegauss-ghost.yaml
+glass_catalog:
+  entries:
+  - type: model
+    key: 1.63854:55.42
+    name: SK18
+    nd: 1.63854
+    vd: 55.42
+  - type: model
+    key: 1.64831:33.84
+    name: SF12
+    nd: 1.64831
+    vd: 33.84
+  - type: model
+    key: 1.64611:33.76
+    nd: 1.6461051462039054
+    vd: 33.75755661109335
+  - type: model
+    key: 1.63623:55.53
+    nd: 1.6362278540802329
+    vd: 55.52508513802422
+configs:
+- id: "0"
+  name: double-gauss (50 mm f/2.8, optimised)
+  surfaces:
+  - id: 1
+    type: sphere
+    radius: 49.39374070000524
+    conic: 0
+    thickness: 3.013603316453576
+    material: 1.63623:55.53
+    diameter: 36
+  - id: 2
+    type: sphere
+    radius: 97.04161219490474
+    conic: 0
+    thickness: 0.5184432452140856
+    material: AIR
+    diameter: 36
+  - id: 3
+    type: sphere
+    radius: -109.21057661676932
+    conic: 0
+    thickness: 0.8126157678070938
+    material: 1.64611:33.76
+    diameter: 28
+  - id: 4
+    type: sphere
+    radius: 70.76305057967143
+    conic: 0
+    thickness: 3.1731970834633985
+    material: AIR
+    diameter: 28
+  - id: 5
+    type: sphere
+    radius: 58.14422502180859
+    conic: 0
+    thickness: 2.142997019955993
+    material: 1.63623:55.53
+    diameter: 26
+  - id: 6
+    type: sphere
+    radius: 272.0932143179719
+    conic: 0
+    thickness: 3.2149368683136057
+    material: AIR
+    diameter: 26
+  - id: 7
+    type: sphere
+    conic: 0
+    thickness: 3
+    material: AIR
+    diameter: 18
+  - id: 8
+    type: sphere
+    radius: -181.89976777904423
+    conic: 0
+    thickness: 3.202201805161384
+    material: 1.63623:55.53
+    diameter: 26
+  - id: 9
+    type: sphere
+    radius: -74.53609397955607
+    conic: 0
+    thickness: 3.986917017474553
+    material: AIR
+    diameter: 26
+  - id: 10
+    type: sphere
+    radius: -80.35681114132403
+    conic: 0
+    thickness: 1.8999639628475151
+    material: 1.64611:33.76
+    diameter: 28
+  - id: 11
+    type: sphere
+    radius: -62.4924967454139
+    conic: 0
+    thickness: 0.5
+    material: AIR
+    diameter: 28
+  - id: 12
+    type: sphere
+    radius: -463.2639923404278
+    conic: 0
+    thickness: 4.189434775190698
+    material: 1.63623:55.53
+    diameter: 36
+  - id: 13
+    type: sphere
+    radius: -44.26112593289344
+    conic: 0
+    thickness: 45.20954468548704
+    material: AIR
+    diameter: 36
+  - id: 14
+    type: sphere
+    conic: 0
+    thickness: 0
+    material: AIR
+    diameter: 44
+chief:
+  fields:
+  - angle: 0.0
+    direction: [0, 1]
+  - angle: 10.0
+    direction: [0, 1]
+  - angle: 16.0
+    direction: [0, 1]
+  - angle: 23.0
+    direction: [0, 1]
+  reference_surface: 14
+  num_rays: 256
+  grid_type: hex
+  dump_map: true
+  wavelengths:
+  - 0.0005876
+rays:
+  rays:
+  - id: ghost_reflect_s4_s2
+    wavelength: 0.0005876
+    initial:
+      origin: [0.0, 5.0, -100.0]
+      direction: [0.0, 0.0, 1.0]
+    path: [0, 1, 2, 3, 4, 3, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+  - id: normal_reference
+    wavelength: 0.0005876
+    initial:
+      origin: [0.0, 5.0, -100.0]
+      direction: [0.0, 0.0, 1.0]
+    path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]

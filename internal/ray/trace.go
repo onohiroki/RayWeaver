@@ -129,8 +129,20 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			interaction = raymath.DetermineInteraction(prevID, currentID, ray.Path[i+1])
 		}
 
-		n1, _ := e.Glass.RefractiveIndex(getPrevMaterial(surfaces, prevID), ray.Wavelength)
-		n2, _ := e.Glass.RefractiveIndex(currentSurf.Material, ray.Wavelength)
+		// Incident and emergent media depend on the physical travel direction.
+		// A forward ray approaches surface i from the object side (medium
+		// M[i-1]) and leaves into M[i]; after a path-encoded reflection it
+		// travels backward, approaching from the image side (medium M[i]) and
+		// leaving into M[i-1]. Fold-mirror surfaces rotate the beam frame so
+		// the ray keeps travelling +Z locally; localDir.Z < 0 therefore
+		// identifies ghost backward travel.
+		n1mat := materialBefore(surfaces, currentID)
+		n2mat := currentSurf.Material
+		if localDir.Z < 0 {
+			n1mat, n2mat = n2mat, n1mat
+		}
+		n1, _ := e.Glass.RefractiveIndex(n1mat, ray.Wavelength)
+		n2, _ := e.Glass.RefractiveIndex(n2mat, ray.Wavelength)
 
 		if interaction == types.Reflect {
 			state.Direction = raymath.Reflect(localDir, normal)
@@ -153,10 +165,12 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 
 		var intensityS, intensityP float64
 		if interaction == types.Reflect {
-			if currentSurf.Material == "AIR" {
+			if currentSurf.Reflects() {
+				// Fold mirror: ideal reflection.
 				intensityS = 1.0
 				intensityP = 1.0
 			} else {
+				// Path-encoded ghost reflection at a lens surface: Fresnel.
 				intensityS = rs * rs
 				intensityP = rp * rp
 			}
@@ -248,23 +262,24 @@ func findSurface(surfaces []types.Surface, id int) *types.Surface {
 	return nil
 }
 
-func getPrevMaterial(surfaces []types.Surface, prevID int) string {
-	if prevID == 0 {
+// materialBefore returns the medium on the object side of the surface: the
+// material of the surface that precedes `id` in the sequence, skipping any
+// intervening fold mirrors (which do not separate media). It is the region a
+// forward-travelling ray is in just before hitting the surface, and the region
+// a backward-travelling (ghost) ray leaves when crossing the surface.
+func materialBefore(surfaces []types.Surface, id int) string {
+	idx := indexOfSurface(surfaces, id)
+	if idx <= 0 {
 		return "AIR"
 	}
-	s := findSurface(surfaces, prevID)
-	if s == nil {
-		return "AIR"
-	}
-	idx := indexOfSurface(surfaces, prevID)
-	for idx > 0 && s.Reflects() {
+	for idx > 0 {
+		s := &surfaces[idx-1]
+		if !s.Reflects() {
+			return s.Material
+		}
 		idx--
-		s = &surfaces[idx]
 	}
-	if s.Reflects() {
-		return "AIR"
-	}
-	return s.Material
+	return "AIR"
 }
 
 func indexOfSurface(surfaces []types.Surface, id int) int {
