@@ -17,8 +17,9 @@ import (
 // runEscape runs the escape-function global optimisation and writes the best
 // solution (pipeline-compatible) plus all discovered local minima in the
 // escape_result section. When verbose is true, progress events (local minima,
-// escape-parameter changes) are reported to stderr during the search.
-func runEscape(data []byte, glassDir string, verbose bool) {
+// escape-parameter changes) are reported to stderr as JSONL; --log FILE writes
+// the same stream to a file.
+func runEscape(data []byte, glassDir string, verbose bool, logFile string) {
 	input := parseYAML[types.Input](data)
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
@@ -31,6 +32,26 @@ func runEscape(data []byte, glassDir string, verbose bool) {
 
 	gc, _ := loadCatalogs(&input, glassDir)
 
+	progress := escape.NewProgress()
+	var logFiles []*os.File
+	if verbose {
+		progress.AddWriter(os.Stderr)
+	}
+	if logFile != "" {
+		f, err := os.Create(logFile)
+		if err != nil {
+			errOut("Error creating log file: %v", err)
+			os.Exit(1)
+		}
+		logFiles = append(logFiles, f)
+		progress.AddWriter(f)
+	}
+	defer func() {
+		for _, f := range logFiles {
+			f.Close()
+		}
+	}()
+
 	isMultiConfig := len(input.Optimization.SharedVariables) > 0 || len(input.Optimization.LocalVariables) > 0
 	if !isMultiConfig {
 		for _, cfg := range input.Configs {
@@ -42,13 +63,13 @@ func runEscape(data []byte, glassDir string, verbose bool) {
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, verbose)
+		runEscapeMulti(input, gc, progress)
 		return
 	}
-	runEscapeSingle(input, gc, verbose)
+	runEscapeSingle(input, gc, progress)
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, verbose bool) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -126,9 +147,15 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, verbose bool) {
 		return optimize.NewOptimizer(cfgCopy)
 	}
 
-	progress := escape.NewProgress()
-	progress.SetEnabled(verbose)
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape, progress)
+	progress.Event("done", map[string]any{
+		"workers":    res.Workers,
+		"cycles":     res.Cycles,
+		"escapes":    res.Escapes,
+		"minima":     len(res.Minima),
+		"best_merit": safeF(res.BestMerit),
+		"timed_out":  res.TimedOut,
+	})
 
 	// Build the escape_result minima against the pristine original surfaces.
 	cfgID := "config1"
@@ -183,7 +210,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, verbose bool) {
 	writeEscapeOutput(input, escResult)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, verbose bool) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -288,9 +315,15 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, verbose bool) {
 		return optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, input.Optimization.JacobianWorkers, nil, hull, hullMargin, hullWeight)
 	}
 
-	progress := escape.NewProgress()
-	progress.SetEnabled(verbose)
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape, progress)
+	progress.Event("done", map[string]any{
+		"workers":    res.Workers,
+		"cycles":     res.Cycles,
+		"escapes":    res.Escapes,
+		"minima":     len(res.Minima),
+		"best_merit": safeF(res.BestMerit),
+		"timed_out":  res.TimedOut,
+	})
 
 	// Pristine template of each config's surfaces, used to materialise every
 	// minimum independently of the best-solution write below.

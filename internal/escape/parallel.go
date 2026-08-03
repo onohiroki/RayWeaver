@@ -88,12 +88,18 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 		deadline = time.Now().Add(time.Duration(cfg.MaxSeconds * float64(time.Second)))
 	}
 
-	progress.Logf("escape params: h=%.4g w=%.4g h_mult=%.4g w_mult=%.4g distance_threshold=%.4g", params.H, params.W, params.HMult, params.WMult, params.Dt)
+	progress.Event("params", map[string]any{
+		"h":                  params.H,
+		"w":                  params.W,
+		"h_mult":             params.HMult,
+		"w_mult":             params.WMult,
+		"distance_threshold": params.Dt,
+	})
+	start := map[string]any{"workers": numWorkers, "max_cycles": maxCycles}
 	if !deadline.IsZero() {
-		progress.Logf("escape starting: %d workers x %d cycles, time budget %.3gs", numWorkers, maxCycles, cfg.MaxSeconds)
-	} else {
-		progress.Logf("escape starting: %d workers x %d cycles (no time budget)", numWorkers, maxCycles)
+		start["max_seconds"] = cfg.MaxSeconds
 	}
+	progress.Event("start", start)
 
 	store := NewStore(params)
 	var wg sync.WaitGroup
@@ -114,7 +120,11 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 				x0 = cycle.perturb(x0, int(seed), initialPerturb)
 			}
 			cycle.Run(x0)
-			progress.Logf("worker %d done: escaped=%d recorded=%d", int(seed), cycle.Escaped(), cycle.Recorded())
+			progress.Event("worker_done", map[string]any{
+				"worker":   int(seed),
+				"escaped":  cycle.Escaped(),
+				"recorded": cycle.Recorded(),
+			})
 
 			escMu.Lock()
 			totalEscapes += cycle.Escaped()

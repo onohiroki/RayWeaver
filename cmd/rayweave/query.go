@@ -43,7 +43,7 @@ func runQuery(data []byte) {
 	sumArg := fs.String("sum", "", "sum of the numeric values resolved by PATH")
 	productArg := fs.String("product", "", "product of the numeric values resolved by PATH")
 	stdevArg := fs.String("stdev", "", "population standard deviation of the numeric values resolved by PATH")
-	jsonlMode := fs.Bool("jsonl", false, "read JSON Lines instead of a single YAML document (optimize --log output)")
+	jsonlMode := fs.Bool("jsonl", false, "read JSON Lines instead of a single YAML document (optimize/escape --log output)")
 	whereExpr := fs.String("where", "", "with --jsonl, keep only lines where EXPR is truthy")
 	first := fs.Bool("first", false, "with --jsonl, use the first matching line instead of the last")
 	gateExpr := fs.String("gate", "", "evaluate EXPR, print a pass record and exit 0/1 by truthiness")
@@ -95,7 +95,7 @@ func runQuery(data []byte) {
 	rawMode := *raw || *rShort
 
 	// ---- 1. Load the document(s) ----
-	var docRoot any // used by SELECTOR / --set / --gate
+	var docRoot any  // used by SELECTOR / --set / --gate
 	var iterRoot any // used by --each / --csv / aggregates
 	if *jsonlMode {
 		lines := parseJSONL(data)
@@ -906,15 +906,37 @@ type strNode struct{ v string }
 type boolNode struct{ v bool }
 type nilNode struct{}
 type identNode struct{ name string }
-type callNode struct{ name string; args []expr }
-type dotNode struct{ x expr; key string }
-type idxNode struct{ x expr; n float64 }
-type filterNode struct{ x expr; key string; val expr }
+type callNode struct {
+	name string
+	args []expr
+}
+type dotNode struct {
+	x   expr
+	key string
+}
+type idxNode struct {
+	x expr
+	n float64
+}
+type filterNode struct {
+	x   expr
+	key string
+	val expr
+}
 type mapNode struct{ x expr }
-type binNode struct{ op string; l, r expr }
-type unNode struct{ op string; x expr }
+type binNode struct {
+	op   string
+	l, r expr
+}
+type unNode struct {
+	op string
+	x  expr
+}
 type condNode struct{ cond, a, b expr }
-type structNode struct{ keys []string; vals []expr }
+type structNode struct {
+	keys []string
+	vals []expr
+}
 type arrNode struct{ vals []expr }
 
 func evalExpr(src string, ctx *evalCtx) (any, error) {
