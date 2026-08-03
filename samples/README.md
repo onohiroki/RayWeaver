@@ -14,7 +14,7 @@ This directory contains sample optical system data and demo scripts for the
 | `multi-config-zoom.yaml` | 3-config zoom demo. Uses `entrance_pupil_diameter` **equality** constraints (now supported), `edge_thickness` with the `surface2` back-surface field, and vignetting constraints. |
 | `simple-zoom.yaml` | 3-config zoom with fuzzy image-height / incident-angle constraints and `ray_paths` (render-only metadata). |
 | `asphere-optimize.yaml` | Singlet whose first surface is `asphere_polynomial`; optimizes `conic` and `a4`/`a6` coefficients (asphere variables). |
-| `doublegauss-init.yaml` | 6-element symmetric double-Gauss starting point for a 35mm-format 50 mm f/2.8 standard lens. The structure was synthesised by an AI agent (see `design/REPORT_designs.md` appendix) via curvature-scale search to hit EFL ≈ 50 mm, then handed to DLS optimisation. The optimised result reaches on-axis RMS < 0.1 mm (see `doublegauss-demo.bash`). |
+| `doublegauss-init.yaml` | 6-element symmetric double-Gauss starting point for a 35mm-format 50 mm f/2.8 standard lens. The structure was synthesised by an AI agent (see `design/REPORT_designs.md` appendix) via curvature-scale search to hit EFL ≈ 50 mm, then handed to DLS optimisation. The optimised result reaches on-axis RMS < 0.1 mm (see `doublegauss-demo.bash`). It also carries an `optimization.escape` section so the same file drives the escape-function demo (`escape-demo.bash --lens doublegauss`); the normal `doublegauss-demo.bash` ignores it. |
 | `doublegauss-ghost.yaml` | Ghost-ray trace sample on the optimised double-Gauss. Uses the surface-sequence encoding of Ono et al. (Optical Review 32:402-411): each ray carries an ordered surface-ID list; a direction reversal in the list means reflection. One ghost path `[0,1,2,3,4,3,2,3,4,...,14]` (reflect at surface 4, reversed refraction through surface 3, reflect at surface 2) plus a normal reference ray, and a `chief` section for re-adjusting the lens effective diameters. See `ghost-demo.bash`. |
 | `run-demo.bash` | End-to-end demo script using `us2645157.yaml`. |
 | `glass-optimize-demo.bash` | Glass optimisation demo using `glass-optimize-demo.yaml`. |
@@ -26,6 +26,7 @@ This directory contains sample optical system data and demo scripts for the
 | `schmidt-optimize.yaml` | DLS optimisation of the folded Schmidt: corrector asphere (a4/a6) + field-flattener curvatures against spot RMS (4 fields). |
 | `schmidt-demo.bash` | Folded-Schmidt demo: chief rays, per-field spot RMS, paraxial analysis (EFL / f/# / pupil / track), and SVG/PNG raytrace diagrams. |
 | `ghost-demo.bash` | Ghost-ray demo on the optimised double-Gauss (`doublegauss-ghost.yaml`): re-adjusts the lens effective diameters with `chief --clear-aperture --shrink`, traces the ghost path and a normal reference ray through the re-sized system, prints the per-surface interaction / Fresnel-intensity table with the accumulated ghost intensity, and draws an SVG diagram. |
+| `escape-demo.bash` | Escape-function global-optimisation demo. Default lens: degraded US2645157 triplet (`escape-demo.yaml`); `--lens doublegauss` runs the escape optimiser on `doublegauss-init.yaml` (much slower — 36 variables). Lists every discovered minimum with its `features[].element_powers` fingerprint, extracts one with `escape extract`, and draws the initial/best diagrams. |
 
 ## External dependencies
 

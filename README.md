@@ -116,6 +116,7 @@ cat samples/us2645157.yaml \
 
 # Escape-function global optimization (finds multiple local minima)
 ./rayweave escape < samples/escape-demo.yaml | tee escape-result.yaml
+# or on the double-Gauss (slow): bash samples/escape-demo.bash --lens doublegauss
 
 # Extract local minimum N as a clean lens YAML
 ./rayweave escape extract --index 1 < escape-result.yaml > min1.yaml
@@ -163,7 +164,9 @@ Notes:
   `docs/escape.md` and `docs/methods/escape-function.md`). It wraps the same
   `variables`/`merit` definitions as `optimize`; the best solution is written
   to the top-level configs (pipeline-compatible) and every discovered local
-  minimum is listed in the `escape_result` section.
+  minimum is listed in the `escape_result` section, with `features` (per-config
+  thin-lens `element_powers` of each lens element) as a compact fingerprint for
+  comparing the minima.
 
 
 ## Sample data

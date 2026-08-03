@@ -102,6 +102,13 @@ The best minimum (lowest true merit) is written to the top-level configs,
 pipeline-compatible with `rayweave trace`/`plot`. Every discovered minimum is
 listed in `escape_result.minima[]` with its full surfaces and variable values,
 so `escape extract --index N` can recover any of them as a clean lens YAML.
+Each minimum also carries `features` — a compact fingerprint for comparing
+minima against each other — with one entry per config (`id`) holding
+`element_powers`: the thin-lens power of every lens element at the d-line, in
+system order (the sum of the surface powers bounding each element, which for a
+refractive element in air equals `(n-1)(c1-c2)`; mirrors are single-surface
+elements with power `-2n/R`). `merit` stays at the minimum level as the
+objective scalar.
 
 ## Relationship to DLS
 

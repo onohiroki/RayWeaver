@@ -19,7 +19,7 @@ Tests: `go test ./...` (12 test files across all packages, no CI).
 
 Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, writes YAML to stdout. `--config ID` on chief/trace/paraxial/plot for multi-config selection.
 
-`escape` (sub-subcommands: `escape` run, `escape extract --index N`) is the Ishiki-Ono style escape-function global optimiser: DLS cycles with merit-function bumps at discovered local minima. Outputs the best solution pipeline-compatible plus `escape_result.minima[]` (full surfaces per minimum).
+`escape` (sub-subcommands: `escape` run, `escape extract --index N`) is the Ishiki-Ono style escape-function global optimiser: DLS cycles with merit-function bumps at discovered local minima. Outputs the best solution pipeline-compatible plus `escape_result.minima[]` (full surfaces per minimum, plus `features[].element_powers`: the thin-lens power of each lens element per config as a solution fingerprint).
 
 ## Key conventions
 
@@ -59,6 +59,7 @@ Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, write
 | `simple-zoom-demo.bash` | Multi-config zoom (3 configs, shared variables), DLS + RMS check |
 | `multi-config-zoom-demo.bash` | Multi-config zoom with per-config comparison table |
 | `glass-optimize-demo.bash` | Glass model variables (nd/vd) as optimisation targets, 4-wavelength spot diagrams |
+| `escape-demo.bash` | Escape-function global search on the US2645157 triplet; `--lens doublegauss` switches to the double-Gauss system (`doublegauss-init.yaml`, slow) |
 
 Demo scripts use `set -euo pipefail` and a `--clean` flag. They are location-independent: every path (input data, outputs) resolves against the script's own directory (`SCRIPT_DIR`), and the binary is found as `RAYWEAVE` env → `$SCRIPT_DIR/rayweave` → `$SCRIPT_DIR/../rayweave` (repo root) → `rayweave` on PATH → error. So they run from the repo root (`bash samples/foo.bash`), from `cd samples`, or from a copied directory (data files must be copied alongside the script). `yq` + `gnuplot` for post-processing (not required by Go build).
 

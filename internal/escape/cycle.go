@@ -22,12 +22,15 @@ type Cycle struct {
 	maxCycles int
 	maxFail   int
 	seed      int64
+	workerID  int
+	progress  *Progress
 	escaped   int
 	recorded  int
 }
 
 // NewCycle creates an escape cycle bound to a wrapper and shared store.
-func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64) *Cycle {
+// progress may be nil to disable verbose reporting.
+func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress) *Cycle {
 	return &Cycle{
 		wrapper:   wrapper,
 		store:     store,
@@ -35,6 +38,8 @@ func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed
 		maxCycles: maxCycles,
 		maxFail:   3,
 		seed:      seed,
+		workerID:  int(seed),
+		progress:  progress,
 	}
 }
 
@@ -122,12 +127,14 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		escapedX := extractX(escRes)
 		if !c.acceptable(escRes.Status, escapedX) {
 			failures++
+			c.progress.Logf("cycle %d worker %d  escape-DLS rejected (%s)", cyc, c.workerID, escRes.Status)
 			if failures >= c.maxFail {
 				break
 			}
 			currentX = c.perturb(currentX, cyc, restartAmp)
 			continue
 		}
+		c.progress.Logf("cycle %d worker %d  escape-DLS %s merit=%.6e", cyc, c.workerID, escRes.Status, c.wrapper.innerMerit(escapedX))
 
 		// Step 2: clean DLS. Remove escapes and converge to the true minimum.
 		c.wrapper.SetEscapes(nil)
@@ -136,12 +143,14 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		trueX := extractX(cleanRes)
 		if !c.acceptable(cleanRes.Status, trueX) {
 			failures++
+			c.progress.Logf("cycle %d worker %d  clean-DLS rejected (%s)", cyc, c.workerID, cleanRes.Status)
 			if failures >= c.maxFail {
 				break
 			}
 			currentX = c.perturb(escapedX, cyc, restartAmp)
 			continue
 		}
+		c.progress.Logf("cycle %d worker %d  clean-DLS  %s merit=%.6e", cyc, c.workerID, cleanRes.Status, c.wrapper.innerMerit(trueX))
 
 		failures = 0
 		c.escaped++
@@ -149,13 +158,15 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		trueMerit := c.wrapper.innerMerit(trueX)
 
 		if c.store.IsNew(trueX) {
-			c.store.Add(Point{X: trueX, Merit: trueMerit})
+			idx := c.store.Add(Point{X: trueX, Merit: trueMerit})
 			c.recorded++
+			c.progress.Logf("cycle %d worker %d  NEW minimum [%d] merit=%.6e", cyc, c.workerID, idx, trueMerit)
 			repeatStreak = 0
 			restartAmp = restartPerturb
 		} else {
 			_, nearest := c.store.FindNearest(trueX)
-			c.store.Strengthen(nearest)
+			p := c.store.Strengthen(nearest)
+			c.progress.Logf("cycle %d worker %d  repeat -> minimum %d strengthened h=%.4g w=%.4g", cyc, c.workerID, nearest, p.H, p.W)
 			// Repeatedly returning to the same minimum: strengthen the escape
 			// (done above) and push the next restart farther out so the
 			// escape DLS starts on a steeper part of the bump.

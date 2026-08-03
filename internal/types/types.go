@@ -526,14 +526,24 @@ type EscapeParamsInfo struct {
 	VariableWeights   map[string]float64 `yaml:"variable_weights,omitempty"`
 }
 
+// ConfigFeatures is one config's feature set for a local minimum — a compact
+// fingerprint used to compare minima against each other. ElementPowers holds
+// the thin-lens power of every lens element in system order.
+type ConfigFeatures struct {
+	ID            string    `yaml:"id"`
+	ElementPowers []float64 `yaml:"element_powers,omitempty"`
+}
+
 // EscapeMinimum is one discovered local minimum. Single-config runs populate
-// Surfaces; multi-config runs populate Configs.
+// Surfaces; multi-config runs populate Configs. Features lists the fingerprint
+// of each config; Merit stays at the minimum level as the objective scalar.
 type EscapeMinimum struct {
 	Index     int              `yaml:"index"`
 	Merit     float64          `yaml:"merit"`
 	Configs   []Config         `yaml:"configs,omitempty"`
 	Surfaces  []Surface        `yaml:"surfaces,omitempty"`
 	Variables []EscapeVarState `yaml:"variables"`
+	Features  []ConfigFeatures `yaml:"features,omitempty"`
 }
 
 // EscapeVarState records the variable values at a local minimum.

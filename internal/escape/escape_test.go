@@ -194,7 +194,7 @@ func TestCycleFindsTwoMinima(t *testing.T) {
 	params := BuildParams(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
-	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0)
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil)
 
 	bestX, bestMerit := cycle.Run([]float64{0.8})
 
@@ -225,7 +225,7 @@ func TestParallelEscapeFindsBothWells(t *testing.T) {
 		HMult:             2.0,
 		WMult:             1.0,
 	}
-	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg)
+	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, nil)
 
 	if len(res.Minima) < 2 {
 		t.Fatalf("expected >=2 minima, got %d (%+v)", len(res.Minima), res.Minima)

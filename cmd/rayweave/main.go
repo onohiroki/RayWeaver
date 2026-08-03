@@ -88,12 +88,14 @@ func main() {
 	escapeExtractMode := false
 	escapeExtractIndex := 0
 	optEscapeGlassDir := ""
+	optEscapeVerbose := false
 	if subcommand == "escape" {
 		if len(args) >= 2 && args[1] == "extract" {
 			escapeExtractMode = true
 			escapeExtractIndex = parseEscapeExtractFlags(args[2:])
 		} else {
 			fs := flag.NewFlagSet("escape", flag.ContinueOnError)
+			fs.BoolVar(&optEscapeVerbose, "verbose", false, "print escape progress (local minima, parameter changes) to stderr")
 			fs.StringVar(&optEscapeGlassDir, "glass-dir", "", "AGF glass catalog directory")
 			fs.Parse(args[1:])
 		}
@@ -127,7 +129,7 @@ func main() {
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
 		} else {
-			runEscape(data, optEscapeGlassDir)
+			runEscape(data, optEscapeGlassDir, optEscapeVerbose)
 		}
 	case "import":
 		runImport(data)
@@ -382,7 +384,7 @@ A CONF operand selects which config's merit terms are active for each rule.
 Output: optimized YAML with updated surface parameters in each config.
  `)
 	case "escape":
-		fmt.Print(`Usage: rayweave escape [--glass-dir DIR] < input.yaml
+		fmt.Print(`Usage: rayweave escape [--verbose] [--glass-dir DIR] < input.yaml
        rayweave escape extract --index N < escape-output.yaml
 
 Escape-function global optimisation (Ishiki-Ono style). DLS repeatedly
@@ -391,6 +393,8 @@ the merit function around that minimum, pushing the next DLS run out of the
 valley to discover other local minima.
 
 Options:
+  --verbose        print escape progress to stderr (local minima found,
+                   escape-parameter changes, per-cycle DLS status)
   --glass-dir DIR    AGF glass catalog directory
 
 Sub-commands:

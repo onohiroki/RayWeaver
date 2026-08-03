@@ -84,12 +84,13 @@ func (s *Store) IsNew(x []float64) bool {
 	return true
 }
 
-// Strengthen grows the escape height and width of the point at idx.
-func (s *Store) Strengthen(idx int) {
+// Strengthen grows the escape height and width of the point at idx and
+// returns the strengthened point (for reporting the updated parameters).
+func (s *Store) Strengthen(idx int) Point {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if idx < 0 || idx >= len(s.points) {
-		return
+		return Point{}
 	}
 	p := &s.points[idx]
 	if s.params.HMult != 0 {
@@ -98,6 +99,7 @@ func (s *Store) Strengthen(idx int) {
 	if s.params.WMult != 0 {
 		p.W *= s.params.WMult
 	}
+	return *p
 }
 
 // All returns a snapshot of all recorded points.

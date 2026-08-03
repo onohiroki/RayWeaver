@@ -9,14 +9,16 @@ import (
 	"github.com/hiroki/rayweaver/internal/escape"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
 // runEscape runs the escape-function global optimisation and writes the best
 // solution (pipeline-compatible) plus all discovered local minima in the
-// escape_result section.
-func runEscape(data []byte, glassDir string) {
+// escape_result section. When verbose is true, progress events (local minima,
+// escape-parameter changes) are reported to stderr during the search.
+func runEscape(data []byte, glassDir string, verbose bool) {
 	input := parseYAML[types.Input](data)
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
@@ -40,13 +42,13 @@ func runEscape(data []byte, glassDir string) {
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc)
+		runEscapeMulti(input, gc, verbose)
 		return
 	}
-	runEscapeSingle(input, gc)
+	runEscapeSingle(input, gc, verbose)
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, verbose bool) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -124,17 +126,33 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog) {
 		return optimize.NewOptimizer(cfgCopy)
 	}
 
-	res := escape.ParallelEscape(factory, *input.Optimization.Escape)
+	progress := escape.NewProgress()
+	progress.SetEnabled(verbose)
+	res := escape.ParallelEscape(factory, *input.Optimization.Escape, progress)
 
 	// Build the escape_result minima against the pristine original surfaces.
+	cfgID := "config1"
+	if len(input.Configs) > 0 && input.Configs[0].ID != "" {
+		cfgID = input.Configs[0].ID
+	}
+
 	minima := make([]types.EscapeMinimum, len(res.Minima))
 	for i, p := range res.Minima {
-		surf, _ := applyEscapeX(surfaces, variables, p.X, gc)
+		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
+		// Register the optimised nd/vd model glasses so the element powers use
+		// the values at this minimum, not the original catalogue entries.
+		for _, g := range newGlasses {
+			gc.Add(g)
+		}
 		minima[i] = types.EscapeMinimum{
 			Index:     i,
 			Merit:     p.Merit,
 			Surfaces:  surf,
 			Variables: buildSingleVarStates(variables, p.X),
+			Features: []types.ConfigFeatures{{
+				ID:            cfgID,
+				ElementPowers: paraxial.ElementPowers(surf, paraxial.DLine, gc),
+			}},
 		}
 	}
 
@@ -165,7 +183,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog) {
 	writeEscapeOutput(input, escResult)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, verbose bool) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -270,7 +288,9 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog) {
 		return optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, input.Optimization.JacobianWorkers, nil, hull, hullMargin, hullWeight)
 	}
 
-	res := escape.ParallelEscape(factory, *input.Optimization.Escape)
+	progress := escape.NewProgress()
+	progress.SetEnabled(verbose)
+	res := escape.ParallelEscape(factory, *input.Optimization.Escape, progress)
 
 	// Pristine template of each config's surfaces, used to materialise every
 	// minimum independently of the best-solution write below.
@@ -281,11 +301,16 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog) {
 	for i, p := range res.Minima {
 		configSurfaces := applyEscapeMulti(template, input.Optimization, p.X)
 		var cfgs []types.Config
+		var features []types.ConfigFeatures
 		for ci := range template {
 			if s, ok := configSurfaces[template[ci].ID]; ok {
 				c := template[ci]
 				c.Surfaces = s
 				cfgs = append(cfgs, c)
+				features = append(features, types.ConfigFeatures{
+					ID:            template[ci].ID,
+					ElementPowers: paraxial.ElementPowers(s, paraxial.DLine, gc),
+				})
 			}
 		}
 		minima[i] = types.EscapeMinimum{
@@ -293,6 +318,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog) {
 			Merit:     p.Merit,
 			Configs:   cfgs,
 			Variables: buildMultiVarStates(input.Optimization, p.X),
+			Features:  features,
 		}
 	}
 

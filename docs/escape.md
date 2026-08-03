@@ -82,9 +82,20 @@ escape_result:
   minima:
     - index: 0
       merit: ...
+      features:                  # compact fingerprint of the minimum (per config)
+        - id: config1
+          element_powers: [0.0075, -0.0041, 0.0022]
       surfaces: [...]
       variables: [...]
 ```
+
+`features` is a compact fingerprint of each minimum for comparing minima
+against each other — one entry per config (`id`), holding `element_powers`: the
+thin-lens power of every lens element at the d-line, in system order (the sum
+of the surface powers bounding each element, `(n-1)(c1-c2)` for a refractive
+element in air; mirrors are single-surface elements with power `-2n/R`). A
+single-config run has exactly one entry. `merit` stays at the minimum level as
+the objective scalar; other feature values can be added per config later.
 
 A concise summary is printed to stderr (never stdout, so the YAML pipeline
 stays intact).
@@ -105,6 +116,11 @@ rayweave escape extract --index 1 < escape-result.yaml \
 rayweave query --each 'escape_result.minima[]:index,merit' \
   --printf '  [%d] merit=%.6e' < escape-result.yaml
 ```
+
+The sample script `samples/escape-demo.bash` runs the same pipeline end to end:
+the default lens is the degraded US2645157 triplet, and `--lens doublegauss`
+switches to `samples/doublegauss-init.yaml` (which carries its own
+`optimization.escape` section). The double-Gauss run is much slower.
 
 ## Method
 

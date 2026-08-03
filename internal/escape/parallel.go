@@ -63,8 +63,9 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 
 // ParallelEscape runs the escape loop across escapeWorkers goroutines, each with
 // its own freshly-built model (via the factory) so the shared catalog and
-// surface state stay race-free. All workers share one Store.
-func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig) Result {
+// surface state stay race-free. All workers share one Store. progress may be
+// nil to disable verbose reporting.
+func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress *Progress) Result {
 	params := BuildParams(cfg, newModel().Variables())
 
 	numWorkers := cfg.EscapeWorkers
@@ -75,6 +76,9 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig) Result {
 	if maxCycles <= 0 {
 		maxCycles = 10
 	}
+
+	progress.Logf("escape params: h=%.4g w=%.4g h_mult=%.4g w_mult=%.4g distance_threshold=%.4g", params.H, params.W, params.HMult, params.WMult, params.Dt)
+	progress.Logf("escape starting: %d workers x %d cycles", numWorkers, maxCycles)
 
 	store := NewStore(params)
 	var wg sync.WaitGroup
@@ -87,13 +91,14 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig) Result {
 			defer wg.Done()
 			inner := newModel()
 			wrapper := NewWrapper(inner, params)
-			cycle := NewCycle(wrapper, store, params, maxCycles, seed)
+			cycle := NewCycle(wrapper, store, params, maxCycles, seed, progress)
 
 			x0 := inner.InitialState()
 			if seed != 0 {
 				x0 = cycle.perturb(x0, int(seed), initialPerturb)
 			}
 			cycle.Run(x0)
+			progress.Logf("worker %d done: escaped=%d recorded=%d", int(seed), cycle.Escaped(), cycle.Recorded())
 
 			escMu.Lock()
 			totalEscapes += cycle.Escaped()
