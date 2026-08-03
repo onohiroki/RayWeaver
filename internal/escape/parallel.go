@@ -1,6 +1,7 @@
 package escape
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -11,15 +12,28 @@ import (
 // Result is the outcome of a parallel escape search: every discovered local
 // minimum ordered by merit, plus the parameters used.
 type Result struct {
-	Params     Params
-	Minima     []Point
-	BestIdx    int
-	BestMerit  float64
-	Escapes    int
-	Workers    int
-	Cycles     int
-	MaxSeconds float64
-	TimedOut   bool
+	Params      Params
+	Minima      []Point
+	MinimaIdx   []int // discovery-order store index of each minimum in Minima
+	BestIdx     int
+	BestMerit   float64
+	Escapes     int
+	Workers     int
+	Cycles      int
+	MaxSeconds  float64
+	TimedOut    bool
+	Interrupted bool
+}
+
+// RunOptions configures a parallel escape search.
+type RunOptions struct {
+	// Progress is the JSONL reporter (nil disables verbose reporting).
+	Progress *Progress
+	// OnRecord is called when a minimum is recorded or improved (nil disables).
+	OnRecord RecordHandler
+	// Context cancels the search: workers stop at the next cycle boundary
+	// once the current DLS run finishes (nil = run to completion).
+	Context context.Context
 }
 
 // BuildParams derives the escape parameters from the YAML config and the
@@ -66,9 +80,9 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 
 // ParallelEscape runs the escape loop across escapeWorkers goroutines, each with
 // its own freshly-built model (via the factory) so the shared catalog and
-// surface state stay race-free. All workers share one Store. progress may be
-// nil to disable verbose reporting.
-func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress *Progress) Result {
+// surface state stay race-free. All workers share one Store. opts.Progress may
+// be nil to disable verbose reporting; opts.Context cancels the search.
+func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunOptions) Result {
 	params := BuildParams(cfg, newModel().Variables())
 
 	numWorkers := cfg.EscapeWorkers
@@ -88,6 +102,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 		deadline = time.Now().Add(time.Duration(cfg.MaxSeconds * float64(time.Second)))
 	}
 
+	progress := opts.Progress
 	progress.Event("params", map[string]any{
 		"h":                  params.H,
 		"w":                  params.W,
@@ -102,6 +117,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 	progress.Event("start", start)
 
 	store := NewStore(params)
+	store.SetOnRecord(opts.OnRecord)
 	var wg sync.WaitGroup
 	totalEscapes := 0
 	timedOut := false
@@ -113,7 +129,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 			defer wg.Done()
 			inner := newModel()
 			wrapper := NewWrapper(inner, params)
-			cycle := NewCycle(wrapper, store, params, maxCycles, seed, progress, deadline)
+			cycle := NewCycle(wrapper, store, params, maxCycles, seed, progress, deadline, opts.Context)
 
 			x0 := inner.InitialState()
 			if seed != 0 {
@@ -121,9 +137,11 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 			}
 			cycle.Run(x0)
 			progress.Event("worker_done", map[string]any{
-				"worker":   int(seed),
-				"escaped":  cycle.Escaped(),
-				"recorded": cycle.Recorded(),
+				"worker":      int(seed),
+				"escaped":     cycle.Escaped(),
+				"recorded":    cycle.Recorded(),
+				"interrupted": cycle.Interrupted(),
+				"timed_out":   cycle.StoppedByTime(),
 			})
 
 			escMu.Lock()
@@ -136,16 +154,18 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 	}
 	wg.Wait()
 
-	points, _ := store.SortedByMerit()
+	points, idxs := store.SortedByMerit()
 	res := Result{
-		Params:     params,
-		Minima:     points,
-		Escapes:    totalEscapes,
-		Workers:    numWorkers,
-		Cycles:     maxCycles,
-		MaxSeconds: cfg.MaxSeconds,
-		TimedOut:   timedOut,
-		BestIdx:    -1,
+		Params:      params,
+		Minima:      points,
+		MinimaIdx:   idxs,
+		Escapes:     totalEscapes,
+		Workers:     numWorkers,
+		Cycles:      maxCycles,
+		MaxSeconds:  cfg.MaxSeconds,
+		TimedOut:    timedOut,
+		Interrupted: opts.Context != nil && opts.Context.Err() != nil,
+		BestIdx:     -1,
 	}
 	if len(points) > 0 {
 		res.BestIdx = 0

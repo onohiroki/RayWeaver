@@ -61,7 +61,11 @@ The true minimum is then classified:
   record it as a new `Point{X, Merit, H, W}`.
 - **Repeat** of a known minimum: **strengthen** the nearest bump (`H ×= h_mult`,
   `W ×= w_mult`) and double the restart offset, so the next escape run starts on
-  a steeper part of the (now taller/wider) bump.
+  a steeper part of the (now taller/wider) bump. If the repeat arrives with a
+  **better** merit, the stored `X`/`Merit` of that minimum are replaced (keeping
+  the strengthened `H`/`W`), so the search always keeps the better data — the
+  version counter (`Store.Replace`, exposed to `--save` file versioning)
+  records how many times a minimum has been improved.
 
 The starting point for the next cycle is a deterministic perturbation of the
 last true minimum (`restartPerturb = 0.1` of the normalized range). Starting
@@ -109,6 +113,23 @@ as it is exceeded. The check only happens *between* DLS runs — a running solve
 always completes, so the overshoot is bounded by one DLS run. This is a
 coarse-grained stop: it never interrupts an in-flight DLS iteration. Minima
 recorded before expiry are still reported, and the output sets `timed_out: true`.
+
+A `SIGINT`/`SIGTERM` behaves the same way: the first signal cancels the shared
+context, workers stop at the next cycle boundary (the running DLS solve
+completes), everything is saved, and the output sets `interrupted: true` with
+exit code 0; a second signal force-quits with exit 1. No DLS-level interruption
+is attempted.
+
+## 4c. Saving minima
+
+`escape --save FILE` writes each recorded minimum to a versioned YAML file as it
+is discovered (see `docs/escape.md`): `FILE1.yaml`, `FILE2.yaml`, … in discovery
+order, with `FILE N.<version>.yaml` archives for superseded improvements. The
+saver is wired through `Store.SetOnRecord` (invoked under the store lock, so
+invocations from parallel workers are serialised), materialises each minimum via
+`applyEscapeX`/`applyEscapeMulti` (which only read the glass catalog — race-free
+against the worker models), and writes atomically (temp + fsync + rename) so a
+hard kill never loses already-found minima.
 
 ## 5. Output
 

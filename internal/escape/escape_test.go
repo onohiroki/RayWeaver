@@ -1,7 +1,12 @@
 package escape
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
 	"math"
+	"sync"
 	"testing"
 	"time"
 
@@ -195,7 +200,7 @@ func TestCycleFindsTwoMinima(t *testing.T) {
 	params := BuildParams(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
-	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{})
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background())
 
 	bestX, bestMerit := cycle.Run([]float64{0.8})
 
@@ -226,7 +231,7 @@ func TestParallelEscapeFindsBothWells(t *testing.T) {
 		HMult:             2.0,
 		WMult:             1.0,
 	}
-	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, nil)
+	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{})
 
 	if len(res.Minima) < 2 {
 		t.Fatalf("expected >=2 minima, got %d (%+v)", len(res.Minima), res.Minima)
@@ -250,7 +255,7 @@ func TestCycleTimeBudgetStopsEarly(t *testing.T) {
 	// A deadline already in the past forces the cycle to stop before the
 	// first DLS run: no escapes recorded, and StoppedByTime is set.
 	deadline := time.Now().Add(-time.Second)
-	cycle := NewCycle(wrapper, store, params, 10, 0, nil, deadline)
+	cycle := NewCycle(wrapper, store, params, 10, 0, nil, deadline, context.Background())
 
 	cycle.Run([]float64{0.8})
 
@@ -277,7 +282,7 @@ func TestCycleNoDeadlineRunsToCompletion(t *testing.T) {
 	params := BuildParams(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
-	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{})
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background())
 
 	cycle.Run([]float64{0.8})
 
@@ -295,12 +300,175 @@ func TestParallelEscapeTimeBudget(t *testing.T) {
 		EscapeWorkers: 2,
 		MaxSeconds:    1e-9, // 1ns budget -> always expired before the first cycle
 	}
-	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, nil)
+	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{})
 
 	if !res.TimedOut {
 		t.Fatal("expected TimedOut=true with a tiny budget")
 	}
 	if res.MaxSeconds != 1e-9 {
 		t.Fatalf("MaxSeconds = %v, want 1e-9", res.MaxSeconds)
+	}
+}
+
+func TestParallelEscapeInterrupt(t *testing.T) {
+	cfg := types.EscapeConfig{MaxCycles: 8, EscapeWorkers: 2}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled: workers must stop before the first DLS run
+
+	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{Context: ctx})
+
+	if !res.Interrupted {
+		t.Fatal("expected Interrupted=true with a cancelled context")
+	}
+	if res.TimedOut {
+		t.Fatal("an interrupt must not be reported as a time budget expiry")
+	}
+	if len(res.Minima) != 0 {
+		t.Fatalf("no minima expected before any DLS run, got %d", len(res.Minima))
+	}
+}
+
+func TestParallelEscapeOnRecord(t *testing.T) {
+	cfg := types.EscapeConfig{
+		MaxCycles:         6,
+		EscapeWorkers:     1,
+		DistanceThreshold: 0.1,
+		HInitial:          0.5,
+		WInitial:          0.5,
+		HMult:             2.0,
+		WMult:             1.0,
+	}
+	var mu sync.Mutex
+	var records []int // idx of every record event (new and improved)
+	var newIndices []int
+	var improved []int
+	onRecord := func(idx int, p Point, isNew bool, version int) {
+		mu.Lock()
+		defer mu.Unlock()
+		records = append(records, idx)
+		if isNew {
+			newIndices = append(newIndices, idx)
+		} else {
+			improved = append(improved, idx)
+		}
+	}
+
+	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{OnRecord: onRecord})
+
+	if len(res.Minima) == 0 {
+		t.Fatal("expected at least one minimum")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(records) == 0 {
+		t.Fatal("expected onRecord to fire")
+	}
+	if len(newIndices) != len(res.Minima) {
+		t.Fatalf("new records = %d, minima = %d", len(newIndices), len(res.Minima))
+	}
+	// Discovery indices must be distinct 0..n-1.
+	seen := map[int]bool{}
+	for _, idx := range newIndices {
+		if seen[idx] {
+			t.Fatalf("duplicate discovery index %d", idx)
+		}
+		seen[idx] = true
+	}
+	for i := range res.Minima {
+		if !seen[i] {
+			t.Fatalf("discovery index %d missing from onRecord", i)
+		}
+	}
+}
+
+func TestStoreReplaceKeepsBetterMerit(t *testing.T) {
+	params := testParams()
+	s := NewStore(params)
+	idx := s.Add(Point{X: []float64{0.5}, Merit: 1.0})
+
+	// Cycle repeat branch: strengthen the bump, then replace when better.
+	s.Strengthen(idx)
+	p, improved := s.Replace(idx, Point{X: []float64{0.52}, Merit: 0.8})
+	if !improved {
+		t.Fatal("expected replacement when the new merit is better")
+	}
+	if p.Merit != 0.8 {
+		t.Fatalf("stored merit = %v, want 0.8", p.Merit)
+	}
+	if p.X[0] != 0.52 {
+		t.Fatalf("stored X = %v, want [0.52]", p.X)
+	}
+	if p.H <= params.H {
+		t.Fatalf("escape strength must be kept from the strengthened point, got H=%v", p.H)
+	}
+	if v := s.Version(idx); v != 1 {
+		t.Fatalf("version = %d, want 1", v)
+	}
+
+	// A worse repeat must not replace or bump the version.
+	s.Strengthen(idx)
+	p, improved = s.Replace(idx, Point{X: []float64{0.53}, Merit: 0.9})
+	if improved {
+		t.Fatal("a worse repeat must not replace the stored point")
+	}
+	if p.Merit != 0.8 {
+		t.Fatalf("stored merit changed on worse repeat = %v, want 0.8", p.Merit)
+	}
+	if v := s.Version(idx); v != 1 {
+		t.Fatalf("version = %d, want 1 (worse repeat must not bump it)", v)
+	}
+}
+
+func TestStoreOnRecord(t *testing.T) {
+	params := testParams()
+	s := NewStore(params)
+	var events []string
+	s.SetOnRecord(func(idx int, p Point, isNew bool, version int) {
+		events = append(events, fmt.Sprintf("%d:%v:%d", idx, isNew, version))
+	})
+
+	s.Add(Point{X: []float64{0.5}, Merit: 1.0})
+	if got := events; len(got) != 1 || got[0] != "0:true:0" {
+		t.Fatalf("Add onRecord = %v, want [0:true:0]", got)
+	}
+
+	s.Replace(0, Point{X: []float64{0.52}, Merit: 0.8})
+	if got := events; len(got) != 2 || got[1] != "0:false:1" {
+		t.Fatalf("Replace onRecord = %v, want second event [0:false:1]", got)
+	}
+
+	// A non-improving replace must not fire.
+	s.Replace(0, Point{X: []float64{0.53}, Merit: 0.9})
+	if got := events; len(got) != 2 {
+		t.Fatalf("worse replace must not fire onRecord, got %d events: %v", len(got), got)
+	}
+}
+
+func TestProgressEventsCarryTimeAndElapsed(t *testing.T) {
+	var buf bytes.Buffer
+	p := NewProgress()
+	p.AddWriter(&buf)
+	p.Event("start", map[string]any{"workers": 1})
+
+	var ev struct {
+		Event   string  `json:"event"`
+		Time    string  `json:"time"`
+		Elapsed float64 `json:"elapsed"`
+		Workers int     `json:"workers"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &ev); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if ev.Event != "start" {
+		t.Fatalf("event = %q, want start", ev.Event)
+	}
+	if ev.Time == "" {
+		t.Fatal("expected a wall-clock time field")
+	}
+	if ev.Elapsed < 0 {
+		t.Fatalf("elapsed = %v, want >= 0", ev.Elapsed)
+	}
+	if ev.Workers != 1 {
+		t.Fatalf("workers = %d, want 1", ev.Workers)
 	}
 }

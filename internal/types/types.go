@@ -509,11 +509,12 @@ type ConstraintMeasurement struct {
 // solution's surfaces live in the top-level system/configs (pipeline-compatible);
 // every discovered local minimum is listed here with its full surface data.
 type EscapeResult struct {
-	BestIndex int              `yaml:"best_index"`
-	BestMerit float64          `yaml:"best_merit"`
-	Params    EscapeParamsInfo `yaml:"params"`
-	TimedOut  bool             `yaml:"timed_out,omitempty"`
-	Minima    []EscapeMinimum  `yaml:"minima"`
+	BestIndex   int              `yaml:"best_index"`
+	BestMerit   float64          `yaml:"best_merit"`
+	Params      EscapeParamsInfo `yaml:"params"`
+	TimedOut    bool             `yaml:"timed_out,omitempty"`
+	Interrupted bool             `yaml:"interrupted,omitempty"`
+	Minima      []EscapeMinimum  `yaml:"minima"`
 }
 
 // EscapeParamsInfo records the escape parameter values actually used.
@@ -543,6 +544,7 @@ type ConfigFeatures struct {
 type EscapeMinimum struct {
 	Index     int              `yaml:"index"`
 	Merit     float64          `yaml:"merit"`
+	File      string           `yaml:"file,omitempty"`
 	Configs   []Config         `yaml:"configs,omitempty"`
 	Surfaces  []Surface        `yaml:"surfaces,omitempty"`
 	Variables []EscapeVarState `yaml:"variables"`

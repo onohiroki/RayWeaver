@@ -90,6 +90,7 @@ func main() {
 	optEscapeGlassDir := ""
 	optEscapeVerbose := false
 	optEscapeLogFile := ""
+	optEscapeSaveFile := ""
 	if subcommand == "escape" {
 		if len(args) >= 2 && args[1] == "extract" {
 			escapeExtractMode = true
@@ -99,6 +100,7 @@ func main() {
 			fs.BoolVar(&optEscapeVerbose, "verbose", false, "print escape progress (local minima, parameter changes) to stderr (JSONL)")
 			fs.StringVar(&optEscapeGlassDir, "glass-dir", "", "AGF glass catalog directory")
 			fs.StringVar(&optEscapeLogFile, "log", "", "write escape progress to file (JSONL)")
+			fs.StringVar(&optEscapeSaveFile, "save", "", "save each discovered local minimum to FILE1.yaml, FILE2.yaml, ...")
 			fs.Parse(args[1:])
 		}
 	}
@@ -131,7 +133,7 @@ func main() {
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
 		} else {
-			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile)
+			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile)
 		}
 	case "import":
 		runImport(data)
@@ -386,7 +388,7 @@ A CONF operand selects which config's merit terms are active for each rule.
 Output: optimized YAML with updated surface parameters in each config.
  `)
 	case "escape":
-		fmt.Print(`Usage: rayweave escape [--verbose] [--log FILE] [--glass-dir DIR] < input.yaml
+		fmt.Print(`Usage: rayweave escape [--verbose] [--log FILE] [--save FILE] [--glass-dir DIR] < input.yaml
        rayweave escape extract --index N < escape-output.yaml
 
 Escape-function global optimisation (Ishiki-Ono style). DLS repeatedly
@@ -396,9 +398,19 @@ valley to discover other local minima.
 
 Options:
   --verbose        print escape progress to stderr as JSONL (local minima
-                   found, escape-parameter changes, per-cycle DLS status)
+                   found, escape-parameter changes, per-cycle DLS status);
+                   every event carries a wall-clock time and elapsed seconds
   --log FILE       write the same JSONL progress stream to FILE
+  --save FILE      save each discovered local minimum to FILE1.yaml, FILE2.yaml,
+                   ... (discovery order). When a minimum is improved, the
+                   current FILE N.yaml is renamed to FILE N.<version>.yaml and
+                   the better point is written as FILE N.yaml. Writes are
+                   atomic, so a killed process never loses already-found minima.
   --glass-dir DIR    AGF glass catalog directory
+
+A SIGINT/SIGTERM stops the search gracefully: workers finish the current DLS
+run, everything is saved, the output marks interrupted: true, and the process
+exits 0. A second signal force-quits immediately.
 
 Sub-commands:
   escape (default)       run the global optimisation loop

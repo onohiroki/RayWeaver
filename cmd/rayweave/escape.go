@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/escape"
@@ -18,8 +21,12 @@ import (
 // solution (pipeline-compatible) plus all discovered local minima in the
 // escape_result section. When verbose is true, progress events (local minima,
 // escape-parameter changes) are reported to stderr as JSONL; --log FILE writes
-// the same stream to a file.
-func runEscape(data []byte, glassDir string, verbose bool, logFile string) {
+// the same stream to a file. When saveBase is non-empty, each discovered
+// minimum is written to saveBase1.yaml, saveBase2.yaml, ... (see
+// escapeFileSaver). A SIGINT/SIGTERM triggers a graceful stop: workers finish
+// the current DLS run, everything is saved, and the output marks
+// interrupted: true.
+func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string) {
 	input := parseYAML[types.Input](data)
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
@@ -52,6 +59,25 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string) {
 		}
 	}()
 
+	// Graceful stop on SIGINT/SIGTERM. The first signal is reported (stderr +
+	// JSONL "interrupt" event) and cancels the shared context, so the workers
+	// stop at the next cycle boundary once the running DLS solve completes.
+	// Everything discovered so far is saved and the stdout YAML is still
+	// written (interrupted: true). A second signal force-quits immediately.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		fmt.Fprintf(os.Stderr, "escape: %v received — stopping after the current DLS run and saving results (press Ctrl-C again to force quit)\n", sig)
+		progress.Event("interrupt", map[string]any{"signal": sig.String()})
+		cancel()
+		<-sigCh
+		fmt.Fprintln(os.Stderr, "escape: force quit")
+		os.Exit(1)
+	}()
+
 	isMultiConfig := len(input.Optimization.SharedVariables) > 0 || len(input.Optimization.LocalVariables) > 0
 	if !isMultiConfig {
 		for _, cfg := range input.Configs {
@@ -63,13 +89,13 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string) {
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, progress)
+		runEscapeMulti(input, gc, progress, saveBase, ctx)
 		return
 	}
-	runEscapeSingle(input, gc, progress)
+	runEscapeSingle(input, gc, progress, saveBase, ctx)
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -147,20 +173,42 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		return optimize.NewOptimizer(cfgCopy)
 	}
 
-	res := escape.ParallelEscape(factory, *input.Optimization.Escape, progress)
-	progress.Event("done", map[string]any{
-		"workers":    res.Workers,
-		"cycles":     res.Cycles,
-		"escapes":    res.Escapes,
-		"minima":     len(res.Minima),
-		"best_merit": safeF(res.BestMerit),
-		"timed_out":  res.TimedOut,
+	var onRecord escape.RecordHandler
+	var saver *escapeFileSaver
+	if saveBase != "" {
+		saver = newEscapeFileSaver(saveBase, func(p escape.Point) types.Input {
+			return materializeSingleInput(input, surfaces, variables, p.X, gc)
+		})
+		onRecord = saver.record
+	}
+
+	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
+		Progress: progress,
+		OnRecord: onRecord,
+		Context:  ctx,
 	})
+	progress.Event("done", map[string]any{
+		"workers":     res.Workers,
+		"cycles":      res.Cycles,
+		"escapes":     res.Escapes,
+		"minima":      len(res.Minima),
+		"best_merit":  safeF(res.BestMerit),
+		"timed_out":   res.TimedOut,
+		"interrupted": res.Interrupted,
+	})
+	if saver != nil && saver.err != nil {
+		errOut("escape: error saving minima: %v", saver.err)
+	}
 
 	// Build the escape_result minima against the pristine original surfaces.
 	cfgID := "config1"
 	if len(input.Configs) > 0 && input.Configs[0].ID != "" {
 		cfgID = input.Configs[0].ID
+	}
+
+	var saveStem, saveExt string
+	if saveBase != "" {
+		saveStem, saveExt = splitSaveBase(saveBase)
 	}
 
 	minima := make([]types.EscapeMinimum, len(res.Minima))
@@ -180,6 +228,9 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 				ID:            cfgID,
 				ElementPowers: paraxial.ElementPowers(surf, paraxial.DLine, gc),
 			}},
+		}
+		if saveBase != "" {
+			minima[i].File = fmt.Sprintf("%s%d%s", saveStem, res.MinimaIdx[i]+1, saveExt)
 		}
 	}
 
@@ -210,7 +261,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	writeEscapeOutput(input, escResult)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -315,20 +366,42 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		return optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, input.Optimization.JacobianWorkers, nil, hull, hullMargin, hullWeight)
 	}
 
-	res := escape.ParallelEscape(factory, *input.Optimization.Escape, progress)
-	progress.Event("done", map[string]any{
-		"workers":    res.Workers,
-		"cycles":     res.Cycles,
-		"escapes":    res.Escapes,
-		"minima":     len(res.Minima),
-		"best_merit": safeF(res.BestMerit),
-		"timed_out":  res.TimedOut,
+	var onRecord escape.RecordHandler
+	var saver *escapeFileSaver
+	if saveBase != "" {
+		saver = newEscapeFileSaver(saveBase, func(p escape.Point) types.Input {
+			return materializeMultiInput(input, input.Optimization, p.X)
+		})
+		onRecord = saver.record
+	}
+
+	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
+		Progress: progress,
+		OnRecord: onRecord,
+		Context:  ctx,
 	})
+	progress.Event("done", map[string]any{
+		"workers":     res.Workers,
+		"cycles":      res.Cycles,
+		"escapes":     res.Escapes,
+		"minima":      len(res.Minima),
+		"best_merit":  safeF(res.BestMerit),
+		"timed_out":   res.TimedOut,
+		"interrupted": res.Interrupted,
+	})
+	if saver != nil && saver.err != nil {
+		errOut("escape: error saving minima: %v", saver.err)
+	}
 
 	// Pristine template of each config's surfaces, used to materialise every
 	// minimum independently of the best-solution write below.
 	template := make([]types.Config, len(input.Configs))
 	copy(template, input.Configs)
+
+	var saveStem, saveExt string
+	if saveBase != "" {
+		saveStem, saveExt = splitSaveBase(saveBase)
+	}
 
 	minima := make([]types.EscapeMinimum, len(res.Minima))
 	for i, p := range res.Minima {
@@ -352,6 +425,9 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			Configs:   cfgs,
 			Variables: buildMultiVarStates(input.Optimization, p.X),
 			Features:  features,
+		}
+		if saveBase != "" {
+			minima[i].File = fmt.Sprintf("%s%d%s", saveStem, res.MinimaIdx[i]+1, saveExt)
 		}
 	}
 
@@ -386,8 +462,9 @@ func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum) *type
 			EscapeWorkers:     res.Workers,
 			MaxSeconds:        res.MaxSeconds,
 		},
-		TimedOut: res.TimedOut,
-		Minima:   minima,
+		TimedOut:    res.TimedOut,
+		Interrupted: res.Interrupted,
+		Minima:      minima,
 	}
 }
 
@@ -564,6 +641,9 @@ func reportEscape(res escape.Result) {
 	fmt.Fprintf(os.Stderr, "  Cycles:    %d\n", res.Cycles)
 	if res.MaxSeconds > 0 {
 		fmt.Fprintf(os.Stderr, "  Time budget: %.3gs (reached: %v)\n", res.MaxSeconds, res.TimedOut)
+	}
+	if res.Interrupted {
+		fmt.Fprintf(os.Stderr, "  Interrupted: true (signal received; discovered minima saved)\n")
 	}
 	fmt.Fprintf(os.Stderr, "  Escapes:   %d\n", res.Escapes)
 	fmt.Fprintf(os.Stderr, "  Minima:    %d\n", len(res.Minima))

@@ -48,7 +48,7 @@ Subcommands are grouped by their role in the data flow
 | Analysis | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. | system + coating → R/T/phase |
 | Transform | `scale` | Uniformly scale a system so its EFL equals `--efl TARGET` (exact; preserves f/#). Useful for building a starting point before optimizing. | system → scaled system |
 | Synthesis | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. `--verbose` also emits a per-term merit breakdown. `--exclude-param` drops target params (e.g. asphere coefficients) from the variable set. | system + merit → optimized system |
-| Synthesis | `escape` | Escape-function global optimization (Ishiki-Ono style): repeatedly run DLS, adding a smooth merit-function bump at each discovered local minimum so the next run escapes the valley and finds other minima. Sub-command `escape extract --index N` pulls one minimum out as a clean lens. Flags: `--glass-dir`, `--index N` (extract). See `docs/escape.md`. | system + merit → best solution + `escape_result` |
+| Synthesis | `escape` | Escape-function global optimization (Ishiki-Ono style): repeatedly run DLS, adding a smooth merit-function bump at each discovered local minimum so the next run escapes the valley and finds other minima. Sub-command `escape extract --index N` pulls one minimum out as a clean lens. Flags: `--glass-dir`, `--verbose`, `--log FILE`, `--save FILE` (versioned per-minimum files), `--index N` (extract). See `docs/escape.md`. | system + merit → best solution + `escape_result` |
 | Presentation | `plot` | Render an SVG or PNG cross-section diagram. Flags: `-o file.svg|.png`, `--lens-width`, `--ray-width`, `--scale`, `--right-margin`, `--config`. | system + rays → diagram |
 | Tooling | `query` | Read-only YAML/JSONL selector: extract values, iterate arrays, aggregate, evaluate expressions and pass-gates from a shell pipeline. Replaces `python3 + PyYAML` / `yq` in the sample demos. See `docs/query.md`. | YAML/JSONL → plain text / YAML / JSON / CSV |
 
@@ -170,7 +170,11 @@ Notes:
   to the top-level configs (pipeline-compatible) and every discovered local
   minimum is listed in the `escape_result` section, with `features` (per-config
   thin-lens `element_powers` of each lens element) as a compact fingerprint for
-  comparing the minima.
+  comparing the minima. A repeat of a known minimum with a better merit replaces
+  the stored point ("keep the better data"). `escape --save FILE` writes each
+  minimum to `FILE1.yaml`, `FILE2.yaml`, … (improvements are kept as
+  `FILE N.<version>.yaml`), and a `SIGINT`/`SIGTERM` stops the search gracefully
+  (`interrupted: true`, exit 0).
 
 
 ## Sample data

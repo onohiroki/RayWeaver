@@ -1,6 +1,7 @@
 package escape
 
 import (
+	"context"
 	"math"
 	"strings"
 	"time"
@@ -14,8 +15,9 @@ import (
 //  2. DLS with escapes cleared (converges to the true local minimum)
 //
 // The true minimum is recorded or, if it matches a known one, that minimum's
-// escape is strengthened and the restart offset grows so the next escape run
-// starts farther from the trap.
+// escape is strengthened (and its stored X/Merit replaced when the new point
+// is better) and the restart offset grows so the next escape run starts
+// farther from the trap.
 type Cycle struct {
 	wrapper   *Wrapper
 	store     *Store
@@ -26,6 +28,7 @@ type Cycle struct {
 	workerID  int
 	progress  *Progress
 	deadline  time.Time
+	ctx       context.Context
 	escaped   int
 	recorded  int
 	stopped   bool
@@ -33,8 +36,8 @@ type Cycle struct {
 
 // NewCycle creates an escape cycle bound to a wrapper and shared store.
 // progress may be nil to disable verbose reporting. A zero deadline disables
-// the time budget (unlimited runtime).
-func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time) *Cycle {
+// the time budget (unlimited runtime); a nil context is ignored.
+func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time, ctx context.Context) *Cycle {
 	return &Cycle{
 		wrapper:   wrapper,
 		store:     store,
@@ -45,6 +48,7 @@ func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed
 		workerID:  int(seed),
 		progress:  progress,
 		deadline:  deadline,
+		ctx:       ctx,
 	}
 }
 
@@ -54,12 +58,31 @@ func (c *Cycle) Escaped() int { return c.escaped }
 // Recorded reports how many distinct minima this cycle recorded.
 func (c *Cycle) Recorded() int { return c.recorded }
 
-// StoppedByTime reports whether the cycle was cut short by the time budget.
-func (c *Cycle) StoppedByTime() bool { return c.stopped }
+// StoppedByTime reports whether the cycle was cut short by the time budget
+// (not by an external interrupt).
+func (c *Cycle) StoppedByTime() bool { return c.stopped && !c.ctxDone() }
 
-// timeUp reports whether the shared wall-clock budget has been exhausted.
+// Interrupted reports whether the shared context was cancelled while the
+// cycle ran (SIGINT/SIGTERM handled at the command layer).
+func (c *Cycle) Interrupted() bool { return c.ctxDone() }
+
+// ctxDone reports whether the shared stop context has been cancelled.
+func (c *Cycle) ctxDone() bool {
+	if c.ctx == nil {
+		return false
+	}
+	select {
+	case <-c.ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// timeUp reports whether the shared wall-clock budget has been exhausted or
+// the shared stop context has been cancelled.
 func (c *Cycle) timeUp() bool {
-	return !c.deadline.IsZero() && time.Now().After(c.deadline)
+	return (!c.deadline.IsZero() && time.Now().After(c.deadline)) || c.ctxDone()
 }
 
 func isConverged(status string) bool {
@@ -134,7 +157,11 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 	restartAmp := restartPerturb
 	for cyc := 0; cyc < c.maxCycles; cyc++ {
 		if c.timeUp() {
-			c.progress.Event("timeout", map[string]any{
+			event := "timeout"
+			if c.ctxDone() {
+				event = "interrupted"
+			}
+			c.progress.Event(event, map[string]any{
 				"worker":     c.workerID,
 				"cycle":      cyc,
 				"max_cycles": c.maxCycles,
@@ -219,15 +246,27 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			restartAmp = restartPerturb
 		} else {
 			_, nearest := c.store.FindNearest(trueX)
-			p := c.store.Strengthen(nearest)
-			c.progress.Event("minimum", map[string]any{
-				"cycle":  cyc,
-				"worker": c.workerID,
-				"kind":   "repeat",
-				"index":  nearest,
-				"h":      p.H,
-				"w":      p.W,
-			})
+			// Strengthen the escape bump first so the recorded H/W are the
+			// grown values, then replace the stored X/Merit when the new point
+			// is better.
+			c.store.Strengthen(nearest)
+			if _, improved := c.store.Replace(nearest, Point{X: trueX, Merit: trueMerit}); improved {
+				c.progress.Event("minimum", map[string]any{
+					"cycle":  cyc,
+					"worker": c.workerID,
+					"kind":   "improved",
+					"index":  nearest,
+					"merit":  trueMerit,
+				})
+			} else {
+				c.progress.Event("minimum", map[string]any{
+					"cycle":  cyc,
+					"worker": c.workerID,
+					"kind":   "repeat",
+					"index":  nearest,
+					"merit":  trueMerit,
+				})
+			}
 			// Repeatedly returning to the same minimum: strengthen the escape
 			// (done above) and push the next restart farther out so the
 			// escape DLS starts on a steeper part of the bump.

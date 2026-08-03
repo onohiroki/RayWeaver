@@ -6,13 +6,23 @@ import (
 	"sync"
 )
 
+// RecordHandler is invoked whenever the store records a new minimum or
+// replaces a recorded one with a better (lower-merit) point. isNew is true for
+// a first-time minimum; version is the number of times the minimum at idx has
+// been improved (0 for a new point). The handler runs while the store lock is
+// held, so invocations from parallel workers are serialised.
+type RecordHandler func(idx int, p Point, isNew bool, version int)
+
 // Store is a thread-safe collection of recorded local minima. Multiple worker
 // goroutines share one Store; the escape strength of a minimum grows when DLS
-// keeps returning to it.
+// keeps returning to it, and its stored X/Merit is replaced by a better point
+// found later.
 type Store struct {
-	mu     sync.RWMutex
-	points []Point
-	params Params
+	mu       sync.RWMutex
+	points   []Point
+	versions []int
+	params   Params
+	onRecord RecordHandler
 }
 
 // NewStore creates an empty store.
@@ -61,14 +71,61 @@ func (s *Store) FindNearest(x []float64) (float64, int) {
 }
 
 // Add appends a new point and returns its index. The caller is responsible
-// for checking distance against Dt beforehand (see IsNew).
+// for checking distance against Dt beforehand (see IsNew). The onRecord
+// handler fires with isNew=true and version=0.
 func (s *Store) Add(p Point) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	p.H = s.params.H
 	p.W = s.params.W
 	s.points = append(s.points, p)
-	return len(s.points) - 1
+	s.versions = append(s.versions, 0)
+	idx := len(s.points) - 1
+	if s.onRecord != nil {
+		s.onRecord(idx, p, true, 0)
+	}
+	return idx
+}
+
+// Replace updates the point at idx in place when p.Merit is better than the
+// stored merit. H and W (escape strength) are kept from the previous version;
+// X and Merit take the improved values. Returns the final stored point and
+// whether a replacement happened. The onRecord handler fires with isNew=false
+// and the new version count only when a replacement actually occurs.
+func (s *Store) Replace(idx int, p Point) (Point, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if idx < 0 || idx >= len(s.points) {
+		return Point{}, false
+	}
+	cur := &s.points[idx]
+	if !(p.Merit < cur.Merit) {
+		return *cur, false
+	}
+	cur.X = p.X
+	cur.Merit = p.Merit
+	s.versions[idx]++
+	if s.onRecord != nil {
+		s.onRecord(idx, *cur, false, s.versions[idx])
+	}
+	return *cur, true
+}
+
+// Version returns how many times the point at idx has been improved (0 = never).
+func (s *Store) Version(idx int) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if idx < 0 || idx >= len(s.versions) {
+		return 0
+	}
+	return s.versions[idx]
+}
+
+// SetOnRecord registers the record handler (nil disables it).
+func (s *Store) SetOnRecord(h RecordHandler) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onRecord = h
 }
 
 // IsNew reports whether x is far enough from every recorded point to be
