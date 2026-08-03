@@ -385,3 +385,48 @@ configs:
 		t.Errorf("scaled EFL = %v, want 40", efl)
 	}
 }
+
+func TestBuildGlassMapResolvesNormalizedNames(t *testing.T) {
+	output := types.Output{
+		Input: types.Input{
+			GlassCatalog: &types.GlassCatalog{
+				Entries: []types.Glass{
+					{
+						Type: types.GlassTypeCatalog, Name: "L-LAL12", ND: 1.62004, VD: 36.41,
+						Manufacturer: "OHARA", DispersionFormula: types.Sellmeier1,
+					},
+				},
+			},
+		},
+	}
+
+	cases := []struct {
+		material string
+		wantND   float64
+	}{
+		{material: "L-LAL12", wantND: 1.62004},      // exact AGF name
+		{material: "LLAL12", wantND: 1.62004},       // CODE V hyphen-stripped
+		{material: "LLAL12_OHARA", wantND: 1.62004}, // CODE V manufacturer suffix
+	}
+	for _, c := range cases {
+		surfaces := []types.Surface{
+			{ID: 1, Type: types.Sphere, Material: c.material},
+			{ID: 2, Type: types.Sphere, Material: "AIR"},
+		}
+		m := buildGlassMap(output, surfaces)
+		gi, ok := m[c.material]
+		if !ok {
+			t.Errorf("material %q: no GlassInfo resolved", c.material)
+			continue
+		}
+		if math.Abs(gi.ND-c.wantND) > 1e-6 {
+			t.Errorf("material %q: ND = %v, want %v", c.material, gi.ND, c.wantND)
+		}
+	}
+
+	// A material with no catalog entry stays unresolved (drawn gray).
+	surfaces := []types.Surface{{ID: 1, Type: types.Sphere, Material: "UNKNOWN_GLASS"}}
+	if m := buildGlassMap(output, surfaces); len(m) != 0 {
+		t.Errorf("expected no resolution for unknown material, got %v", m)
+	}
+}

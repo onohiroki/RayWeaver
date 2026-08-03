@@ -68,6 +68,68 @@ func TestCatalogLookupAlias(t *testing.T) {
 	}
 }
 
+func TestNormalizeName(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"L-LAL12", "LLAL12"},
+		{"S-BSL7", "SBSL7"},
+		{"LLAL12_OHARA", "LLAL12OHARA"},
+		{"N-BK7", "NBK7"},
+		{"F2", "F2"},
+		{"n-bk7", "NBK7"},
+		{"1.51680:64.17", "1.51680:64.17"},
+	}
+	for _, c := range cases {
+		if got := NormalizeName(c.in); got != c.want {
+			t.Errorf("NormalizeName(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestCatalogLookupNormalized(t *testing.T) {
+	c := NewCatalog()
+	g := types.Glass{
+		Type: types.GlassTypeCatalog, Name: "L-LAL12", ND: 1.62004, VD: 36.41,
+		Manufacturer: "OHARA", DispersionFormula: types.Sellmeier1,
+	}
+	c.Add(g)
+
+	// AGF spelling and CODE V hyphen-stripped spelling both resolve.
+	for _, key := range []string{"L-LAL12", "LLAL12", "llal12"} {
+		got, ok := c.Lookup(key)
+		if !ok {
+			t.Errorf("Lookup(%q) failed", key)
+			continue
+		}
+		if got.Name != "L-LAL12" {
+			t.Errorf("Lookup(%q) Name = %q, want L-LAL12", key, got.Name)
+		}
+	}
+}
+
+func TestCatalogLookupManufacturerSuffix(t *testing.T) {
+	c := NewCatalog()
+	g := types.Glass{
+		Type: types.GlassTypeCatalog, Name: "L-LAL12", ND: 1.62004, VD: 36.41,
+		Manufacturer: "OHARA", DispersionFormula: types.Sellmeier1,
+	}
+	c.Add(g)
+
+	got, ok := c.Lookup("LLAL12_OHARA")
+	if !ok {
+		t.Fatal("Lookup(LLAL12_OHARA) failed")
+	}
+	if got.Name != "L-LAL12" {
+		t.Errorf("Name = %q, want L-LAL12", got.Name)
+	}
+
+	// Wrong manufacturer must not match.
+	if _, ok := c.Lookup("LLAL12_SCHOTT"); ok {
+		t.Error("Lookup(LLAL12_SCHOTT) should fail with mismatched manufacturer")
+	}
+}
+
 func TestCatalogLookupModelAutoKey(t *testing.T) {
 	c := NewCatalog()
 	g := types.Glass{Type: types.GlassTypeModel, ND: 1.51680, VD: 64.17}
@@ -164,10 +226,10 @@ func TestCalcRefractiveIndexSellmeier(t *testing.T) {
 
 func TestCalcRefractiveIndexModel(t *testing.T) {
 	g := &types.Glass{
-		Type: types.GlassTypeModel,
+		Type:  types.GlassTypeModel,
 		Label: "my_glass",
-		ND:   1.51680,
-		VD:   64.17,
+		ND:    1.51680,
+		VD:    64.17,
 	}
 	n, err := CalcRefractiveIndex(g, 0.000587562)
 	if err != nil {
@@ -376,7 +438,7 @@ ED
 	if len(g.Coefficients) < 6 {
 		t.Fatalf("expected ≥6 coefficients, got %d", len(g.Coefficients))
 	}
-	if g.Coefficients[0] != 1.265385420E+00 {
+	if g.Coefficients[0] != 1.265385420e+00 {
 		t.Errorf("expected coeff[0]=1.265385420, got %g", g.Coefficients[0])
 	}
 	if g.DispersionFormula != types.Sellmeier1 {

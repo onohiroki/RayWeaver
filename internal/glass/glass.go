@@ -72,26 +72,59 @@ func NewCatalog() *Catalog {
 	}
 }
 
+// NormalizeName normalizes a glass name for lookup: hyphens and underscores
+// are removed and the result is uppercased. CODE V references glasses without
+// the separators used in AGF names (e.g. "LLAL12" for "L-LAL12").
+func NormalizeName(name string) string {
+	s := strings.ReplaceAll(name, "-", "")
+	s = strings.ReplaceAll(s, "_", "")
+	return strings.ToUpper(s)
+}
+
 func (c *Catalog) Add(glass types.Glass) {
 	key := types.ResolveGlassKey(glass)
 	g := glass
 	g.Key = key
-	c.ByName[key] = &g
+	c.addKey(key, &g)
 	if g.Label != "" && g.Label != key {
-		c.ByName[g.Label] = &g
+		c.addKey(g.Label, &g)
 	}
 	for _, alias := range glass.Aliases {
-		c.ByName[alias] = &g
+		c.addKey(alias, &g)
+	}
+}
+
+// addKey registers g under key and its normalized (hyphen/underscore-stripped,
+// uppercased) variant so lookups work with either the AGF or CODE V spelling.
+func (c *Catalog) addKey(key string, g *types.Glass) {
+	c.ByName[key] = g
+	norm := NormalizeName(key)
+	if norm != key {
+		c.ByName[norm] = g
 	}
 }
 
 func (c *Catalog) Lookup(key string) (*types.Glass, bool) {
-	g, ok := c.ByName[key]
-	if ok {
+	if g, ok := c.ByName[key]; ok {
 		return g, true
 	}
 	for _, g := range c.ByName {
 		if g.Name == key {
+			return g, true
+		}
+	}
+	if norm := NormalizeName(key); norm != key {
+		if g, ok := c.ByName[norm]; ok {
+			return g, true
+		}
+	}
+	// CODE V "MFR_GLASS" convention: material names may carry a manufacturer
+	// suffix (e.g. "LLAL12_OHARA"). Match the prefix and confirm the
+	// manufacturer, mirroring the import-time lookup.
+	if i := strings.IndexByte(key, '_'); i > 0 {
+		prefix := key[:i]
+		wantMfr := strings.ToUpper(key[i+1:])
+		if g, ok := c.Lookup(prefix); ok && strings.ToUpper(g.Manufacturer) == wantMfr {
 			return g, true
 		}
 	}

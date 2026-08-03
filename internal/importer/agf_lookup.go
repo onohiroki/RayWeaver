@@ -3,6 +3,7 @@ package importer
 import (
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -73,23 +74,17 @@ func buildAGFLookup(glasses []types.Glass) map[string]*types.Glass {
 
 func addLookupKey(m map[string]*types.Glass, key string, g *types.Glass) {
 	m[key] = g
-	norm := normalizeGlassName(key)
+	norm := glass.NormalizeName(key)
 	if norm != key {
 		m[norm] = g
 	}
-}
-
-func normalizeGlassName(name string) string {
-	s := strings.ReplaceAll(name, "-", "")
-	s = strings.ReplaceAll(s, "_", "")
-	return strings.ToUpper(s)
 }
 
 func lookupCodeV(lookup map[string]*types.Glass, name string) *types.Glass {
 	if g, ok := lookup[name]; ok {
 		return g
 	}
-	norm := normalizeGlassName(name)
+	norm := glass.NormalizeName(name)
 	if g, ok := lookup[norm]; ok {
 		return g
 	}
@@ -103,7 +98,7 @@ func lookupCodeV(lookup map[string]*types.Glass, name string) *types.Glass {
 				return g
 			}
 		}
-		normPrefix := normalizeGlassName(prefix)
+		normPrefix := glass.NormalizeName(prefix)
 		if g, ok := lookup[normPrefix]; ok {
 			if mfrMatch(g, wantMfr) {
 				return g

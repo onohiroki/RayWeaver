@@ -63,7 +63,7 @@ func runPlot(data []byte) {
 
 	surface.Precompute(surfaces)
 
-	glassMap := buildGlassMap(output)
+	glassMap := buildGlassMap(output, surfaces)
 
 	cfg := render.Config{
 		Surfaces:       surfaces,
@@ -104,26 +104,34 @@ func runPlot(data []byte) {
 	}
 }
 
-func buildGlassMap(output types.Output) map[string]render.GlassInfo {
-	m := make(map[string]render.GlassInfo)
-	if output.GlassCatalog == nil {
-		return m
+// buildGlassMap resolves the materials actually used on surfaces through the
+// glass catalog. Resolving via glass.Catalog.Lookup applies the same
+// CODE V-style name normalization (hyphen/underscore stripping, manufacturer
+// suffix) as the trace/chief/optimize subcommands, so glasses referenced by
+// e.g. "LLAL12" or "LLAL12_OHARA" are colored just like their AGF spellings.
+func buildGlassMap(output types.Output, surfaces []types.Surface) map[string]render.GlassInfo {
+	gc := glass.NewCatalog()
+	if output.GlassCatalog != nil {
+		for _, g := range output.GlassCatalog.Entries {
+			gc.Add(g)
+		}
 	}
-	for _, g := range output.GlassCatalog.Entries {
-		nd, vd, _ := glass.NDVD(&g)
-		info := render.GlassInfo{ND: nd, VD: vd}
-		if key := types.ResolveGlassKey(g); key != "" {
-			m[key] = info
+
+	m := make(map[string]render.GlassInfo)
+	for _, s := range surfaces {
+		mat := s.Material
+		if mat == "" || mat == "AIR" {
+			continue
 		}
-		if g.Name != "" {
-			m[g.Name] = info
+		if _, seen := m[mat]; seen {
+			continue
 		}
-		if g.Label != "" {
-			m[g.Label] = info
+		g, ok := gc.Lookup(mat)
+		if !ok {
+			continue
 		}
-		for _, alias := range g.Aliases {
-			m[alias] = info
-		}
+		nd, vd, _ := glass.NDVD(g)
+		m[mat] = render.GlassInfo{ND: nd, VD: vd}
 	}
 	return m
 }
