@@ -153,13 +153,15 @@ func ParseAGF(data []byte, sourceName ...string) ([]types.Glass, error) {
 		}
 
 		if strings.HasPrefix(line, "RANGE") {
-			parts := strings.Fields(line)
+			parts := strings.Fields(strings.TrimSpace(line[5:]))
 			if len(parts) >= 2 {
-				if v, err := strconv.ParseFloat(parts[0][5:], 64); err == nil {
-					current.WavelengthMin = v
+				// AGF spectral range values are in µm; store in mm (the
+				// internal wavelength unit).
+				if v, err := strconv.ParseFloat(parts[0], 64); err == nil {
+					current.WavelengthMin = v / 1000
 				}
 				if v, err := strconv.ParseFloat(parts[1], 64); err == nil {
-					current.WavelengthMax = v
+					current.WavelengthMax = v / 1000
 				}
 			}
 			continue

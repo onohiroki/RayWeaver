@@ -215,12 +215,38 @@ func TestCalcRefractiveIndexSellmeier(t *testing.T) {
 		DispersionFormula: types.Sellmeier1,
 		Coefficients:      []float64{1.03961212, 0.00600069867, 0.231792344, 0.0200179144, 1.01046945, 103.560653},
 	}
-	n, err := CalcRefractiveIndex(g, 0.58756)
+	n, err := CalcRefractiveIndex(g, 0.000587562)
 	if err != nil {
 		t.Fatalf("CalcRefractiveIndex: %v", err)
 	}
 	if n < 1.50 || n > 1.53 {
 		t.Errorf("n = %v, expected ~1.5168", n)
+	}
+}
+
+func TestCalcRefractiveIndexCatalogDFC(t *testing.T) {
+	g := &types.Glass{
+		Type:              types.GlassTypeCatalog,
+		Name:              "N-BK7",
+		DispersionFormula: types.Sellmeier1,
+		Coefficients:      []float64{1.03961212, 0.00600069867, 0.231792344, 0.0200179144, 1.01046945, 103.560653},
+	}
+	cases := []struct {
+		wavelength float64 // mm
+		want       float64
+	}{
+		{wavelength: 0.000486133, want: 1.52238}, // F line
+		{wavelength: 0.000587562, want: 1.51680}, // d line
+		{wavelength: 0.000656273, want: 1.51432}, // C line
+	}
+	for _, c := range cases {
+		n, err := CalcRefractiveIndex(g, c.wavelength)
+		if err != nil {
+			t.Fatalf("CalcRefractiveIndex(%v): %v", c.wavelength, err)
+		}
+		if math.Abs(n-c.want) > 0.0005 {
+			t.Errorf("n(%v mm) = %v, want ~%v", c.wavelength, n, c.want)
+		}
 	}
 }
 
@@ -443,6 +469,35 @@ ED
 	}
 	if g.DispersionFormula != types.Sellmeier1 {
 		t.Errorf("expected DispersionFormula=sellmeier_1, got %q", g.DispersionFormula)
+	}
+}
+
+func TestParseAGF_RANGE(t *testing.T) {
+	for _, tc := range []struct {
+		name, line string
+		wantMin    float64
+		wantMax    float64
+	}{
+		{name: "space separated", line: "RANGE 0.35 2.5", wantMin: 0.00035, wantMax: 0.0025},
+		{name: "keyword attached", line: "RANGE0.35 2.5", wantMin: 0.00035, wantMax: 0.0025},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := "CC TEST\nNM TST 2 1 1.5 60 0 1\n" + tc.line + "\n"
+			glasses, err := ParseAGF([]byte(input))
+			if err != nil {
+				t.Fatalf("ParseAGF failed: %v", err)
+			}
+			if len(glasses) != 1 {
+				t.Fatalf("expected 1 glass, got %d", len(glasses))
+			}
+			g := glasses[0]
+			if math.Abs(g.WavelengthMin-tc.wantMin) > 1e-12 {
+				t.Errorf("WavelengthMin = %v, want %v (mm)", g.WavelengthMin, tc.wantMin)
+			}
+			if math.Abs(g.WavelengthMax-tc.wantMax) > 1e-12 {
+				t.Errorf("WavelengthMax = %v, want %v (mm)", g.WavelengthMax, tc.wantMax)
+			}
+		})
 	}
 }
 

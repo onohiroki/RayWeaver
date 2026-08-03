@@ -11,20 +11,12 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-// ndvdLines returns the d/F/C line wavelengths in the unit expected by g's
-// dispersion model. Catalog dispersion formulas (sellmeier/schott/extended)
-// are fitted for micrometres; model and tabulated glasses use millimetres,
-// the internal wavelength unit of the ray trace.
-func ndvdLines(g *types.Glass) (d, f, c float64) {
-	switch {
-	case g.Type == types.GlassTypeCatalog &&
-		(g.DispersionFormula == types.Sellmeier1 || g.DispersionFormula == types.Schott ||
-			g.DispersionFormula == types.Extended2 || g.DispersionFormula == types.Extended3):
-		return 0.587562, 0.486133, 0.656273
-	default:
-		return 0.000587562, 0.000486133, 0.000656273
-	}
-}
+// d/F/C spectral lines in mm (the internal wavelength unit).
+const (
+	wlD = 0.000587562
+	wlF = 0.000486133
+	wlC = 0.000656273
+)
 
 // NDVD returns the d-line refractive index and Abbe number for g. When nd/vd
 // are not stored directly (coefficient-only catalog glasses or tabulated
@@ -38,7 +30,6 @@ func NDVD(g *types.Glass) (nd, vd float64, ok bool) {
 		return g.ND, g.VD, true
 	}
 
-	wlD, wlF, wlC := ndvdLines(g)
 	nD, errD := CalcRefractiveIndex(g, wlD)
 	nF, errF := CalcRefractiveIndex(g, wlF)
 	nC, errC := CalcRefractiveIndex(g, wlC)
@@ -172,18 +163,23 @@ func (c *Catalog) cacheKey(g *types.Glass, material string, wavelength float64) 
 	return sb.String()
 }
 
+// CalcRefractiveIndex computes the refractive index of g at the given
+// wavelength in mm (the internal ray-trace unit). Catalog dispersion formulas
+// (sellmeier/schott/extended) are fitted for micrometre wavelengths per the
+// AGF convention, so the wavelength is converted to µm before evaluation;
+// model and tabulated glasses consume mm directly.
 func CalcRefractiveIndex(g *types.Glass, wavelength float64) (float64, error) {
 	switch g.Type {
 	case types.GlassTypeCatalog:
 		switch g.DispersionFormula {
 		case types.Sellmeier1:
-			return sellmeier1(g.Coefficients, wavelength)
+			return sellmeier1(g.Coefficients, wavelength*1000)
 		case types.Schott:
-			return schott(g.Coefficients, wavelength)
+			return schott(g.Coefficients, wavelength*1000)
 		case types.Extended3:
-			return extended3(g.Coefficients, wavelength)
+			return extended3(g.Coefficients, wavelength*1000)
 		case types.Extended2:
-			return extended2(g.Coefficients, wavelength)
+			return extended2(g.Coefficients, wavelength*1000)
 		case types.Constant:
 			return g.ND, nil
 		default:
@@ -207,6 +203,8 @@ func CalcRefractiveIndex(g *types.Glass, wavelength float64) (float64, error) {
 	}
 }
 
+// sellmeier1 evaluates the Sellmeier 1 formula with coefficients in µm
+// wavelength units (AGF convention).
 func sellmeier1(coeffs []float64, lambda float64) (float64, error) {
 	if len(coeffs) < 6 {
 		return 0, fmt.Errorf("sellmeier_1 requires 6 coefficients")
@@ -224,6 +222,8 @@ func sellmeier1(coeffs []float64, lambda float64) (float64, error) {
 	return math.Sqrt(n2), nil
 }
 
+// schott evaluates the Schott formula with coefficients in µm wavelength
+// units (AGF convention).
 func schott(coeffs []float64, lambda float64) (float64, error) {
 	if len(coeffs) < 6 {
 		return 0, fmt.Errorf("schott requires 6 coefficients")
@@ -240,6 +240,8 @@ func schott(coeffs []float64, lambda float64) (float64, error) {
 	return math.Sqrt(n2), nil
 }
 
+// extended3 evaluates the extended 3 formula with coefficients in µm
+// wavelength units (AGF convention).
 func extended3(coeffs []float64, lambda float64) (float64, error) {
 	if len(coeffs) < 9 {
 		return 0, fmt.Errorf("extended_3 requires 9 coefficients")
@@ -259,6 +261,8 @@ func extended3(coeffs []float64, lambda float64) (float64, error) {
 	return math.Sqrt(n2), nil
 }
 
+// extended2 evaluates the extended 2 formula with coefficients in µm
+// wavelength units (AGF convention).
 func extended2(coeffs []float64, lambda float64) (float64, error) {
 	if len(coeffs) < 10 {
 		return 0, fmt.Errorf("extended_2 requires 10 coefficients")
