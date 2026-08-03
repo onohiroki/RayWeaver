@@ -57,7 +57,7 @@ func runImport(data []byte) {
 			os.Exit(1)
 		}
 		result.GlassEntries = importer.EnhanceGlassEntriesFromAGF(
-			result.GlassEntries, agfGlasses, *format,
+			result.GlassEntries, agfGlasses,
 		)
 	}
 

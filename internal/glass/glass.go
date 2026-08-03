@@ -124,8 +124,10 @@ func (c *Catalog) Lookup(key string) (*types.Glass, bool) {
 	if i := strings.IndexByte(key, '_'); i > 0 {
 		prefix := key[:i]
 		wantMfr := strings.ToUpper(key[i+1:])
-		if g, ok := c.Lookup(prefix); ok && strings.ToUpper(g.Manufacturer) == wantMfr {
-			return g, true
+		if wantMfr != "" {
+			if g, ok := c.Lookup(prefix); ok && strings.ToUpper(g.Manufacturer) == wantMfr {
+				return g, true
+			}
 		}
 	}
 	return nil, false

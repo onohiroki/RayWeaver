@@ -24,7 +24,7 @@ func TestEnhance_Zemax_ExactMatch(t *testing.T) {
 	}
 	agf := makeAGFGlasses()
 
-	got := EnhanceGlassEntriesFromAGF(entries, agf, "zemax")
+	got := EnhanceGlassEntriesFromAGF(entries, agf)
 
 	if len(got) != 2 {
 		t.Fatalf("expected 2 entries, got %d", len(got))
@@ -52,7 +52,7 @@ func TestEnhance_Zemax_NoMatch(t *testing.T) {
 	}
 	agf := makeAGFGlasses()
 
-	got := EnhanceGlassEntriesFromAGF(entries, agf, "zemax")
+	got := EnhanceGlassEntriesFromAGF(entries, agf)
 
 	if len(got) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(got))
@@ -68,7 +68,7 @@ func TestEnhance_CodeV_NormalizedMatch(t *testing.T) {
 	}
 	agf := makeAGFGlasses()
 
-	got := EnhanceGlassEntriesFromAGF(entries, agf, "codev")
+	got := EnhanceGlassEntriesFromAGF(entries, agf)
 
 	if len(got) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(got))
@@ -90,7 +90,7 @@ func TestEnhance_CodeV_UnderscoreSplitMatch(t *testing.T) {
 	}
 	agf := makeAGFGlasses()
 
-	got := EnhanceGlassEntriesFromAGF(entries, agf, "codev")
+	got := EnhanceGlassEntriesFromAGF(entries, agf)
 
 	if len(got) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(got))
@@ -112,7 +112,7 @@ func TestEnhance_CodeV_UnderscoreSplit_NoMatchWrongMfr(t *testing.T) {
 	}
 	agf := makeAGFGlasses()
 
-	got := EnhanceGlassEntriesFromAGF(entries, agf, "codev")
+	got := EnhanceGlassEntriesFromAGF(entries, agf)
 
 	if len(got) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(got))
@@ -129,7 +129,7 @@ func TestEnhance_CodeV_ExactMatchFirst(t *testing.T) {
 	}
 	agf := makeAGFGlasses()
 
-	got := EnhanceGlassEntriesFromAGF(entries, agf, "codev")
+	got := EnhanceGlassEntriesFromAGF(entries, agf)
 
 	if len(got) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(got))
@@ -143,7 +143,7 @@ func TestEnhance_CodeV_ExactMatchFirst(t *testing.T) {
 }
 
 func TestEnhance_EmptyEntries(t *testing.T) {
-	got := EnhanceGlassEntriesFromAGF(nil, makeAGFGlasses(), "codev")
+	got := EnhanceGlassEntriesFromAGF(nil, makeAGFGlasses())
 	if len(got) != 0 {
 		t.Errorf("expected empty, got %d", len(got))
 	}
@@ -153,7 +153,7 @@ func TestEnhance_EmptyAGF(t *testing.T) {
 	entries := []types.Glass{
 		{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.51680, VD: 64.17},
 	}
-	got := EnhanceGlassEntriesFromAGF(entries, nil, "codev")
+	got := EnhanceGlassEntriesFromAGF(entries, nil)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 entry, got %d", len(got))
 	}

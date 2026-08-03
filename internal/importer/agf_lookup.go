@@ -1,18 +1,24 @@
 package importer
 
 import (
-	"strings"
-
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func EnhanceGlassEntriesFromAGF(entries []types.Glass, agfGlasses []types.Glass, format string) []types.Glass {
+// EnhanceGlassEntriesFromAGF upgrades imported glass entries (which carry only
+// a material label) to full catalog glasses by matching the label against the
+// AGF catalog. Matching goes through glass.Catalog.Lookup, so CODE V-style
+// spellings (hyphen/underscore stripped, manufacturer-suffixed) resolve the
+// same way as at runtime.
+func EnhanceGlassEntriesFromAGF(entries, agfGlasses []types.Glass) []types.Glass {
 	if len(agfGlasses) == 0 {
 		return entries
 	}
 
-	lookup := buildAGFLookup(agfGlasses)
+	gc := glass.NewCatalog()
+	for _, g := range agfGlasses {
+		gc.Add(g)
+	}
 
 	result := make([]types.Glass, len(entries))
 	for i, e := range entries {
@@ -22,96 +28,32 @@ func EnhanceGlassEntriesFromAGF(entries []types.Glass, agfGlasses []types.Glass,
 			continue
 		}
 
-		var matched *types.Glass
-
-		if format == "codev" {
-			matched = lookupCodeV(lookup, mat)
-		} else {
-			if g, ok := lookup[mat]; ok {
-				matched = g
-			}
-		}
-
-		if matched != nil {
-			upgraded := e
-			upgraded.Type = types.GlassTypeCatalog
-			upgraded.DispersionFormula = matched.DispersionFormula
-			upgraded.Coefficients = make([]float64, len(matched.Coefficients))
-			copy(upgraded.Coefficients, matched.Coefficients)
-			upgraded.Name = matched.Name
-			upgraded.Manufacturer = matched.Manufacturer
-			upgraded.WavelengthMin = matched.WavelengthMin
-			upgraded.WavelengthMax = matched.WavelengthMax
-			upgraded.Aliases = make([]string, len(matched.Aliases))
-			copy(upgraded.Aliases, matched.Aliases)
-			if matched.ND != 0 {
-				upgraded.ND = matched.ND
-			}
-			if matched.VD != 0 {
-				upgraded.VD = matched.VD
-			}
-			upgraded.RefractiveIndices = nil
-			result[i] = upgraded
-		} else {
+		matched, ok := gc.Lookup(mat)
+		if !ok {
 			result[i] = e
+			continue
 		}
+
+		upgraded := e
+		upgraded.Type = types.GlassTypeCatalog
+		upgraded.DispersionFormula = matched.DispersionFormula
+		upgraded.Coefficients = make([]float64, len(matched.Coefficients))
+		copy(upgraded.Coefficients, matched.Coefficients)
+		upgraded.Name = matched.Name
+		upgraded.Manufacturer = matched.Manufacturer
+		upgraded.WavelengthMin = matched.WavelengthMin
+		upgraded.WavelengthMax = matched.WavelengthMax
+		upgraded.Aliases = make([]string, len(matched.Aliases))
+		copy(upgraded.Aliases, matched.Aliases)
+		if matched.ND != 0 {
+			upgraded.ND = matched.ND
+		}
+		if matched.VD != 0 {
+			upgraded.VD = matched.VD
+		}
+		upgraded.RefractiveIndices = nil
+		result[i] = upgraded
 	}
 
 	return result
-}
-
-func buildAGFLookup(glasses []types.Glass) map[string]*types.Glass {
-	m := make(map[string]*types.Glass)
-	for i := range glasses {
-		g := &glasses[i]
-		addLookupKey(m, g.Name, g)
-		for _, alias := range g.Aliases {
-			addLookupKey(m, alias, g)
-		}
-	}
-	return m
-}
-
-func addLookupKey(m map[string]*types.Glass, key string, g *types.Glass) {
-	m[key] = g
-	norm := glass.NormalizeName(key)
-	if norm != key {
-		m[norm] = g
-	}
-}
-
-func lookupCodeV(lookup map[string]*types.Glass, name string) *types.Glass {
-	if g, ok := lookup[name]; ok {
-		return g
-	}
-	norm := glass.NormalizeName(name)
-	if g, ok := lookup[norm]; ok {
-		return g
-	}
-	if strings.Contains(name, "_") {
-		parts := strings.SplitN(name, "_", 2)
-		prefix := parts[0]
-		wantMfr := strings.ToUpper(parts[1])
-
-		if g, ok := lookup[prefix]; ok {
-			if mfrMatch(g, wantMfr) {
-				return g
-			}
-		}
-		normPrefix := glass.NormalizeName(prefix)
-		if g, ok := lookup[normPrefix]; ok {
-			if mfrMatch(g, wantMfr) {
-				return g
-			}
-		}
-	}
-	return nil
-}
-
-func mfrMatch(g *types.Glass, wantMfr string) bool {
-	if wantMfr == "" {
-		return true
-	}
-	actual := strings.ToUpper(g.Manufacturer)
-	return actual == wantMfr
 }
