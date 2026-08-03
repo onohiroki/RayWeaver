@@ -67,3 +67,12 @@ func (c *Cauchy) Eval(lambda float64) float64 {
 	}
 	return n
 }
+
+// ConnectedCauchy returns ca shifted so that it passes through (lambdaBoundary,
+// target), making it C0-continuous with the spline/table at the band boundary.
+// Only the constant term A is adjusted, so the whole curve shifts uniformly.
+func ConnectedCauchy(ca Cauchy, lambdaBoundary, target float64) Cauchy {
+	connected := ca
+	connected.A += target - ca.Eval(lambdaBoundary)
+	return connected
+}

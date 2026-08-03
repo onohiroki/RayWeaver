@@ -28,7 +28,7 @@ resolve to `n = 1`.
 | `extended_2` | `n² = 1 + Σᵢ Bᵢλ²/(λ² − Cᵢ)`, 5 Sellmeier terms (10 coefficients) |
 | `extended_3` | polynomial `n²` in λ² and λ⁻² … λ⁻¹², 9 coefficients |
 | `constant` | `n = nd` (no dispersion) |
-| tabulated | piecewise-linear interpolation of an `(λ, n)` table |
+| tabulated | cubic-spline interpolation of an `(λ, n)` table (linear below 3 entries); Cauchy extrapolation connected C0-continuously at the table edges |
 | model | `nd`/`vd`-based approximation (below) |
 
 ## 3. Model glasses (nd/vd → dispersion)
@@ -40,12 +40,17 @@ as follows (`RefractiveIndexFromNDVD`):
 1. The standard-line indices `nₙ`, `n_C`, `n_F`, `n_d`, `n_g`, … are derived
    from `nd`/`vd` using the industry approximation `n = 1 + (n_d − 1)(C + Aλ² +
    Bλ⁻² + …)` fitted to the known (λ, index) knots (`internal/glass/indeces.go`).
-2. In the visible band (≈365–2058 nm) the (λ, n) knots are interpolated with a
-   **cubic spline** (`SplineInterpolate`), so the model is smooth and
-   differentiable — important for the DLS Jacobian.
+2. Between the first and last standard-line knots (≈365–2058 nm) the (λ, n)
+   knots are interpolated with a **cubic spline** (`SplineInterpolate`), so the
+   model is smooth and differentiable — important for the DLS Jacobian.
 3. Outside that band, a **Cauchy fit** `n = A + B/λ² + C/λ⁴ (+ D/λ⁶)` is fitted
-   to the same knots by least squares and evaluated. Cauchy is well-behaved
-   beyond the fitted band.
+   to the same knots by least squares and evaluated. The curve is shifted so it
+   meets the spline **exactly at the band edges** (C0-continuous), and values
+   are clamped to `n ≥ 1`. Cauchy is well-behaved beyond the fitted band.
+
+Tabulated glasses follow the same scheme: a natural cubic spline inside the
+`(λ, n)` table (linear interpolation below 3 entries, since a spline needs at
+least 3 knots) and a C0-connected Cauchy extrapolation outside the table range.
 
 Because the dispersion is a smooth function of `nd`/`vd`, the optimizer can
 differentiate merit terms with respect to glass variables.
@@ -55,7 +60,11 @@ differentiate merit terms with respect to glass variables.
 `FitCauchy` builds the normal equations for `n(λ) = A + B x + C x²` (or a
 fourth term), `x = 1/λ²`, and solves them with `raymath.SolveLinear`
 (least-squares normal equations). This is the fallback dispersion model used
-outside the spline band.
+outside the spline band, both for model and tabulated glasses. Because a raw
+least-squares fit need not reproduce the spline value exactly at the band edge,
+`ConnectedCauchy` shifts only the constant term `A` so the curve passes through
+the edge knot — making the overall index continuous (C0) across the spline →
+Cauchy transition.
 
 ## 5. Index caching
 

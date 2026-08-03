@@ -206,6 +206,148 @@ func TestInterpolateRefractiveIndex(t *testing.T) {
 	}
 }
 
+// N-BK7-like standard-line table used by the spline/extrapolation tests.
+var bk7Table = types.RefractiveIndexTable{
+	{Wavelength: 0.000365015, Value: 1.53117},
+	{Wavelength: 0.000404656, Value: 1.52705},
+	{Wavelength: 0.000435835, Value: 1.52439},
+	{Wavelength: 0.000486133, Value: 1.52238},
+	{Wavelength: 0.000546074, Value: 1.51872},
+	{Wavelength: 0.000587562, Value: 1.51680},
+	{Wavelength: 0.000656273, Value: 1.51432},
+	{Wavelength: 0.00101398, Value: 1.50731},
+}
+
+func TestInterpolateRefractiveIndexSpline(t *testing.T) {
+	// Knots reproduce the table values exactly.
+	for _, e := range bk7Table {
+		n, err := interpolateRefractiveIndex(bk7Table, e.Wavelength)
+		if err != nil {
+			t.Fatalf("interpolateRefractiveIndex at λ=%v: %v", e.Wavelength, err)
+		}
+		if math.Abs(n-e.Value) > 1e-10 {
+			t.Errorf("n at knot λ=%v = %v, want %v", e.Wavelength, n, e.Value)
+		}
+	}
+
+	// C1 continuity: the natural cubic spline makes the analytic left/right
+	// derivatives agree exactly at every interior knot.
+	knots := make([]IndexEntry, len(bk7Table))
+	for i, e := range bk7Table {
+		knots[i] = IndexEntry{Wavelength: e.Wavelength, Index: e.Value}
+	}
+	s, err := BuildSpline(knots)
+	if err != nil {
+		t.Fatalf("BuildSpline: %v", err)
+	}
+	for k := 1; k < len(knots)-1; k++ {
+		hL := knots[k].Wavelength - knots[k-1].Wavelength
+		hR := knots[k+1].Wavelength - knots[k].Wavelength
+		dL := (knots[k].Index-knots[k-1].Index)/hL + hL*(s[k-1]+2*s[k])/6.0
+		dR := (knots[k+1].Index-knots[k].Index)/hR - hR*(2*s[k]+s[k+1])/6.0
+		if math.Abs(dL-dR) > 1e-9*math.Max(1, math.Abs(dL)) {
+			t.Errorf("derivative discontinuity at λ=%v: left %v right %v", knots[k].Wavelength, dL, dR)
+		}
+	}
+
+	// Monotone fall like a real glass (n decreases as λ grows).
+	below, err := interpolateRefractiveIndex(bk7Table, 0.000450)
+	if err != nil {
+		t.Fatal(err)
+	}
+	above, err := interpolateRefractiveIndex(bk7Table, 0.000600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if below <= above {
+		t.Errorf("expected n decreasing with wavelength: n(450nm)=%v <= n(600nm)=%v", below, above)
+	}
+}
+
+func TestInterpolateRefractiveIndexExtrapolation(t *testing.T) {
+	// Cauchy extrapolation connects C0-continuously at both table edges.
+	lo := bk7Table[0]
+	hi := bk7Table[len(bk7Table)-1]
+	for _, wl := range []float64{lo.Wavelength - 1e-7, lo.Wavelength - 0.000010, lo.Wavelength - 0.000030} {
+		n, err := interpolateRefractiveIndex(bk7Table, wl)
+		if err != nil {
+			t.Fatalf("extrapolate below at λ=%v: %v", wl, err)
+		}
+		if math.Abs(n-lo.Value) > 0.05 {
+			t.Errorf("n at λ=%v = %v, expected close to edge %v", wl, n, lo.Value)
+		}
+	}
+	for _, wl := range []float64{hi.Wavelength + 1e-7, hi.Wavelength + 0.000020, hi.Wavelength + 0.000400} {
+		n, err := interpolateRefractiveIndex(bk7Table, wl)
+		if err != nil {
+			t.Fatalf("extrapolate above at λ=%v: %v", wl, err)
+		}
+		if math.Abs(n-hi.Value) > 0.05 {
+			t.Errorf("n at λ=%v = %v, expected close to edge %v", wl, n, hi.Value)
+		}
+	}
+
+	// Smooth monotone fall continuing beyond the table.
+	extrap, err := interpolateRefractiveIndex(bk7Table, 0.002500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if extrap > hi.Value || extrap < 1.0 {
+		t.Errorf("IR extrapolation n = %v outside (1.0, %v]", extrap, hi.Value)
+	}
+}
+
+func TestInterpolateRefractiveIndexClamp(t *testing.T) {
+	// Anomalous table (n increases with λ): the Cauchy fit has a negative B so
+	// the UV extrapolation would run below 1 and must be clamped.
+	anomalous := types.RefractiveIndexTable{
+		{Wavelength: 0.000500, Value: 1.50},
+		{Wavelength: 0.000600, Value: 1.55},
+		{Wavelength: 0.000700, Value: 1.60},
+	}
+	for _, wl := range []float64{0.000250, 0.000100, 0.000010} {
+		n, err := interpolateRefractiveIndex(anomalous, wl)
+		if err != nil {
+			t.Fatalf("clamp at λ=%v: %v", wl, err)
+		}
+		if n < 1.0 {
+			t.Errorf("n at λ=%v = %v, want clamped >= 1.0", wl, n)
+		}
+	}
+}
+
+func TestInterpolateRefractiveIndexSingleEntry(t *testing.T) {
+	table := types.RefractiveIndexTable{
+		{Wavelength: 0.000600, Value: 1.5},
+	}
+	for _, wl := range []float64{0.000200, 0.000600, 0.001000} {
+		n, err := interpolateRefractiveIndex(table, wl)
+		if err != nil {
+			t.Fatalf("single entry at λ=%v: %v", wl, err)
+		}
+		if n != 1.5 {
+			t.Errorf("n at λ=%v = %v, want 1.5", wl, n)
+		}
+	}
+}
+
+func TestInterpolateRefractiveIndexDuplicateWavelength(t *testing.T) {
+	table := types.RefractiveIndexTable{
+		{Wavelength: 0.000500, Value: 1.50},
+		{Wavelength: 0.000600, Value: 1.52},
+		{Wavelength: 0.000600, Value: 1.55},
+		{Wavelength: 0.000700, Value: 1.54},
+	}
+	// Must not panic and must return a finite value (linear fallback).
+	n, err := interpolateRefractiveIndex(table, 0.000550)
+	if err != nil {
+		t.Fatalf("duplicate wavelength: %v", err)
+	}
+	if math.IsNaN(n) || math.IsInf(n, 0) || n <= 1.0 {
+		t.Errorf("n = %v, expected finite physical value", n)
+	}
+}
+
 func TestCalcRefractiveIndexSellmeier(t *testing.T) {
 	g := &types.Glass{
 		Type:              types.GlassTypeCatalog,
@@ -430,6 +572,69 @@ func TestRefractiveIndexFromNDVDOutsideRange(t *testing.T) {
 	_, err := RefractiveIndexFromNDVD(1.5, 60, 0.000300)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRefractiveIndexFromNDVDCauchyContinuous(t *testing.T) {
+	const eps = 1e-9
+	cases := [][2]float64{
+		{1.51680, 64.17}, // N-BK7
+		{1.72825, 28.41}, // SF2
+		{1.5, 60},
+		{1.8, 25},
+	}
+	for _, c := range cases {
+		nd, vd := c[0], c[1]
+		indices := IndecesFromNdVd(nd, vd)
+		knots := sortedKnots(indices)
+		lo := knots[0].Wavelength
+		hi := knots[len(knots)-1].Wavelength
+
+		// Cauchy extrapolation connects C0-continuously with the spline at both
+		// band edges (first and last knot).
+		nLo, err := RefractiveIndexFromNDVD(nd, vd, lo)
+		if err != nil {
+			t.Fatalf("n(%v,%v)@lo: %v", nd, vd, err)
+		}
+		nLoBelow, err := RefractiveIndexFromNDVD(nd, vd, lo-eps)
+		if err != nil {
+			t.Fatalf("n(%v,%v) below lo: %v", nd, vd, err)
+		}
+		if math.Abs(nLoBelow-nLo) > 1e-6 {
+			t.Errorf("UV Cauchy not C0 with spline: |n(%v)−n(%v)| = %v", lo-eps, lo, math.Abs(nLoBelow-nLo))
+		}
+
+		nHi, err := RefractiveIndexFromNDVD(nd, vd, hi)
+		if err != nil {
+			t.Fatalf("n(%v,%v)@hi: %v", nd, vd, err)
+		}
+		nHiAbove, err := RefractiveIndexFromNDVD(nd, vd, hi+eps)
+		if err != nil {
+			t.Fatalf("n(%v,%v) above hi: %v", nd, vd, err)
+		}
+		if math.Abs(nHiAbove-nHi) > 1e-6 {
+			t.Errorf("IR Cauchy not C0 with spline: |n(%v)−n(%v)| = %v", hi+eps, hi, math.Abs(nHiAbove-nHi))
+		}
+
+		// Cauchy band values stay physical and monotone (n decreasing with λ).
+		nUV := 0.0
+		for _, wl := range []float64{0.000340, lo - 0.000001} {
+			n, err := RefractiveIndexFromNDVD(nd, vd, wl)
+			if err != nil {
+				t.Fatalf("n(%v,%v)@%v: %v", nd, vd, wl, err)
+			}
+			if n < 1.0 || n > 2.0 {
+				t.Errorf("n(%v,%v)@%v = %v, outside physical range", nd, vd, wl, n)
+			}
+			nUV = n
+		}
+		nIR, err := RefractiveIndexFromNDVD(nd, vd, 0.004000)
+		if err != nil {
+			t.Fatalf("n(%v,%v)@0.004: %v", nd, vd, err)
+		}
+		if nIR >= nUV {
+			t.Errorf("n(%v,%v): IR %v should be < UV %v", nd, vd, nIR, nUV)
+		}
 	}
 }
 

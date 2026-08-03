@@ -282,24 +282,31 @@ func extended2(coeffs []float64, lambda float64) (float64, error) {
 
 func RefractiveIndexFromNDVD(nd, vd, wavelength float64) (float64, error) {
 	const (
-		splineMin = 0.000365
-		splineMax = 0.002058
 		cauchyMin = 0.000320
 		cauchyMax = 0.005000
 	)
 
-	if wavelength >= splineMin && wavelength <= splineMax {
-		indices := IndecesFromNdVd(nd, vd)
-		knots := sortedKnots(indices)
+	indices := IndecesFromNdVd(nd, vd)
+	knots := sortedKnots(indices)
+	lo := knots[0].Wavelength
+	hi := knots[len(knots)-1].Wavelength
+
+	if wavelength >= lo && wavelength <= hi {
 		return SplineInterpolate(knots, wavelength)
 	}
 
-	if wavelength > cauchyMin && wavelength < splineMin ||
-		wavelength > splineMax && wavelength < cauchyMax {
-		indices := IndecesFromNdVd(nd, vd)
-		knots := sortedKnots(indices)
+	if wavelength > cauchyMin && wavelength < cauchyMax {
 		ca := FitCauchy(knots, 3)
-		return ca.Eval(wavelength), nil
+		if wavelength < lo {
+			ca = ConnectedCauchy(ca, lo, knots[0].Index)
+		} else {
+			ca = ConnectedCauchy(ca, hi, knots[len(knots)-1].Index)
+		}
+		n := ca.Eval(wavelength)
+		if n < 1.0 {
+			n = 1.0
+		}
+		return n, nil
 	}
 
 	return nd, nil
@@ -331,19 +338,59 @@ func interpolateRefractiveIndex(entries types.RefractiveIndexTable, wavelength f
 		return sorted[i].Wavelength < sorted[j].Wavelength
 	})
 
+	// Spline interpolation needs at least 3 distinct knots; smaller tables stay
+	// linear (constant for a single entry, clamped beyond the endpoints).
+	if len(sorted) < 3 {
+		return linearInterpolateTable(sorted, wavelength), nil
+	}
+
+	knots := make([]IndexEntry, len(sorted))
+	for i, e := range sorted {
+		knots[i] = IndexEntry{Wavelength: e.Wavelength, Index: e.Value}
+	}
+
+	s, err := BuildSpline(knots)
+	if err != nil {
+		// Duplicate or non-increasing wavelengths: fall back to linear/clamped.
+		return linearInterpolateTable(sorted, wavelength), nil
+	}
+
+	// Outside the table, extrapolate with a Cauchy fit connected C0-continuously
+	// to the spline at the table edge, clamped to a physical n >= 1.
+	if wavelength < knots[0].Wavelength {
+		ca := ConnectedCauchy(FitCauchy(knots, 3), knots[0].Wavelength, knots[0].Index)
+		return clampIndex(ca.Eval(wavelength)), nil
+	}
+	if wavelength > knots[len(knots)-1].Wavelength {
+		last := len(knots) - 1
+		ca := ConnectedCauchy(FitCauchy(knots, 3), knots[last].Wavelength, knots[last].Index)
+		return clampIndex(ca.Eval(wavelength)), nil
+	}
+
+	return EvalSpline(knots, s, wavelength), nil
+}
+
+func linearInterpolateTable(sorted types.RefractiveIndexTable, wavelength float64) float64 {
 	if wavelength <= sorted[0].Wavelength {
-		return sorted[0].Value, nil
+		return sorted[0].Value
 	}
 	if wavelength >= sorted[len(sorted)-1].Wavelength {
-		return sorted[len(sorted)-1].Value, nil
+		return sorted[len(sorted)-1].Value
 	}
 
 	for i := 0; i < len(sorted)-1; i++ {
 		if wavelength >= sorted[i].Wavelength && wavelength <= sorted[i+1].Wavelength {
 			t := (wavelength - sorted[i].Wavelength) / (sorted[i+1].Wavelength - sorted[i].Wavelength)
-			return sorted[i].Value + t*(sorted[i+1].Value-sorted[i].Value), nil
+			return sorted[i].Value + t*(sorted[i+1].Value-sorted[i].Value)
 		}
 	}
 
-	return sorted[len(sorted)-1].Value, nil
+	return sorted[len(sorted)-1].Value
+}
+
+func clampIndex(n float64) float64 {
+	if n < 1.0 {
+		return 1.0
+	}
+	return n
 }
