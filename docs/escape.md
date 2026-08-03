@@ -34,6 +34,7 @@ optimization:
   escape:
     max_cycles: 10          # DLS cycles per worker
     escape_workers: 4       # top-level parallel goroutines (default 4)
+    max_seconds: 0          # soft wall-clock budget (seconds, shared; 0 = unlimited)
     distance_threshold: 0.1 # normalised distance to call a point "new"
     h_initial: 0.1          # escape bump height
     w_initial: 0.5          # escape bump width
@@ -61,6 +62,14 @@ The DLS solve inside each worker parallelises its Jacobian across
 goroutines are `escape_workers × jacobian_workers`; set `jacobian_workers: 1`
 to avoid oversubscription.
 
+### Time budget
+
+`max_seconds` (default 0 = unlimited) is a **soft** wall-clock budget shared by
+all workers: expiry is checked between DLS runs (at the start of each cycle), so
+a running solve always finishes — the overshoot is bounded by one DLS run. The
+search stops early when the budget is exhausted, discovered minima are still
+reported, and the output marks `timed_out: true`.
+
 ## Output
 
 The best solution is written to `configs[].surfaces` (pipeline-compatible with
@@ -71,6 +80,7 @@ discovered local minimum with its full surfaces and variable values:
 escape_result:
   best_index: 0
   best_merit: ...
+  timed_out: false              # true if the search was cut short by max_seconds
   params:
     h_initial: ...
     w_initial: ...
@@ -79,6 +89,7 @@ escape_result:
     distance_threshold: ...
     max_cycles: ...
     escape_workers: ...
+    max_seconds: ...
   minima:
     - index: 0
       merit: ...

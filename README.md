@@ -158,6 +158,10 @@ Notes:
   parallelises its Jacobian across `jacobian_workers`, so the total goroutine
   count is `escape_workers × jacobian_workers`; set `jacobian_workers: 1` when
   running many escape workers to avoid oversubscription.
+- `optimization.escape.max_seconds` adds a soft wall-clock budget (seconds,
+  shared by all workers) to the escape search: expiry is checked between DLS
+  runs, so a running solve always finishes. The output marks `timed_out: true`
+  when the search was cut short.
 - `configs[].ray_paths` is render-only metadata; the optimizer ignores it.
 - `edge_thickness` constraints take the back surface explicitly via `surface2`.
 - `optimization.escape` enables the escape-function global optimizer (see

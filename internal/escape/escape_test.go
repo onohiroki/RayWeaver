@@ -3,6 +3,7 @@ package escape
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -194,7 +195,7 @@ func TestCycleFindsTwoMinima(t *testing.T) {
 	params := BuildParams(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
-	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil)
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{})
 
 	bestX, bestMerit := cycle.Run([]float64{0.8})
 
@@ -238,5 +239,68 @@ func TestParallelEscapeFindsBothWells(t *testing.T) {
 	}
 	if res.Cycles != 8 {
 		t.Fatalf("cycles = %d, want 8", res.Cycles)
+	}
+}
+
+func TestCycleTimeBudgetStopsEarly(t *testing.T) {
+	cfg := types.EscapeConfig{HInitial: 0.5, WInitial: 0.5, HMult: 2.0, WMult: 1.0}
+	params := BuildParams(cfg, twoWell{}.Variables())
+	store := NewStore(params)
+	wrapper := NewWrapper(twoWell{}, params)
+	// A deadline already in the past forces the cycle to stop before the
+	// first DLS run: no escapes recorded, and StoppedByTime is set.
+	deadline := time.Now().Add(-time.Second)
+	cycle := NewCycle(wrapper, store, params, 10, 0, nil, deadline)
+
+	cycle.Run([]float64{0.8})
+
+	if !cycle.StoppedByTime() {
+		t.Fatal("expected cycle stopped by time budget")
+	}
+	if cycle.Escaped() != 0 {
+		t.Fatalf("escaped = %d, want 0 (no DLS before expiry)", cycle.Escaped())
+	}
+	if store.Len() != 0 {
+		t.Fatalf("no minima should be recorded before expiry, got %d", store.Len())
+	}
+}
+
+func TestCycleNoDeadlineRunsToCompletion(t *testing.T) {
+	cfg := types.EscapeConfig{
+		MaxCycles:         3,
+		DistanceThreshold: 0.1,
+		HInitial:          0.5,
+		WInitial:          0.5,
+		HMult:             2.0,
+		WMult:             1.0,
+	}
+	params := BuildParams(cfg, twoWell{}.Variables())
+	store := NewStore(params)
+	wrapper := NewWrapper(twoWell{}, params)
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{})
+
+	cycle.Run([]float64{0.8})
+
+	if cycle.StoppedByTime() {
+		t.Fatal("cycle without a deadline must not report stopped by time")
+	}
+	if store.Len() < 1 {
+		t.Fatalf("expected at least one recorded minimum, got %d", store.Len())
+	}
+}
+
+func TestParallelEscapeTimeBudget(t *testing.T) {
+	cfg := types.EscapeConfig{
+		MaxCycles:     8,
+		EscapeWorkers: 2,
+		MaxSeconds:    1e-9, // 1ns budget -> always expired before the first cycle
+	}
+	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, nil)
+
+	if !res.TimedOut {
+		t.Fatal("expected TimedOut=true with a tiny budget")
+	}
+	if res.MaxSeconds != 1e-9 {
+		t.Fatalf("MaxSeconds = %v, want 1e-9", res.MaxSeconds)
 	}
 }

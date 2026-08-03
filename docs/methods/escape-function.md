@@ -89,12 +89,26 @@ The escape cycle disables the DLS internal stall perturbation
 |---|---|---|
 | `escape_workers` | 4 | parallel top-level goroutines |
 | `max_cycles` | 10 | DLS cycles per worker |
+| `max_seconds` | 0 | soft wall-clock budget in seconds, shared by all workers (0 = unlimited) |
 | `distance_threshold` | 0.1 | normalized distance to call a point "new" |
 | `h_initial` | 0.1 | initial bump height (escape strength) |
 | `w_initial` | 0.5 | initial bump width (locality) |
 | `h_mult` | 2.0 | strengthen factor on a repeated minimum |
 | `w_mult` | 1.3 | widen factor on a repeated minimum |
 | `variable_weights` | 1.0 each | per-parameter distance weights |
+
+## 4b. Termination
+
+The search normally runs `escape_workers` workers for `max_cycles` cycles each.
+A worker also stops early after `maxFail = 3` consecutive unacceptable DLS runs
+(a solve that neither converges nor produces a finite, sane merit).
+
+`max_seconds` adds a **soft** wall-clock budget shared by all workers: each
+worker checks the shared deadline at the start of every cycle and stops as soon
+as it is exceeded. The check only happens *between* DLS runs — a running solve
+always completes, so the overshoot is bounded by one DLS run. This is a
+coarse-grained stop: it never interrupts an in-flight DLS iteration. Minima
+recorded before expiry are still reported, and the output sets `timed_out: true`.
 
 ## 5. Output
 

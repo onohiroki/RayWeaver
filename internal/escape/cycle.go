@@ -3,6 +3,7 @@ package escape
 import (
 	"math"
 	"strings"
+	"time"
 
 	"github.com/hiroki/rayweaver/internal/dls"
 )
@@ -24,13 +25,16 @@ type Cycle struct {
 	seed      int64
 	workerID  int
 	progress  *Progress
+	deadline  time.Time
 	escaped   int
 	recorded  int
+	stopped   bool
 }
 
 // NewCycle creates an escape cycle bound to a wrapper and shared store.
-// progress may be nil to disable verbose reporting.
-func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress) *Cycle {
+// progress may be nil to disable verbose reporting. A zero deadline disables
+// the time budget (unlimited runtime).
+func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time) *Cycle {
 	return &Cycle{
 		wrapper:   wrapper,
 		store:     store,
@@ -40,6 +44,7 @@ func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed
 		seed:      seed,
 		workerID:  int(seed),
 		progress:  progress,
+		deadline:  deadline,
 	}
 }
 
@@ -48,6 +53,14 @@ func (c *Cycle) Escaped() int { return c.escaped }
 
 // Recorded reports how many distinct minima this cycle recorded.
 func (c *Cycle) Recorded() int { return c.recorded }
+
+// StoppedByTime reports whether the cycle was cut short by the time budget.
+func (c *Cycle) StoppedByTime() bool { return c.stopped }
+
+// timeUp reports whether the shared wall-clock budget has been exhausted.
+func (c *Cycle) timeUp() bool {
+	return !c.deadline.IsZero() && time.Now().After(c.deadline)
+}
 
 func isConverged(status string) bool {
 	return strings.HasPrefix(status, "converged")
@@ -120,6 +133,11 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 	repeatStreak := 0
 	restartAmp := restartPerturb
 	for cyc := 0; cyc < c.maxCycles; cyc++ {
+		if c.timeUp() {
+			c.progress.Logf("worker %d: time budget expired, stopping at cycle %d/%d", c.workerID, cyc, c.maxCycles)
+			c.stopped = true
+			break
+		}
 		// Step 1: escape DLS. Push away from every recorded minimum.
 		c.wrapper.SetEscapes(c.store.All())
 		c.wrapper.SetStartX(currentX)

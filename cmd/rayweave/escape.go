@@ -333,9 +333,9 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, verbose bool) {
 		}
 	}
 
-	escResult := assembleEscapeResult(res, minima)
+	escapeResult := assembleEscapeResult(res, minima)
 	reportEscape(res)
-	writeEscapeOutput(input, escResult)
+	writeEscapeOutput(input, escapeResult)
 }
 
 // assembleEscapeResult wraps the minima list with the report metadata.
@@ -351,8 +351,10 @@ func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum) *type
 			DistanceThreshold: res.Params.Dt,
 			MaxCycles:         res.Cycles,
 			EscapeWorkers:     res.Workers,
+			MaxSeconds:        res.MaxSeconds,
 		},
-		Minima: minima,
+		TimedOut: res.TimedOut,
+		Minima:   minima,
 	}
 }
 
@@ -527,6 +529,9 @@ func reportEscape(res escape.Result) {
 	fmt.Fprintf(os.Stderr, "=== Escape complete ===\n")
 	fmt.Fprintf(os.Stderr, "  Workers:   %d\n", res.Workers)
 	fmt.Fprintf(os.Stderr, "  Cycles:    %d\n", res.Cycles)
+	if res.MaxSeconds > 0 {
+		fmt.Fprintf(os.Stderr, "  Time budget: %.3gs (reached: %v)\n", res.MaxSeconds, res.TimedOut)
+	}
 	fmt.Fprintf(os.Stderr, "  Escapes:   %d\n", res.Escapes)
 	fmt.Fprintf(os.Stderr, "  Minima:    %d\n", len(res.Minima))
 	for i, p := range res.Minima {

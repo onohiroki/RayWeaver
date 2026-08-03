@@ -456,6 +456,7 @@ type OptimizationConfig struct {
 type EscapeConfig struct {
 	MaxCycles         int                `yaml:"max_cycles,omitempty"`
 	EscapeWorkers     int                `yaml:"escape_workers,omitempty"`
+	MaxSeconds        float64            `yaml:"max_seconds,omitempty"`
 	DistanceThreshold float64            `yaml:"distance_threshold,omitempty"`
 	HInitial          float64            `yaml:"h_initial,omitempty"`
 	WInitial          float64            `yaml:"w_initial,omitempty"`
@@ -511,6 +512,7 @@ type EscapeResult struct {
 	BestIndex int              `yaml:"best_index"`
 	BestMerit float64          `yaml:"best_merit"`
 	Params    EscapeParamsInfo `yaml:"params"`
+	TimedOut  bool             `yaml:"timed_out,omitempty"`
 	Minima    []EscapeMinimum  `yaml:"minima"`
 }
 
@@ -523,6 +525,7 @@ type EscapeParamsInfo struct {
 	DistanceThreshold float64            `yaml:"distance_threshold"`
 	MaxCycles         int                `yaml:"max_cycles"`
 	EscapeWorkers     int                `yaml:"escape_workers,omitempty"`
+	MaxSeconds        float64            `yaml:"max_seconds,omitempty"`
 	VariableWeights   map[string]float64 `yaml:"variable_weights,omitempty"`
 }
 

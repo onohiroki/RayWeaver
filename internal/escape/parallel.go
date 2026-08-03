@@ -2,6 +2,7 @@ package escape
 
 import (
 	"sync"
+	"time"
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -10,13 +11,15 @@ import (
 // Result is the outcome of a parallel escape search: every discovered local
 // minimum ordered by merit, plus the parameters used.
 type Result struct {
-	Params    Params
-	Minima    []Point
-	BestIdx   int
-	BestMerit float64
-	Escapes   int
-	Workers   int
-	Cycles    int
+	Params     Params
+	Minima     []Point
+	BestIdx    int
+	BestMerit  float64
+	Escapes    int
+	Workers    int
+	Cycles     int
+	MaxSeconds float64
+	TimedOut   bool
 }
 
 // BuildParams derives the escape parameters from the YAML config and the
@@ -77,12 +80,25 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 		maxCycles = 10
 	}
 
+	// Soft wall-clock budget shared by all workers. A zero value disables the
+	// limit; expiry is checked between DLS runs, so a running solve always
+	// finishes (overshoot is bounded by one DLS run).
+	var deadline time.Time
+	if cfg.MaxSeconds > 0 {
+		deadline = time.Now().Add(time.Duration(cfg.MaxSeconds * float64(time.Second)))
+	}
+
 	progress.Logf("escape params: h=%.4g w=%.4g h_mult=%.4g w_mult=%.4g distance_threshold=%.4g", params.H, params.W, params.HMult, params.WMult, params.Dt)
-	progress.Logf("escape starting: %d workers x %d cycles", numWorkers, maxCycles)
+	if !deadline.IsZero() {
+		progress.Logf("escape starting: %d workers x %d cycles, time budget %.3gs", numWorkers, maxCycles, cfg.MaxSeconds)
+	} else {
+		progress.Logf("escape starting: %d workers x %d cycles (no time budget)", numWorkers, maxCycles)
+	}
 
 	store := NewStore(params)
 	var wg sync.WaitGroup
 	totalEscapes := 0
+	timedOut := false
 	var escMu sync.Mutex
 
 	for i := 0; i < numWorkers; i++ {
@@ -91,7 +107,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 			defer wg.Done()
 			inner := newModel()
 			wrapper := NewWrapper(inner, params)
-			cycle := NewCycle(wrapper, store, params, maxCycles, seed, progress)
+			cycle := NewCycle(wrapper, store, params, maxCycles, seed, progress, deadline)
 
 			x0 := inner.InitialState()
 			if seed != 0 {
@@ -102,6 +118,9 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 
 			escMu.Lock()
 			totalEscapes += cycle.Escaped()
+			if cycle.StoppedByTime() {
+				timedOut = true
+			}
 			escMu.Unlock()
 		}(int64(i))
 	}
@@ -109,12 +128,14 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, progress 
 
 	points, _ := store.SortedByMerit()
 	res := Result{
-		Params:  params,
-		Minima:  points,
-		Escapes: totalEscapes,
-		Workers: numWorkers,
-		Cycles:  maxCycles,
-		BestIdx: -1,
+		Params:     params,
+		Minima:     points,
+		Escapes:    totalEscapes,
+		Workers:    numWorkers,
+		Cycles:     maxCycles,
+		MaxSeconds: cfg.MaxSeconds,
+		TimedOut:   timedOut,
+		BestIdx:    -1,
 	}
 	if len(points) > 0 {
 		res.BestIdx = 0
