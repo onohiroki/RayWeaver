@@ -577,3 +577,82 @@ func TestCatalogRefractiveIndexCacheConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestNDVDStoredValues(t *testing.T) {
+	g := &types.Glass{Type: types.GlassTypeModel, Label: "m", ND: 1.51680, VD: 64.17}
+	nd, vd, ok := NDVD(g)
+	if !ok {
+		t.Fatal("expected ok=true for stored nd/vd")
+	}
+	if nd != 1.51680 || vd != 64.17 {
+		t.Errorf("got nd=%v vd=%v, want 1.5168 64.17", nd, vd)
+	}
+}
+
+func TestNDVDCatalogFromCoefficients(t *testing.T) {
+	g := &types.Glass{
+		Type:              types.GlassTypeCatalog,
+		Name:              "N-BK7",
+		DispersionFormula: types.Sellmeier1,
+		Coefficients:      []float64{1.03961212, 0.00600069867, 0.231792344, 0.0200179144, 1.01046945, 103.560653},
+	}
+	nd, vd, ok := NDVD(g)
+	if !ok {
+		t.Fatal("expected ok=true for coefficient-only catalog glass")
+	}
+	if math.Abs(nd-1.5168)/1.5168 > 0.001 {
+		t.Errorf("nd = %v, want ~1.5168", nd)
+	}
+	if math.Abs(vd-64.17)/64.17 > 0.01 {
+		t.Errorf("vd = %v, want ~64.17", vd)
+	}
+}
+
+func TestNDVDTabulated(t *testing.T) {
+	g := &types.Glass{
+		Type:  types.GlassTypeTabulated,
+		Label: "table",
+		RefractiveIndices: types.RefractiveIndexTable{
+			{Wavelength: 0.000486133, Value: 1.52238},
+			{Wavelength: 0.000587562, Value: 1.51680},
+			{Wavelength: 0.000656273, Value: 1.51432},
+		},
+	}
+	nd, vd, ok := NDVD(g)
+	if !ok {
+		t.Fatal("expected ok=true for tabulated glass")
+	}
+	if math.Abs(nd-1.5168)/1.5168 > 0.001 {
+		t.Errorf("nd = %v, want ~1.5168", nd)
+	}
+	wantVD := (1.51680 - 1) / (1.52238 - 1.51432)
+	if math.Abs(vd-wantVD)/wantVD > 0.001 {
+		t.Errorf("vd = %v, want ~%.2f", vd, wantVD)
+	}
+}
+
+func TestNDVDConstant(t *testing.T) {
+	g := &types.Glass{
+		Type:              types.GlassTypeCatalog,
+		Name:              "CONST",
+		DispersionFormula: types.Constant,
+		ND:                1.6,
+	}
+	nd, vd, ok := NDVD(g)
+	if !ok {
+		t.Fatal("expected ok=true for constant glass with nd")
+	}
+	if nd != 1.6 {
+		t.Errorf("nd = %v, want 1.6", nd)
+	}
+	if vd != 0 {
+		t.Errorf("vd = %v, want 0 (no dispersion)", vd)
+	}
+}
+
+func TestNDVDNoData(t *testing.T) {
+	g := &types.Glass{Type: types.GlassTypeModel, Label: "empty"}
+	if _, _, ok := NDVD(g); ok {
+		t.Error("expected ok=false for glass with no nd/vd or dispersion data")
+	}
+}

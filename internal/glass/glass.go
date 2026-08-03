@@ -11,6 +11,55 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
+// ndvdLines returns the d/F/C line wavelengths in the unit expected by g's
+// dispersion model. Catalog dispersion formulas (sellmeier/schott/extended)
+// are fitted for micrometres; model and tabulated glasses use millimetres,
+// the internal wavelength unit of the ray trace.
+func ndvdLines(g *types.Glass) (d, f, c float64) {
+	switch {
+	case g.Type == types.GlassTypeCatalog &&
+		(g.DispersionFormula == types.Sellmeier1 || g.DispersionFormula == types.Schott ||
+			g.DispersionFormula == types.Extended2 || g.DispersionFormula == types.Extended3):
+		return 0.587562, 0.486133, 0.656273
+	default:
+		return 0.000587562, 0.000486133, 0.000656273
+	}
+}
+
+// NDVD returns the d-line refractive index and Abbe number for g. When nd/vd
+// are not stored directly (coefficient-only catalog glasses or tabulated
+// glasses), it computes n(d), n(F), n(C) via CalcRefractiveIndex and derives
+// vd = (nd-1)/(nF-nC). ok is false when neither source yields valid values.
+func NDVD(g *types.Glass) (nd, vd float64, ok bool) {
+	if g == nil {
+		return 0, 0, false
+	}
+	if g.ND > 0 && g.VD > 0 {
+		return g.ND, g.VD, true
+	}
+
+	wlD, wlF, wlC := ndvdLines(g)
+	nD, errD := CalcRefractiveIndex(g, wlD)
+	nF, errF := CalcRefractiveIndex(g, wlF)
+	nC, errC := CalcRefractiveIndex(g, wlC)
+
+	if g.ND > 0 {
+		nd = g.ND
+	} else if errD == nil {
+		nd = nD
+	} else {
+		return 0, 0, false
+	}
+
+	if errF != nil || errC != nil {
+		return nd, 0, true
+	}
+	if nd <= 1 || nF-nC == 0 {
+		return nd, 0, true
+	}
+	return nd, (nd - 1) / (nF - nC), true
+}
+
 type Catalog struct {
 	ByName map[string]*types.Glass
 

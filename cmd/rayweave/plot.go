@@ -110,11 +110,19 @@ func buildGlassMap(output types.Output) map[string]render.GlassInfo {
 		return m
 	}
 	for _, g := range output.GlassCatalog.Entries {
+		nd, vd, _ := glass.NDVD(&g)
+		info := render.GlassInfo{ND: nd, VD: vd}
+		if key := types.ResolveGlassKey(g); key != "" {
+			m[key] = info
+		}
 		if g.Name != "" {
-			m[g.Name] = render.GlassInfo{ND: g.ND, VD: g.VD}
+			m[g.Name] = info
+		}
+		if g.Label != "" {
+			m[g.Label] = info
 		}
 		for _, alias := range g.Aliases {
-			m[alias] = render.GlassInfo{ND: g.ND, VD: g.VD}
+			m[alias] = info
 		}
 	}
 	return m
