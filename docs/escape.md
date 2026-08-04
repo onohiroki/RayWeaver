@@ -94,6 +94,83 @@ normalised variable space) seeds the paralllel workers at slightly different
 start points. With the default `initial_perturb` all workers converge toward the
 same basin, so this is usually the first knob to raise.
 
+### Exploration depth vs. breadth
+
+Two search strategies are useful, and the knobs above map directly onto them.
+
+**Broad search** — survey many distinct basins, accepting that each is explored
+shallowly. This suits coarse stage-one searches (e.g. when the dome is unknown
+and a diverse set of starting points is more valuable than a deep local solve).
+
+- raise `initial_perturb` (e.g. `0.10`) and `w_span` (e.g. `3.0`) so workers
+  spread widely
+- widen `w_initial` so the escape bump covers a larger neighbourhood, letting
+  the next run leave the valley and reach distant regions
+- lower `escape_iter_frac` (e.g. `0.25`): each basin is only refined briefly
+  before escaping
+- the trade-off is a shallower best merit per basin
+
+**Deep search** — concentrate on a narrow region and refine it thoroughly.
+This suits refining a known-good solution or a second-pass sweep around a
+promising dome.
+
+- lower `initial_perturb` (e.g. `0.02`) and `w_span` (e.g. `1.5`) so workers
+  stay close together
+- narrow `w_initial` so the escape bump stays local, keeping re-runs in the same
+  neighbourhood
+- raise `escape_iter_frac` (e.g. `0.5`): each basin is solved to a tight
+  convergence before moving on
+- the trade-off is fewer basins visited per unit time
+
+In both cases `max_cycles` trades breadth against depth of a setting, and
+`escape_workers` scales the wall-clock cost (each worker is independent, so a
+higher count broadens the search cheaply). Nothing here changes the two-phase
+(escape-then-clean) structure — the clean phase always refines the final best
+point with the full budget.
+
+#### Parameter summary
+
+| Parameter | Balanced (default) | Broad | Deep |
+|---|---|---|---|
+| `initial_perturb` | 0.05 | 0.10 | 0.02 |
+| `w_span` | 2.0 | 3.0 | 1.5 |
+| `w_initial` | 0.5 | 0.8 | 0.3 |
+| `escape_iter_frac` | 1/3 | 0.25 | 0.5 |
+| `max_cycles` | 10 | lower | higher |
+| `escape_workers` | 4 | higher for cheap breadth | lower |
+
+`w_initial` and `max_cycles` are set alongside the four tuning knobs above. The
+remaining performance fields (`h_initial`, `w_mult`, `max_seconds`, …) are
+independent of the breadth/depth trade-off.
+
+#### Example: broad search
+
+```yaml
+optimization:
+  method: dls
+  escape:
+    escape_workers: 8
+    max_cycles: 6
+    initial_perturb: 0.10
+    w_span: 3.0
+    w_initial: 0.8
+    escape_iter_frac: 0.25
+```
+
+#### Example: deep search
+
+```yaml
+optimization:
+  method: dls
+  escape:
+    escape_workers: 2
+    max_cycles: 15
+    initial_perturb: 0.02
+    w_span: 1.5
+    w_initial: 0.3
+    escape_iter_frac: 0.5
+```
+
 ### Time budget
 
 `max_seconds` (default 0 = unlimited) is a **soft** wall-clock budget shared by
