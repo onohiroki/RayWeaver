@@ -31,7 +31,7 @@ func TestOptimizerSeidelDistortionKind(t *testing.T) {
 	s5 := paraxial.ComputeSeidel(surfaces, 10, 0.00058756, gc).Distortion
 
 	cfg := Config{
-		Surfaces: surfaces,
+		Surfaces:  surfaces,
 		Variables: []Variable{},
 		MeritTerms: []MeritTerm{{
 			Kind:        MeritSeidelDistortion,
@@ -246,7 +246,7 @@ func TestOptimizerCanImproveDegradedSystem(t *testing.T) {
 }
 
 type mockLogger struct {
-	iterLogs  []struct {
+	iterLogs []struct {
 		Iter        int
 		Merit       float64
 		Improvement float64
@@ -477,5 +477,58 @@ func TestOptimizerLoggerCalled(t *testing.T) {
 	}
 	if len(logger.iterLogs) > result.Iterations {
 		t.Errorf("LogIter called %d times, want at most %d (iterations)", len(logger.iterLogs), result.Iterations)
+	}
+}
+
+// TestUpdatePupils verifies the dynamic-pupil recomputation: UpdatePupils
+// derives a non-zero per-config pupil Z at the current variables, and the value
+// follows a change in the variables (the aperture position moves during
+// optimisation).
+func TestUpdatePupils(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SK18", ND: 1.63854, VD: 55.42})
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SF12", ND: 1.64831, VD: 33.84})
+
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 1 / 10.2871491742, Thickness: 1.524, Material: "SK18", Diameter: 10.0},
+		{ID: 2, Type: types.Sphere, Curvature: 1 / -239.3967954752, Thickness: 2.3368, Material: "AIR", Diameter: 10.0},
+		{ID: 3, Type: types.Sphere, Curvature: 1 / -12.8269871730, Thickness: 0.508, Material: "SF12", Diameter: 6.0},
+		{ID: 4, Type: types.Sphere, Curvature: 1 / 10.5917184406, Thickness: 1.4986, Material: "AIR", Diameter: 6.0},
+		{ID: 5, Type: types.Sphere, Curvature: 0.0, Thickness: 1.016, Material: "AIR", Diameter: 3.78},
+		{ID: 6, Type: types.Sphere, Curvature: 1 / 61.8456294200, Thickness: 1.524, Material: "SK18", Diameter: 6.0},
+		{ID: 7, Type: types.Sphere, Curvature: 1 / -10.0074859032, Thickness: 21.36695183553, Material: "AIR", Diameter: 6.0},
+		{ID: 8, Type: types.Sphere, Curvature: 0.0, Thickness: 0.0, Material: "AIR", Diameter: 44.0},
+	}
+
+	cfg := Config{
+		Surfaces: surfaces,
+		Variables: []Variable{{
+			Name:      "s1_c",
+			SurfaceID: 1,
+			Param:     "curvature",
+			Min:       0.05,
+			Max:       0.2,
+		}},
+		Fields:       []types.FieldItem{{ID: 0, AngleDeg: 0, Weight: 1}, {ID: 1, AngleDeg: 16, Weight: 1}},
+		MeritTerms:   []MeritTerm{{FieldAngle: 0, FieldWeight: 1, Wavelength: 0.00058756, WavWeight: 1, Weight: 1}},
+		GlassCatalog: gc,
+		RefSurface:   8,
+		NumRays:      32,
+	}
+
+	opt := NewOptimizer(cfg)
+	opt.UpdatePupils([]float64{0.0})
+	zLo := opt.configs[0].pupilZ
+	if zLo == 0 {
+		t.Fatal("UpdatePupils did not derive a pupil Z at x=0")
+	}
+
+	opt.UpdatePupils([]float64{1.0})
+	zHi := opt.configs[0].pupilZ
+	if zHi == 0 {
+		t.Fatal("UpdatePupils did not derive a pupil Z at x=1")
+	}
+	if math.Abs(zLo-zHi) < 1e-6 {
+		t.Errorf("pupil Z did not follow the variables: x=0 -> %v, x=1 -> %v", zLo, zHi)
 	}
 }

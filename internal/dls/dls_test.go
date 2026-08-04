@@ -155,6 +155,39 @@ func (m polyModel) ComputeConstraints(x []float64) []float64 {
 	return c
 }
 
+// pupilRecordingModel implements PupilUpdater to verify the solver calls it
+// once per iteration.
+type pupilRecordingModel struct {
+	polyModel
+	updates [][]float64
+}
+
+func (m *pupilRecordingModel) UpdatePupils(x []float64) {
+	m.updates = append(m.updates, append([]float64{}, x...))
+}
+
+// TestSolveCallsPupilUpdaterPerIteration verifies that a Model implementing
+// PupilUpdater has UpdatePupils invoked at the top of every DLS iteration with
+// the physical (denormalised) variable vector.
+func TestSolveCallsPupilUpdaterPerIteration(t *testing.T) {
+	m := &pupilRecordingModel{polyModel: polyModel{n: 2}}
+	res := Solve(m)
+
+	if len(m.updates) < 1 {
+		t.Fatalf("UpdatePupils never called")
+	}
+	if len(m.updates) != res.Iterations && len(m.updates) != res.Iterations-1 {
+		t.Errorf("UpdatePupils called %d times, want %d or %d (once per iteration)", len(m.updates), res.Iterations, res.Iterations-1)
+	}
+	for _, x := range m.updates {
+		for _, xi := range x {
+			if xi < 0 || xi > 1 {
+				t.Errorf("UpdatePupils received x=%v outside the variable box", x)
+			}
+		}
+	}
+}
+
 func TestComputeJacobiansParallelDeterminism(t *testing.T) {
 	m := polyModel{n: 6}
 	xNorm := []float64{0.1, 0.4, 0.7, 0.9, 0.2, 0.5}

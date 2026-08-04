@@ -1195,6 +1195,16 @@ func runParaxial(data []byte) {
 		chiefRays = temp.ChiefRays
 	}
 
+	// Stop-free (dynamic-pupil) systems have no explicit stop surface for the
+	// paraxial pupil trace; derive the entrance pupil from the dynamic-pupil
+	// chief pass (selected config's fields under --config) so EPD is reported
+	// even when the document carries no chief_rays.
+	if selectedSys.StopSurface <= 0 && len(chiefRays) == 0 {
+		if pupil := dynamicPupilForInput(input, configFlag, surfaces, gc); pupil != nil {
+			chiefRays = append(chiefRays, types.ChiefRayResult{EntrancePupil: pupil})
+		}
+	}
+
 	result := paraxial.Compute(selectedSys, wavelength, gc, objectHeight, chiefRays)
 
 	output := types.Output{

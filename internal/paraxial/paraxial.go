@@ -308,12 +308,15 @@ func Compute(
 	}
 
 	// --- Entrance pupil ---
-	// Use chief_rays for location if available; diameter from paraxial trace
-	epFromChief := false
+	// With an explicit stop, the diameter comes from a paraxial trace through
+	// the stop aperture. Without a stop (dynamic-pupil systems), the chief rays
+	// carry the entrance pupil (location + radius); use that radius for the
+	// diameter so EPD is still reported for stop-free systems.
+	var chiefPupil *types.Pupil
 	for _, cr := range chiefRays {
 		if cr.EntrancePupil != nil && cr.EntrancePupil.Radius > 0 {
 			r.EntrancePupilLocation = cr.EntrancePupil.Center.Z
-			epFromChief = true
+			chiefPupil = cr.EntrancePupil
 			break
 		}
 	}
@@ -323,7 +326,7 @@ func Compute(
 		if stopR > 0 {
 			pupilRay := tracePupilBackward(surfaces, nIndex, stopIdx, 0, 1.0)
 			if math.Abs(pupilRay.U) > 1e-15 {
-				if !epFromChief {
+				if chiefPupil == nil {
 					r.EntrancePupilLocation = -pupilRay.Y / pupilRay.U
 				}
 				eRay := tracePupilBackward(surfaces, nIndex, stopIdx, stopR, 0)
@@ -331,6 +334,8 @@ func Compute(
 				r.EntrancePupilDiameter = 2 * epRad
 			}
 		}
+	} else if chiefPupil != nil {
+		r.EntrancePupilDiameter = 2 * chiefPupil.Radius
 	}
 
 	if r.EntrancePupilDiameter > 0 && math.Abs(r.FocalLength) > 1e-15 {

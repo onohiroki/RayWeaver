@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 
+	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -27,6 +28,7 @@ type Config struct {
 	GlassCatalog   *glass.Catalog
 	CoatingCatalog interface{}
 	StopSurface    int
+	RefSurface     int
 	PupilZ         float64
 	MaxIter        int
 	Mu             float64
@@ -48,6 +50,7 @@ type ConfigInput struct {
 	ID          string
 	Weight      float64
 	StopSurface int
+	RefSurface  int
 	PupilZ      float64
 	Surfaces    []types.Surface
 	Fields      []types.FieldItem
@@ -116,7 +119,9 @@ type config struct {
 	id          string
 	weight      float64
 	stopSurface int
+	refSurface  int
 	pupilZ      float64
+	fieldDefs   []types.FieldDef
 	surfaces    []types.Surface
 	fields      []types.FieldItem
 	wavelengths []types.WavelengthItem
@@ -156,6 +161,54 @@ func resolvePupilZ(surfaces []types.Surface, stopSurface int, pupilZ float64) fl
 	return pupilZ
 }
 
+// fieldDefsFromItems converts the per-config field items into chief field
+// definitions for the dynamic-pupil pass.
+func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]types.FieldDef, len(items))
+	for i, f := range items {
+		out[i] = types.FieldDef{
+			Angle:       f.AngleDeg,
+			ImageHeight: f.ImageHeight,
+			Direction:   []float64{0, 1},
+		}
+	}
+	return out
+}
+
+// UpdatePupils re-derives each config's dynamic entrance pupil at the current
+// variable state x and stores it as the grid centring for the rest of the DLS
+// iteration (the solver calls it once per iteration). The pupil therefore
+// follows the lens during optimisation — the aperture position moves — while
+// staying frozen within one iteration so the base-point and Jacobian residual
+// evaluations share the same grid centring.
+func (o *Optimizer) UpdatePupils(x []float64) {
+	configSurfaces, tempGC := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+	pol := types.NewCircularJones(true)
+
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		if cfg.refSurface <= 0 || len(cfg.fieldDefs) == 0 {
+			continue
+		}
+		surfaces := configSurfaces[cfg.id]
+		results := chief.DetermineChiefRaysGrid(
+			types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
+			cfg.fieldDefs, cfg.refSurface, o.numRays, gc, pol,
+			types.DefaultWavelength, false, types.GridPolar, nil, nil, nil,
+		)
+		for _, r := range results {
+			if r.EntrancePupil != nil {
+				cfg.pupilZ = r.EntrancePupil.Center.Z
+				break
+			}
+		}
+	}
+}
+
 type Optimizer struct {
 	configs          []config
 	variables        []Variable
@@ -185,7 +238,9 @@ func NewOptimizer(cfg Config) *Optimizer {
 		id:          "config1",
 		weight:      1.0,
 		stopSurface: cfg.StopSurface,
+		refSurface:  cfg.RefSurface,
 		pupilZ:      resolvePupilZ(cfg.Surfaces, cfg.StopSurface, cfg.PupilZ),
+		fieldDefs:   fieldDefsFromItems(cfg.Fields),
 		surfaces:    cfg.Surfaces,
 		fields:      cfg.Fields,
 		constraints: cfg.Constraints,
@@ -231,7 +286,9 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			id:          ci.ID,
 			weight:      ci.Weight,
 			stopSurface: ci.StopSurface,
+			refSurface:  ci.RefSurface,
 			pupilZ:      resolvePupilZ(ci.Surfaces, ci.StopSurface, ci.PupilZ),
+			fieldDefs:   fieldDefsFromItems(ci.Fields),
 			surfaces:    ci.Surfaces,
 			fields:      ci.Fields,
 			wavelengths: ci.Wavelengths,

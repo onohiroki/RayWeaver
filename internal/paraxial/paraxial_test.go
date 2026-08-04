@@ -56,6 +56,26 @@ func TestComputeWithChiefRays(t *testing.T) {
 	}
 }
 
+func TestComputeDynamicPupilDiameter(t *testing.T) {
+	sys, gc := singletSystem()
+	// No stop surface and no chief pupil: EPD must remain unset (no inference).
+	if r := Compute(sys, 0.00058756, gc, 0, nil); r.EntrancePupilDiameter != 0 {
+		t.Errorf("EntrancePupilDiameter without stop or chief pupil = %v, want 0", r.EntrancePupilDiameter)
+	}
+	// A chief dynamic-pupil entrance pupil (radius) provides the EPD even
+	// though the system has no explicit stop.
+	chiefRays := []types.ChiefRayResult{
+		{EntrancePupil: &types.Pupil{Center: types.Vec3{Z: 12.5}, Radius: 10.0}},
+	}
+	r := Compute(sys, 0.00058756, gc, 0, chiefRays)
+	if want := 20.0; math.Abs(r.EntrancePupilDiameter-want) > 1e-9 {
+		t.Errorf("EntrancePupilDiameter = %v, want %v", r.EntrancePupilDiameter, want)
+	}
+	if math.Abs(r.EntrancePupilLocation-12.5) > 1e-9 {
+		t.Errorf("EntrancePupilLocation = %v, want 12.5", r.EntrancePupilLocation)
+	}
+}
+
 func TestStopSurfaceID(t *testing.T) {
 	surfaces := []types.Surface{
 		{ID: 1, Diameter: 50.0},

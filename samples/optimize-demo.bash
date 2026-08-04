@@ -89,14 +89,14 @@ echo
 
 echo "--- PNG diagrams ---"
 echo "=== Initial diagram ==="
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$YAML" | $RAYWEAVE chief --marginal-rays \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/optimize-demo-init.png" >/dev/null
 echo "Written: $OUTDIR/optimize-demo-init.png"
 echo
 
 echo "=== Optimized diagram ==="
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$OPT_RESULT" | $RAYWEAVE chief --marginal-rays \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$OPT_RESULT" | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/optimize-demo-opt.png" >/dev/null
 echo "Written: $OUTDIR/optimize-demo-opt.png"

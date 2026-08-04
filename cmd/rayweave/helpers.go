@@ -23,6 +23,16 @@ func parseYAML[T any](data []byte) T {
 	return out
 }
 
+// chiefRefSurface returns the chief reference surface ID (0 when the chief
+// section is absent), used to seed the dynamic-pupil recomputation during
+// optimisation.
+func chiefRefSurface(input types.Input) int {
+	if input.Chief == nil {
+		return 0
+	}
+	return input.Chief.ReferenceSurface
+}
+
 // computePupilZ returns the entrance pupil Z used to centre grid traces for one
 // config's initial surfaces: the explicit stop surface Z, else the dynamic
 // pupil from a chief pass over the initial surfaces, else 0. It seeds the
@@ -38,33 +48,93 @@ func computePupilZ(input types.Input, surfaces []types.Surface, gc *glass.Catalo
 			}
 		}
 	}
-	var fields []types.FieldDef
+	pupil := dynamicEntrancePupil(surfaces, chiefFieldDefs(input), input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), input.Chief.GridType, input.Chief.PassThrough)
+	if pupil != nil {
+		return pupil.Center.Z
+	}
+	return 0
+}
+
+// polarization returns the ray polarization from the input rays section, or a
+// default circular Jones vector.
+func polarization(input types.Input) types.JonesVector {
+	if input.Rays != nil {
+		return input.Rays.Polarization
+	}
+	return types.NewCircularJones(true)
+}
+
+// chiefFieldDefs returns chief field definitions from the top-level chief
+// section (explicit fields, else the angle list), or nil when absent.
+func chiefFieldDefs(input types.Input) []types.FieldDef {
+	if input.Chief == nil {
+		return nil
+	}
 	if len(input.Chief.Fields) > 0 {
-		fields = input.Chief.Fields
-	} else {
-		for _, a := range input.Chief.FieldAngles {
-			fields = append(fields, types.FieldDef{Angle: a, Direction: []float64{0, 1}})
+		return input.Chief.Fields
+	}
+	var fields []types.FieldDef
+	for _, a := range input.Chief.FieldAngles {
+		fields = append(fields, types.FieldDef{Angle: a, Direction: []float64{0, 1}})
+	}
+	return fields
+}
+
+// fieldDefsFromItems converts per-config field items into chief field
+// definitions for the dynamic-pupil pass.
+func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]types.FieldDef, len(items))
+	for i, f := range items {
+		out[i] = types.FieldDef{
+			Angle:       f.AngleDeg,
+			ImageHeight: f.ImageHeight,
+			Direction:   []float64{0, 1},
 		}
 	}
-	if len(fields) == 0 || len(surfaces) == 0 {
-		return 0
+	return out
+}
+
+// dynamicEntrancePupil runs the dynamic-pupil chief pass over surfaces with the
+// given fields and reference surface and returns the first field's entrance
+// pupil (nil when none is found). It derives the pupil for stop-free systems,
+// which have no aperture stop to trace from.
+func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, refSurface, numRays int, gc *glass.Catalog, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget) *types.Pupil {
+	if len(fields) == 0 || len(surfaces) == 0 || refSurface <= 0 {
+		return nil
 	}
 	surface.Precompute(surfaces)
-	pol := types.NewCircularJones(true)
-	if input.Rays != nil {
-		pol = input.Rays.Polarization
-	}
 	results := chief.DetermineChiefRaysGrid(
-		types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface},
-		fields, input.Chief.ReferenceSurface, input.Chief.NumRays, gc, pol,
-		types.DefaultWavelength, false, input.Chief.GridType, input.Chief.PassThrough, nil, nil,
+		types.System{Surfaces: surfaces},
+		fields, refSurface, numRays, gc, pol,
+		types.DefaultWavelength, false, gridType, passThrough, nil, nil,
 	)
 	for _, r := range results {
 		if r.EntrancePupil != nil {
-			return r.EntrancePupil.Center.Z
+			return r.EntrancePupil
 		}
 	}
-	return 0
+	return nil
+}
+
+// dynamicPupilForInput returns the dynamic entrance pupil for the selected
+// system: the per-config fields when --config is set, else the top-level chief
+// fields. Nil when the chief section or a reference surface is absent.
+func dynamicPupilForInput(input types.Input, configFlag *string, surfaces []types.Surface, gc *glass.Catalog) *types.Pupil {
+	if input.Chief == nil || input.Chief.ReferenceSurface <= 0 {
+		return nil
+	}
+	fields := chiefFieldDefs(input)
+	if configFlag != nil && *configFlag != "" {
+		if idx, _ := resolveConfig(input.Configs, *configFlag); idx >= 0 {
+			if cfgFields := fieldDefsFromItems(input.Configs[idx].Fields); len(cfgFields) > 0 {
+				fields = cfgFields
+			}
+		}
+	}
+	return dynamicEntrancePupil(surfaces, fields, input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), types.GridPolar, nil)
 }
 
 // writeYAML marshals a value to stdout, exiting on error.

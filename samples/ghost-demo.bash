@@ -12,7 +12,7 @@ set -euo pipefail
 # forward to the image (surface 14).
 #
 # Steps
-#   1. chief --clear-aperture --shrink --preserve-rays : re-size lens
+#   1. chief --clear-aperture --preserve-rays : re-size lens
 #      diameters to the beam while keeping the ghost/normal rays
 #   2. trace                           : trace the ghost + normal reference rays
 #   3. query                           : per-surface table + Fresnel intensities
@@ -78,11 +78,11 @@ echo "  - forward again to the image (surface 14)"
 echo
 
 # ── Re-adjust lens clear apertures to the beam footprint ──
-# `chief --clear-aperture --shrink --preserve-rays` re-computes every
+# `chief --clear-aperture --preserve-rays` re-computes every
 # surface's effective diameter from the traced grid beams (the aperture stop
 # keeps its diameter), while keeping the ghost/normal rays for the trace.
-echo "=== Re-adjusting lens effective diameters (chief --clear-aperture --shrink --preserve-rays) ==="
-$RAYWEAVE chief --clear-aperture --shrink --clear-aperture-rays 1024 --preserve-rays < "$YAML" \
+echo "=== Re-adjusting lens effective diameters (chief --clear-aperture --preserve-rays) ==="
+$RAYWEAVE chief --clear-aperture --clear-aperture-rays 1024 --preserve-rays < "$YAML" \
   | $RAYWEAVE trace > "$TRACE_RESULT"
 echo "  Written: $TRACE_RESULT"
 echo

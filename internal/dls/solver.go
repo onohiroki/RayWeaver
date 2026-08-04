@@ -101,6 +101,9 @@ func Solve(m Model) Result {
 	bestKnownMerit := merit
 
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
+		if pu, ok := m.(PupilUpdater); ok {
+			pu.UpdatePupils(denormalize(xNorm, variables, scales))
+		}
 		J_opt, r_opt, J_con, c_con := computeJacobians(m, xNorm, variables, scales, opts.Epsilon, opts.Workers)
 
 		J, r := J_opt, r_opt

@@ -210,13 +210,13 @@ fi
 
 # ── Diagrams ──
 echo "=== Diagrams ==="
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$YAML" \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/doublegauss-init.png" >/dev/null 2>&1 || true
 echo "Written: $OUTDIR/doublegauss-init.png"
 
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$OPT_RESULT" \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$OPT_RESULT" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/doublegauss-opt.png" >/dev/null 2>&1 || true

@@ -198,19 +198,19 @@ fi
 
 # ── Diagrams ──
 echo "=== Diagrams ==="
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$YAML" \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/asphere-optimize-init.png" >/dev/null 2>&1 || true
 echo "Written: $OUTDIR/asphere-optimize-init.png"
 
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$SPH_RESULT" \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$SPH_RESULT" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/asphere-optimize-spherical.png" >/dev/null 2>&1 || true
 echo "Written: $OUTDIR/asphere-optimize-spherical.png"
 
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$ASP_RESULT" \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$ASP_RESULT" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/asphere-optimize-opt.png" >/dev/null 2>&1 || true

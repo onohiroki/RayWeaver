@@ -124,7 +124,7 @@ fi
 
 echo
 echo "=== Scaled raytrace diagram ==="
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$SCALED" \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$SCALED" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/us2645157-scaled50.svg" 2>/dev/null || true

@@ -67,3 +67,14 @@ type Model interface {
 	ComputeConstraints(x []float64) []float64
 	Options() Options
 }
+
+// PupilUpdater is an optional Model capability: recompute the dynamic pupil
+// (grid centring) at the current variable state before the next Jacobian
+// column sweep. The solver calls it once per iteration at the current x, so the
+// pupil moves between iterations while staying frozen within one iteration —
+// the base-point and all finite-difference residual evaluations share the same
+// pupil, keeping the Jacobian consistent. Models that do not implement it keep
+// whatever grid centring they were constructed with.
+type PupilUpdater interface {
+	UpdatePupils(x []float64)
+}
