@@ -128,8 +128,12 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 		go func(seed int64) {
 			defer wg.Done()
 			inner := newModel()
-			wrapper := NewWrapper(inner, params)
-			cycle := NewCycle(wrapper, store, params, maxCycles, seed, progress, deadline, opts.Context)
+			workerParams := params
+			if numWorkers > 1 {
+				workerParams.W = params.W * (1 + float64(seed)/float64(numWorkers-1))
+			}
+			wrapper := NewWrapper(inner, workerParams)
+			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context)
 
 			x0 := inner.InitialState()
 			if seed != 0 {

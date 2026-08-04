@@ -100,6 +100,13 @@ func Solve(m Model) Result {
 	copy(bestKnownNorm, xNorm)
 	bestKnownMerit := merit
 
+	bestMeritWindowAgo := bestMerit
+	lastCheckIter := 0
+	stallWindow := opts.MaxIter / 5
+	if stallWindow < 50 {
+		stallWindow = 50
+	}
+
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
 		if pu, ok := m.(PupilUpdater); ok {
 			pu.UpdatePupils(denormalize(xNorm, variables, scales))
@@ -416,10 +423,31 @@ func Solve(m Model) Result {
 				copy(bestKnownNorm, xNorm)
 			}
 		}
+
+		// When stall escape is disabled (e.g. by the escape-function wrapper),
+		// a plateau with no improvement will run to max_iterations. Detect
+		// this by checking whether the best merit has stalled over a generous
+		// window relative to the total budget and stop early, returning the
+		// best point recorded so far.
+		if opts.DisableStallEscape && totalIter-lastCheckIter >= stallWindow {
+			if lastCheckIter > 0 {
+				denom := math.Abs(bestMerit)
+				if denom < 1e-10 {
+					denom = 1e-10
+				}
+				rel := math.Abs(bestMerit-bestMeritWindowAgo) / denom
+				if rel < 1e-4 {
+					status = "converged_stalled"
+					break
+				}
+			}
+			bestMeritWindowAgo = bestMerit
+			lastCheckIter = totalIter
+		}
 	}
 
 	iterations := totalIter
-	if status == "converged" || status == "converged_gradient" {
+	if status == "converged" || status == "converged_gradient" || status == "converged_stalled" {
 		iterations = totalIter + 1
 	}
 

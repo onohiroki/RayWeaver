@@ -136,6 +136,11 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		stopSurface = input.Chief.StopSurface
 	}
 
+	workers := input.Optimization.JacobianWorkers
+	if workers <= 0 {
+		workers = 2
+	}
+
 	cfg := optimize.Config{
 		Surfaces:       surfaces,
 		Variables:      variables,
@@ -152,7 +157,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		NumRays:        input.Optimization.NumRays,
 		ApertureMargin: apertureMargin,
 		MuConMax:       input.Optimization.MuConMax,
-		Workers:        input.Optimization.JacobianWorkers,
+		Workers:        workers,
 	}
 	if input.Optimization.GlassHull != nil && input.Optimization.GlassHull.Enabled {
 		cfg.Hull = glass.NewDefaultConvexHull()
@@ -351,6 +356,11 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	}
 	muConMax := input.Optimization.MuConMax
 
+	jacobianWorkers := input.Optimization.JacobianWorkers
+	if jacobianWorkers <= 0 {
+		jacobianWorkers = 2
+	}
+
 	var hull *glass.ConvexHull
 	hullMargin := 0.02
 	hullWeight := 1.0
@@ -367,7 +377,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	factory := func() dls.Model {
 		configsCopy := make([]optimize.ConfigInput, len(configs))
 		copy(configsCopy, configs)
-		return optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, input.Optimization.JacobianWorkers, nil, hull, hullMargin, hullWeight)
+		return optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, nil, hull, hullMargin, hullWeight)
 	}
 
 	var onRecord escape.RecordHandler

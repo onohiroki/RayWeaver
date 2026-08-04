@@ -47,6 +47,15 @@ type Point struct {
 	W     float64
 }
 
+// Phase selects the current phase of the escape cycle for the Wrapper's
+// Options() adaptation.
+type Phase int
+
+const (
+	PhaseEscape Phase = iota
+	PhaseClean
+)
+
 // Wrapper implements dls.Model by delegating to an inner model and adding a
 // smooth escape residual for every recorded local minimum. Passing a nil or
 // empty escape list makes the wrapper behave exactly like the inner model
@@ -56,6 +65,7 @@ type Wrapper struct {
 	escapes []Point
 	params  Params
 	startX  []float64
+	phase   Phase
 }
 
 // NewWrapper wraps an inner dls.Model with escape-function support.
@@ -127,7 +137,17 @@ func (w *Wrapper) Options() dls.Options {
 	// The escape cycle provides its own escape mechanism; the DLS internal
 	// stall perturbation would fight it.
 	opts.DisableStallEscape = true
+	if w.phase == PhaseEscape {
+		if opts.MaxIter > 3 {
+			opts.MaxIter = max(50, opts.MaxIter/3)
+		}
+	}
 	return opts
+}
+
+// SetPhase selects the escape-cycle phase so Options() can adapt MaxIter.
+func (w *Wrapper) SetPhase(p Phase) {
+	w.phase = p
 }
 
 // EvaluateMerit returns the inner merit plus all escape terms.

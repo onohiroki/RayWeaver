@@ -141,7 +141,7 @@ const restartPerturb = 0.1
 
 // initialPerturb is the normalised-amplitude spread applied to each worker's
 // initial state so parallel workers explore different neighbourhoods.
-const initialPerturb = 0.01
+const initialPerturb = 0.05
 
 // Run performs the escape loop starting from x0. It returns the final point
 // (the last converged minimum) and its unescaped merit.
@@ -172,6 +172,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		// Step 1: escape DLS. Push away from every recorded minimum.
 		c.wrapper.SetEscapes(c.store.All())
 		c.wrapper.SetStartX(currentX)
+		c.wrapper.SetPhase(PhaseEscape)
 		escRes := dls.Solve(c.wrapper)
 		escapedX := extractX(escRes)
 		if !c.acceptable(escRes.Status, escapedX) {
@@ -201,6 +202,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		// Step 2: clean DLS. Remove escapes and converge to the true minimum.
 		c.wrapper.SetEscapes(nil)
 		c.wrapper.SetStartX(escapedX)
+		c.wrapper.SetPhase(PhaseClean)
 		cleanRes := dls.Solve(c.wrapper)
 		trueX := extractX(cleanRes)
 		if !c.acceptable(cleanRes.Status, trueX) {
