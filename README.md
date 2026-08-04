@@ -152,13 +152,21 @@ Notes:
 - `optimization.aperture_margin` is clamped to ≥ 1.0 (smaller values make the
   pupil grid smaller than the aperture and stall DLS).
 - `optimization.jacobian_workers` sets the number of goroutines used for the
-  DLS finite-difference Jacobian (default `GOMAXPROCS`). The Jacobian is
-  deterministic: the result is identical for any worker count.
+  DLS finite-difference Jacobian (default `GOMAXPROCS`; the `escape` command
+  defaults an unset value to 2 instead). The Jacobian is deterministic: the
+  result is identical for any worker count.
 - `optimization.escape.escape_workers` sets the top-level parallel escape
   goroutines (default 4). Each escape worker runs a DLS solve that itself
   parallelises its Jacobian across `jacobian_workers`, so the total goroutine
   count is `escape_workers × jacobian_workers`; set `jacobian_workers: 1` when
   running many escape workers to avoid oversubscription.
+- `optimization.escape` execution tuning extends the defaults: `escape_iter_frac`
+  caps escape-phase DLS iterations (default 1/3), `stall_early_stop` (default
+  true) ends an escape-phase solve whose best merit stalls over
+  `stall_window_frac` (default 0.2) with a relative change below `stall_rel_tol`
+  (default `1e-4`) — the clean phase always runs the full budget; `w_span`
+  (default 2.0) widens per-worker escape-bump widths and `initial_perturb`
+  (default 0.05) spreads worker start points in the normalised variable space.
 - `optimization.escape.max_seconds` adds a soft wall-clock budget (seconds,
   shared by all workers) to the escape search: expiry is checked between DLS
   runs, so a running solve always finishes. The output marks `timed_out: true`

@@ -446,32 +446,48 @@ Sub-commands:
   escape extract --index N   extract local minimum N as a clean lens YAML
 
 Input YAML — optimization.escape section:
-  optimization:
-    method: dls
-    variables: [...]          # same variable definitions as 'optimize'
-    escape:
-      max_cycles: 10          # DLS cycles per worker
-      escape_workers: 4       # top-level parallel goroutines (default 4)
-      distance_threshold: 0.1 # normalised distance to call a point "new"
-      h_initial: 0.1          # escape bump height
-      w_initial: 0.5          # escape bump width
-      h_mult: 2.0             # strengthen factor when a minimum repeats
-      w_mult: 1.3             # widen factor when a minimum repeats
-      variable_weights:       # optional per-param weight (default 1.0)
-        curvature: 1000
-        thickness: 1
-        nd: 10
-        vd: 1
+   optimization:
+     method: dls
+     variables: [...]          # same variable definitions as 'optimize'
+     escape:
+       max_cycles: 10          # DLS cycles per worker
+       escape_workers: 4       # top-level parallel goroutines (default 4)
+       max_seconds: 0          # soft shared wall-clock budget in seconds (0 = unlimited)
+       distance_threshold: 0.1 # normalised distance to call a point "new"
+       h_initial: 0.1          # escape bump height
+       w_initial: 0.5          # escape bump width
+       h_mult: 2.0             # strengthen factor when a minimum repeats
+       w_mult: 1.3             # widen factor when a minimum repeats
+       variable_weights:       # optional per-param weight (default 1.0)
+         curvature: 1000
+         thickness: 1
+         nd: 10
+         vd: 1
+       # Optional execution tuning (defaults shown):
+       escape_iter_frac: 0.333 # escape-phase MaxIter as a fraction of full budget
+       w_span: 2.0             # per-worker W scaling span: W*(1 + i/(N-1)*(w_span-1))
+       stall_window_frac: 0.2  # stalled-early-stop window as a fraction of MaxIter
+       stall_rel_tol: 0.0001   # stalled-early-stop relative merit threshold
+       stall_early_stop: true  # stalled-early-stop in the escape phase (clean phase never stalls)
+       initial_perturb: 0.05   # normalised spread of parallel-worker start points
 
 The DLS solve inside each worker parallelises the Jacobian across jacobian_workers
-(optimization.jacobian_workers, default GOMAXPROCS). With escape_workers > 1 the
-total goroutines are escape_workers * jacobian_workers; set jacobian_workers: 1 to
-avoid oversubscription.
+(optimization.jacobian_workers). Under the escape command, an unset
+jacobian_workers defaults to 2 instead of GOMAXPROCS; with escape_workers > 1 the
+total goroutines are escape_workers * jacobian_workers, so set jacobian_workers: 1
+with many escape workers to avoid oversubscription.
 
 Escape parameters act in the normalised variable space: each variable is
 scaled by its min..max range. Variables with min == max are excluded from the
 escape distance. distance_threshold is a fraction of the normalised range
 (default 0.1).
+
+The stalled-early-stop shortens an escape-phase DLS: once the best merit has
+not improved by at least stall_rel_tol (relative) over a stall_window_frac
+window of iterations, the solver returns converged_stalled with the best point
+found. The clean re-optimisation phase always runs the full budget so a slow
+late-stage improvement is not cut off. Set stall_early_stop: false to disable
+this entirely.
 
 Output: best solution in configs[].surfaces (pipeline-compatible with
 "rayweave trace"/"rayweave plot"), plus an escape_result section listing

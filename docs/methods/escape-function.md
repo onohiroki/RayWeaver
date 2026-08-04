@@ -76,9 +76,12 @@ flat at its own centre), so the nudge is necessary.
 
 `escape_workers` (default 4) goroutines each run their own cycle, sharing a
 single store of recorded minima. Each worker's initial state is perturbed by a
-deterministic, seed-derived offset (`initialPerturb = 0.01`) so the workers
-explore distinct neighbourhoods. Each worker builds an **isolated model** (a
-fresh optimizer) so concurrent merit evaluations never share mutable state.
+deterministic, seed-derived offset (`initialPerturb = 0.05` default) so the
+workers explore distinct neighbourhoods. Each worker builds an **isolated model**
+(a fresh optimizer) so concurrent merit evaluations never share mutable state.
+The escape-bump width is additionally a per-worker function of the index
+(`W × (1 + i/(N-1) × (w_span-1))`, default `w_span = 2.0`), widening the spread
+so workers drift toward different basins.
 
 Because each DLS run inside a cycle parallelizes its own Jacobian across
 `jacobian_workers`, the total goroutine count is `escape_workers ×
@@ -86,6 +89,17 @@ jacobian_workers`; set `jacobian_workers: 1` when running many escape workers.
 
 The escape cycle disables the DLS internal stall perturbation
 (`DisableStallEscape`), which would otherwise fight the escape mechanism.
+
+### Stalled-early-stop (phase-aware)
+
+Escape-phase DLS solves have a capped iteration budget: `escape_iter_frac`
+(default 1/3) of the full budget, floored at 50 iterations. With
+`stall_early_stop` (default true), a solve whose best merit has not improved by
+at least `stall_rel_tol` (default `1e-4`, relative) over a `stall_window_frac`
+(default 0.2) window returns the best point found and the cycle moves on. The
+clean re-optimisation phase always runs the full budget and never stalls, so a
+slow, late-stage merit improvement (a real source of the global best) is never
+cut off.
 
 ## 4. Parameters
 
@@ -100,6 +114,12 @@ The escape cycle disables the DLS internal stall perturbation
 | `h_mult` | 2.0 | strengthen factor on a repeated minimum |
 | `w_mult` | 1.3 | widen factor on a repeated minimum |
 | `variable_weights` | 1.0 each | per-parameter distance weights |
+| `escape_iter_frac` | 1/3 | escape-phase MaxIter as a fraction of the full budget (min 50) |
+| `w_span` | 2.0 | per-worker W scaling span |
+| `stall_window_frac` | 0.2 | stalled-early-stop window as a fraction of escape MaxIter |
+| `stall_rel_tol` | `1e-4` | stalled-early-stop relative merit threshold |
+| `stall_early_stop` | true | stalled-early-stop in the escape phase (clean phase never stalls) |
+| `initial_perturb` | 0.05 | normalised spread of parallel-worker start points |
 
 ## 4b. Termination
 

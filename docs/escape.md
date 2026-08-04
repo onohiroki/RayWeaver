@@ -48,6 +48,13 @@ optimization:
       thickness: 1
       nd: 10
       vd: 1
+    # Optional execution tuning (defaults shown; 0 = default):
+    escape_iter_frac: 0.333 # escape-phase MaxIter as a fraction of the full budget
+    w_span: 2.0             # per-worker W scaling span: W*(1 + i/(N-1)*(w_span-1))
+    stall_window_frac: 0.2  # stalled-early-stop window as a fraction of escape MaxIter
+    stall_rel_tol: 1e-4     # stalled-early-stop relative merit threshold
+    stall_early_stop: true  # stalled-early-stop in the escape phase (clean phase never stalls)
+    initial_perturb: 0.05   # normalised amplitude spreading parallel workers' start points
 ```
 
 ### Escape parameters
@@ -63,9 +70,29 @@ X and merit of that minimum are replaced (the better data is kept; the escape
 strength from the strengthen step is retained).
 
 The DLS solve inside each worker parallelises its Jacobian across
-`jacobian_workers` (default `GOMAXPROCS`). With `escape_workers > 1` the total
+`jacobian_workers`. Under the `escape` command an unset `jacobian_workers`
+defaults to **2** instead of `GOMAXPROCS`. With `escape_workers > 1` the total
 goroutines are `escape_workers × jacobian_workers`; set `jacobian_workers: 1`
-to avoid oversubscription.
+with many escape workers to avoid oversubscription.
+
+### Execution tuning
+
+Escape-phase DLS solves have a capped iteration budget:
+`escape_iter_frac` (default 1/3) of the full `max_iter` budget, floored at 50
+iterations. Once the best merit has failed to improve by at least
+`stall_rel_tol` (default `1e-4`, relative) over a `stall_window_frac`
+(default 0.2) window of iterations, that escape-phase solve returns early with
+the best point found (`stall_early_stop: true`, the default). The clean
+re-optimisation phase — the source of slow, late-stage merit improvements —
+**always** runs the full budget and never stalls. Set `stall_early_stop: false`
+to disable stalled-early-stop in the escape phase entirely.
+
+`w_span` (default 2.0) widens worker diversity: worker `i` of `N` uses
+`W × (1 + i/(N-1) × (w_span-1))`, spreading the escape-bump widths so parallel
+workers drift toward different basins. `initial_perturb` (default 0.05, in the
+normalised variable space) seeds the paralllel workers at slightly different
+start points. With the default `initial_perturb` all workers converge toward the
+same basin, so this is usually the first knob to raise.
 
 ### Time budget
 
@@ -122,6 +149,12 @@ escape_result:
     max_cycles: ...
     escape_workers: ...
     max_seconds: ...
+    escape_iter_frac: ...
+    w_span: ...
+    stall_window_frac: ...
+    stall_rel_tol: ...
+    stall_early_stop: ...
+    initial_perturb: ...
   minima:
     - index: 0
       merit: ...
