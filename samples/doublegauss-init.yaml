@@ -208,13 +208,109 @@ optimization:
     min: 36.0
     max: 52.0
     active: true
+  - name: s1_dia
+    target:
+      type: surface
+      id: 1
+      param: diameter
+    min: 20.0
+    max: 45.0
+    active: true
+  - name: s2_dia
+    target:
+      type: surface
+      id: 2
+      param: diameter
+    min: 20.0
+    max: 45.0
+    active: true
+  - name: s3_dia
+    target:
+      type: surface
+      id: 3
+      param: diameter
+    min: 18.0
+    max: 40.0
+    active: true
+  - name: s4_dia
+    target:
+      type: surface
+      id: 4
+      param: diameter
+    min: 18.0
+    max: 40.0
+    active: true
+  - name: s5_dia
+    target:
+      type: surface
+      id: 5
+      param: diameter
+    min: 16.0
+    max: 38.0
+    active: true
+  - name: s6_dia
+    target:
+      type: surface
+      id: 6
+      param: diameter
+    min: 16.0
+    max: 38.0
+    active: true
   - name: s7_dia
     target:
       type: surface
       id: 7
       param: diameter
-    min: 18.0
+    min: 12.0
     max: 25.0
+    active: true
+  - name: s8_dia
+    target:
+      type: surface
+      id: 8
+      param: diameter
+    min: 16.0
+    max: 38.0
+    active: true
+  - name: s9_dia
+    target:
+      type: surface
+      id: 9
+      param: diameter
+    min: 16.0
+    max: 38.0
+    active: true
+  - name: s10_dia
+    target:
+      type: surface
+      id: 10
+      param: diameter
+    min: 18.0
+    max: 40.0
+    active: true
+  - name: s11_dia
+    target:
+      type: surface
+      id: 11
+      param: diameter
+    min: 18.0
+    max: 40.0
+    active: true
+  - name: s12_dia
+    target:
+      type: surface
+      id: 12
+      param: diameter
+    min: 20.0
+    max: 45.0
+    active: true
+  - name: s13_dia
+    target:
+      type: surface
+      id: 13
+      param: diameter
+    min: 20.0
+    max: 45.0
     active: true
   - name: s3_sf12_nd
     target:
@@ -346,36 +442,42 @@ configs:
     thickness: 3.5
     material: SK18
     diameter: 36.0
+    auto_aperture: true
   - id: 2
     type: sphere
     radius: -454.545455
     thickness: 0.5
     material: AIR
     diameter: 36.0
+    auto_aperture: true
   - id: 3
     type: sphere
     radius: 121.212121
     thickness: 1.2
     material: SF12
     diameter: 28.0
+    auto_aperture: true
   - id: 4
     type: sphere
     radius: 45.454545
     thickness: 3.0
     material: AIR
     diameter: 28.0
+    auto_aperture: true
   - id: 5
     type: sphere
     radius: 54.545455
     thickness: 2.5
     material: SK18
     diameter: 26.0
+    auto_aperture: true
   - id: 6
     type: sphere
     radius: 181.818182
     thickness: 3.0
     material: AIR
     diameter: 26.0
+    auto_aperture: true
   - id: 7
     type: sphere
     radius: 0.0
@@ -388,36 +490,42 @@ configs:
     thickness: 2.5
     material: SK18
     diameter: 26.0
+    auto_aperture: true
   - id: 9
     type: sphere
     radius: -54.545455
     thickness: 3.0
     material: AIR
     diameter: 26.0
+    auto_aperture: true
   - id: 10
     type: sphere
     radius: -45.454545
     thickness: 1.2
     material: SF12
     diameter: 28.0
+    auto_aperture: true
   - id: 11
     type: sphere
     radius: -121.212121
     thickness: 0.5
     material: AIR
     diameter: 28.0
+    auto_aperture: true
   - id: 12
     type: sphere
     radius: 454.545455
     thickness: 3.5
     material: SK18
     diameter: 36.0
+    auto_aperture: true
   - id: 13
     type: sphere
     radius: -60.606061
     thickness: 42.0
     material: AIR
     diameter: 36.0
+    auto_aperture: true
   - id: 14
     type: sphere
     radius: 0.0

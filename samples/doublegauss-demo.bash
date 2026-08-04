@@ -4,16 +4,21 @@ set -euo pipefail
 # =============================================================================
 # doublegauss-demo.bash — DLS design of a 6-element 50 mm f/2.8 double-Gauss
 #
-# Purpose: optimise a realistic standard lens (36 variables including glass
-# nd/vd) from a synthesised starting point and report the key performance
-# figures — EFL, f-number, spot RMS and distortion — before and after.
+# Purpose: optimise a realistic standard lens (48 variables including glass
+# nd/vd and all surface diameters) from a synthesised starting point and
+# report the key performance figures — EFL, f-number, spot RMS and distortion
+# — before and after. After the DLS solve, the auto_aperture surface diameters
+# are re-set to the beam footprint and per-field vignetting is re-settled with
+# `vignette`, so the "after" figures reflect the real, vignetted system.
 #
 # Steps
 #   1. paraxial           : EFL / f# before
 #   2. chief              : spot RMS + distortion per field before
 #   3. optimize --verbose : DLS (256 rays, 500 iterations)
-#   4. paraxial + chief   : the same figures after
-#   5. plot               : raytrace diagrams before/after
+#   4. vignette           : re-set auto_aperture diameters to the beam
+#                           footprint + settle per-field vignetting
+#   5. paraxial + chief   : the same figures after (on the vignetted result)
+#   6. plot               : raytrace diagrams before/after
 #
 # How to read the result
 #   - Spot RMS per field is the geometric spot radius; on-axis < 0.1 mm gate.
@@ -40,13 +45,14 @@ done
 YAML="$SCRIPT_DIR/doublegauss-init.yaml"
 OUTDIR="$SCRIPT_DIR"
 OPT_RESULT="$OUTDIR/doublegauss-result.yaml"
+VIGNETTE_RESULT="$OUTDIR/doublegauss-vignette.yaml"
 OPT_LOG="$OUTDIR/doublegauss-log.jsonl"
 RESULT_FILE="$OUTDIR/doublegauss-demo-result.txt"
 
 # Clean-only mode
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
-  rm -f "$OPT_RESULT" "$OPT_LOG" "$RESULT_FILE"
+  rm -f "$OPT_RESULT" "$VIGNETTE_RESULT" "$OPT_LOG" "$RESULT_FILE"
   rm -f "$OUTDIR"/doublegauss-init.png "$OUTDIR"/doublegauss-opt.png
   echo "  Removed generated files"
   exit 0
@@ -92,7 +98,7 @@ echo "  6-element symmetric double-Gauss (front: crown/flint/meniscus |"
 echo "  stop | meniscus/flint/crown). Total 14 surfaces."
 echo "  Fields: 0 deg / 10 deg / 16 deg / 23 deg (35 mm format half-diagonal)"
 echo "  Wavelengths: F (486nm) / d (588nm) / C (656nm)"
-echo "  36 variables: curvatures, thicknesses, glass nd/vd"
+echo "  48 variables: curvatures, thicknesses, glass nd/vd, surface diameters"
 echo "  Constraints: abs_efl band 50±0.5 mm, EPD band 17.86±0.3 mm"
 echo "  Merit: spot RMS (12 terms) + lateral colour + OPD RMS"
 echo "  Target threshold: on-axis RMS < 0.1 mm"
@@ -130,11 +136,23 @@ $RAYWEAVE optimize --verbose --log "$OPT_LOG" < "$YAML" > "$OPT_RESULT"
 echo "  Written: $OPT_RESULT"
 echo
 
-# ── Evaluate after state ──
-echo "--- Optimized state ---"
-EFL_AFTER=$( $RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | $RAYWEAVE query -r paraxial_result.focal_length )
-FNO_AFTER=$( $RAYWEAVE paraxial < "$OPT_RESULT" 2>/dev/null | $RAYWEAVE query -r paraxial_result.image_space_f_number )
-AFTER_CHIEF=$( $RAYWEAVE chief < "$OPT_RESULT" 2>/dev/null )
+# ── Re-set effective diameters + settle vignetting on the optimized result ──
+echo "=== Vignette: re-set auto_aperture diameters + settle vignetting ==="
+$RAYWEAVE vignette --iterations 3 --min-glass-path 0.5 < "$OPT_RESULT" > "$VIGNETTE_RESULT"
+echo "  Written: $VIGNETTE_RESULT"
+echo "  auto_aperture diameter changes (before -> after):"
+$RAYWEAVE query --each 'vignetting_result.diameters[]:surface_id,before,after' \
+  --printf '    s%-2d  %8.4f -> %8.4f' < "$VIGNETTE_RESULT"
+echo "  per-field vignetting (1.0 = no vignetting):"
+$RAYWEAVE query --each 'vignetting_result.fields[]:field_index,angle_deg,vignetting' \
+  --printf '    f%d  %5.1f deg  vig=%5.3f' < "$VIGNETTE_RESULT"
+echo
+
+# ── Evaluate after state (on the vignetted result) ──
+echo "--- Optimized state (after vignette) ---"
+EFL_AFTER=$( $RAYWEAVE paraxial < "$VIGNETTE_RESULT" 2>/dev/null | $RAYWEAVE query -r paraxial_result.focal_length )
+FNO_AFTER=$( $RAYWEAVE paraxial < "$VIGNETTE_RESULT" 2>/dev/null | $RAYWEAVE query -r paraxial_result.image_space_f_number )
+AFTER_CHIEF=$( $RAYWEAVE chief < "$VIGNETTE_RESULT" 2>/dev/null )
 
 for fi in 0 1 2 3; do
   ang=$(echo "$AFTER_CHIEF" | $RAYWEAVE query --default '?' -r "chief_rays[$fi].field_angle")
@@ -190,6 +208,11 @@ echo
     printf "  %-6s %5s°  %9.2f%%  %9.2f%%\n" "f$fi" "$ang" "$d1" "$d2"
   done
   echo
+  echo "--- Vignetting (auto_aperture diameters re-set after optimization) ---"
+  $RAYWEAVE query --each 'vignetting_result.diameters[]:surface_id,before,after' \
+    --printf '  s%-2d  %8.4f -> %8.4f' < "$VIGNETTE_RESULT"
+  echo
+  echo
 } > "$RESULT_FILE"
 
 # ── Console summary ──
@@ -210,13 +233,13 @@ fi
 
 # ── Diagrams ──
 echo "=== Diagrams ==="
-$RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" \
+$RAYWEAVE chief --clear-aperture < "$YAML" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/doublegauss-init.png" >/dev/null 2>&1 || true
 echo "Written: $OUTDIR/doublegauss-init.png"
 
-$RAYWEAVE chief --clear-aperture --ray-fan < "$OPT_RESULT" \
+$RAYWEAVE trace < "$VIGNETTE_RESULT" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/doublegauss-opt.png" >/dev/null 2>&1 || true
