@@ -57,6 +57,23 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 	if cfg.DistanceThreshold != 0 {
 		p.Dt = cfg.DistanceThreshold
 	}
+	for _, m := range []struct {
+		src float64
+		dst *float64
+	}{
+		{cfg.EscapeIterFrac, &p.EscapeIterFrac},
+		{cfg.WSpan, &p.WSpan},
+		{cfg.StallWindowFrac, &p.StallWindowFrac},
+		{cfg.StallRelTol, &p.StallRelTol},
+		{cfg.InitialPerturb, &p.InitialPerturb},
+	} {
+		if m.src > 0 {
+			*m.dst = m.src
+		}
+	}
+	if cfg.StallEarlyStop != nil {
+		p.StallEarlyStop = *cfg.StallEarlyStop
+	}
 
 	p.Weights = make([]float64, len(variables))
 	p.Scales = make([]float64, len(variables))
@@ -129,15 +146,19 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 			defer wg.Done()
 			inner := newModel()
 			workerParams := params
+			wSpan := workerParams.WSpan
+			if wSpan <= 0 {
+				wSpan = 2.0
+			}
 			if numWorkers > 1 {
-				workerParams.W = params.W * (1 + float64(seed)/float64(numWorkers-1))
+				workerParams.W = workerParams.W * (1 + float64(seed)/float64(numWorkers-1)*(wSpan-1))
 			}
 			wrapper := NewWrapper(inner, workerParams)
 			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context)
 
 			x0 := inner.InitialState()
 			if seed != 0 {
-				x0 = cycle.perturb(x0, int(seed), initialPerturb)
+				x0 = cycle.perturb(x0, int(seed), workerParams.InitialPerturb)
 			}
 			cycle.Run(x0)
 			progress.Event("worker_done", map[string]any{

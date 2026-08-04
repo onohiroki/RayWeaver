@@ -475,6 +475,12 @@ func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum) *type
 			MaxCycles:         res.Cycles,
 			EscapeWorkers:     res.Workers,
 			MaxSeconds:        res.MaxSeconds,
+			EscapeIterFrac:    res.Params.EscapeIterFrac,
+			WSpan:             res.Params.WSpan,
+			StallWindowFrac:   res.Params.StallWindowFrac,
+			StallRelTol:       res.Params.StallRelTol,
+			StallEarlyStop:    boolPtr(res.Params.StallEarlyStop),
+			InitialPerturb:    res.Params.InitialPerturb,
 		},
 		TimedOut:    res.TimedOut,
 		Interrupted: res.Interrupted,
@@ -717,6 +723,15 @@ func runEscapeExtract(data []byte, index int) {
 	}
 
 	writeYAML(&output)
+}
+
+// boolPtr returns a pointer to b (nil when b is false), so the escape config
+// can distinguish "explicitly off" from "defaulted on" in the output report.
+func boolPtr(b bool) *bool {
+	if !b {
+		return nil
+	}
+	return &b
 }
 
 // parseEscapeExtractFlags parses `--index N` for the extract subcommand.

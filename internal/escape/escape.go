@@ -23,17 +23,30 @@ type Params struct {
 	Weights []float64 // optional per-variable weight (nil or 0 -> 1.0)
 	Active  []int     // indices of variables where Min != Max (excluded from distance)
 	Scales  []float64 // Max - Min for each variable (normalisation scale)
+	// Execution tuning (wiring of the DLS options; not part of the bump).
+	EscapeIterFrac  float64 // escape-phase MaxIter as a fraction of the full budget (0 = 1/3)
+	WSpan           float64 // worker W scaling span: W*(1 + i/(N-1)*(WSpan-1)); 0 = 2
+	StallWindowFrac float64 // stalled-early-stop window as a fraction of MaxIter (0 = 0.2)
+	StallRelTol     float64 // stalled-early-stop relative merit threshold (0 = 1e-4)
+	StallEarlyStop  bool    // enable stalled-early-stop in the escape phase (clean phase never stalls)
+	InitialPerturb  float64 // normalised amplitude spreading parallel workers (0 = 0.05)
 }
 
 // DefaultParams returns the literature-recommended starting values adapted to
 // the normalised variable space.
 func DefaultParams() Params {
 	return Params{
-		H:     0.1,
-		W:     0.5,
-		HMult: 2.0,
-		WMult: 1.3,
-		Dt:    0.1,
+		H:               0.1,
+		W:               0.5,
+		HMult:           2.0,
+		WMult:           1.3,
+		Dt:              0.1,
+		EscapeIterFrac:  1.0 / 3.0,
+		WSpan:           2.0,
+		StallWindowFrac: 0.2,
+		StallRelTol:     1e-4,
+		StallEarlyStop:  true,
+		InitialPerturb:  0.05,
 	}
 }
 
@@ -137,9 +150,16 @@ func (w *Wrapper) Options() dls.Options {
 	// The escape cycle provides its own escape mechanism; the DLS internal
 	// stall perturbation would fight it.
 	opts.DisableStallEscape = true
-	if w.phase == PhaseEscape {
+	// Only the basin-escape DLS uses stalled early termination; the clean
+	// re-optimisation keeps the full budget so a slow late-stage improvement
+	// (e.g. a max_iterations clean run yielding the global best) is not cut
+	// off prematurely.
+	opts.EnableStallDone = w.phase == PhaseEscape && w.params.StallEarlyStop
+	opts.StallWindowFrac = w.params.StallWindowFrac
+	opts.StallRelTol = w.params.StallRelTol
+	if w.phase == PhaseEscape && w.params.EscapeIterFrac > 0 {
 		if opts.MaxIter > 3 {
-			opts.MaxIter = max(50, opts.MaxIter/3)
+			opts.MaxIter = max(50, int(float64(opts.MaxIter)*w.params.EscapeIterFrac))
 		}
 	}
 	return opts

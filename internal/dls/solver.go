@@ -102,9 +102,17 @@ func Solve(m Model) Result {
 
 	bestMeritWindowAgo := bestMerit
 	lastCheckIter := 0
-	stallWindow := opts.MaxIter / 5
+	stallWindowFrac := opts.StallWindowFrac
+	if stallWindowFrac <= 0 {
+		stallWindowFrac = 0.2
+	}
+	stallWindow := int(float64(opts.MaxIter) * stallWindowFrac)
 	if stallWindow < 50 {
 		stallWindow = 50
+	}
+	stallRelTol := opts.StallRelTol
+	if stallRelTol <= 0 {
+		stallRelTol = 1e-4
 	}
 
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
@@ -428,15 +436,17 @@ func Solve(m Model) Result {
 		// a plateau with no improvement will run to max_iterations. Detect
 		// this by checking whether the best merit has stalled over a generous
 		// window relative to the total budget and stop early, returning the
-		// best point recorded so far.
-		if opts.DisableStallEscape && totalIter-lastCheckIter >= stallWindow {
+		// best point recorded so far. EnableStallDone lets callers opt out
+		// (e.g. the clean re-optimisation phase keeps the full budget so a
+		// slow late-stage improvement is not cut off).
+		if opts.DisableStallEscape && opts.EnableStallDone && totalIter-lastCheckIter >= stallWindow {
 			if lastCheckIter > 0 {
 				denom := math.Abs(bestMerit)
 				if denom < 1e-10 {
 					denom = 1e-10
 				}
 				rel := math.Abs(bestMerit-bestMeritWindowAgo) / denom
-				if rel < 1e-4 {
+				if rel < stallRelTol {
 					status = "converged_stalled"
 					break
 				}

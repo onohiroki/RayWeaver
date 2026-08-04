@@ -47,7 +47,16 @@ type Options struct {
 	MuConMax           float64
 	Workers            int
 	DisableStallEscape bool
-	Logger             Logger
+	EnableStallDone    bool
+	// StallWindowFrac is the fraction of MaxIter used as the stalled-early-stop
+	// window (0 = default 20%, i.e. MaxIter/5, floor 50). Only consulted when
+	// EnableStallDone is true.
+	StallWindowFrac float64
+	// StallRelTol is the relative best-merit improvement that must occur over
+	// the stall window to keep the solver running (0 = default 1e-4). Only
+	// consulted when EnableStallDone is true.
+	StallRelTol float64
+	Logger      Logger
 }
 
 type ConstraintState struct {

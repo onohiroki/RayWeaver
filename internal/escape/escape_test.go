@@ -472,3 +472,66 @@ func TestProgressEventsCarryTimeAndElapsed(t *testing.T) {
 		t.Fatalf("workers = %d, want 1", ev.Workers)
 	}
 }
+
+func TestBuildParamsAppliesExecutionTuning(t *testing.T) {
+	early := false
+	cfg := types.EscapeConfig{
+		EscapeIterFrac:  0.25,
+		WSpan:           3.0,
+		StallWindowFrac: 0.5,
+		StallRelTol:     1e-3,
+		StallEarlyStop:  &early,
+		InitialPerturb:  0.1,
+	}
+	p := BuildParams(cfg, twoWell{}.Variables())
+	if p.EscapeIterFrac != 0.25 || p.WSpan != 3.0 || p.StallWindowFrac != 0.5 ||
+		p.StallRelTol != 1e-3 || p.StallEarlyStop || p.InitialPerturb != 0.1 {
+		t.Fatalf("tuning not applied: %+v", p)
+	}
+}
+
+func TestDefaultParamsTuning(t *testing.T) {
+	p := DefaultParams()
+	if p.EscapeIterFrac != 1.0/3.0 || p.WSpan != 2.0 || p.StallWindowFrac != 0.2 ||
+		p.StallRelTol != 1e-4 || !p.StallEarlyStop || p.InitialPerturb != 0.05 {
+		t.Fatalf("unexpected tuning defaults: %+v", p)
+	}
+}
+
+func TestWrapperOptionsPhaseLimitsMaxIter(t *testing.T) {
+	params := testParams()
+	params.EscapeIterFrac = 0.25
+	w := NewWrapper(twoWell{}, params)
+
+	w.SetPhase(PhaseEscape)
+	opts := w.Options()
+	// twoWell.Options() returns MaxIter=200; capped to 200*0.25 = 50.
+	if opts.MaxIter != 50 {
+		t.Fatalf("PhaseEscape MaxIter = %d, want 50", opts.MaxIter)
+	}
+	if !opts.EnableStallDone {
+		t.Fatal("PhaseEscape should enable stalled early stop")
+	}
+	if opts.StallWindowFrac != params.StallWindowFrac || opts.StallRelTol != params.StallRelTol {
+		t.Fatalf("stall tuning not propagated: %+v", opts)
+	}
+
+	w.SetPhase(PhaseClean)
+	opts = w.Options()
+	if opts.MaxIter != 200 {
+		t.Fatalf("PhaseClean MaxIter = %d, want 200 (full budget)", opts.MaxIter)
+	}
+	if opts.EnableStallDone {
+		t.Fatal("PhaseClean should not enable stalled early stop")
+	}
+}
+
+func TestWrapperOptionsDisableStallEarlyStop(t *testing.T) {
+	params := testParams()
+	params.StallEarlyStop = false
+	w := NewWrapper(twoWell{}, params)
+	w.SetPhase(PhaseEscape)
+	if w.Options().EnableStallDone {
+		t.Fatal("StallEarlyStop=false should keep stalled stop disabled")
+	}
+}

@@ -468,6 +468,12 @@ type EscapeConfig struct {
 	HMult             float64            `yaml:"h_mult,omitempty"`
 	WMult             float64            `yaml:"w_mult,omitempty"`
 	VariableWeights   map[string]float64 `yaml:"variable_weights,omitempty"`
+	EscapeIterFrac    float64            `yaml:"escape_iter_frac,omitempty"`
+	WSpan             float64            `yaml:"w_span,omitempty"`
+	StallWindowFrac   float64            `yaml:"stall_window_frac,omitempty"`
+	StallRelTol       float64            `yaml:"stall_rel_tol,omitempty"`
+	StallEarlyStop    *bool              `yaml:"stall_early_stop,omitempty"`
+	InitialPerturb    float64            `yaml:"initial_perturb,omitempty"`
 }
 
 type MeritTermResult struct {
@@ -533,6 +539,12 @@ type EscapeParamsInfo struct {
 	EscapeWorkers     int                `yaml:"escape_workers,omitempty"`
 	MaxSeconds        float64            `yaml:"max_seconds,omitempty"`
 	VariableWeights   map[string]float64 `yaml:"variable_weights,omitempty"`
+	EscapeIterFrac    float64            `yaml:"escape_iter_frac,omitempty"`
+	WSpan             float64            `yaml:"w_span,omitempty"`
+	StallWindowFrac   float64            `yaml:"stall_window_frac,omitempty"`
+	StallRelTol       float64            `yaml:"stall_rel_tol,omitempty"`
+	StallEarlyStop    *bool              `yaml:"stall_early_stop,omitempty"`
+	InitialPerturb    float64            `yaml:"initial_perturb,omitempty"`
 }
 
 // ConfigFeatures is one config's feature set for a local minimum — a compact

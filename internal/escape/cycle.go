@@ -139,10 +139,6 @@ func (c *Cycle) perturb(x []float64, counter int, amplitude float64) []float64 {
 // for the escape to exert a push.
 const restartPerturb = 0.1
 
-// initialPerturb is the normalised-amplitude spread applied to each worker's
-// initial state so parallel workers explore different neighbourhoods.
-const initialPerturb = 0.05
-
 // Run performs the escape loop starting from x0. It returns the final point
 // (the last converged minimum) and its unescaped merit.
 func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
