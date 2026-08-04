@@ -168,12 +168,12 @@ echo
 
 echo "--- PNG diagrams ---"
 echo "=== Initial diagram ==="
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$YAML" | $RAYWEAVE trace \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/${PREFIX}init.png" >/dev/null
 echo "Written: $OUTDIR/${PREFIX}init.png"
 
 echo "=== Best-solution diagram ==="
-$RAYWEAVE chief --clear-aperture --shrink --ray-fan < "$RESULT" | $RAYWEAVE trace \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$RESULT" | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/${PREFIX}best.png" >/dev/null
 echo "Written: $OUTDIR/${PREFIX}best.png"
 

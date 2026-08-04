@@ -469,6 +469,7 @@ func tripletEqualityConfigs(eflTarget, epdTarget float64) []ConfigInput {
 	return []ConfigInput{{
 		ID:          "cfg1",
 		Weight:      1.0,
+		StopSurface: 5, // explicit aperture (was the implicit smallest-diameter stop)
 		Surfaces:    surfaces,
 		Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}, {ID: 1, AngleDeg: 16.0, Weight: 1.0}, {ID: 2, AngleDeg: 24.0, Weight: 0.5}},
 		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},

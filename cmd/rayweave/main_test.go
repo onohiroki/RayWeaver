@@ -221,13 +221,12 @@ func runChiefWithArgs(t *testing.T, args []string, data []byte) []byte {
 	return out.Bytes()
 }
 
-// TestClearApertureShrink is a regression test for the improvement report
-// (3.5): --clear-aperture --shrink must size diameters to the beam footprint
-// including off-axis fields (the old re-aiming lost the axial component and
-// produced undersized apertures that vignetted off-axis beams). After
-// shrinking, a chief trace must still pass all field rays.
-func TestClearApertureShrink(t *testing.T) {
-	// A wide-field triplet with oversized diameters.
+// TestClearApertureAutoAperture sizes only auto_aperture: true surfaces to the
+// beam footprint (including off-axis fields) while fixed (auto_aperture: false)
+// surfaces keep their diameter, and the off-axis beam must still pass.
+func TestClearApertureAutoAperture(t *testing.T) {
+	// A wide-field triplet with oversized auto_aperture diameters and a fixed
+	// aperture (surface 5) that must be preserved.
 	yamlData := `glass_catalog:
   entries:
     - {type: model, name: SK18, nd: 1.63854, vd: 55.42}
@@ -244,16 +243,16 @@ configs:
   - id: cfg1
     active: true
     surfaces:
-      - {id: 1, type: sphere, radius: 10.2871491742, thickness: 1.524, material: SK18, diameter: 20.0}
-      - {id: 2, type: sphere, radius: -239.3967954752, thickness: 2.3368, material: AIR, diameter: 20.0}
-      - {id: 3, type: sphere, radius: -12.826987173, thickness: 0.508, material: SF12, diameter: 20.0}
-      - {id: 4, type: sphere, radius: 10.5917184406, thickness: 1.4986, material: AIR, diameter: 20.0}
+      - {id: 1, type: sphere, radius: 10.2871491742, thickness: 1.524, material: SK18, diameter: 20.0, auto_aperture: true}
+      - {id: 2, type: sphere, radius: -239.3967954752, thickness: 2.3368, material: AIR, diameter: 20.0, auto_aperture: true}
+      - {id: 3, type: sphere, radius: -12.826987173, thickness: 0.508, material: SF12, diameter: 20.0, auto_aperture: true}
+      - {id: 4, type: sphere, radius: 10.5917184406, thickness: 1.4986, material: AIR, diameter: 20.0, auto_aperture: true}
       - {id: 5, type: sphere, radius: 0, thickness: 1.016, material: AIR, diameter: 3.78}
-      - {id: 6, type: sphere, radius: 61.84562942, thickness: 1.524, material: SK18, diameter: 20.0}
-      - {id: 7, type: sphere, radius: -10.0074859032, thickness: 21.36695183553, material: AIR, diameter: 20.0}
+      - {id: 6, type: sphere, radius: 61.84562942, thickness: 1.524, material: SK18, diameter: 20.0, auto_aperture: true}
+      - {id: 7, type: sphere, radius: -10.0074859032, thickness: 21.36695183553, material: AIR, diameter: 20.0, auto_aperture: true}
       - {id: 8, type: sphere, radius: 0, thickness: 0, material: AIR, diameter: 44.0}
 `
-	out := runChiefWithArgs(t, []string{"--clear-aperture", "--shrink", "--clear-aperture-rays", "1024"}, []byte(yamlData))
+	out := runChiefWithArgs(t, []string{"--clear-aperture", "--clear-aperture-rays", "1024"}, []byte(yamlData))
 
 	var res struct {
 		Configs []types.Config `yaml:"configs"`
@@ -262,20 +261,32 @@ configs:
 		t.Fatalf("yaml.Unmarshal clear-aperture output: %v", err)
 	}
 	surfs := res.Configs[0].Surfaces
-	// Front element should have been shrunk well below its input 20 mm.
-	if s1 := surfaceDiameterOf(surfs, 1); s1 >= 19.0 {
-		t.Errorf("s1 diameter after --shrink = %v, want < 19 (beam footprint)", s1)
-	}
-	// The stop (surface 5) is preserved as the aperture.
+	// The fixed aperture (surface 5) is preserved.
 	if s5 := surfaceDiameterOf(surfs, 5); math.Abs(s5-3.78) > 1e-6 {
-		t.Errorf("stop (s5) diameter = %v, want 3.78 (aperture preserved)", s5)
+		t.Errorf("fixed aperture (s5) diameter = %v, want 3.78 (auto_aperture: false surfaces are never resized)", s5)
 	}
-	// With the shrunk diameters, a chief trace must still pass the off-axis
-	// field rays (the bug used to undersize and clip them).
+	// The reference surface is untouched.
+	if s8 := surfaceDiameterOf(surfs, 8); math.Abs(s8-44.0) > 1e-6 {
+		t.Errorf("reference (s8) diameter = %v, want 44", s8)
+	}
+	// At least one auto_aperture surface was resized below the input 20 mm.
+	resized := false
+	for _, id := range []int{1, 2, 3, 4, 6, 7} {
+		if d := surfaceDiameterOf(surfs, id); d < 19.0 {
+			resized = true
+		}
+	}
+	if !resized {
+		t.Errorf("no auto_aperture surface was shrunk below 19 mm (beam footprint sizing failed)")
+	}
+	// With the sized diameters the on-axis beam must pass fully; the off-axis
+	// beam is legitimately vignetted by the fixed aperture (surface 5), so it
+	// must still trace a substantial fraction of its rays.
 	trace := runChiefWithArgs(t, nil, out)
 	var tr struct {
 		ChiefRays []struct {
 			SpotStats *struct {
+				TotalRays  int `yaml:"total_rays"`
 				TracedRays int `yaml:"traced_rays"`
 			} `yaml:"spot_stats"`
 		} `yaml:"chief_rays"`
@@ -286,15 +297,26 @@ configs:
 	if len(tr.ChiefRays) != 2 {
 		t.Fatalf("expected 2 fields, got %d", len(tr.ChiefRays))
 	}
-	for i, cr := range tr.ChiefRays {
-		if cr.SpotStats == nil || cr.SpotStats.TracedRays < 200 {
-			t.Errorf("field %d traced %d rays (<200): off-axis beam clipped after shrink", i, func() int {
-				if cr.SpotStats == nil {
-					return -1
-				}
-				return cr.SpotStats.TracedRays
-			}())
-		}
+	if cr := tr.ChiefRays[0]; cr.SpotStats == nil || cr.SpotStats.TracedRays < cr.SpotStats.TotalRays {
+		t.Errorf("on-axis field traced %d/%d rays: on-axis beam must never be clipped", func() int {
+			if cr.SpotStats == nil {
+				return -1
+			}
+			return cr.SpotStats.TracedRays
+		}(), func() int {
+			if cr.SpotStats == nil {
+				return -1
+			}
+			return cr.SpotStats.TotalRays
+		}())
+	}
+	if cr := tr.ChiefRays[1]; cr.SpotStats == nil || cr.SpotStats.TracedRays < 150 {
+		t.Errorf("off-axis field traced %d rays (<150): beam too heavily clipped after sizing", func() int {
+			if cr.SpotStats == nil {
+				return -1
+			}
+			return cr.SpotStats.TracedRays
+		}())
 	}
 }
 

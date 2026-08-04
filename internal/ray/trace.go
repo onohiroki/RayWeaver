@@ -22,9 +22,6 @@ const (
 	ErrGlassPathLong   RayError = "glass_path_too_long"
 )
 
-
-
-
 type Engine struct {
 	Glass   *glass.Catalog
 	Coating *coating.Catalog
@@ -105,7 +102,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			Z: localOrigin.Z + localDir.Z*t,
 		}
 
-		if currentSurf.Diameter > 0 && !ray.SkipApertureCheck && !(ray.SkipGlassPathCheck && currentSurf.AutoAperture) {
+		if currentSurf.Diameter > 0 && !ray.SkipApertureCheck && !(ray.SkipAutoApertureCheck && currentSurf.AutoAperture) && !(ray.SkipGlassPathCheck && currentSurf.AutoAperture) {
 			h := math.Sqrt(hitPoint.X*hitPoint.X + hitPoint.Y*hitPoint.Y)
 			if h > currentSurf.Diameter/2 {
 				result.Error = "ray missed surface (aperture stop)"
@@ -199,16 +196,16 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			path := globalPos.Subtract(glassEntryPos).Length()
 			entrySurf := findSurface(surfaces, glassEntrySurfaceID)
 			if entrySurf != nil {
-			if entrySurf.MinGlassPath > 0 && path < entrySurf.MinGlassPath {
-				result.Error = "ray missed surface (glass path too short)"
-				result.ErrorCode = string(ErrGlassPathShort)
-				return result
-			}
-			if entrySurf.MaxGlassPath > 0 && path > entrySurf.MaxGlassPath {
-				result.Error = "ray missed surface (glass path too long)"
-				result.ErrorCode = string(ErrGlassPathLong)
-				return result
-			}
+				if entrySurf.MinGlassPath > 0 && path < entrySurf.MinGlassPath {
+					result.Error = "ray missed surface (glass path too short)"
+					result.ErrorCode = string(ErrGlassPathShort)
+					return result
+				}
+				if entrySurf.MaxGlassPath > 0 && path > entrySurf.MaxGlassPath {
+					result.Error = "ray missed surface (glass path too long)"
+					result.ErrorCode = string(ErrGlassPathLong)
+					return result
+				}
 			}
 		}
 		if interaction == types.Reflect {

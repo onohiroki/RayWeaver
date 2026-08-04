@@ -27,6 +27,7 @@ type Config struct {
 	GlassCatalog   *glass.Catalog
 	CoatingCatalog interface{}
 	StopSurface    int
+	PupilZ         float64
 	MaxIter        int
 	Mu             float64
 	Tol            float64
@@ -47,6 +48,7 @@ type ConfigInput struct {
 	ID          string
 	Weight      float64
 	StopSurface int
+	PupilZ      float64
 	Surfaces    []types.Surface
 	Fields      []types.FieldItem
 	Wavelengths []types.WavelengthItem
@@ -114,6 +116,7 @@ type config struct {
 	id          string
 	weight      float64
 	stopSurface int
+	pupilZ      float64
 	surfaces    []types.Surface
 	fields      []types.FieldItem
 	wavelengths []types.WavelengthItem
@@ -135,6 +138,22 @@ type meritTerm struct {
 	wavWeight      float64
 	weight         float64
 	target         float64
+}
+
+// resolvePupilZ returns the pupil Z used to centre grid traces for a config:
+// the explicit stop surface Z when one is set, otherwise the caller-provided
+// dynamic pupil Z. The stop surface is never inferred.
+func resolvePupilZ(surfaces []types.Surface, stopSurface int, pupilZ float64) float64 {
+	if stopSurface > 0 {
+		sc := append([]types.Surface{}, surfaces...)
+		surface.Precompute(sc)
+		for _, s := range sc {
+			if s.ID == stopSurface {
+				return s.PhysicalZ
+			}
+		}
+	}
+	return pupilZ
 }
 
 type Optimizer struct {
@@ -166,6 +185,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		id:          "config1",
 		weight:      1.0,
 		stopSurface: cfg.StopSurface,
+		pupilZ:      resolvePupilZ(cfg.Surfaces, cfg.StopSurface, cfg.PupilZ),
 		surfaces:    cfg.Surfaces,
 		fields:      cfg.Fields,
 		constraints: cfg.Constraints,
@@ -211,6 +231,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			id:          ci.ID,
 			weight:      ci.Weight,
 			stopSurface: ci.StopSurface,
+			pupilZ:      resolvePupilZ(ci.Surfaces, ci.StopSurface, ci.PupilZ),
 			surfaces:    ci.Surfaces,
 			fields:      ci.Fields,
 			wavelengths: ci.Wavelengths,
@@ -610,7 +631,7 @@ func (o *Optimizer) constraintFieldAngle(cfg *config, c types.ConstraintOperand,
 // points.
 func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
-	points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
+	points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
 	return points
 }
 
@@ -701,7 +722,7 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 		if math.Abs(angle) != extremeAngle {
 			continue
 		}
-		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
+		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
 		for id, e := range perSurf {
 			if e > extents[id] {
 				extents[id] = e
@@ -846,7 +867,7 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, cfg.pupilZ)
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {
@@ -887,7 +908,7 @@ func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []Constr
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, cfg.pupilZ)
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {
@@ -930,7 +951,7 @@ func (o *Optimizer) FinalConstraintMeasurements(x []float64) []types.ConstraintM
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, cfg.pupilZ)
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {

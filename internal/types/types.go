@@ -145,6 +145,11 @@ type Ray struct {
 	Jones              JonesVector        `yaml:"-"`
 	SkipGlassPathCheck bool               `yaml:"-"`
 	SkipApertureCheck  bool               `yaml:"-"`
+	// SkipAutoApertureCheck skips the aperture check on auto_aperture surfaces
+	// only, so their diameter can be measured from the true beam extent rather
+	// than from a self-clipped set of rays. Fixed (auto_aperture: false)
+	// surfaces still clip.
+	SkipAutoApertureCheck bool `yaml:"-"`
 }
 
 type SurfaceResult struct {
@@ -278,7 +283,7 @@ type ChiefInput struct {
 	FieldAngles      []float64          `yaml:"field_angles,omitempty"`
 	Fields           []FieldDef         `yaml:"fields,omitempty"`
 	ReferenceSurface int                `yaml:"reference_surface"`
-	StopSurface      int                `yaml:"stop_surface"`
+	StopSurface      int                `yaml:"stop_surface,omitempty"`
 	NumRays          int                `yaml:"num_rays"`
 	GridType         GridType           `yaml:"grid_type,omitempty"`
 	DumpMap          bool               `yaml:"dump_map,omitempty"`
@@ -637,7 +642,8 @@ type ChiefRayResult struct {
 	FieldAngle    float64           `yaml:"field_angle"`
 	ChiefRay      Ray               `yaml:"chief_ray"`
 	ImageHeight   Vec3              `yaml:"image_height"`
-	EntrancePupil Pupil             `yaml:"entrance_pupil"`
+	EntrancePupil *Pupil            `yaml:"entrance_pupil,omitempty"`
+	ExitPupil     *Pupil            `yaml:"exit_pupil,omitempty"`
 	GridPoints    []GridPoint       `yaml:"grid_points,omitempty"`
 	SpotStats     *SpotStats        `yaml:"spot_stats,omitempty"`
 	RayFan        *RayFan           `yaml:"ray_fan,omitempty"`
@@ -688,6 +694,43 @@ type StopInfo struct {
 	Diameter  float64 `yaml:"diameter"`
 }
 
+// VignettingField reports the per-field vignetting result for the `vignette`
+// subcommand. Vignetting is the surviving fraction of the pupil grid;
+// EntrancePupilZ / ExitPupilZ are the per-field dynamic pupils; BoundLower /
+// BoundUpper are field 0's marginal-ray envelope at the field's entrance pupil
+// plane; MarginalYLower / MarginalYUpper are this field's marginal-ray heights
+// there.
+type VignettingField struct {
+	FieldIndex     int     `yaml:"field_index"`
+	AngleDeg       float64 `yaml:"angle_deg"`
+	Vignetting     float64 `yaml:"vignetting"`
+	GridTotal      int     `yaml:"grid_total"`
+	GridSurviving  int     `yaml:"grid_surviving"`
+	EntrancePupilZ float64 `yaml:"entrance_pupil_z,omitempty"`
+	ExitPupilZ     float64 `yaml:"exit_pupil_z,omitempty"`
+	BoundLower     float64 `yaml:"bound_lower,omitempty"`
+	BoundUpper     float64 `yaml:"bound_upper,omitempty"`
+	MarginalYLower float64 `yaml:"marginal_y_lower,omitempty"`
+	MarginalYUpper float64 `yaml:"marginal_y_upper,omitempty"`
+}
+
+// DiameterState records one surface's diameter before and after a `vignette`
+// pass.
+type DiameterState struct {
+	SurfaceID int     `yaml:"surface_id"`
+	Before    float64 `yaml:"before"`
+	After     float64 `yaml:"after"`
+}
+
+// VignettingResult is the report emitted by the `vignette` subcommand.
+type VignettingResult struct {
+	Iterations   int               `yaml:"iterations"`
+	MinGlassPath float64           `yaml:"min_glass_path"`
+	StopSurface  int               `yaml:"stop_surface,omitempty"`
+	Diameters    []DiameterState   `yaml:"diameters"`
+	Fields       []VignettingField `yaml:"fields"`
+}
+
 type Output struct {
 	Input          `yaml:",inline"`
 	ChiefRays      []ChiefRayResult    `yaml:"chief_rays,omitempty"`
@@ -695,6 +738,7 @@ type Output struct {
 	ParaxialResult *ParaxialResult     `yaml:"paraxial_result,omitempty"`
 	OptResults     *OptimizationResult `yaml:"opt_results,omitempty"`
 	EscapeResult   *EscapeResult       `yaml:"escape_result,omitempty"`
+	Vignetting     *VignettingResult   `yaml:"vignetting_result,omitempty"`
 	Provenance     *Provenance         `yaml:"provenance,omitempty"`
 	Stop           *StopInfo           `yaml:"stop,omitempty"`
 }

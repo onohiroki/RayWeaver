@@ -100,6 +100,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 			ID:          cfg.ID,
 			Weight:      cfg.Weight,
 			StopSurface: stopSurface,
+			PupilZ:      computePupilZ(input, surfaces, gc),
 			Surfaces:    surfaces,
 			Fields:      fields,
 			Wavelengths: wavelengths,
@@ -111,11 +112,13 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	// Single-config YAML may omit the configs[] wrapper entirely or use a
 	// default config with weight 1.0; fall back to a synthetic config.
 	if len(configs) == 0 {
+		cfgSurfaces := firstConfigSurfaces(input)
 		configs = []optimize.ConfigInput{{
 			ID:          "config1",
 			Weight:      1.0,
 			StopSurface: 0,
-			Surfaces:    firstConfigSurfaces(input),
+			PupilZ:      computePupilZ(input, cfgSurfaces, gc),
+			Surfaces:    cfgSurfaces,
 			Fields:      loadFields(input),
 			Constraints: input.Optimization.Constraints,
 		}}

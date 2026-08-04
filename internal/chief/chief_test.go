@@ -144,7 +144,7 @@ func TestSearchOriginForTargetAsphereRecovery(t *testing.T) {
 		rayDir.Y, rayDir, -100.0, 3, 0,
 		path, 0.00058756,
 		types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)},
-		engine, surfaces, 3, false,
+		engine, surfaces, computeStopZ(surfaces, 3), false,
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y },
 	)
 
@@ -195,7 +195,7 @@ func TestSearchOriginForTargetVignettingRecovery(t *testing.T) {
 	result := searchOriginForTarget(rayDir.Y, rayDir, -100.0, 3, 0,
 		dls.BuildPath(surfaces), 0.00058756,
 		types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)},
-		engine, surfaces, 3, false,
+		engine, surfaces, computeStopZ(surfaces, 3), false,
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
 
 	// The result should be non-zero (since the ray has a non-zero field angle)
@@ -337,7 +337,7 @@ func TestComputeRayFanAngleMapping(t *testing.T) {
 	origin := types.Vec3{X: 0, Y: 0, Z: -100}
 	dir := types.Vec3{X: 0, Y: 0, Z: 1}
 
-	fan := computeRayFan(engine, sys, dls.BuildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90, 45}, 8)
+	fan := computeRayFan(engine, sys, dls.BuildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, 0.0, []float64{0, 90, 45}, 8)
 	if fan == nil {
 		t.Fatal("computeRayFan returned nil")
 	}
@@ -372,7 +372,7 @@ func TestComputeRayFanDefaultBothPlanes(t *testing.T) {
 	dir := types.Vec3{X: 0, Y: 0, Z: 1}
 
 	// On-axis field still produces both planes under the default config.
-	fan := computeRayFan(engine, sys, dls.BuildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, []float64{0, 90}, 8)
+	fan := computeRayFan(engine, sys, dls.BuildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, 0.0, []float64{0, 90}, 8)
 	if len(fan.Meridional) == 0 || len(fan.Sagittal) == 0 {
 		t.Error("default config must produce both meridional and sagittal for all fields")
 	}

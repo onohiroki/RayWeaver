@@ -127,6 +127,8 @@ func main() {
 		runTMM(data)
 	case "plot":
 		runPlot(data)
+	case "vignette":
+		runVignette(data)
 	case "optimize":
 		runOptimize(data, optVerbose, optLogFile, optGlassDir, optExcludeParams)
 	case "escape":
@@ -166,10 +168,10 @@ Options:
   --pass-through N     constrain chief ray to pass through (0,0) centre of
                          surface N (overrides YAML pass_through.surface)
   --clear-aperture     trace grid rays (all fields) through every surface and
-                         set surfaces[].diameter = 2x max radial extent
-                         using entrance-pupil-based beam diameter
-  --clear-aperture-margin 2.0   beam diameter multiplier relative to entrance
-                         pupil (default 2 = 2× entrance pupil diameter)
+                         set auto_aperture: true surfaces' diameter = 2x max
+                         radial extent + 2x --clear-aperture-margin-mm
+  --clear-aperture-margin-mm 0.2   clearance added to each side of the beam
+                         footprint (mm, default 0.2)
   --marginal-rays      extract marginal (max/min) rays from grid points and
                          append them for piping into trace/plot
   --ray-fan            compute ray fan (transverse aberration) for each field
@@ -308,6 +310,33 @@ glass_catalog section.  Ray colours follow the field angle
 
 Note: PNG output uses golang.org/x/image/vector for rasterization
   with anti-aliasing.  No external tools required.
+`)
+	case "vignette":
+		fmt.Print(`Usage: rayweave vignette [--iterations 3] [--min-glass-path 0.5] [--margin-mm 0.2] < system.yaml
+
+Iteratively settles surface diameters and per-field vignetting using the
+dynamic pupil (per-field entrance/exit pupil from the chief-ray crossings,
+no physical stop required).
+
+Options:
+  --iterations 3        number of diameter/pupil passes (default 3)
+  --min-glass-path 0.5  minimum glass path (edge thickness) below which a ray
+                          fails, applied to every glass element (mm)
+  --margin-mm 0.2       clearance added to each side of the beam footprint
+                          when sizing auto_aperture surfaces (mm)
+  --wl 0.00058756       reference wavelength (mm)
+  --config ID           select config by id (multi-config mode)
+  --glass-dir DIR       AGF glass catalog directory
+
+Input: standard system YAML. The chief section supplies fields / grid. Only
+surfaces marked auto_aperture: true are re-sized; auto_aperture: false
+surfaces are fixed limiters (the aperture never moves).
+
+Output: YAML with updated configs[].surfaces[].diameter, chief_rays[] with
+per-field entrance_pupil / exit_pupil (dynamic), rays[] = chief + marginal
+rays, and a vignetting_result: report. Pipe into trace then plot:
+
+  rayweave vignette < lens.yaml | rayweave trace | rayweave plot -o out.png
 `)
 	case "optimize":
 		fmt.Print(`Usage: rayweave optimize [--verbose] [--log FILE] < input.yaml
@@ -688,9 +717,8 @@ func containsGlass(entries []types.Glass, g types.Glass) bool {
 
 func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
-	clearAperture := fs.Bool("clear-aperture", false, "trace grid rays (all fields, through the aperture stop) through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set surfaces[].diameter = 2x that extent")
-	clearApertureShrink := fs.Bool("shrink", false, "with --clear-aperture, also shrink diameters down to the beam footprint (default: only grow); the aperture stop keeps its diameter")
-	clearApertureMarginMM := fs.Float64("clear-aperture-margin-mm", 0.2, "with --clear-aperture --shrink, extra clearance added to each side of the beam footprint (mm)")
+	clearAperture := fs.Bool("clear-aperture", false, "trace grid rays (all fields) through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set auto_aperture: true surfaces' diameter = 2x that extent + margin")
+	clearApertureMarginMM := fs.Float64("clear-aperture-margin-mm", 0.2, "with --clear-aperture, extra clearance added to each side of the beam footprint (mm)")
 	clearApertureRays := fs.Int("clear-aperture-rays", 0, "ray count for --clear-aperture beam tracing (0 = use chief.num_rays); use a dense grid for accurate footprints")
 	marginalRays := fs.Bool("marginal-rays", false, "from each field's grid points find the rays with max/min image Y (and X for off-axis fields) and append them as marginal rays to the output 'rays' section for piping into trace/plot")
 	preserveRays := fs.Bool("preserve-rays", false, "with --clear-aperture, keep the existing 'rays' section instead of replacing it with chief rays, and omit chief_rays from the output (aperture adjustment only)")
@@ -874,19 +902,13 @@ func runChief(data []byte) {
 		}
 
 		refID := input.Chief.ReferenceSurface
-		stopID := findApertureStopID(surfaces, input.Chief.StopSurface)
+		stopID := input.Chief.StopSurface
 		for i := range surfaces {
-			if surfaces[i].ID == refID || surfaces[i].ID == stopID {
+			if surfaces[i].ID == refID || (stopID > 0 && surfaces[i].ID == stopID) || !surfaces[i].AutoAperture {
 				continue
 			}
 			if perSurfaceMaxY[i] > 0 {
-				computedDiam := perSurfaceMaxY[i] * 2
-				if *clearApertureShrink {
-					computedDiam += 2 * *clearApertureMarginMM
-					surfaces[i].Diameter = computedDiam
-				} else if computedDiam > surfaces[i].Diameter {
-					surfaces[i].Diameter = computedDiam
-				}
+				surfaces[i].Diameter = perSurfaceMaxY[i]*2 + 2**clearApertureMarginMM
 			}
 		}
 	}
@@ -937,9 +959,6 @@ func runChief(data []byte) {
 	}
 
 	stopID := input.Chief.StopSurface
-	if stopID <= 0 {
-		stopID = findApertureStopID(surfaces, 0)
-	}
 	if stopID > 0 {
 		for _, s := range surfaces {
 			if s.ID == stopID {
@@ -954,28 +973,6 @@ func runChief(data []byte) {
 	}
 
 	writeYAML(&output)
-}
-
-// findApertureStopID returns the ID of the aperture stop surface: the
-// explicit stop_surface if given, otherwise the smallest non-auto-aperture
-// diameter (mirrors chief's fallback).
-func findApertureStopID(surfaces []types.Surface, explicitID int) int {
-	if explicitID > 0 {
-		for _, s := range surfaces {
-			if s.ID == explicitID {
-				return explicitID
-			}
-		}
-	}
-	stopID := 0
-	minD := math.MaxFloat64
-	for _, s := range surfaces {
-		if !s.AutoAperture && s.Diameter > 0 && s.Diameter < minD {
-			minD = s.Diameter
-			stopID = s.ID
-		}
-	}
-	return stopID
 }
 
 // extractMarginalRays finds the grid rays with max/min image Y (and X for

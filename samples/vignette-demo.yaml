@@ -1,0 +1,48 @@
+# Vignette demo input: the double-Gauss start system
+# (samples/doublegauss-init.yaml, f/2.8 50 mm) with auto_aperture: true on the
+# real lens surfaces so `rayweave vignette` can re-size their diameters to the
+# surviving-beam envelope. Surface 7 (diameter 15.8, the aperture) and surface
+# 14 (image plane) are fixed (auto_aperture: false) and never re-sized.
+#
+# No chief.stop_surface is set: the entrance/exit pupils are derived from the
+# chief-ray crossings (dynamic pupil).
+glass_catalog:
+    entries:
+        - {type: model, name: SK18, nd: 1.63854, vd: 55.42}
+        - {type: model, name: SF12, nd: 1.64831, vd: 33.84}
+
+chief:
+    fields:
+        - {angle: 0, direction: [0, 1]}
+        - {angle: 10, direction: [0, 1]}
+        - {angle: 16, direction: [0, 1]}
+        - {angle: 23, direction: [0, 1]}
+    reference_surface: 14
+    num_rays: 256
+    grid_type: hex
+    dump_map: true
+    wavelengths:
+        - 0.0004861
+        - 0.0005876
+        - 0.0006563
+
+configs:
+    - id: config0
+      name: nominal
+      weight: 0
+      active: true
+      surfaces:
+        - {id: 1, type: sphere, radius: 60.606061, thickness: 3.5, material: SK18, diameter: 36.0, auto_aperture: true}
+        - {id: 2, type: sphere, radius: -454.545455, thickness: 0.5, material: AIR, diameter: 36.0, auto_aperture: true}
+        - {id: 3, type: sphere, radius: 121.212121, thickness: 1.2, material: SF12, diameter: 28.0, auto_aperture: true}
+        - {id: 4, type: sphere, radius: 45.454545, thickness: 3.0, material: AIR, diameter: 28.0, auto_aperture: true}
+        - {id: 5, type: sphere, radius: 54.545455, thickness: 2.5, material: SK18, diameter: 26.0, auto_aperture: true}
+        - {id: 6, type: sphere, radius: 181.818182, thickness: 3.0, material: AIR, diameter: 26.0, auto_aperture: true}
+        - {id: 7, type: sphere, thickness: 3.0, material: AIR, diameter: 15.8}
+        - {id: 8, type: sphere, radius: -181.818182, thickness: 2.5, material: SK18, diameter: 26.0, auto_aperture: true}
+        - {id: 9, type: sphere, radius: -54.545455, thickness: 3.0, material: AIR, diameter: 26.0, auto_aperture: true}
+        - {id: 10, type: sphere, radius: -45.454545, thickness: 1.2, material: SF12, diameter: 28.0, auto_aperture: true}
+        - {id: 11, type: sphere, radius: -121.212121, thickness: 0.5, material: AIR, diameter: 28.0, auto_aperture: true}
+        - {id: 12, type: sphere, radius: 454.545455, thickness: 3.5, material: SK18, diameter: 36.0, auto_aperture: true}
+        - {id: 13, type: sphere, radius: -60.606061, thickness: 42.0, material: AIR, diameter: 36.0, auto_aperture: true}
+        - {id: 14, type: sphere, thickness: 0.0, material: AIR, diameter: 44.0}

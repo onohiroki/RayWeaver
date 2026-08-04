@@ -8,6 +8,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
 )
@@ -20,6 +21,50 @@ func parseYAML[T any](data []byte) T {
 		os.Exit(1)
 	}
 	return out
+}
+
+// computePupilZ returns the entrance pupil Z used to centre grid traces for one
+// config's initial surfaces: the explicit stop surface Z, else the dynamic
+// pupil from a chief pass over the initial surfaces, else 0. It seeds the
+// optimiser's grid centring (the pupil is recomputed during Phase-2 runs).
+func computePupilZ(input types.Input, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	if input.Chief == nil {
+		return 0
+	}
+	if input.Chief.StopSurface > 0 {
+		for _, s := range surfaces {
+			if s.ID == input.Chief.StopSurface {
+				return s.PhysicalZ
+			}
+		}
+	}
+	var fields []types.FieldDef
+	if len(input.Chief.Fields) > 0 {
+		fields = input.Chief.Fields
+	} else {
+		for _, a := range input.Chief.FieldAngles {
+			fields = append(fields, types.FieldDef{Angle: a, Direction: []float64{0, 1}})
+		}
+	}
+	if len(fields) == 0 || len(surfaces) == 0 {
+		return 0
+	}
+	surface.Precompute(surfaces)
+	pol := types.NewCircularJones(true)
+	if input.Rays != nil {
+		pol = input.Rays.Polarization
+	}
+	results := chief.DetermineChiefRaysGrid(
+		types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface},
+		fields, input.Chief.ReferenceSurface, input.Chief.NumRays, gc, pol,
+		types.DefaultWavelength, false, input.Chief.GridType, input.Chief.PassThrough, nil, nil,
+	)
+	for _, r := range results {
+		if r.EntrancePupil != nil {
+			return r.EntrancePupil.Center.Z
+		}
+	}
+	return 0
 }
 
 // writeYAML marshals a value to stdout, exiting on error.

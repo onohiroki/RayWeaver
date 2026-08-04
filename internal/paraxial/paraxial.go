@@ -153,7 +153,7 @@ func stopSurfaceID(surfaces []types.Surface, explicitID int) int {
 			}
 		}
 	}
-	return surface.FindStopID(surfaces)
+	return 0
 }
 
 func stopSurfaceIndex(surfaces []types.Surface, explicitID int) int {
@@ -311,7 +311,7 @@ func Compute(
 	// Use chief_rays for location if available; diameter from paraxial trace
 	epFromChief := false
 	for _, cr := range chiefRays {
-		if cr.EntrancePupil.Radius > 0 {
+		if cr.EntrancePupil != nil && cr.EntrancePupil.Radius > 0 {
 			r.EntrancePupilLocation = cr.EntrancePupil.Center.Z
 			epFromChief = true
 			break

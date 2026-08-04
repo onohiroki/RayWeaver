@@ -11,20 +11,20 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int) ([]IPoint, map[int]float64) {
+func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int) ([]IPoint, map[int]float64) {
 	skipGlassPath := fieldAngle == 0
-	return traceGridRays(gc, surfaces, stopID, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, workers)
+	return traceGridRays(gc, surfaces, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, workers)
 }
 
 // TraceFieldGridExtents traces a pupil grid with aperture and glass-path
 // checks disabled, returning the true geometric max radial ray extent on each
 // surface, independent of any surface aperture clipping.
-func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int) map[int]float64 {
-	_, perSurfMax := traceGridRays(gc, surfaces, stopID, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers)
+func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int) map[int]float64 {
+	_, perSurfMax := traceGridRays(gc, surfaces, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers)
 	return perSurfMax
 }
 
-func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int) ([]IPoint, map[int]float64) {
+func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
@@ -51,12 +51,11 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopID int, fiel
 	zStart := -100.0
 	grid := generatePupilGrid(numRays, apertureRadius, rotationOffset)
 
-	stopZ := surface.ComputeStopZ(surfaces, stopID)
 	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
 	if rayDir.Z > 1e-12 && tanComponent > 1e-12 {
 		tanComponent /= rayDir.Z
-		pupilOffsetX := -(stopZ - zStart) * tanComponent * dx
-		pupilOffsetY := -(stopZ - zStart) * tanComponent * dy
+		pupilOffsetX := -(pupilZ - zStart) * tanComponent * dx
+		pupilOffsetY := -(pupilZ - zStart) * tanComponent * dy
 		for i := range grid {
 			grid[i].X += pupilOffsetX
 			grid[i].Y += pupilOffsetY
@@ -129,7 +128,7 @@ func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float
 	for i := 0; i < n; i++ {
 		for j := 0; j < n; j++ {
 			r := (float64(i) + 0.5) / float64(n) * apertureRadius
-			theta := 2 * math.Pi * (float64(j) + 0.5) / float64(n) + rotationOffset
+			theta := 2*math.Pi*(float64(j)+0.5)/float64(n) + rotationOffset
 			pts = append(pts, pupilPoint{
 				X: r * math.Cos(theta),
 				Y: r * math.Sin(theta),
@@ -140,16 +139,21 @@ func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float
 }
 
 // ApertureRadiusForGrid returns the entrance-pupil radius used for grid
-// traces, preferring the paraxial value.
+// traces: min(paraxial entrance-pupil radius, fixed minimum aperture radius)
+// so the F-number is preserved while auto_aperture:false surfaces cap the beam.
 func ApertureRadiusForGrid(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, margin float64) float64 {
-	if r := paraxialEntranceRadius(surfaces, wavelength, gc, margin); r > 0 {
-		return r
+	rPar := paraxialEntranceRadius(surfaces, wavelength, gc, margin)
+	rFixed := surface.FixedMinApertureRadius(surfaces)
+	if rPar > 0 && rFixed > 0 {
+		return math.Min(rPar, rFixed)
 	}
-	r := surface.FixedMinApertureRadius(surfaces)
-	if r <= 0 {
-		r = surface.MinApertureRadius(surfaces)
+	if rPar > 0 {
+		return rPar
 	}
-	return r
+	if rFixed > 0 {
+		return rFixed
+	}
+	return surface.MinApertureRadius(surfaces)
 }
 
 func paraxialEntranceRadius(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, margin float64) float64 {

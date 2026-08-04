@@ -62,9 +62,13 @@ func TestStopSurfaceID(t *testing.T) {
 		{ID: 2, Diameter: 10.0},
 		{ID: 3, Diameter: 20.0},
 	}
-	idx := stopSurfaceIndex(surfaces, 0)
-	if idx != 1 {
-		t.Errorf("Stop index = %d, want 1", idx)
+	// Without an explicit stop there is no stop (never inferred).
+	if idx := stopSurfaceIndex(surfaces, 0); idx != -1 {
+		t.Errorf("Stop index without explicit stop = %d, want -1 (no implicit stop)", idx)
+	}
+	// An explicit stop is honoured.
+	if idx := stopSurfaceIndex(surfaces, 2); idx != 1 {
+		t.Errorf("Explicit stop index = %d, want 1", idx)
 	}
 }
 
@@ -144,8 +148,9 @@ func TestComputeSchmidtFoldEFL(t *testing.T) {
 	}
 }
 
-// TestStopSurfaceExplicit: an explicit system.StopSurface overrides the
-// min-diameter fallback, and the stop Z is the physical (folded) Z.
+// TestStopSurfaceExplicit: an explicit system.StopSurface selects the stop,
+// and the stop Z is the physical (folded) Z. Without an explicit stop there is
+// no stop (the smallest diameter is never inferred).
 func TestStopSurfaceExplicit(t *testing.T) {
 	surfaces := []types.Surface{
 		{ID: 1, Diameter: 200.0},
@@ -153,10 +158,10 @@ func TestStopSurfaceExplicit(t *testing.T) {
 		{ID: 3, Diameter: 20.0},
 	}
 	surface.Precompute(surfaces)
-	// Without an explicit stop, the smallest diameter (surface 2) wins.
+	// Without an explicit stop, no stop is inferred.
 	idx := stopSurfaceIndex(surfaces, 0)
-	if idx != 1 {
-		t.Errorf("fallback stop index = %d, want 1 (surface 2)", idx)
+	if idx != -1 {
+		t.Errorf("stop index without explicit stop = %d, want -1 (no implicit stop)", idx)
 	}
 	// With an explicit stop_surface, surface 1 wins even though it is larger.
 	idx = stopSurfaceIndex(surfaces, 1)

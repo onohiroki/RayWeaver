@@ -113,10 +113,6 @@ func ParseZemax(input string) (*ParseResult, error) {
 		result.ImageSurface = last.ID
 	}
 
-	if result.StopSurface == 0 && len(result.Surfaces) > 0 {
-		result.StopSurface = result.Surfaces[0].ID
-	}
-
 	fillDefaults(result)
 
 	return result, nil

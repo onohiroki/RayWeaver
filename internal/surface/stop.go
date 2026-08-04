@@ -6,39 +6,11 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-// FindStopID returns the aperture stop: the fixed (non-auto_aperture) surface
-// with the smallest diameter, since auto_aperture surfaces are sized by the
-// beam and must never define the stop. Falls back to the smallest diameter
-// overall when every surface is auto_aperture.
-func FindStopID(surfaces []types.Surface) int {
-	stopID := 0
-	minD := math.MaxFloat64
-	for _, s := range surfaces {
-		if !s.AutoAperture && s.Diameter > 0 && s.Diameter < minD {
-			minD = s.Diameter
-			stopID = s.ID
-		}
-	}
-	if stopID != 0 {
-		return stopID
-	}
-	minD = math.MaxFloat64
-	for _, s := range surfaces {
-		if s.Diameter > 0 && s.Diameter < minD {
-			minD = s.Diameter
-			stopID = s.ID
-		}
-	}
-	return stopID
-}
-
-// ComputeStopZ returns the physical Z of the stop surface, resolving the stop
-// via FindStopID when stopID is not positive.
+// ComputeStopZ returns the physical Z of the explicitly specified stop surface,
+// or 0 when no stop is given. The stop is never inferred: with stopID <= 0 the
+// system has no stop and callers fall back to the dynamic pupil.
 func ComputeStopZ(surfaces []types.Surface, stopID int) float64 {
 	if stopID <= 0 {
-		stopID = FindStopID(surfaces)
-	}
-	if stopID == 0 {
 		return 0
 	}
 	for _, s := range surfaces {
@@ -77,4 +49,22 @@ func FixedMinApertureRadius(surfaces []types.Surface) float64 {
 		return 0
 	}
 	return minR
+}
+
+// FixedMinApertureRadiusZ returns the physical Z of the fixed (auto_aperture:
+// false) surface with the smallest aperture radius — the position where the
+// beam is physically limited. Returns 0 when no such surface exists.
+func FixedMinApertureRadiusZ(surfaces []types.Surface) float64 {
+	minR := math.MaxFloat64
+	z := 0.0
+	for _, s := range surfaces {
+		if !s.AutoAperture && s.Diameter > 0 && s.Diameter/2 < minR {
+			minR = s.Diameter / 2
+			z = s.PhysicalZ
+		}
+	}
+	if minR == math.MaxFloat64 {
+		return 0
+	}
+	return z
 }

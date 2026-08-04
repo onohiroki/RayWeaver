@@ -15,9 +15,11 @@ Tests: `go test ./...` (12 test files across all packages, no CI).
 
 ## Subcommands
 
-`chief` | `trace` | `paraxial` | `tmm` | `plot` | `optimize` | `escape` | `import`
+`chief` | `trace` | `paraxial` | `tmm` | `plot` | `vignette` | `optimize` | `escape` | `import`
 
 Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, writes YAML to stdout. `--config ID` on chief/trace/paraxial/plot for multi-config selection.
+
+`vignette` iteratively settles per-field vignetting and `auto_aperture` surface diameters using the dynamic pupil (see below). Output is pipeline-compatible: `vignette → trace → plot`.
 
 `escape` (sub-subcommands: `escape` run, `escape extract --index N`) is the Ishiki-Ono style escape-function global optimiser: DLS cycles with merit-function bumps at discovered local minima. Outputs the best solution pipeline-compatible plus `escape_result.minima[]` (full surfaces per minimum, plus `features[].element_powers`: the thin-lens power of each lens element per config as a solution fingerprint).
 
@@ -29,6 +31,10 @@ Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, write
 - Optimize auto-detects multi-config mode when `shared_variables`, `local_variables`, or `configs[].merit` exist.
 - Surface 0 = implicit object plane (no intersection/refraction). Ray `path` must start with `0`.
 - New surface fields: `auto_aperture` (vignetting), `min_glass_path`/`max_glass_path` (edge-thickness constraints).
+- **There is no implicit aperture stop.** The stop is only used when `chief.stop_surface` is set explicitly (it is then output with `yaml:"stop_surface,omitempty"` — omitted when 0/absent). Without a stop, the pupil is **dynamic**: per-field entrance pupil Z = the in-lens crossing of each field's chief ray with field 0's chief ray (the aperture position); the grid is centred on it. `chief` iterates this (≤3 passes) until the pupil settles. `surface.FindStopID` does not exist; `paraxial`/`importer` never infer a stop.
+- **Dynamic pupil in `chief`**: the chief ray of each field passes through the surviving-grid centroid at the reference surface; the entrance pupil is the in-lens chief-ray crossing and the exit pupil the image-side outgoing-segment crossing (omitted when ill-conditioned). The grid radius is `min(paraxial entrance-pupil radius, fixed-min aperture radius)` so the F-number is preserved while `auto_aperture: false` surfaces cap the beam.
+- **`vignette`** (`rayweave vignette [--iterations 3] [--min-glass-path 0.5] [--margin-mm 0.2]`): per pass it measures the surviving beam (re-traces every grid ray with the aperture check skipped on `auto_aperture` surfaces, glass-path check on) and sizes `auto_aperture: true` surfaces to `2×max extent + 2×margin-mm`; fixed (`auto_aperture: false`) surfaces are never re-sized. Rays failing the glass-path (edge-thickness) constraint or a fixed-surface aperture are vignetted (narrowed beam); the on-axis field's marginal envelope at each field's entrance pupil plane bounds the off-axis bundles. Outputs `vignetting_result:` (per-field vignetting, per-field entrance pupil Z, envelope, marginals, diameter before/after) plus chief + marginal rays for plotting.
+- **`--clear-aperture`** (chief flag) sizes only `auto_aperture: true` surfaces to the beam footprint + margin (always grow+shrink; `--shrink` was removed). One-shot; use `vignette` for the iterative version.
 - `optimize --verbose` outputs JSONL on stderr; `--log FILE` writes to file.
 - `escape --verbose` also outputs JSONL on stderr and `--log FILE` writes the same stream to a file (events: `params`, `start`, `cycle`, `minimum`, `worker_done`, `timeout`, `interrupt`, `interrupted`, `done`; every event carries `time` (RFC3339) and `elapsed` (seconds since run start)). Both are readable via `query --jsonl --where ...`. The trailing `=== Escape complete ===` human summary on stderr is unchanged.
 - `escape --save FILE` writes every discovered local minimum to `FILE1.yaml`, `FILE2.yaml`, ... (discovery order, clean pipeline-compatible Input). When a minimum is improved (better merit, judged the same minimum by `distance_threshold`), the current `FILE N.yaml` is renamed to `FILE N.<version>.yaml` and the better point is written to `FILE N.yaml`. The saver (`escapeFileSaver.record`, wired via `Store.SetOnRecord`) runs under the store lock, uses `applyEscapeX`/`applyEscapeMulti` (catalog read-only, race-free), and writes atomically (temp + fsync + rename) so a SIGKILL never loses already-found minima. `escape_result.minima[].file` records each file; `Result.MinimaIdx` maps the merit-sorted minima back to discovery indices.

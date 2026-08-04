@@ -12,7 +12,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle float64, gc *glass.Catalog, numRays int, apertureMargin float64, stopID int) float64 {
+func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle float64, gc *glass.Catalog, numRays int, apertureMargin float64, stopSurface int, pupilZ float64) float64 {
 	if !op.Active {
 		return 0
 	}
@@ -31,7 +31,7 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 	case types.MeasureSystemLength:
 		return evaluateSystemLength(surfaces)
 	case types.MeasureEntrancePupilDiameter:
-		return evaluateEntrancePupilDiameter(surfaces, gc)
+		return evaluateEntrancePupilDiameter(surfaces, gc, stopSurface)
 	case types.MeasureDiameter:
 		return evaluateDiameter(surfaces, op.Surface)
 	case types.MeasureEdgeThickness:
@@ -42,13 +42,13 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 		}
 		return evaluateEdgeThickness(surfaces, op.Surface, backID)
 	case types.MeasureFNumber:
-		return evaluateFNumber(surfaces, gc)
+		return evaluateFNumber(surfaces, gc, stopSurface)
 	case types.MeasureBeamClearance:
-		return evaluateBeamClearance(surfaces, stopID, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin)
+		return evaluateBeamClearance(surfaces, pupilZ, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin)
 	case types.MeasureVignettingFactor:
-		return evaluateVignettingFactor(surfaces, stopID, fieldAngle, op.Wavelength, gc, numRays, apertureMargin)
+		return evaluateVignettingFactor(surfaces, pupilZ, fieldAngle, op.Wavelength, gc, numRays, apertureMargin)
 	case types.MeasureBeamDiameter:
-		return evaluateBeamDiameter(surfaces, stopID, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin)
+		return evaluateBeamDiameter(surfaces, pupilZ, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin)
 	default:
 		return 0
 	}
@@ -199,11 +199,11 @@ func evaluateDiameter(surfaces []types.Surface, id int) float64 {
 	return 0
 }
 
-func evaluateBeamClearance(surfaces []types.Surface, stopID int, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
+func evaluateBeamClearance(surfaces []types.Surface, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
-	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, stopID, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
+	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
 	if perSurfMax == nil {
 		return 0
 	}
@@ -215,11 +215,11 @@ func evaluateBeamClearance(surfaces []types.Surface, stopID int, fieldAngle, wav
 	return 0
 }
 
-func evaluateBeamDiameter(surfaces []types.Surface, stopID int, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
+func evaluateBeamDiameter(surfaces []types.Surface, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
-	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, stopID, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
+	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
 	if perSurfMax == nil {
 		return 0
 	}
@@ -231,11 +231,11 @@ func evaluateBeamDiameter(surfaces []types.Surface, stopID int, fieldAngle, wave
 	return 0
 }
 
-func evaluateVignettingFactor(surfaces []types.Surface, stopID int, fieldAngle, wavelength float64, gc *glass.Catalog, numRays int, apertureMargin float64) float64 {
+func evaluateVignettingFactor(surfaces []types.Surface, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, numRays int, apertureMargin float64) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
-	points, _ := dls.TraceFieldGrid(gc, surfaces, stopID, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
+	points, _ := dls.TraceFieldGrid(gc, surfaces, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
 	if len(points) == 0 {
 		return 0
 	}
@@ -280,16 +280,32 @@ func evaluateEdgeThickness(surfaces []types.Surface, frontID, backID int) float6
 	return center + sagitta(back.Curvature, h) - sagitta(front.Curvature, h)
 }
 
-func evaluateFNumber(surfaces []types.Surface, gc *glass.Catalog) float64 {
-	sys := types.System{Surfaces: surfaces}
+func evaluateFNumber(surfaces []types.Surface, gc *glass.Catalog, stopSurface int) float64 {
+	sys := types.System{Surfaces: surfaces, StopSurface: stopSurface}
 	res := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
-	return res.InfConjImageSpaceFNumber
+	if res.InfConjImageSpaceFNumber > 0 {
+		return res.InfConjImageSpaceFNumber
+	}
+	// No explicit stop: the beam is limited by the smallest fixed surface.
+	epd := evaluateEntrancePupilDiameter(surfaces, gc, stopSurface)
+	if epd > 0 && math.Abs(res.FocalLength) > 1e-15 {
+		return res.FocalLength / epd
+	}
+	return 0
 }
 
-func evaluateEntrancePupilDiameter(surfaces []types.Surface, gc *glass.Catalog) float64 {
-	sys := types.System{Surfaces: surfaces}
+func evaluateEntrancePupilDiameter(surfaces []types.Surface, gc *glass.Catalog, stopSurface int) float64 {
+	sys := types.System{Surfaces: surfaces, StopSurface: stopSurface}
 	res := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
-	return res.EntrancePupilDiameter
+	if res.EntrancePupilDiameter > 0 {
+		return res.EntrancePupilDiameter
+	}
+	// No explicit stop: the aperture is the smallest fixed surface.
+	r := surface.FixedMinApertureRadius(surfaces)
+	if r <= 0 {
+		r = surface.MinApertureRadius(surfaces)
+	}
+	return 2 * r
 }
 
 func evaluateSystemLength(surfaces []types.Surface) float64 {

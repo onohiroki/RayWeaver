@@ -144,7 +144,6 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 	}
 
 	var surfList []types.Surface
-	stopFound := false
 
 	for i := 1; i < len(surfaces); i++ {
 		s := surfaces[i]
@@ -181,10 +180,6 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 	}
 
 	result.Surfaces = surfList
-
-	if !stopFound && len(surfList) > 0 {
-		result.StopSurface = surfList[0].ID
-	}
 
 	fillDefaults(result)
 
