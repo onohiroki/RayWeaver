@@ -550,9 +550,18 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 	configSurfaces := make(map[string][]types.Surface, len(o.configs))
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
-		s := make([]types.Surface, len(cfg.surfaces))
-		copy(s, cfg.surfaces)
-		configSurfaces[cfg.id] = s
+	s := make([]types.Surface, len(cfg.surfaces))
+	for j, src := range cfg.surfaces {
+		cp := src
+		if src.Coefficients != nil {
+			cp.Coefficients = append([]float64(nil), src.Coefficients...)
+		}
+		if src.Decenter != nil {
+			cp.Decenter = append([]types.DecenterStep(nil), src.Decenter...)
+		}
+		s[j] = cp
+	}
+	configSurfaces[cfg.id] = s
 	}
 
 	needTempGC := false
@@ -688,7 +697,7 @@ func (o *Optimizer) constraintFieldAngle(cfg *config, c types.ConstraintOperand,
 // points.
 func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
-	points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
+	points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
 	return points
 }
 
@@ -709,7 +718,7 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 	path := dls.BuildPath(surfaces)
 	engine := ray.NewEngine(gc, nil)
 
-	apertureRadius := dls.ApertureRadiusForGrid(surfaces, wavelength, gc, o.apertureMargin)
+	apertureRadius := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, wavelength, gc, o.apertureMargin)
 	if apertureRadius <= 0 {
 		return 0
 	}
@@ -779,7 +788,7 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 		if math.Abs(angle) != extremeAngle {
 			continue
 		}
-		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
+		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
 		for id, e := range perSurf {
 			if e > extents[id] {
 				extents[id] = e
