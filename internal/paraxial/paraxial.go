@@ -204,6 +204,24 @@ func totalTrack(surfaces []types.Surface) float64 {
 	return imgZ - z[0]
 }
 
+// MarginalRayHeights returns the paraxial marginal-ray height at each
+// surface's vertex for a unit-height, infinite-conjugate input ray. The trace
+// runs in the unfolded local frame (reflections flip the index sign, not the
+// direction of travel), so each value is the beam-radius scale factor of that
+// surface relative to the unit-height input.
+func MarginalRayHeights(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) []float64 {
+	if len(surfaces) == 0 {
+		return nil
+	}
+	nIndex := resolveIndices(surfaces, wavelength, gc)
+	vertices, _ := traceForward(surfaces, nIndex, 1.0, 0.0)
+	y := make([]float64, len(vertices))
+	for i, v := range vertices {
+		y[i] = v.Y
+	}
+	return y
+}
+
 func resolveIndices(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) []float64 {
 	n := make([]float64, len(surfaces))
 	for i, s := range surfaces {

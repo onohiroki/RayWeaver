@@ -203,7 +203,7 @@ func evaluateBeamClearance(surfaces []types.Surface, pupilZ float64, fieldAngle,
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
-	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
+	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, 0, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
 	if perSurfMax == nil {
 		return 0
 	}
@@ -219,7 +219,7 @@ func evaluateBeamDiameter(surfaces []types.Surface, pupilZ float64, fieldAngle, 
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
-	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
+	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, 0, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
 	if perSurfMax == nil {
 		return 0
 	}
@@ -235,7 +235,7 @@ func evaluateVignettingFactor(surfaces []types.Surface, pupilZ float64, fieldAng
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
-	points, _ := dls.TraceFieldGrid(gc, surfaces, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
+	points, _ := dls.TraceFieldGrid(gc, surfaces, 0, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1)
 	if len(points) == 0 {
 		return 0
 	}
