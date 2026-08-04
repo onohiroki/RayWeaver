@@ -147,9 +147,10 @@ func writeYAML(v any) {
 	os.Stdout.Write(outData)
 }
 
-// marginalRaysForField extracts the grid rays with max/min image Y (and X for
-// fields with an X direction component) for one chief result and returns them
-// as marginal rays.
+// marginalRaysForField extracts the grid rays at the extreme pupil-plane
+// positions (max/min PupilY and optionally PupilX) for one chief result and
+// returns them as marginal rays. Pupil-plane coordinates come from the grid
+// so that the marginal rays trace the aperture boundary.
 func marginalRaysForField(fi int, r chief.Result, wavelength float64, path []int, pol types.JonesVector) []types.Ray {
 	var maxY, minY *types.GridPoint
 	var maxX, minX *types.GridPoint
@@ -160,19 +161,19 @@ func marginalRaysForField(fi int, r chief.Result, wavelength float64, path []int
 		if gp.ImageX == nil || gp.ImageY == nil {
 			continue
 		}
-		y := *gp.ImageY
-		if maxY == nil || y > *maxY.ImageY {
+		py := gp.PupilY
+		if maxY == nil || py > maxY.PupilY {
 			maxY = gp
 		}
-		if minY == nil || y < *minY.ImageY {
+		if minY == nil || py < minY.PupilY {
 			minY = gp
 		}
 		if hasX {
-			x := *gp.ImageX
-			if maxX == nil || x > *maxX.ImageX {
+			px := gp.PupilX
+			if maxX == nil || px > maxX.PupilX {
 				maxX = gp
 			}
-			if minX == nil || x < *minX.ImageX {
+			if minX == nil || px < minX.PupilX {
 				minX = gp
 			}
 		}
