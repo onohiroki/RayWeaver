@@ -25,7 +25,9 @@ samples/*.svg
 samples/*.png
 samples/*.csv
 samples/*-result.yaml
+samples/*-vignette.yaml
 samples/*-optimized.yaml
+samples/vignette-demo-chief.yaml
 samples/glass-chief-init-w*.yaml
 samples/optimize-demo-*
 samples/escape-demo-*

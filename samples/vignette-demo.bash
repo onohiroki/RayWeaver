@@ -5,12 +5,12 @@ set -euo pipefail
 # vignette-demo.bash — dynamic pupil + iterative vignetting / diameter sizing
 #
 # Purpose: show the `vignette` subcommand on the double-Gauss start system
-# (samples/vignette-demo.yaml, f/2.8 50 mm). The chief rays are found from the
-# surviving-grid centroid; the entrance and exit pupils are derived per field
-# from the chief-ray crossings (no explicit stop — chief.stop_surface is
-# omitted). Vignetting comes from the fixed aperture (surface 7) and the
-# glass-path (edge-thickness) check, and auto_aperture: true surfaces are
-# re-sized to the surviving-beam envelope.
+# (samples/vignette-demo.yaml, f/3.1 50 mm — fixed stop D=15.8 at surface 7).
+# The chief rays are found from the surviving-grid centroid; the entrance
+# and exit pupils are derived per field from the chief-ray crossings (no
+# explicit stop — chief.stop_surface is omitted). Vignetting comes from the
+# fixed aperture (surface 7) and the glass-path (edge-thickness) check, and
+# auto_aperture: true surfaces are re-sized to the surviving-beam envelope.
 #
 # Steps
 #   1. chief        : dynamic-pupil chief (per-field entrance/exit pupil)

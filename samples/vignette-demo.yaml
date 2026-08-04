@@ -1,5 +1,6 @@
 # Vignette demo input: the double-Gauss start system
-# (samples/doublegauss-init.yaml, f/2.8 50 mm) with auto_aperture: true on the
+# (samples/doublegauss-init.yaml, f/3.1 50 mm — the fixed stop D=15.8 at
+# surface 7 gives EFL 49.7 mm -> f/3.14) with auto_aperture: true on the
 # real lens surfaces so `rayweave vignette` can re-size their diameters to the
 # surviving-beam envelope. Surface 7 (diameter 15.8, the aperture) and surface
 # 14 (image plane) are fixed (auto_aperture: false) and never re-sized.
