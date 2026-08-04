@@ -5,7 +5,9 @@ set -euo pipefail
 # asphere-optimize-demo.bash — aspheric-surface optimisation (two stages)
 #
 # Purpose: compare a spherical-only optimisation with one that also varies the
-# asphere coefficients (conic, a4, a6) of the front surface of a singlet.
+# asphere coefficients (conic, a4, a6) of the front surface of a singlet. The
+# front (aspheric) surface is the explicit aperture stop (chief.stop_surface:
+# 1), so the pupil sits at the first surface.
 #
 # Steps
 #   1. Stage 1 (spherical): optimize curvatures only (asphere vars excluded
@@ -15,7 +17,9 @@ set -euo pipefail
 #                             spherical / asphere
 #
 # How to read the result
-#   - The coefficient table shows the asphere terms only move in stage 2.
+#   - The coefficient table (result.txt) shows the surface-1 shape parameters
+#     curvature / conic / a4 / a6 before, after the spherical stage and after
+#     the asphere stage, plus a delta (asphere-opt minus initial) column.
 #   - Spot RMS (mm) and OPD RMS (mm) should both drop before -> asphere.
 #   - OPD RMS ~ 1e-3 mm is near the diffraction limit at 587.6 nm.
 #   - Gate: asphere-opt on-axis RMS < 0.3 mm.
@@ -74,8 +78,12 @@ cat >> "$RESULT_FILE" <<'EOF'
 === How to interpret this result ===
 - Two optimisation stages on a singlet with an aspheric front surface:
   spherical-opt varies only curvatures; asphere-opt also varies conic/a4/a6.
+  The front (aspheric) surface is the explicit aperture stop
+  (chief.stop_surface: 1), so the pupil sits at the first surface.
 - Coef table: the asphere coefficients stay 0 in the spherical stage (they
-  are not variables) and pick up small non-zero values in the asphere stage.
+  are not variables) and pick up small non-zero values in the asphere stage;
+  the "delta (asp-before)" column is the asphere-opt value minus the initial
+  value of each surface-1 shape parameter (curv / conic / a4 / a6).
 - Spot RMS (mm): geometric RMS spot radius; the asphere stage reaches the
   smallest on-axis value.
 - OPD RMS (mm): RMS of (optical path length - mean OPL) across the pupil, a
@@ -94,7 +102,8 @@ echo "    coefficients (conic, a4, a6) stay fixed at 0."
 echo "  Stage 2 (asphere):   additionally optimize conic / a4 / a6."
 echo
 echo "Optical system:"
-echo "  Surface 1: asphere_polynomial (N-BK7),  Surface 2: sphere,  Surface 3: image"
+echo "  Surface 1: asphere_polynomial (N-BK7, explicit aperture stop),"
+echo "  Surface 2: sphere,  Surface 3: image"
 echo "  Fields: 0 deg / 5 deg, wavelength d (587.6 nm)"
 echo
 
@@ -125,13 +134,28 @@ read -r ASP_AFTER ASP_STATUS < <(log_summary "$ASP_LOG")
 # ── Asphere coefficients (before / spherical-opt / asphere-opt) ──
 extract_coeffs() {
   local yaml="$1"
+  $RAYWEAVE query --default 0 --printf '%.6f' 'configs[0].surfaces[0].curvature' < "$yaml"
   $RAYWEAVE query --default 0 --printf '%.6f' 'configs[0].surfaces[0].conic' < "$yaml"
   $RAYWEAVE query --default 0 --printf '%.6e' 'configs[0].surfaces[0].coefficients[0]' < "$yaml"
   $RAYWEAVE query --default 0 --printf '%.6e' 'configs[0].surfaces[0].coefficients[1]' < "$yaml"
 }
-readarray -t COEF_BEFORE < <(extract_coeffs "$YAML")
-readarray -t COEF_SPH    < <(extract_coeffs "$SPH_RESULT")
-readarray -t COEF_ASP    < <(extract_coeffs "$ASP_RESULT")
+# bash 3.2 (macOS default) has no readarray; read the four lines one by one.
+{
+  read CUR_BEFORE; read CON_BEFORE; read A4_BEFORE; read A6_BEFORE;
+} < <(extract_coeffs "$YAML")
+{
+  read CUR_SPH; read CON_SPH; read A4_SPH; read A6_SPH;
+} < <(extract_coeffs "$SPH_RESULT")
+{
+  read CUR_ASP; read CON_ASP; read A4_ASP; read A6_ASP;
+} < <(extract_coeffs "$ASP_RESULT")
+coef_delta() {
+  awk -v a="$1" -v b="$2" 'BEGIN { printf "%.6e", b - a }'
+}
+DELTA_CUR=$(coef_delta "$CUR_BEFORE" "$CUR_ASP")
+DELTA_CON=$(coef_delta "$CON_BEFORE" "$CON_ASP")
+DELTA_A4=$(coef_delta "$A4_BEFORE" "$A4_ASP")
+DELTA_A6=$(coef_delta "$A6_BEFORE" "$A6_ASP")
 
 # ── Spot RMS (before / spherical-opt / asphere-opt) ──
 BEFORE_CHIEF=$($RAYWEAVE chief < "$YAML" 2>/dev/null)
@@ -152,11 +176,12 @@ opd_field() {
   echo "=== Asphere optimization demo: two-stage comparison ==="
   echo
   echo "--- Asphere coefficient (surface 1) ---"
-  printf "  %-8s %14s %14s %14s\n" "Coef" "before" "spherical-opt" "asphere-opt"
-  printf "  %-8s %14s %14s %14s\n" "----" "-------" "-------------" "-----------"
-  printf "  %-8s %14s %14s %14s\n" "conic" "${COEF_BEFORE[0]}" "${COEF_SPH[0]}" "${COEF_ASP[0]}"
-  printf "  %-8s %14s %14s %14s\n" "a4"    "${COEF_BEFORE[1]}" "${COEF_SPH[1]}" "${COEF_ASP[1]}"
-  printf "  %-8s %14s %14s %14s\n" "a6"    "${COEF_BEFORE[2]}" "${COEF_SPH[2]}" "${COEF_ASP[2]}"
+  printf "  %-8s %14s %14s %14s %16s\n" "Coef" "before" "spherical-opt" "asphere-opt" "delta (asp-before)"
+  printf "  %-8s %14s %14s %14s %16s\n" "----" "-------" "-------------" "-----------" "------------------"
+  printf "  %-8s %14s %14s %14s %16s\n" "curv" "$CUR_BEFORE" "$CUR_SPH" "$CUR_ASP" "$DELTA_CUR"
+  printf "  %-8s %14s %14s %14s %16s\n" "conic" "$CON_BEFORE" "$CON_SPH" "$CON_ASP" "$DELTA_CON"
+  printf "  %-8s %14s %14s %14s %16s\n" "a4"    "$A4_BEFORE" "$A4_SPH" "$A4_ASP" "$DELTA_A4"
+  printf "  %-8s %14s %14s %14s %16s\n" "a6"    "$A6_BEFORE" "$A6_SPH" "$A6_ASP" "$DELTA_A6"
   echo
   echo "--- Spot RMS (d=587.6nm, chief evaluation) ---"
   printf "  %-6s %6s  %10s  %10s  %10s\n" "Field" "Angle" "before" "spherical" "asphere"
@@ -198,19 +223,19 @@ fi
 
 # ── Diagrams ──
 echo "=== Diagrams ==="
-$RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" \
+$RAYWEAVE chief --clear-aperture < "$YAML" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/asphere-optimize-init.png" >/dev/null 2>&1 || true
 echo "Written: $OUTDIR/asphere-optimize-init.png"
 
-$RAYWEAVE chief --clear-aperture --ray-fan < "$SPH_RESULT" \
+$RAYWEAVE chief --clear-aperture < "$SPH_RESULT" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/asphere-optimize-spherical.png" >/dev/null 2>&1 || true
 echo "Written: $OUTDIR/asphere-optimize-spherical.png"
 
-$RAYWEAVE chief --clear-aperture --ray-fan < "$ASP_RESULT" \
+$RAYWEAVE chief --clear-aperture < "$ASP_RESULT" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/asphere-optimize-opt.png" >/dev/null 2>&1 || true

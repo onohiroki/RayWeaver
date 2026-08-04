@@ -5,6 +5,7 @@ glass_catalog:
     nd: 1.5168
     vd: 64.17
 chief:
+  stop_surface: 1
   fields:
   - angle: 0.0
     direction:
