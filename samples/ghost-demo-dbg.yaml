@@ -18,7 +18,7 @@
 #
 # The `chief` section is used by samples/ghost-demo.bash to re-adjust the lens
 # effective diameters (`chief --clear-aperture --shrink`) before plotting.
-# Run:  rayweave trace < samples/doublegauss-ghost.yaml
+# Run:  rayweave trace < samples/ghost-demo-dbg.yaml
 glass_catalog:
   entries:
   - type: model

@@ -39,11 +39,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-YAML="$SCRIPT_DIR/doublegauss-ghost.yaml"
+YAML="$SCRIPT_DIR/ghost-demo-dbg.yaml"
 OUTDIR="$SCRIPT_DIR"
-TRACE_RESULT="$OUTDIR/doublegauss-ghost-trace-result.yaml"
-RESULT_FILE="$OUTDIR/ghost-demo-result.txt"
-SVG="$OUTDIR/doublegauss-ghost.svg"
+TRACE_RESULT="$OUTDIR/ghost-demo-dbg-trace-result.yaml"
+RESULT_FILE="$OUTDIR/ghost-demo-dbg-result.txt"
+SVG="$OUTDIR/ghost-demo-dbg.svg"
 
 # Clean-only mode
 if [ "$CLEAN" = true ]; then
