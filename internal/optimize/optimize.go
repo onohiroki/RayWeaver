@@ -761,23 +761,12 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 	return (lo + hi) / 2
 }
 
-// sizeAutoApertures measures the true geometric beam extent at the extreme
-// field angle (ignoring aperture clipping) and sizes every AutoAperture
-// surface so its diameter covers the full bundle. Callers must restore the
-// initial diameters first.
+// sizeAutoApertures measures the true geometric beam extent of every field
+// (ignoring aperture clipping) and sizes every AutoAperture surface so its
+// diameter covers the union envelope of all fields' marginal rays. Using all
+// fields (rather than only the extreme field) keeps the lens large enough for
+// the widest bundle. Callers must restore the initial diameters first.
 func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog) {
-	extremeAngle := 0.0
-	for ti := range cfg.meritTerms {
-		term := &cfg.meritTerms[ti]
-		a := math.Abs(o.termFieldAngle(cfg, term, surfaces, gc))
-		if a > extremeAngle {
-			extremeAngle = a
-		}
-	}
-	if extremeAngle <= 0 {
-		return
-	}
-
 	extents := make(map[int]float64)
 	for ti := range cfg.meritTerms {
 		term := &cfg.meritTerms[ti]
@@ -785,9 +774,6 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 			continue
 		}
 		angle := o.termFieldAngle(cfg, term, surfaces, gc)
-		if math.Abs(angle) != extremeAngle {
-			continue
-		}
 		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
 		for id, e := range perSurf {
 			if e > extents[id] {
