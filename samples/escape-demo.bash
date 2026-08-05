@@ -23,6 +23,8 @@ set -euo pipefail
 #      triplet                 : escape extract --index N pulls one full
 #                                local-minimum system out
 #   3. plot                    : diagrams of the initial and best systems
+#   4. element-powers chart    : a PNG showing every local minimum's
+#                                element_powers offset from a merit baseline
 #
 # How to read the result
 #   - Best merit is the lowest DLS merit among the discovered minima.
@@ -84,6 +86,8 @@ if [ "$CLEAN" = true ]; then
   rm -f "$OUTDIR"/escape-demo-doublegauss-progress.jsonl
   rm -f "$OUTDIR"/escape-demo-doublegauss-min*.yaml
   rm -f "$OUTDIR"/escape-demo-doublegauss-init.png "$OUTDIR"/escape-demo-doublegauss-best.png "$OUTDIR"/escape-demo-doublegauss-min1.png
+  rm -f "$OUTDIR"/escape-demo-element-powers.png "$OUTDIR"/escape-demo-doublegauss-element-powers.png
+  rm -f "$OUTDIR"/escape-powers-*.dat "$OUTDIR"/escape-powers-*.png
   echo "  Removed: triplet and double-Gauss escape outputs"
   exit 0
 fi
@@ -131,6 +135,68 @@ fi
 }
 trap append_interpretation EXIT
 
+# ── Element-powers chart: one offset line per local minimum ──
+# Reads the result YAML and draws a PNG whose vertical axis is merit (log
+# scale); each minimum's element_powers are a polyline offset from its merit
+# baseline. Requires gnuplot (fallback to /opt/homebrew/bin) and the rayweave
+# binary (RAYWEAVE). Silently returns when gnuplot is absent.
+plot_element_powers() {
+  local out="$1"
+  local data="$OUTDIR/${PREFIX}element-powers.dat"
+  local gnuplot="${GNUPLOT:-$(command -v gnuplot || true)}"
+  if [[ -z "$gnuplot" && -x /opt/homebrew/bin/gnuplot ]]; then
+    gnuplot=/opt/homebrew/bin/gnuplot
+  fi
+  if [[ -z "$gnuplot" ]]; then
+    echo "  (element-powers chart skipped: gnuplot not available)"
+    return 0
+  fi
+
+  local nmin nel
+  nmin=$("$RAYWEAVE" query --len escape_result.minima < "$RESULT" 2>/dev/null || echo 0)
+  if [[ -z "$nmin" || "$nmin" -eq 0 ]]; then
+    echo "  (element-powers chart skipped: no minima in result)"
+    return 0
+  fi
+  nel=$("$RAYWEAVE" query --len escape_result.minima[0].features[0].element_powers < "$RESULT" 2>/dev/null || echo 6)
+  if [[ -z "$nel" || "$nel" -eq 0 ]]; then nel=6; fi
+
+  # One row per (minimum, element): idx merit element_index power
+  : > "$data"
+  local i e merit p
+  for ((i=0; i<nmin; i++)); do
+    merit=$("$RAYWEAVE" query -r "escape_result.minima[$i].merit" < "$RESULT")
+    for ((e=0; e<nel; e++)); do
+      p=$("$RAYWEAVE" query -r "escape_result.minima[$i].features[0].element_powers[$e]" < "$RESULT")
+      echo "$i $merit $e $p" >> "$data"
+    done
+  done
+
+  GNUTERM=pngcairo "$gnuplot" <<GPLOT 2>/dev/null
+  set terminal pngcairo size 1100,750
+  set output "$out"
+
+  set xlabel "element index"
+  set ylabel "merit (log scale)"
+  set title "A: local minima by merit — element_powers as offset lines from the merit baseline"
+  set key outside right
+  set grid ytics
+
+  set xrange [-0.5:"$((nel-1)).5"]
+  set xtics 0,1,$((nel-1))
+
+  SCALE = 6.0
+  # merit baseline for each minimum: log10(merit), drawn as a faint rule
+  plot for [i=0:$((nmin-1))] \
+    "$data" using 3:(log10(\$2) + \$4*SCALE) every ::i*$nel::(i*$nel+$nel-1) \
+      with linespoints pt 7 ps 1.2 lw 2 title sprintf("min %d", i), \
+    for [i=0:$((nmin-1))] \
+    "$data" using 3:(log10(\$2)) every ::i*$nel::(i*$nel+$nel-1) \
+      with lines lc rgb "#888888" lw 0.5 notitle
+GPLOT
+  echo "Written: $out"
+}
+
 echo "=== Escape demo: global optimisation of the $LENS_NAME ==="
 echo
 
@@ -176,6 +242,9 @@ echo "=== Best-solution diagram ==="
 $RAYWEAVE chief --clear-aperture --ray-fan < "$RESULT" | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/${PREFIX}best.png" >/dev/null
 echo "Written: $OUTDIR/${PREFIX}best.png"
+
+echo "=== Element-powers chart ==="
+plot_element_powers "$OUTDIR/${PREFIX}element-powers.png"
 
 if [[ -n "$SAVE_BASE" ]]; then
   echo "=== Saved local minima (--save) ==="

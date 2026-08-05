@@ -31,6 +31,7 @@ samples/vignette-demo-chief.yaml
 samples/glass-chief-init-w*.yaml
 samples/optimize-demo-*
 samples/escape-demo-*
+samples/*element-powers.dat
 samples/glass-chief-opt-w*.yaml
 samples/us2645157-scaled50.yaml
 design
