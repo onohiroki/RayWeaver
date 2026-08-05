@@ -550,18 +550,18 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 	configSurfaces := make(map[string][]types.Surface, len(o.configs))
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
-	s := make([]types.Surface, len(cfg.surfaces))
-	for j, src := range cfg.surfaces {
-		cp := src
-		if src.Coefficients != nil {
-			cp.Coefficients = append([]float64(nil), src.Coefficients...)
+		s := make([]types.Surface, len(cfg.surfaces))
+		for j, src := range cfg.surfaces {
+			cp := src
+			if src.Coefficients != nil {
+				cp.Coefficients = append([]float64(nil), src.Coefficients...)
+			}
+			if src.Decenter != nil {
+				cp.Decenter = append([]types.DecenterStep(nil), src.Decenter...)
+			}
+			s[j] = cp
 		}
-		if src.Decenter != nil {
-			cp.Decenter = append([]types.DecenterStep(nil), src.Decenter...)
-		}
-		s[j] = cp
-	}
-	configSurfaces[cfg.id] = s
+		configSurfaces[cfg.id] = s
 	}
 
 	needTempGC := false
