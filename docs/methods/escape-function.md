@@ -134,11 +134,24 @@ always completes, so the overshoot is bounded by one DLS run. This is a
 coarse-grained stop: it never interrupts an in-flight DLS iteration. Minima
 recorded before expiry are still reported, and the output sets `timed_out: true`.
 
-A `SIGINT`/`SIGTERM` behaves the same way: the first signal cancels the shared
-context, workers stop at the next cycle boundary (the running DLS solve
-completes), everything is saved, and the output sets `interrupted: true` with
-exit code 0; a second signal force-quits with exit 1. No DLS-level interruption
-is attempted.
+A `SIGINT`/`SIGTERM` stops the search in three escalating stages, where the
+first two each exit 0 with `interrupted: true`:
+
+1. **First signal** cancels the shared context: workers stop at the next cycle
+   boundary (the running DLS solve completes), everything is saved.
+2. **Second signal** closes a mid-solve stop channel (`dls.Options.Stop`, wired
+   via `RunOptions.HardStop → Cycle.hardStop → Wrapper.SetStop`). The running
+   DLS aborts within one iteration — at the iteration top, after the pupil
+   update, inside the line search, and between Jacobian column sweeps — and
+   returns its best point so far with status `dls.StatusInterrupted`. The cycle
+   records that partial point into the store (`Cycle.recordInterrupted`,
+   guarded by `Iterations > 0` and a finite merit) so it is saved like any
+   discovered minimum.
+3. **Third signal** force-quits with exit 1.
+
+`max_seconds` remains a coarse-grained stop (checked *between* DLS runs; a
+running solve always completes), so it never interrupts an in-flight iteration —
+only the second signal does.
 
 ## 4c. Saving minima
 

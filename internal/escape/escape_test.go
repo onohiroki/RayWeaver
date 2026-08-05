@@ -200,7 +200,7 @@ func TestCycleFindsTwoMinima(t *testing.T) {
 	params := BuildParams(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
-	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background())
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background(), nil)
 
 	bestX, bestMerit := cycle.Run([]float64{0.8})
 
@@ -255,7 +255,7 @@ func TestCycleTimeBudgetStopsEarly(t *testing.T) {
 	// A deadline already in the past forces the cycle to stop before the
 	// first DLS run: no escapes recorded, and StoppedByTime is set.
 	deadline := time.Now().Add(-time.Second)
-	cycle := NewCycle(wrapper, store, params, 10, 0, nil, deadline, context.Background())
+	cycle := NewCycle(wrapper, store, params, 10, 0, nil, deadline, context.Background(), nil)
 
 	cycle.Run([]float64{0.8})
 
@@ -282,7 +282,7 @@ func TestCycleNoDeadlineRunsToCompletion(t *testing.T) {
 	params := BuildParams(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
-	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background())
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background(), nil)
 
 	cycle.Run([]float64{0.8})
 
@@ -291,6 +291,79 @@ func TestCycleNoDeadlineRunsToCompletion(t *testing.T) {
 	}
 	if store.Len() < 1 {
 		t.Fatalf("expected at least one recorded minimum, got %d", store.Len())
+	}
+}
+
+// slowShallow is a 1D model that barely descends and sleeps per residual
+// evaluation, so a DLS solve stays in progress long enough for a test to
+// interrupt it mid-run.
+type slowShallow struct{}
+
+func (slowShallow) Variables() []dls.VariableInfo {
+	return []dls.VariableInfo{{Name: "x", Param: "x", Min: 0, Max: 1}}
+}
+
+func (slowShallow) InitialState() []float64 { return []float64{0.3} }
+
+func (slowShallow) Options() dls.Options {
+	return dls.Options{MaxIter: 100, Tol: 1e-14, Epsilon: 1e-6}
+}
+
+func (slowShallow) EvaluateMerit(x []float64) float64 {
+	d := x[0] - 0.5
+	return d * d * 1e-6
+}
+
+func (slowShallow) ComputeResiduals(x []float64) []float64 {
+	time.Sleep(5 * time.Millisecond)
+	d := x[0] - 0.5
+	return []float64{d * 1e-3}
+}
+
+func (slowShallow) ComputeConstraints(x []float64) []float64 { return nil }
+
+// TestCycleHardStopInterruptsMidSolve verifies that closing the mid-DLS stop
+// channel aborts the running solve promptly, marks the cycle interrupted, and
+// preserves the interrupted solve's best-so-far in the store.
+func TestCycleHardStopInterruptsMidSolve(t *testing.T) {
+	cfg := types.EscapeConfig{
+		MaxCycles:         50,
+		DistanceThreshold: 0.1,
+		HInitial:          0.5,
+		WInitial:          0.5,
+		HMult:             2.0,
+		WMult:             1.0,
+	}
+	params := BuildParams(cfg, slowShallow{}.Variables())
+	store := NewStore(params)
+	wrapper := NewWrapper(slowShallow{}, params)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hardStop := make(chan struct{})
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, ctx, hardStop)
+
+	start := time.Now()
+	done := make(chan struct{}, 1)
+	go func() { cycle.Run([]float64{0.3}); done <- struct{}{} }()
+
+	// Let a DLS solve get going, then mimic a second Ctrl-C: interrupt it
+	// while it is running rather than waiting for the cycle boundary.
+	time.Sleep(50 * time.Millisecond)
+	close(hardStop)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("cycle did not return promptly after the hard stop fired mid-solve")
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("cycle took too long to stop: %v", time.Since(start))
+	}
+	if !cycle.Interrupted() {
+		t.Fatal("Interrupted() must be true after a hard stop")
+	}
+	if store.Len() < 1 {
+		t.Fatalf("expected the interrupted best-so-far to be recorded, store.Len()=%d", store.Len())
 	}
 }
 
@@ -325,6 +398,47 @@ func TestParallelEscapeInterrupt(t *testing.T) {
 	}
 	if len(res.Minima) != 0 {
 		t.Fatalf("no minima expected before any DLS run, got %d", len(res.Minima))
+	}
+}
+
+// TestParallelEscapeHardStop verifies that closing the mid-DLS stop channel
+// aborts the running solves, records the interrupted best-so-far points, and
+// reports Interrupted=true — the second-Ctrl-C path at the parallel level.
+func TestParallelEscapeHardStop(t *testing.T) {
+	cfg := types.EscapeConfig{
+		MaxCycles:         50,
+		EscapeWorkers:     2,
+		DistanceThreshold: 0.1,
+		HInitial:          0.5,
+		WInitial:          0.5,
+		HMult:             2.0,
+		WMult:             1.0,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	hardStop := make(chan struct{})
+	resCh := make(chan Result, 1)
+	go func() {
+		resCh <- ParallelEscape(func() dls.Model { return slowShallow{} }, cfg, RunOptions{Context: ctx, HardStop: hardStop})
+	}()
+
+	// Let the workers get into long-running solves, then interrupt mid-run.
+	time.Sleep(50 * time.Millisecond)
+	close(hardStop)
+
+	select {
+	case res := <-resCh:
+		if !res.Interrupted {
+			t.Fatal("expected Interrupted=true after a hard stop")
+		}
+		if res.TimedOut {
+			t.Fatal("a hard stop must not be reported as a time budget expiry")
+		}
+		if len(res.Minima) < 1 {
+			t.Fatalf("expected interrupted best-so-far points recorded, got %d minima", len(res.Minima))
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("ParallelEscape did not return after the hard stop")
 	}
 }
 

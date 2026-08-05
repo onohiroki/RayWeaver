@@ -437,9 +437,11 @@ Options:
                    atomic, so a killed process never loses already-found minima.
   --glass-dir DIR    AGF glass catalog directory
 
-A SIGINT/SIGTERM stops the search gracefully: workers finish the current DLS
-run, everything is saved, the output marks interrupted: true, and the process
-exits 0. A second signal force-quits immediately.
+A SIGINT/SIGTERM stops the search in three stages: the first signal waits for
+the current DLS run to finish (everything saved, interrupted: true, exit 0); the
+second interrupts the running DLS within one iteration, preserving its best
+point so far (interrupted: true, exit 0); the third force-quits immediately
+(exit 1).
 
 Sub-commands:
   escape (default)       run the global optimisation loop

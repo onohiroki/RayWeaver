@@ -23,9 +23,9 @@ import (
 // escape-parameter changes) are reported to stderr as JSONL; --log FILE writes
 // the same stream to a file. When saveBase is non-empty, each discovered
 // minimum is written to saveBase1.yaml, saveBase2.yaml, ... (see
-// escapeFileSaver). A SIGINT/SIGTERM triggers a graceful stop: workers finish
-// the current DLS run, everything is saved, and the output marks
-// interrupted: true.
+// escapeFileSaver). SIGINT/SIGTERM stops the search in three escalating stages
+// (graceful cycle boundary → mid-DLS interrupt → force quit), each producing
+// interrupted: true and exit 0 except the last.
 func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string) {
 	input := parseYAML[types.Input](data)
 	if input.Optimization == nil {
@@ -59,20 +59,30 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 		}
 	}()
 
-	// Graceful stop on SIGINT/SIGTERM. The first signal is reported (stderr +
-	// JSONL "interrupt" event) and cancels the shared context, so the workers
-	// stop at the next cycle boundary once the running DLS solve completes.
-	// Everything discovered so far is saved and the stdout YAML is still
-	// written (interrupted: true). A second signal force-quits immediately.
+	// Three-stage stop on SIGINT/SIGTERM.
+	//
+	//  1st signal: graceful stop. Cancels the shared context; workers stop at
+	//     the next cycle boundary once the running DLS solve completes.
+	//     Everything discovered so far is saved and the stdout YAML is still
+	//     written (interrupted: true).
+	//  2nd signal: hard stop. Closes the mid-solve interrupt channel so the
+	//     running DLS aborts within one iteration (best point so far preserved
+	//     and saved); the run still completes normally (interrupted: true).
+	//  3rd signal: force quit immediately (exit 1).
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	sigCh := make(chan os.Signal, 2)
+	hardStop := make(chan struct{})
+	sigCh := make(chan os.Signal, 3)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
-		fmt.Fprintf(os.Stderr, "escape: %v received — stopping after the current DLS run and saving results (press Ctrl-C again to force quit)\n", sig)
+		fmt.Fprintf(os.Stderr, "escape: %v received — stopping after the current DLS run and saving results (press Ctrl-C again to interrupt the running DLS)\n", sig)
 		progress.Event("interrupt", map[string]any{"signal": sig.String()})
 		cancel()
+		sig = <-sigCh
+		fmt.Fprintf(os.Stderr, "escape: %v received — interrupting the running DLS within the next iteration and saving results (press Ctrl-C again to force quit)\n", sig)
+		progress.Event("interrupt_dls", map[string]any{"signal": sig.String()})
+		close(hardStop)
 		<-sigCh
 		fmt.Fprintln(os.Stderr, "escape: force quit")
 		os.Exit(1)
@@ -89,13 +99,13 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, progress, saveBase, ctx)
+		runEscapeMulti(input, gc, progress, saveBase, ctx, hardStop)
 		return
 	}
-	runEscapeSingle(input, gc, progress, saveBase, ctx)
+	runEscapeSingle(input, gc, progress, saveBase, ctx, hardStop)
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context, hardStop <-chan struct{}) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -193,6 +203,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		Progress: progress,
 		OnRecord: onRecord,
 		Context:  ctx,
+		HardStop: hardStop,
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,
@@ -268,7 +279,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	writeEscapeOutput(input, escResult)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context, hardStop <-chan struct{}) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -393,6 +404,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		Progress: progress,
 		OnRecord: onRecord,
 		Context:  ctx,
+		HardStop: hardStop,
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,

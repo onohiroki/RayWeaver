@@ -183,7 +183,9 @@ Notes:
   the stored point ("keep the better data"). `escape --save FILE` writes each
   minimum to `FILE1.yaml`, `FILE2.yaml`, … (improvements are kept as
   `FILE N.<version>.yaml`), and a `SIGINT`/`SIGTERM` stops the search gracefully
-  (`interrupted: true`, exit 0).
+  (`interrupted: true`, exit 0): the first signal waits for the cycle boundary,
+  the second interrupts the running DLS within one iteration (preserving its
+  best point so far), and the third force-quits.
 
 
 ## Sample data

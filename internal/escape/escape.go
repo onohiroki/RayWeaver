@@ -79,11 +79,18 @@ type Wrapper struct {
 	params  Params
 	startX  []float64
 	phase   Phase
+	stop    <-chan struct{}
 }
 
 // NewWrapper wraps an inner dls.Model with escape-function support.
 func NewWrapper(inner dls.Model, params Params) *Wrapper {
 	return &Wrapper{inner: inner, params: params}
+}
+
+// SetStop sets the optional channel that aborts a running DLS solve mid-way
+// (see dls.Options.Stop). nil disables mid-solve interruption.
+func (w *Wrapper) SetStop(stop <-chan struct{}) {
+	w.stop = stop
 }
 
 // SetEscapes replaces the active escape points. Empty list clears them.
@@ -150,6 +157,10 @@ func (w *Wrapper) Options() dls.Options {
 	// The escape cycle provides its own escape mechanism; the DLS internal
 	// stall perturbation would fight it.
 	opts.DisableStallEscape = true
+	// The mid-solve stop channel is set per-solve by the cycle from the shared
+	// interrupt signal. Each worker owns its Wrapper and runs sequentially, so
+	// per-wrapper state is race-free.
+	opts.Stop = w.stop
 	// Only the basin-escape DLS uses stalled early termination; the clean
 	// re-optimisation keeps the full budget so a slow late-stage improvement
 	// (e.g. a max_iterations clean run yielding the global best) is not cut

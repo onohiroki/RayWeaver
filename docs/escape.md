@@ -181,14 +181,24 @@ reported, and the output marks `timed_out: true`.
 
 ### Interrupting the search
 
-`rayweave escape` is designed for long runs. A `SIGINT`/`SIGTERM` stops it
-gracefully: the signal is reported (a human line on stderr plus a JSONL
-`interrupt` event in the `--verbose`/`--log` stream), the workers finish the
-current DLS run and stop at the next cycle boundary, every discovered minimum is
-saved, the stdout YAML is still written with `interrupted: true`, and the
-process exits 0. A second signal force-quits immediately (exit 1). Because every
-minimum is written atomically as it is found, even a hard kill never loses
-already-discovered minima.
+`rayweave escape` is designed for long runs. A `SIGINT`/`SIGTERM` stops it in
+three escalating stages, and the first two still complete normally
+(`interrupted: true`, exit 0):
+
+1. **First signal** — graceful stop. The signal is reported (a human line on
+   stderr plus a JSONL `interrupt` event in the `--verbose`/`--log` stream), the
+   shared context is cancelled, workers finish the current DLS run and stop at
+   the next cycle boundary, every discovered minimum is saved, the stdout YAML
+   is still written with `interrupted: true`, and the process exits 0.
+2. **Second signal** — mid-DLS stop. A JSONL `interrupt_dls` event is emitted
+   and the running DLS solve is aborted within one iteration (at the iteration
+   top, after the pupil update, inside the line search, and between Jacobian
+   column sweeps). The solve's **best point so far** is preserved as a minimum
+   and saved to the `--save` files. The run still exits 0 with `interrupted: true`.
+3. **Third signal** — force quit with exit 1.
+
+Because every minimum is written atomically as it is found, even a hard kill
+never loses already-discovered minima.
 
 ### Saving minima
 

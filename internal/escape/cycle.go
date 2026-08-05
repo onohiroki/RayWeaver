@@ -29,6 +29,7 @@ type Cycle struct {
 	progress  *Progress
 	deadline  time.Time
 	ctx       context.Context
+	hardStop  <-chan struct{}
 	escaped   int
 	recorded  int
 	stopped   bool
@@ -36,8 +37,9 @@ type Cycle struct {
 
 // NewCycle creates an escape cycle bound to a wrapper and shared store.
 // progress may be nil to disable verbose reporting. A zero deadline disables
-// the time budget (unlimited runtime); a nil context is ignored.
-func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time, ctx context.Context) *Cycle {
+// the time budget (unlimited runtime); a nil context and a nil hardStop are
+// ignored.
+func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time, ctx context.Context, hardStop <-chan struct{}) *Cycle {
 	return &Cycle{
 		wrapper:   wrapper,
 		store:     store,
@@ -49,6 +51,7 @@ func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed
 		progress:  progress,
 		deadline:  deadline,
 		ctx:       ctx,
+		hardStop:  hardStop,
 	}
 }
 
@@ -59,12 +62,12 @@ func (c *Cycle) Escaped() int { return c.escaped }
 func (c *Cycle) Recorded() int { return c.recorded }
 
 // StoppedByTime reports whether the cycle was cut short by the time budget
-// (not by an external interrupt).
-func (c *Cycle) StoppedByTime() bool { return c.stopped && !c.ctxDone() }
+// (not by an external interrupt or a hard stop).
+func (c *Cycle) StoppedByTime() bool { return c.stopped && !c.ctxDone() && !hardStopped(c.hardStop) }
 
-// Interrupted reports whether the shared context was cancelled while the
-// cycle ran (SIGINT/SIGTERM handled at the command layer).
-func (c *Cycle) Interrupted() bool { return c.ctxDone() }
+// Interrupted reports whether the shared context was cancelled or the hard
+// stop fired while the cycle ran (SIGINT/SIGTERM handled at the command layer).
+func (c *Cycle) Interrupted() bool { return c.ctxDone() || hardStopped(c.hardStop) }
 
 // ctxDone reports whether the shared stop context has been cancelled.
 func (c *Cycle) ctxDone() bool {
@@ -73,6 +76,19 @@ func (c *Cycle) ctxDone() bool {
 	}
 	select {
 	case <-c.ctx.Done():
+		return true
+	default:
+		return false
+	}
+}
+
+// hardStopped reports whether the mid-solve interrupt channel has been closed.
+func hardStopped(hardStop <-chan struct{}) bool {
+	if hardStop == nil {
+		return false
+	}
+	select {
+	case <-hardStop:
 		return true
 	default:
 		return false
@@ -169,8 +185,14 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		c.wrapper.SetEscapes(c.store.All())
 		c.wrapper.SetStartX(currentX)
 		c.wrapper.SetPhase(PhaseEscape)
+		c.wrapper.SetStop(c.hardStop)
 		escRes := dls.Solve(c.wrapper)
 		escapedX := extractX(escRes)
+		if escRes.Status == dls.StatusInterrupted {
+			c.recordInterrupted(escRes, cyc, "escape_dls")
+			c.stopped = true
+			break
+		}
 		if !c.acceptable(escRes.Status, escapedX) {
 			failures++
 			c.progress.Event("cycle", map[string]any{
@@ -199,8 +221,14 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		c.wrapper.SetEscapes(nil)
 		c.wrapper.SetStartX(escapedX)
 		c.wrapper.SetPhase(PhaseClean)
+		c.wrapper.SetStop(c.hardStop)
 		cleanRes := dls.Solve(c.wrapper)
 		trueX := extractX(cleanRes)
+		if cleanRes.Status == dls.StatusInterrupted {
+			c.recordInterrupted(cleanRes, cyc, "clean_dls")
+			c.stopped = true
+			break
+		}
 		if !c.acceptable(cleanRes.Status, trueX) {
 			failures++
 			c.progress.Event("cycle", map[string]any{
@@ -288,4 +316,66 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 	}
 
 	return bestX, bestMerit
+}
+
+// recordInterrupted records the best point found so far by a DLS solve that
+// was aborted mid-iteration by the hard stop. The point is a partial solution,
+// not a converged local minimum, but preserving it means an interrupted run
+// never loses its best work. A solve stopped before completing any iteration
+// (or yielding a finite merit) has nothing worth keeping and is skipped.
+func (c *Cycle) recordInterrupted(res dls.Result, cyc int, phase string) {
+	if res.Iterations <= 0 {
+		c.progress.Event("cycle", map[string]any{
+			"cycle":      cyc,
+			"worker":     c.workerID,
+			"phase":      phase,
+			"status":     "interrupted",
+			"dls_status": res.Status,
+		})
+		return
+	}
+	x := extractX(res)
+	m := c.wrapper.innerMerit(x)
+	if math.IsNaN(m) || math.IsInf(m, 0) || m >= 1e12 {
+		return
+	}
+	c.progress.Event("cycle", map[string]any{
+		"cycle":      cyc,
+		"worker":     c.workerID,
+		"phase":      phase,
+		"status":     "interrupted",
+		"dls_status": res.Status,
+		"merit":      m,
+	})
+	if c.store.IsNew(x) {
+		idx := c.store.Add(Point{X: x, Merit: m})
+		c.recorded++
+		c.progress.Event("minimum", map[string]any{
+			"cycle":  cyc,
+			"worker": c.workerID,
+			"kind":   "interrupted",
+			"index":  idx,
+			"merit":  m,
+		})
+		return
+	}
+	_, nearest := c.store.FindNearest(x)
+	c.store.Strengthen(nearest)
+	if _, improved := c.store.Replace(nearest, Point{X: x, Merit: m}); improved {
+		c.progress.Event("minimum", map[string]any{
+			"cycle":  cyc,
+			"worker": c.workerID,
+			"kind":   "improved",
+			"index":  nearest,
+			"merit":  m,
+		})
+	} else {
+		c.progress.Event("minimum", map[string]any{
+			"cycle":  cyc,
+			"worker": c.workerID,
+			"kind":   "repeat",
+			"index":  nearest,
+			"merit":  m,
+		})
+	}
 }

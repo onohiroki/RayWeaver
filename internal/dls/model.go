@@ -2,6 +2,11 @@ package dls
 
 const MeritSpotRMS = "spot_rms"
 
+// StatusInterrupted is the solver status returned when the Stop channel is
+// closed mid-solve: the best point found so far is returned instead of a
+// converged result.
+const StatusInterrupted = "interrupted"
+
 type VariableInfo struct {
 	Name      string
 	SurfaceID int
@@ -57,6 +62,12 @@ type Options struct {
 	// consulted when EnableStallDone is true.
 	StallRelTol float64
 	Logger      Logger
+	// Stop is an optional channel that, when closed, asks the solver to abort
+	// as soon as possible (checked at the top of every iteration and inside
+	// the Jacobian sweep and line search). On stop the solver returns the
+	// best point found so far with Status "interrupted" instead of a converged
+	// result. nil disables interruption.
+	Stop <-chan struct{}
 }
 
 type ConstraintState struct {

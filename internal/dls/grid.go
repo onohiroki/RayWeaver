@@ -105,7 +105,7 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 		}
 	}
 
-	parallelColumns(len(grid), workers, trace)
+	parallelColumns(len(grid), workers, trace, nil)
 
 	perSurfMax := make(map[int]float64)
 	for _, local := range perRayMax {

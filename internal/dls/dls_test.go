@@ -3,6 +3,7 @@ package dls
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -197,8 +198,8 @@ func TestComputeJacobiansParallelDeterminism(t *testing.T) {
 		scales[i] = v.Max - v.Min
 	}
 
-	serialJ, serialR, serialJC, serialC := computeJacobians(m, xNorm, variables, scales, 1e-6, 1)
-	parJ, parR, parJC, parC := computeJacobians(m, xNorm, variables, scales, 1e-6, 4)
+	serialJ, serialR, serialJC, serialC := computeJacobians(m, xNorm, variables, scales, 1e-6, 1, nil)
+	parJ, parR, parJC, parC := computeJacobians(m, xNorm, variables, scales, 1e-6, 4, nil)
 
 	if !equalFloats(serialR, parR) {
 		t.Errorf("residual baseline mismatch: %v vs %v", serialR, parR)
@@ -236,4 +237,97 @@ func equalMatrices(a, b [][]float64) bool {
 		}
 	}
 	return true
+}
+
+// interruptibleModel is a shallow bowl whose residuals have tiny gradients.
+// Once the solver reaches the second iteration, UpdatePupils blocks on the
+// Stop channel, so the solve cannot run ahead of a test closing it — the
+// interrupt is reached deterministically regardless of goroutine scheduling.
+type interruptibleModel struct {
+	stop chan struct{}
+	iter int
+}
+
+func (m *interruptibleModel) Variables() []VariableInfo {
+	return []VariableInfo{
+		{Name: "x", Min: 0, Max: 1},
+		{Name: "y", Min: 0, Max: 1},
+	}
+}
+
+func (m *interruptibleModel) InitialState() []float64 { return []float64{0.3, 0.3} }
+
+func (m *interruptibleModel) Options() Options {
+	return Options{MaxIter: 100000, Tol: 1e-14, Stop: m.stop}
+}
+
+func (m *interruptibleModel) UpdatePupils(x []float64) {
+	m.iter++
+	if m.iter >= 2 && m.stop != nil {
+		<-m.stop // pause the solve mid-descent until the test interrupts it
+	}
+}
+
+func (m *interruptibleModel) ComputeResiduals(x []float64) []float64 {
+	r := make([]float64, len(x))
+	for i := range x {
+		r[i] = (x[i] - 0.5) * 1e-4
+	}
+	return r
+}
+
+func (m *interruptibleModel) ComputeConstraints(x []float64) []float64 { return nil }
+
+func (m *interruptibleModel) EvaluateMerit(x []float64) float64 {
+	r := m.ComputeResiduals(x)
+	s := 0.0
+	for _, v := range r {
+		s += v * v
+	}
+	return s
+}
+
+// TestSolveInterruptedReturnsBestSoFar verifies that closing the Stop channel
+// mid-solve aborts the solver with Status "interrupted" while still returning
+// the best point found so far.
+func TestSolveInterruptedReturnsBestSoFar(t *testing.T) {
+	stop := make(chan struct{})
+	m := &interruptibleModel{stop: stop}
+	done := make(chan Result, 1)
+	go func() { done <- Solve(m) }()
+
+	// The model blocks at iteration 2 until Stop is closed, so a tiny delay
+	// guarantees we interrupt a solve that has already completed a descent step.
+	<-time.After(5 * time.Millisecond)
+	close(stop)
+
+	select {
+	case res := <-done:
+		if res.Status != StatusInterrupted {
+			t.Fatalf("Status = %q, want %q", res.Status, StatusInterrupted)
+		}
+		if res.Iterations <= 0 {
+			t.Fatalf("Iterations = %d, want > 0 (interrupted mid-descent)", res.Iterations)
+		}
+		if len(res.Variables) != 2 {
+			t.Fatalf("len(Variables) = %d, want 2", len(res.Variables))
+		}
+		for _, vs := range res.Variables {
+			if math.IsNaN(vs.After) || vs.After < 0 || vs.After > 1 {
+				t.Fatalf("best-so-far After=%v outside the variable box", vs.After)
+			}
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Solve did not return after Stop was closed")
+	}
+}
+
+// TestSolveUninterruptedNeverStops verifies that a nil Stop channel leaves the
+// solver running to its normal termination.
+func TestSolveUninterruptedNeverStops(t *testing.T) {
+	m := &interruptibleModel{stop: nil}
+	res := Solve(m)
+	if res.Status == StatusInterrupted {
+		t.Fatal("nil Stop channel must not produce an interrupted status")
+	}
 }

@@ -34,6 +34,12 @@ type RunOptions struct {
 	// Context cancels the search: workers stop at the next cycle boundary
 	// once the current DLS run finishes (nil = run to completion).
 	Context context.Context
+	// HardStop aborts a running DLS solve mid-iteration (see
+	// dls.Options.Stop): when closed, the in-flight solve returns its best
+	// point so far and the cycle stops immediately (nil = never interrupt a
+	// running solve). A second interrupt signal typically closes this after
+	// Context was already cancelled by the first.
+	HardStop <-chan struct{}
 }
 
 // BuildParams derives the escape parameters from the YAML config and the
@@ -154,7 +160,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 				workerParams.W = workerParams.W * (1 + float64(seed)/float64(numWorkers-1)*(wSpan-1))
 			}
 			wrapper := NewWrapper(inner, workerParams)
-			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context)
+			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop)
 
 			x0 := inner.InitialState()
 			if seed != 0 {
@@ -189,7 +195,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 		Cycles:      maxCycles,
 		MaxSeconds:  cfg.MaxSeconds,
 		TimedOut:    timedOut,
-		Interrupted: opts.Context != nil && opts.Context.Err() != nil,
+		Interrupted: (opts.Context != nil && opts.Context.Err() != nil) || hardStopped(opts.HardStop),
 		BestIdx:     -1,
 	}
 	if len(points) > 0 {

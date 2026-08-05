@@ -116,10 +116,22 @@ func Solve(m Model) Result {
 	}
 
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
+		if stopped(opts.Stop) {
+			status = StatusInterrupted
+			break
+		}
 		if pu, ok := m.(PupilUpdater); ok {
 			pu.UpdatePupils(denormalize(xNorm, variables, scales))
 		}
-		J_opt, r_opt, J_con, c_con := computeJacobians(m, xNorm, variables, scales, opts.Epsilon, opts.Workers)
+		if stopped(opts.Stop) {
+			status = StatusInterrupted
+			break
+		}
+		J_opt, r_opt, J_con, c_con := computeJacobians(m, xNorm, variables, scales, opts.Epsilon, opts.Workers, opts.Stop)
+		if stopped(opts.Stop) {
+			status = StatusInterrupted
+			break
+		}
 
 		J, r := J_opt, r_opt
 		if hasConstraints {
@@ -230,6 +242,7 @@ func Solve(m Model) Result {
 
 		actualReduction := merit - meritNew
 
+		lineStopped := false
 		if actualReduction <= 0 {
 			dirDeriv := 0.0
 			for j := 0; j < nVars; j++ {
@@ -238,6 +251,10 @@ func Solve(m Model) Result {
 
 			alpha := 1.0
 			for k := 0; k < 8; k++ {
+				if stopped(opts.Stop) {
+					lineStopped = true
+					break
+				}
 				alpha *= 0.5
 				xTestNorm := make([]float64, nVars)
 				for j := 0; j < nVars; j++ {
@@ -279,6 +296,11 @@ func Solve(m Model) Result {
 					break
 				}
 			}
+		}
+
+		if lineStopped {
+			status = StatusInterrupted
+			break
 		}
 
 		halfDeltaHDelta := 0.0
@@ -432,6 +454,11 @@ func Solve(m Model) Result {
 			}
 		}
 
+		if stopped(opts.Stop) {
+			status = StatusInterrupted
+			break
+		}
+
 		// When stall escape is disabled (e.g. by the escape-function wrapper),
 		// a plateau with no improvement will run to max_iterations. Detect
 		// this by checking whether the best merit has stalled over a generous
@@ -505,7 +532,7 @@ func Solve(m Model) Result {
 // and constraints with respect to every variable. Each perturbed evaluation
 // writes a distinct column of J_opt/J_con, so the loop is embarrassingly
 // parallel and produces bit-identical results regardless of worker count.
-func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales []float64, epsilon float64, workers int) ([][]float64, []float64, [][]float64, []float64) {
+func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales []float64, epsilon float64, workers int, stop <-chan struct{}) ([][]float64, []float64, [][]float64, []float64) {
 	nVars := len(xNorm)
 	xPhys := denormalize(xNorm, variables, scales)
 
@@ -548,9 +575,9 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 	}
 
 	if workers > 1 && nVars > 1 {
-		parallelColumns(nVars, workers, column)
+		parallelColumns(nVars, workers, column, stop)
 	} else {
-		for j := 0; j < nVars; j++ {
+		for j := 0; j < nVars && !stopped(stop); j++ {
 			column(j)
 		}
 	}
@@ -558,8 +585,25 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 	return J_opt, r0, J_con, c0
 }
 
+// stopped reports whether the stop channel has been closed.
+func stopped(stop <-chan struct{}) bool {
+	if stop == nil {
+		return false
+	}
+	select {
+	case <-stop:
+		return true
+	default:
+		return false
+	}
+}
+
 // parallelColumns runs work(j) for j in [0, n) across up to workers goroutines.
-func parallelColumns(n, workers int, work func(j int)) {
+// It checks stop between dispatched jobs so an interrupted sweep stops early
+// (returning partial, unused Jacobian columns — the caller aborts the solve).
+// Dispatcher and workers both select on stop to avoid a send/receive deadlock
+// when a worker exits mid-sweep.
+func parallelColumns(n, workers int, work func(j int), stop <-chan struct{}) {
 	if workers > n {
 		workers = n
 	}
@@ -569,13 +613,26 @@ func parallelColumns(n, workers int, work func(j int)) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for j := range jobs {
-				work(j)
+			for {
+				select {
+				case j, ok := <-jobs:
+					if !ok {
+						return
+					}
+					work(j)
+				case <-stop:
+					return
+				}
 			}
 		}()
 	}
+dispatch:
 	for j := 0; j < n; j++ {
-		jobs <- j
+		select {
+		case jobs <- j:
+		case <-stop:
+			break dispatch
+		}
 	}
 	close(jobs)
 	wg.Wait()
