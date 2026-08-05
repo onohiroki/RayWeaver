@@ -229,6 +229,18 @@ type Optimizer struct {
 	hullMargin       float64
 	hullWeight       float64
 	hullPairs        []glassPair
+	// stop, when set, is forwarded into dls.Options.Stop so the solver aborts
+	// mid-solve (returning the best point found so far with Status
+	// "interrupted") once the channel is closed. nil disables interruption.
+	stop <-chan struct{}
+}
+
+// SetStop wires the mid-solve stop channel into the DLS options returned by
+// Options. Closing it asks the running solve to abort at the next checkpoint
+// (top of an iteration, after the pupil update / Jacobian, inside the line
+// search) and return its best-so-far state instead of a converged result.
+func (o *Optimizer) SetStop(stop <-chan struct{}) {
+	o.stop = stop
 }
 
 // NewOptimizer builds a single-configuration Optimizer (backward-compatible
@@ -526,6 +538,7 @@ func (o *Optimizer) Options() dls.Options {
 		MuConMax:       o.muConMax,
 		Workers:        o.workers,
 		Logger:         o.logger,
+		Stop:           o.stop,
 	}
 }
 

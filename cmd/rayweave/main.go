@@ -415,6 +415,11 @@ Merit terms are evaluated per-config and summed weighted by config weight.
 A CONF operand selects which config's merit terms are active for each rule.
 
 Output: optimized YAML with updated surface parameters in each config.
+
+A SIGINT/SIGTERM stops the solve in two stages: the first signal interrupts
+the running DLS within one iteration, preserving its best point found so far
+(written to stdout with interrupted: true, exit 0); the second force-quits
+immediately (exit 1).
  `)
 	case "escape":
 		fmt.Print(`Usage: rayweave escape [--verbose] [--log FILE] [--save FILE] [--glass-dir DIR] < input.yaml

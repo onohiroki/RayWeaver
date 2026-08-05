@@ -499,6 +499,7 @@ type OptimizationResult struct {
 	Status            string                  `yaml:"status"`
 	Iterations        int                     `yaml:"iterations"`
 	Reason            string                  `yaml:"reason,omitempty"`
+	Interrupted       bool                    `yaml:"interrupted,omitempty"`
 	Constraints       []ConstraintMeasurement `yaml:"constraints,omitempty"`
 }
 

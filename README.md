@@ -186,6 +186,9 @@ Notes:
   (`interrupted: true`, exit 0): the first signal waits for the cycle boundary,
   the second interrupts the running DLS within one iteration (preserving its
   best point so far), and the third force-quits.
+- `optimize` also stops gracefully on `SIGINT`/`SIGTERM` (`interrupted: true`,
+  exit 0): the first signal interrupts the running DLS within one iteration and
+  writes the best point found so far to stdout; the second force-quits.
 
 
 ## Sample data

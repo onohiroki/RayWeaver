@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -240,7 +242,31 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	}
 
 	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight)
+
+	// Two-stage stop on SIGINT/SIGTERM.
+	//
+	//  1st signal: graceful stop. Closes the mid-solve stop channel so the
+	//     running DLS aborts at the next checkpoint (top of an iteration, after
+	//     the pupil update / Jacobian, inside the line search) and returns the
+	//     best point found so far with Status "interrupted". The result is
+	//     written to stdout as usual (interrupted: true) and the run exits 0.
+	//  2nd signal: force quit immediately (exit 1).
+	stop := make(chan struct{})
+	opt.SetStop(stop)
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigCh
+		fmt.Fprintf(os.Stderr, "optimize: %v received — stopping at the current DLS iteration and writing the best result found so far (press Ctrl-C again to force quit)\n", sig)
+		close(stop)
+		<-sigCh
+		fmt.Fprintln(os.Stderr, "optimize: force quit")
+		os.Exit(1)
+	}()
+
 	result := opt.Optimize()
+
+	interrupted := result.Status == dls.StatusInterrupted
 
 	// Emit a per-term merit breakdown so the reported merit value can be
 	// reconciled against an external evaluation (e.g. `chief` spot RMS).
@@ -268,6 +294,9 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		fmt.Fprintf(os.Stderr, "=== Optimization complete ===\n")
 	}
 	fmt.Fprintf(os.Stderr, "  Status:      %s\n", result.Status)
+	if interrupted {
+		fmt.Fprintf(os.Stderr, "  Interrupted: true (best result found so far written to stdout)\n")
+	}
 	fmt.Fprintf(os.Stderr, "  Iterations:  %d\n", result.Iterations)
 	fmt.Fprintf(os.Stderr, "  Before:      %.6e\n", result.BeforeMerit)
 	fmt.Fprintf(os.Stderr, "  After:       %.6e\n", result.AfterMerit)
@@ -334,6 +363,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	output.OptResults = &types.OptimizationResult{
 		Status:      result.Status,
 		Iterations:  result.Iterations,
+		Interrupted: interrupted,
 		Constraints: opt.FinalConstraintMeasurements(finalX),
 	}
 

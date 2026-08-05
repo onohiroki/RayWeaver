@@ -184,6 +184,41 @@ func TestOptimizerResultHasExpectedFields(t *testing.T) {
 	}
 }
 
+func TestOptimizerStopReturnsInterrupted(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+	}
+
+	cfg := Config{
+		Surfaces: surfaces,
+		Variables: []Variable{
+			{SurfaceID: 1, Param: "curvature", Min: -1.0, Max: 1.0},
+		},
+		MeritTerms:   []MeritTerm{{FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
+		GlassCatalog: gc,
+		MaxIter:      50,
+		NumRays:      4,
+	}
+
+	opt := NewOptimizer(cfg)
+	stop := make(chan struct{})
+	close(stop)
+	opt.SetStop(stop)
+
+	result := opt.Optimize()
+
+	if result.Status != dls.StatusInterrupted {
+		t.Errorf("Status = %q, want %q", result.Status, dls.StatusInterrupted)
+	}
+	if len(result.Variables) != 1 {
+		t.Errorf("Variables = %d entries, want 1 (best-so-far preserved)", len(result.Variables))
+	}
+}
+
 func TestOptimizerCanImproveDegradedSystem(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SK18", ND: 1.63854, VD: 55.42})
