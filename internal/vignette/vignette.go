@@ -5,8 +5,11 @@
 // Each pass re-traces every field's pupil grid with the current surface
 // diameters acting as clips and the glass-path (edge-thickness) check on,
 // then sizes auto_aperture: true surfaces to the surviving-beam envelope.
-// The on-axis (field 0) marginal-ray envelope at each field's entrance pupil
-// plane bounds the off-axis bundles; rays falling outside it are vignetted.
+// Diameters are sized to the union envelope of every field's full beam, so a
+// vignetted off-axis bundle never shrinks the lens. The on-axis (field 0)
+// marginal-ray envelope bounds the off-axis bundles in the plane perpendicular
+// to each field's own chief ray (through its entrance pupil); rays falling
+// outside that envelope are vignetted.
 package vignette
 
 import (
@@ -169,23 +172,47 @@ func analyze(work []types.Surface, results []chief.Result, opts Options, gc *gla
 		}
 	}
 
-	// Crossing-Z bounding: an off-axis field's rays must fall within field 0's
-	// marginal-ray envelope at the field's entrance pupil plane, otherwise they
+	// Vignetting comparison frames: an off-axis field's rays must fall within
+	// field 0's marginal-ray envelope, measured in the plane perpendicular to
+	// the field's own chief ray (through the entrance pupil), rather than in a
+	// plane perpendicular to the optical axis. The on-axis beam casts a
+	// circular aperture; the off-axis bundle must fit within it as seen along
+	// its chief ray.
+	frames := make([]planeFrame, len(results))
+	for fi := range results {
+		frames[fi] = chiefPlaneFrame(engine, work, path, results[fi], pol, opts.Wavelength)
+	}
+
+	// Diameter (extent) measurement uses the FULL beam of every field, before
+	// the bounding cut, so a narrowed off-axis bundle never shrinks the lens: an
+	// auto_aperture surface is sized to cover the union envelope of all fields'
+	// marginal rays. Only then are the per-field marginal rays re-derived
+	// against those diameters (via the bounding cut below).
+	extents := make(map[int]float64)
+	for fi := range results {
+		for _, t := range all[fi] {
+			for j, p := range t.pos {
+				e := math.Max(math.Abs(p.X), math.Abs(p.Y))
+				if e > extents[t.ids[j]] {
+					extents[t.ids[j]] = e
+				}
+			}
+		}
+	}
+
+	// Crossing-plane bounding: an off-axis field's rays must fall within field
+	// 0's marginal-ray envelope in the field's chief-ray frame, otherwise they
 	// are vignetted (narrowed beam).
 	if len(results) >= 2 {
 		for fi := 1; fi < len(results); fi++ {
-			z := 0.0
-			if results[fi].EntrancePupil != nil {
-				z = results[fi].EntrancePupil.Center.Z
-			}
-			lo, hi, ok := envelopeAtZ(all[0], z)
+			lo, hi, ok := envelopeAtPlane(all[0], frames[fi])
 			if !ok {
 				continue
 			}
 			keep := all[fi][:0]
 			for _, t := range all[fi] {
-				y, ok := rayYAtZ(t.pos, z)
-				if !ok || (y >= lo-1e-9 && y <= hi+1e-9) {
+				h, ok := rayHeightAtPlane(t.pos, frames[fi])
+				if !ok || (h >= lo-1e-9 && h <= hi+1e-9) {
 					keep = append(keep, t)
 				}
 			}
@@ -193,25 +220,9 @@ func analyze(work []types.Surface, results []chief.Result, opts Options, gc *gla
 		}
 	}
 
-	extents := make(map[int]float64)
 	fields := make([]FieldResult, len(results))
 	for fi := range results {
 		traces := all[fi]
-		fdExt := make(map[int]float64)
-		for _, t := range traces {
-			for j, p := range t.pos {
-				e := math.Max(math.Abs(p.X), math.Abs(p.Y))
-				if e > fdExt[t.ids[j]] {
-					fdExt[t.ids[j]] = e
-				}
-			}
-		}
-		for id, e := range fdExt {
-			if e > extents[id] {
-				extents[id] = e
-			}
-		}
-
 		total := len(results[fi].GridPoints)
 		kept := len(traces)
 
@@ -231,8 +242,7 @@ func analyze(work []types.Surface, results []chief.Result, opts Options, gc *gla
 			fr.ExitPupilZ = results[fi].ExitPupil.Center.Z
 		}
 
-		z := fr.EntrancePupilZ
-		if lo, hi, ok := envelopeAtZ(all[0], z); ok {
+		if lo, hi, ok := envelopeAtPlane(all[0], frames[fi]); ok {
 			fr.BoundLower = lo
 			fr.BoundUpper = hi
 		}
@@ -240,14 +250,14 @@ func analyze(work []types.Surface, results []chief.Result, opts Options, gc *gla
 		if up, lo := extremeRays(fi, traces); up != nil || lo != nil {
 			if up != nil {
 				fr.MarginalUpper = rayFromTrace(fi, *up, "Yplus", opts.Wavelength, path, pol)
-				if y, ok := rayYAtZ(up.pos, z); ok {
-					fr.MarginalYUpper = y
+				if h, ok := rayHeightAtPlane(up.pos, frames[fi]); ok {
+					fr.MarginalYUpper = h
 				}
 			}
 			if lo != nil {
 				fr.MarginalLower = rayFromTrace(fi, *lo, "Yminus", opts.Wavelength, path, pol)
-				if y, ok := rayYAtZ(lo.pos, z); ok {
-					fr.MarginalYLower = y
+				if h, ok := rayHeightAtPlane(lo.pos, frames[fi]); ok {
+					fr.MarginalYLower = h
 				}
 			}
 		}
@@ -291,22 +301,77 @@ func rayFromTrace(fi int, t tracedRay, tag string, wavelength float64, path []in
 	return &r
 }
 
-// envelopeAtZ returns the min/max interpolated Y of the given rays at the plane
-// Z. ok is false when no ray spans that plane.
-func envelopeAtZ(rays []tracedRay, z float64) (lo, hi float64, ok bool) {
+// planeFrame is a comparison plane for one field: the plane through the
+// field's entrance pupil, perpendicular to its chief ray. The meridional axis
+// m is the unit direction in the meridional (Y-Z) plane perpendicular to the
+// chief ray, so heights are measured along the true off-axis bundle direction
+// rather than along the optical axis.
+type planeFrame struct {
+	center types.Vec3
+	axis   types.Vec3 // unit chief-ray direction (plane normal)
+	m      types.Vec3 // unit meridional axis (in-plane height direction)
+}
+
+// chiefPlaneFrame builds the chief-ray-perpendicular comparison plane for one
+// field. The chief ray is traced so the plane normal reflects the in-lens beam
+// direction at the entrance pupil. Falls back to the optical axis when no
+// entrance pupil or chief direction is available.
+func chiefPlaneFrame(engine *ray.Engine, surfaces []types.Surface, path []int, r chief.Result, pol types.JonesVector, wavelength float64) planeFrame {
+	axis := types.Vec3{X: 0, Y: 0, Z: 1}
+	if r.EntrancePupil != nil && r.ChiefRay.Initial.Direction.LengthSq() > 0 {
+		dir := r.ChiefRay.Initial.Direction.Normalize()
+		// Trace the chief ray so the plane normal matches the beam direction at
+		// the entrance pupil (in-lens), not the object-space direction.
+		tr := engine.TraceRay(types.Ray{
+			Wavelength: wavelength,
+			Initial:    types.RayState{Origin: r.ChiefRay.Initial.Origin, Direction: dir},
+			Path:       path,
+			Jones:      pol,
+		}, surfaces)
+		if tr.Error == "" {
+			z := r.EntrancePupil.Center.Z
+			if d, ok := rayDirAtZ(tr.Surfaces, z); ok && d.LengthSq() > 1e-18 {
+				axis = d.Normalize()
+			}
+		}
+	}
+	m := meridionalAxis(axis)
+	center := types.Vec3{X: 0, Y: 0, Z: 0}
+	if r.EntrancePupil != nil {
+		center = r.EntrancePupil.Center
+	}
+	return planeFrame{center: center, axis: axis, m: m}
+}
+
+// meridionalAxis returns the unit direction in the Y-Z (meridional) plane
+// perpendicular to the given chief-ray direction, pointing toward +Y.
+func meridionalAxis(axis types.Vec3) types.Vec3 {
+	// Project +Y onto the plane perpendicular to the axis.
+	y := types.Vec3{X: 0, Y: 1, Z: 0}
+	along := axis.Scale(y.Dot(axis))
+	m := y.Subtract(along)
+	if m.LengthSq() < 1e-18 {
+		return y
+	}
+	return m.Normalize()
+}
+
+// envelopeAtPlane returns the min/max meridional height of the given rays at
+// the comparison plane. ok is false when no ray spans that plane.
+func envelopeAtPlane(rays []tracedRay, f planeFrame) (lo, hi float64, ok bool) {
 	lo, hi = math.Inf(1), math.Inf(-1)
 	hit := false
 	for _, t := range rays {
-		y, yok := rayYAtZ(t.pos, z)
-		if !yok {
+		h, hok := rayHeightAtPlane(t.pos, f)
+		if !hok {
 			continue
 		}
 		hit = true
-		if y < lo {
-			lo = y
+		if h < lo {
+			lo = h
 		}
-		if y > hi {
-			hi = y
+		if h > hi {
+			hi = h
 		}
 	}
 	if !hit {
@@ -315,24 +380,53 @@ func envelopeAtZ(rays []tracedRay, z float64) (lo, hi float64, ok bool) {
 	return lo, hi, true
 }
 
-// rayYAtZ interpolates the ray's Y at the plane Z along its piecewise-linear
-// path.
-func rayYAtZ(pos []types.Vec3, z float64) (float64, bool) {
+// rayHeightAtPlane interpolates the ray's meridional height at the field's
+// comparison plane (through center, normal axis) along its piecewise-linear
+// path. The height is the signed projection of (pos - center) onto the
+// meridional axis m.
+func rayHeightAtPlane(pos []types.Vec3, f planeFrame) (float64, bool) {
+	dist := func(p types.Vec3) float64 {
+		return (p.X-f.center.X)*f.axis.X + (p.Y-f.center.Y)*f.axis.Y + (p.Z-f.center.Z)*f.axis.Z
+	}
+	height := func(p types.Vec3) float64 {
+		return (p.X-f.center.X)*f.m.X + (p.Y-f.center.Y)*f.m.Y + (p.Z-f.center.Z)*f.m.Z
+	}
 	for k := 0; k+1 < len(pos); k++ {
 		a, b := pos[k], pos[k+1]
-		if (a.Z <= z && z <= b.Z) || (b.Z <= z && z <= a.Z) {
-			dz := b.Z - a.Z
+		da, db := dist(a), dist(b)
+		if (da <= 0 && db >= 0) || (db <= 0 && da >= 0) {
+			dz := db - da
 			if math.Abs(dz) < 1e-18 {
-				if math.Abs(a.Z-z) < 1e-9 {
-					return a.Y, true
+				if math.Abs(da) < 1e-9 {
+					return height(a), true
 				}
 				continue
 			}
-			t := (z - a.Z) / dz
-			return a.Y + t*(b.Y-a.Y), true
+			t := -da / dz
+			return height(a) + t*(height(b)-height(a)), true
 		}
 	}
 	return 0, false
+}
+
+// rayDirAtZ returns the interpolated ray direction at the plane Z along its
+// piecewise-linear trace.
+func rayDirAtZ(pts []types.SurfaceResult, z float64) (types.Vec3, bool) {
+	for k := 0; k+1 < len(pts); k++ {
+		a, b := pts[k], pts[k+1]
+		if (a.Position.Z <= z && z <= b.Position.Z) || (b.Position.Z <= z && z <= a.Position.Z) {
+			dz := b.Position.Z - a.Position.Z
+			if math.Abs(dz) < 1e-18 {
+				if math.Abs(a.Position.Z-z) < 1e-9 {
+					return a.Direction, true
+				}
+				continue
+			}
+			t := (z - a.Position.Z) / dz
+			return a.Direction.Add(b.Direction.Subtract(a.Direction).Scale(t)), true
+		}
+	}
+	return types.Vec3{}, false
 }
 
 // applyMinGlassPath sets opts.MinGlassPath on every glass element's entry
