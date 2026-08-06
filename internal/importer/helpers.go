@@ -2,6 +2,7 @@ package importer
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -104,4 +105,51 @@ func addGlassEntry(result *ParseResult, mat string) {
 		entry.VD = vd
 	}
 	result.GlassEntries = append(result.GlassEntries, entry)
+}
+
+// ConfigSurfaceSet returns the surfaces for a given config index: the base
+// (config-0) geometry with that config's thickness/diameter overrides
+// applied. When the config has no overrides the base surfaces are returned
+// unchanged.
+func ConfigSurfaceSet(result *ParseResult, config int) []types.Surface {
+	thick, okThick := result.ConfigThickness[config]
+	diam, okDiam := result.ConfigDiameter[config]
+	if !okThick && !okDiam {
+		return result.Surfaces
+	}
+	out := make([]types.Surface, len(result.Surfaces))
+	copy(out, result.Surfaces)
+	for i := range out {
+		id := out[i].ID
+		if t, ok := thick[id]; ok {
+			out[i].Thickness = t
+		}
+		if d, ok := diam[id]; ok {
+			out[i].Diameter = d
+		}
+	}
+	return out
+}
+
+// ConfigIndexes returns the distinct config indices declared by the file
+// (from THIC/SDIA overrides). Empty when the lens has no per-config
+// overrides (a single-config lens) — the caller then uses the base surfaces
+// directly as config 0.
+func ConfigIndexes(result *ParseResult) []int {
+	seen := map[int]bool{}
+	var idx []int
+	for c := range result.ConfigThickness {
+		if !seen[c] {
+			seen[c] = true
+			idx = append(idx, c)
+		}
+	}
+	for c := range result.ConfigDiameter {
+		if !seen[c] {
+			seen[c] = true
+			idx = append(idx, c)
+		}
+	}
+	sort.Ints(idx)
+	return idx
 }

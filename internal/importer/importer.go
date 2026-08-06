@@ -10,6 +10,21 @@ type ParseResult struct {
 	ImageSurface int
 	GlassEntries []types.Glass
 	FNO          float64
+
+	// FieldType is the ZEMAX system field type (FTYP code) controlling how the
+	// YFLN/XFLN values are interpreted: 0 = angle (deg), 1 = object height,
+	// 2 = paraxial image height, 3 = real image height. Defaults to 0 (angle)
+	// when no FTYP line is present.
+	FieldType int
+
+	// Multi-config support (ZEMAX): surfaces hold the base (config-0)
+	// geometry; the per-config thickness/diameter overrides by config index
+	// and surface ID are reported here. Non-nil when a lens declares at
+	// least one config overrides. Fields/wavelengths are shared across
+	// configs.
+	ConfigIndexes   []int
+	ConfigThickness map[int]map[int]float64 // [config][surfaceID]
+	ConfigDiameter  map[int]map[int]float64 // [config][surfaceID]
 }
 
 var commonGlass = map[string]struct {

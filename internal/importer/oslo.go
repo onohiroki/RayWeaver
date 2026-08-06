@@ -573,6 +573,8 @@ func parseOsloAngleField(line string) *types.FieldItem {
 		rest = strings.TrimSpace(line[6:])
 	} else if strings.HasPrefix(upper, "F ") {
 		rest = strings.TrimSpace(line[2:])
+	} else if strings.HasPrefix(upper, "ANG ") {
+		rest = strings.TrimSpace(line[4:])
 	} else {
 		return nil
 	}

@@ -50,6 +50,22 @@ func ParseZemax(input string) (*ParseResult, error) {
 		}
 
 		if currentSurface != nil {
+			// "STOP" appears as a standalone token at the top of a surface's
+			// block (the standard ZEMAX layout) and marks that surface as the
+			// aperture stop. It carries no surface-param value, so route it
+			// here rather than routing it to parseZemaxSurfaceParam.
+			if keyword == "STOP" {
+				result.StopSurface = currentSurface.ID
+				continue
+			}
+			// Per-config overrides ("THIC <surf> <config> <value>") trail the
+			// surface blocks; they reference a surface other than the one being
+			// read, so route them to header parsing rather than corrupting the
+			// current surface.
+			if (keyword == "THIC" || keyword == "SDIA") && isConfigOverrideLine(args) {
+				parseZemaxHeader(result, keyword, args)
+				continue
+			}
 			parseZemaxSurfaceParam(currentSurface, keyword, args)
 		} else {
 			parseZemaxHeader(result, keyword, args)
@@ -183,6 +199,54 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 			}
 			result.Wavelengths = append(result.Wavelengths, wl)
 		}
+	case "YFLN":
+		// YFLN <f0> <f1> ... — field values for the y direction. The meaning of
+		// the values is given by the system field type (FTYP): 0 = half-angle in
+		// degrees, otherwise an object/image height in mm. The first column is
+		// the on-axis field (normally 0) and is skipped together with any other
+		// unused (zero) slots.
+		for _, a := range args[1:] {
+			v := parseFloat(a)
+			if v > 0 {
+				result.Fields = append(result.Fields, newField(result, v))
+			}
+		}
+	case "XFLN":
+		// XFLN <x0> <x1> ... — x field values; nearly always zero.
+		for _, a := range args[1:] {
+			v := parseFloat(a)
+			if v > 0 {
+				result.Fields = append(result.Fields, newField(result, v))
+			}
+		}
+	case "THIC", "SDIA":
+		// Config-override rows: <surf> <config> <value> <flags...>. They appear
+		// after the surface blocks and carry a leading surface ID plus a config
+		// index, distinguishing them from the per-surface THIC (thickness) /
+		// DIAM (diameter) parameters. They only apply to lenses declaring them.
+		if len(args) >= 3 && isConfigOverrideLine(args) {
+			surf := int(parseFloat(args[0]))
+			cfg := int(parseFloat(args[1]))
+			val := parseFloat(args[2])
+			if keyword == "THIC" {
+				if result.ConfigThickness == nil {
+					result.ConfigThickness = map[int]map[int]float64{}
+				}
+				if result.ConfigThickness[cfg] == nil {
+					result.ConfigThickness[cfg] = map[int]float64{}
+				}
+				result.ConfigThickness[cfg][surf] = val
+			} else {
+				if result.ConfigDiameter == nil {
+					result.ConfigDiameter = map[int]map[int]float64{}
+				}
+				if result.ConfigDiameter[cfg] == nil {
+					result.ConfigDiameter[cfg] = map[int]float64{}
+				}
+				result.ConfigDiameter[cfg][surf] = val
+			}
+			return
+		}
 	case "FIELD":
 		if len(args) >= 3 {
 			fieldType := int(parseFloat(args[1]))
@@ -230,6 +294,13 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 			}
 		}
 	case "PWAV":
+	case "FTYP":
+		// FTYP <global-type> <f0> <f1> ... — system field type. Only the global
+		// (per-volume) type is honored; per-field overrides are rare and all
+		// point to the same representation in the sample corpus.
+		if len(args) > 0 {
+			result.FieldType = int(parseFloat(args[0]))
+		}
 	case "UNIT":
 	case "VERS":
 	case "MODE":
@@ -240,6 +311,52 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 	}
 }
 
+// newField builds a FieldItem from a YFLN/XFLN value using the system field
+// type: type 0 is a half-angle in degrees, types 1..3 are object/image heights.
+func newField(result *ParseResult, v float64) types.FieldItem {
+	f := types.FieldItem{
+		ID:     len(result.Fields),
+		Weight: 1.0,
+	}
+	switch result.FieldType {
+	case 1, 2, 3:
+		f.ImageHeight = v
+	default:
+		f.AngleDeg = v
+	}
+	return f
+}
+
 func splitLine(line string) []string {
 	return strings.Fields(line)
+}
+
+// isConfigOverrideLine reports whether a THIC/SDIA token list is a ZEMAX
+// per-config override ("<surf> <config> <value> <flags...>") rather than a
+// per-surface parameter. Overrides carry a leading integer surface ID and an
+// integer config index (>=1); an in-surface thickness/diameter has a plain
+// numeric value as its first token.
+func isConfigOverrideLine(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	surf, ok1 := parseIntToken(args[0])
+	cfg, ok2 := parseIntToken(args[1])
+	return ok1 && ok2 && surf >= 0 && cfg >= 1
+}
+
+func parseIntToken(s string) (int, bool) {
+	orig := s
+	if strings.HasPrefix(s, "-") {
+		s = s[1:]
+	}
+	if s == "" {
+		return 0, false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return 0, false
+		}
+	}
+	return int(parseFloat(orig)), true
 }
