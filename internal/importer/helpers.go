@@ -75,6 +75,64 @@ func fillDefaults(result *ParseResult) {
 	if len(result.Fields) == 0 {
 		result.Fields = []types.FieldItem{defaultField()}
 	}
+	flattenNegativeThickness(result)
+}
+
+// maxFlattenThickness bounds the negative thicknesses that flattenNegativeThickness
+// will normalise. Single isolated negatives at or below this magnitude are the
+// ZEMAX "stop reference plane" idiom (a zero-power iris plane a small distance in
+// front of a surface); larger negatives encode telecentric/afocal return paths or
+// genuine folds, which must not be flipped to positive.
+const maxFlattenThickness = 10.0
+
+// flattenNegativeThickness normalises the negative-thickness ZEMAX stop-reference
+// idiom into rayweave's all-positive, monotonic-Z fold model. A surface with a
+// single isolated negative thickness t (|t| <= maxFlattenThickness) is flipped to
+// +|t|, which preserves every inter-surface air gap while shifting only the
+// surfaces after it by 2|t|. Files with several negatives (folded/return paths)
+// or a single large negative (telecentric layouts) are left untouched.
+//
+// The base surfaces and the per-config thickness overrides are both normalised so
+// that ConfigSurfaceSet never reintroduces a negative thickness downstream.
+// StopSurface (the aperture position and its diameter) is unchanged. Returns the
+// number of surfaces flattened.
+func flattenNegativeThickness(result *ParseResult) int {
+	if result == nil {
+		return 0
+	}
+	flattened := 0
+
+	neg := -1
+	for i := range result.Surfaces {
+		if result.Surfaces[i].Thickness < 0 {
+			if neg >= 0 {
+				return 0
+			}
+			neg = i
+		}
+	}
+	if neg >= 0 && math.Abs(result.Surfaces[neg].Thickness) <= maxFlattenThickness {
+		result.Surfaces[neg].Thickness = -result.Surfaces[neg].Thickness
+		flattened++
+	}
+
+	for cfg := range result.ConfigThickness {
+		negSurf := -1
+		for s, t := range result.ConfigThickness[cfg] {
+			if t < 0 {
+				if negSurf >= 0 {
+					negSurf = -2
+					break
+				}
+				negSurf = s
+			}
+		}
+		if negSurf >= 0 && math.Abs(result.ConfigThickness[cfg][negSurf]) <= maxFlattenThickness {
+			result.ConfigThickness[cfg][negSurf] = -result.ConfigThickness[cfg][negSurf]
+			flattened++
+		}
+	}
+	return flattened
 }
 
 // addGlassEntry registers a glass material, deduplicating by
