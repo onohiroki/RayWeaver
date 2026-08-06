@@ -144,6 +144,32 @@ func TestCatalogLookupModelAutoKey(t *testing.T) {
 	}
 }
 
+func TestCatalogLookupMoldSuffix(t *testing.T) {
+	c := NewCatalog()
+	c.Add(types.Glass{Type: types.GlassTypeCatalog, Name: "N-BK7", ND: 1.51680, VD: 64.17})
+
+	got, ok := c.Lookup("N-BK7_MOLD")
+	if !ok {
+		t.Fatal("Lookup(N-BK7_MOLD) failed")
+	}
+	if got.Name != "N-BK7" {
+		t.Errorf("Name = %q, want N-BK7", got.Name)
+	}
+}
+
+func TestCatalogLookupResinParenthesis(t *testing.T) {
+	c := NewCatalog()
+	c.Add(types.Glass{Type: types.GlassTypeModel, Label: "OKP4HT", ND: 1.52500, VD: 56.00})
+
+	got, ok := c.Lookup("AL-6263-(OKP4HT)")
+	if !ok {
+		t.Fatal("Lookup(AL-6263-(OKP4HT)) failed")
+	}
+	if got.Label != "OKP4HT" {
+		t.Errorf("Label = %q, want OKP4HT", got.Label)
+	}
+}
+
 func TestCatalogRefractiveIndexAir(t *testing.T) {
 	c := NewCatalog()
 	n, err := c.RefractiveIndex("AIR", 0.00058756)

@@ -170,11 +170,31 @@ func addGlassEntryNDV(result *ParseResult, mat string, nd, vd float64) {
 			entry.ND = nd
 			entry.VD = vd
 		}
-	} else if nd, vd, ok := LookupGlass(mat); ok {
+	} else if nd, vd, ok := decodeDispersionCode(mat); ok {
+		entry.ND = nd
+		entry.VD = vd
+	} else if nd, vd, ok := resolveCommonGlass(mat); ok {
 		entry.ND = nd
 		entry.VD = vd
 	}
 	result.GlassEntries = append(result.GlassEntries, entry)
+}
+
+// decodeDispersionCode decodes a ZEMAX/OSLO 6-digit glass code "nnnvvv" into
+// nd = 1.nnn and vd = vv.v (e.g. 748523 -> nd 1.748, vd 52.3). Returns ok=false
+// when the label is not a 6-digit code.
+func decodeDispersionCode(code string) (nd, vd float64, ok bool) {
+	if len(code) != 6 {
+		return 0, 0, false
+	}
+	for _, r := range code {
+		if r < '0' || r > '9' {
+			return 0, 0, false
+		}
+	}
+	nd = 1 + parseFloat(code[0:3])/1000.0
+	vd = parseFloat(code[3:6]) / 10.0
+	return nd, vd, true
 }
 
 // ConfigSurfaceSet returns the surfaces for a given config index: the base

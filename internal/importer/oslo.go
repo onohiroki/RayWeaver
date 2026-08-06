@@ -87,7 +87,7 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 			continue
 		}
 		if strings.HasPrefix(upper, "GLA ") || strings.HasPrefix(upper, "GLASS ") {
-			current.Material = strings.TrimSpace(line[4:])
+			current.Material, current.GlassIndices = splitOsloGlassLine(line[4:])
 			continue
 		}
 		if strings.HasPrefix(upper, "RD ") {
@@ -161,7 +161,11 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 			diam = s.ApertureRadius * 2
 		}
 
-		addGlassEntry(result, mat)
+		if len(s.GlassIndices) > 0 {
+			addOsloModelGlass(result, mat, s.GlassIndices)
+		} else {
+			addGlassEntry(result, mat)
+		}
 
 		surf := types.Surface{
 			ID:        id,
@@ -188,9 +192,73 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 
 type nxtSurface struct {
 	Material       string
+	GlassIndices   []float64
 	Radius         float64
 	Thickness      float64
 	ApertureRadius float64
+}
+
+// splitOsloGlassLine splits the value of an OSLO GLA/GLASS line into the glass
+// name and any trailing model-glass refractive indices. OSLO writes model
+// glasses as "GLA <name> <nd> <nF> <nC>" (indices at the d/F/C lines); catalog
+// references are just "GLA <name>". Model glasses exported from ZEMAX may use a
+// numeric name carrying its own index, e.g. "GLA 1.506000 1.506 1.506".
+func splitOsloGlassLine(rest string) (name string, indices []float64) {
+	tokens := strings.Fields(rest)
+	if len(tokens) == 0 {
+		return "", nil
+	}
+	n := len(tokens)
+	for n > 0 && parseFloat(tokens[n-1]) > 0 {
+		n--
+	}
+	if n > 0 {
+		return strings.Join(tokens[:n], " "), tokensToFloats(tokens[n:])
+	}
+	if len(tokens) == 1 {
+		return tokens[0], nil
+	}
+	return tokens[0], tokensToFloats(tokens[1:])
+}
+
+func tokensToFloats(tokens []string) []float64 {
+	out := make([]float64, len(tokens))
+	for i, t := range tokens {
+		out[i] = parseFloat(t)
+	}
+	return out
+}
+
+// osloStandardWavelengths are the OSLO default WV1..WV3 (d, F, C lines) in mm,
+// the wavelengths at which GLA model-glass indices are given.
+var osloStandardWavelengths = [...]float64{0.000587562, 0.000486133, 0.000656273}
+
+// addOsloModelGlass registers an OSLO model glass (a name plus refractive
+// indices at the d/F/C lines) as a tabulated glass entry, deduplicating by
+// label like addGlassEntry. The tabulated form preserves the three indices
+// exactly and works at any trace wavelength.
+func addOsloModelGlass(result *ParseResult, name string, indices []float64) {
+	if name == "" || isAir(name) {
+		return
+	}
+	for _, g := range result.GlassEntries {
+		if strings.EqualFold(g.Label, name) {
+			return
+		}
+	}
+	table := make(types.RefractiveIndexTable, len(indices))
+	for i, idx := range indices {
+		wl := types.DefaultWavelength
+		if i < len(osloStandardWavelengths) {
+			wl = osloStandardWavelengths[i]
+		}
+		table[i] = types.RefractiveIndexEntry{Wavelength: wl, Value: idx}
+	}
+	result.GlassEntries = append(result.GlassEntries, types.Glass{
+		Type:              types.GlassTypeTabulated,
+		Label:             name,
+		RefractiveIndices: table,
+	})
 }
 
 func parseOsloWVLine(line string) []types.WavelengthItem {

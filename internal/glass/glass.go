@@ -121,6 +121,20 @@ func (c *Catalog) Lookup(key string) (*types.Glass, bool) {
 			}
 		}
 	}
+	// Moulding-grade suffix: "N-BK7_MOLD" is the pressing blank of the same
+	// glass, so strip it and resolve the base name.
+	if strings.HasSuffix(key, "_MOLD") {
+		if g, ok := c.Lookup(key[:len(key)-len("_MOLD")]); ok {
+			return g, true
+		}
+	}
+	// Resin notation: "AL-6263-(OKP4HT)" names a moulding compound by the
+	// parenthesised resin, which is the actual optical material.
+	if i := strings.IndexByte(key, '('); i >= 0 && strings.HasSuffix(key, ")") {
+		if g, ok := c.Lookup(key[i+1 : len(key)-1]); ok {
+			return g, true
+		}
+	}
 	return nil, false
 }
 

@@ -1,6 +1,10 @@
 package importer
 
-import "github.com/hiroki/rayweaver/internal/types"
+import (
+	"strings"
+
+	"github.com/hiroki/rayweaver/internal/types"
+)
 
 type ParseResult struct {
 	Surfaces     []types.Surface
@@ -64,12 +68,38 @@ var commonGlass = map[string]struct {
 	// Common crown/flint alias spellings.
 	"SKN18":  {1.63854, 55.42},
 	"LAKN16": {1.73400, 51.49},
+	// Optical plastics and resins.
+	"PMMA":    {1.49180, 57.40},
+	"ACRYLIC": {1.49180, 57.40},
+	"OKP4":    {1.52500, 56.00},
+	"OKP4HT":  {1.52500, 56.00},
+	"330R":    {1.50940, 56.20},
 }
 
 func LookupGlass(name string) (nd, vd float64, ok bool) {
 	g, ok := commonGlass[name]
 	if ok {
 		return g.ND, g.VD, true
+	}
+	return 0, 0, false
+}
+
+// resolveCommonGlass resolves a glass label against the built-in catalog,
+// additionally falling back to the moulding-grade "_MOLD" suffix and to the
+// parenthesised resin of compound names such as "AL-6263-(OKP4HT)".
+func resolveCommonGlass(name string) (nd, vd float64, ok bool) {
+	if nd, vd, ok := LookupGlass(name); ok {
+		return nd, vd, true
+	}
+	if strings.HasSuffix(name, "_MOLD") {
+		if nd, vd, ok := LookupGlass(name[:len(name)-len("_MOLD")]); ok {
+			return nd, vd, true
+		}
+	}
+	if i := strings.IndexByte(name, '('); i >= 0 && strings.HasSuffix(name, ")") {
+		if nd, vd, ok := LookupGlass(name[i+1 : len(name)-1]); ok {
+			return nd, vd, true
+		}
 	}
 	return 0, 0, false
 }
