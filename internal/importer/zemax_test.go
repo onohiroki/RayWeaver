@@ -3,6 +3,8 @@ package importer
 import (
 	"math"
 	"testing"
+
+	"github.com/hiroki/rayweaver/internal/types"
 )
 
 func TestZemax_BasicTextFormat(t *testing.T) {
@@ -213,6 +215,147 @@ SURF 1
 		if s.Coefficients[i] != want[i] {
 			t.Errorf("coefficient[%d]: expected %g, got %g", i, want[i], s.Coefficients[i])
 		}
+	}
+}
+
+func TestZemax_WavelengthMicroToMilli(t *testing.T) {
+	input := `WAVL 0.48613
+WAVL 0.58756
+WAVM 1 0.65627 1
+SURF 0
+  TYPE STANDARD
+  CURV 0.0
+  THIC INFINITY
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+  GLAS BK7
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []float64{0.00048613, 0.00058756, 0.00065627}
+	if len(result.Wavelengths) != len(want) {
+		t.Fatalf("expected %d wavelengths, got %d", len(want), len(result.Wavelengths))
+	}
+	for i, w := range want {
+		if math.Abs(result.Wavelengths[i].Value-w) > 1e-12 {
+			t.Errorf("wavelength %d: expected %g, got %g", i, w, result.Wavelengths[i].Value)
+		}
+	}
+}
+
+func TestZemax_FieldTypeImageHeight(t *testing.T) {
+	input := `FTYP 3 0 3 3 0 0 0
+YFLN 0 15 21 0 0 0 0 0 0 0 0 0
+XFLN 0 0 0 0 0 0 0 0 0 0 0 0
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FieldType != 3 {
+		t.Fatalf("field type: expected 3, got %d", result.FieldType)
+	}
+	if len(result.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(result.Fields))
+	}
+	if result.Fields[0].ImageHeight != 15 || result.Fields[0].AngleDeg != 0 {
+		t.Errorf("field 0: expected image height 15, got ih=%g angle=%g", result.Fields[0].ImageHeight, result.Fields[0].AngleDeg)
+	}
+	if result.Fields[1].ImageHeight != 21 {
+		t.Errorf("field 1: expected image height 21, got %g", result.Fields[1].ImageHeight)
+	}
+}
+
+func TestParseZemax_FieldTypeAngle(t *testing.T) {
+	input := `FTYP 0 0 0 0 0 0 0
+YFLN 0 15 21 0 0 0 0 0 0 0 0 0
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Fields[0].AngleDeg != 15 || result.Fields[1].AngleDeg != 21 {
+		t.Errorf("angle fields: expected 15/21, got %g/%g", result.Fields[0].AngleDeg, result.Fields[1].AngleDeg)
+	}
+}
+
+func TestZemax_InlineModelGlass(t *testing.T) {
+	input := `SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+  GLAS ___BLANK 1 0 1.76499 15.0 7.48E-1 0 0 0 0 0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Surfaces[0].Material != "___BLANK" {
+		t.Errorf("material: expected ___BLANK, got %q", result.Surfaces[0].Material)
+	}
+	var g *types.Glass
+	for i := range result.GlassEntries {
+		if result.GlassEntries[i].Label == "___BLANK" {
+			g = &result.GlassEntries[i]
+		}
+	}
+	if g == nil {
+		t.Fatal("expected ___BLANK glass entry")
+	}
+	if math.Abs(g.ND-1.76499) > 1e-5 || math.Abs(g.VD-15.0) > 1e-5 {
+		t.Errorf("inline nd/vd: expected 1.76499/15.0, got %g/%g", g.ND, g.VD)
+	}
+}
+
+func TestZemax_MultiConfigOverrides(t *testing.T) {
+	input := `STOP 1
+YFL 0 15 21
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+  GLAS BK7
+  DIAM 20.0
+SURF 2
+  TYPE STANDARD
+  CURV 0.0
+  THIC 0.0
+THIC 1 1 4.5 0 0 0 1 1 1 0 0
+THIC 1 2 2.5 0 0 0 1 1 1 0 0
+THIC 2 2 3.0 0 0 0 1 1 1 0 0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	idx := ConfigIndexes(result)
+	if len(idx) != 2 || idx[0] != 1 || idx[1] != 2 {
+		t.Errorf("config indexes: expected [1 2], got %v", idx)
+	}
+	// Config 2 should override surface 1 thickness to 2.5 and surface 2 to 3.0.
+	s := ConfigSurfaceSet(result, 2)
+	if s[0].ID != 1 {
+		t.Fatalf("unexpected first surface id %d", s[0].ID)
+	}
+	if math.Abs(s[0].Thickness-2.5) > 1e-9 || math.Abs(s[1].Thickness-3.0) > 1e-9 {
+		t.Errorf("config 2 override: expected surf1=2.5 surf2=3.0, got %g/%g", s[0].Thickness, s[1].Thickness)
+	}
+	// Base (config 0) keeps the DISZ value.
+	base := ConfigSurfaceSet(result, 0)
+	if math.Abs(base[0].Thickness-5.0) > 1e-9 {
+		t.Errorf("base config thickness: expected 5.0, got %g", base[0].Thickness)
 	}
 }
 
