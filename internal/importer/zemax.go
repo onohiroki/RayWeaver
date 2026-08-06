@@ -114,6 +114,8 @@ func ParseZemax(input string) (*ParseResult, error) {
 		mat := strings.TrimSpace(sp.Material)
 		if mat == "" || isAir(mat) {
 			mat = "AIR"
+		} else if sp.InlineND > 0 {
+			addGlassEntryNDV(result, mat, sp.InlineND, sp.InlineVD)
 		} else {
 			addGlassEntry(result, mat)
 		}
@@ -143,6 +145,8 @@ type zemaxSurface struct {
 	Diameter    float64
 	Conic       float64
 	Parms       map[int]float64
+	InlineND    float64
+	InlineVD    float64
 }
 
 func parseZemaxSurfaceParam(s *zemaxSurface, keyword string, args []string) {
@@ -162,6 +166,13 @@ func parseZemaxSurfaceParam(s *zemaxSurface, keyword string, args []string) {
 	case "GLAS":
 		if len(args) > 0 {
 			s.Material = args[0]
+			// ZEMAX inline model glass: GLAS <name> <dispersion-flag> <0> <nd> <vd> ...
+			// A dispersion flag of 1 means nd/vd follow inline; store them so the
+			// surface build can register a real model entry instead of "___BLANK".
+			if len(args) >= 5 && parseFloat(args[1]) == 1 {
+				s.InlineND = parseFloat(args[3])
+				s.InlineVD = parseFloat(args[4])
+			}
 		}
 	case "DIAM":
 		if len(args) > 0 {

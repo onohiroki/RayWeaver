@@ -80,6 +80,15 @@ func fillDefaults(result *ParseResult) {
 // addGlassEntry registers a glass material, deduplicating by
 // case-insensitive label. Inline "nd:vd" model glasses are expanded in place.
 func addGlassEntry(result *ParseResult, mat string) {
+	addGlassEntryNDV(result, mat, 0, 0)
+}
+
+// addGlassEntryNDV registers a glass material, deduplicating by
+// case-insensitive label. When nd is positive the entry is a model glass
+// carrying the supplied index/Abbe number (used for ZEMAX inline model
+// glasses such as "___BLANK"); otherwise nd/vd are resolved from the
+// "nd:vd" label convention or the built-in catalog.
+func addGlassEntryNDV(result *ParseResult, mat string, nd, vd float64) {
 	if mat == "" || isAir(mat) {
 		return
 	}
@@ -92,7 +101,10 @@ func addGlassEntry(result *ParseResult, mat string) {
 		Type:  types.GlassTypeModel,
 		Label: mat,
 	}
-	if strings.Contains(mat, ":") {
+	if nd > 0 {
+		entry.ND = nd
+		entry.VD = vd
+	} else if strings.Contains(mat, ":") {
 		parts := strings.SplitN(mat, ":", 2)
 		nd := parseFloat(parts[0])
 		vd := parseFloat(parts[1])
