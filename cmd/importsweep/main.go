@@ -64,8 +64,15 @@ type record struct {
 	FNumber        string
 	TotalTrack     string
 	ParaxialOK     bool
-	Configs        int
-	ConfigsOK      int
+
+	// Diagnostic breakdown of trace failures (see sweepMetrics).
+	ApertureStop            int
+	ApertureStopTraceable   int
+	ApertureStopUnreachable int
+	ModelFailCount          int
+	Vignetted               bool
+	Configs                 int
+	ConfigsOK               int
 }
 
 func (r *record) row() []string {
@@ -78,7 +85,8 @@ func (r *record) row() []string {
 		boolStr(r.ChiefOK), itoa(r.ChiefRays), itoa(r.MarginalRays), itoa(r.GridError), r.SpotRMS,
 		itoa(r.TraceTotal), itoa(r.TraceOK), itoa(r.ChiefFailed), itoa(r.MarginalFailed), r.TraceError, r.TraceStopSurf,
 		r.FocalLength, r.EPD, r.FNumber, r.TotalTrack, boolStr(r.ParaxialOK),
-		itoa(r.Configs), itoa(r.ConfigsOK),
+		itoa(r.ApertureStop), itoa(r.ApertureStopTraceable), itoa(r.ApertureStopUnreachable), itoa(r.ModelFailCount),
+		boolStr(r.Vignetted), itoa(r.Configs), itoa(r.ConfigsOK),
 	}
 }
 
@@ -90,7 +98,8 @@ var header = []string{
 	"chief_ok", "chief_rays", "marginal_rays", "grid_error", "spot_rms_r",
 	"trace_total", "trace_ok", "chief_failed", "marginal_failed", "trace_error", "trace_stop_surface",
 	"paraxial_focal_length", "paraxial_epd", "paraxial_fno", "paraxial_track", "paraxial_ok",
-	"configs", "configs_ok",
+	"aperture_stop", "aperture_stop_traceable", "aperture_stop_unreachable", "model_fail_count",
+	"vignetted", "configs", "configs_ok",
 }
 
 func boolStr(b bool) string {
@@ -332,6 +341,17 @@ func processFile(abs, format string, agfGlasses []types.Glass) record {
 	rec.FNumber = prim.FNumber
 	rec.TotalTrack = prim.TotalTrack
 	rec.ParaxialOK = prim.ParaxialOK
+	rec.ApertureStop = prim.ApertureStop
+	rec.ApertureStopTraceable = prim.ApertureStopTraceable
+	rec.ApertureStopUnreachable = prim.ApertureStopUnreachable
+	rec.ModelFailCount = prim.ModelFailCount
+	rec.Vignetted = prim.ModelFailCount == 0 && prim.ApertureStop > 0 &&
+		prim.ApertureStopTraceable > 0 && prim.ApertureStopUnreachable == 0
+
+	if dumpGlobal != "" && strings.Contains(abs, dumpGlobal) && prim.ApertureStop > 0 {
+		fmt.Printf("  aperture-stop diagnostics: blocked=%d traceable=%d unreachable=%d model_fail=%d\n",
+			prim.ApertureStop, prim.ApertureStopTraceable, prim.ApertureStopUnreachable, prim.ModelFailCount)
+	}
 
 	// --- Per-config validation (multi-config lenses) ---
 	cfgIdx := importer.ConfigIndexes(result)
@@ -376,6 +396,18 @@ type sweepMetrics struct {
 	FNumber        string
 	TotalTrack     string
 	ParaxialOK     bool
+
+	// ApertureStop counts rays that fail with "ray missed surface (aperture
+	// stop)". Of those, ApertureStopTraceable reach the image plane when the
+	// aperture check is disabled (real vignetting: the beam is clipped by a
+	// smaller clear aperture but is otherwise traceable), while
+	// ApertureStopUnreachable still fail (a model/pupil error, e.g. a wide-angle
+	// chief ray that cannot enter the lens). ModelFailCount counts rays that fail
+	// for any other reason (missed surface, TIR, glass path).
+	ApertureStop            int
+	ApertureStopTraceable   int
+	ApertureStopUnreachable int
+	ModelFailCount          int
 }
 
 // sweepConfig runs the chief-grid + marginal-ray + trace + paraxial pipeline
@@ -450,6 +482,22 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 		if res.Error == "" {
 			m.TraceOK++
 			continue
+		}
+		isAperture := res.Error == "ray missed surface (aperture stop)"
+		if isAperture {
+			m.ApertureStop++
+			// Re-trace with the aperture check disabled to distinguish real
+			// vignetting (the ray reaches the image once unclipped) from a
+			// model/pupil error (the ray still cannot complete the path).
+			probe := *r
+			probe.SkipApertureCheck = true
+			if probeRes := engine.TraceRay(probe, surfaces); probeRes.Error == "" {
+				m.ApertureStopTraceable++
+			} else {
+				m.ApertureStopUnreachable++
+			}
+		} else {
+			m.ModelFailCount++
 		}
 		if strings.HasPrefix(r.ID, "chief_") {
 			m.ChiefFailed++
@@ -574,6 +622,8 @@ func summarize(recs []record, skipped []string, root string, total int) [][]stri
 	noTrace := 0
 	traceFail := 0
 	noParax := 0
+	vignetted := 0
+	modelFailFiles := 0
 
 	for _, r := range recs {
 		b := byGroup[r.Group]
@@ -595,12 +645,18 @@ func summarize(recs []record, skipped []string, root string, total int) [][]stri
 		} else {
 			chiefEmpty++
 		}
-		if r.TraceTotal > 0 && r.TraceOK == r.TraceTotal {
+		if r.TraceTotal > 0 && (r.TraceOK == r.TraceTotal || r.Vignetted) {
 			b.allTraced++
 		} else if r.TraceTotal == 0 {
 			noTrace++
 		} else {
 			traceFail++
+		}
+		if r.Vignetted {
+			vignetted++
+		}
+		if r.ModelFailCount > 0 {
+			modelFailFiles++
 		}
 		if r.ParaxialOK {
 			b.paraxOK++
@@ -622,7 +678,7 @@ func summarize(recs []record, skipped []string, root string, total int) [][]stri
 		if !r.ParseOK || !r.ChiefOK || r.TraceTotal == 0 {
 			critical++
 			problems++
-		} else if r.TraceOK < r.TraceTotal || !r.ParaxialOK || r.GridError > 0 || r.ChiefFailed > 0 {
+		} else if !r.Vignetted && (r.TraceOK < r.TraceTotal || !r.ParaxialOK || r.GridError > 0 || r.ChiefFailed > 0) {
 			problems++
 		}
 	}
@@ -639,8 +695,11 @@ func summarize(recs []record, skipped []string, root string, total int) [][]stri
 		{"chief_ok", itoa(countBool(recs, func(r record) bool { return r.ChiefOK }))},
 		{"chief_empty", itoa(chiefEmpty)},
 		{"traced_ok_all_rays", itoa(countBool(recs, func(r record) bool { return r.TraceTotal > 0 && r.TraceOK == r.TraceTotal }))},
+		{"trace_ok_or_vignetted", itoa(countBool(recs, func(r record) bool { return r.TraceTotal > 0 && (r.TraceOK == r.TraceTotal || r.Vignetted) }))},
 		{"trace_fail_some_rays", itoa(traceFail)},
 		{"trace_no_rays", itoa(noTrace)},
+		{"vignetted", itoa(vignetted)},
+		{"model_fail_files", itoa(modelFailFiles)},
 		{"paraxial_ok", itoa(countBool(recs, func(r record) bool { return r.ParaxialOK }))},
 		{"paraxial_missing", itoa(noParax)},
 		{"with_problems", itoa(problems)},
