@@ -74,12 +74,46 @@ var commonGlass = map[string]struct {
 	"OKP4":    {1.52500, 56.00},
 	"OKP4HT":  {1.52500, 56.00},
 	"330R":    {1.50940, 56.20},
+	// Hoya legacy glasses (H- naming used in patents; discontinued from HOYA's
+	// current catalog). Values from the 湖北新华光 (NHG) / CDGM / OHARA AGF
+	// equivalents of the same glasses.
+	"H-ZF72":    {1.92286, 18.90},
+	"H-ZLAF70":  {1.90366, 31.32},
+	"H-LAK51":   {1.69680, 55.44},
+	"H-ZF4":     {1.72825, 28.32},
+	"H-QK3":     {1.48749, 70.44},
+	"H-ZLAF54":  {1.81600, 46.54},
+	"H-ZLAF55":  {1.83480, 42.73},
+	"H-ZLAF53":  {1.83400, 37.32},
+	"H-LAK2":    {1.69099, 54.75},
+	"H-ZLAF50B": {1.80400, 46.56},
+	"H-ZLAF55F": {1.83480, 42.73},
+	"H-LAF6L":   {1.75699, 47.70},
+	"H-LAF50A":  {1.77250, 49.60},
+	"H-LAF3":    {1.74400, 44.89},
+	"H-FK70":    {1.56907, 71.30},
+	"H-ZPK2":    {1.60300, 65.44},
+	"H-ZLAF55A": {1.83480, 42.73},
+	"H-LAK50":   {1.65160, 58.39},
+	"H-ZF75":    {1.94595, 17.99},
+	"H-ZLAF68":  {1.88299, 40.79},
+	"H-ZLAF80":  {2.00069, 25.47},
 }
 
 func LookupGlass(name string) (nd, vd float64, ok bool) {
 	g, ok := commonGlass[name]
 	if ok {
 		return g.ND, g.VD, true
+	}
+	// Accept the same glass under the alternative H- spelling ("H-LAK51" vs
+	// "H_LAK51"), which lens data mixes.
+	for _, alt := range []string{strings.ReplaceAll(name, "_", "-"), strings.ReplaceAll(name, "-", "_")} {
+		if alt == name {
+			continue
+		}
+		if g, ok := commonGlass[alt]; ok {
+			return g.ND, g.VD, true
+		}
 	}
 	return 0, 0, false
 }

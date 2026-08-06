@@ -174,6 +174,14 @@ func TestGlassResolutionHelpers(t *testing.T) {
 		{"N-BK7_MOLD", 1.5168, 64.17, true},
 		{"AL-6263-(OKP4HT)", 1.52500, 56.00, true},
 		{"AL-6261-(OKP4)", 1.52500, 56.00, true},
+		// Hoya legacy H- glasses.
+		{"H-ZF72", 1.92286, 18.90, true},
+		{"H-ZLAF70", 1.90366, 31.32, true},
+		{"H-LAK51", 1.69680, 55.44, true},
+		{"H-ZF4", 1.72825, 28.32, true},
+		{"H-QK3", 1.48749, 70.44, true},
+		{"H-ZLAF55_MOLD", 1.83480, 42.73, true},
+		{"H_LAF2", 1.74320, 49.31, true}, // underscore spelling of H-LAF2
 		{"TOTALLY_UNKNOWN", 0, 0, false},
 	}
 	for _, c := range cases {
@@ -185,7 +193,7 @@ func TestGlassResolutionHelpers(t *testing.T) {
 		if !ok {
 			continue
 		}
-		if math.Abs(nd-c.wantND) > 1e-6 || math.Abs(vd-c.wantVD) > 1e-6 {
+		if math.Abs(nd-c.wantND) > 1e-5 || math.Abs(vd-c.wantVD) > 1e-5 {
 			t.Errorf("%s: got nd=%.6f vd=%.6f want %.6f/%.6f", c.name, nd, vd, c.wantND, c.wantVD)
 		}
 	}

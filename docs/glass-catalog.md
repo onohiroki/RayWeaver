@@ -90,12 +90,43 @@ The `commonGlass` map in `internal/importer/importer.go`. Current as of
 | COC | 1.53000 | 56.00 | Resin |
 | POLYCARB | 1.58547 | 30.16 | Resin |
 | POLYSTYR | 1.59030 | 30.90 | Resin |
+| PMMA | 1.49180 | 57.40 | Optical plastic |
+| ACRYLIC | 1.49180 | 57.40 | Optical plastic (PMMA) |
+| OKP4 | 1.52500 | 56.00 | Zeonex resin |
+| OKP4HT | 1.52500 | 56.00 | Zeonex resin |
+| 330R | 1.50940 | 56.20 | Zeonex resin |
 | CAF2 | 1.43380 | 95.30 | Fluoride |
 | QUARTZ | 1.45846 | 67.82 | Fused silica |
 | SUPRASIL | 1.45846 | 67.82 | Synthetic fused silica |
 | PYREX | 1.47340 | 67.50 | Borosilicate |
 | SKN18 | 1.63854 | 55.42 | Crown |
 | LAKN16 | 1.73400 | 51.49 | Lanthanum |
+| H-ZF72 | 1.92286 | 18.90 | Hoya legacy |
+| H-ZLAF70 | 1.90366 | 31.32 | Hoya legacy |
+| H-LAK51 | 1.69680 | 55.44 | Hoya legacy |
+| H-ZF4 | 1.72825 | 28.32 | Hoya legacy |
+| H-QK3 | 1.48749 | 70.44 | Hoya legacy |
+| H-ZLAF54 | 1.81600 | 46.54 | Hoya legacy |
+| H-ZLAF55 | 1.83480 | 42.73 | Hoya legacy |
+| H-ZLAF53 | 1.83400 | 37.32 | Hoya legacy |
+| H-LAK2 | 1.69099 | 54.75 | Hoya legacy |
+| H-ZLAF50B | 1.80400 | 46.56 | Hoya legacy |
+| H-ZLAF55F | 1.83480 | 42.73 | Hoya legacy |
+| H-LAF6L | 1.75699 | 47.70 | Hoya legacy |
+| H-LAF50A | 1.77250 | 49.60 | Hoya legacy |
+| H-LAF3 | 1.74400 | 44.89 | Hoya legacy |
+| H-FK70 | 1.56907 | 71.30 | Hoya legacy |
+| H-ZPK2 | 1.60300 | 65.44 | Hoya legacy |
+| H-ZLAF55A | 1.83480 | 42.73 | Hoya legacy |
+| H-LAK50 | 1.65160 | 58.39 | Hoya legacy |
+| H-ZF75 | 1.94595 | 17.99 | Hoya legacy |
+| H-ZLAF68 | 1.88299 | 40.79 | Hoya legacy |
+| H-ZLAF80 | 2.00069 | 25.47 | Hoya legacy |
+
+The Hoya legacy entries use the values of the equivalent glasses as supplied by
+the manufacturers that keep the H- naming (湖北新华光 NHG, CDGM; Ohara S-PHM53
+for H-ZPK2; Sumita K-GFK70 for H-FK70), since these families were renamed and
+discontinued from HOYA's own catalog.
 
 Note: the listing is maintained manually. For the authoritative values always
 refer to `commonGlass` in `internal/importer/importer.go`.
@@ -113,9 +144,9 @@ refer to `commonGlass` in `internal/importer/importer.go`.
 
 Patent files in the corpus often use non-catalog notations that do not match the
 AGF catalog (`H_LAF2`, `E48R`, `AL-6263-(OKP4HT)`, `MIRROR`, etc.). The built-in
-`commonGlass` deliberately omits glasses of unclear identity (`OKP4*` family,
-`MIRROR` = mirror-surface handling). As identities are confirmed, they are added
-to `commonGlass`.
+`commonGlass` deliberately omits glasses of unclear identity (`MIRROR` = mirror
+surface handling, `SF17`/`IRG15` = discontinued special glasses whose data is not
+publicly available). As identities are confirmed, they are added to `commonGlass`.
 
 Reference: the wide-angle entrance-pupil analysis is in
 `wide-angle-pupil-analysis.md` (repo root).
