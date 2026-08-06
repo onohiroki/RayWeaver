@@ -1,108 +1,121 @@
 # Glass catalog: built-in entries and fallback resolution
 
-RayWeave が硝材（ガラス）データをどのように解決するか、内蔵テーブルの中身、
-そして外部カタログ（AGF）との優先関係・フォールバック動作を説明する。
+This document explains how RayWeave resolves glass (optical material) data: the
+built-in table, its contents, and the precedence/fallback behaviour between it
+and external (AGF) catalogs.
 
-## 1. データは 2 系統
+## 1. Two data sources
 
-レンズファイルの面は `GLAS <name>` で硝子名を持ち、その屈折率 n とアッベ数 νd
-（あるいは分散式）が必要になる。RayWeave には次の 2 系統がある。
+Each surface in a lens file carries a glass name via `GLAS <name>`, which needs
+its refractive index n and Abbe number νd (or a dispersion formula). RayWeave
+has two sources:
 
-| 系統 | 場所 | 内容 | 精度 |
+| Source | Location | Contents | Precision |
 |---|---|---|---|
-| 内蔵 `commonGlass` | `internal/importer/importer.go`（Go コード内 map） | 各硝子の **n・νd の 2 値のみ** | 概算（n・νd から Cauchy 分散を導出） |
-| 外部 AGF カタログ | `GLASS/` ディレクトリ（`--glass-dir` で指定） | Sellmeier 係数・波長範囲・メーカー名などフルデータ | 高精度 |
+| Built-in `commonGlass` | `internal/importer/importer.go` (map in Go code) | Only the **n and νd pair** for each glass | Approximate (Cauchy dispersion derived from n, νd) |
+| External AGF catalog | `GLASS/` directory (via `--glass-dir`) | Full data: Sellmeier coefficients, wavelength range, manufacturer name, etc. | High precision |
 
-内蔵テーブルは「名前だけ分かって値は不明だった硝子を、既知の n・νd で最低限動かす」ための
-フォールバック辞書である。AGF が完全に揃っていれば原則そちらが優先される。
+The built-in table is a fallback dictionary for getting "known name, unknown
+values" glasses minimally working with their known n and νd. When a complete AGF
+catalog is available, it takes precedence in principle.
 
-## 2. 解決順序（パース時）
+## 2. Resolution order (at parse time)
 
-レンズファイルの各面の `GLAS <name>` は、インポータが `addGlassEntryNDV`
-（`internal/importer/helpers.go`）で以下の優先順で解決する。
+Each surface's `GLAS <name>` is resolved by the importer via
+`addGlassEntryNDV` (`internal/importer/helpers.go`) in the following order:
 
-1. **インライン n・νd** — ZEMAX のモデル硝子行 `GLAS <name> <disp-flag> 0 <nd> <vd> ...`
-   （disp-flag=1）は nd/vd を直接保持。例: `___BLANK` → n=1.76499, νd=15.0。
-2. **`"n:νd"` ラベル規約** — ラベル自体が `1.517:64` のような形式なら分割。
-3. **内蔵 `commonGlass`**（`LookupGlass`）— ラベルが内蔵テーブルに一致。
-4. それ以外 → **未解決のモデル硝子**（n=0）。スィープでは `unresolved` として報告される。
+1. **Inline n, νd** — a ZEMAX model-glass line `GLAS <name> <disp-flag> 0 <nd> <vd> ...`
+   (disp-flag=1) carries nd/vd directly. Example: `___BLANK` → n=1.76499, νd=15.0.
+2. **`"n:νd"` label convention** — a label of the form `1.517:64` is split.
+3. **Built-in `commonGlass`** (`LookupGlass`) — the label matches the built-in table.
+4. Otherwise → **unresolved model glass** (n=0). Reported as `unresolved` in sweeps.
 
-## 3. AGF による「アップグレード」（パース後）
+## 3. AGF "upgrade" (after parsing)
 
-`import` / `importsweep` の後段で `EnhanceGlassEntriesFromAGF`
-（`internal/importer/agf_lookup.go`）が、**ラベル一致した分だけ** AGF の本格データへ
-上書きする。
+In the later stages of `import` / `importsweep`,
+`EnhanceGlassEntriesFromAGF` (`internal/importer/agf_lookup.go`) overwrites
+entries with full AGF data, but only for labels that match.
 
-- 照合は `glass.Catalog.Lookup`（正規化キー: ハイフン/アンダスコアを除去）。
-- 一致したら `Type=Catalog`、Sellmeier 係数、`ND`/`VD`、メーカー名などをコピー。
-- これは **`--glass-dir` を渡したときのみ実行**（`cmd/rayweave/import.go`）。
+- Matching uses `glass.Catalog.Lookup` (normalized key: hyphens/underscores stripped).
+- On a match, `Type=Catalog`, Sellmeier coefficients, `ND`/`VD`, manufacturer
+  name, etc. are copied over.
+- This runs **only when `--glass-dir` is given** (`cmd/rayweave/import.go`).
 
-## 4. どちらが優先するか
+## 4. Which one takes precedence
 
-- **ラベルが一致する限り AGF が優先**（内蔵の n/νd は AGF 値で上書きされる）。
-- ラベルが一致しない場合のみ、内蔵 `commonGlass` の n/νd が使われる。
-- つまり内蔵テーブルは「AGF に無い名前」専用の最後のセーフティネットである。
+- **AGF wins as long as the label matches** (the built-in n/νd are overwritten by AGF values).
+- Only when the label does not match is the built-in `commonGlass` n/νd used.
+- In other words, the built-in table is a last-resort safety net reserved for
+  names absent from the AGF catalog.
 
-## 5. 将来、AGF に同一硝子のデータが入ったら
+## 5. If the same glass later appears in the AGF catalog
 
-照合は動的な正規化キーによる。将来 AGF が同じ硝子を
-`H-LAF2`（正規化 `HLAF2`）のように掲載すれば、内蔵の `H_LAF2`（正規化 `HLAF2`）と
-自動的に一致し、何も変更なく AGF データへ切り替わる。
+Matching uses a dynamic normalized key. If a future AGF catalog lists the same
+glass as `H-LAF2` (normalized `HLAF2`), it automatically matches the built-in
+`H_LAF2` (normalized `HLAF2`) and switches to AGF data with no changes needed.
 
-注意点:
+Caveats:
 
-- **別銘柄の別名では引っかからない**（例: 将来の AGF が `LAF2`＝Nikon 仕様なら正規化
-  `LAF2` ≠ `HLAF2`）。その場合は別名エントリの追加か名前の正規化が必要。
-- 現在はラベル一致のみで、**n/νd ベースのフォールバックは未実装**（全く同じ n/νd の
-  別銘柄には自動で切り替わらない）。
+- **Aliases from different manufacturers do not match** (e.g., if a future AGF
+  lists `LAF2` as a Nikon spec, normalized `LAF2` ≠ `HLAF2`). That case requires
+  adding an alias entry or name normalization.
+- Currently only label matching is implemented; **n/νd-based fallback is not**
+  (a different-brand glass with the exact same n/νd will not switch automatically).
 
-## 6. 内蔵 `commonGlass` の一覧
+## 6. Built-in `commonGlass` listing
 
-`internal/importer/importer.go` の `commonGlass`。以下は現状（2026-08）。
+The `commonGlass` map in `internal/importer/importer.go`. Current as of
+2026-08. Several of these entries were added from lens data obtained from
+[lens-designs.com](https://www.lens-designs.com/).
 
-| 名前 | nd | νd | 区分 |
+| Name | nd | νd | Category |
 |---|---|---|---|
-| BK7 | 1.51680 | 64.17 | 標準クラウン |
-| F2 | 1.62004 | 36.37 | フリント |
-| SF12 | 1.64831 | 33.84 | フリント |
-| S-LAH66 | 1.77250 | 49.60 | ランタン |
-| SK18 | 1.63854 | 55.42 | クラウン |
-| SF5 | 1.67270 | 32.21 | フリント |
-| SF11 | 1.78470 | 25.76 | フリント |
-| LAKN22 | 1.65113 | 55.89 | ランタン |
-| K10 | 1.50137 | 56.41 | クラウン |
-| H_LAF2 | 1.74320 | 49.31 | Hoya 系 |
-| H-LAK52 | 1.72916 | 54.68 | Hoya 系 |
-| H-LAK53 | 1.72151 | 50.79 | Hoya 系 |
-| H-ZF3 | 1.71736 | 29.51 | Hoya 系 |
-| H-F1 | 1.62588 | 35.70 | Hoya 系 |
-| H-ZLAF56 | 1.77377 | 47.25 | Hoya 系 |
-| E48R | 1.53016 | 55.99 | 光学プラスチック |
-| 480R | 1.52500 | 56.00 | 光学プラスチック |
-| COC | 1.53000 | 56.00 | 樹脂 |
-| POLYCARB | 1.58547 | 30.16 | 樹脂 |
-| POLYSTYR | 1.59030 | 30.90 | 樹脂 |
-| CAF2 | 1.43380 | 95.30 | 蛍石 |
-| QUARTZ | 1.45846 | 67.82 | 石英 |
-| SUPRASIL | 1.45846 | 67.82 | 合成石英 |
-| PYREX | 1.47340 | 67.50 | ホウケイ酸 |
-| SKN18 | 1.63854 | 55.42 | クラウン |
-| LAKN16 | 1.73400 | 51.49 | ランタン |
+| BK7 | 1.51680 | 64.17 | Standard crown |
+| F2 | 1.62004 | 36.37 | Flint |
+| SF12 | 1.64831 | 33.84 | Flint |
+| S-LAH66 | 1.77250 | 49.60 | Lanthanum |
+| SK18 | 1.63854 | 55.42 | Crown |
+| SF5 | 1.67270 | 32.21 | Flint |
+| SF11 | 1.78470 | 25.76 | Flint |
+| LAKN22 | 1.65113 | 55.89 | Lanthanum |
+| K10 | 1.50137 | 56.41 | Crown |
+| H_LAF2 | 1.74320 | 49.31 | Hoya family |
+| H-LAK52 | 1.72916 | 54.68 | Hoya family |
+| H-LAK53 | 1.72151 | 50.79 | Hoya family |
+| H-ZF3 | 1.71736 | 29.51 | Hoya family |
+| H-F1 | 1.62588 | 35.70 | Hoya family |
+| H-ZLAF56 | 1.77377 | 47.25 | Hoya family |
+| E48R | 1.53016 | 55.99 | Optical plastic |
+| 480R | 1.52500 | 56.00 | Optical plastic |
+| COC | 1.53000 | 56.00 | Resin |
+| POLYCARB | 1.58547 | 30.16 | Resin |
+| POLYSTYR | 1.59030 | 30.90 | Resin |
+| CAF2 | 1.43380 | 95.30 | Fluoride |
+| QUARTZ | 1.45846 | 67.82 | Fused silica |
+| SUPRASIL | 1.45846 | 67.82 | Synthetic fused silica |
+| PYREX | 1.47340 | 67.50 | Borosilicate |
+| SKN18 | 1.63854 | 55.42 | Crown |
+| LAKN16 | 1.73400 | 51.49 | Lanthanum |
 
-※ 一覧は保守対象。正確な値は必ず `internal/importer/importer.go` の `commonGlass` を参照すること。
+Note: the listing is maintained manually. For the authoritative values always
+refer to `commonGlass` in `internal/importer/importer.go`.
 
-## 7. 一覧の取得
+## 7. Obtaining the listing
 
-- 現状はソースの `commonGlass` を読むしかない（列挙 API はない）。
-- 公開関数 `LookupGlass(name)` は単一の名前を調べるだけで、一覧を出せない。
-- 一覧を出力する CLI は無い（`importsweep` の `-dump` はそのファイルの硝子エントリと
-  未解決判定を出すが、内蔵テーブル全体は出さない）。
+- Currently the only way is to read `commonGlass` in the source (there is no
+  enumeration API).
+- The exported function `LookupGlass(name)` looks up a single name and cannot
+  dump the whole table.
+- No CLI prints the full list (`importsweep -dump` prints the glass entries and
+  unresolved determination for one file, not the entire built-in table).
 
-## 8. 未解決が残る場合
+## 8. When unresolved entries remain
 
-コーパスの特許ファイルでは AGF に一致しない非カタログ表記がよく出る
-（`H_LAF2`、`E48R`、`AL-6263-(OKP4HT)`、`MIRROR` など）。内蔵 `commonGlass` は身分が
-不明確なもの（`OKP4*` 系、`MIRROR`＝反射面の扱い）を意図的に入れていない。
-身分が確定し次第、`commonGlass` へ追加する。
+Patent files in the corpus often use non-catalog notations that do not match the
+AGF catalog (`H_LAF2`, `E48R`, `AL-6263-(OKP4HT)`, `MIRROR`, etc.). The built-in
+`commonGlass` deliberately omits glasses of unclear identity (`OKP4*` family,
+`MIRROR` = mirror-surface handling). As identities are confirmed, they are added
+to `commonGlass`.
 
-参考: 広角レンズの入射瞳問題の分析は `wide-angle-pupil-analysis.md`（リポジトリルート）。
+Reference: the wide-angle entrance-pupil analysis is in
+`wide-angle-pupil-analysis.md` (repo root).

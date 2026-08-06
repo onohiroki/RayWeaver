@@ -27,6 +27,8 @@ type ParseResult struct {
 	ConfigDiameter  map[int]map[int]float64 // [config][surfaceID]
 }
 
+// commonGlass is the built-in fallback glass dictionary. Entries added below
+// were sourced from lens data obtained from https://www.lens-designs.com/.
 var commonGlass = map[string]struct {
 	ND float64
 	VD float64
