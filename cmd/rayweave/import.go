@@ -99,28 +99,52 @@ func runImport(data []byte) {
 		}
 	}
 
-	config := types.Config{
-		ID:          *configID,
-		Name:        *configName,
-		Weight:      1.0,
-		Active:      true,
-		Fields:      result.Fields,
-		Wavelengths: result.Wavelengths,
-		RayPaths: []types.RayPath{{
-			ObjectSurface: 0,
-			ImageSurface:  lastID,
-			StopSurface:   stopSurface,
-		}},
-		Surfaces: surfaces,
-		Merit: &types.MeritFunction{
-			Type: "spot_rms",
-			Terms: []types.MeritTerm{{
-				Kind:       "spot_rms",
-				Field:      0,
-				Wavelength: firstWavelength(result.Wavelengths),
-				Weight:     1.0,
+	configIdx := importer.ConfigIndexes(result)
+	if len(configIdx) == 0 {
+		configIdx = []int{0}
+	}
+
+	// Per-config ray tracking: chief rays are resolved on the first config
+	// (representative); every created config carries its own surfaces,
+	// fields and wavelengths so downstream `chief`/`trace`/`optimize`
+	// commands select a config with `--config`.
+	var configs []types.Config
+	for _, c := range configIdx {
+		var cfgSurfaces []types.Surface
+		if c == 0 {
+			cfgSurfaces = surfaces
+		} else {
+			cfgSurfaces = importer.ConfigSurfaceSet(result, c)
+		}
+		cfgID := *configID
+		cfgName := *configName
+		if c != 0 {
+			cfgID = fmt.Sprintf("config%d", c)
+			cfgName = fmt.Sprintf("Config%d", c)
+		}
+		configs = append(configs, types.Config{
+			ID:          cfgID,
+			Name:        cfgName,
+			Weight:      1.0,
+			Active:      true,
+			Fields:      result.Fields,
+			Wavelengths: result.Wavelengths,
+			RayPaths: []types.RayPath{{
+				ObjectSurface: 0,
+				ImageSurface:  lastID,
+				StopSurface:   stopSurface,
 			}},
-		},
+			Surfaces: cfgSurfaces,
+			Merit: &types.MeritFunction{
+				Type: "spot_rms",
+				Terms: []types.MeritTerm{{
+					Kind:       "spot_rms",
+					Field:      0,
+					Wavelength: firstWavelength(result.Wavelengths),
+					Weight:     1.0,
+				}},
+			},
+		})
 	}
 
 	output := types.Input{
@@ -143,22 +167,24 @@ func runImport(data []byte) {
 			StopSurface:      stopSurface,
 			NumRays:          128,
 		},
-		Configs: []types.Config{config},
+		Configs: configs,
 	}
 
 	outputOut := types.Output{
 		Input: output,
 	}
 
-	if !*noChief && len(result.Fields) > 0 {
-		chiefFields := make([]types.FieldDef, len(result.Fields))
-		for i, f := range result.Fields {
-			chiefFields[i] = types.FieldDef{
-				Angle:       f.AngleDeg,
-				ImageHeight: f.ImageHeight,
-			}
+	// Chief rays are computed on the representative (first) config.
+	chiefSurfaces := configs[0].Surfaces
+	chiefFields := make([]types.FieldDef, len(result.Fields))
+	for i, f := range result.Fields {
+		chiefFields[i] = types.FieldDef{
+			Angle:       f.AngleDeg,
+			ImageHeight: f.ImageHeight,
 		}
+	}
 
+	if !*noChief && len(result.Fields) > 0 {
 		wavelength := firstWavelength(result.Wavelengths)
 		pol := types.NewCircularJones(true)
 
@@ -167,8 +193,8 @@ func runImport(data []byte) {
 			Coordinate: types.Vec3{},
 		}
 
-		selectedSys := types.System{Surfaces: surfaces}
-		surface.Precompute(surfaces)
+		selectedSys := types.System{Surfaces: chiefSurfaces}
+		surface.Precompute(chiefSurfaces)
 
 		chiefResults := chief.DetermineChiefRaysGrid(
 			selectedSys,
@@ -187,7 +213,7 @@ func runImport(data []byte) {
 
 		outputOut.ChiefRays = make([]types.ChiefRayResult, len(chiefResults))
 		rayList := make([]types.Ray, 0, len(chiefResults)*3)
-		path := dls.BuildPath(surfaces)
+		path := dls.BuildPath(chiefSurfaces)
 
 		for fi, r := range chiefResults {
 			cr := types.ChiefRayResult{
