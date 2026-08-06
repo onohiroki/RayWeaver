@@ -1004,7 +1004,7 @@ func extractMarginalRays(results []chief.Result, wavelength float64, surfaces []
 	var rays []types.Ray
 	path := dls.BuildPath(surfaces)
 	for fi, r := range results {
-		rays = append(rays, marginalRaysForField(fi, r, wavelength, path, pol)...)
+		rays = append(rays, chief.MarginalRaysForField(fi, r, wavelength, path, pol)...)
 	}
 	return rays
 }

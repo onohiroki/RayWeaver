@@ -234,7 +234,7 @@ func runImport(data []byte) {
 			chiefRay.Jones = pol
 			rayList = append(rayList, chiefRay)
 
-			rayList = append(rayList, marginalRaysForField(fi, r, wavelength, path, pol)...)
+			rayList = append(rayList, chief.MarginalRaysForField(fi, r, wavelength, path, pol)...)
 		}
 
 		outputOut.Rays = &types.RayInput{
