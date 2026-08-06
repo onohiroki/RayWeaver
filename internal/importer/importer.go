@@ -41,6 +41,27 @@ var commonGlass = map[string]struct {
 	"SF11":    {1.78470, 25.76},
 	"LAKN22":  {1.65113, 55.89},
 	"K10":     {1.50137, 56.41},
+	// Hoya glasses (H_ prefix used in patent shorthand).
+	"H_LAF2":   {1.74320, 49.31},
+	"H-LAK52":  {1.72916, 54.68},
+	"H-LAK53":  {1.72151, 50.79},
+	"H-ZF3":    {1.71736, 29.51},
+	"H-F1":     {1.62588, 35.70},
+	"H-ZLAF56": {1.77377, 47.25},
+	// Optical plastics and moulding resins.
+	"E48R":     {1.53016, 55.99},
+	"480R":     {1.52500, 56.00},
+	"COC":      {1.53000, 56.00},
+	"POLYCARB": {1.58547, 30.16},
+	"POLYSTYR": {1.59030, 30.90},
+	// Fused silica / fluorides.
+	"CAF2":     {1.43380, 95.30},
+	"QUARTZ":   {1.45846, 67.82},
+	"SUPRASIL": {1.45846, 67.82},
+	"PYREX":    {1.47340, 67.50},
+	// Common crown/flint alias spellings.
+	"SKN18":  {1.63854, 55.42},
+	"LAKN16": {1.73400, 51.49},
 }
 
 func LookupGlass(name string) (nd, vd float64, ok bool) {
