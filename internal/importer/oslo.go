@@ -206,7 +206,7 @@ func parseOsloWVLine(line string) []types.WavelengthItem {
 		if val > 0 {
 			out = append(out, types.WavelengthItem{
 				ID:     i,
-				Value:  val,
+				Value:  val / 1000.0,
 				Weight: 1.0,
 			})
 		}
@@ -561,7 +561,7 @@ func parseOsloPILine(line string) *types.WavelengthItem {
 		return nil
 	}
 	return &types.WavelengthItem{
-		Value:  val,
+		Value:  val / 1000.0,
 		Weight: 1.0,
 	}
 }

@@ -174,7 +174,7 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 		if len(args) > 0 {
 			wl := types.WavelengthItem{
 				ID:    len(result.Wavelengths),
-				Value: parseFloat(args[0]),
+				Value: parseFloat(args[0]) / 1000.0,
 			}
 			if len(args) >= 2 {
 				wl.Weight = parseFloat(args[1])
@@ -214,7 +214,7 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 		if len(args) >= 2 {
 			wl := types.WavelengthItem{
 				ID:    len(result.Wavelengths),
-				Value: parseFloat(args[1]),
+				Value: parseFloat(args[1]) / 1000.0,
 			}
 			if len(args) >= 3 {
 				wl.Weight = parseFloat(args[2])
