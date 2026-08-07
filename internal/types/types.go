@@ -309,6 +309,9 @@ type WavelengthItem struct {
 	Value  float64 `yaml:"value"`
 	Label  string  `yaml:"label,omitempty"`
 	Weight float64 `yaml:"weight"`
+	// Primary marks the reference (primary) wavelength of the system, e.g. the
+	// one selected by the CODE V REF header. It is omitted from YAML when false.
+	Primary bool `yaml:"primary,omitempty"`
 }
 
 type RayPath struct {

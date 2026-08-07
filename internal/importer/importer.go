@@ -20,6 +20,12 @@ type ParseResult struct {
 	// per-surface diameters.
 	EntrancePupilDiameter float64
 
+	// ReferenceWavelengthIdx is the 0-based index of the primary (reference)
+	// wavelength selected by the CODE V REF header, or -1 when absent. It is
+	// applied at the end of parsing by marking the matching WavelengthItem as
+	// Primary.
+	ReferenceWavelengthIdx int
+
 	// FieldType is the ZEMAX system field type (FTYP code) controlling how the
 	// YFLN/XFLN values are interpreted: 0 = angle (deg), 1 = object height,
 	// 2 = paraxial image height, 3 = real image height. Defaults to 0 (angle)

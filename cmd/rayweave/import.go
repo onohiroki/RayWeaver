@@ -254,6 +254,11 @@ func runImport(data []byte) {
 
 func firstWavelength(wavelengths []types.WavelengthItem) float64 {
 	for _, w := range wavelengths {
+		if w.Primary && w.Value > 0 {
+			return w.Value
+		}
+	}
+	for _, w := range wavelengths {
 		if w.Value > 0 {
 			return w.Value
 		}

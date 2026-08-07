@@ -695,3 +695,165 @@ END
 		}
 	}
 }
+
+func TestCodeV_CONKConic(t *testing.T) {
+	input := `SEQ
+S -1058.98937 -276.006853 REFL
+CON
+K -1.314566
+S 0 -0.981318
+CON
+K 0.889123
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) != 3 {
+		t.Fatalf("expected 3 surfaces, got %d", len(result.Surfaces))
+	}
+	// The CON marker + separate K line sets the conic on the current surface.
+	if math.Abs(result.Surfaces[0].Conic+1.314566) > 1e-9 {
+		t.Errorf("surface 1 conic: expected -1.314566, got %g", result.Surfaces[0].Conic)
+	}
+	if math.Abs(result.Surfaces[1].Conic-0.889123) > 1e-9 {
+		t.Errorf("surface 2 conic: expected 0.889123, got %g", result.Surfaces[1].Conic)
+	}
+}
+
+func TestCodeV_CONKConicSemicolon(t *testing.T) {
+	input := `SEQ
+S -1058.98937 -276.006853 REFL
+K 0.226106; A 0.368950E-10
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) != 2 {
+		t.Fatalf("expected 2 surfaces, got %d", len(result.Surfaces))
+	}
+	s := result.Surfaces[0]
+	if math.Abs(s.Conic-0.226106) > 1e-9 {
+		t.Errorf("surface 1 conic: expected 0.226106, got %g", s.Conic)
+	}
+	// The asphere letter after the ';' is captured too (r^4 term, idx 0).
+	if len(s.Coefficients) != 1 || math.Abs(s.Coefficients[0]-0.368950E-10) > 1e-18 {
+		t.Errorf("surface 1 coeff[0]: expected 0.368950E-10, got %v", s.Coefficients)
+	}
+}
+
+func TestCodeV_CONValueOnLine(t *testing.T) {
+	input := `SEQ
+S -1058.98937 -276.006853 REFL
+CON -1.0
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) != 2 {
+		t.Fatalf("expected 2 surfaces, got %d", len(result.Surfaces))
+	}
+	if math.Abs(result.Surfaces[0].Conic+1.0) > 1e-9 {
+		t.Errorf("surface 1 conic: expected -1.0, got %g", result.Surfaces[0].Conic)
+	}
+}
+
+func TestCodeV_REFPrimary(t *testing.T) {
+	input := `SEQ
+WL 656.3 587.6 486.1
+REF 2
+S 100 5
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Wavelengths) != 3 {
+		t.Fatalf("expected 3 wavelengths, got %d", len(result.Wavelengths))
+	}
+	// REF 2 (1-based) marks the 587.6nm entry (0-based index 1) as primary.
+	if result.Wavelengths[0].Primary {
+		t.Error("wavelength 0 should not be primary")
+	}
+	if !result.Wavelengths[1].Primary {
+		t.Error("wavelength 1 (587.6nm) should be primary via REF 2")
+	}
+	if result.Wavelengths[2].Primary {
+		t.Error("wavelength 2 should not be primary")
+	}
+	if result.ReferenceWavelengthIdx != 1 {
+		t.Errorf("reference wavelength idx: expected 1, got %d", result.ReferenceWavelengthIdx)
+	}
+}
+
+func TestCodeV_REFBeforeWL(t *testing.T) {
+	input := `SEQ
+REF 3
+WL 656.3 587.6 486.1
+S 100 5
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Wavelengths) != 3 {
+		t.Fatalf("expected 3 wavelengths, got %d", len(result.Wavelengths))
+	}
+	if !result.Wavelengths[2].Primary {
+		t.Error("wavelength 2 should be primary even when REF precedes WL")
+	}
+}
+
+func TestCodeV_REFNoWL(t *testing.T) {
+	input := `SEQ
+REF 2
+S 100 5
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With no WL list, only the default single wavelength exists; REF is
+	// out of range and must be ignored without error.
+	if len(result.Wavelengths) != 1 {
+		t.Fatalf("expected 1 default wavelength, got %d", len(result.Wavelengths))
+	}
+	if result.Wavelengths[0].Primary {
+		t.Error("default wavelength must not be marked primary")
+	}
+}
+
+func TestCodeV_REFKeywordNotClobberedByAsp(t *testing.T) {
+	input := `SEQ
+S 100 5 1.5:60
+  ASP
+  K -1.5
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The asp-block K handling must still work unchanged.
+	if len(result.Surfaces) != 2 {
+		t.Fatalf("expected 2 surfaces, got %d", len(result.Surfaces))
+	}
+	if math.Abs(result.Surfaces[0].Conic+1.5) > 1e-9 {
+		t.Errorf("surface 1 conic: expected -1.5, got %g", result.Surfaces[0].Conic)
+	}
+}

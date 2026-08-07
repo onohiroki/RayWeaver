@@ -25,7 +25,7 @@ func ParseCodeV(input string) (*ParseResult, error) {
 
 	lines := joinContinuationLines(rawLines)
 
-	result := &ParseResult{StopSurface: 0}
+	result := &ParseResult{StopSurface: 0, ReferenceWavelengthIdx: -1}
 	surfMap := make(map[int]*codeVSurf)
 
 	beforeLens := true
@@ -221,10 +221,16 @@ func ParseCodeV(input string) (*ParseResult, error) {
 
 		if compactMode && lastSurfNum > 0 {
 			switch first {
-			case "CCY":
-				if len(tokens) >= 2 {
-					surf := getOrCreate(surfMap, lastSurfNum)
-					surf.Conic = parseFloat(tokens[1])
+			case "CCY", "CON", "K":
+				// Compact-mode conic statements. "CON" declares a conic type
+				// (the value may follow on the same line or in the next "K"
+				// line); "K <k>" / "CCY <k>" set the conic value directly. A
+				// line may join several statements with ';' (e.g.
+				// "K 0.226106; A 0.368950E-10"), so delegate to the statement
+				// walker. The 3-token "K <surf> <k>" keyword form falls
+				// through to the surface-prefixed handler below.
+				if first != "K" || len(tokens) != 3 {
+					applyCodeVCompactOps(getOrCreate(surfMap, lastSurfNum), tokens)
 				}
 				inAspBlock = false
 				continue
@@ -376,6 +382,14 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		}
 	}
 
+	// CODE V REF selects the primary (reference) wavelength by 1-based index
+	// in the WL list; mark it so downstream selection (FNO sizing, chief ray
+	// wavelength, merit term) uses it. REF may appear before or after WL, so
+	// apply once all wavelengths are known.
+	if result.ReferenceWavelengthIdx >= 0 && result.ReferenceWavelengthIdx < len(result.Wavelengths) {
+		result.Wavelengths[result.ReferenceWavelengthIdx].Primary = true
+	}
+
 	fillDefaults(result)
 
 	return result, nil
@@ -488,6 +502,15 @@ func parseCodeVHeader(upper string, tokens []string, result *ParseResult, inchMo
 		result.EntrancePupilDiameter = parseFloat(tokens[1])
 		return true
 	}
+	if strings.HasPrefix(upper, "REF ") && len(tokens) >= 2 {
+		// REF selects the primary (reference) wavelength by its 1-based
+		// position in the WL list. Stored 0-based; applied to the
+		// WavelengthItem Primary flag once all wavelengths are known.
+		if n, err := strconv.Atoi(tokens[1]); err == nil && n > 0 {
+			result.ReferenceWavelengthIdx = n - 1
+		}
+		return true
+	}
 	if strings.HasPrefix(upper, "DIM ") && len(tokens) >= 2 {
 		if strings.ToUpper(tokens[1]) == "I" {
 			*inchMode = true
@@ -495,6 +518,28 @@ func parseCodeVHeader(upper string, tokens []string, result *ParseResult, inchMo
 		return true
 	}
 	return false
+}
+
+// applyCodeVCompactOps applies compact-mode conic and asphere statements to a
+// surface. A line may join several statements with ';' (e.g. "K 0.226106; A
+// 0.368950E-10" or "CCY 0; THC 0"); tokens are walked in "keyword value" pairs
+// where a trailing ';' is absorbed by parseFloat. CCY/CON/K set the conic
+// constant, asphere letters set polynomial coefficients, and any other
+// statement (e.g. THC) is ignored.
+func applyCodeVCompactOps(surf *codeVSurf, tokens []string) {
+	for i := 0; i+1 < len(tokens); i += 2 {
+		switch tokens[i] {
+		case "CCY", "CON", "K":
+			surf.Conic = parseFloat(tokens[i+1])
+		default:
+			if isAsphereLetter(tokens[i]) {
+				if surf.Coeffs == nil {
+					surf.Coeffs = make(map[int]float64)
+				}
+				surf.Coeffs[asphereOrder(tokens[i])] = parseFloat(tokens[i+1])
+			}
+		}
+	}
 }
 
 func processCodeVKeyword(surf *codeVSurf, keyword string, tokens []string) {
