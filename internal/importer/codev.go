@@ -17,6 +17,12 @@ type codeVSurf struct {
 	isPIM     bool
 	SurfType  string
 	Coeffs    map[int]float64
+
+	// Decenter-and-return (DAR) state: the surface's decenter components
+	// accumulated from YDE/XDE/ZDE (shifts) and ADE/BDE/CDE (tilts). Only set
+	// when a DAR keyword preceded them on this surface.
+	Decenter  types.DecenterStep
+	decActive bool
 }
 
 func ParseCodeV(input string) (*ParseResult, error) {
@@ -255,6 +261,20 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			case "THC":
 				inAspBlock = false
 				continue
+			case "DAR":
+				// Decenter-and-return: the current surface is shifted/tilted
+				// locally and the axis returns after it. rayweave models this
+				// with a per-surface DecenterStep; the decenter components are
+				// supplied by following YDE/XDE/ZDE/ADE/BDE/CDE statements.
+				getOrCreate(surfMap, lastSurfNum).decActive = true
+				inAspBlock = false
+				continue
+			case "YDE", "XDE", "ZDE", "ADE", "BDE", "CDE":
+				surf := getOrCreate(surfMap, lastSurfNum)
+				surf.decActive = true
+				applyCodeVDecenterOps(surf, tokens)
+				inAspBlock = false
+				continue
 			}
 		}
 
@@ -354,6 +374,13 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			Conic:     s.Conic,
 		}
 
+		// CODE V decenter-and-return (DAR) components become a per-surface
+		// DecenterStep. The return path is implicit in rayweave's local
+		// surface coordinates, so only the forward components are kept.
+		if s.decActive && (s.Decenter != types.DecenterStep{}) {
+			t.Decenter = []types.DecenterStep{s.Decenter}
+		}
+
 		if len(s.Coeffs) > 0 {
 			hasNonZero := false
 			maxOrder := 0
@@ -385,6 +412,11 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		last := result.Surfaces[len(result.Surfaces)-1]
 		result.ImageSurface = last.ID
 	}
+
+	// Convert folded mirror systems (REFL material, negative spacings) into
+	// rayweave's fold model before any EPD sizing or default filling so the
+	// downstream pipeline sees all-positive thicknesses.
+	convertFoldMirrors(result)
 
 	// CODE V EPD specifies the entrance pupil diameter; when the file carries
 	// no per-surface apertures, size the stop surface to it so the chief grid
@@ -594,6 +626,29 @@ func applyCodeVCompactOps(surf *codeVSurf, tokens []string) {
 				}
 				surf.Coeffs[asphereOrder(tokens[i])] = parseFloat(tokens[i+1])
 			}
+		}
+	}
+}
+
+// applyCodeVDecenterOps accumulates decenter components from a CODE V decenter
+// statement line. A line joins several statements with ';' (e.g.
+// "YDE 48.695345; ADE 8.438645"), so walk the tokens as keyword/value pairs
+// (parseFloat ignores a trailing ';').
+func applyCodeVDecenterOps(surf *codeVSurf, tokens []string) {
+	for i := 0; i+1 < len(tokens); i += 2 {
+		switch strings.ToUpper(tokens[i]) {
+		case "YDE":
+			surf.Decenter.Shift.Y = parseFloat(tokens[i+1])
+		case "XDE":
+			surf.Decenter.Shift.X = parseFloat(tokens[i+1])
+		case "ZDE":
+			surf.Decenter.Shift.Z = parseFloat(tokens[i+1])
+		case "ADE":
+			surf.Decenter.Tilt.X = parseFloat(tokens[i+1])
+		case "BDE":
+			surf.Decenter.Tilt.Y = parseFloat(tokens[i+1])
+		case "CDE":
+			surf.Decenter.Tilt.Z = parseFloat(tokens[i+1])
 		}
 	}
 }

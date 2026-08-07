@@ -88,6 +88,70 @@ func fillDefaults(result *ParseResult) {
 	zeroNegativeDummyThickness(result)
 }
 
+// mirrorFoldStep is the decenter step that folds a mirror in the beam frame:
+// a 180-degree Y tilt reflects the ray and the fold walk reverses the optical
+// axis for the following surfaces.
+var mirrorFoldStep = types.DecenterStep{
+	Tilt:    types.Vec3{X: 0, Y: 180, Z: 0},
+	Reflect: true,
+}
+
+// convertFoldMirrors converts CODE V / ZEMAX folded-mirror systems into
+// rayweave's fold model. Mirror surfaces (material REFL/MIRROR) gain the fold
+// decenter step and revert to the surrounding medium (AIR); surfaces in the
+// reflected frame (after an odd number of mirrors) have their curvature sign
+// negated and their (negative) thickness made positive, matching the reversed
+// Z axis of the fold. The mirror's own curvature is part of the reflected
+// frame, so it is sign-flipped too. Returns the number of mirrors converted.
+func convertFoldMirrors(result *ParseResult) int {
+	if result == nil {
+		return 0
+	}
+	reflected := make([]bool, len(result.Surfaces))
+	reflectCount := 0
+	converted := 0
+	for i := range result.Surfaces {
+		s := &result.Surfaces[i]
+		if isMirrorMaterial(s.Material) {
+			reflectCount++
+			s.Decenter = append(s.Decenter, mirrorFoldStep)
+			s.Material = "AIR"
+			converted++
+		}
+		if reflectCount%2 == 1 {
+			reflected[i] = true
+			s.Curvature = -s.Curvature
+			if s.Thickness < 0 {
+				s.Thickness = -s.Thickness
+			}
+		}
+	}
+	// Per-config thickness overrides for surfaces in the reflected frame carry
+	// the same reversed-axis spacing; normalise them the same way so that
+	// ConfigSurfaceSet never reintroduces a negative thickness downstream.
+	if reflectCount > 0 {
+		for cfg := range result.ConfigThickness {
+			for surfID, t := range result.ConfigThickness[cfg] {
+				idx := surfaceIndexByID(result.Surfaces, surfID)
+				if idx >= 0 && idx < len(reflected) && reflected[idx] && t < 0 {
+					result.ConfigThickness[cfg][surfID] = -t
+				}
+			}
+		}
+	}
+	return converted
+}
+
+// surfaceIndexByID returns the index of the surface with the given ID, or -1.
+func surfaceIndexByID(surfaces []types.Surface, id int) int {
+	for i := range surfaces {
+		if surfaces[i].ID == id {
+			return i
+		}
+	}
+	return -1
+}
+
 // zeroNegativeDummyThickness normalises the negative-spacing dummy-surface idiom
 // (a zero-power reference plane with a negative spacing) into rayweave's
 // all-positive, monotonic-Z model. A surface is a dummy only when it carries no
@@ -167,7 +231,7 @@ func addGlassEntry(result *ParseResult, mat string) {
 // glasses such as "___BLANK"); otherwise nd/vd are resolved from the
 // "nd:vd" label convention or the built-in catalog.
 func addGlassEntryNDV(result *ParseResult, mat string, nd, vd float64) {
-	if mat == "" || isAir(mat) {
+	if mat == "" || isAir(mat) || isMirrorMaterial(mat) {
 		return
 	}
 	for _, g := range result.GlassEntries {

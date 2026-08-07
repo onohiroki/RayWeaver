@@ -383,3 +383,112 @@ SURF 1
 		t.Errorf("expected 1 default field, got %d", len(result.Fields))
 	}
 }
+
+func TestZemax_MirrorFold(t *testing.T) {
+	// A two-mirror Cassegrain-like system: MIRROR material, negative spacing
+	// after the first mirror, positive after the second.
+	input := `SURF 1
+  TYPE STANDARD
+  CURV 0.0
+  THIC 16.0
+SURF 2
+  TYPE STANDARD
+  CURV -0.021872266966754158
+  THIC -16.0
+  GLAS MIRROR
+SURF 3
+  TYPE STANDARD
+  CURV -0.052083333333333336
+  THIC 24.035
+  GLAS MIRROR
+SURF 4
+  TYPE STANDARD
+  CURV 0.0
+  THIC 0.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) != 4 {
+		t.Fatalf("expected 4 surfaces, got %d", len(result.Surfaces))
+	}
+	// First mirror: curvature flipped, thickness positive, fold decenter.
+	m1 := result.Surfaces[1]
+	if math.Abs(m1.Curvature-0.021872266966754158) > 1e-15 {
+		t.Errorf("M1 curvature: expected +0.02187, got %g", m1.Curvature)
+	}
+	if m1.Thickness != 16.0 {
+		t.Errorf("M1 thickness: expected +16, got %g", m1.Thickness)
+	}
+	if m1.Material != "AIR" {
+		t.Errorf("M1 material: expected AIR, got %q", m1.Material)
+	}
+	if !m1.Reflects() {
+		t.Error("M1 should Reflects()")
+	}
+	// Second mirror: curvature NOT flipped (2nd reflection).
+	m2 := result.Surfaces[2]
+	if math.Abs(m2.Curvature+0.052083333333333336) > 1e-15 {
+		t.Errorf("M2 curvature: expected -0.05208 (not flipped), got %g", m2.Curvature)
+	}
+	if m2.Thickness != 24.035 {
+		t.Errorf("M2 thickness: expected 24.035, got %g", m2.Thickness)
+	}
+	if !m2.Reflects() {
+		t.Error("M2 should Reflects()")
+	}
+}
+
+func TestZemax_CoordBreakTransfer(t *testing.T) {
+	// A COORDBRK dummy with a tilt-about-X transform is removed and its
+	// transform is transferred to the next real surface.
+	input := `SURF 1
+  TYPE STANDARD
+  CURV 0.0
+  THIC 70.0
+SURF 2
+  TYPE COORDBRK
+  CURV 0.0
+  PARM 1 0
+  PARM 2 0
+  PARM 3 16.44
+  PARM 4 0
+  PARM 5 0
+  PARM 6 0
+  THIC 0
+SURF 3
+  TYPE STANDARD
+  CURV 0.006325110689437066
+  THIC 0.0
+  GLAS MIRROR
+SURF 4
+  TYPE STANDARD
+  CURV 0.0
+  THIC 0.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// COORDBRK surface is removed: 3 real surfaces remain.
+	if len(result.Surfaces) != 3 {
+		t.Fatalf("expected 3 surfaces (COORDBRK removed), got %d", len(result.Surfaces))
+	}
+	// The COORDBRK thickness is folded into the preceding surface.
+	if result.Surfaces[0].Thickness != 70.0 {
+		t.Errorf("surface 1 thickness: expected 70, got %g", result.Surfaces[0].Thickness)
+	}
+	// The mirror receives the transferred tilt (16.44 about X) as its first
+	// decenter step, followed by the fold.
+	m := result.Surfaces[1]
+	if len(m.Decenter) < 2 {
+		t.Fatalf("mirror should have COORDBRK tilt + fold, got %d steps", len(m.Decenter))
+	}
+	if math.Abs(m.Decenter[0].Tilt.X-16.44) > 1e-9 {
+		t.Errorf("COORDBRK tilt.X: expected 16.44, got %g", m.Decenter[0].Tilt.X)
+	}
+	if !m.Decenter[1].Reflect {
+		t.Error("mirror should have a reflect fold step")
+	}
+}

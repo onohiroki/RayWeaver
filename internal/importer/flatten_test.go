@@ -120,9 +120,16 @@ SURF 2
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A mirror (even planar) is a real fold, not a dummy.
-	if result.Surfaces[0].Thickness != -40.0 {
-		t.Errorf("mirror negative was zeroed: %g", result.Surfaces[0].Thickness)
+	// A mirror is a real fold, not a dummy: it becomes a reflect decenter
+	// surface whose (previously negative) thickness is made positive.
+	if result.Surfaces[0].Thickness != 40.0 {
+		t.Errorf("mirror thickness: expected +40 (folded), got %g", result.Surfaces[0].Thickness)
+	}
+	if !result.Surfaces[0].Reflects() {
+		t.Error("mirror surface should carry a reflect decenter step")
+	}
+	if result.Surfaces[0].Material != "AIR" {
+		t.Errorf("mirror material: expected AIR, got %q", result.Surfaces[0].Material)
 	}
 }
 

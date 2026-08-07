@@ -77,11 +77,35 @@ func ParseZemax(input string) (*ParseResult, error) {
 	}
 
 	seenIDs := make(map[int]bool)
+	var pendingDecenter types.DecenterStep
+	var pendingTiltFirst bool
+	var pendingHas bool
 	for _, sp := range surfParams {
 		if seenIDs[sp.ID] {
 			continue
 		}
 		seenIDs[sp.ID] = true
+
+		// A COORDBRK surface is a zero-power dummy that carries a coordinate
+		// break for the following surfaces. It is removed from the surface
+		// list; its decenter/tilt transform is transferred to the next real
+		// surface and its (usually zero) thickness is folded into the
+		// preceding surface.
+		if strings.EqualFold(sp.SurfaceType, "COORDBRK") {
+			pendingDecenter = types.DecenterStep{
+				Shift: types.Vec3{X: sp.Parms[1], Y: sp.Parms[2]},
+				Tilt:  types.Vec3{X: sp.Parms[3], Y: sp.Parms[4], Z: sp.Parms[5]},
+			}
+			pendingTiltFirst = sp.coordBreakOrder()
+			pendingHas = true
+			if len(result.Surfaces) > 0 {
+				last := &result.Surfaces[len(result.Surfaces)-1]
+				if sp.Thickness != 0 {
+					last.Thickness += sp.Thickness
+				}
+			}
+			continue
+		}
 
 		s := types.Surface{
 			ID:        sp.ID,
@@ -121,10 +145,34 @@ func ParseZemax(input string) (*ParseResult, error) {
 		}
 		s.Material = mat
 
+		// A pending COORDBRK transform applies to this surface: tilts before
+		// decenters (PARM 6 = 1) or decenters before tilts (default) map onto
+		// the DecenterStep's internal Tilt/Shift ordering.
+		if pendingHas {
+			step := pendingDecenter
+			if pendingTiltFirst {
+				// Tilt-first: a single DecenterStep applies translation then
+				// rotation, so express the reversed order as a tilt step
+				// followed by a shift step.
+				s.Decenter = []types.DecenterStep{
+					{Tilt: step.Tilt},
+					{Shift: step.Shift},
+				}
+			} else {
+				s.Decenter = []types.DecenterStep{step}
+			}
+			pendingHas = false
+		}
+
 		if sp.ID != 0 {
 			result.Surfaces = append(result.Surfaces, s)
 		}
 	}
+
+	// Convert folded mirror systems (MIRROR material, negative spacings) into
+	// rayweave's fold model before defaults are filled so the downstream
+	// pipeline sees all-positive thicknesses.
+	convertFoldMirrors(result)
 
 	if len(result.Surfaces) > 0 {
 		last := result.Surfaces[len(result.Surfaces)-1]
@@ -147,6 +195,17 @@ type zemaxSurface struct {
 	Parms       map[int]float64
 	InlineND    float64
 	InlineVD    float64
+
+	// Decenter holds the coordinate-break transform of a COORDBRK surface
+	// (PARM 1..6: decenter X/Y, tilt about X/Y/Z, order). It is transferred
+	// to the next real surface when the COORDBRK dummy is removed.
+	Decenter types.DecenterStep
+}
+
+// coordBreakOrder reports whether a ZEMAX COORDBRK applies tilts before
+// decenters (PARM 6 = 1) rather than the default decenters-then-tilts.
+func (s *zemaxSurface) coordBreakOrder() bool {
+	return s.Parms[6] == 1
 }
 
 func parseZemaxSurfaceParam(s *zemaxSurface, keyword string, args []string) {

@@ -1067,3 +1067,140 @@ END
 	}
 }
 
+// TestCodeV_SchmidtFold verifies the Schmidt-camera mirror system: a REFL
+// surface with a negative spacing is converted into a fold decenter step, the
+// mirror and following surfaces get their curvature sign flipped (odd
+// reflection count), and all thicknesses become positive.
+func TestCodeV_SchmidtFold(t *testing.T) {
+	input := `RDM N;LEN "VERSION: 10.7"
+SEQ
+SO 0 100
+S 0.000562598189395594 6.30393959108 569.631
+S 0.0 170.946831705
+S -0.004721047778140267 -96.2601569305 REFL
+S -0.02441573206343559 -5.94371447159 569.631
+S 0.0 -1.731355379851178
+SI 0.0 0.0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Corrector and air space keep their signs.
+	if math.Abs(result.Surfaces[0].Curvature-0.000562598189395594) > 1e-15 {
+		t.Errorf("corrector curvature changed: %g", result.Surfaces[0].Curvature)
+	}
+	// Mirror: curvature flipped, thickness positive, fold decenter, material AIR.
+	m := result.Surfaces[2]
+	if math.Abs(m.Curvature-0.004721047778140267) > 1e-15 {
+		t.Errorf("mirror curvature: expected +0.004721, got %g", m.Curvature)
+	}
+	if m.Thickness != 96.2601569305 {
+		t.Errorf("mirror thickness: expected +96.26, got %g", m.Thickness)
+	}
+	if m.Material != "AIR" {
+		t.Errorf("mirror material: expected AIR, got %q", m.Material)
+	}
+	if !m.Reflects() {
+		t.Error("mirror should Reflects()")
+	}
+	// Field lens after mirror: curvature flipped too.
+	if math.Abs(result.Surfaces[3].Curvature-0.02441573206343559) > 1e-15 {
+		t.Errorf("field lens curvature: expected +0.0244, got %g", result.Surfaces[3].Curvature)
+	}
+	// All thicknesses positive.
+	for _, s := range result.Surfaces {
+		if s.Thickness < 0 {
+			t.Errorf("surface %d: negative thickness after fold: %g", s.ID, s.Thickness)
+		}
+	}
+}
+
+// TestCodeV_ThreeMirrorFolds verifies curvature sign alternation across three
+// mirrors: flip on the 1st, keep on the 2nd, flip on the 3rd.
+func TestCodeV_ThreeMirrorFolds(t *testing.T) {
+	input := `SEQ
+SO 0 100
+S 0 300.000000
+S -1058.98937 -276.006853 REFL
+CON
+K -1.314566
+S 0 -0.981318
+S -324.06500 319.160560 REFL
+CON
+K 0.889123
+S -453.96516 -321.621031 REFL
+ASP
+K 0.226106; A 0.368950E-10
+SI 0 15.407921
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) != 6 {
+		t.Fatalf("expected 6 surfaces, got %d", len(result.Surfaces))
+	}
+	// M1: flipped.
+	if !result.Surfaces[1].Reflects() {
+		t.Error("M1 should Reflects()")
+	}
+	if result.Surfaces[1].Curvature <= 0 {
+		t.Errorf("M1 curvature: expected positive (flipped), got %g", result.Surfaces[1].Curvature)
+	}
+	// M2: not flipped (second reflection).
+	if !result.Surfaces[3].Reflects() {
+		t.Error("M2 should Reflects()")
+	}
+	if result.Surfaces[3].Curvature >= 0 {
+		t.Errorf("M2 curvature: expected negative (not flipped), got %g", result.Surfaces[3].Curvature)
+	}
+	// M3: flipped.
+	if !result.Surfaces[4].Reflects() {
+		t.Error("M3 should Reflects()")
+	}
+	if result.Surfaces[4].Curvature <= 0 {
+		t.Errorf("M3 curvature: expected positive (flipped), got %g", result.Surfaces[4].Curvature)
+	}
+	// All thicknesses positive.
+	for _, s := range result.Surfaces {
+		if s.Thickness < 0 {
+			t.Errorf("surface %d: negative thickness after fold: %g", s.ID, s.Thickness)
+		}
+	}
+}
+
+// TestCodeV_DARDecenter verifies that CODE V DAR/YDE/ADE statements become a
+// per-surface DecenterStep on the preceding surface.
+func TestCodeV_DARDecenter(t *testing.T) {
+	input := `SEQ
+SO 0 100
+S -1058.98937 -276.006853 REFL
+DAR
+YDE 48.695345; ADE 8.438645
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := result.Surfaces[0]
+	if len(m.Decenter) == 0 {
+		t.Fatal("mirror should carry a decenter")
+	}
+	// First step: DAR decenter (shift Y, tilt X).
+	if math.Abs(m.Decenter[0].Shift.Y-48.695345) > 1e-9 {
+		t.Errorf("DAR shift.Y: expected 48.695345, got %g", m.Decenter[0].Shift.Y)
+	}
+	if math.Abs(m.Decenter[0].Tilt.X-8.438645) > 1e-9 {
+		t.Errorf("DAR tilt.X: expected 8.438645, got %g", m.Decenter[0].Tilt.X)
+	}
+	// Second step: the mirror fold.
+	if len(m.Decenter) < 2 || !m.Decenter[1].Reflect {
+		t.Error("mirror should have a reflect fold step after the DAR decenter")
+	}
+}
+
