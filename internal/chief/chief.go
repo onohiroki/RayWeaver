@@ -564,8 +564,10 @@ func backwardChiefOrigin(
 	origin := emPos.Add(fwdObj.Scale((zStart - emPos.Z) / fwdObj.Z))
 
 	// Validate the forward chief ray actually passes through the stop centre
-	// (within a micron); a backward trace that does not close means the
-	// construction is unreliable, so fall back to the forward search.
+	// (within a micron). A failure after the stop is acceptable only at the
+	// image surface (an off-axis image landing outside the detector aperture);
+	// a mid-lens failure means the construction is unreliable, so fall back to
+	// the forward search.
 	probe := types.Ray{
 		Wavelength: wavelength,
 		Initial:    types.RayState{Origin: origin, Direction: fwdObj},
@@ -573,16 +575,27 @@ func backwardChiefOrigin(
 		Jones:      types.NewCircularJones(true),
 	}
 	pres := engine.TraceRay(probe, surfaces)
-	if pres.Error != "" {
-		return types.Vec3{}, types.Vec3{}, false
-	}
+	reachedStop := false
 	for i := range pres.Surfaces {
 		if pres.Surfaces[i].SurfaceID == stopID {
 			hit := pres.Surfaces[i].Position
 			if math.Hypot(hit.X-stopCenter.X, hit.Y-stopCenter.Y) > 1e-3 {
 				return types.Vec3{}, types.Vec3{}, false
 			}
+			reachedStop = true
 			break
+		}
+	}
+	if !reachedStop {
+		return types.Vec3{}, types.Vec3{}, false
+	}
+	if pres.Error != "" && len(path) >= 2 {
+		lastReached := -1
+		if len(pres.Surfaces) > 0 {
+			lastReached = pres.Surfaces[len(pres.Surfaces)-1].SurfaceID
+		}
+		if lastReached != path[len(path)-2] {
+			return types.Vec3{}, types.Vec3{}, false
 		}
 	}
 	return origin, fwdObj, true
@@ -665,7 +678,7 @@ func backwardChiefObjectPoint(
 	}
 
 	bwd := types.Vec3{X: uX, Y: uY, Z: -1}.Normalize()
-	emPos, emDir, ok := engine.TraceBackward(surfaces, frontSeq, stopCenter, bwd, wavelength)
+	_, emDir, ok := engine.TraceBackward(surfaces, frontSeq, stopCenter, bwd, wavelength)
 	if !ok {
 		return types.Vec3{}, types.Vec3{}, false
 	}
@@ -675,7 +688,9 @@ func backwardChiefObjectPoint(
 	}
 
 	// Validate the forward chief ray from the object point passes through the
-	// stop centre (within a micron).
+	// stop centre (within a micron). A failure after the stop is acceptable only
+	// at the image surface; a mid-lens failure means the construction is
+	// unreliable, so fall back.
 	probe := types.Ray{
 		Wavelength: wavelength,
 		Initial:    types.RayState{Origin: objectPoint, Direction: fwdDir},
@@ -683,19 +698,29 @@ func backwardChiefObjectPoint(
 		Jones:      types.NewCircularJones(true),
 	}
 	pres := engine.TraceRay(probe, surfaces)
-	if pres.Error != "" {
-		return types.Vec3{}, types.Vec3{}, false
-	}
+	reachedStop := false
 	for i := range pres.Surfaces {
 		if pres.Surfaces[i].SurfaceID == stopID {
 			hit := pres.Surfaces[i].Position
 			if math.Hypot(hit.X-stopCenter.X, hit.Y-stopCenter.Y) > 1e-3 {
 				return types.Vec3{}, types.Vec3{}, false
 			}
+			reachedStop = true
 			break
 		}
 	}
-	_ = emPos
+	if !reachedStop {
+		return types.Vec3{}, types.Vec3{}, false
+	}
+	if pres.Error != "" && len(path) >= 2 {
+		lastReached := -1
+		if len(pres.Surfaces) > 0 {
+			lastReached = pres.Surfaces[len(pres.Surfaces)-1].SurfaceID
+		}
+		if lastReached != path[len(path)-2] {
+			return types.Vec3{}, types.Vec3{}, false
+		}
+	}
 	return objectPoint, fwdDir, true
 }
 
