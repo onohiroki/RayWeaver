@@ -1,5 +1,15 @@
 # RayWeave — agents guide
 
+## Working rules
+
+- On the `develop` branch, do **not** commit (or amend, rebase, push, or otherwise
+  rewrite history) until the user explicitly asks you to commit. Keep the working
+  tree changes staged/untracked and report what is ready to commit.
+- While working on `develop`, do **not** modify the `main` branch and do **not**
+  push to GitHub (`origin`). Work stays on `develop` (gitea `private` unless told
+  otherwise).
+- Re-timestamping commits and force-pushing require explicit user approval.
+
 ## Build & run
 
 ```sh
