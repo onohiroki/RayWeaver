@@ -414,3 +414,53 @@ func TestLongitudinalAberration(t *testing.T) {
 		})
 	}
 }
+
+// TestBackwardChiefObjectPoint verifies the finite-conjugate (object-height)
+// backward construction: the forward chief ray from the object point must pass
+// through the stop centre.
+func TestBackwardChiefObjectPoint(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: "N-BK7", Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 10.0},
+	}
+	surface.Precompute(surfaces)
+	e := ray.NewEngine(gc, nil)
+	path := []int{0, 1, 2, 3}
+	const wl = 0.00058756
+	const objectZ = -100.0
+
+	for _, h := range []float64{3.0, 5.0, -4.0} {
+		op, dir, ok := backwardChiefObjectPoint(e, surfaces, path, 3, types.Vec3{}, h, 0, 1, objectZ, wl)
+		if !ok {
+			t.Fatalf("h=%v: backwardChiefObjectPoint failed", h)
+		}
+		if math.Abs(op.Y-h) > 1e-9 || op.Z != objectZ {
+			t.Errorf("h=%v: object point = (%v,%v,%v), want Y=%v Z=%v", h, op.X, op.Y, op.Z, h, objectZ)
+		}
+		fwd := types.Ray{
+			Wavelength: wl,
+			Initial:    types.RayState{Origin: op, Direction: dir},
+			Path:       path,
+			Jones:      types.NewCircularJones(true),
+		}
+		res := e.TraceRay(fwd, surfaces)
+		if res.Error != "" {
+			t.Fatalf("h=%v: forward ray failed: %v", h, res.Error)
+		}
+		var stopHit *types.SurfaceResult
+		for i := range res.Surfaces {
+			if res.Surfaces[i].SurfaceID == 3 {
+				stopHit = &res.Surfaces[i]
+			}
+		}
+		if stopHit == nil {
+			t.Fatalf("h=%v: no stop hit", h)
+		}
+		if dist := math.Hypot(stopHit.Position.X, stopHit.Position.Y); dist > 1e-3 {
+			t.Errorf("h=%v: stop miss %v mm", h, dist)
+		}
+	}
+}
