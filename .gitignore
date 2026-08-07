@@ -19,6 +19,7 @@
 .aiignore
 GLASS/*.agf
 GLASS/*.AGF
+GLASS/database/
 samples/*.txt
 samples/*.jsonl
 samples/*.svg
