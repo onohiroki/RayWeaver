@@ -4,6 +4,9 @@ import (
 	"math"
 	"os"
 	"testing"
+
+	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/types"
 )
 
 func parseSEQ(t *testing.T, path string) *ParseResult {
@@ -413,6 +416,226 @@ si 0 0
 	// Lowercase "sto" marks the current surface as the stop.
 	if result.StopSurface != 2 {
 		t.Errorf("stop surface: expected 2, got %d", result.StopSurface)
+	}
+}
+
+func TestCodeV_EPDDiameter(t *testing.T) {
+	input := `SEQ
+EPD 50.0
+S 100 5 1.5:60
+S -50 10
+STO
+S 200 2
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The stop surface gets the EPD as its aperture when no diameter is given.
+	if result.StopSurface != 2 {
+		t.Fatalf("stop surface: expected 2, got %d", result.StopSurface)
+	}
+	if result.EntrancePupilDiameter != 50.0 {
+		t.Errorf("entrance pupil diameter: expected 50.0, got %g", result.EntrancePupilDiameter)
+	}
+	if result.Surfaces[1].Diameter != 50.0 {
+		t.Errorf("stop surface diameter: expected 50.0, got %g", result.Surfaces[1].Diameter)
+	}
+}
+
+func TestCodeV_EPDNotOverrideExplicitAperture(t *testing.T) {
+	input := `SEQ
+EPD 50.0
+S 100 5 1.5:60
+  CIR 20.0
+STO
+S 200 2
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Surfaces[0].Diameter != 40.0 {
+		t.Errorf("explicit CIR aperture overwritten by EPD: got %g", result.Surfaces[0].Diameter)
+	}
+}
+
+func TestCodeV_CIREDGDoesNotClobberClearAperture(t *testing.T) {
+	input := `SEQ
+S 100 5 1.5:60
+  CIR 6.0
+  CIR EDG 7.0
+S -50 10
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The clear CIR wins; EDG (edge) is a fallback that cannot zero it.
+	if result.Surfaces[0].Diameter != 12.0 {
+		t.Errorf("surface 1 diameter: expected 12.0 (clear CIR), got %g", result.Surfaces[0].Diameter)
+	}
+}
+
+func TestCodeV_PRVTubulatedGlass(t *testing.T) {
+	input := `RDM;LEN "test"
+PRV
+  PWL 656.3 587.6 486.1
+  'XYZ' 1.50 1.51 1.52
+END
+SO 0.0 0.1e14
+S 100 5 'XYZ'
+SI 0 0
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *types.Glass
+	for i := range result.GlassEntries {
+		if result.GlassEntries[i].Label == "XYZ" {
+			found = &result.GlassEntries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("XYZ glass not registered")
+	}
+	if found.Type != types.GlassTypeTabulated {
+		t.Errorf("XYZ type: expected tabulated, got %s", found.Type)
+	}
+	if len(found.RefractiveIndices) != 3 {
+		t.Fatalf("XYZ table len: expected 3, got %d", len(found.RefractiveIndices))
+	}
+	// PWL values (nm) become millimetres in the table (internal ray unit).
+	if found.RefractiveIndices[1].Wavelength != 0.0005876 {
+		t.Errorf("table wavelength 1: expected 0.0005876, got %g", found.RefractiveIndices[1].Wavelength)
+	}
+	if found.RefractiveIndices[1].Value != 1.51 {
+		t.Errorf("table index 1: expected 1.51, got %g", found.RefractiveIndices[1].Value)
+	}
+}
+
+func TestCodeV_PRVAfterSEQ(t *testing.T) {
+	input := `SEQ
+PRV
+  PWL 656.3 587.6 486.1
+  'XYZ' 1.50 1.51 1.52
+END
+S 100 5 'XYZ'
+S -50 10
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) != 3 {
+		t.Fatalf("expected 3 surfaces, got %d", len(result.Surfaces))
+	}
+	var found *types.Glass
+	for i := range result.GlassEntries {
+		if result.GlassEntries[i].Label == "XYZ" {
+			found = &result.GlassEntries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("XYZ glass not registered from a PRV block after the SEQ keyword")
+	}
+	if found.Type != types.GlassTypeTabulated {
+		t.Errorf("XYZ type: expected tabulated, got %s", found.Type)
+	}
+}
+
+func TestCodeV_PRVIndex(t *testing.T) {
+	input := `SEQ
+PRV
+  PWL 656.3 587.6 486.1
+  'XYZ' 1.50 1.51 1.52
+END
+S 100 5 'XYZ'
+S -50 10
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *types.Glass
+	for i := range result.GlassEntries {
+		if result.GlassEntries[i].Label == "XYZ" {
+			found = &result.GlassEntries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("XYZ glass not registered")
+	}
+	// At 587.6nm (0.0005876 mm) the tabulated value is an exact knot: 1.51.
+	n, err := glass.CalcRefractiveIndex(found, 0.0005876)
+	if err != nil {
+		t.Fatalf("CalcRefractiveIndex: %v", err)
+	}
+	if math.Abs(n-1.51) > 1e-6 {
+		t.Errorf("XYZ index at 587.6nm: expected 1.51, got %g", n)
+	}
+	// A wavelength between knots interpolates (656.3..587.6 -> ~1.505).
+	nMid, err := glass.CalcRefractiveIndex(found, 0.00062)
+	if err != nil {
+		t.Fatalf("CalcRefractiveIndex mid: %v", err)
+	}
+	if nMid < 1.50 || nMid > 1.51 {
+		t.Errorf("XYZ index at 620nm: expected between 1.50 and 1.51, got %g", nMid)
+	}
+}
+
+func TestCodeV_PRVFormulaGlass(t *testing.T) {
+	input := `SEQ
+PRV
+  PWL 550.0
+  'NOA61' LAU 2.36390625 0.0 0.025493134 -0.000580235 -3.49933e-6 4.45404e-8
+END
+S 100 5 'NOA61'
+S -50 10
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *types.Glass
+	for i := range result.GlassEntries {
+		if result.GlassEntries[i].Label == "NOA61" {
+			found = &result.GlassEntries[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("NOA61 formula glass not registered")
+	}
+	if found.DispersionFormula != types.Laurent {
+		t.Errorf("NOA61 formula: expected laurent, got %s", found.DispersionFormula)
+	}
+	if len(found.Coefficients) != 6 {
+		t.Fatalf("NOA61 coefficients: expected 6, got %d", len(found.Coefficients))
+	}
+	// The Laurent formula evaluates to n ≈ 1.56 at 587.6 nm (0.0005876 mm).
+	n, err := glass.CalcRefractiveIndex(found, 0.0005876)
+	if err != nil {
+		t.Fatalf("CalcRefractiveIndex: %v", err)
+	}
+	if math.Abs(n-1.5597) > 0.001 {
+		t.Errorf("NOA61 index at 587.6nm: expected ~1.5597, got %g", n)
 	}
 }
 

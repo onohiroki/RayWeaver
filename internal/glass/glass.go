@@ -202,6 +202,8 @@ func CalcRefractiveIndex(g *types.Glass, wavelength float64) (float64, error) {
 			return extended3(g.Coefficients, wavelength*1000)
 		case types.Extended2:
 			return extended2(g.Coefficients, wavelength*1000)
+		case types.Laurent:
+			return laurent(g.Coefficients, wavelength*1000)
 		case types.Constant:
 			return g.ND, nil
 		default:
@@ -258,6 +260,26 @@ func schott(coeffs []float64, lambda float64) (float64, error) {
 	n2 := coeffs[0] + coeffs[1]*lsq + coeffs[2]*l2 + coeffs[3]*l4 + coeffs[4]*l6 + coeffs[5]*l8
 	if n2 <= 0 {
 		return 0, fmt.Errorf("invalid schott result")
+	}
+	return math.Sqrt(n2), nil
+}
+
+// laurent evaluates the Laurent dispersion formula (CODE V "LAU", also the
+// classic Schott polynomial) with coefficients in µm wavelength units:
+//
+//	n² = A₀ + A₁λ² + A₂/λ² + A₃/λ⁴ + A₄/λ⁶ + A₅/λ⁸
+func laurent(coeffs []float64, lambda float64) (float64, error) {
+	if len(coeffs) < 6 {
+		return 0, fmt.Errorf("laurent requires 6 coefficients")
+	}
+	lsq := lambda * lambda
+	l2 := 1.0 / lsq
+	l4 := l2 * l2
+	l6 := l4 * l2
+	l8 := l6 * l2
+	n2 := coeffs[0] + coeffs[1]*lsq + coeffs[2]*l2 + coeffs[3]*l4 + coeffs[4]*l6 + coeffs[5]*l8
+	if n2 <= 0 {
+		return 0, fmt.Errorf("invalid laurent result")
 	}
 	return math.Sqrt(n2), nil
 }

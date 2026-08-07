@@ -15,6 +15,11 @@ type ParseResult struct {
 	GlassEntries []types.Glass
 	FNO          float64
 
+	// EntrancePupilDiameter is the CODE V EPD (entrance pupil diameter) header
+	// value, applied to the stop surface aperture when the file carries no
+	// per-surface diameters.
+	EntrancePupilDiameter float64
+
 	// FieldType is the ZEMAX system field type (FTYP code) controlling how the
 	// YFLN/XFLN values are interpreted: 0 = angle (deg), 1 = object height,
 	// 2 = paraxial image height, 3 = real image height. Defaults to 0 (angle)

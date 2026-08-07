@@ -190,21 +190,43 @@ func addGlassEntryNDV(result *ParseResult, mat string, nd, vd float64) {
 	result.GlassEntries = append(result.GlassEntries, entry)
 }
 
-// decodeDispersionCode decodes a ZEMAX/OSLO 6-digit glass code "nnnvvv" into
-// nd = 1.nnn and vd = vv.v (e.g. 748523 -> nd 1.748, vd 52.3). Returns ok=false
-// when the label is not a 6-digit code.
+// decodeDispersionCode decodes a glass code into nd = 1.nnn and vd = vv.v.
+// The bare ZEMAX/OSLO 6-digit form is "nnnvvv" (e.g. 748523 -> 1.748/52.3);
+// CODE V writes the same digits with a separator dot, padding each half with
+// zeros (e.g. "500.700" -> 1.500/70.0, "517000.520000" -> 1.517/52.0).
 func decodeDispersionCode(code string) (nd, vd float64, ok bool) {
-	if len(code) != 6 {
-		return 0, 0, false
-	}
-	for _, r := range code {
-		if r < '0' || r > '9' {
+	ndStr, vdStr := "", ""
+	if i := strings.IndexByte(code, '.'); i >= 0 {
+		ndStr, vdStr = code[:i], code[i+1:]
+	} else {
+		if len(code) != 6 {
 			return 0, 0, false
 		}
+		ndStr, vdStr = code[:3], code[3:]
 	}
-	nd = 1 + parseFloat(code[0:3])/1000.0
-	vd = parseFloat(code[3:6]) / 10.0
-	return nd, vd, true
+	nd3, ok1 := leadingDigits(ndStr)
+	vd3, ok2 := leadingDigits(vdStr)
+	if !ok1 || !ok2 {
+		return 0, 0, false
+	}
+	return 1 + nd3/1000.0, vd3 / 10.0, true
+}
+
+// leadingDigits returns the value of the leading run of up to three digits.
+func leadingDigits(s string) (float64, bool) {
+	var d float64
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			break
+		}
+		if n >= 3 {
+			break
+		}
+		d = d*10 + float64(r-'0')
+		n++
+	}
+	return d, n > 0
 }
 
 // ConfigSurfaceSet returns the surfaces for a given config index: the base

@@ -46,6 +46,7 @@ const (
 	Extended2  DispersionFormula = "extended_2"
 	Extended3  DispersionFormula = "extended_3"
 	Constant   DispersionFormula = "constant"
+	Laurent    DispersionFormula = "laurent"
 )
 
 // DefaultWavelength is the fallback design wavelength (587.56 nm) in mm.

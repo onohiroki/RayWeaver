@@ -36,6 +36,8 @@ func ParseCodeV(input string) (*ParseResult, error) {
 	compactCounter := 0
 	lastSurfNum := 0
 	inAspBlock := false
+	inPrv := false
+	var prvWavelengths []float64
 
 	for _, raw := range lines {
 		line := strings.TrimSpace(raw)
@@ -54,6 +56,13 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		// CODE V is case-insensitive; dispatch on the uppercased keyword while
 		// keeping the raw tokens for values and material labels.
 		first := strings.ToUpper(tokens[0])
+
+		// A partial-wavelength (PRV) block may precede or follow the lens
+		// data; handle it before any keyword dispatch so PWL/glass rows and
+		// the block-closing END are never parsed as surfaces or terminators.
+		if parseCodeVPRVLine(upper, tokens, result, &inPrv, &prvWavelengths) {
+			continue
+		}
 
 		if beforeLens {
 			if upper == "SEQ" || strings.HasPrefix(upper, "SEQ ") {
@@ -174,10 +183,18 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		}
 
 		if first == "CIR" && len(tokens) >= 2 {
-			d := parseFloat(tokens[1]) * 2
 			if lastSurfNum > 0 {
 				surf := getOrCreate(surfMap, lastSurfNum)
-				surf.Diameter = d
+				if strings.EqualFold(tokens[1], "EDG") {
+					// Edge aperture: a mechanical edge spec, never the optical
+					// clear aperture. Use it only as a fallback so it cannot
+					// clobber a preceding clear CIR with a zero.
+					if surf.Diameter == 0 && len(tokens) >= 3 {
+						surf.Diameter = parseFloat(tokens[2]) * 2
+					}
+				} else {
+					surf.Diameter = parseFloat(tokens[1]) * 2
+				}
 			}
 			inAspBlock = false
 			continue
@@ -265,6 +282,9 @@ func ParseCodeV(input string) (*ParseResult, error) {
 				s.Diameter *= 25.4
 			}
 		}
+		if result.EntrancePupilDiameter > 0 {
+			result.EntrancePupilDiameter *= 25.4
+		}
 	}
 
 	lastID := 0
@@ -340,6 +360,20 @@ func ParseCodeV(input string) (*ParseResult, error) {
 	if len(result.Surfaces) > 0 {
 		last := result.Surfaces[len(result.Surfaces)-1]
 		result.ImageSurface = last.ID
+	}
+
+	// CODE V EPD specifies the entrance pupil diameter; when the file carries
+	// no per-surface apertures, size the stop surface to it so the chief grid
+	// radius resolves. (The stop surface defaults to 1 for codev.)
+	if result.EntrancePupilDiameter > 0 {
+		for i := range result.Surfaces {
+			if result.Surfaces[i].ID == result.StopSurface {
+				if result.Surfaces[i].Diameter == 0 {
+					result.Surfaces[i].Diameter = result.EntrancePupilDiameter
+				}
+				break
+			}
+		}
 	}
 
 	fillDefaults(result)
@@ -450,6 +484,10 @@ func parseCodeVHeader(upper string, tokens []string, result *ParseResult, inchMo
 		result.FNO = parseFloat(tokens[1])
 		return true
 	}
+	if strings.HasPrefix(upper, "EPD ") && len(tokens) >= 2 {
+		result.EntrancePupilDiameter = parseFloat(tokens[1])
+		return true
+	}
 	if strings.HasPrefix(upper, "DIM ") && len(tokens) >= 2 {
 		if strings.ToUpper(tokens[1]) == "I" {
 			*inchMode = true
@@ -541,4 +579,116 @@ func parseCodeVSurfNum(s string) int {
 		return -1
 	}
 	return n
+}
+
+// parseCodeVPRVLine handles one line of a CODE V partial-wavelength (PRV)
+// block: "PRV" enters the block, "PWL <wavelengths>" records the reference
+// wavelengths (nm), each following "<glass> <index per wavelength>" row
+// registers a tabulated glass, and "END" leaves the block. Returns handled=true
+// for any consumed line so the caller skips normal keyword parsing (including
+// the block-closing END, which must not terminate the lens).
+func parseCodeVPRVLine(upper string, tokens []string, result *ParseResult, inPrv *bool, prvWavelengths *[]float64) bool {
+	if *inPrv {
+		if strings.HasPrefix(upper, "PWL ") {
+			*prvWavelengths = parseCodeVPRVWavelengths(tokens[1:])
+		} else if upper == "END" || strings.HasPrefix(upper, "END ") {
+			*inPrv = false
+		} else if len(*prvWavelengths) > 0 && len(tokens) >= 2 {
+			// A row is either "<glass> <index per wavelength>" (table form) or
+			// "<glass> <formula-type> <coeffs...>" (dispersion-formula form,
+			// e.g. "NOA61 LAU 2.36390625 ..."). A non-numeric second token
+			// selects the formula form.
+			name := strings.Trim(strings.TrimSpace(tokens[0]), "'\"")
+			if formula, ok := codeVFormulaType(tokens[1]); ok {
+				coeffs := make([]float64, 0, len(tokens)-2)
+				for _, tok := range tokens[2:] {
+					coeffs = append(coeffs, parseFloat(tok))
+				}
+				addFormulaGlass(result, name, formula, coeffs)
+			} else if parseFloat(tokens[1]) > 1 {
+				indices := make([]float64, 0, len(tokens)-1)
+				for _, tok := range tokens[1:] {
+					indices = append(indices, parseFloat(tok))
+				}
+				if len(indices) == len(*prvWavelengths) {
+					addTabulatedGlass(result, name, *prvWavelengths, indices)
+				}
+			}
+		}
+		return true
+	}
+	if upper == "PRV" || strings.HasPrefix(upper, "PRV ") {
+		*inPrv = true
+		return true
+	}
+	return false
+}
+
+// parseCodeVPRVWavelengths converts a CODE V PRV "PWL" row (wavelengths in nm)
+// into millimetres, the internal ray-trace wavelength unit.
+func parseCodeVPRVWavelengths(tokens []string) []float64 {
+	out := make([]float64, 0, len(tokens))
+	for _, tok := range tokens {
+		nm := parseFloat(tok)
+		if nm > 0 {
+			out = append(out, nm/1e6)
+		}
+	}
+	return out
+}
+
+// addTabulatedGlass registers a partial-wavelength glass (CODE V PRV rows) as a
+// tabulated dispersion entry, deduplicating by case-insensitive label.
+func addTabulatedGlass(result *ParseResult, name string, wavelengths []float64, indices []float64) {
+	if name == "" {
+		return
+	}
+	for _, g := range result.GlassEntries {
+		if strings.EqualFold(g.Label, name) {
+			return
+		}
+	}
+	table := make(types.RefractiveIndexTable, len(wavelengths))
+	for i := range wavelengths {
+		table[i] = types.RefractiveIndexEntry{Wavelength: wavelengths[i], Value: indices[i]}
+	}
+	result.GlassEntries = append(result.GlassEntries, types.Glass{
+		Type:              types.GlassTypeTabulated,
+		Key:               name,
+		Label:             name,
+		RefractiveIndices: table,
+	})
+}
+
+// codeVFormulaType maps a CODE V PRV dispersion-formula keyword to the internal
+// DispersionFormula, reporting ok=false for unrecognised types. The Laurent
+// ("LAU") and classic Schott polynomial share the same coefficient layout
+// n² = A₀ + A₁λ² + A₂/λ² + A₃/λ⁴ + A₄/λ⁶ + A₅/λ⁸.
+func codeVFormulaType(kw string) (types.DispersionFormula, bool) {
+	switch strings.ToUpper(kw) {
+	case "LAU", "GML":
+		return types.Laurent, true
+	default:
+		return "", false
+	}
+}
+
+// addFormulaGlass registers a CODE V PRV dispersion-formula glass (e.g.
+// "NOA61 LAU <coeffs>"), deduplicating by case-insensitive label.
+func addFormulaGlass(result *ParseResult, name string, formula types.DispersionFormula, coeffs []float64) {
+	if name == "" || len(coeffs) == 0 {
+		return
+	}
+	for _, g := range result.GlassEntries {
+		if strings.EqualFold(g.Label, name) {
+			return
+		}
+	}
+	result.GlassEntries = append(result.GlassEntries, types.Glass{
+		Type:              types.GlassTypeCatalog,
+		Key:               name,
+		Label:             name,
+		DispersionFormula: formula,
+		Coefficients:      coeffs,
+	})
 }

@@ -231,6 +231,31 @@ func TestSellmeier1InvalidCoeffs(t *testing.T) {
 	}
 }
 
+func TestLaurent(t *testing.T) {
+	// CODE V "LAU" coefficients for NOA61 (adhesive) from a PRV block.
+	coeffs := []float64{2.36390625, 0.0, 0.025493134, -0.000580235, -3.49933e-6, 4.45404e-8}
+	// n² = A₀ + A₁λ² + A₂/λ² + A₃/λ⁴ + A₄/λ⁶ + A₅/λ⁸, λ in µm.
+	lsq := 0.58756 * 0.58756
+	want := math.Sqrt(coeffs[0] + coeffs[2]/lsq + coeffs[3]/(lsq*lsq) + coeffs[4]/(lsq*lsq*lsq) + coeffs[5]/(lsq*lsq*lsq*lsq))
+	n, err := laurent(coeffs, 0.58756)
+	if err != nil {
+		t.Fatalf("laurent: %v", err)
+	}
+	if math.Abs(n-want) > 1e-9 {
+		t.Errorf("laurent: got %g, want %g", n, want)
+	}
+	if n < 1.5 || n > 1.6 {
+		t.Errorf("laurent NOA61 at d-line: n = %g, expected ~1.55", n)
+	}
+}
+
+func TestLaurentInvalidCoeffs(t *testing.T) {
+	_, err := laurent(nil, 0.58756)
+	if err == nil {
+		t.Error("Expected error for empty coefficients")
+	}
+}
+
 func TestInterpolateRefractiveIndex(t *testing.T) {
 	entries := []types.RefractiveIndexEntry{
 		{Wavelength: 0.000486, Value: 1.522},
