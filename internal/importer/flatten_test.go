@@ -1,11 +1,8 @@
 package importer
 
-import (
-	"math"
-	"testing"
-)
+import "testing"
 
-func TestFlattenNegativeThickness_SingleSmall(t *testing.T) {
+func TestZeroNegativeDummy_SingleDummyZeroed(t *testing.T) {
 	input := `STOP 1
 SURF 1
   TYPE STANDARD
@@ -29,13 +26,13 @@ SURF 3
 	if len(result.Surfaces) != 3 {
 		t.Fatalf("expected 3 surfaces, got %d", len(result.Surfaces))
 	}
-	// The single negative thickness on the stop reference plane is flipped.
-	if result.Surfaces[0].Thickness != 0.2 {
-		t.Errorf("surface 1 thickness: expected +0.2, got %g", result.Surfaces[0].Thickness)
+	// The negative thickness on the zero-power dummy plane is set to 0.
+	if result.Surfaces[0].Thickness != 0 {
+		t.Errorf("surface 1 thickness: expected 0, got %g", result.Surfaces[0].Thickness)
 	}
-	// The stop itself is preserved.
-	if result.StopSurface != 1 {
-		t.Errorf("stop surface: expected 1, got %d", result.StopSurface)
+	// The dummy held the stop, so the stop is dropped.
+	if result.StopSurface != 0 {
+		t.Errorf("stop surface: expected 0 (dropped), got %d", result.StopSurface)
 	}
 	// Downstream surfaces keep their thicknesses.
 	if result.Surfaces[1].Thickness != 3.0 {
@@ -43,7 +40,7 @@ SURF 3
 	}
 }
 
-func TestFlattenNegativeThickness_AllPositiveUntouched(t *testing.T) {
+func TestZeroNegativeDummy_AllPositiveUntouched(t *testing.T) {
 	input := `SURF 1
   TYPE STANDARD
   CURV 0.02
@@ -63,7 +60,7 @@ SURF 2
 	}
 }
 
-func TestFlattenNegativeThickness_MultipleNegativesUntouched(t *testing.T) {
+func TestZeroNegativeDummy_MultipleDummiesZeroed(t *testing.T) {
 	input := `SURF 1
   TYPE STANDARD
   CURV 0.0
@@ -81,17 +78,17 @@ SURF 3
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A folded/return path (several negatives) must not be flattened.
-	if result.Surfaces[0].Thickness != -1.0 || result.Surfaces[1].Thickness != -2.0 {
-		t.Errorf("multi-negative fold path was modified: %g/%g",
+	// Every zero-power non-mirror negative is zeroed regardless of count.
+	if result.Surfaces[0].Thickness != 0 || result.Surfaces[1].Thickness != 0 {
+		t.Errorf("dummy negatives not zeroed: %g/%g",
 			result.Surfaces[0].Thickness, result.Surfaces[1].Thickness)
 	}
 }
 
-func TestFlattenNegativeThickness_HugeNegativeUntouched(t *testing.T) {
+func TestZeroNegativeDummy_PoweredSurfaceKept(t *testing.T) {
 	input := `SURF 1
   TYPE STANDARD
-  CURV 0.0
+  CURV 0.5
   THIC -90.0
 SURF 2
   TYPE STANDARD
@@ -102,35 +99,92 @@ SURF 2
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Telecentric/return layouts with a large negative thickness stay as-is.
-	if math.Abs(result.Surfaces[0].Thickness+90.0) > 1e-12 {
-		t.Errorf("huge negative was flattened: %g", result.Surfaces[0].Thickness)
+	// A powered surface (Curvature != 0) is a real element, not a dummy.
+	if result.Surfaces[0].Thickness != -90.0 {
+		t.Errorf("powered negative was zeroed: %g", result.Surfaces[0].Thickness)
 	}
 }
 
-func TestFlattenNegativeThickness_ConfigOverride(t *testing.T) {
+func TestZeroNegativeDummy_MirrorMaterialKept(t *testing.T) {
 	input := `SURF 1
   TYPE STANDARD
-  CURV 0.02
-  THIC 5.0
-  GLAS BK7
+  CURV 0.0
+  THIC -40.0
+  GLAS MIRROR
 SURF 2
   TYPE STANDARD
   CURV 0.0
   THIC 0.0
-THIC 1 1 -0.5 0 0 0 1 1 1 0 0
-THIC 1 2 4.0 0 0 0 1 1 1 0 0
 `
 	result, err := ParseZemax(input)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Config 1's single small negative override is flattened.
-	if got := result.ConfigThickness[1][1]; got != 0.5 {
-		t.Errorf("config 1 override: expected +0.5, got %g", got)
+	// A mirror (even planar) is a real fold, not a dummy.
+	if result.Surfaces[0].Thickness != -40.0 {
+		t.Errorf("mirror negative was zeroed: %g", result.Surfaces[0].Thickness)
 	}
-	// Config 2's positive override is untouched.
-	if got := result.ConfigThickness[2][1]; got != 4.0 {
-		t.Errorf("config 2 override: expected 4.0, got %g", got)
+}
+
+func TestZeroNegativeDummy_StopOnNonZeroedKept(t *testing.T) {
+	input := `STOP 2
+SURF 1
+  TYPE STANDARD
+  CURV 0.0
+  THIC -0.2
+SURF 2
+  TYPE STANDARD
+  CURV 0.0
+  THIC 3.0
+SURF 3
+  TYPE STANDARD
+  CURV 0.0
+  THIC 0.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Surface 1 is zeroed; the stop sits on surface 2 and is preserved.
+	if result.Surfaces[0].Thickness != 0 {
+		t.Errorf("dummy not zeroed: %g", result.Surfaces[0].Thickness)
+	}
+	if result.StopSurface != 2 {
+		t.Errorf("stop surface: expected 2 (kept), got %d", result.StopSurface)
+	}
+}
+
+func TestZeroNegativeDummy_ConfigOverride(t *testing.T) {
+	input := `SURF 1
+  TYPE STANDARD
+  CURV 0.0
+  THIC 5.0
+SURF 2
+  TYPE STANDARD
+  CURV 0.02
+  THIC 4.0
+SURF 3
+  TYPE STANDARD
+  CURV 0.0
+  THIC 0.0
+THIC 1 1 -0.5 0 0 0 1 1 1 0 0
+THIC 2 1 -2.0 0 0 0 1 1 1 0 0
+THIC 3 1 4.0 0 0 0 1 1 1 0 0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Surface 1 is a curv-0 dummy: its negative override is zeroed.
+	if got := result.ConfigThickness[1][1]; got != 0 {
+		t.Errorf("config 1 surf 1 override: expected 0, got %g", got)
+	}
+	// Surface 2 is powered: its negative override stays as-is.
+	if got := result.ConfigThickness[1][2]; got != -2.0 {
+		t.Errorf("config 1 surf 2 override: expected -2.0, got %g", got)
+	}
+	// Positive override is untouched.
+	if got := result.ConfigThickness[1][3]; got != 4.0 {
+		t.Errorf("config 1 surf 3 override: expected 4.0, got %g", got)
 	}
 }

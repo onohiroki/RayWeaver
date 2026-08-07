@@ -387,6 +387,35 @@ SI 0 0
 	}
 }
 
+func TestCodeV_LowercaseKeywords(t *testing.T) {
+	input := `tit 'singlet'
+dim m
+so 0. 100.
+s 0.1 1 nbk7_schott
+s -.05 15
+sto
+s 0.02 2
+si 0 0
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) != 4 {
+		t.Fatalf("expected 4 surfaces, got %d", len(result.Surfaces))
+	}
+	if result.Surfaces[0].Thickness != 1 {
+		t.Errorf("surface 1 thickness: expected 1, got %g", result.Surfaces[0].Thickness)
+	}
+	if result.Surfaces[0].Material != "nbk7_schott" {
+		t.Errorf("surface 1 material: expected nbk7_schott (case kept), got %q", result.Surfaces[0].Material)
+	}
+	// Lowercase "sto" marks the current surface as the stop.
+	if result.StopSurface != 2 {
+		t.Errorf("stop surface: expected 2, got %d", result.StopSurface)
+	}
+}
+
 func TestCodeV_Defaults(t *testing.T) {
 	input := `SEQ
 S 100 5

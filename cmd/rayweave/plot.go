@@ -47,6 +47,10 @@ func runPlot(data []byte) {
 		}
 	}
 
+	if len(output.Configs) == 0 {
+		errOut("Error: no configs to plot (define configs[].surfaces)")
+		os.Exit(1)
+	}
 	surfaces := output.Configs[0].Surfaces
 	if configFlag != "" {
 		idx, err := resolveConfig(output.Configs, configFlag)

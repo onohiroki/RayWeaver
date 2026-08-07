@@ -75,64 +75,74 @@ func fillDefaults(result *ParseResult) {
 	if len(result.Fields) == 0 {
 		result.Fields = []types.FieldItem{defaultField()}
 	}
-	flattenNegativeThickness(result)
+	zeroNegativeDummyThickness(result)
 }
 
-// maxFlattenThickness bounds the negative thicknesses that flattenNegativeThickness
-// will normalise. Single isolated negatives at or below this magnitude are the
-// ZEMAX "stop reference plane" idiom (a zero-power iris plane a small distance in
-// front of a surface); larger negatives encode telecentric/afocal return paths or
-// genuine folds, which must not be flipped to positive.
-const maxFlattenThickness = 10.0
-
-// flattenNegativeThickness normalises the negative-thickness ZEMAX stop-reference
-// idiom into rayweave's all-positive, monotonic-Z fold model. A surface with a
-// single isolated negative thickness t (|t| <= maxFlattenThickness) is flipped to
-// +|t|, which preserves every inter-surface air gap while shifting only the
-// surfaces after it by 2|t|. Files with several negatives (folded/return paths)
-// or a single large negative (telecentric layouts) are left untouched.
+// zeroNegativeDummyThickness normalises the negative-spacing dummy-surface idiom
+// (a zero-power reference plane with a negative spacing) into rayweave's
+// all-positive, monotonic-Z model. A surface is a dummy only when it carries no
+// optical power (Curvature == 0) and is not a mirror (material REFL/MIRROR);
+// folded mirrors and powered surfaces with negative spacings encode genuine
+// return paths and must not be collapsed.
 //
-// The base surfaces and the per-config thickness overrides are both normalised so
-// that ConfigSurfaceSet never reintroduces a negative thickness downstream.
-// StopSurface (the aperture position and its diameter) is unchanged. Returns the
-// number of surfaces flattened.
-func flattenNegativeThickness(result *ParseResult) int {
+// Each dummy's thickness is set to 0 so the trace continues. When the dummy held
+// the aperture stop, the stop is dropped (StopSurface = 0) and the pipeline falls
+// back to the dynamic pupil. The base surfaces and the per-config thickness
+// overrides are both normalised so that ConfigSurfaceSet never reintroduces a
+// negative thickness downstream. Returns the number of surfaces zeroed.
+func zeroNegativeDummyThickness(result *ParseResult) int {
 	if result == nil {
 		return 0
 	}
-	flattened := 0
+	zeroed := 0
 
-	neg := -1
+	zeroedIDs := map[int]bool{}
 	for i := range result.Surfaces {
-		if result.Surfaces[i].Thickness < 0 {
-			if neg >= 0 {
-				return 0
-			}
-			neg = i
+		s := &result.Surfaces[i]
+		if s.Thickness < 0 && isDummySurface(s) {
+			s.Thickness = 0
+			zeroed++
+			zeroedIDs[s.ID] = true
 		}
-	}
-	if neg >= 0 && math.Abs(result.Surfaces[neg].Thickness) <= maxFlattenThickness {
-		result.Surfaces[neg].Thickness = -result.Surfaces[neg].Thickness
-		flattened++
 	}
 
 	for cfg := range result.ConfigThickness {
-		negSurf := -1
 		for s, t := range result.ConfigThickness[cfg] {
-			if t < 0 {
-				if negSurf >= 0 {
-					negSurf = -2
-					break
-				}
-				negSurf = s
+			if t < 0 && isDummySurfaceID(result, s) {
+				result.ConfigThickness[cfg][s] = 0
+				zeroed++
+				zeroedIDs[s] = true
 			}
 		}
-		if negSurf >= 0 && math.Abs(result.ConfigThickness[cfg][negSurf]) <= maxFlattenThickness {
-			result.ConfigThickness[cfg][negSurf] = -result.ConfigThickness[cfg][negSurf]
-			flattened++
+	}
+
+	if result.StopSurface > 0 && zeroedIDs[result.StopSurface] {
+		result.StopSurface = 0
+	}
+
+	return zeroed
+}
+
+// isDummySurface reports whether a surface is a zero-power non-mirror reference
+// plane (the CODE V/ZEMAX "dummy" convention).
+func isDummySurface(s *types.Surface) bool {
+	return s.Curvature == 0 && !isMirrorMaterial(s.Material)
+}
+
+// isDummySurfaceID looks a surface up by ID and reports whether it is a dummy.
+func isDummySurfaceID(result *ParseResult, id int) bool {
+	for i := range result.Surfaces {
+		if result.Surfaces[i].ID == id {
+			return isDummySurface(&result.Surfaces[i])
 		}
 	}
-	return flattened
+	return false
+}
+
+// isMirrorMaterial reports whether a material label denotes a mirror surface.
+func isMirrorMaterial(mat string) bool {
+	m := strings.ToUpper(strings.TrimSpace(mat))
+	return m == "REFL" || m == "MIRROR"
 }
 
 // addGlassEntry registers a glass material, deduplicating by

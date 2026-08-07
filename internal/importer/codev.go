@@ -51,6 +51,10 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			continue
 		}
 
+		// CODE V is case-insensitive; dispatch on the uppercased keyword while
+		// keeping the raw tokens for values and material labels.
+		first := strings.ToUpper(tokens[0])
+
 		if beforeLens {
 			if upper == "SEQ" || strings.HasPrefix(upper, "SEQ ") {
 				beforeLens = false
@@ -62,7 +66,7 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			}
 			// Some SEQ files omit the SEQ keyword entirely.
 			// SO/S/SI lines signal start of surface data.
-			if len(tokens) > 0 && (tokens[0] == "SO" || tokens[0] == "S" || tokens[0] == "SI") {
+			if len(tokens) > 0 && (first == "SO" || first == "S" || first == "SI") {
 				beforeLens = false
 			} else {
 				continue
@@ -76,8 +80,6 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		if parseCodeVHeader(upper, tokens, result, &inchMode) {
 			continue
 		}
-
-		first := tokens[0]
 
 		if first == "ASP" {
 			if len(tokens) >= 2 {
