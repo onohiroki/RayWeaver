@@ -706,13 +706,23 @@ func addTabulatedGlass(result *ParseResult, name string, wavelengths []float64, 
 }
 
 // codeVFormulaType maps a CODE V PRV dispersion-formula keyword to the internal
-// DispersionFormula, reporting ok=false for unrecognised types. The Laurent
-// ("LAU") and classic Schott polynomial share the same coefficient layout
-// n² = A₀ + A₁λ² + A₂/λ² + A₃/λ⁴ + A₄/λ⁶ + A₅/λ⁸.
+// DispersionFormula, reporting ok=false for unrecognised types.
+//
+//   - LAU / GML: Laurent n² = A₀ + A₁λ² + A₂/λ² + A₃/λ⁴ + A₄/λ⁶ + A₅/λ⁸
+//   - SLM / GMS: standard Sellmeier n² = 1 + Σ Bᵢλ²/(λ² − Cᵢ), 6 coefficients
+//     in B₁ C₁ B₂ C₂ B₃ C₃ order
+//   - CAU: Cauchy n = A₀ + A₁/λ² + A₂/λ⁴ + … (returns n directly)
+//   - HAR: Hartmann n = A₀ + A₁/(λ − A₂) (returns n directly)
 func codeVFormulaType(kw string) (types.DispersionFormula, bool) {
 	switch strings.ToUpper(kw) {
 	case "LAU", "GML":
 		return types.Laurent, true
+	case "SLM", "GMS":
+		return types.Sellmeier1, true
+	case "CAU":
+		return types.Cauchy, true
+	case "HAR":
+		return types.Hartmann, true
 	default:
 		return "", false
 	}

@@ -47,6 +47,11 @@ const (
 	Extended3  DispersionFormula = "extended_3"
 	Constant   DispersionFormula = "constant"
 	Laurent    DispersionFormula = "laurent"
+
+	// Cauchy and Hartmann are the CODE V PRV formula types CAU / HAR. Unlike
+	// most of the others they yield n directly (not n²).
+	Cauchy   DispersionFormula = "cauchy"
+	Hartmann DispersionFormula = "hartmann"
 )
 
 // DefaultWavelength is the fallback design wavelength (587.56 nm) in mm.

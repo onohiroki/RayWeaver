@@ -204,6 +204,10 @@ func CalcRefractiveIndex(g *types.Glass, wavelength float64) (float64, error) {
 			return extended2(g.Coefficients, wavelength*1000)
 		case types.Laurent:
 			return laurent(g.Coefficients, wavelength*1000)
+		case types.Cauchy:
+			return cauchy(g.Coefficients, wavelength*1000)
+		case types.Hartmann:
+			return hartmann(g.Coefficients, wavelength*1000)
 		case types.Constant:
 			return g.ND, nil
 		default:
@@ -282,6 +286,40 @@ func laurent(coeffs []float64, lambda float64) (float64, error) {
 		return 0, fmt.Errorf("invalid laurent result")
 	}
 	return math.Sqrt(n2), nil
+}
+
+// cauchy evaluates the Cauchy dispersion formula (CODE V "CAU"), returning n
+// directly (not n²). Coefficients are in µm wavelength units:
+//
+//	n(λ) = A₀ + A₁/λ² + A₂/λ⁴ + A₃/λ⁶ + …
+//
+// The number of terms is taken from the coefficient count (at least one).
+func cauchy(coeffs []float64, lambda float64) (float64, error) {
+	if len(coeffs) < 1 {
+		return 0, fmt.Errorf("cauchy requires at least 1 coefficient")
+	}
+	x := 1.0 / (lambda * lambda)
+	n := coeffs[0]
+	xi := x
+	for i := 1; i < len(coeffs); i++ {
+		n += coeffs[i] * xi
+		xi *= x
+	}
+	return n, nil
+}
+
+// hartmann evaluates the Hartmann dispersion formula (CODE V "HAR") with
+// coefficients in µm wavelength units, returning n directly:
+//
+//	n(λ) = A₀ + A₁/(λ − A₂)
+func hartmann(coeffs []float64, lambda float64) (float64, error) {
+	if len(coeffs) < 3 {
+		return 0, fmt.Errorf("hartmann requires 3 coefficients")
+	}
+	if lambda == coeffs[2] {
+		return 0, fmt.Errorf("hartmann: wavelength at resonance (%g)", lambda)
+	}
+	return coeffs[0] + coeffs[1]/(lambda-coeffs[2]), nil
 }
 
 // extended3 evaluates the extended 3 formula with coefficients in µm

@@ -256,6 +256,86 @@ func TestLaurentInvalidCoeffs(t *testing.T) {
 	}
 }
 
+func TestCauchy(t *testing.T) {
+	// n(λ) = A₀ + A₁/λ² + A₂/λ⁴, A0 ≈ 1.5, A1 ≈ 0.004, A2 ≈ -2e-6, λ in µm.
+	coeffs := []float64{1.50, 0.004, -2e-6}
+	lambda := 0.58756
+	lsq := lambda * lambda
+	want := coeffs[0] + coeffs[1]/lsq + coeffs[2]/(lsq*lsq)
+	n, err := cauchy(coeffs, lambda)
+	if err != nil {
+		t.Fatalf("cauchy: %v", err)
+	}
+	if math.Abs(n-want) > 1e-12 {
+		t.Errorf("cauchy: got %g, want %g", n, want)
+	}
+	if n < 1.5 || n > 1.6 {
+		t.Errorf("cauchy at d-line: n = %g, expected ~1.51", n)
+	}
+}
+
+func TestCauchyVariableTerms(t *testing.T) {
+	// A single-term Cauchy (just A₀) must evaluate to a constant.
+	n, err := cauchy([]float64{1.52}, 0.58756)
+	if err != nil {
+		t.Fatalf("cauchy: %v", err)
+	}
+	if math.Abs(n-1.52) > 1e-12 {
+		t.Errorf("single-term cauchy: got %g, want 1.52", n)
+	}
+	// Four terms (A₁/λ² + A₂/λ⁴ + A₃/λ⁶) exercise the higher-order loop.
+	coeffs := []float64{1.5, 0.004, -2e-2, 1e-3}
+	lambda := 0.58756
+	lsq := lambda * lambda
+	want := coeffs[0] + coeffs[1]/lsq + coeffs[2]/(lsq*lsq) + coeffs[3]/(lsq*lsq*lsq)
+	if got, err := cauchy(coeffs, lambda); err != nil || math.Abs(got-want) > 1e-9 {
+		t.Errorf("4-term cauchy: got %g, want %g (err=%v)", got, want, err)
+	}
+}
+
+func TestCauchyInvalidCoeffs(t *testing.T) {
+	_, err := cauchy(nil, 0.58756)
+	if err == nil {
+		t.Error("Expected error for empty coefficients")
+	}
+}
+
+func TestHartmann(t *testing.T) {
+	// n(λ) = A₀ + A₁/(λ − A₂), λ in µm.
+	coeffs := []float64{1.50, 0.004, 0.12}
+	lambda := 0.58756
+	want := coeffs[0] + coeffs[1]/(lambda-coeffs[2])
+	n, err := hartmann(coeffs, lambda)
+	if err != nil {
+		t.Fatalf("hartmann: %v", err)
+	}
+	if math.Abs(n-want) > 1e-12 {
+		t.Errorf("hartmann: got %g, want %g", n, want)
+	}
+	if n < 1.5 || n > 1.6 {
+		t.Errorf("hartmann at d-line: n = %g, expected ~1.51", n)
+	}
+}
+
+func TestHartmannResonance(t *testing.T) {
+	// At λ = A₂ the denominator vanishes.
+	_, err := hartmann([]float64{1.5, 0.004, 0.58756}, 0.58756)
+	if err == nil {
+		t.Error("Expected error at the resonance wavelength")
+	}
+}
+
+func TestHartmannInvalidCoeffs(t *testing.T) {
+	_, err := hartmann(nil, 0.58756)
+	if err == nil {
+		t.Error("Expected error for empty coefficients")
+	}
+	_, err = hartmann([]float64{1.5, 0.004}, 0.58756)
+	if err == nil {
+		t.Error("Expected error for fewer than 3 coefficients")
+	}
+}
+
 func TestInterpolateRefractiveIndex(t *testing.T) {
 	entries := []types.RefractiveIndexEntry{
 		{Wavelength: 0.000486, Value: 1.522},

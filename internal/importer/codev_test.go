@@ -3,6 +3,7 @@ package importer
 import (
 	"math"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -636,6 +637,111 @@ END
 	}
 	if math.Abs(n-1.5597) > 0.001 {
 		t.Errorf("NOA61 index at 587.6nm: expected ~1.5597, got %g", n)
+	}
+}
+
+func TestCodeV_PRVFormulaTypes(t *testing.T) {
+	tests := []struct {
+		name     string
+		kw       string
+		expected types.DispersionFormula
+	}{
+		{"SLM", "SLM", types.Sellmeier1},
+		{"GMS", "GMS", types.Sellmeier1},
+		{"CAU", "CAU", types.Cauchy},
+		{"HAR", "HAR", types.Hartmann},
+		{"LAU", "LAU", types.Laurent},
+		{"GML", "GML", types.Laurent},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			formula, ok := codeVFormulaType(tc.kw)
+			if !ok {
+				t.Fatalf("codeVFormulaType(%s): not recognised", tc.kw)
+			}
+			if formula != tc.expected {
+				t.Errorf("codeVFormulaType(%s): got %s, want %s", tc.kw, formula, tc.expected)
+			}
+		})
+	}
+	if _, ok := codeVFormulaType("BOGUS"); ok {
+		t.Error("codeVFormulaType(BOGUS): expected not recognised")
+	}
+}
+
+// parseCodeVFormulaGlass runs a minimal CODE V SEQ with a single PRV formula
+// glass and returns the registered Glass entry (registered and used as "FGL").
+func parseCodeVFormulaGlass(t *testing.T, kw string, coeffs []string) *types.Glass {
+	t.Helper()
+	var buf strings.Builder
+	buf.WriteString("SEQ\nPRV\n  PWL 550.0\n  'FGL' ")
+	buf.WriteString(kw)
+	for _, c := range coeffs {
+		buf.WriteString(" " + c)
+	}
+	buf.WriteString("\nEND\nS 100 5 'FGL'\nS -50 10\nSI 0 0\nEND\n")
+	result, err := ParseCodeV(buf.String())
+	if err != nil {
+		t.Fatalf("ParseCodeV: %v", err)
+	}
+	for i := range result.GlassEntries {
+		if result.GlassEntries[i].Label == "FGL" {
+			return &result.GlassEntries[i]
+		}
+	}
+	t.Fatal("FGL formula glass not registered")
+	return nil
+}
+
+func TestCodeV_PRVFormulaSellmeier(t *testing.T) {
+	// N-BK7-style Sellmeier coefficients (µm): B1 C1 B2 C2 B3 C3.
+	g := parseCodeVFormulaGlass(t, "SLM", []string{
+		"1.03961212", "0.00600069867", "0.231792344", "0.0200179144", "1.01046945", "103.560653",
+	})
+	if g.DispersionFormula != types.Sellmeier1 {
+		t.Errorf("expected sellmeier_1, got %s", g.DispersionFormula)
+	}
+	n, err := glass.CalcRefractiveIndex(g, 0.0005876)
+	if err != nil {
+		t.Fatalf("CalcRefractiveIndex: %v", err)
+	}
+	if math.Abs(n-1.5168) > 0.002 {
+		t.Errorf("Sellmeier index at 587.6nm: expected ~1.5168, got %g", n)
+	}
+}
+
+func TestCodeV_PRVFormulaCauchy(t *testing.T) {
+	g := parseCodeVFormulaGlass(t, "CAU", []string{"1.50", "0.004", "-2e-6"})
+	if g.DispersionFormula != types.Cauchy {
+		t.Errorf("expected cauchy, got %s", g.DispersionFormula)
+	}
+	lambdaMM := 0.0005876
+	lambda := lambdaMM * 1000
+	lsq := lambda * lambda
+	want := 1.50 + 0.004/lsq - 2e-6/(lsq*lsq)
+	n, err := glass.CalcRefractiveIndex(g, lambdaMM)
+	if err != nil {
+		t.Fatalf("CalcRefractiveIndex: %v", err)
+	}
+	if math.Abs(n-want) > 1e-9 {
+		t.Errorf("Cauchy index at 587.6nm: got %g, want %g", n, want)
+	}
+}
+
+func TestCodeV_PRVFormulaHartmann(t *testing.T) {
+	g := parseCodeVFormulaGlass(t, "HAR", []string{"1.50", "0.004", "0.12"})
+	if g.DispersionFormula != types.Hartmann {
+		t.Errorf("expected hartmann, got %s", g.DispersionFormula)
+	}
+	lambdaMM := 0.0005876
+	lambda := lambdaMM * 1000
+	want := 1.50 + 0.004/(lambda-0.12)
+	n, err := glass.CalcRefractiveIndex(g, lambdaMM)
+	if err != nil {
+		t.Fatalf("CalcRefractiveIndex: %v", err)
+	}
+	if math.Abs(n-want) > 1e-9 {
+		t.Errorf("Hartmann index at 587.6nm: got %g, want %g", n, want)
 	}
 }
 
