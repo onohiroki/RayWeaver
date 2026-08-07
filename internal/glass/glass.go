@@ -128,6 +128,14 @@ func (c *Catalog) Lookup(key string) (*types.Glass, bool) {
 			return g, true
 		}
 	}
+	// Moulding-grade trailing "M" (Ohara "S-BAL42M", CDGM "D-LAK6M", Sumita
+	// "K-VC79M"): the base name is the same glass. Only applies when the base
+	// actually resolves, so a legitimate name ending in M is unaffected.
+	if strings.HasSuffix(key, "M") && len(key) > 2 {
+		if g, ok := c.Lookup(key[:len(key)-1]); ok {
+			return g, true
+		}
+	}
 	// Resin notation: "AL-6263-(OKP4HT)" names a moulding compound by the
 	// parenthesised resin, which is the actual optical material.
 	if i := strings.IndexByte(key, '('); i >= 0 && strings.HasSuffix(key, ")") {

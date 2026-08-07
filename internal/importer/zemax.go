@@ -167,8 +167,9 @@ func parseZemaxSurfaceParam(s *zemaxSurface, keyword string, args []string) {
 		if len(args) > 0 {
 			s.Material = args[0]
 			// ZEMAX inline model glass: GLAS <name> <dispersion-flag> <0> <nd> <vd> ...
-			// A dispersion flag of 1 means nd/vd follow inline; store them so the
-			// surface build can register a real model entry instead of "___BLANK".
+			// A dispersion flag of 1 means nd/vd follow inline (a real model
+			// glass); flag 0 is a named catalog glass whose trailing nd/vd are
+			// ZEMAX placeholder defaults, so they must not override the lookup.
 			if len(args) >= 5 && parseFloat(args[1]) == 1 {
 				s.InlineND = parseFloat(args[3])
 				s.InlineVD = parseFloat(args[4])

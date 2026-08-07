@@ -170,6 +170,19 @@ func TestCatalogLookupResinParenthesis(t *testing.T) {
 	}
 }
 
+func TestCatalogLookupTrailingM(t *testing.T) {
+	c := NewCatalog()
+	c.Add(types.Glass{Type: types.GlassTypeCatalog, Name: "S-BAL42", ND: 1.583126, VD: 59.374673})
+
+	got, ok := c.Lookup("S-BAL42M")
+	if !ok {
+		t.Fatal("Lookup(S-BAL42M) failed")
+	}
+	if got.Name != "S-BAL42" {
+		t.Errorf("Name = %q, want S-BAL42", got.Name)
+	}
+}
+
 func TestCatalogRefractiveIndexAir(t *testing.T) {
 	c := NewCatalog()
 	n, err := c.RefractiveIndex("AIR", 0.00058756)

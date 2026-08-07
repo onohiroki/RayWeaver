@@ -71,9 +71,12 @@ var commonGlass = map[string]struct {
 	// Optical plastics and resins.
 	"PMMA":    {1.49180, 57.40},
 	"ACRYLIC": {1.49180, 57.40},
-	"OKP4":    {1.52500, 56.00},
-	"OKP4HT":  {1.52500, 56.00},
-	"330R":    {1.50940, 56.20},
+	"OKP4":   {1.52500, 56.00},
+	"OKP4HT": {1.52500, 56.00},
+	"330R":   {1.50940, 56.20},
+	"F52R":   {1.53530, 56.00},
+	"K26R":   {1.53530, 56.00},
+	"WATER":  {1.33300, 55.50},
 	// Hoya legacy glasses (H- naming used in patents; discontinued from HOYA's
 	// current catalog). Values from the 湖北新华光 (NHG) / CDGM / OHARA AGF
 	// equivalents of the same glasses.
