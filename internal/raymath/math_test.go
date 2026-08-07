@@ -233,6 +233,26 @@ func TestSphereParaxialRadius(t *testing.T) {
 	}
 }
 
+func TestIntersectSpherePlaneBehind(t *testing.T) {
+	// A flat surface (radius 0) is crossed even at negative t (the ray is
+	// already behind it); this must stay accepted (the original behaviour).
+	tHit, ok := IntersectSphere(types.Vec3{Z: 5}, types.Vec3{Z: 1}, 0)
+	if !ok || math.Abs(tHit+5) > 1e-9 {
+		t.Errorf("IntersectSphere plane behind: t = %v, ok = %v, want -5", tHit, ok)
+	}
+}
+
+func TestIntersectSphereBoth(t *testing.T) {
+	// A ray on the axis of a sphere returns both roots (vertex and far side).
+	t1, t2, ok := IntersectSphereBoth(types.Vec3{Z: -100}, types.Vec3{Z: 1}, 100)
+	if !ok {
+		t.Fatal("IntersectSphereBoth failed")
+	}
+	if math.Abs(t1-100) > 1e-6 || math.Abs(t2-300) > 1e-6 {
+		t.Errorf("both roots: t1=%v t2=%v, want 100/300", t1, t2)
+	}
+}
+
 func TestIntersectSpherePlane(t *testing.T) {
 	origin := types.Vec3{X: 0, Y: 0, Z: -10}
 	dir := types.Vec3{X: 0, Y: 0, Z: 1}

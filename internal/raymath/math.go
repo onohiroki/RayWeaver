@@ -72,26 +72,18 @@ func ComputeDecenterTransform(decenter []types.DecenterStep) types.Mat4 {
 
 func IntersectSphere(origin, dir types.Vec3, radius float64) (float64, bool) {
 	if radius == 0 {
+		// A plane: the ray always crosses it (any sign of t), matching the
+		// original behaviour before the two-root refactor.
 		if dir.Z == 0 {
 			return 0, false
 		}
 		return -origin.Z / dir.Z, true
 	}
 
-	a := dir.Dot(dir)
-	centerToOrigin := types.Vec3{X: origin.X, Y: origin.Y, Z: origin.Z - radius}
-	b := 2.0 * dir.Dot(centerToOrigin)
-	c := centerToOrigin.Dot(centerToOrigin) - radius*radius
-	disc := b*b - 4*a*c
-
-	if disc < 0 {
+	t1, t2, ok := IntersectSphereBoth(origin, dir, radius)
+	if !ok {
 		return 0, false
 	}
-
-	sqrtDisc := math.Sqrt(disc)
-	t1 := (-b - sqrtDisc) / (2 * a)
-	t2 := (-b + sqrtDisc) / (2 * a)
-
 	if t1 > 1e-12 {
 		return t1, true
 	}
@@ -111,6 +103,38 @@ func IntersectSphere(origin, dir types.Vec3, radius float64) (float64, bool) {
 		return t2, true
 	}
 	return 0, false
+}
+
+// IntersectSphereBoth returns both intersection parameters of the ray with the
+// sphere (t1 <= t2), or ok=false when the ray misses. Unlike IntersectSphere it
+// does not discard negative roots, letting a backward ray select the vertex-side
+// hit.
+func IntersectSphereBoth(origin, dir types.Vec3, radius float64) (t1, t2 float64, ok bool) {
+	if radius == 0 {
+		if dir.Z == 0 {
+			return 0, 0, false
+		}
+		t := -origin.Z / dir.Z
+		return t, t, true
+	}
+
+	a := dir.Dot(dir)
+	centerToOrigin := types.Vec3{X: origin.X, Y: origin.Y, Z: origin.Z - radius}
+	b := 2.0 * dir.Dot(centerToOrigin)
+	c := centerToOrigin.Dot(centerToOrigin) - radius*radius
+	disc := b*b - 4*a*c
+
+	if disc < 0 {
+		return 0, 0, false
+	}
+
+	sqrtDisc := math.Sqrt(disc)
+	t1 = (-b - sqrtDisc) / (2 * a)
+	t2 = (-b + sqrtDisc) / (2 * a)
+	if t1 > t2 {
+		t1, t2 = t2, t1
+	}
+	return t1, t2, true
 }
 
 func SphereNormal(p types.Vec3, radius float64) types.Vec3 {
@@ -232,7 +256,7 @@ func ComputeParaxialCurvature(sagFunc func(float64) float64) float64 {
 
 func SphereParaxialRadius(radius float64, coefficients []float64) float64 {
 	if len(coefficients) >= 1 {
-		Rinv := 1.0 / radius + 2*coefficients[0]
+		Rinv := 1.0/radius + 2*coefficients[0]
 		if Rinv == 0 {
 			return 0
 		}

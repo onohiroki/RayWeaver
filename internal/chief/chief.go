@@ -517,6 +517,181 @@ func computeChiefRayAngleGrid(
 
 // --- pass-through constrained chief ray (angle-based) ---
 
+// backwardChiefOrigin constructs the through-stop chief ray by tracing backward
+// from the stop centre through the front optics and matching the emergent
+// object-space angle to the field angle. This is more robust than the forward
+// origin search (which can overshoot the narrow valid origin window of a small
+// lens). Returns the origin at zStart and the forward direction, or ok=false
+// when the construction is not applicable (no front optics, a folded front, or
+// no matching direction such as a fisheye field).
+func backwardChiefOrigin(
+	engine *ray.Engine,
+	surfaces []types.Surface,
+	path []int,
+	stopID int,
+	ptCoord types.Vec3,
+	thetaRad, dx, dy float64,
+	zStart, wavelength float64,
+) (types.Vec3, types.Vec3, bool) {
+	var stopSurf *types.Surface
+	for i := range surfaces {
+		if surfaces[i].ID == stopID {
+			stopSurf = &surfaces[i]
+			break
+		}
+	}
+	if stopSurf == nil {
+		return types.Vec3{}, types.Vec3{}, false
+	}
+
+	frontSeq := ray.FrontPath(surfaces, stopID)
+	if len(frontSeq) == 0 {
+		// The stop is the first surface: no front optics to trace through, so
+		// the geometric estimate (straight line at the field angle) applies.
+		return types.Vec3{}, types.Vec3{}, false
+	}
+	for _, idx := range frontSeq {
+		if surfaces[idx].Reflects() {
+			return types.Vec3{}, types.Vec3{}, false
+		}
+	}
+	// The backward ray visits the front surfaces in decreasing index order, so
+	// their physical Z must be strictly decreasing (positive thicknesses). A
+	// negative thickness or a fold between the stop and the first surface breaks
+	// that monotonicity; fall back to the forward search.
+	if stopSurf.PhysicalZ <= surfaces[frontSeq[0]].PhysicalZ {
+		return types.Vec3{}, types.Vec3{}, false
+	}
+	for i := 1; i < len(frontSeq); i++ {
+		if surfaces[frontSeq[i-1]].PhysicalZ <= surfaces[frontSeq[i]].PhysicalZ {
+			return types.Vec3{}, types.Vec3{}, false
+		}
+	}
+
+	stopCenter := stopSurf.LocalToGlobal.MultiplyPoint(ptCoord)
+
+	uY, ok := searchBackwardTangent(engine, surfaces, frontSeq, stopCenter,
+		math.Atan(math.Tan(thetaRad)*dy), false, wavelength)
+	if !ok {
+		return types.Vec3{}, types.Vec3{}, false
+	}
+	uX := 0.0
+	if math.Abs(dx) > 1e-9 {
+		var okX bool
+		if uX, okX = searchBackwardTangent(engine, surfaces, frontSeq, stopCenter,
+			math.Atan(math.Tan(thetaRad)*dx), true, wavelength); !okX {
+			return types.Vec3{}, types.Vec3{}, false
+		}
+	}
+
+	bwd := types.Vec3{X: uX, Y: uY, Z: -1}.Normalize()
+	emPos, emDir, ok := engine.TraceBackward(surfaces, frontSeq, stopCenter, bwd, wavelength)
+	if !ok {
+		return types.Vec3{}, types.Vec3{}, false
+	}
+	fwdObj := emDir.Scale(-1)
+	if fwdObj.Z <= 1e-12 {
+		return types.Vec3{}, types.Vec3{}, false
+	}
+	origin := emPos.Add(fwdObj.Scale((zStart - emPos.Z) / fwdObj.Z))
+
+	// Validate the forward chief ray actually passes through the stop centre
+	// (within a micron); a backward trace that does not close means the
+	// construction is unreliable, so fall back to the forward search.
+	probe := types.Ray{
+		Wavelength: wavelength,
+		Initial:    types.RayState{Origin: origin, Direction: fwdObj},
+		Path:       path,
+		Jones:      types.NewCircularJones(true),
+	}
+	pres := engine.TraceRay(probe, surfaces)
+	if pres.Error != "" {
+		return types.Vec3{}, types.Vec3{}, false
+	}
+	for i := range pres.Surfaces {
+		if pres.Surfaces[i].SurfaceID == stopID {
+			hit := pres.Surfaces[i].Position
+			if math.Hypot(hit.X-stopCenter.X, hit.Y-stopCenter.Y) > 1e-3 {
+				return types.Vec3{}, types.Vec3{}, false
+			}
+			break
+		}
+	}
+	return origin, fwdObj, true
+}
+
+// searchBackwardTangent finds the tangent u of the backward ray at the stop
+// (direction (0,u,-1) or (u,0,-1)) such that the emergent object-space angle in
+// that plane equals targetAngle. Returns (u, ok); ok=false when no such
+// direction exists (the field angle is beyond the reachable range).
+func searchBackwardTangent(
+	engine *ray.Engine,
+	surfaces []types.Surface,
+	frontSeq []int,
+	stopCenter types.Vec3,
+	targetAngle float64,
+	isX bool,
+	wavelength float64,
+) (float64, bool) {
+	angleFn := func(u float64) (float64, bool) {
+		dir := types.Vec3{X: 0, Y: 0, Z: -1}
+		if isX {
+			dir.X = u
+		} else {
+			dir.Y = u
+		}
+		_, emDir, ok := engine.TraceBackward(surfaces, frontSeq, stopCenter, dir, wavelength)
+		if !ok {
+			return 0, false
+		}
+		if isX {
+			return math.Atan2(math.Abs(emDir.X), math.Abs(emDir.Z)), true
+		}
+		return math.Atan2(math.Abs(emDir.Y), math.Abs(emDir.Z)), true
+	}
+
+	if targetAngle < 1e-12 {
+		return 0, true
+	}
+
+	// u = 0 is the on-axis backward ray, which must emerge on-axis.
+	if a, ok := angleFn(0); !ok || a >= targetAngle {
+		return 0, ok
+	}
+
+	lo := 0.0
+	step := 0.002
+	for u := step; u <= 10.0; {
+		ang, ok := angleFn(u)
+		if ok {
+			if ang >= targetAngle {
+				hi := u
+				for iter := 0; iter < 60; iter++ {
+					mid := (lo + hi) / 2
+					mang, mok := angleFn(mid)
+					if !mok {
+						hi = mid
+						continue
+					}
+					if math.Abs(mang-targetAngle) < 1e-9 {
+						return mid, true
+					}
+					if mang < targetAngle {
+						lo = mid
+					} else {
+						hi = mid
+					}
+				}
+				return (lo + hi) / 2, true
+			}
+			lo = u
+		}
+		u += step
+		step *= 1.5
+	}
+	return 0, false
+}
+
 func computeChiefRayAngleGridWithPassThrough(
 	system types.System,
 	engine *ray.Engine,
@@ -534,28 +709,39 @@ func computeChiefRayAngleGridWithPassThrough(
 ) Result {
 	zStart := -100.0
 
-	sinT := math.Sin(thetaRad)
-	cosT := math.Cos(thetaRad)
-	rayDir := types.Vec3{
-		X: sinT * dx,
-		Y: sinT * dy,
-		Z: cosT,
-	}.Normalize()
-
 	ptCoord := pt.Coordinate
 
-	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, pt.Surface, ptCoord.Y,
-		path, wavelength, pol, engine, system.Surfaces, pupilZ, false,
-		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
+	// Preferred: construct the chief ray by backward tracing from the stop,
+	// matching the object-space field angle. This avoids the forward origin
+	// search, which can overshoot the narrow valid origin window of a small
+	// lens. Fall back to the origin search when not applicable.
+	var origin types.Vec3
+	var rayDir types.Vec3
+	if o, d, ok := backwardChiefOrigin(engine, system.Surfaces, path, pt.Surface,
+		ptCoord, thetaRad, dx, dy, zStart, wavelength); ok {
+		origin = o
+		rayDir = d
+	} else {
+		sinT := math.Sin(thetaRad)
+		cosT := math.Cos(thetaRad)
+		rayDir = types.Vec3{
+			X: sinT * dx,
+			Y: sinT * dy,
+			Z: cosT,
+		}.Normalize()
 
-	originX := 0.0
-	if math.Abs(rayDir.X) > 1e-12 || math.Abs(ptCoord.X) > 1e-12 {
-		originX = searchOriginForTarget(rayDir.X, rayDir, zStart, pt.Surface, ptCoord.X,
-			path, wavelength, pol, engine, system.Surfaces, pupilZ, true,
-			func(sr types.SurfaceResult) float64 { return sr.Position.X })
+		originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, pt.Surface, ptCoord.Y,
+			path, wavelength, pol, engine, system.Surfaces, pupilZ, false,
+			func(sr types.SurfaceResult) float64 { return sr.Position.Y })
+
+		originX := 0.0
+		if math.Abs(rayDir.X) > 1e-12 || math.Abs(ptCoord.X) > 1e-12 {
+			originX = searchOriginForTarget(rayDir.X, rayDir, zStart, pt.Surface, ptCoord.X,
+				path, wavelength, pol, engine, system.Surfaces, pupilZ, true,
+				func(sr types.SurfaceResult) float64 { return sr.Position.X })
+		}
+		origin = types.Vec3{X: originX, Y: originY, Z: zStart}
 	}
-
-	origin := types.Vec3{X: originX, Y: originY, Z: zStart}
 
 	t := (pupilZ - origin.Z) / rayDir.Z
 	pupilCenterX := origin.X + t*rayDir.X
