@@ -963,3 +963,107 @@ END
 		t.Errorf("surface 1 conic: expected -1.5, got %g", result.Surfaces[0].Conic)
 	}
 }
+
+// parseRDMSEQ parses a minimal two-surface lens whose surface rows are written
+// in a given RDM mode and returns the curvature of the first surface.
+func parseRDMSEQ(t *testing.T, rdmLine string, s1 string) (float64, error) {
+	t.Helper()
+	input := "SEQ\n" + rdmLine + "\nSO 0 100\nS " + s1 + " nbk7_schott\nS -0.05 15\nSI 0 0\nEND\n"
+	result, err := ParseCodeV(input)
+	if err != nil {
+		return 0, err
+	}
+	return result.Surfaces[0].Curvature, nil
+}
+
+func TestCodeV_RDMDefaultIsCurvature(t *testing.T) {
+	// RDM absent → curvature mode: the surface value is used directly.
+	c, err := parseRDMSEQ(t, "", "0.1 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(c-0.1) > 1e-12 {
+		t.Errorf("RDM-absent curvature: expected 0.1 (curvature mode), got %g", c)
+	}
+}
+
+func TestCodeV_RDMNIsCurvature(t *testing.T) {
+	// "RDM N" selects curvature mode (CODE V 10.x/11.x export header).
+	for _, rdm := range []string{"RDM N", "rdm n", "RDM NO", "RDM N;LEN \"VERSION: 10.7\""} {
+		c, err := parseRDMSEQ(t, rdm, "0.01779 1")
+		if err != nil {
+			t.Fatalf("%s: %v", rdm, err)
+		}
+		if math.Abs(c-0.01779) > 1e-9 {
+			t.Errorf("%s: expected curvature 0.01779, got %g", rdm, c)
+		}
+	}
+}
+
+func TestCodeV_RDMYIsRadius(t *testing.T) {
+	// "RDM Y" (and bare "RDM") select radius mode: value converted via 1/r.
+	for _, rdm := range []string{"RDM Y", "rdm y", "RDM", "RDM;LEN \"VERSION: 11.2\""} {
+		c, err := parseRDMSEQ(t, rdm, "61.47 6")
+		if err != nil {
+			t.Fatalf("%s: %v", rdm, err)
+		}
+		want := 1.0 / 61.47
+		if math.Abs(c-want) > 1e-12 {
+			t.Errorf("%s: expected radius 61.47 → curvature %g, got %g", rdm, want, c)
+		}
+	}
+}
+
+func TestCodeV_RDMSurfaceKeywordUnaffected(t *testing.T) {
+	// "RDY <surf> <radius>" (and the RD/RDM keyword forms) always insert a
+	// radius regardless of the entry mode; curvature mode must not change them.
+	input := `SEQ
+RDM N
+SO 0 100
+S 0 1 nbk7_schott
+S -0.05 15
+RDY 1 61.47
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 1.0 / 61.47
+	if math.Abs(result.Surfaces[0].Curvature-want) > 1e-12 {
+		t.Errorf("RDY surface radius: expected curvature %g, got %g", want, result.Surfaces[0].Curvature)
+	}
+}
+
+func TestCodeV_RDMSingletFocalPositive(t *testing.T) {
+	// The singlet sample (RDM absent, S values 0.1 / -0.05) must read as a
+	// curvature-mode biconvex lens with a positive EFL, so FNO→EPD sizing and
+	// the chief grid resolve.
+	input := `SEQ
+SO 0 100
+S 0.1 1 nbk7_schott
+S -0.05 15
+SI 0 0
+FNO 5.0
+WL 650 550 450
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) < 2 {
+		t.Fatalf("expected ≥2 surfaces, got %d", len(result.Surfaces))
+	}
+	if math.Abs(result.Surfaces[0].Curvature-0.1) > 1e-12 {
+		t.Errorf("surface 1: expected curvature 0.1, got %g", result.Surfaces[0].Curvature)
+	}
+	if math.Abs(result.Surfaces[1].Curvature+0.05) > 1e-12 {
+		t.Errorf("surface 2: expected curvature -0.05, got %g", result.Surfaces[1].Curvature)
+	}
+	if result.FNO != 5.0 {
+		t.Errorf("FNO: expected 5, got %g", result.FNO)
+	}
+}
+

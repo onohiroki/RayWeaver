@@ -49,6 +49,16 @@ func radiusToCurvature(r float64) float64 {
 	return 1.0 / r
 }
 
+// surfaceValue converts a CODE V surface first value into a curvature,
+// honouring the RDM entry mode: in radius mode the value is a radius of
+// curvature, in curvature mode it is already a curvature.
+func surfaceValue(v float64, radiusMode bool) float64 {
+	if radiusMode {
+		return radiusToCurvature(v)
+	}
+	return v
+}
+
 // getOrCreate returns the map entry, creating it if absent.
 func getOrCreate[T any](m map[int]*T, id int) *T {
 	if s, ok := m[id]; ok {

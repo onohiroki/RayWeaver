@@ -39,6 +39,12 @@ func ParseCodeV(input string) (*ParseResult, error) {
 	inPrv := false
 	var prvWavelengths []float64
 
+	// Radius/curvature entry mode (CODE V "RDM"). Default is curvature mode
+	// (RDM absent or RDM N): surface first values are curvatures. RDM Y / RDM
+	// select radius mode: values are radii of curvature and converted to
+	// curvature at parse time.
+	radiusMode := false
+
 	for _, raw := range lines {
 		line := strings.TrimSpace(raw)
 		if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "*") || strings.HasPrefix(line, "//") {
@@ -50,6 +56,18 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		tokens := strings.Fields(line)
 
 		if len(tokens) == 0 {
+			continue
+		}
+
+		// The RDM directive selects whether the surface first values are radii
+		// of curvature (RDM / RDM Y, or absent-but-leaf RDM; CODE V writes
+		// "RDM;..." for radius) or curvatures (RDM N / RDM NO). The default
+		// when RDM is absent is curvature mode. Apply the mode before any
+		// keyword dispatch so every following surface reads the right units.
+		// Only treat a line as a directive when it carries a mode word; look
+		// for the mode either fused into the token after "RDM" (e.g. ";LEN ")
+		// or as a Y/N/YES/NO keyword.
+		if parseCodeVRDMDirective(upper, tokens, &radiusMode) {
 			continue
 		}
 
@@ -149,7 +167,7 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			compactMode = true
 			compactCounter++
 			surf := getOrCreate(surfMap, compactCounter)
-			surf.Curvature = radiusToCurvature(parseFloat(tokens[1]))
+			surf.Curvature = surfaceValue(parseFloat(tokens[1]), radiusMode)
 			surf.Thickness = parseThickness(parseFloat(tokens[2]))
 
 			if len(tokens) >= 4 {
@@ -174,7 +192,7 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			compactMode = true
 			compactCounter++
 			surf := getOrCreate(surfMap, compactCounter)
-			surf.Curvature = radiusToCurvature(parseFloat(tokens[1]))
+			surf.Curvature = surfaceValue(parseFloat(tokens[1]), radiusMode)
 			surf.Thickness = parseThickness(parseFloat(tokens[2]))
 			lastSurfNum = compactCounter
 			imageSurface = compactCounter
@@ -440,6 +458,44 @@ func parseCodeVWeights(args []string, result *ParseResult) {
 			result.Wavelengths[i].Weight = ws[i]
 		}
 	}
+}
+
+// parseCodeVRDMDirective handles the CODE V "RDM" radius/curvature mode
+// directive and reports whether the line was consumed as one.
+//
+// CODE V semantics: RDM selects the units used for the first value of surface
+// data rows. "RDM" alone or "RDM Y" selects radii of curvature; "RDM N"
+// selects curvatures. When the directive is absent, CODE V defaults to
+// curvature mode. The directive commonly appears fused with other header text
+// on the same line, e.g. "RDM N;LEN \"VERSION...\"" or "RDM;LEN \"VERSION...\"",
+// where the mode word is the token following "RDM" (possibly including a ";"
+// terminator that the surface-row parser would otherwise choke on).
+func parseCodeVRDMDirective(upper string, tokens []string, radiusMode *bool) bool {
+	if len(tokens) == 0 || !strings.HasPrefix(strings.ToUpper(tokens[0]), "RDM") {
+		return false
+	}
+	// The mode word may be fused into the first token ("RDM;LEN ..." or
+	// "RDM N;LEN ...") or appear as a separate token ("RDM Y", "rdm n").
+	firstUpper := strings.ToUpper(tokens[0])
+	var mode string
+	if i := strings.Index(firstUpper, ";"); i >= 0 {
+		// Fused form: the directive is complete within the first token.
+		mode = firstUpper[len("RDM"):i]
+	} else if len(tokens) > 1 {
+		// Separate form: take the mode word from the next token, dropping a
+		// trailing ";" that a surface row parser would otherwise choke on.
+		mode = strings.ToUpper(strings.Trim(tokens[1], ";"))
+	}
+	switch mode {
+	case "", "Y", "YES":
+		*radiusMode = true
+	case "N", "NO":
+		*radiusMode = false
+	default:
+		// Not a mode directive — e.g. "RDM <surf> <radius>" surface row.
+		return false
+	}
+	return true
 }
 
 // parseCodeVHeader handles header-level keywords (wavelengths, fields, FNO,
