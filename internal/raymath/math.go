@@ -95,7 +95,19 @@ func IntersectSphere(origin, dir types.Vec3, radius float64) (float64, bool) {
 	if t1 > 1e-12 {
 		return t1, true
 	}
+	// A ray arriving at a zero-thickness (coincident) surface is already on
+	// the next sphere at its vertex: the near intersection is t1 ≈ 0 for a
+	// convex surface and t2 ≈ 0 for a concave one. Accept that hit so the
+	// trace continues instead of reporting a missed surface. TraceRay rejects
+	// t ≈ 0 on the first surface of a path, so this only relaxes later
+	// surfaces.
+	if math.Abs(t1) < 1e-9 {
+		return t1, true
+	}
 	if t2 > 1e-12 {
+		return t2, true
+	}
+	if math.Abs(t2) < 1e-9 {
 		return t2, true
 	}
 	return 0, false

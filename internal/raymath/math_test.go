@@ -114,6 +114,25 @@ func TestIntersectSphereTangent(t *testing.T) {
 	}
 }
 
+func TestIntersectSphereCoincidentConvex(t *testing.T) {
+	// Ray is already on a zero-thickness (coincident) surface at the vertex of
+	// a convex sphere: t1 = 0, t2 = 2R. The vertex hit must be accepted so the
+	// trace continues through coincident surfaces.
+	tHit, ok := IntersectSphere(types.Vec3{}, types.Vec3{Z: 1}, 100)
+	if !ok || math.Abs(tHit) > 1e-9 {
+		t.Errorf("IntersectSphere at convex vertex: t = %v, ok = %v, want t ≈ 0", tHit, ok)
+	}
+}
+
+func TestIntersectSphereCoincidentConcave(t *testing.T) {
+	// Same but for a concave surface (radius < 0): the vertex is the t2 ≈ 0
+	// intersection.
+	tHit, ok := IntersectSphere(types.Vec3{}, types.Vec3{Z: 1}, -100)
+	if !ok || math.Abs(tHit) > 1e-9 {
+		t.Errorf("IntersectSphere at concave vertex: t = %v, ok = %v, want t ≈ 0", tHit, ok)
+	}
+}
+
 func TestSphereNormal(t *testing.T) {
 	// Sphere center at (0,0,R). Point at (100,0,0) on sphere R=100.
 	// Normal should point from center to surface: (1,0,-1) / sqrt(2) = (0.707,0,-0.707)

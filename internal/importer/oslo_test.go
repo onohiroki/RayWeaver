@@ -132,6 +132,39 @@ END
 	}
 }
 
+func TestParseOslo_NXTWavelengthMicroToMilli(t *testing.T) {
+	input := `LEN NEW "WL" 0.98445 12
+TH  1.0e+10
+NXT
+WV 0.58756 0.48613 0.65627
+WW 1.0 0.8 0.6
+GLA BK7
+RD  0.5
+TH  1.0
+NXT
+AIR
+RD  0.0
+TH  0.0
+END
+`
+	result, err := ParseOslo(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Wavelengths) != 3 {
+		t.Fatalf("expected 3 wavelengths, got %d", len(result.Wavelengths))
+	}
+	want := []float64{0.00058756, 0.00048613, 0.00065627}
+	for i, w := range want {
+		if math.Abs(result.Wavelengths[i].Value-w) > 1e-12 {
+			t.Errorf("wavelength %d: expected %g, got %g", i, w, result.Wavelengths[i].Value)
+		}
+	}
+	if math.Abs(result.Wavelengths[1].Weight-0.8) > 1e-12 {
+		t.Errorf("wavelength 1 weight: expected 0.8, got %g", result.Wavelengths[1].Weight)
+	}
+}
+
 func TestDecodeDispersionCode(t *testing.T) {
 	cases := []struct {
 		code   string

@@ -126,7 +126,7 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 				if i < len(wvValues) {
 					result.Wavelengths = append(result.Wavelengths, types.WavelengthItem{
 						ID:     len(result.Wavelengths),
-						Value:  wvValues[i],
+						Value:  wvValues[i] / 1000.0,
 						Weight: weight,
 					})
 				}
