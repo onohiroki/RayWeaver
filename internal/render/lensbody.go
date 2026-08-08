@@ -136,28 +136,31 @@ func validAtHeight(surf types.Surface, h float64) bool {
 }
 
 // computeElemEdges evaluates each surface and builds the top and bottom rim
-// geometry. The lens is classified by the sign of the two curvatures:
+// geometry. The lens is classified from the two curvatures alone: a diverging
+// (concave) lens has c1 < c2 (edge thickness greater than the center), a
+// converging (convex) lens has c1 >= c2. This covers biconvex, biconcave,
+// plano and meniscus shapes alike.
 //
-//   - Concave (meniscus) lens — both curvatures non-zero and same sign: the
-//     taller surface (larger h) carries a horizontal chamfer of half the Z
-//     separation between the two surface edges (parallel to the optical axis);
-//     the shorter surface connects to the chamfer end diagonally. Equal-height
-//     elements keep a plain horizontal rim. In an extreme meniscus (e.g.
-//     fisheye) the taller surface's edge lies at or beyond the shorter
-//     surface's edge in Z (towards the image); a forward-pointing chamfer is
-//     then impossible and the two edges are joined by a straight diagonal.
-//   - Convex lens — opposite signs (or a plane): both surfaces are drawn at
-//     the taller surface's height so the rim is a plain horizontal line, the
-//     classic drawing style. When that shared height would exceed a surface's
-//     radius of curvature (the sag becomes undefined), it falls back to the
-//     per-surface heights joined by a straight diagonal.
+//   - Concave lens (c1 < c2): the taller surface (larger h) carries a
+//     horizontal chamfer of half the Z separation between the two surface
+//     edges (parallel to the optical axis); the shorter surface connects to
+//     the chamfer end diagonally. The chamfer always points from the taller
+//     surface's edge toward the shorter one, so it works whether the taller
+//     edge lies before or after the shorter edge in Z (e.g. a rear negative
+//     meniscus or biconcave lens in a double Gauss). Equal-height elements
+//     keep a plain horizontal rim.
+//   - Convex lens (c1 >= c2): both surfaces are drawn at the taller surface's
+//     height so the rim is a plain horizontal line, the classic drawing style.
+//     When that shared height would exceed a surface's radius of curvature
+//     (the sag becomes undefined), it falls back to the per-surface heights
+//     joined by a straight diagonal.
 func computeElemEdges(e element, z1, z2 float64) elemEdge {
 	c1 := e.r1Surf.Curvature
 	c2 := e.r2Surf.Curvature
-	meniscus := c1 != 0 && c2 != 0 && (c1 > 0) == (c2 > 0)
+	concave := c1 < c2
 
 	h1eff, h2eff := e.h1, e.h2
-	if !meniscus {
+	if !concave {
 		hShared := math.Max(e.h1, e.h2)
 		if validAtHeight(e.r1Surf, hShared) && validAtHeight(e.r2Surf, hShared) {
 			h1eff, h2eff = hShared, hShared
@@ -188,14 +191,14 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 
 	// Convex lens with unequal effective heights (the shared height broke):
 	// join the two edges directly with a diagonal.
-	if !meniscus {
+	if !concave {
 		ee.topPts = []vec2{p2Top, p1Top}
 		ee.bottomPts = []vec2{p1Bot, p2Bot}
 		return ee
 	}
 
-	// Meniscus with unequal heights: chamfer on the taller surface, diagonal to
-	// the shorter surface.
+	// Concave lens with unequal heights: chamfer on the taller surface,
+	// diagonal to the shorter surface.
 	var hTall, zTall, zShort float64
 	if h1eff > h2eff {
 		hTall = h1eff
@@ -205,15 +208,6 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 		hTall = h2eff
 		zTall = z2Top
 		zShort = z1Top
-	}
-
-	// Extreme meniscus (e.g. fisheye): the taller surface's edge lies at or
-	// beyond the shorter surface's edge in Z (towards the image), so a
-	// forward-pointing chamfer is not possible — join the edges directly.
-	if zTall >= zShort {
-		ee.topPts = []vec2{p2Top, p1Top}
-		ee.bottomPts = []vec2{p1Bot, p2Bot}
-		return ee
 	}
 
 	chZ := (zTall + zShort) / 2
