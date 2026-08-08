@@ -9,12 +9,14 @@ import (
 )
 
 type element struct {
-	r1Idx  int
-	r2Idx  int
-	r1Surf types.Surface
-	r2Surf types.Surface
-	h1     float64
-	h2     float64
+	r1Idx      int
+	r2Idx      int
+	r1Surf     types.Surface
+	r2Surf     types.Surface
+	h1         float64
+	h2         float64
+	r1Cemented bool
+	r2Cemented bool
 }
 
 func buildLensBodies(surfaces []types.Surface, zPos []float64, globalMaxH float64) []string {
@@ -66,10 +68,16 @@ func globalMaxSemiDiameter(surfaces []types.Surface) float64 {
 	return maxH
 }
 
+// isGlassSurface reports whether the surface bounds a glass medium on its
+// exit side (used to detect cemented interfaces between two glass elements).
+func isGlassSurface(s types.Surface) bool {
+	return !s.Material.IsAir() && s.Material.Key != "1"
+}
+
 func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 	var elems []element
 	for i := 0; i < len(surfaces); {
-		if surfaces[i].Material.IsAir() || surfaces[i].Material.Key == "1" {
+		if !isGlassSurface(surfaces[i]) {
 			i++
 			continue
 		}
@@ -79,12 +87,14 @@ func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 			break
 		}
 		elems = append(elems, element{
-			r1Idx:  r1,
-			r2Idx:  r2,
-			r1Surf: surfaces[r1],
-			r2Surf: surfaces[r2],
-			h1:     surfaceSemiDiameter(surfaces[r1], globalMaxH),
-			h2:     surfaceSemiDiameter(surfaces[r2], globalMaxH),
+			r1Idx:      r1,
+			r2Idx:      r2,
+			r1Surf:     surfaces[r1],
+			r2Surf:     surfaces[r2],
+			h1:         surfaceSemiDiameter(surfaces[r1], globalMaxH),
+			h2:         surfaceSemiDiameter(surfaces[r2], globalMaxH),
+			r1Cemented: r1 > 0 && isGlassSurface(surfaces[r1-1]),
+			r2Cemented: r2 < len(surfaces) && isGlassSurface(surfaces[r2]),
 		})
 		i = r2
 	}
@@ -117,12 +127,12 @@ func buildElemPath(e element, z1, z2 float64) string {
 // surface-2 edge. Both include their endpoints (each polylines' first point
 // coincides with where the adjacent curved surface ends).
 type elemEdge struct {
-	h1eff    float64
-	h2eff    float64
-	sag1h    float64
-	sag1mh   float64
-	sag2h    float64
-	sag2mh   float64
+	h1eff     float64
+	h2eff     float64
+	sag1h     float64
+	sag1mh    float64
+	sag2h     float64
+	sag2mh    float64
 	topPts    []vec2
 	bottomPts []vec2
 }
@@ -141,39 +151,52 @@ func validAtHeight(surf types.Surface, h float64) bool {
 // converging (convex) lens has c1 >= c2. This covers biconvex, biconcave,
 // plano and meniscus shapes alike.
 //
-//   - Concave lens (c1 < c2): the taller surface (larger h) carries a
+//   - Concave lens (c1 < c2) or a cemented element: the surface carrying the
 //     horizontal chamfer of half the Z separation between the two surface
-//     edges (parallel to the optical axis); the shorter surface connects to
-//     the chamfer end diagonally. The chamfer always points from the taller
-//     surface's edge toward the shorter one, so it works whether the taller
-//     edge lies before or after the shorter edge in Z (e.g. a rear negative
-//     meniscus or biconcave lens in a double Gauss). Equal-height elements
-//     keep a plain horizontal rim.
-//   - Convex lens (c1 >= c2): both surfaces are drawn at the taller surface's
-//     height so the rim is a plain horizontal line, the classic drawing style.
-//     When that shared height would exceed a surface's radius of curvature
-//     (the sag becomes undefined), it falls back to the per-surface heights
-//     joined by a straight diagonal.
+//     edges (parallel to the optical axis) is the cemented surface when the
+//     element is part of a cemented pair, otherwise the taller surface; the
+//     other surface connects to the chamfer end diagonally. Putting the
+//     chamfer on the cemented side keeps the bonded rim flat. The chamfer
+//     always points from the carrier's edge toward the other surface, so it
+//     works whether the carrier edge lies before or after the other edge in Z
+//     (e.g. a rear negative meniscus or biconcave lens in a double Gauss).
+//     Equal-height elements keep a plain horizontal rim.
+//   - Convex lens (c1 >= c2) with no cemented surface: both surfaces are drawn
+//     at the taller surface's height so the rim is a plain horizontal line,
+//     the classic drawing style. When that shared height would exceed a
+//     surface's radius of curvature (the sag becomes undefined), it falls back
+//     to the per-surface heights joined by a straight diagonal.
+//
+// If the element's two surfaces cross (their axial spacing reaches zero at
+// some height), the element is clipped at that height so nothing is drawn
+// beyond the crossing.
 func computeElemEdges(e element, z1, z2 float64) elemEdge {
 	c1 := e.r1Surf.Curvature
 	c2 := e.r2Surf.Curvature
 	concave := c1 < c2
 
 	h1eff, h2eff := e.h1, e.h2
-	if !concave {
+	// Cemented surfaces are always drawn at their own semi-diameter; only a
+	// convex element with two free surfaces may share the taller height.
+	if !concave && !e.r1Cemented && !e.r2Cemented {
 		hShared := math.Max(e.h1, e.h2)
 		if validAtHeight(e.r1Surf, hShared) && validAtHeight(e.r2Surf, hShared) {
 			h1eff, h2eff = hShared, hShared
 		}
 	}
 
+	// Clip the element at the height where its two surfaces first cross.
+	if hc, ok := surfaceCrossHeight(e, z1, z2, math.Min(h1eff, h2eff)); ok && hc > 0 {
+		h1eff, h2eff = hc, hc
+	}
+
 	ee := elemEdge{
-		h1eff:    h1eff,
-		h2eff:    h2eff,
-		sag1h:    globalSag(e.r1Surf, h1eff),
-		sag1mh:   globalSag(e.r1Surf, -h1eff),
-		sag2h:    globalSag(e.r2Surf, h2eff),
-		sag2mh:   globalSag(e.r2Surf, -h2eff),
+		h1eff:  h1eff,
+		h2eff:  h2eff,
+		sag1h:  globalSag(e.r1Surf, h1eff),
+		sag1mh: globalSag(e.r1Surf, -h1eff),
+		sag2h:  globalSag(e.r2Surf, h2eff),
+		sag2mh: globalSag(e.r2Surf, -h2eff),
 	}
 
 	z1Top := z1 + ee.sag1h
@@ -189,31 +212,67 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 		return ee
 	}
 
-	// Convex lens with unequal effective heights (the shared height broke):
-	// join the two edges directly with a diagonal.
-	if !concave {
+	// Convex lens with unequal effective heights and no cemented surface (the
+	// shared height broke): join the two edges directly with a diagonal.
+	if !concave && !e.r1Cemented && !e.r2Cemented {
 		ee.topPts = []vec2{p2Top, p1Top}
 		ee.bottomPts = []vec2{p1Bot, p2Bot}
 		return ee
 	}
 
-	// Concave lens with unequal heights: chamfer on the taller surface,
-	// diagonal to the shorter surface.
-	var hTall, zTall, zShort float64
-	if h1eff > h2eff {
-		hTall = h1eff
-		zTall = z1Top
-		zShort = z2Top
+	// Unequal heights on a concave lens or a cemented element: the chamfer
+	// (horizontal, parallel to the optical axis) is placed on the cemented
+	// surface when the element is part of a cemented pair, else on the taller
+	// surface; the other surface connects diagonally.
+	chamferR1 := h1eff >= h2eff
+	if e.r1Cemented != e.r2Cemented {
+		chamferR1 = e.r1Cemented
+	}
+	var hChamfer, zChamfer, zOther float64
+	if chamferR1 {
+		hChamfer, zChamfer = h1eff, z1Top
+		zOther = z2Top
 	} else {
-		hTall = h2eff
-		zTall = z2Top
-		zShort = z1Top
+		hChamfer, zChamfer = h2eff, z2Top
+		zOther = z1Top
 	}
 
-	chZ := (zTall + zShort) / 2
-	ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hTall}, p1Top}
-	ee.bottomPts = []vec2{p1Bot, vec2{X: chZ, Y: -hTall}, p2Bot}
+	chZ := (zChamfer + zOther) / 2
+	ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hChamfer}, p1Top}
+	ee.bottomPts = []vec2{p1Bot, vec2{X: chZ, Y: -hChamfer}, p2Bot}
 	return ee
+}
+
+// surfaceCrossHeight returns the height at which the element's two surfaces
+// first meet (z1+sag1(h) == z2+sag2(h)) within [0, hmax], and whether such a
+// crossing exists. Beyond the crossing the lens body would be
+// self-intersecting, so the element is clipped there.
+func surfaceCrossHeight(e element, z1, z2, hmax float64) (float64, bool) {
+	if hmax <= 0 {
+		return 0, false
+	}
+	n := 64
+	var prevH, prevSp float64
+	for i := 0; i <= n; i++ {
+		h := hmax * float64(i) / float64(n)
+		sp := (z2 + globalSag(e.r2Surf, h)) - (z1 + globalSag(e.r1Surf, h))
+		if math.IsNaN(sp) {
+			return 0, false
+		}
+		if i == 0 {
+			if sp <= 0 {
+				return 0, true
+			}
+			prevH, prevSp = h, sp
+			continue
+		}
+		if sp <= 0 {
+			t := prevSp / (prevSp - sp)
+			return prevH + t*(h-prevH), true
+		}
+		prevH, prevSp = h, sp
+	}
+	return 0, false
 }
 
 // edgeToPath appends the polyline as absolute L commands (the caller's current
