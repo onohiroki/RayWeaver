@@ -36,7 +36,7 @@ func TestEscapeFileSaverVersioning(t *testing.T) {
 			Configs: []types.Config{{
 				ID: "c1",
 				Surfaces: []types.Surface{
-					{ID: 1, Type: types.Sphere, Thickness: p.X[0], Material: "AIR"},
+					{ID: 1, Type: types.Sphere, Thickness: p.X[0], Material: types.Material{}},
 				},
 			}},
 		}

@@ -56,8 +56,8 @@ SURF 3
 	if result.Surfaces[0].Thickness != 5.0 {
 		t.Errorf("surface 1 thick: expected 5.0, got %g", result.Surfaces[0].Thickness)
 	}
-	if result.Surfaces[0].Material != "BK7" {
-		t.Errorf("surface 1 material: expected BK7, got %q", result.Surfaces[0].Material)
+	if result.Surfaces[0].Material.Key != "BK7" {
+		t.Errorf("surface 1 material: expected BK7, got %q", result.Surfaces[0].Material.Key)
 	}
 	if result.Surfaces[0].Diameter != 40.0 {
 		t.Errorf("surface 1 diameter: expected 40.0 (2*20), got %g", result.Surfaces[0].Diameter)
@@ -302,20 +302,16 @@ func TestZemax_InlineModelGlass(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Surfaces[0].Material != "___BLANK" {
-		t.Errorf("material: expected ___BLANK, got %q", result.Surfaces[0].Material)
+	if result.Surfaces[0].Material.HasKey() {
+		t.Errorf("material: expected inline model (no key), got key %q", result.Surfaces[0].Material.Key)
 	}
-	var g *types.Glass
+	if result.Surfaces[0].Material.ND != 1.76499 || result.Surfaces[0].Material.VD != 15.0 {
+		t.Errorf("inline nd/vd: expected 1.76499/15.0, got %g/%g", result.Surfaces[0].Material.ND, result.Surfaces[0].Material.VD)
+	}
 	for i := range result.GlassEntries {
 		if result.GlassEntries[i].Label == "___BLANK" {
-			g = &result.GlassEntries[i]
+			t.Fatal("inline model glass must not be registered in the glass catalog")
 		}
-	}
-	if g == nil {
-		t.Fatal("expected ___BLANK glass entry")
-	}
-	if math.Abs(g.ND-1.76499) > 1e-5 || math.Abs(g.VD-15.0) > 1e-5 {
-		t.Errorf("inline nd/vd: expected 1.76499/15.0, got %g/%g", g.ND, g.VD)
 	}
 }
 
@@ -421,8 +417,8 @@ SURF 4
 	if m1.Thickness != 16.0 {
 		t.Errorf("M1 thickness: expected +16, got %g", m1.Thickness)
 	}
-	if m1.Material != "AIR" {
-		t.Errorf("M1 material: expected AIR, got %q", m1.Material)
+	if !m1.Material.IsAir() {
+		t.Errorf("M1 material: expected AIR, got %q", m1.Material.String())
 	}
 	if !m1.Reflects() {
 		t.Error("M1 should Reflects()")

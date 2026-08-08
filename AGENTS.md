@@ -91,7 +91,18 @@ Demo scripts use `set -euo pipefail` and a `--clean` flag. They are location-ind
 
 ## Glass catalog
 
-AGF files + inline entries. Dispersion: Sellmeier (preferred) or Cauchy from nd+vd. `Catalog.RefractiveIndex(name, wavelength)`. AGF files in `GLASS/` (gitignored `*.agf`).
+AGF files + inline entries. Dispersion: Sellmeier (preferred) or Cauchy from nd+vd. AGF files in `GLASS/` (gitignored `*.agf`).
+
+## Surface materials (`types.Material`)
+
+A surface `material` is a structured type, one of:
+- **Catalogue reference** — `material: {key: N-BK7}` (flat legacy scalar `material: "N-BK7"` still parses to this). Index comes from `glass_catalog`.
+- **Inline model glass** — `material: {nd: 1.76499, vd: 15.0}` (flat legacy `"1.76499:15.00"` still parses to this). Dispersion is computed from nd/vd; no catalogue entry is involved.
+- **Air** — `material: AIR` or absent. A surface with both a `key` and `nd`/`vd` is a catalogue reference (key wins).
+
+`Catalog.RefractiveIndex(types.Material, wavelength)` resolves by key first, then inline nd/vd. The importers (ZEMAX inline `GLAS ___BLANK ...`, Oslo inline nd, CODE V) write **inline model glasses** — each surface carries its own nd/vd, so same-named model glasses from different files no longer collide in `glass_catalog`. A model glass may instead be registered in `glass_catalog` under its own key and referenced by `key` (shared across surfaces); the importers do not do this automatically.
+
+**Optimization**: a glass `nd`/`vd` variable targets the surface's material. Inline models are updated in place (key stays empty); keyed references are optimised through an in-flight catalogue override (the base catalog is never mutated) and `MaterializeGlassEntries`/`FinalConfigs` rewrite every surface sharing that key to the optimised **inline** model glass (`{nd, vd}`, key removed). No new glass entry is appended to `glass_catalog`.
 
 ## 日本語の扱い
 

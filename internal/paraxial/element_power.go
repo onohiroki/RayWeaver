@@ -1,8 +1,6 @@
 package paraxial
 
 import (
-	"strings"
-
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -13,8 +11,8 @@ const DLine = 0.000587562
 
 // isAirMaterial reports whether a surface material is the implicit air/object
 // medium (empty, "1", or "air").
-func isAirMaterial(m string) bool {
-	return m == "" || m == "1" || strings.EqualFold(m, "air")
+func isAirMaterial(m types.Material) bool {
+	return m.IsAir() || m.Key == "1"
 }
 
 // ElementPowers returns the thin-lens power of every lens element in system

@@ -3,6 +3,8 @@ package types
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -59,6 +61,81 @@ func (j JonesVector) MarshalYAML() (interface{}, error) {
 	return []float64{real(j.Ex), imag(j.Ex), real(j.Ey), imag(j.Ey)}, nil
 }
 
+// UnmarshalYAML accepts both the structured form ({key, nd, vd}) and the
+// legacy flat string form ("BK7", "AIR", "1.76499:15.00").
+func (m *Material) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		var s string
+		if err := node.Decode(&s); err != nil {
+			return err
+		}
+		*m = ParseMaterial(s)
+		return nil
+	case yaml.MappingNode:
+		var raw struct {
+			Key string  `yaml:"key"`
+			ND  float64 `yaml:"nd"`
+			VD  float64 `yaml:"vd"`
+		}
+		if err := node.Decode(&raw); err != nil {
+			return err
+		}
+		raw.Key = strings.TrimSpace(raw.Key)
+		if raw.Key == "" || strings.EqualFold(raw.Key, "AIR") {
+			if raw.ND > 0 {
+				*m = Material{ND: raw.ND, VD: raw.VD}
+				return nil
+			}
+			*m = Material{}
+			return nil
+		}
+		*m = Material{Key: raw.Key, ND: raw.ND, VD: raw.VD}
+		return nil
+	default:
+		return fmt.Errorf("material must be a mapping or a string")
+	}
+}
+
+// ParseMaterial maps a legacy flat-string material onto a Material.
+func ParseMaterial(s string) Material {
+	s = strings.TrimSpace(s)
+	if s == "" || strings.EqualFold(s, "AIR") {
+		return Material{}
+	}
+	if nd, vd, ok := parseNDVDMaterial(s); ok {
+		return Material{ND: nd, VD: vd}
+	}
+	return Material{Key: s}
+}
+
+// MarshalYAML emits the structured form: {key} for catalog references, {nd, vd}
+// for model glasses, and the flat "AIR" for air.
+func (m Material) MarshalYAML() (interface{}, error) {
+	switch {
+	case m.IsAir():
+		return "AIR", nil
+	case m.HasKey():
+		return map[string]string{"key": m.Key}, nil
+	default:
+		return map[string]float64{"nd": m.ND, "vd": m.VD}, nil
+	}
+}
+
+// parseNDVDMaterial parses the legacy "nd:vd" flat-string form.
+func parseNDVDMaterial(s string) (nd, vd float64, ok bool) {
+	i := strings.IndexByte(s, ':')
+	if i <= 0 || i == len(s)-1 {
+		return 0, 0, false
+	}
+	nd, err1 := strconv.ParseFloat(s[:i], 64)
+	vd, err2 := strconv.ParseFloat(s[i+1:], 64)
+	if err1 != nil || err2 != nil || nd <= 0 {
+		return 0, 0, false
+	}
+	return nd, vd, true
+}
+
 type surfaceYAML struct {
 	ID           int            `yaml:"id"`
 	Type         SurfaceType    `yaml:"type"`
@@ -66,7 +143,7 @@ type surfaceYAML struct {
 	Curvature    float64        `yaml:"curvature,omitempty"`
 	Conic        float64        `yaml:"conic"`
 	Thickness    float64        `yaml:"thickness"`
-	Material     string         `yaml:"material"`
+	Material     Material       `yaml:"material"`
 	Diameter     float64        `yaml:"diameter,omitempty"`
 	Coefficients []float64      `yaml:"coefficients,omitempty"`
 	NormRadius   float64        `yaml:"norm_radius,omitempty"`
@@ -161,6 +238,9 @@ type glassYAML struct {
 }
 
 func ResolveGlassKey(g Glass) string {
+	if g.Key != "" {
+		return g.Key
+	}
 	switch g.Type {
 	case GlassTypeCatalog:
 		return g.Name

@@ -541,6 +541,22 @@ func applyEscapeX(surfaces []types.Surface, variables []optimize.Variable, x []f
 				continue
 			}
 			optimize.SetSurfaceParam(&result[idx], v.Param, val)
+		case "nd", "vd":
+			// Inline model gas (no catalogue key): apply directly to the
+			// surface material. Keyed materials are handled by
+			// applyGlassOverrides below.
+			idx := dls.SurfaceIndex(result, v.SurfaceID)
+			if idx < 0 {
+				continue
+			}
+			m := &result[idx].Material
+			if !m.HasKey() {
+				if v.Param == "nd" {
+					m.ND = val
+				} else {
+					m.VD = val
+				}
+			}
 		}
 	}
 
@@ -553,21 +569,22 @@ func applyEscapeX(surfaces []types.Surface, variables []optimize.Variable, x []f
 // applyGlassOverrides rewrites surface materials for optimised nd/vd model
 // glasses, mirroring the single-config optimize output behaviour.
 func applyGlassOverrides(result *[]types.Surface, variables []optimize.Variable, x []float64, gc *glass.Catalog) []types.Glass {
-	return optimize.MaterializeGlassEntries(variables, x, gc,
+	optimize.MaterializeGlassEntries(variables, x, gc,
 		func(v optimize.Variable) (string, bool) {
 			idx := dls.SurfaceIndex(*result, v.SurfaceID)
-			if idx < 0 || (*result)[idx].Material == "" {
+			if idx < 0 || !(*result)[idx].Material.HasKey() {
 				return "", false
 			}
-			return (*result)[idx].Material, true
+			return (*result)[idx].Material.Key, true
 		},
-		func(origKey, newKey string) {
+		func(origKey string, nd, vd float64) {
 			for i := range *result {
-				if (*result)[i].Material == origKey {
-					(*result)[i].Material = newKey
+				if (*result)[i].Material.HasKey() && (*result)[i].Material.Key == origKey {
+					(*result)[i].Material = types.Material{ND: nd, VD: vd}
 				}
 			}
 		})
+	return nil
 }
 
 // applyEscapeMulti projects a flat variable vector onto all configs' surfaces.

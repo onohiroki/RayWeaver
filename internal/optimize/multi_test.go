@@ -171,9 +171,9 @@ func TestMultiOptimizerApplyLocalVariables(t *testing.T) {
 
 func TestMultiOptimizerSizeAutoAperturesGeometric(t *testing.T) {
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: "AIR", Diameter: 20.0, AutoAperture: true},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: "AIR", Diameter: 10.0, AutoAperture: true},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 100.0, Material: "AIR", Diameter: 8.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: types.Material{}, Diameter: 20.0, AutoAperture: true},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: types.Material{}, Diameter: 10.0, AutoAperture: true},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 100.0, Material: types.Material{}, Diameter: 8.0},
 	}
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
@@ -457,14 +457,14 @@ func TestMultiOptimizerResultHasExpectedFields(t *testing.T) {
 // constraints (abs_efl and entrance_pupil_diameter) on the given targets.
 func tripletEqualityConfigs(eflTarget, epdTarget float64) []ConfigInput {
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 1 / 10.2871491742, Thickness: 1.524, Material: "SK18", Diameter: 10.0},
-		{ID: 2, Type: types.Sphere, Curvature: 1 / -239.3967954752, Thickness: 2.3368, Material: "AIR", Diameter: 10.0},
-		{ID: 3, Type: types.Sphere, Curvature: 1 / -12.8269871730, Thickness: 0.508, Material: "SF12", Diameter: 6.0},
-		{ID: 4, Type: types.Sphere, Curvature: 1 / 10.5917184406, Thickness: 1.4986, Material: "AIR", Diameter: 6.0},
-		{ID: 5, Type: types.Sphere, Curvature: 0.0, Thickness: 1.016, Material: "AIR", Diameter: 3.78},
-		{ID: 6, Type: types.Sphere, Curvature: 1 / 61.8456294200, Thickness: 1.524, Material: "SK18", Diameter: 6.0},
-		{ID: 7, Type: types.Sphere, Curvature: 1 / -10.0074859032, Thickness: 21.36695183553, Material: "AIR", Diameter: 6.0},
-		{ID: 8, Type: types.Sphere, Curvature: 0.0, Thickness: 0.0, Material: "AIR", Diameter: 44.0},
+		{ID: 1, Type: types.Sphere, Curvature: 1 / 10.2871491742, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 10.0},
+		{ID: 2, Type: types.Sphere, Curvature: 1 / -239.3967954752, Thickness: 2.3368, Material: types.Material{}, Diameter: 10.0},
+		{ID: 3, Type: types.Sphere, Curvature: 1 / -12.8269871730, Thickness: 0.508, Material: types.Material{Key: "SF12"}, Diameter: 6.0},
+		{ID: 4, Type: types.Sphere, Curvature: 1 / 10.5917184406, Thickness: 1.4986, Material: types.Material{}, Diameter: 6.0},
+		{ID: 5, Type: types.Sphere, Curvature: 0.0, Thickness: 1.016, Material: types.Material{}, Diameter: 3.78},
+		{ID: 6, Type: types.Sphere, Curvature: 1 / 61.8456294200, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 6.0},
+		{ID: 7, Type: types.Sphere, Curvature: 1 / -10.0074859032, Thickness: 21.36695183553, Material: types.Material{}, Diameter: 6.0},
+		{ID: 8, Type: types.Sphere, Curvature: 0.0, Thickness: 0.0, Material: types.Material{}, Diameter: 44.0},
 	}
 	return []ConfigInput{{
 		ID:          "cfg1",
@@ -593,8 +593,8 @@ func TestMultiOptimizerApertureMarginClamp(t *testing.T) {
 // usable as optimization variables.
 func TestMultiOptimizerAsphereVariables(t *testing.T) {
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.AspherePolynomial, Curvature: 0.01, Conic: 0.0, Coefficients: []float64{1e-5, 0, 0}, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.AspherePolynomial, Curvature: 0.01, Conic: 0.0, Coefficients: []float64{1e-5, 0, 0}, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
 	}
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})

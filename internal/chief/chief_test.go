@@ -15,8 +15,8 @@ func singletSystem() (types.System, *glass.Catalog) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
 	}
 	surface.Precompute(surfaces)
 	return types.System{Surfaces: surfaces}, gc
@@ -125,9 +125,9 @@ func TestSearchOriginForTargetAsphereRecovery(t *testing.T) {
 	// to fail with "ray missed surface". The next surfaces are routine.
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.AspherePolynomial, Curvature: 0.02, Conic: 0,
-			Thickness: 10.0, Material: "N-BK7", Diameter: 200.0},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 90.0, Material: "AIR", Diameter: 100.0},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 100.0},
+			Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 200.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 90.0, Material: types.Material{}, Diameter: 100.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 100.0},
 	}
 	surface.Precompute(surfaces)
 	engine := ray.NewEngine(gc, nil)
@@ -170,9 +170,9 @@ func TestSearchOriginForTargetVignettingRecovery(t *testing.T) {
 	// Front surface with moderate curvature and limited aperture that causes
 	// the paraxial geoEst to clip, while a nearby origin works.
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 10.0, Material: "N-BK7", Diameter: 30.0},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 40.0, Material: "AIR", Diameter: 30.0},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 20.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 30.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 40.0, Material: types.Material{}, Diameter: 30.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 20.0},
 	}
 	surface.Precompute(surfaces)
 	engine := ray.NewEngine(gc, nil)
@@ -238,9 +238,9 @@ func TestDetermineChiefRaysImageHeightWithPassThrough(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 50.0, Material: "AIR", Diameter: 50.0},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 20.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 50.0, Material: types.Material{}, Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 20.0},
 	}
 	surface.Precompute(surfaces)
 	sys := types.System{Surfaces: surfaces}
@@ -275,11 +275,11 @@ func TestFieldExplicitPath(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: "AIR", Diameter: 200.0},
-		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0, Reflect: true,
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: types.Material{}, Diameter: 200.0},
+		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: types.Material{}, Diameter: 300.0, Reflect: true,
 			Decenter: []types.DecenterStep{{Tilt: types.Vec3{Y: 180}, Scope: types.ScopeBoth}}},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 60.0},
-		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: types.Material{}, Diameter: 60.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 50.0},
 	}
 	surface.Precompute(surfaces)
 	sys := types.System{Surfaces: surfaces}
@@ -422,9 +422,9 @@ func TestBackwardChiefObjectPoint(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 50.0},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 10.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: types.Material{}, Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 10.0},
 	}
 	surface.Precompute(surfaces)
 	e := ray.NewEngine(gc, nil)

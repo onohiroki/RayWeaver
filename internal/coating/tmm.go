@@ -30,7 +30,7 @@ func (c *Catalog) Lookup(name string) (*types.CoatingEntry, bool) {
 func (c *Catalog) ResolveLayers(entry *types.CoatingEntry, gc *glass.Catalog, wavelength float64) {
 	for i := range entry.Layers {
 		layer := &entry.Layers[i]
-		n, err := gc.RefractiveIndex(layer.Material, wavelength)
+		n, err := gc.RefractiveIndex(types.ParseMaterial(layer.Material), wavelength)
 		if err != nil {
 			n = 1.5
 		}

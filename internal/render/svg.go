@@ -131,7 +131,7 @@ func LensSVG(cfg Config) string {
 	for _, e := range findElements(cfg.Surfaces, globalH) {
 		mat := e.r1Surf.Material
 		var fill string
-		if gi, ok := cfg.GlassMap[mat]; ok {
+		if gi, ok := cfg.GlassMap[mat.String()]; ok {
 			fill = GlassSVGFill(gi.ND, gi.VD)
 		} else {
 			fill = "rgb(180,180,180)"

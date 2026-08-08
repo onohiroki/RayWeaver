@@ -124,18 +124,22 @@ func buildGlassMap(output types.Output, surfaces []types.Surface) map[string]ren
 	m := make(map[string]render.GlassInfo)
 	for _, s := range surfaces {
 		mat := s.Material
-		if mat == "" || mat == "AIR" {
+		if mat.IsAir() {
 			continue
 		}
-		if _, seen := m[mat]; seen {
+		key := mat.String()
+		if _, seen := m[key]; seen {
 			continue
 		}
-		g, ok := gc.Lookup(mat)
-		if !ok {
-			continue
+		nd, vd := mat.ND, mat.VD
+		if mat.HasKey() {
+			g, ok := gc.Lookup(mat.Key)
+			if !ok {
+				continue
+			}
+			nd, vd, _ = glass.NDVD(g)
 		}
-		nd, vd, _ := glass.NDVD(g)
-		m[mat] = render.GlassInfo{ND: nd, VD: vd}
+		m[key] = render.GlassInfo{ND: nd, VD: vd}
 	}
 	return m
 }

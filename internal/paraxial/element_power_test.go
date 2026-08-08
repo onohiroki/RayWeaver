@@ -20,8 +20,8 @@ func TestElementPowersSinglet(t *testing.T) {
 	gc := powGC()
 	// Thin lens in air: n=1.5, R1=100, R2=-200 -> (n-1)(c1-c2) = 0.5*(0.01+0.005).
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "G1"},
-		{ID: 2, Type: types.Sphere, Curvature: -0.005, Thickness: 100.0, Material: "AIR"},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "G1"}},
+		{ID: 2, Type: types.Sphere, Curvature: -0.005, Thickness: 100.0, Material: types.Material{}},
 	}
 	surface.Precompute(surfaces)
 
@@ -38,9 +38,9 @@ func TestElementPowersCementedDoublet(t *testing.T) {
 	gc := powGC()
 	// Two glass bodies: [air->G1, G1->G2] and [G1->G2, G2->air].
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 0.1, Material: "G1"},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 0.1, Material: "G2"},
-		{ID: 3, Type: types.Sphere, Curvature: 0.005, Thickness: 50.0, Material: "AIR"},
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 0.1, Material: types.Material{Key: "G1"}},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 0.1, Material: types.Material{Key: "G2"}},
+		{ID: 3, Type: types.Sphere, Curvature: 0.005, Thickness: 50.0, Material: types.Material{}},
 	}
 	surface.Precompute(surfaces)
 
@@ -63,7 +63,7 @@ func TestElementPowersMirror(t *testing.T) {
 	// Concave mirror in the fold model: beam-frame R = +800, power = -2/800.
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 1.0 / 800.0, Thickness: 100.0, Reflect: true,
-		Decenter: []types.DecenterStep{{Tilt: types.Vec3{Y: 180}, Scope: types.ScopeBoth}}},
+			Decenter: []types.DecenterStep{{Tilt: types.Vec3{Y: 180}, Scope: types.ScopeBoth}}},
 	}
 	surface.Precompute(surfaces)
 
@@ -79,8 +79,8 @@ func TestElementPowersMirror(t *testing.T) {
 func TestElementPowersAirOnly(t *testing.T) {
 	gc := powGC()
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: "AIR"},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 100.0, Material: "AIR"},
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: types.Material{}},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 100.0, Material: types.Material{}},
 	}
 	surface.Precompute(surfaces)
 
@@ -95,8 +95,8 @@ func TestElementPowersSumApproximatesSystemPower(t *testing.T) {
 	// The thin-lens element power should be close to the real (thick) system
 	// power 1/EFL; the difference is the thickness term, small here.
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 5.0, Material: "G1"},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR"},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 5.0, Material: types.Material{Key: "G1"}},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}},
 	}
 	surface.Precompute(surfaces)
 

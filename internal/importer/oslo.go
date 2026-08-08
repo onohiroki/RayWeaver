@@ -172,8 +172,12 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 			Type:      types.Sphere,
 			Curvature: curv,
 			Thickness: parseThickness(s.Thickness),
-			Material:  mat,
 			Diameter:  diam,
+		}
+		if isAir(mat) {
+			surf.Material = types.Material{}
+		} else {
+			surf.Material = types.Material{Key: mat}
 		}
 		surfList = append(surfList, surf)
 	}
@@ -416,6 +420,9 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 		}
 
 		mat := s.Material
+		if mat == "" {
+			mat = "AIR"
+		}
 		addGlassEntry(result, mat)
 
 		surf := types.Surface{
@@ -423,9 +430,13 @@ func parseOsloSRF(input string) (*ParseResult, error) {
 			Type:      types.Sphere,
 			Curvature: s.Curvature,
 			Thickness: s.Thickness,
-			Material:  s.Material,
 			Diameter:  s.Diameter,
 			Conic:     s.Conic,
+		}
+		if isAir(mat) {
+			surf.Material = types.Material{}
+		} else {
+			surf.Material = types.Material{Key: mat}
 		}
 		result.Surfaces = append(result.Surfaces, surf)
 	}

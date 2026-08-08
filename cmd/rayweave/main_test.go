@@ -432,8 +432,8 @@ func TestBuildGlassMapResolvesNormalizedNames(t *testing.T) {
 	}
 	for _, c := range cases {
 		surfaces := []types.Surface{
-			{ID: 1, Type: types.Sphere, Material: c.material},
-			{ID: 2, Type: types.Sphere, Material: "AIR"},
+			{ID: 1, Type: types.Sphere, Material: types.Material{Key: c.material}},
+			{ID: 2, Type: types.Sphere, Material: types.Material{}},
 		}
 		m := buildGlassMap(output, surfaces)
 		gi, ok := m[c.material]
@@ -447,7 +447,7 @@ func TestBuildGlassMapResolvesNormalizedNames(t *testing.T) {
 	}
 
 	// A material with no catalog entry stays unresolved (drawn gray).
-	surfaces := []types.Surface{{ID: 1, Type: types.Sphere, Material: "UNKNOWN_GLASS"}}
+	surfaces := []types.Surface{{ID: 1, Type: types.Sphere, Material: types.Material{Key: "UNKNOWN_GLASS"}}}
 	if m := buildGlassMap(output, surfaces); len(m) != 0 {
 		t.Errorf("expected no resolution for unknown material, got %v", m)
 	}

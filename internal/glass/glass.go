@@ -146,31 +146,45 @@ func (c *Catalog) Lookup(key string) (*types.Glass, bool) {
 	return nil, false
 }
 
-func (c *Catalog) RefractiveIndex(material string, wavelength float64) (float64, error) {
-	if material == "AIR" || material == "" {
+func (c *Catalog) RefractiveIndex(mat types.Material, wavelength float64) (float64, error) {
+	if mat.IsAir() {
 		return 1.0, nil
 	}
 
-	g, ok := c.Lookup(material)
-	if !ok {
-		return 0, fmt.Errorf("glass not found: %s", material)
+	// Catalog reference (key takes precedence over an inline nd/vd): the entry
+	// may be a catalog (dispersion formula), model (nd/vd) or tabulated glass.
+	if mat.HasKey() {
+		g, ok := c.Lookup(mat.Key)
+		if !ok {
+			return 0, fmt.Errorf("glass not found: %s", mat.Key)
+		}
+		key := c.cacheKey(g, mat.String(), wavelength)
+		if v, ok := c.indexCache.Load(key); ok {
+			return v.(float64), nil
+		}
+		n, err := CalcRefractiveIndex(g, wavelength)
+		if err != nil {
+			return 0, err
+		}
+		c.indexCache.Store(key, n)
+		return n, nil
 	}
 
-	// Cache the computed index per (glass, nd/vd, wavelength). Model glasses
-	// optimised by nd/vd change values between evaluations, so those are part
-	// of the key; catalog/tabulated glasses use zero nd/vd markers that are
-	// stable across calls.
-	key := c.cacheKey(g, material, wavelength)
-	if v, ok := c.indexCache.Load(key); ok {
-		return v.(float64), nil
+	// Self-contained model glass: nd/vd live directly on the material.
+	if mat.HasModel() {
+		key := "model|" + mat.String() + "|" + strconv.FormatFloat(wavelength, 'g', -1, 64)
+		if v, ok := c.indexCache.Load(key); ok {
+			return v.(float64), nil
+		}
+		n, err := RefractiveIndexFromNDVD(mat.ND, mat.VD, wavelength)
+		if err != nil {
+			return 0, err
+		}
+		c.indexCache.Store(key, n)
+		return n, nil
 	}
 
-	n, err := CalcRefractiveIndex(g, wavelength)
-	if err != nil {
-		return 0, err
-	}
-	c.indexCache.Store(key, n)
-	return n, nil
+	return 1.0, nil
 }
 
 func (c *Catalog) cacheKey(g *types.Glass, material string, wavelength float64) string {

@@ -17,9 +17,9 @@ func TestTraceBackwardReversibility(t *testing.T) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "BK7", ND: 1.5168, VD: 64.17})
 
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.1, Thickness: 2.0, Material: "BK7", Diameter: 10},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 5.0, Material: "AIR", Diameter: 10},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 3},
+		{ID: 1, Type: types.Sphere, Curvature: 0.1, Thickness: 2.0, Material: types.Material{Key: "BK7"}, Diameter: 10},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 5.0, Material: types.Material{}, Diameter: 10},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 3},
 	}
 	surface.Precompute(surfaces)
 	e := NewEngine(gc, nil)
@@ -71,8 +71,8 @@ func TestTraceBackwardReversibility(t *testing.T) {
 
 func TestFrontPathStopAtFirstSurface(t *testing.T) {
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.1, Thickness: 2.0, Material: "BK7"},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR"},
+		{ID: 1, Type: types.Sphere, Curvature: 0.1, Thickness: 2.0, Material: types.Material{Key: "BK7"}},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}},
 	}
 	if seq := FrontPath(surfaces, 1); seq != nil {
 		t.Fatalf("FrontPath(stop=first) = %v, want nil", seq)

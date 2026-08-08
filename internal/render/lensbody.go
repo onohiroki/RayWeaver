@@ -67,7 +67,7 @@ func globalMaxSemiDiameter(surfaces []types.Surface) float64 {
 func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 	var elems []element
 	for i := 0; i < len(surfaces); {
-		if surfaces[i].Material == "" || surfaces[i].Material == "1" || strings.EqualFold(surfaces[i].Material, "air") {
+		if surfaces[i].Material.IsAir() || surfaces[i].Material.Key == "1" {
 			i++
 			continue
 		}
@@ -114,7 +114,7 @@ func buildAirLines(surfaces []types.Surface, zPos []float64) []string {
 			continue
 		}
 		mat := surfaces[i].Material
-		if mat == "" || mat == "1" || strings.EqualFold(mat, "air") {
+		if mat.IsAir() || mat.Key == "1" {
 			h := surfaces[i].Diameter / 2
 			x := zPos[i] + globalSag(surfaces[i], h)
 			out = append(out, fmt.Sprintf("M %.6f,%.6f L %.6f,%.6f", x, h, x, -h))

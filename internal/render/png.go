@@ -106,7 +106,7 @@ func LensPNG(cfg Config) ([]byte, error) {
 	for _, e := range findElements(cfg.Surfaces, globalH) {
 		mat := e.r1Surf.Material
 		var fill color.NRGBA
-		if gi, ok := cfg.GlassMap[mat]; ok {
+		if gi, ok := cfg.GlassMap[mat.String()]; ok {
 			fill = glassFill(gi.ND, gi.VD, 191)
 		} else {
 			fill = color.NRGBA{180, 180, 180, 191}

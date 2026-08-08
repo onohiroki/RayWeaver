@@ -19,9 +19,9 @@ func testGlassCatalog() *glass.Catalog {
 // pupil grid is shifted off-axis and clips the top edge of surfaces 1 and 2.
 func clippedSystem() []types.Surface {
 	return []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: "AIR", Diameter: 20.0},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: "AIR", Diameter: 10.0},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 100.0, Material: "AIR", Diameter: 8.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: types.Material{}, Diameter: 20.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: types.Material{}, Diameter: 10.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 100.0, Material: types.Material{}, Diameter: 8.0},
 	}
 }
 
@@ -136,8 +136,8 @@ func TestNewMeasuresInactive(t *testing.T) {
 // surface ID. It now uses the explicit `surface2` field.
 func TestEdgeThicknessSurface2(t *testing.T) {
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 5.0, Material: "N-BK7", Diameter: 20.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 20.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 20.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 20.0},
 	}
 	surface.Precompute(surfaces)
 

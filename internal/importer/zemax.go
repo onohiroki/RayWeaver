@@ -112,7 +112,6 @@ func ParseZemax(input string) (*ParseResult, error) {
 			Type:      types.Sphere,
 			Curvature: sp.Curvature,
 			Thickness: sp.Thickness,
-			Material:  sp.Material,
 			Diameter:  sp.Diameter,
 			Conic:     sp.Conic,
 		}
@@ -136,14 +135,17 @@ func ParseZemax(input string) (*ParseResult, error) {
 		}
 
 		mat := strings.TrimSpace(sp.Material)
-		if mat == "" || isAir(mat) {
-			mat = "AIR"
-		} else if sp.InlineND > 0 {
-			addGlassEntryNDV(result, mat, sp.InlineND, sp.InlineVD)
-		} else {
+		switch {
+		case mat == "" || isAir(mat):
+			s.Material = types.Material{}
+		case sp.InlineND > 0:
+			// ZEMAX inline model glass (e.g. "___BLANK"): the nd/vd travel
+			// with the surface; no glass_catalog entry is needed.
+			s.Material = types.Material{ND: sp.InlineND, VD: sp.InlineVD}
+		default:
 			addGlassEntry(result, mat)
+			s.Material = types.Material{Key: mat}
 		}
-		s.Material = mat
 
 		// A pending COORDBRK transform applies to this surface: tilts before
 		// decenters (PARM 6 = 1) or decenters before tilts (default) map onto

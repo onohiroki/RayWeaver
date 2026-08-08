@@ -436,7 +436,7 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 			if cfg == nil {
 				continue
 			}
-			key := resolveGlassKeyFromSurface(cfg.surfaces, gc, v.SurfaceID)
+			key := resolveGlassKeyFromSurface(cfg.surfaces, v.SurfaceID)
 			v.GlassName = key
 			if key != "" {
 				if g, ok := gc.Lookup(key); ok {
@@ -637,7 +637,20 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 				surfaces[idx].Curvature = 1.0 / val
 			}
 		case "nd", "vd":
-			key := resolveGlassKeyFromSurface(surfaces, o.gc, v.SurfaceID)
+			// Inline model glass (nd/vd carried on the surface, no catalogue
+			// key): apply the variable directly to the surface material. A
+			// keyed material goes through the in-flight catalogue override.
+			m := &surfaces[idx].Material
+			if m.HasModel() && !m.HasKey() {
+				switch v.Param {
+				case "nd":
+					m.ND = val
+				case "vd":
+					m.VD = val
+				}
+				continue
+			}
+			key := resolveGlassKeyFromSurface(surfaces, v.SurfaceID)
 			if g, ok := localOverrides[key]; ok {
 				switch v.Param {
 				case "nd":
@@ -1079,33 +1092,35 @@ func (o *Optimizer) FinalApertures(x []float64) map[string]map[int]float64 {
 
 // FinalConfigs returns the surfaces of every config after applying x, with
 // nd/vd-optimised model glasses materialised (surface materials rewritten to
-// the new glass keys) and the new glass entries to append to the catalog.
+// the optimised inline model glass).
 func (o *Optimizer) FinalConfigs(x []float64) (map[string][]types.Surface, []types.Glass) {
 	configSurfaces, _ := o.applyVariables(x)
 	newGlasses := o.materializeGlasses(configSurfaces, x)
 	return configSurfaces, newGlasses
 }
 
-// materializeGlasses collects the optimised nd/vd pairs into model glass
-// entries and rewrites the affected surface materials to the new glass keys.
+// materializeGlasses collects the optimised nd/vd pairs and rewrites the
+// affected surface materials (catalogue-keyed ones become inline model glass;
+// inline models already carry the values from applyVariables).
 func (o *Optimizer) materializeGlasses(configSurfaces map[string][]types.Surface, x []float64) []types.Glass {
-	return MaterializeGlassEntries(o.variables, x, o.gc,
+	MaterializeGlassEntries(o.variables, x, o.gc,
 		func(v Variable) (string, bool) {
 			if v.IsShared {
 				return "", false
 			}
 			return v.GlassName, v.GlassName != ""
 		},
-		func(origKey, newKey string) {
+		func(origKey string, nd, vd float64) {
 			for ci := range o.configs {
 				cfgID := o.configs[ci].id
 				for i := range configSurfaces[cfgID] {
-					if configSurfaces[cfgID][i].Material == origKey {
-						configSurfaces[cfgID][i].Material = newKey
+					if configSurfaces[cfgID][i].Material.HasKey() && configSurfaces[cfgID][i].Material.Key == origKey {
+						configSurfaces[cfgID][i].Material = types.Material{ND: nd, VD: vd}
 					}
 				}
 			}
 		})
+	return nil
 }
 
 // AsphereCoefIndex maps an asphere coefficient parameter name (a4/a6/a8/a10/
@@ -1217,17 +1232,23 @@ func (o *Optimizer) getInitialState() []float64 {
 				x[i] = (v.Min + v.Max) / 2
 			}
 		case "nd", "vd":
-			key := v.GlassName
-			if key == "" && cfg != nil {
-				key = resolveGlassKeyFromSurface(cfg.surfaces, o.gc, v.SurfaceID)
-			}
-			if o.gc != nil && key != "" {
-				if g, ok := o.gc.Lookup(key); ok {
-					switch v.Param {
-					case "nd":
-						x[i] = g.ND
-					case "vd":
-						x[i] = g.VD
+			if cfg != nil {
+				if idx := surfaceIndex(cfg.surfaces, v.SurfaceID); idx >= 0 {
+					m := cfg.surfaces[idx].Material
+					if m.HasModel() && !m.HasKey() {
+						if v.Param == "nd" {
+							x[i] = m.ND
+						} else {
+							x[i] = m.VD
+						}
+					} else if m.HasKey() && o.gc != nil {
+						if g, ok := o.gc.Lookup(m.Key); ok {
+							if v.Param == "nd" {
+								x[i] = g.ND
+							} else {
+								x[i] = g.VD
+							}
+						}
 					}
 				}
 			}
@@ -1275,16 +1296,19 @@ func (o *Optimizer) buildVariableStates(x []float64) []VariableState {
 			if cfg := findConfigByID(o.configs, v.Config); cfg != nil {
 				if idx := surfaceIndex(cfg.surfaces, v.SurfaceID); idx >= 0 {
 					if v.Param == "nd" || v.Param == "vd" {
-						key := v.GlassName
-						if key == "" {
-							key = resolveGlassKeyFromSurface(cfg.surfaces, o.gc, v.SurfaceID)
-						}
-						if o.gc != nil && key != "" {
-							if g, ok := o.gc.Lookup(key); ok {
-								switch v.Param {
-								case "nd":
+						m := cfg.surfaces[idx].Material
+						switch {
+						case m.HasModel() && !m.HasKey():
+							if v.Param == "nd" {
+								st.Before = m.ND
+							} else {
+								st.Before = m.VD
+							}
+						case m.HasKey() && o.gc != nil:
+							if g, ok := o.gc.Lookup(m.Key); ok {
+								if v.Param == "nd" {
 									st.Before = g.ND
-								case "vd":
+								} else {
 									st.Before = g.VD
 								}
 							}
@@ -1324,13 +1348,13 @@ func buildHullPairs(variables []Variable) []glassPair {
 	return pairs
 }
 
-func resolveGlassKeyFromSurface(surfaces []types.Surface, gc *glass.Catalog, id int) string {
+func resolveGlassKeyFromSurface(surfaces []types.Surface, id int) string {
 	for _, s := range surfaces {
 		if s.ID == id {
-			if s.Material == "" || s.Material == "AIR" {
-				return ""
+			if s.Material.HasKey() {
+				return s.Material.Key
 			}
-			return s.Material
+			return ""
 		}
 	}
 	return ""

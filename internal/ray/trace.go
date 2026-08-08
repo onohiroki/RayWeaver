@@ -210,7 +210,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 		}
 		if interaction == types.Reflect {
 			glassEntrySurfaceID = 0
-		} else if currentSurf.Material != "AIR" {
+		} else if !currentSurf.Material.IsAir() {
 			glassEntryPos = globalPos
 			glassEntrySurfaceID = currentID
 		} else {
@@ -264,10 +264,10 @@ func findSurface(surfaces []types.Surface, id int) *types.Surface {
 // intervening fold mirrors (which do not separate media). It is the region a
 // forward-travelling ray is in just before hitting the surface, and the region
 // a backward-travelling (ghost) ray leaves when crossing the surface.
-func materialBefore(surfaces []types.Surface, id int) string {
+func materialBefore(surfaces []types.Surface, id int) types.Material {
 	idx := indexOfSurface(surfaces, id)
 	if idx <= 0 {
-		return "AIR"
+		return types.Material{}
 	}
 	for idx > 0 {
 		s := &surfaces[idx-1]
@@ -276,7 +276,7 @@ func materialBefore(surfaces []types.Surface, id int) string {
 		}
 		idx--
 	}
-	return "AIR"
+	return types.Material{}
 }
 
 func indexOfSurface(surfaces []types.Surface, id int) int {

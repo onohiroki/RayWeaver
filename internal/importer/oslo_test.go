@@ -34,8 +34,8 @@ func TestParseOslo_ModelGlassIndices(t *testing.T) {
 	if len(result.Surfaces) != 1 {
 		t.Fatalf("expected 1 surface, got %d", len(result.Surfaces))
 	}
-	if result.Surfaces[0].Material != "MOD G1" {
-		t.Errorf("surface material: expected %q, got %q", "MOD G1", result.Surfaces[1].Material)
+	if result.Surfaces[0].Material.Key != "MOD G1" {
+		t.Errorf("surface material: expected %q, got %q", "MOD G1", result.Surfaces[1].Material.Key)
 	}
 
 	var g *types.Glass
@@ -78,8 +78,8 @@ END
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Surfaces[0].Material != "BK7" {
-		t.Errorf("surface material: expected %q, got %q", "BK7", result.Surfaces[1].Material)
+	if result.Surfaces[0].Material.Key != "BK7" {
+		t.Errorf("surface material: expected %q, got %q", "BK7", result.Surfaces[1].Material.Key)
 	}
 	var g *types.Glass
 	for i := range result.GlassEntries {
@@ -115,8 +115,8 @@ END
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Surfaces[0].Material != "1.506000" {
-		t.Errorf("surface material: expected %q, got %q", "1.506000", result.Surfaces[1].Material)
+	if result.Surfaces[0].Material.Key != "1.506000" {
+		t.Errorf("surface material: expected %q, got %q", "1.506000", result.Surfaces[1].Material.Key)
 	}
 	var g *types.Glass
 	for i := range result.GlassEntries {

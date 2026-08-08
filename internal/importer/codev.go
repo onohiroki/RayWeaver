@@ -374,9 +374,13 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			Type:      surfType,
 			Curvature: s.Curvature,
 			Thickness: s.Thickness,
-			Material:  mat,
 			Diameter:  s.Diameter,
 			Conic:     s.Conic,
+		}
+		if mat == "" || isAir(mat) {
+			t.Material = types.Material{}
+		} else {
+			t.Material = types.Material{Key: mat}
 		}
 
 		// CODE V decenter-and-return (DAR) components become a per-surface

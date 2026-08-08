@@ -13,8 +13,8 @@ import (
 
 func singletSurfaces() []types.Surface {
 	return []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
 	}
 }
 
@@ -81,8 +81,8 @@ func TestOptimizerEvaluateMerit(t *testing.T) {
 
 func TestOptimizerApplyVariablesCurvature(t *testing.T) {
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
 	}
 
 	cfg := Config{
@@ -115,8 +115,8 @@ func TestOptimizerApplyVariablesCurvature(t *testing.T) {
 
 func TestOptimizerApplyVariablesThickness(t *testing.T) {
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
 	}
 
 	cfg := Config{
@@ -152,8 +152,8 @@ func TestOptimizerResultHasExpectedFields(t *testing.T) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
 	}
 
 	cfg := Config{
@@ -189,8 +189,8 @@ func TestOptimizerStopReturnsInterrupted(t *testing.T) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
 	}
 
 	cfg := Config{
@@ -225,14 +225,14 @@ func TestOptimizerCanImproveDegradedSystem(t *testing.T) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SF12", ND: 1.64831, VD: 33.84})
 
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.12, Thickness: 1.524, Material: "SK18", Diameter: 10.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.004177, Thickness: 2.3368, Material: "AIR", Diameter: 10.0},
-		{ID: 3, Type: types.Sphere, Curvature: -0.05, Thickness: 0.508, Material: "SF12", Diameter: 6.0},
-		{ID: 4, Type: types.Sphere, Curvature: 0.094413, Thickness: 1.4986, Material: "AIR", Diameter: 6.0},
-		{ID: 5, Type: types.Sphere, Curvature: 0, Thickness: 1.016, Material: "AIR", Diameter: 3.7825297358},
-		{ID: 6, Type: types.Sphere, Curvature: 0.025, Thickness: 1.524, Material: "SK18", Diameter: 6.0},
-		{ID: 7, Type: types.Sphere, Curvature: -0.15, Thickness: 21.36695183553, Material: "AIR", Diameter: 6.0},
-		{ID: 8, Type: types.Sphere, Curvature: 0, Thickness: 0.0, Material: "AIR"},
+		{ID: 1, Type: types.Sphere, Curvature: 0.12, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 10.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.004177, Thickness: 2.3368, Material: types.Material{}, Diameter: 10.0},
+		{ID: 3, Type: types.Sphere, Curvature: -0.05, Thickness: 0.508, Material: types.Material{Key: "SF12"}, Diameter: 6.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0.094413, Thickness: 1.4986, Material: types.Material{}, Diameter: 6.0},
+		{ID: 5, Type: types.Sphere, Curvature: 0, Thickness: 1.016, Material: types.Material{}, Diameter: 3.7825297358},
+		{ID: 6, Type: types.Sphere, Curvature: 0.025, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 6.0},
+		{ID: 7, Type: types.Sphere, Curvature: -0.15, Thickness: 21.36695183553, Material: types.Material{}, Diameter: 6.0},
+		{ID: 8, Type: types.Sphere, Curvature: 0, Thickness: 0.0, Material: types.Material{}},
 	}
 
 	terms := []MeritTerm{
@@ -459,14 +459,14 @@ func TestOptimizerLoggerCalled(t *testing.T) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SF12", ND: 1.64831, VD: 33.84})
 
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.05, Thickness: 1.524, Material: "SK18", Diameter: 10.0},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 2.3368, Material: "AIR", Diameter: 10.0},
-		{ID: 3, Type: types.Sphere, Curvature: -0.05, Thickness: 0.508, Material: "SF12", Diameter: 6.0},
-		{ID: 4, Type: types.Sphere, Curvature: 0.094413, Thickness: 1.4986, Material: "AIR", Diameter: 6.0},
-		{ID: 5, Type: types.Sphere, Curvature: 0, Thickness: 1.016, Material: "AIR", Diameter: 3.7825297358},
-		{ID: 6, Type: types.Sphere, Curvature: 0.025, Thickness: 1.524, Material: "SK18", Diameter: 6.0},
-		{ID: 7, Type: types.Sphere, Curvature: -0.15, Thickness: 21.36695183553, Material: "AIR", Diameter: 6.0},
-		{ID: 8, Type: types.Sphere, Curvature: 0, Thickness: 0.0, Material: "AIR"},
+		{ID: 1, Type: types.Sphere, Curvature: 0.05, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 10.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 2.3368, Material: types.Material{}, Diameter: 10.0},
+		{ID: 3, Type: types.Sphere, Curvature: -0.05, Thickness: 0.508, Material: types.Material{Key: "SF12"}, Diameter: 6.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0.094413, Thickness: 1.4986, Material: types.Material{}, Diameter: 6.0},
+		{ID: 5, Type: types.Sphere, Curvature: 0, Thickness: 1.016, Material: types.Material{}, Diameter: 3.7825297358},
+		{ID: 6, Type: types.Sphere, Curvature: 0.025, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 6.0},
+		{ID: 7, Type: types.Sphere, Curvature: -0.15, Thickness: 21.36695183553, Material: types.Material{}, Diameter: 6.0},
+		{ID: 8, Type: types.Sphere, Curvature: 0, Thickness: 0.0, Material: types.Material{}},
 	}
 
 	terms := []MeritTerm{
@@ -525,14 +525,14 @@ func TestUpdatePupils(t *testing.T) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "SF12", ND: 1.64831, VD: 33.84})
 
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 1 / 10.2871491742, Thickness: 1.524, Material: "SK18", Diameter: 10.0},
-		{ID: 2, Type: types.Sphere, Curvature: 1 / -239.3967954752, Thickness: 2.3368, Material: "AIR", Diameter: 10.0},
-		{ID: 3, Type: types.Sphere, Curvature: 1 / -12.8269871730, Thickness: 0.508, Material: "SF12", Diameter: 6.0},
-		{ID: 4, Type: types.Sphere, Curvature: 1 / 10.5917184406, Thickness: 1.4986, Material: "AIR", Diameter: 6.0},
-		{ID: 5, Type: types.Sphere, Curvature: 0.0, Thickness: 1.016, Material: "AIR", Diameter: 3.78},
-		{ID: 6, Type: types.Sphere, Curvature: 1 / 61.8456294200, Thickness: 1.524, Material: "SK18", Diameter: 6.0},
-		{ID: 7, Type: types.Sphere, Curvature: 1 / -10.0074859032, Thickness: 21.36695183553, Material: "AIR", Diameter: 6.0},
-		{ID: 8, Type: types.Sphere, Curvature: 0.0, Thickness: 0.0, Material: "AIR", Diameter: 44.0},
+		{ID: 1, Type: types.Sphere, Curvature: 1 / 10.2871491742, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 10.0},
+		{ID: 2, Type: types.Sphere, Curvature: 1 / -239.3967954752, Thickness: 2.3368, Material: types.Material{}, Diameter: 10.0},
+		{ID: 3, Type: types.Sphere, Curvature: 1 / -12.8269871730, Thickness: 0.508, Material: types.Material{Key: "SF12"}, Diameter: 6.0},
+		{ID: 4, Type: types.Sphere, Curvature: 1 / 10.5917184406, Thickness: 1.4986, Material: types.Material{}, Diameter: 6.0},
+		{ID: 5, Type: types.Sphere, Curvature: 0.0, Thickness: 1.016, Material: types.Material{}, Diameter: 3.78},
+		{ID: 6, Type: types.Sphere, Curvature: 1 / 61.8456294200, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 6.0},
+		{ID: 7, Type: types.Sphere, Curvature: 1 / -10.0074859032, Thickness: 21.36695183553, Material: types.Material{}, Diameter: 6.0},
+		{ID: 8, Type: types.Sphere, Curvature: 0.0, Thickness: 0.0, Material: types.Material{}, Diameter: 44.0},
 	}
 
 	cfg := Config{

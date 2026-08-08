@@ -185,7 +185,7 @@ func TestCatalogLookupTrailingM(t *testing.T) {
 
 func TestCatalogRefractiveIndexAir(t *testing.T) {
 	c := NewCatalog()
-	n, err := c.RefractiveIndex("AIR", 0.00058756)
+	n, err := c.RefractiveIndex(types.Material{}, 0.00058756)
 	if err != nil {
 		t.Fatalf("RefractiveIndex(AIR): %v", err)
 	}
@@ -196,7 +196,7 @@ func TestCatalogRefractiveIndexAir(t *testing.T) {
 
 func TestCatalogRefractiveIndexEmpty(t *testing.T) {
 	c := NewCatalog()
-	n, err := c.RefractiveIndex("", 0.00058756)
+	n, err := c.RefractiveIndex(types.Material{}, 0.00058756)
 	if err != nil {
 		t.Fatalf("RefractiveIndex(''): %v", err)
 	}
@@ -207,7 +207,7 @@ func TestCatalogRefractiveIndexEmpty(t *testing.T) {
 
 func TestCatalogRefractiveIndexGlassNotFound(t *testing.T) {
 	c := NewCatalog()
-	_, err := c.RefractiveIndex("NONEXISTENT", 0.00058756)
+	_, err := c.RefractiveIndex(types.Material{Key: "NONEXISTENT"}, 0.00058756)
 	if err == nil {
 		t.Error("Expected error for nonexistent glass")
 	}
@@ -995,11 +995,11 @@ func TestCatalogRefractiveIndexCache(t *testing.T) {
 	c := NewCatalog()
 	c.Add(types.Glass{Type: types.GlassTypeModel, Label: "MOD", ND: 1.5, VD: 60})
 
-	n1, err := c.RefractiveIndex("MOD", 0.00058756)
+	n1, err := c.RefractiveIndex(types.Material{Key: "MOD"}, 0.00058756)
 	if err != nil {
 		t.Fatal(err)
 	}
-	n2, err := c.RefractiveIndex("MOD", 0.00058756)
+	n2, err := c.RefractiveIndex(types.Material{Key: "MOD"}, 0.00058756)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1011,7 +1011,7 @@ func TestCatalogRefractiveIndexCache(t *testing.T) {
 	// but the underlying model glass changes. The cache key includes nd/vd so
 	// the new value must not be shadowed by the old cached one.
 	c.ByName["MOD"].ND = 1.8
-	n3, err := c.RefractiveIndex("MOD", 0.00058756)
+	n3, err := c.RefractiveIndex(types.Material{Key: "MOD"}, 0.00058756)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1034,7 +1034,7 @@ func TestCatalogRefractiveIndexCacheConcurrent(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for i := 0; i < 200; i++ {
-				if _, err := c.RefractiveIndex("G", 0.00058756); err != nil {
+				if _, err := c.RefractiveIndex(types.Material{Key: "G"}, 0.00058756); err != nil {
 					t.Errorf("RefractiveIndex: %v", err)
 					return
 				}

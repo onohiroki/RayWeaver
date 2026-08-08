@@ -438,17 +438,17 @@ func applyMinGlassPath(surfaces []types.Surface, min float64) {
 	}
 	for i := range surfaces {
 		m := surfaces[i].Material
-		if m == "" || m == "AIR" {
+		if m.IsAir() {
 			continue
 		}
-		prev := "AIR"
+		prev := types.Material{}
 		for j := i - 1; j >= 0; j-- {
 			if !surfaces[j].Reflects() {
 				prev = surfaces[j].Material
 				break
 			}
 		}
-		if (prev == "" || prev == "AIR") && surfaces[i].MinGlassPath <= 0 {
+		if prev.IsAir() && surfaces[i].MinGlassPath <= 0 {
 			surfaces[i].MinGlassPath = min
 		}
 	}

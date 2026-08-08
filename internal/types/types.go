@@ -3,6 +3,7 @@ package types
 import (
 	"fmt"
 	"math"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -106,13 +107,51 @@ type DecenterStep struct {
 	Scope Scope `yaml:"scope,omitempty"`
 }
 
+// Material identifies the optical medium after a surface. It is either a
+// reference into the glass catalog (Key), a self-contained model glass
+// (ND/VD), or empty for AIR. When both Key and ND are present, Key takes
+// precedence: the surface resolves through the catalog.
+type Material struct {
+	Key string  `yaml:"key,omitempty"`
+	ND  float64 `yaml:"nd,omitempty"`
+	VD  float64 `yaml:"vd,omitempty"`
+}
+
+// IsAir reports whether the material is empty air.
+func (m Material) IsAir() bool {
+	return m.ND == 0 && (m.Key == "" || strings.EqualFold(m.Key, "AIR"))
+}
+
+// HasKey reports whether the material is a catalog reference (key takes
+// precedence over an inline nd/vd when both are present).
+func (m Material) HasKey() bool {
+	return m.Key != "" && !strings.EqualFold(m.Key, "AIR")
+}
+
+// HasModel reports whether the material carries its own nd/vd model glass
+// (no catalog key).
+func (m Material) HasModel() bool {
+	return m.Key == "" && m.ND > 0
+}
+
+// String returns a canonical key for cache keys, lookups and error messages.
+func (m Material) String() string {
+	if m.HasKey() {
+		return m.Key
+	}
+	if m.HasModel() {
+		return fmt.Sprintf("%.5f:%.2f", m.ND, m.VD)
+	}
+	return "AIR"
+}
+
 type Surface struct {
 	ID           int            `yaml:"id"`
 	Type         SurfaceType    `yaml:"type"`
 	Curvature    float64        `yaml:"curvature,omitempty"`
 	Conic        float64        `yaml:"conic"`
 	Thickness    float64        `yaml:"thickness"`
-	Material     string         `yaml:"material"`
+	Material     Material       `yaml:"material"`
 	Diameter     float64        `yaml:"diameter,omitempty"`
 	Coefficients []float64      `yaml:"coefficients,omitempty"`
 	NormRadius   float64        `yaml:"norm_radius,omitempty"`

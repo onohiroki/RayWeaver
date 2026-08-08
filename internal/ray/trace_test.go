@@ -14,8 +14,8 @@ func simpleSingletEngine() (*Engine, []types.Surface) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	engine := NewEngine(gc, nil)
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
 	}
 	surface.Precompute(surfaces)
 	return engine, surfaces
@@ -26,9 +26,9 @@ func ghostSingletEngine() (*Engine, []types.Surface) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	engine := NewEngine(gc, nil)
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 50.0},
 	}
 	surface.Precompute(surfaces)
 	return engine, surfaces
@@ -59,9 +59,9 @@ func testSnell(d, n types.Vec3, n1, n2 float64) types.Vec3 {
 func TestTraceRayGhostBackwardRefraction(t *testing.T) {
 	engine, surfaces := ghostSingletEngine()
 	ray := types.Ray{
-		ID:        "ghost",
+		ID:         "ghost",
 		Wavelength: 0.00058756,
-		Path:      []int{0, 1, 2, 3, 2, 1, 2, 3},
+		Path:       []int{0, 1, 2, 3, 2, 1, 2, 3},
 		Initial: types.RayState{
 			Origin:    types.Vec3{X: 0, Y: 5.0, Z: -100.0},
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
@@ -88,7 +88,7 @@ func TestTraceRayGhostBackwardRefraction(t *testing.T) {
 	}
 
 	// The backward pass at surface 2 (index 4) travels from air into glass.
-	incident := result.Surfaces[3].Direction  // direction after the s3 reflection
+	incident := result.Surfaces[3].Direction // direction after the s3 reflection
 	hit := result.Surfaces[4].Position
 	var s2v types.Surface
 	for _, s := range surfaces {
@@ -98,7 +98,7 @@ func TestTraceRayGhostBackwardRefraction(t *testing.T) {
 	}
 	center := types.Vec3{X: 0, Y: 0, Z: s2v.PhysicalZ + s2v.Radius()}
 	normal := hit.Subtract(center).Normalize()
-	nGlass, _ := engine.Glass.RefractiveIndex("N-BK7", ray.Wavelength)
+	nGlass, _ := engine.Glass.RefractiveIndex(types.Material{Key: "N-BK7"}, ray.Wavelength)
 	expected := testSnell(incident, normal, 1.0, nGlass)
 	got := result.Surfaces[4].Direction
 	if math.Abs(got.X-expected.X) > 1e-6 || math.Abs(got.Y-expected.Y) > 1e-6 || math.Abs(got.Z-expected.Z) > 1e-6 {
@@ -113,9 +113,9 @@ func TestTraceRayGhostBackwardRefraction(t *testing.T) {
 func TestTraceRayGhostReflectIntensity(t *testing.T) {
 	engine, surfaces := ghostSingletEngine()
 	ray := types.Ray{
-		ID:        "ghost2",
+		ID:         "ghost2",
 		Wavelength: 0.00058756,
-		Path:      []int{0, 1, 2, 1, 2, 3},
+		Path:       []int{0, 1, 2, 1, 2, 3},
 		Initial: types.RayState{
 			Origin:    types.Vec3{X: 0, Y: 2.0, Z: -100.0},
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
@@ -139,9 +139,9 @@ func TestTraceRayGhostReflectIntensity(t *testing.T) {
 func TestTraceRayOnAxis(t *testing.T) {
 	engine, surfaces := simpleSingletEngine()
 	ray := types.Ray{
-		ID:        "onaxis",
+		ID:         "onaxis",
 		Wavelength: 0.00058756,
-		Path:      []int{1, 2},
+		Path:       []int{1, 2},
 		Initial: types.RayState{
 			Origin:    types.Vec3{X: 0, Y: 0, Z: -100.0},
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
@@ -162,9 +162,9 @@ func TestTraceRayOnAxis(t *testing.T) {
 func TestTraceRayOffAxis(t *testing.T) {
 	engine, surfaces := simpleSingletEngine()
 	ray := types.Ray{
-		ID:        "offaxis",
+		ID:         "offaxis",
 		Wavelength: 0.00058756,
-		Path:      []int{1, 2},
+		Path:       []int{1, 2},
 		Initial: types.RayState{
 			Origin:    types.Vec3{X: 0, Y: 5.0, Z: -100.0},
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
@@ -182,9 +182,9 @@ func TestTraceRayOffAxis(t *testing.T) {
 func TestTraceRayMissesAperture(t *testing.T) {
 	engine, surfaces := simpleSingletEngine()
 	ray := types.Ray{
-		ID:        "miss",
+		ID:         "miss",
 		Wavelength: 0.00058756,
-		Path:      []int{1, 2},
+		Path:       []int{1, 2},
 		Initial: types.RayState{
 			Origin:    types.Vec3{X: 0, Y: 100.0, Z: -100.0},
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
@@ -210,9 +210,9 @@ func TestNewEngine(t *testing.T) {
 func TestTraceRayPreservesOPL(t *testing.T) {
 	engine, surfaces := simpleSingletEngine()
 	ray := types.Ray{
-		ID:        "opl",
+		ID:         "opl",
 		Wavelength: 0.00058756,
-		Path:      []int{1, 2},
+		Path:       []int{1, 2},
 		Initial: types.RayState{
 			Origin:    types.Vec3{X: 0, Y: 0, Z: -100.0},
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
@@ -235,11 +235,11 @@ func foldedMirrorSurfaces() ([]types.Surface, *glass.Catalog) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: "AIR", Diameter: 200.0},
-		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0, Reflect: true,
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: types.Material{}, Diameter: 200.0},
+		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: types.Material{}, Diameter: 300.0, Reflect: true,
 			Decenter: []types.DecenterStep{{Tilt: types.Vec3{X: 0, Y: 180, Z: 0}, Scope: types.ScopeBoth}}},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 60.0},
-		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: types.Material{}, Diameter: 60.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 50.0},
 	}
 	surface.Precompute(surfaces)
 	return surfaces, gc
@@ -249,9 +249,9 @@ func TestTraceRayReflectFlag(t *testing.T) {
 	surfaces, gc := foldedMirrorSurfaces()
 	engine := NewEngine(gc, nil)
 	ray := types.Ray{
-		ID:        "mirror",
+		ID:         "mirror",
 		Wavelength: 0.00058756,
-		Path:      []int{1, 2, 3, 4},
+		Path:       []int{1, 2, 3, 4},
 		Initial: types.RayState{
 			Origin:    types.Vec3{X: 0, Y: 0, Z: -100.0},
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
@@ -285,11 +285,11 @@ func TestTraceRayReflectFlagTilted(t *testing.T) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	engine := NewEngine(gc, nil)
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: "AIR", Diameter: 200.0},
-		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0, Reflect: true,
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: types.Material{}, Diameter: 200.0},
+		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: types.Material{}, Diameter: 300.0, Reflect: true,
 			Decenter: []types.DecenterStep{{Tilt: types.Vec3{X: 0, Y: 180, Z: 0}, Scope: types.ScopeBoth}}},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 60.0},
-		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: types.Material{}, Diameter: 60.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 50.0},
 	}
 	surface.Precompute(surfaces)
 
@@ -297,9 +297,9 @@ func TestTraceRayReflectFlagTilted(t *testing.T) {
 	// physical Z = 1000-500 = 500, on axis.
 	for _, h := range []float64{0, 20, 50, 80} {
 		ray := types.Ray{
-			ID:        "bundle",
+			ID:         "bundle",
 			Wavelength: 0.00058756,
-			Path:      []int{1, 2, 3, 4},
+			Path:       []int{1, 2, 3, 4},
 			Initial: types.RayState{
 				Origin:    types.Vec3{X: h, Y: 0, Z: -100.0},
 				Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},

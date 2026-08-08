@@ -33,37 +33,37 @@ import (
 
 // record holds every metric collected for one lens file.
 type record struct {
-	Path           string
-	Group          string
-	Format         string
-	ParseOK        bool
-	ParseError     string
-	Surfaces       int
-	Fields         int
-	FieldType      int
-	FieldAngles    string
-	Wavelengths    int
+	Path            string
+	Group           string
+	Format          string
+	ParseOK         bool
+	ParseError      string
+	Surfaces        int
+	Fields          int
+	FieldType       int
+	FieldAngles     string
+	Wavelengths     int
 	Glasses         int
 	UnresolvedGlass int
 	UnresolvedNames string
-	Stop           int
-	HasDiameter    bool
-	ChiefOK        bool
-	ChiefRays      int
-	MarginalRays   int
-	GridError      int
-	SpotRMS        string
-	TraceTotal     int
-	TraceOK        int
-	ChiefFailed    int
-	MarginalFailed int
-	TraceError     string
-	TraceStopSurf  string
-	FocalLength    string
-	EPD            string
-	FNumber        string
-	TotalTrack     string
-	ParaxialOK     bool
+	Stop            int
+	HasDiameter     bool
+	ChiefOK         bool
+	ChiefRays       int
+	MarginalRays    int
+	GridError       int
+	SpotRMS         string
+	TraceTotal      int
+	TraceOK         int
+	ChiefFailed     int
+	MarginalFailed  int
+	TraceError      string
+	TraceStopSurf   string
+	FocalLength     string
+	EPD             string
+	FNumber         string
+	TotalTrack      string
+	ParaxialOK      bool
 
 	// Diagnostic breakdown of trace failures (see sweepMetrics).
 	ApertureStop            int
@@ -576,7 +576,7 @@ func traceStopPoint(res types.RayResult, surfaces []types.Surface) string {
 	nextMat := ""
 	for i := range surfaces {
 		if surfaces[i].ID == last.SurfaceID && i+1 < len(surfaces) {
-			nextMat = surfaces[i+1].Material
+			nextMat = surfaces[i+1].Material.String()
 			break
 		}
 	}
@@ -614,10 +614,10 @@ func writeCSV(path string, rows [][]string) {
 // reason counts.
 func summarize(recs []record, skipped []string, root string, total int) [][]string {
 	type bucket struct {
-		parseOK    int
-		chiefOK    int
-		allTraced  int
-		paraxOK    int
+		parseOK   int
+		chiefOK   int
+		allTraced int
+		paraxOK   int
 	}
 	byGroup := map[string]*bucket{}
 

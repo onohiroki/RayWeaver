@@ -1249,7 +1249,7 @@ func runTMM(data []byte) {
 		}
 		for i := range input.Layers {
 			if input.Layers[i].N == 0 && input.Layers[i].Material != "" {
-				n, err := gc.RefractiveIndex(input.Layers[i].Material, input.Lambda)
+				n, err := gc.RefractiveIndex(types.ParseMaterial(input.Layers[i].Material), input.Lambda)
 				if err == nil {
 					input.Layers[i].N = n
 				}

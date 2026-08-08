@@ -113,11 +113,11 @@ func convertFoldMirrors(result *ParseResult) int {
 	converted := 0
 	for i := range result.Surfaces {
 		s := &result.Surfaces[i]
-		if isMirrorMaterial(s.Material) {
+		if isMirrorMaterial(s.Material.Key) {
 			reflectCount++
 			s.Decenter = append(s.Decenter, mirrorFoldStep)
 			s.Reflect = true
-			s.Material = "AIR"
+			s.Material = types.Material{}
 			converted++
 		}
 		if reflectCount%2 == 1 {
@@ -208,7 +208,7 @@ func shiftNegativeDummyThickness(result *ParseResult) int {
 // isDummySurface reports whether a surface is a zero-power non-mirror reference
 // plane (the CODE V/ZEMAX "dummy" convention).
 func isDummySurface(s *types.Surface) bool {
-	return s.Curvature == 0 && !isMirrorMaterial(s.Material)
+	return s.Curvature == 0 && !isMirrorMaterial(s.Material.Key)
 }
 
 // isDummySurfaceID looks a surface up by ID and reports whether it is a dummy.

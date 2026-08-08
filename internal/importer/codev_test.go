@@ -411,8 +411,8 @@ si 0 0
 	if result.Surfaces[0].Thickness != 1 {
 		t.Errorf("surface 1 thickness: expected 1, got %g", result.Surfaces[0].Thickness)
 	}
-	if result.Surfaces[0].Material != "nbk7_schott" {
-		t.Errorf("surface 1 material: expected nbk7_schott (case kept), got %q", result.Surfaces[0].Material)
+	if result.Surfaces[0].Material.Key != "nbk7_schott" {
+		t.Errorf("surface 1 material: expected nbk7_schott (case kept), got %q", result.Surfaces[0].Material.String())
 	}
 	// Lowercase "sto" marks the current surface as the stop.
 	if result.StopSurface != 2 {
@@ -848,7 +848,7 @@ END
 		t.Errorf("surface 1 conic: expected 0.226106, got %g", s.Conic)
 	}
 	// The asphere letter after the ';' is captured too (r^4 term, idx 0).
-	if len(s.Coefficients) != 1 || math.Abs(s.Coefficients[0]-0.368950E-10) > 1e-18 {
+	if len(s.Coefficients) != 1 || math.Abs(s.Coefficients[0]-0.368950e-10) > 1e-18 {
 		t.Errorf("surface 1 coeff[0]: expected 0.368950E-10, got %v", s.Coefficients)
 	}
 }
@@ -1099,8 +1099,8 @@ END
 	if m.Thickness != 96.2601569305 {
 		t.Errorf("mirror thickness: expected +96.26, got %g", m.Thickness)
 	}
-	if m.Material != "AIR" {
-		t.Errorf("mirror material: expected AIR, got %q", m.Material)
+	if !m.Material.IsAir() {
+		t.Errorf("mirror material: expected AIR, got %q", m.Material.String())
 	}
 	if !m.Reflects() {
 		t.Error("mirror should Reflects()")
@@ -1207,4 +1207,3 @@ END
 		t.Error("DAR mirror should Reflects()")
 	}
 }
-

@@ -149,8 +149,8 @@ SURF 2
 	if !result.Surfaces[0].Reflects() {
 		t.Error("mirror surface should carry a reflect decenter step")
 	}
-	if result.Surfaces[0].Material != "AIR" {
-		t.Errorf("mirror material: expected AIR, got %q", result.Surfaces[0].Material)
+	if !result.Surfaces[0].Material.IsAir() {
+		t.Errorf("mirror material: expected AIR, got %q", result.Surfaces[0].Material.String())
 	}
 }
 

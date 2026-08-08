@@ -13,8 +13,8 @@ func singletSystem() (types.System, *glass.Catalog) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: "N-BK7", Diameter: 50.0},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: "AIR", Diameter: 50.0},
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
 	}
 	surface.Precompute(surfaces)
 	return types.System{Surfaces: surfaces}, gc
@@ -105,11 +105,11 @@ func mirrorSystem() (types.System, *glass.Catalog) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: "AIR", Diameter: 200.0},
-		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0, Reflect: true,
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: types.Material{}, Diameter: 200.0},
+		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: types.Material{}, Diameter: 300.0, Reflect: true,
 			Decenter: []types.DecenterStep{{Tilt: types.Vec3{X: 0, Y: 180, Z: 0}, Scope: types.ScopeBoth}}},
-		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 60.0},
-		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: types.Material{}, Diameter: 60.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 50.0},
 	}
 	surface.Precompute(surfaces)
 	return types.System{Surfaces: surfaces}, gc
@@ -139,16 +139,16 @@ func TestComputeSchmidtFoldEFL(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.AspherePolynomial, Curvature: 0, Thickness: 5.0, Material: "N-BK7", Diameter: 200.0,
+		{ID: 1, Type: types.AspherePolynomial, Curvature: 0, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 200.0,
 			Coefficients: []float64{-7.012596538707627e-10, -1.8934227166178542e-14}},
-		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 795.0, Material: "AIR", Diameter: 200.0},
-		{ID: 3, Type: types.Sphere, Curvature: 1.0 / 800.0, Thickness: 340.0, Material: "AIR", Diameter: 300.0, Reflect: true,
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 795.0, Material: types.Material{}, Diameter: 200.0},
+		{ID: 3, Type: types.Sphere, Curvature: 1.0 / 800.0, Thickness: 340.0, Material: types.Material{}, Diameter: 300.0, Reflect: true,
 			Decenter: []types.DecenterStep{{Tilt: types.Vec3{Y: 180}, Scope: types.ScopeBoth}}},
-		{ID: 4, Type: types.Sphere, Curvature: 1.0 / 1097.9971323070158, Thickness: 3.00737900841865, Material: "N-BK7", Diameter: 72.0},
-		{ID: 5, Type: types.Sphere, Curvature: 1.0 / 4527.917674010644, Thickness: 12.0, Material: "AIR", Diameter: 72.0},
-		{ID: 6, Type: types.Sphere, Curvature: 1.0 / 1208.2550812192317, Thickness: 3.007046907695411, Material: "N-BK7", Diameter: 72.0},
-		{ID: 7, Type: types.Sphere, Curvature: 1.0 / 4873.116517849829, Thickness: 42.0, Material: "AIR", Diameter: 72.0},
-		{ID: 8, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR"},
+		{ID: 4, Type: types.Sphere, Curvature: 1.0 / 1097.9971323070158, Thickness: 3.00737900841865, Material: types.Material{Key: "N-BK7"}, Diameter: 72.0},
+		{ID: 5, Type: types.Sphere, Curvature: 1.0 / 4527.917674010644, Thickness: 12.0, Material: types.Material{}, Diameter: 72.0},
+		{ID: 6, Type: types.Sphere, Curvature: 1.0 / 1208.2550812192317, Thickness: 3.007046907695411, Material: types.Material{Key: "N-BK7"}, Diameter: 72.0},
+		{ID: 7, Type: types.Sphere, Curvature: 1.0 / 4873.116517849829, Thickness: 42.0, Material: types.Material{}, Diameter: 72.0},
+		{ID: 8, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}},
 	}
 	surface.Precompute(surfaces)
 	sys := types.System{Surfaces: surfaces, StopSurface: 1}
