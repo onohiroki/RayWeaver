@@ -5,10 +5,15 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func foldRotation(s types.Surface) types.Mat4 {
+// frameRotation accumulates the frame-bending rotations of a surface's decenter
+// steps: those with scope frame or both change the beam frame for the surfaces
+// following this one. Scope-surface steps leave the frame untouched. A fold
+// mirror's own fold is one such step (tilt [0,180,0] with scope: both), so the
+// frame rotation here is what the fold walk multiplies into the running frame.
+func frameRotation(s types.Surface) types.Mat4 {
 	m := types.NewIdentity()
 	for _, d := range s.Decenter {
-		if !d.Reflect {
+		if !d.Scope.Bends() {
 			continue
 		}
 		rx := types.NewRotationX(raymath.DegToRad(d.Tilt.X))
@@ -65,9 +70,9 @@ func Precompute(surfaces []types.Surface) {
 			}
 		}
 
-		if s.Reflects() {
+		if s.Bends() {
 			frameOrigin = s.PhysicalZ
-			frameRot = frameRot.Multiply(foldRotation(*s))
+			frameRot = frameRot.Multiply(frameRotation(*s))
 			currentZ = s.Thickness
 		} else {
 			currentZ += s.Thickness
@@ -88,15 +93,15 @@ func PhysicalZ(surfaces []types.Surface) []float64 {
 		s := &surfaces[i]
 
 		local := raymath.ComputeDecenterTransform(s.Decenter)
-		lt := types.NewTranslation(types.Vec3{Z: frameOrigin}).
+		computed := types.NewTranslation(types.Vec3{Z: frameOrigin}).
 			Multiply(frameRot).
 			Multiply(types.NewTranslation(types.Vec3{Z: currentZ})).
 			Multiply(local)
-		z[i] = lt.MultiplyPoint(types.Vec3{}).Z
+		z[i] = computed.MultiplyPoint(types.Vec3{}).Z
 
-		if s.Reflects() {
+		if s.Bends() {
 			frameOrigin = z[i]
-			frameRot = frameRot.Multiply(foldRotation(*s))
+			frameRot = frameRot.Multiply(frameRotation(*s))
 			currentZ = s.Thickness
 		} else {
 			currentZ += s.Thickness

@@ -199,16 +199,23 @@ func TestSurfaceNegativeThicknessError(t *testing.T) {
 	}
 }
 
-// TestSurfaceTopLevelReflectError: the surface-level `reflect` flag is
-// removed; it must be rejected with a hint to use decenter reflect.
-func TestSurfaceTopLevelReflectError(t *testing.T) {
+// TestSurfaceTopLevelReflect: the surface-level `reflect` flag marks a mirror
+// surface (the per-decenter `reflect` was replaced by decenter `scope`).
+func TestSurfaceTopLevelReflect(t *testing.T) {
 	data := []byte("id: 3\nradius: -800.0\nthickness: 340.0\nmaterial: AIR\nreflect: true")
 	var s Surface
 	err := yaml.Unmarshal(data, &s)
-	if err == nil {
-		t.Fatal("expected error for top-level reflect, got nil")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(err.Error(), "reflect") {
-		t.Errorf("error = %v, want mention of reflect", err)
+	if !s.Reflect {
+		t.Error("reflect: true not decoded")
+	}
+	out, err := yaml.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(out, []byte("reflect: true")) {
+		t.Errorf("marshal output = %s, want reflect: true", out)
 	}
 }

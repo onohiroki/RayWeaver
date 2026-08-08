@@ -60,6 +60,11 @@ func FresnelAmplitude(n1, n2, cosTheta1, cosTheta2 float64) (rs, rp, ts, tp floa
 func ComputeDecenterTransform(decenter []types.DecenterStep) types.Mat4 {
 	m := types.NewIdentity()
 	for _, step := range decenter {
+		// A scope:frame step bends the beam frame only; it does not move the
+		// surface itself, so it is excluded from the surface's local transform.
+		if !step.Scope.MovesSurface() {
+			continue
+		}
 		t := types.NewTranslation(step.Shift)
 		rx := types.NewRotationX(DegToRad(step.Tilt.X))
 		ry := types.NewRotationY(DegToRad(step.Tilt.Y))

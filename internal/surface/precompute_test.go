@@ -51,10 +51,10 @@ func TestPrecomputePlane(t *testing.T) {
 // Z=800 (tilt-180 decenter reflect), then surfaces at decreasing physical Z.
 // It checks Reflects(), PhysicalZ, and the folded frame orientation.
 func TestPrecomputeFold(t *testing.T) {
-	reflect := []types.DecenterStep{{Tilt: types.Vec3{X: 0, Y: 180, Z: 0}, Reflect: true}}
+	reflect := []types.DecenterStep{{Tilt: types.Vec3{X: 0, Y: 180, Z: 0}, Scope: types.ScopeBoth}}
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 800.0, Material: "AIR"},
-		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 800.0, Thickness: 340.0, Material: "AIR", Decenter: reflect},
+		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 800.0, Thickness: 340.0, Material: "AIR", Reflect: true, Decenter: reflect},
 		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 42.0, Material: "AIR"},
 		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR"},
 	}

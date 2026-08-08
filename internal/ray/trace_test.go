@@ -236,8 +236,8 @@ func foldedMirrorSurfaces() ([]types.Surface, *glass.Catalog) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: "AIR", Diameter: 200.0},
-		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0,
-			Decenter: []types.DecenterStep{{Tilt: types.Vec3{X: 0, Y: 180, Z: 0}, Reflect: true}}},
+		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0, Reflect: true,
+			Decenter: []types.DecenterStep{{Tilt: types.Vec3{X: 0, Y: 180, Z: 0}, Scope: types.ScopeBoth}}},
 		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 60.0},
 		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 50.0},
 	}
@@ -286,8 +286,8 @@ func TestTraceRayReflectFlagTilted(t *testing.T) {
 	engine := NewEngine(gc, nil)
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: "AIR", Diameter: 200.0},
-		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0,
-			Decenter: []types.DecenterStep{{Tilt: types.Vec3{X: 0, Y: 180, Z: 0}, Reflect: true}}},
+		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0, Reflect: true,
+			Decenter: []types.DecenterStep{{Tilt: types.Vec3{X: 0, Y: 180, Z: 0}, Scope: types.ScopeBoth}}},
 		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 60.0},
 		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 50.0},
 	}

@@ -276,8 +276,8 @@ func TestFieldExplicitPath(t *testing.T) {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 1000.0, Material: "AIR", Diameter: 200.0},
-		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0,
-			Decenter: []types.DecenterStep{{Tilt: types.Vec3{Y: 180}, Reflect: true}}},
+		{ID: 2, Type: types.Sphere, Curvature: 1.0 / 1000.0, Thickness: 480.0, Material: "AIR", Diameter: 300.0, Reflect: true,
+			Decenter: []types.DecenterStep{{Tilt: types.Vec3{Y: 180}, Scope: types.ScopeBoth}}},
 		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: "AIR", Diameter: 60.0},
 		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: "AIR", Diameter: 50.0},
 	}

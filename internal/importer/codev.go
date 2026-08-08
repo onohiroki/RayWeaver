@@ -19,8 +19,13 @@ type codeVSurf struct {
 	Coeffs    map[int]float64
 
 	// Decenter-and-return (DAR) state: the surface's decenter components
-	// accumulated from YDE/XDE/ZDE (shifts) and ADE/BDE/CDE (tilts). Only set
-	// when a DAR keyword preceded them on this surface.
+	// accumulated from YDE/XDE/ZDE (shifts) and ADE/BDE/CDE (tilts). Only
+	// present when a DAR keyword preceded them on this surface. The DAR
+	// "return" is implicit: the decenter applies to the surface itself and
+	// the axis then continues (scope scope surface), matching CODE V's
+	// decenter-and-return (inverse transform after the surface). REX/REY and
+	// ADY in the same block are rectangular-aperture half-widths and aperture
+	// offsets, not return decenters.
 	Decenter  types.DecenterStep
 	decActive bool
 }
@@ -375,8 +380,9 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		}
 
 		// CODE V decenter-and-return (DAR) components become a per-surface
-		// DecenterStep. The return path is implicit in rayweave's local
-		// surface coordinates, so only the forward components are kept.
+		// DecenterStep with scope surface (default): the surface is shifted and
+		// tilted while the beam frame continues, which is exactly what a DAR
+		// does in CODE V (apply the decenter, then return the axis).
 		if s.decActive && (s.Decenter != types.DecenterStep{}) {
 			t.Decenter = []types.DecenterStep{s.Decenter}
 		}

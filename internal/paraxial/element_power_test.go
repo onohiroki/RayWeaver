@@ -62,8 +62,8 @@ func TestElementPowersMirror(t *testing.T) {
 	gc := powGC()
 	// Concave mirror in the fold model: beam-frame R = +800, power = -2/800.
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 1.0 / 800.0, Thickness: 100.0,
-			Decenter: []types.DecenterStep{{Tilt: types.Vec3{Y: 180}, Reflect: true}}},
+		{ID: 1, Type: types.Sphere, Curvature: 1.0 / 800.0, Thickness: 100.0, Reflect: true,
+		Decenter: []types.DecenterStep{{Tilt: types.Vec3{Y: 180}, Scope: types.ScopeBoth}}},
 	}
 	surface.Precompute(surfaces)
 

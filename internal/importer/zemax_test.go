@@ -488,7 +488,7 @@ SURF 4
 	if math.Abs(m.Decenter[0].Tilt.X-16.44) > 1e-9 {
 		t.Errorf("COORDBRK tilt.X: expected 16.44, got %g", m.Decenter[0].Tilt.X)
 	}
-	if !m.Decenter[1].Reflect {
-		t.Error("mirror should have a reflect fold step")
+	if !m.Decenter[1].Scope.Bends() || m.Decenter[1] != (types.DecenterStep{Tilt: types.Vec3{Y: 180}, Scope: types.ScopeBoth}) {
+		t.Error("mirror should have a fold step (scope: both)")
 	}
 }

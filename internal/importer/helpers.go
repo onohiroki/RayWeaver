@@ -88,12 +88,13 @@ func fillDefaults(result *ParseResult) {
 	zeroNegativeDummyThickness(result)
 }
 
-// mirrorFoldStep is the decenter step that folds a mirror in the beam frame:
-// a 180-degree Y tilt reflects the ray and the fold walk reverses the optical
-// axis for the following surfaces.
+// mirrorFoldStep is the decenter step that folds a mirror in the beam frame: a
+// 180-degree Y tilt with scope: both reflects the ray off the surface and, at
+// the fold walk, reverses the optical axis for the following surfaces. The
+// surface itself carries `reflect: true` (set in convertFoldMirrors).
 var mirrorFoldStep = types.DecenterStep{
-	Tilt:    types.Vec3{X: 0, Y: 180, Z: 0},
-	Reflect: true,
+	Tilt:  types.Vec3{X: 0, Y: 180, Z: 0},
+	Scope: types.ScopeBoth,
 }
 
 // convertFoldMirrors converts CODE V / ZEMAX folded-mirror systems into
@@ -115,6 +116,7 @@ func convertFoldMirrors(result *ParseResult) int {
 		if isMirrorMaterial(s.Material) {
 			reflectCount++
 			s.Decenter = append(s.Decenter, mirrorFoldStep)
+			s.Reflect = true
 			s.Material = "AIR"
 			converted++
 		}

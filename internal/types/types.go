@@ -75,10 +75,35 @@ func NewLinearJones(angleDeg float64) JonesVector {
 	return JonesVector{Ex: c, Ey: s}
 }
 
+// Scope selects the reference frame a DecenterStep is applied to.
+type Scope string
+
+const (
+	// ScopeSurface is the default: the step applies to the surface itself and
+	// the beam frame returns after it (CODE V DAR semantics).
+	ScopeSurface Scope = ""
+	// ScopeFrame applies the step only to the beam frame, leaving the surface
+	// untouched (a coordinate-break / COORDBRK semantics).
+	ScopeFrame Scope = "frame"
+	// ScopeBoth applies the step to both the surface and the beam frame (the
+	// CODE V BEN semantics, e.g. a fold mirror stepping the frame after it).
+	ScopeBoth Scope = "both"
+)
+
+// Bends reports whether the step bends the beam frame for following surfaces.
+func (s Scope) Bends() bool {
+	return s == ScopeFrame || s == ScopeBoth
+}
+
+// MovesSurface reports whether the step repositions/tilts the surface itself.
+func (s Scope) MovesSurface() bool {
+	return s != ScopeFrame
+}
+
 type DecenterStep struct {
-	Shift   Vec3 `yaml:"shift"`
-	Tilt    Vec3 `yaml:"tilt"`
-	Reflect bool `yaml:"reflect,omitempty"`
+	Shift Vec3  `yaml:"shift"`
+	Tilt  Vec3  `yaml:"tilt"`
+	Scope Scope `yaml:"scope,omitempty"`
 }
 
 type Surface struct {
@@ -97,6 +122,7 @@ type Surface struct {
 	AutoAperture bool           `yaml:"auto_aperture,omitempty"`
 	MinGlassPath float64        `yaml:"min_glass_path,omitempty"`
 	MaxGlassPath float64        `yaml:"max_glass_path,omitempty"`
+	Reflect      bool           `yaml:"reflect,omitempty"`
 
 	LocalToGlobal  Mat4    `yaml:"-"`
 	GlobalToLocal  Mat4    `yaml:"-"`
@@ -121,9 +147,16 @@ func (s *Surface) SetRadius(r float64) {
 	}
 }
 
+// Reflects reports whether the surface is a mirror (top-level `reflect: true`).
 func (s Surface) Reflects() bool {
+	return s.Reflect
+}
+
+// Bends reports whether any decenter step bends the beam frame for surfaces
+// after this one (a scope of frame or both).
+func (s Surface) Bends() bool {
 	for _, d := range s.Decenter {
-		if d.Reflect {
+		if d.Scope.Bends() {
 			return true
 		}
 	}

@@ -60,7 +60,7 @@ func (j JonesVector) MarshalYAML() (interface{}, error) {
 }
 
 type surfaceYAML struct {
-	ID           int             `yaml:"id"`
+	ID           int            `yaml:"id"`
 	Type         SurfaceType    `yaml:"type"`
 	Radius       float64        `yaml:"radius,omitempty"`
 	Curvature    float64        `yaml:"curvature,omitempty"`
@@ -71,11 +71,12 @@ type surfaceYAML struct {
 	Coefficients []float64      `yaml:"coefficients,omitempty"`
 	NormRadius   float64        `yaml:"norm_radius,omitempty"`
 	Decenter     []DecenterStep `yaml:"decenter,omitempty"`
-	Coating        string         `yaml:"coating,omitempty"`
-	Role           string         `yaml:"role,omitempty"`
-	AutoAperture   bool           `yaml:"auto_aperture,omitempty"`
-	MinGlassPath   float64        `yaml:"min_glass_path,omitempty"`
-	MaxGlassPath   float64        `yaml:"max_glass_path,omitempty"`
+	Coating      string         `yaml:"coating,omitempty"`
+	Role         string         `yaml:"role,omitempty"`
+	AutoAperture bool           `yaml:"auto_aperture,omitempty"`
+	MinGlassPath float64        `yaml:"min_glass_path,omitempty"`
+	MaxGlassPath float64        `yaml:"max_glass_path,omitempty"`
+	Reflect      bool           `yaml:"reflect,omitempty"`
 }
 
 func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
@@ -88,7 +89,7 @@ func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for i := 0; i+1 < len(node.Content); i += 2 {
 		if node.Content[i].Value == "reflect" {
-			return errors.New("top-level surface `reflect` is removed; use decenter: [{tilt: [0, 180, 0], reflect: true}]")
+			raw.Reflect = node.Content[i+1].Value == "true"
 		}
 	}
 	s.ID = raw.ID
@@ -105,6 +106,7 @@ func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
 	s.AutoAperture = raw.AutoAperture
 	s.MinGlassPath = raw.MinGlassPath
 	s.MaxGlassPath = raw.MaxGlassPath
+	s.Reflect = raw.Reflect
 
 	if raw.Curvature != 0 {
 		s.Curvature = raw.Curvature
@@ -132,6 +134,7 @@ func (s Surface) MarshalYAML() (interface{}, error) {
 		AutoAperture: s.AutoAperture,
 		MinGlassPath: s.MinGlassPath,
 		MaxGlassPath: s.MaxGlassPath,
+		Reflect:      s.Reflect,
 	}
 	if s.radiusUsed {
 		raw.Radius = s.Radius()
@@ -142,18 +145,18 @@ func (s Surface) MarshalYAML() (interface{}, error) {
 }
 
 type glassYAML struct {
-	Type              GlassType              `yaml:"type,omitempty"`
-	Key               string                 `yaml:"key,omitempty"`
-	Name              string                 `yaml:"name,omitempty"`
-	Label             string                 `yaml:"label,omitempty"`
-	Manufacturer      string                 `yaml:"manufacturer,omitempty"`
-	DispersionFormula DispersionFormula      `yaml:"dispersion_formula,omitempty"`
-	ND                float64                `yaml:"nd,omitempty"`
-	VD                float64                `yaml:"vd,omitempty"`
-	Coefficients      []float64              `yaml:"coefficients,omitempty"`
-	WavelengthMin     float64                `yaml:"wavelength_range_min,omitempty"`
-	WavelengthMax     float64                `yaml:"wavelength_range_max,omitempty"`
-	Aliases           []string               `yaml:"aliases,omitempty"`
+	Type              GlassType            `yaml:"type,omitempty"`
+	Key               string               `yaml:"key,omitempty"`
+	Name              string               `yaml:"name,omitempty"`
+	Label             string               `yaml:"label,omitempty"`
+	Manufacturer      string               `yaml:"manufacturer,omitempty"`
+	DispersionFormula DispersionFormula    `yaml:"dispersion_formula,omitempty"`
+	ND                float64              `yaml:"nd,omitempty"`
+	VD                float64              `yaml:"vd,omitempty"`
+	Coefficients      []float64            `yaml:"coefficients,omitempty"`
+	WavelengthMin     float64              `yaml:"wavelength_range_min,omitempty"`
+	WavelengthMax     float64              `yaml:"wavelength_range_max,omitempty"`
+	Aliases           []string             `yaml:"aliases,omitempty"`
 	RefractiveIndices RefractiveIndexTable `yaml:"refractive_indices,omitempty"`
 }
 
