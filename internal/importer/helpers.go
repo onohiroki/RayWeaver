@@ -85,7 +85,7 @@ func fillDefaults(result *ParseResult) {
 	if len(result.Fields) == 0 {
 		result.Fields = []types.FieldItem{defaultField()}
 	}
-	zeroNegativeDummyThickness(result)
+	shiftNegativeDummyThickness(result)
 }
 
 // mirrorFoldStep is the decenter step that folds a mirror in the beam frame: a
@@ -154,31 +154,37 @@ func surfaceIndexByID(surfaces []types.Surface, id int) int {
 	return -1
 }
 
-// zeroNegativeDummyThickness normalises the negative-spacing dummy-surface idiom
-// (a zero-power reference plane with a negative spacing) into rayweave's
+// shiftNegativeDummyThickness normalises the negative-spacing dummy-surface
+// idiom (a zero-power reference plane with a negative spacing) into rayweave's
 // all-positive, monotonic-Z model. A surface is a dummy only when it carries no
 // optical power (Curvature == 0) and is not a mirror (material REFL/MIRROR);
 // folded mirrors and powered surfaces with negative spacings encode genuine
 // return paths and must not be collapsed.
 //
-// Each dummy's thickness is set to 0 so the trace continues. When the dummy held
-// the aperture stop, the stop is dropped (StopSurface = 0) and the pipeline falls
-// back to the dynamic pupil. The base surfaces and the per-config thickness
-// overrides are both normalised so that ConfigSurfaceSet never reintroduces a
-// negative thickness downstream. Returns the number of surfaces zeroed.
-func zeroNegativeDummyThickness(result *ParseResult) int {
+// The negative spacing is not discarded: it is reproduced as a scope-surface
+// decenter shift on the dummy itself, so the plane's global vertex keeps the
+// originally-mapped position while its thickness is set to 0 so the beam frame
+// (and the trace) continues past the plane unchanged. When the dummy held the
+// aperture stop, the stop is dropped (StopSurface = 0) and the pipeline falls
+// back to the dynamic pupil. The per-config thickness overrides are normalised
+// the same way so that ConfigSurfaceSet never reintroduces a negative thickness
+// downstream. Returns the number of surfaces converted.
+func shiftNegativeDummyThickness(result *ParseResult) int {
 	if result == nil {
 		return 0
 	}
-	zeroed := 0
+	shifted := 0
 
-	zeroedIDs := map[int]bool{}
+	shiftedIDs := map[int]bool{}
 	for i := range result.Surfaces {
 		s := &result.Surfaces[i]
 		if s.Thickness < 0 && isDummySurface(s) {
+			s.Decenter = append(s.Decenter, types.DecenterStep{
+				Shift: types.Vec3{Z: s.Thickness},
+			})
 			s.Thickness = 0
-			zeroed++
-			zeroedIDs[s.ID] = true
+			shifted++
+			shiftedIDs[s.ID] = true
 		}
 	}
 
@@ -186,17 +192,17 @@ func zeroNegativeDummyThickness(result *ParseResult) int {
 		for s, t := range result.ConfigThickness[cfg] {
 			if t < 0 && isDummySurfaceID(result, s) {
 				result.ConfigThickness[cfg][s] = 0
-				zeroed++
-				zeroedIDs[s] = true
+				shifted++
+				shiftedIDs[s] = true
 			}
 		}
 	}
 
-	if result.StopSurface > 0 && zeroedIDs[result.StopSurface] {
+	if result.StopSurface > 0 && shiftedIDs[result.StopSurface] {
 		result.StopSurface = 0
 	}
 
-	return zeroed
+	return shifted
 }
 
 // isDummySurface reports whether a surface is a zero-power non-mirror reference

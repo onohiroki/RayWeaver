@@ -2,7 +2,7 @@ package importer
 
 import "testing"
 
-func TestZeroNegativeDummy_SingleDummyZeroed(t *testing.T) {
+func TestShiftNegativeDummy_SingleDummyShifted(t *testing.T) {
 	input := `STOP 1
 SURF 1
   TYPE STANDARD
@@ -26,9 +26,17 @@ SURF 3
 	if len(result.Surfaces) != 3 {
 		t.Fatalf("expected 3 surfaces, got %d", len(result.Surfaces))
 	}
-	// The negative thickness on the zero-power dummy plane is set to 0.
+	// The negative thickness on the zero-power dummy plane is reproduced as
+	// a scope-surface decenter shift; the span itself is zeroed so the trace
+	// continues.
 	if result.Surfaces[0].Thickness != 0 {
 		t.Errorf("surface 1 thickness: expected 0, got %g", result.Surfaces[0].Thickness)
+	}
+	if len(result.Surfaces[0].Decenter) != 1 {
+		t.Fatalf("surface 1 decenter: expected 1 step, got %d", len(result.Surfaces[0].Decenter))
+	}
+	if result.Surfaces[0].Decenter[0].Shift.Z != -0.2 {
+		t.Errorf("surface 1 shift.Z: expected -0.2, got %g", result.Surfaces[0].Decenter[0].Shift.Z)
 	}
 	// The dummy held the stop, so the stop is dropped.
 	if result.StopSurface != 0 {
@@ -40,7 +48,7 @@ SURF 3
 	}
 }
 
-func TestZeroNegativeDummy_AllPositiveUntouched(t *testing.T) {
+func TestShiftNegativeDummy_AllPositiveUntouched(t *testing.T) {
 	input := `SURF 1
   TYPE STANDARD
   CURV 0.02
@@ -58,9 +66,12 @@ SURF 2
 	if result.Surfaces[0].Thickness != 5.0 {
 		t.Errorf("thickness changed though all positive: %g", result.Surfaces[0].Thickness)
 	}
+	if len(result.Surfaces[0].Decenter) != 0 {
+		t.Errorf("positive surface gained a shift: %v", result.Surfaces[0].Decenter)
+	}
 }
 
-func TestZeroNegativeDummy_MultipleDummiesZeroed(t *testing.T) {
+func TestShiftNegativeDummy_MultipleDummiesShifted(t *testing.T) {
 	input := `SURF 1
   TYPE STANDARD
   CURV 0.0
@@ -78,14 +89,21 @@ SURF 3
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Every zero-power non-mirror negative is zeroed regardless of count.
+	// Every zero-power non-mirror negative becomes a shift, regardless of
+	// count.
 	if result.Surfaces[0].Thickness != 0 || result.Surfaces[1].Thickness != 0 {
 		t.Errorf("dummy negatives not zeroed: %g/%g",
 			result.Surfaces[0].Thickness, result.Surfaces[1].Thickness)
 	}
+	if result.Surfaces[0].Decenter[0].Shift.Z != -1.0 {
+		t.Errorf("surface 1 shift.Z: expected -1, got %g", result.Surfaces[0].Decenter[0].Shift.Z)
+	}
+	if result.Surfaces[1].Decenter[0].Shift.Z != -2.0 {
+		t.Errorf("surface 2 shift.Z: expected -2, got %g", result.Surfaces[1].Decenter[0].Shift.Z)
+	}
 }
 
-func TestZeroNegativeDummy_PoweredSurfaceKept(t *testing.T) {
+func TestShiftNegativeDummy_PoweredSurfaceKept(t *testing.T) {
 	input := `SURF 1
   TYPE STANDARD
   CURV 0.5
@@ -103,9 +121,12 @@ SURF 2
 	if result.Surfaces[0].Thickness != -90.0 {
 		t.Errorf("powered negative was zeroed: %g", result.Surfaces[0].Thickness)
 	}
+	if len(result.Surfaces[0].Decenter) != 0 {
+		t.Errorf("powered negative gained a shift: %v", result.Surfaces[0].Decenter)
+	}
 }
 
-func TestZeroNegativeDummy_MirrorMaterialKept(t *testing.T) {
+func TestShiftNegativeDummy_MirrorMaterialKept(t *testing.T) {
 	input := `SURF 1
   TYPE STANDARD
   CURV 0.0
@@ -133,7 +154,7 @@ SURF 2
 	}
 }
 
-func TestZeroNegativeDummy_StopOnNonZeroedKept(t *testing.T) {
+func TestShiftNegativeDummy_StopOnNonShiftedKept(t *testing.T) {
 	input := `STOP 2
 SURF 1
   TYPE STANDARD
@@ -152,7 +173,7 @@ SURF 3
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Surface 1 is zeroed; the stop sits on surface 2 and is preserved.
+	// Surface 1 is shifted (thickness zeroed); the stop sits on surface 2.
 	if result.Surfaces[0].Thickness != 0 {
 		t.Errorf("dummy not zeroed: %g", result.Surfaces[0].Thickness)
 	}
@@ -161,7 +182,7 @@ SURF 3
 	}
 }
 
-func TestZeroNegativeDummy_ConfigOverride(t *testing.T) {
+func TestShiftNegativeDummy_ConfigOverride(t *testing.T) {
 	input := `SURF 1
   TYPE STANDARD
   CURV 0.0
