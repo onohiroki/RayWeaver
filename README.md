@@ -217,6 +217,12 @@ All units are millimetres (wavelengths, thicknesses, radii, coordinates). Coatin
 | [gopkg.in/yaml.v3](https://github.com/go-yaml/yaml) | MIT |
 | [golang.org/x/image](https://pkg.go.dev/golang.org/x/image) | BSD |
 
+## Credits
+
+The CODE V / ZEMAX importers draw on [ray-optics](https://github.com/rayoptics/rayoptics)
+for command semantics (e.g. TLA dispatch, decenter/return transforms). Thanks to
+the ray-optics authors for open-sourcing it.
+
 ## License
 
 This project is MIT licensed. The sample lens data in `samples/us2645157.yaml` is derived from US patent 2,645,157 and carries the original MIT license (© 2014 Daniel J. Reiley).
