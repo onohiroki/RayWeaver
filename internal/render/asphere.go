@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -201,16 +202,18 @@ func catmullRomCurve(pts []vec2, firstCmd string) string {
 	return b.String()
 }
 
-func effectiveSemiDiameter(surf types.Surface, nextSurf *types.Surface, globalMaxH float64) float64 {
+// surfaceSemiDiameter returns the height at which a surface is drawn. It uses
+// the surface's own clear aperture, capped at the absolute radius of curvature
+// so the sag evaluation stays inside its valid domain (sag(h) is NaN for
+// h > |R| on spherical/aspheric surfaces whose base sphere term has a square
+// root). globalMaxH is the fallback when the surface has no clear aperture.
+func surfaceSemiDiameter(surf types.Surface, globalMaxH float64) float64 {
 	h := globalMaxH
 	if surf.Diameter > 0 {
 		h = surf.Diameter / 2
 	}
-	if nextSurf != nil && nextSurf.Diameter > 0 {
-		nh := nextSurf.Diameter / 2
-		if nh > h {
-			h = nh
-		}
+	if r := math.Abs(surf.Radius()); r > 0 && h > r {
+		h = r
 	}
 	if h <= 0 {
 		h = 1.0

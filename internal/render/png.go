@@ -244,46 +244,51 @@ func drawSagPathFromSVG(ras *vector.Rasterizer, svgPath string, scale, midZ floa
 }
 
 func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ float64, c color.NRGBA) {
-	h := e.h
-	if h <= 0 {
+	if e.h1 <= 0 || e.h2 <= 0 {
 		return
 	}
-	sag1h := globalSag(e.r1Surf, h)
+	ee := computeElemEdges(e, z1, z2)
 	ras.Reset(canvasW, canvasH)
-	px, py := worldPt(z1+sag1h, h, midZ, scale)
+	px, py := worldPt(z1+ee.sag1h, e.h1, midZ, scale)
 	ras.MoveTo(px, py)
 
-	sampleSagPath(ras, e.r1Surf, h, -h, z1, scale, midZ)
+	sampleSagPath(ras, e.r1Surf, e.h1, -e.h1, z1, scale, midZ)
 
-	sag2h := globalSag(e.r2Surf, h)
-	px2, py2 := worldPt(z2+sag2h, -h, midZ, scale)
-	ras.LineTo(px2, py2)
+	for _, p := range ee.bottomPts {
+		px, py := worldPt(p.X, p.Y, midZ, scale)
+		ras.LineTo(px, py)
+	}
 
-	sampleSagPath(ras, e.r2Surf, -h, h, z2, scale, midZ)
+	sampleSagPath(ras, e.r2Surf, -e.h2, e.h2, z2, scale, midZ)
+
+	for _, p := range ee.topPts {
+		px, py := worldPt(p.X, p.Y, midZ, scale)
+		ras.LineTo(px, py)
+	}
 	ras.ClosePath()
 
 	ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
 }
 
 func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ, strokeWidth float64, c color.NRGBA) {
-	h := e.h
-	if h <= 0 {
+	if e.h1 <= 0 || e.h2 <= 0 {
 		return
 	}
-	sag1h := globalSag(e.r1Surf, h)
-	sag1mh := globalSag(e.r1Surf, -h)
-	sag2h := globalSag(e.r2Surf, h)
-	sag2mh := globalSag(e.r2Surf, -h)
+	ee := computeElemEdges(e, z1, z2)
 
 	ras.Reset(canvasW, canvasH)
 	// Left curved surface (top → bottom)
-	strokeSagPath(ras, e.r1Surf, h, -h, z1, scale, midZ, strokeWidth)
-	// Right curved surface (bottom → top)
-	strokeSagPath(ras, e.r2Surf, -h, h, z2, scale, midZ, strokeWidth)
-	// Top edge
-	strokeLine(ras, z1+sag1h, h, z2+sag2h, h, strokeWidth, scale, midZ)
+	strokeSagPath(ras, e.r1Surf, e.h1, -e.h1, z1, scale, midZ, strokeWidth)
 	// Bottom edge
-	strokeLine(ras, z2+sag2mh, -h, z1+sag1mh, -h, strokeWidth, scale, midZ)
+	for i := 0; i < len(ee.bottomPts)-1; i++ {
+		strokeLine(ras, ee.bottomPts[i].X, ee.bottomPts[i].Y, ee.bottomPts[i+1].X, ee.bottomPts[i+1].Y, strokeWidth, scale, midZ)
+	}
+	// Right curved surface (bottom → top)
+	strokeSagPath(ras, e.r2Surf, -e.h2, e.h2, z2, scale, midZ, strokeWidth)
+	// Top edge
+	for i := 0; i < len(ee.topPts)-1; i++ {
+		strokeLine(ras, ee.topPts[i].X, ee.topPts[i].Y, ee.topPts[i+1].X, ee.topPts[i+1].Y, strokeWidth, scale, midZ)
+	}
 	ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
 }
 

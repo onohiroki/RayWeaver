@@ -12,7 +12,8 @@ type element struct {
 	r2Idx  int
 	r1Surf types.Surface
 	r2Surf types.Surface
-	h      float64
+	h1     float64
+	h2     float64
 }
 
 func buildLensBodies(surfaces []types.Surface, zPos []float64, globalMaxH float64) []string {
@@ -76,13 +77,13 @@ func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 		if r2 >= len(surfaces) {
 			break
 		}
-		h := effectiveSemiDiameter(surfaces[r1], &surfaces[r2], globalMaxH)
 		elems = append(elems, element{
 			r1Idx:  r1,
 			r2Idx:  r2,
 			r1Surf: surfaces[r1],
 			r2Surf: surfaces[r2],
-			h:      h,
+			h1:     surfaceSemiDiameter(surfaces[r1], globalMaxH),
+			h2:     surfaceSemiDiameter(surfaces[r2], globalMaxH),
 		})
 		i = r2
 	}
@@ -90,20 +91,104 @@ func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 }
 
 func buildElemPath(e element, z1, z2 float64) string {
-	sag2 := globalSag(e.r2Surf, e.h)
-	x2 := z2 + sag2
+	ee := computeElemEdges(e, z1, z2)
 
 	var b strings.Builder
 
-	b.WriteString(surfaceDownPath(e.r1Surf, e.h, z1))
+	b.WriteString(surfaceDownPath(e.r1Surf, e.h1, z1))
 
 	b.WriteByte(' ')
-	b.WriteString(fmt.Sprintf("L %.6f,%.6f", x2, -e.h))
+	b.WriteString(edgeToPath(ee.bottomPts))
 
 	b.WriteByte(' ')
-	b.WriteString(surfaceUpPath(e.r2Surf, e.h, z2))
+	b.WriteString(surfaceUpPath(e.r2Surf, e.h2, z2))
+
+	b.WriteByte(' ')
+	b.WriteString(edgeToPath(ee.topPts))
 
 	b.WriteString(" Z")
+	return b.String()
+}
+
+// elemEdge holds the per-surface sag values and the top/bottom edge polylines
+// of a lens element. topPts runs from the surface-2 edge to the surface-1 edge;
+// bottomPts runs from the surface-1 edge to the surface-2 edge. Both include
+// their endpoints (each polylines' first point coincides with where the
+// adjacent curved surface ends).
+type elemEdge struct {
+	sag1h  float64
+	sag1mh float64
+	sag2h  float64
+	sag2mh float64
+	topPts    []vec2
+	bottomPts []vec2
+}
+
+// computeElemEdges evaluates each surface at its own semi-diameter and builds
+// the top and bottom rim geometry. The rim rules (see design notes):
+//
+//   - h1 == h2: straight horizontal rim (single-height elements).
+//   - The taller surface (larger h) carries a horizontal chamfer of length
+//     half the Z separation between the two surface edges; the shorter surface
+//     connects to the chamfer end diagonally. When the taller surface's edge
+//     lies at or beyond the shorter surface's edge in Z (towards the image),
+//     the chamfer would point backwards, so the two edges are joined by a
+//     straight diagonal instead.
+func computeElemEdges(e element, z1, z2 float64) elemEdge {
+	ee := elemEdge{
+		sag1h:  globalSag(e.r1Surf, e.h1),
+		sag1mh: globalSag(e.r1Surf, -e.h1),
+		sag2h:  globalSag(e.r2Surf, e.h2),
+		sag2mh: globalSag(e.r2Surf, -e.h2),
+	}
+
+	z1Top := z1 + ee.sag1h
+	z2Top := z2 + ee.sag2h
+	p1Top := vec2{X: z1Top, Y: e.h1}
+	p2Top := vec2{X: z2Top, Y: e.h2}
+	p1Bot := vec2{X: z1 + ee.sag1mh, Y: -e.h1}
+	p2Bot := vec2{X: z2 + ee.sag2mh, Y: -e.h2}
+
+	if e.h1 == e.h2 {
+		ee.topPts = []vec2{p2Top, p1Top}
+		ee.bottomPts = []vec2{p1Bot, p2Bot}
+		return ee
+	}
+
+	var hTall, zTall, zShort float64
+	if e.h1 > e.h2 {
+		hTall = e.h1
+		zTall = z1Top
+		zShort = z2Top
+	} else {
+		hTall = e.h2
+		zTall = z2Top
+		zShort = z1Top
+	}
+
+	// Taller edge at or beyond the shorter edge towards the image: no room for
+	// a forward-pointing chamfer, join the edges directly.
+	if zTall >= zShort {
+		ee.topPts = []vec2{p2Top, p1Top}
+		ee.bottomPts = []vec2{p1Bot, p2Bot}
+		return ee
+	}
+
+	dz := zShort - zTall
+	chZ := zTall + dz/2
+	ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hTall}, p1Top}
+	ee.bottomPts = []vec2{p1Bot, vec2{X: chZ, Y: -hTall}, p2Bot}
+	return ee
+}
+
+// edgeToPath appends the polyline as absolute L commands (the caller's current
+// point is already the first point of the polyline).
+func edgeToPath(pts []vec2) string {
+	var b strings.Builder
+	for _, p := range pts {
+		b.WriteString(fmt.Sprintf("L %.6f,%.6f", p.X, p.Y))
+		b.WriteByte(' ')
+	}
 	return b.String()
 }
 
