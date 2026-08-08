@@ -223,18 +223,43 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 	// Unequal heights on a concave lens or a cemented element: the chamfer
 	// (horizontal, parallel to the optical axis) is placed on the cemented
 	// surface when the element is part of a cemented pair, else on the taller
-	// surface; the other surface connects diagonally.
+	// surface; the other surface connects diagonally. The chamfer point must
+	// always sit at a greater height (in absolute value) than where the
+	// diagonal meets the other surface; if a cemented surface would force the
+	// chamfer onto the shorter side, connect with a horizontal rim at a
+	// shared height instead (the taller height when both surfaces are
+	// well-defined there, else the shorter one).
 	chamferR1 := h1eff >= h2eff
 	if e.r1Cemented != e.r2Cemented {
 		chamferR1 = e.r1Cemented
 	}
-	var hChamfer, zChamfer, zOther float64
+	var hChamfer, zChamfer, hOther, zOther float64
 	if chamferR1 {
 		hChamfer, zChamfer = h1eff, z1Top
-		zOther = z2Top
+		hOther, zOther = h2eff, z2Top
 	} else {
 		hChamfer, zChamfer = h2eff, z2Top
-		zOther = z1Top
+		hOther, zOther = h1eff, z1Top
+	}
+
+	if hChamfer < hOther {
+		// Chamfer on the shorter side is invalid geometry. Connect with a
+		// horizontal rim instead: draw both surfaces at one shared height,
+		// preferring the taller height when both surfaces are well-defined
+		// there, otherwise the shorter one (always well-defined).
+		hShared := math.Min(h1eff, h2eff)
+		if hMax := math.Max(h1eff, h2eff); validAtHeight(e.r1Surf, hMax) && validAtHeight(e.r2Surf, hMax) {
+			hShared = hMax
+		}
+		ee.h1eff, ee.h2eff = hShared, hShared
+		ee.sag1h = globalSag(e.r1Surf, hShared)
+		ee.sag1mh = globalSag(e.r1Surf, -hShared)
+		ee.sag2h = globalSag(e.r2Surf, hShared)
+		ee.sag2mh = globalSag(e.r2Surf, -hShared)
+		zt1, zt2 := z1+ee.sag1h, z2+ee.sag2h
+		ee.topPts = []vec2{{X: zt2, Y: hShared}, {X: zt1, Y: hShared}}
+		ee.bottomPts = []vec2{{X: z1 + ee.sag1mh, Y: -hShared}, {X: z2 + ee.sag2mh, Y: -hShared}}
+		return ee
 	}
 
 	chZ := (zChamfer + zOther) / 2
