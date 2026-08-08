@@ -316,7 +316,7 @@ configs:
         type: sphere
         curvature: 0.007692308
         thickness: 10.0
-        material: BK7
+        material: {key: BK7}
         diameter: 40.0
       - id: 2
         type: sphere
@@ -328,7 +328,7 @@ configs:
         type: sphere
         curvature: -0.01
         thickness: 10.0
-        material: F2
+        material: {key: F2}
         diameter: 40.0
       - id: 4
         type: sphere
@@ -340,7 +340,7 @@ configs:
         type: sphere
         curvature: 0.01
         thickness: 10.0
-        material: BK7
+        material: {key: BK7}
         diameter: 40.0
       - id: 6
         type: sphere
@@ -462,7 +462,7 @@ configs:
         type: sphere
         curvature: 0.007692308
         thickness: 10.0
-        material: BK7
+        material: {key: BK7}
         diameter: 40.0
       - id: 2
         type: sphere
@@ -474,7 +474,7 @@ configs:
         type: sphere
         curvature: -0.01
         thickness: 10.0
-        material: F2
+        material: {key: F2}
         diameter: 40.0
       - id: 4
         type: sphere
@@ -486,7 +486,7 @@ configs:
         type: sphere
         curvature: 0.01
         thickness: 10.0
-        material: BK7
+        material: {key: BK7}
         diameter: 40.0
       - id: 6
         type: sphere
@@ -601,7 +601,7 @@ configs:
         type: sphere
         curvature: 0.007692308
         thickness: 10.0
-        material: BK7
+        material: {key: BK7}
         diameter: 40.0
       - id: 2
         type: sphere
@@ -613,7 +613,7 @@ configs:
         type: sphere
         curvature: -0.01
         thickness: 10.0
-        material: F2
+        material: {key: F2}
         diameter: 40.0
       - id: 4
         type: sphere
@@ -625,7 +625,7 @@ configs:
         type: sphere
         curvature: 0.01
         thickness: 10.0
-        material: BK7
+        material: {key: BK7}
         diameter: 40.0
       - id: 6
         type: sphere

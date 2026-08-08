@@ -443,7 +443,7 @@ configs:
     type: sphere
     radius: 60.606061
     thickness: 3.5
-    material: SK18
+    material: {key: SK18}
     diameter: 36.0
     auto_aperture: true
   - id: 2
@@ -457,7 +457,7 @@ configs:
     type: sphere
     radius: 121.212121
     thickness: 1.2
-    material: SF12
+    material: {key: SF12}
     diameter: 28.0
     auto_aperture: true
   - id: 4
@@ -471,7 +471,7 @@ configs:
     type: sphere
     radius: 54.545455
     thickness: 2.5
-    material: SK18
+    material: {key: SK18}
     diameter: 26.0
     auto_aperture: true
   - id: 6
@@ -491,7 +491,7 @@ configs:
     type: sphere
     radius: -181.818182
     thickness: 2.5
-    material: SK18
+    material: {key: SK18}
     diameter: 26.0
     auto_aperture: true
   - id: 9
@@ -505,7 +505,7 @@ configs:
     type: sphere
     radius: -45.454545
     thickness: 1.2
-    material: SF12
+    material: {key: SF12}
     diameter: 28.0
     auto_aperture: true
   - id: 11
@@ -519,7 +519,7 @@ configs:
     type: sphere
     radius: 454.545455
     thickness: 3.5
-    material: SK18
+    material: {key: SK18}
     diameter: 36.0
     auto_aperture: true
   - id: 13

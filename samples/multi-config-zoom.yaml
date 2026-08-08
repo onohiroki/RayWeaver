@@ -500,7 +500,7 @@ configs:
     type: sphere
     curvature: 0.008
     thickness: 10.0
-    material: BK7
+    material: {key: BK7}
     diameter: 20.0
   - id: 2
     type: sphere
@@ -518,7 +518,7 @@ configs:
     type: sphere
     curvature: -0.01
     thickness: 10.0
-    material: F2
+    material: {key: F2}
     diameter: 40.0
   - id: 5
     type: sphere
@@ -536,7 +536,7 @@ configs:
     type: sphere
     curvature: 0.01
     thickness: 10.0
-    material: BK7
+    material: {key: BK7}
     diameter: 40.0
   - id: 8
     type: sphere
@@ -554,7 +554,7 @@ configs:
     type: sphere
     curvature: 0.01
     thickness: 10.0
-    material: BK7
+    material: {key: BK7}
     diameter: 40.0
   - id: 11
     type: sphere
@@ -662,7 +662,7 @@ configs:
     type: sphere
     curvature: 0.008
     thickness: 10.0
-    material: BK7
+    material: {key: BK7}
     diameter: 20.0
   - id: 2
     type: sphere
@@ -680,7 +680,7 @@ configs:
     type: sphere
     curvature: -0.01
     thickness: 10.0
-    material: F2
+    material: {key: F2}
     diameter: 40.0
   - id: 5
     type: sphere
@@ -698,7 +698,7 @@ configs:
     type: sphere
     curvature: 0.01
     thickness: 10.0
-    material: BK7
+    material: {key: BK7}
     diameter: 40.0
   - id: 8
     type: sphere
@@ -716,7 +716,7 @@ configs:
     type: sphere
     curvature: 0.01
     thickness: 10.0
-    material: BK7
+    material: {key: BK7}
     diameter: 40.0
   - id: 11
     type: sphere
@@ -824,7 +824,7 @@ configs:
     type: sphere
     curvature: 0.008
     thickness: 10.0
-    material: BK7
+    material: {key: BK7}
     diameter: 20.0
   - id: 2
     type: sphere
@@ -842,7 +842,7 @@ configs:
     type: sphere
     curvature: -0.01
     thickness: 10.0
-    material: F2
+    material: {key: F2}
     diameter: 40.0
   - id: 5
     type: sphere
@@ -860,7 +860,7 @@ configs:
     type: sphere
     curvature: 0.01
     thickness: 10.0
-    material: BK7
+    material: {key: BK7}
     diameter: 40.0
   - id: 8
     type: sphere
@@ -878,7 +878,7 @@ configs:
     type: sphere
     curvature: 0.01
     thickness: 10.0
-    material: BK7
+    material: {key: BK7}
     diameter: 40.0
   - id: 11
     type: sphere

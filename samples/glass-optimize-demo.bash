@@ -132,24 +132,33 @@ $RAYWEAVE query --jsonl --where 'has("status")' -r iter < "$OPT_LOG"
 echo
 
 echo "--- Glass before → after ---"
-extract_glass_value() {
+# "Before" values come from the input glass_catalog (model1/2/3 are registered
+# there and referenced by key). "After" values now live inline on the surface
+# material ({nd, vd}) — the catalog keeps the original entries unchanged.
+extract_catalog_glass() {
   local yaml="$1"
   local label="$2"
   local field="$3"
   $RAYWEAVE query -r "glass_catalog.entries[name=$label].$field" < "$yaml"
 }
-INIT_ND1=$(extract_glass_value "$YAML" model1 nd)
-INIT_VD1=$(extract_glass_value "$YAML" model1 vd)
-INIT_ND2=$(extract_glass_value "$YAML" model2 nd)
-INIT_VD2=$(extract_glass_value "$YAML" model2 vd)
-INIT_ND3=$(extract_glass_value "$YAML" model3 nd)
-INIT_VD3=$(extract_glass_value "$YAML" model3 vd)
-OPT_ND1=$(extract_glass_value "$OPT_RESULT" model1 nd)
-OPT_VD1=$(extract_glass_value "$OPT_RESULT" model1 vd)
-OPT_ND2=$(extract_glass_value "$OPT_RESULT" model2 nd)
-OPT_VD2=$(extract_glass_value "$OPT_RESULT" model2 vd)
-OPT_ND3=$(extract_glass_value "$OPT_RESULT" model3 nd)
-OPT_VD3=$(extract_glass_value "$OPT_RESULT" model3 vd)
+extract_surface_glass() {
+  local yaml="$1"
+  local sid="$2"
+  local field="$3"
+  $RAYWEAVE query -r "configs[0].surfaces[id=$sid].material.$field" < "$yaml"
+}
+INIT_ND1=$(extract_catalog_glass "$YAML" model1 nd)
+INIT_VD1=$(extract_catalog_glass "$YAML" model1 vd)
+INIT_ND2=$(extract_catalog_glass "$YAML" model2 nd)
+INIT_VD2=$(extract_catalog_glass "$YAML" model2 vd)
+INIT_ND3=$(extract_catalog_glass "$YAML" model3 nd)
+INIT_VD3=$(extract_catalog_glass "$YAML" model3 vd)
+OPT_ND1=$(extract_surface_glass "$OPT_RESULT" 1 nd)
+OPT_VD1=$(extract_surface_glass "$OPT_RESULT" 1 vd)
+OPT_ND2=$(extract_surface_glass "$OPT_RESULT" 3 nd)
+OPT_VD2=$(extract_surface_glass "$OPT_RESULT" 3 vd)
+OPT_ND3=$(extract_surface_glass "$OPT_RESULT" 5 nd)
+OPT_VD3=$(extract_surface_glass "$OPT_RESULT" 5 vd)
 echo "  model1: nd $INIT_ND1 → $OPT_ND1  vd $INIT_VD1 → $OPT_VD1"
 echo "  model2: nd $INIT_ND2 → $OPT_ND2  vd $INIT_VD2 → $OPT_VD2"
 echo "  model3: nd $INIT_ND3 → $OPT_ND3  vd $INIT_VD3 → $OPT_VD3"
@@ -160,7 +169,16 @@ echo "  Surface  curv       diameter  material"
 for ID in 1 2 3 4 5 6; do
   CV=$( $RAYWEAVE query --default '?' -r "configs[0].surfaces[id=$ID].curvature" < "$OPT_RESULT" )
   DIAM=$( $RAYWEAVE query --default '?' -r "configs[0].surfaces[id=$ID].diameter" < "$OPT_RESULT" )
-  MAT=$( $RAYWEAVE query --default '?' -r "configs[0].surfaces[id=$ID].material" < "$OPT_RESULT" )
+  MKEY=$( $RAYWEAVE query --default '?' -r "configs[0].surfaces[id=$ID].material.key" < "$OPT_RESULT" )
+  MND=$( $RAYWEAVE query --default '?' -r "configs[0].surfaces[id=$ID].material.nd" < "$OPT_RESULT" )
+  if [ "$MKEY" != "?" ] && [ "$MKEY" != "-1" ]; then
+    MAT="key:$MKEY"
+  elif [ "$MND" != "?" ] && [ "$MND" != "-1" ]; then
+    MVD=$( $RAYWEAVE query --default '?' -r "configs[0].surfaces[id=$ID].material.vd" < "$OPT_RESULT" )
+    MAT="nd=$MND vd=$MVD"
+  else
+    MAT="AIR"
+  fi
   printf "  %-7s %-10s %-8s  %s\n" "S$ID" "$CV" "${DIAM:-?}" "$MAT"
 done
 echo

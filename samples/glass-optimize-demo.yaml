@@ -200,7 +200,7 @@ configs:
         type: "sphere"
         curvature: 0.015
         thickness: 6.0
-        material: "model1"
+        material: {key: model1}
         diameter: 15.0
         auto_aperture: true
         min_glass_path: 1.0
@@ -208,28 +208,28 @@ configs:
         type: "sphere"
         curvature: -0.01
         thickness: 6.0
-        material: "AIR"
+        material: AIR
         diameter: 15.0
         auto_aperture: true
       - id: 3
         type: "sphere"
         curvature: 0.0
         thickness: 3.0
-        material: "model2"
+        material: {key: model2}
         diameter: 9.0
         auto_aperture: false
       - id: 4
         type: "sphere"
         curvature: 0.0
         thickness: 3.0
-        material: "AIR"
+        material: AIR
         diameter: 12.0
         auto_aperture: true
       - id: 5
         type: "sphere"
         curvature: 0.0
         thickness: 3.0
-        material: "model3"
+        material: {key: model3}
         diameter: 12.0
         auto_aperture: true
         min_glass_path: 0.3
@@ -237,14 +237,14 @@ configs:
         type: "sphere"
         curvature: 0.0
         thickness: 20.0
-        material: "AIR"
+        material: AIR
         diameter: 12.0
         auto_aperture: true
       - id: 7
         type: "sphere"
         curvature: 0.0
         thickness: 0.0
-        material: "AIR"
+        material: AIR
     merit:
       type: weighted_sum
       terms:

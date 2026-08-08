@@ -17,49 +17,49 @@ configs:
         type: "sphere"
         radius: 10.2871491742
         thickness: 1.524
-        material: "SK18"
+        material: {key: SK18}
         diameter: 10.0
       - id: 2
         type: "sphere"
         radius: -239.3967954752
         thickness: 2.3368
-        material: "AIR"
+        material: AIR
         diameter: 10.0
       - id: 3
         type: "sphere"
         radius: -12.8269871730
         thickness: 0.508
-        material: "SF12"
+        material: {key: SF12}
         diameter: 6.0
       - id: 4
         type: "sphere"
         radius: 10.5917184406
         thickness: 1.4986
-        material: "AIR"
+        material: AIR
         diameter: 6.0
       - id: 5
         type: "sphere"
         radius: 0.0
         thickness: 1.016
-        material: "AIR"
+        material: AIR
         diameter: 3.7825297358
       - id: 6
         type: "sphere"
         radius: 61.8456294200
         thickness: 1.524
-        material: "SK18"
+        material: {key: SK18}
         diameter: 6.0
       - id: 7
         type: "sphere"
         radius: -10.0074859032
         thickness: 21.36695183553
-        material: "AIR"
+        material: AIR
         diameter: 6.0
       - id: 8
         type: "sphere"
         radius: 0.0
         thickness: 0.0
-        material: "AIR"
+        material: AIR
 chief:
   fields:
     - angle: 0.0

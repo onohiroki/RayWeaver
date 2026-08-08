@@ -48,7 +48,7 @@ configs:
     radius: 49.39374070000524
     conic: 0
     thickness: 3.013603316453576
-    material: 1.63623:55.53
+    material: {nd: 1.63623, vd: 55.53}
     diameter: 36
   - id: 2
     type: sphere
@@ -62,7 +62,7 @@ configs:
     radius: -109.21057661676932
     conic: 0
     thickness: 0.8126157678070938
-    material: 1.64611:33.76
+    material: {nd: 1.64611, vd: 33.76}
     diameter: 28
   - id: 4
     type: sphere
@@ -76,7 +76,7 @@ configs:
     radius: 58.14422502180859
     conic: 0
     thickness: 2.142997019955993
-    material: 1.63623:55.53
+    material: {nd: 1.63623, vd: 55.53}
     diameter: 26
   - id: 6
     type: sphere
@@ -96,7 +96,7 @@ configs:
     radius: -181.89976777904423
     conic: 0
     thickness: 3.202201805161384
-    material: 1.63623:55.53
+    material: {nd: 1.63623, vd: 55.53}
     diameter: 26
   - id: 9
     type: sphere
@@ -110,7 +110,7 @@ configs:
     radius: -80.35681114132403
     conic: 0
     thickness: 1.8999639628475151
-    material: 1.64611:33.76
+    material: {nd: 1.64611, vd: 33.76}
     diameter: 28
   - id: 11
     type: sphere
@@ -124,7 +124,7 @@ configs:
     radius: -463.2639923404278
     conic: 0
     thickness: 4.189434775190698
-    material: 1.63623:55.53
+    material: {nd: 1.63623, vd: 55.53}
     diameter: 36
   - id: 13
     type: sphere

@@ -33,17 +33,17 @@ configs:
       weight: 0
       active: true
       surfaces:
-        - {id: 1, type: sphere, radius: 60.606061, thickness: 3.5, material: SK18, diameter: 36.0, auto_aperture: true}
+        - {id: 1, type: sphere, radius: 60.606061, thickness: 3.5, material: {key: SK18}, diameter: 36.0, auto_aperture: true}
         - {id: 2, type: sphere, radius: -454.545455, thickness: 0.5, material: AIR, diameter: 36.0, auto_aperture: true}
-        - {id: 3, type: sphere, radius: 121.212121, thickness: 1.2, material: SF12, diameter: 28.0, auto_aperture: true}
+        - {id: 3, type: sphere, radius: 121.212121, thickness: 1.2, material: {key: SF12}, diameter: 28.0, auto_aperture: true}
         - {id: 4, type: sphere, radius: 45.454545, thickness: 3.0, material: AIR, diameter: 28.0, auto_aperture: true}
-        - {id: 5, type: sphere, radius: 54.545455, thickness: 2.5, material: SK18, diameter: 26.0, auto_aperture: true}
+        - {id: 5, type: sphere, radius: 54.545455, thickness: 2.5, material: {key: SK18}, diameter: 26.0, auto_aperture: true}
         - {id: 6, type: sphere, radius: 181.818182, thickness: 3.0, material: AIR, diameter: 26.0, auto_aperture: true}
         - {id: 7, type: sphere, thickness: 3.0, material: AIR, diameter: 15.8}
-        - {id: 8, type: sphere, radius: -181.818182, thickness: 2.5, material: SK18, diameter: 26.0, auto_aperture: true}
+        - {id: 8, type: sphere, radius: -181.818182, thickness: 2.5, material: {key: SK18}, diameter: 26.0, auto_aperture: true}
         - {id: 9, type: sphere, radius: -54.545455, thickness: 3.0, material: AIR, diameter: 26.0, auto_aperture: true}
-        - {id: 10, type: sphere, radius: -45.454545, thickness: 1.2, material: SF12, diameter: 28.0, auto_aperture: true}
+        - {id: 10, type: sphere, radius: -45.454545, thickness: 1.2, material: {key: SF12}, diameter: 28.0, auto_aperture: true}
         - {id: 11, type: sphere, radius: -121.212121, thickness: 0.5, material: AIR, diameter: 28.0, auto_aperture: true}
-        - {id: 12, type: sphere, radius: 454.545455, thickness: 3.5, material: SK18, diameter: 36.0, auto_aperture: true}
+        - {id: 12, type: sphere, radius: 454.545455, thickness: 3.5, material: {key: SK18}, diameter: 36.0, auto_aperture: true}
         - {id: 13, type: sphere, radius: -60.606061, thickness: 42.0, material: AIR, diameter: 36.0, auto_aperture: true}
         - {id: 14, type: sphere, thickness: 0.0, material: AIR, diameter: 44.0}

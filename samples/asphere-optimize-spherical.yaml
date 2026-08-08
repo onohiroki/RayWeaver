@@ -64,7 +64,7 @@ configs:
     - 0.0
     - 0.0
     thickness: 6.0
-    material: N-BK7
+    material: {key: N-BK7}
     diameter: 12.5
   - id: 2
     type: sphere
