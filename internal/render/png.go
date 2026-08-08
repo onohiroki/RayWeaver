@@ -249,17 +249,17 @@ func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, sc
 	}
 	ee := computeElemEdges(e, z1, z2)
 	ras.Reset(canvasW, canvasH)
-	px, py := worldPt(z1+ee.sag1h, e.h1, midZ, scale)
+	px, py := worldPt(z1+ee.sag1h, ee.h1eff, midZ, scale)
 	ras.MoveTo(px, py)
 
-	sampleSagPath(ras, e.r1Surf, e.h1, -e.h1, z1, scale, midZ)
+	sampleSagPath(ras, e.r1Surf, ee.h1eff, -ee.h1eff, z1, scale, midZ)
 
 	for _, p := range ee.bottomPts {
 		px, py := worldPt(p.X, p.Y, midZ, scale)
 		ras.LineTo(px, py)
 	}
 
-	sampleSagPath(ras, e.r2Surf, -e.h2, e.h2, z2, scale, midZ)
+	sampleSagPath(ras, e.r2Surf, -ee.h2eff, ee.h2eff, z2, scale, midZ)
 
 	for _, p := range ee.topPts {
 		px, py := worldPt(p.X, p.Y, midZ, scale)
@@ -278,13 +278,13 @@ func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2,
 
 	ras.Reset(canvasW, canvasH)
 	// Left curved surface (top → bottom)
-	strokeSagPath(ras, e.r1Surf, e.h1, -e.h1, z1, scale, midZ, strokeWidth)
+	strokeSagPath(ras, e.r1Surf, ee.h1eff, -ee.h1eff, z1, scale, midZ, strokeWidth)
 	// Bottom edge
 	for i := 0; i < len(ee.bottomPts)-1; i++ {
 		strokeLine(ras, ee.bottomPts[i].X, ee.bottomPts[i].Y, ee.bottomPts[i+1].X, ee.bottomPts[i+1].Y, strokeWidth, scale, midZ)
 	}
 	// Right curved surface (bottom → top)
-	strokeSagPath(ras, e.r2Surf, -e.h2, e.h2, z2, scale, midZ, strokeWidth)
+	strokeSagPath(ras, e.r2Surf, -ee.h2eff, ee.h2eff, z2, scale, midZ, strokeWidth)
 	// Top edge
 	for i := 0; i < len(ee.topPts)-1; i++ {
 		strokeLine(ras, ee.topPts[i].X, ee.topPts[i].Y, ee.topPts[i+1].X, ee.topPts[i+1].Y, strokeWidth, scale, midZ)

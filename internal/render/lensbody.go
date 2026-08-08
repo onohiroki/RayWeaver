@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/hiroki/rayweaver/internal/types"
@@ -95,13 +96,13 @@ func buildElemPath(e element, z1, z2 float64) string {
 
 	var b strings.Builder
 
-	b.WriteString(surfaceDownPath(e.r1Surf, e.h1, z1))
+	b.WriteString(surfaceDownPath(e.r1Surf, ee.h1eff, z1))
 
 	b.WriteByte(' ')
 	b.WriteString(edgeToPath(ee.bottomPts))
 
 	b.WriteByte(' ')
-	b.WriteString(surfaceUpPath(e.r2Surf, e.h2, z2))
+	b.WriteString(surfaceUpPath(e.r2Surf, ee.h2eff, z2))
 
 	b.WriteByte(' ')
 	b.WriteString(edgeToPath(ee.topPts))
@@ -110,72 +111,112 @@ func buildElemPath(e element, z1, z2 float64) string {
 	return b.String()
 }
 
-// elemEdge holds the per-surface sag values and the top/bottom edge polylines
-// of a lens element. topPts runs from the surface-2 edge to the surface-1 edge;
-// bottomPts runs from the surface-1 edge to the surface-2 edge. Both include
-// their endpoints (each polylines' first point coincides with where the
-// adjacent curved surface ends).
+// elemEdge holds the per-surface effective heights, sag values and the
+// top/bottom edge polylines of a lens element. topPts runs from the surface-2
+// edge to the surface-1 edge; bottomPts runs from the surface-1 edge to the
+// surface-2 edge. Both include their endpoints (each polylines' first point
+// coincides with where the adjacent curved surface ends).
 type elemEdge struct {
-	sag1h  float64
-	sag1mh float64
-	sag2h  float64
-	sag2mh float64
+	h1eff    float64
+	h2eff    float64
+	sag1h    float64
+	sag1mh   float64
+	sag2h    float64
+	sag2mh   float64
 	topPts    []vec2
 	bottomPts []vec2
 }
 
-// computeElemEdges evaluates each surface at its own semi-diameter and builds
-// the top and bottom rim geometry. The rim rules (see design notes):
+// validAtHeight reports whether the surface's sag is well-defined at height h.
+// For non-plane surfaces h must not exceed the radius of curvature (sag(h) is
+// NaN beyond it); planes are valid at any height.
+func validAtHeight(surf types.Surface, h float64) bool {
+	r := math.Abs(surf.Radius())
+	return r == 0 || h <= r
+}
+
+// computeElemEdges evaluates each surface and builds the top and bottom rim
+// geometry. The lens is classified by the sign of the two curvatures:
 //
-//   - h1 == h2: straight horizontal rim (single-height elements).
-//   - The taller surface (larger h) carries a horizontal chamfer of length
-//     half the Z separation between the two surface edges; the shorter surface
-//     connects to the chamfer end diagonally. When the taller surface's edge
-//     lies at or beyond the shorter surface's edge in Z (towards the image),
-//     the chamfer would point backwards, so the two edges are joined by a
-//     straight diagonal instead.
+//   - Concave (meniscus) lens — both curvatures non-zero and same sign: the
+//     taller surface (larger h) carries a horizontal chamfer of half the Z
+//     separation between the two surface edges (parallel to the optical axis);
+//     the shorter surface connects to the chamfer end diagonally. Equal-height
+//     elements keep a plain horizontal rim. In an extreme meniscus (e.g.
+//     fisheye) the taller surface's edge lies at or beyond the shorter
+//     surface's edge in Z (towards the image); a forward-pointing chamfer is
+//     then impossible and the two edges are joined by a straight diagonal.
+//   - Convex lens — opposite signs (or a plane): both surfaces are drawn at
+//     the taller surface's height so the rim is a plain horizontal line, the
+//     classic drawing style. When that shared height would exceed a surface's
+//     radius of curvature (the sag becomes undefined), it falls back to the
+//     per-surface heights joined by a straight diagonal.
 func computeElemEdges(e element, z1, z2 float64) elemEdge {
+	c1 := e.r1Surf.Curvature
+	c2 := e.r2Surf.Curvature
+	meniscus := c1 != 0 && c2 != 0 && (c1 > 0) == (c2 > 0)
+
+	h1eff, h2eff := e.h1, e.h2
+	if !meniscus {
+		hShared := math.Max(e.h1, e.h2)
+		if validAtHeight(e.r1Surf, hShared) && validAtHeight(e.r2Surf, hShared) {
+			h1eff, h2eff = hShared, hShared
+		}
+	}
+
 	ee := elemEdge{
-		sag1h:  globalSag(e.r1Surf, e.h1),
-		sag1mh: globalSag(e.r1Surf, -e.h1),
-		sag2h:  globalSag(e.r2Surf, e.h2),
-		sag2mh: globalSag(e.r2Surf, -e.h2),
+		h1eff:    h1eff,
+		h2eff:    h2eff,
+		sag1h:    globalSag(e.r1Surf, h1eff),
+		sag1mh:   globalSag(e.r1Surf, -h1eff),
+		sag2h:    globalSag(e.r2Surf, h2eff),
+		sag2mh:   globalSag(e.r2Surf, -h2eff),
 	}
 
 	z1Top := z1 + ee.sag1h
 	z2Top := z2 + ee.sag2h
-	p1Top := vec2{X: z1Top, Y: e.h1}
-	p2Top := vec2{X: z2Top, Y: e.h2}
-	p1Bot := vec2{X: z1 + ee.sag1mh, Y: -e.h1}
-	p2Bot := vec2{X: z2 + ee.sag2mh, Y: -e.h2}
+	p1Top := vec2{X: z1Top, Y: h1eff}
+	p2Top := vec2{X: z2Top, Y: h2eff}
+	p1Bot := vec2{X: z1 + ee.sag1mh, Y: -h1eff}
+	p2Bot := vec2{X: z2 + ee.sag2mh, Y: -h2eff}
 
-	if e.h1 == e.h2 {
+	if h1eff == h2eff {
 		ee.topPts = []vec2{p2Top, p1Top}
 		ee.bottomPts = []vec2{p1Bot, p2Bot}
 		return ee
 	}
 
+	// Convex lens with unequal effective heights (the shared height broke):
+	// join the two edges directly with a diagonal.
+	if !meniscus {
+		ee.topPts = []vec2{p2Top, p1Top}
+		ee.bottomPts = []vec2{p1Bot, p2Bot}
+		return ee
+	}
+
+	// Meniscus with unequal heights: chamfer on the taller surface, diagonal to
+	// the shorter surface.
 	var hTall, zTall, zShort float64
-	if e.h1 > e.h2 {
-		hTall = e.h1
+	if h1eff > h2eff {
+		hTall = h1eff
 		zTall = z1Top
 		zShort = z2Top
 	} else {
-		hTall = e.h2
+		hTall = h2eff
 		zTall = z2Top
 		zShort = z1Top
 	}
 
-	// Taller edge at or beyond the shorter edge towards the image: no room for
-	// a forward-pointing chamfer, join the edges directly.
+	// Extreme meniscus (e.g. fisheye): the taller surface's edge lies at or
+	// beyond the shorter surface's edge in Z (towards the image), so a
+	// forward-pointing chamfer is not possible — join the edges directly.
 	if zTall >= zShort {
 		ee.topPts = []vec2{p2Top, p1Top}
 		ee.bottomPts = []vec2{p1Bot, p2Bot}
 		return ee
 	}
 
-	dz := zShort - zTall
-	chZ := zTall + dz/2
+	chZ := (zTall + zShort) / 2
 	ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hTall}, p1Top}
 	ee.bottomPts = []vec2{p1Bot, vec2{X: chZ, Y: -hTall}, p2Bot}
 	return ee
