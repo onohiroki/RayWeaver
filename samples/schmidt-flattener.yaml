@@ -1,9 +1,12 @@
 # Schmidt camera — folded primary + corrector + field flattener
 #
 # Fold model: all thicknesses are positive; the fold is carried by the
-# primary's `decenter: [{tilt: [0, 180, 0], reflect: true}]`.  After the
-# mirror the beam travels back toward the stop, so the physical Z of the FF
-# surfaces and image is smaller than the mirror's.
+# primary's `decenter: [{tilt: [0, 180, 0], scope: both}]` plus a top-level
+# `reflect: true`.  `scope: both` tilts the surface and bends the beam frame,
+# so the mirror radius is the beam-frame radius (R=+800 for the concave
+# mirror; the fold negates the physical radius).  After the mirror the beam
+# travels back toward the stop, so the physical Z of the FF surfaces and image
+# is smaller than the mirror's.
 #
 # Layout (physical Z, mm): corrector/stop at 0, mirror at 800, FF front at
 # ~460, flat image at 400.  Full 35mm full-frame coverage (half-diagonal
@@ -51,7 +54,8 @@ configs:
         thickness: 340.0
         material: AIR
         diameter: 300.0
-        decenter: [{tilt: [0, 180, 0], reflect: true}]
+        decenter: [{tilt: [0, 180, 0], scope: both}]
+        reflect: true
         role: "primary"
       - id: 4
         type: "sphere"

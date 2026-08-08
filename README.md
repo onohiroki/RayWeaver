@@ -10,7 +10,7 @@ RayWeaver is a CLI ray tracing engine for optical systems, written in Go.
 - Thin-film coating analysis via the transfer-matrix method
 - SVG cross-section diagram generation
 - Support for decentered and tilted elements
-- Folded systems (mirrors): positive thicknesses only, fold via `decenter: [{tilt: [0, 180, 0], reflect: true}]`, fold-aware paraxial/chief/ray tracing
+- Folded systems (mirrors): positive thicknesses only, fold via `decenter: [{tilt: [0, 180, 0], scope: both}]` + top-level `reflect: true`, fold-aware paraxial/chief/ray tracing
 - Glass dispersion via Sellmeier or Cauchy models
 - Jones-matrix polarization tracking
 - DLS (damped least squares) local optimization of lens surfaces

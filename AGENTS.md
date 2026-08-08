@@ -65,8 +65,9 @@ Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, write
 ## Fold model
 
 - **All thicknesses are positive.** A mirror is folded via
-  `decenter: [{tilt: [0, 180, 0], reflect: true}]` (tilt in **degrees**).
-  Negative thickness and the top-level surface `reflect` key are parse-time errors.
+  `decenter: [{tilt: [0, 180, 0], scope: both}]` plus a top-level
+  `reflect: true` (tilt in **degrees**). Negative thickness is a parse-time
+  error.
 - The beam-frame radius after an odd number of reflections is the **negation**
   of the physical radius (e.g. a concave mirror with R=-800 in the old unfolded
   model is R=+800 here). Paraxial and ray trace both consume the beam-frame radius.

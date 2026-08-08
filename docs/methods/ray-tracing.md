@@ -50,8 +50,8 @@ positive dot product with it (`cos θ₁ > 0`).
 
 ## 4. Interaction type
 
-The interaction is `TRANSMIT` unless the surface is a fold mirror
-(`decenter[].reflect: true`) or the path encodes a reflection
+The interaction is `TRANSMIT` unless the surface is a fold mirror (top-level
+`reflect: true`) or the path encodes a reflection
 (`DetermineInteraction` detects a direction reversal: `prev → current → next`
 changing sign).
 
@@ -125,7 +125,8 @@ traces are race-free.
 ## Fold model
 
 Folded (mirror) systems use **positive thicknesses** only. A mirror is created
-by `decenter: [{tilt: [0, 180, 0], reflect: true}]`. The fold walk
+by `decenter: [{tilt: [0, 180, 0], scope: both}]` plus a top-level
+`reflect: true` on the surface. The fold walk
 (`internal/surface/precompute.go`) keeps rays travelling +Z locally after a
 fold; the beam-frame radius after an odd number of reflections is the negation
 of the physical radius. `materialBefore` skips fold mirrors when resolving

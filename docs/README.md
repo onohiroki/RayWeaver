@@ -52,7 +52,7 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
 - Surfaces use `curvature` as the primary field; `radius` in YAML is converted
   to curvature at parse time.
 - Folded (mirror) systems use **positive thicknesses only**. A mirror is folded
-  via `decenter: [{tilt: [0, 180, 0], reflect: true}]` (tilt in degrees).
-  Negative thicknesses and a top-level `reflect` key are parse-time errors.
+  via `decenter: [{tilt: [0, 180, 0], scope: both}]` plus a top-level
+  `reflect: true` (tilt in degrees). Negative thicknesses are parse-time errors.
 - All output documents preserve the input document and add a section; pipelines
   such as `chief → trace → plot` and `chief → paraxial` therefore work.

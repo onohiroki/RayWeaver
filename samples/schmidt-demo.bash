@@ -5,9 +5,10 @@ set -euo pipefail
 # schmidt-demo.bash — folded Schmidt camera evaluation
 #
 # Purpose: show the fold model (positive thicknesses only; the fold is carried
-# by the primary's decenter [{tilt: [0, 180, 0], reflect: true}]) on a D=200
-# F/1.93 Schmidt camera: BK7 corrector plate + spherical primary + 2-element
-# field flattener, with the sensor folded back to Z=400.
+# by the primary's decenter [{tilt: [0, 180, 0], scope: both}] + top-level
+# `reflect: true`) on a D=200 F/1.93 Schmidt camera: BK7 corrector plate +
+# spherical primary + 2-element field flattener, with the sensor folded back
+# to Z=400.
 #
 # Steps
 #   1. chief       : chief rays + spot grid -> schmidt-chief-result.yaml
@@ -108,7 +109,7 @@ echo
 # ── Result summary ──
 {
   echo "Schmidt camera (D=200, EFL~386, F/1.93, 35mm full-frame)"
-  echo "Fold model: positive thicknesses; primary decenter [{tilt: [0, 180, 0], reflect: true}]"
+  echo "Fold model: positive thicknesses; primary decenter [{tilt: [0, 180, 0], scope: both}] + reflect: true"
   echo "Corrector plate (BK7 asphere a4/a6) + spherical primary + 2-element field flattener."
   echo "Physical Z: corrector/stop at 0, primary at 800, flat sensor at 400."
   echo
@@ -128,7 +129,7 @@ echo
   echo "- All fields stay near diffraction-limited (0.02-0.04 mm) because the"
   echo "  corrector plate removes the spherical aberration of the fast primary."
   echo "- Fold model: all thicknesses are positive; the primary decenter"
-  echo "  [{tilt: [0, 180, 0], reflect: true}] folds the beam back to the flat"
+  echo "  [{tilt: [0, 180, 0], scope: both}] folds the beam back to the flat"
   echo "  sensor at Z=400 (primary at Z=800)."
   echo "- The largest field (3.2 deg = 35 mm full-frame half-diagonal) shows a"
   echo "  slightly larger RMS: the natural field-curvature / astigmatism limit."
