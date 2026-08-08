@@ -75,7 +75,7 @@ func LensPNG(cfg Config) ([]byte, error) {
 	// SVG renders axis as "M 0,0 L axisLen,0": world z=0 to z=axisLen.
 	axisLen := maxSurfZ * (1 + rightFrac)
 	ras.Reset(canvasW, canvasH)
-	dashedLine(ras, 0, axisLen, 0, 0.3, scale, midZ, 3, 3)
+	dashedLine(ras, 0, axisLen, 0, 1.0, scale, midZ, 3.0/scale, 3.0/scale)
 	ras.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{160, 160, 160, 128}), image.Point{})
 
 	// Rays (behind lenses)
@@ -144,17 +144,17 @@ func rasterFill(ras *vector.Rasterizer, img *image.RGBA, fn func(*vector.Rasteri
 func strokeLine(ras *vector.Rasterizer, z0, y0, z1, y1, width, scale, midZ float64) {
 	px0, py0 := worldPt(z0, y0, midZ, scale)
 	px1, py1 := worldPt(z1, y1, midZ, scale)
-	strokeLinePx(ras, px0, py0, px1, py1, width, scale)
+	strokeLinePx(ras, px0, py0, px1, py1, width)
 }
 
-func strokeLinePx(ras *vector.Rasterizer, px0, py0, px1, py1 float32, width, scale float64) {
+func strokeLinePx(ras *vector.Rasterizer, px0, py0, px1, py1 float32, width float64) {
 	dx := px1 - px0
 	dy := py1 - py0
 	segLen := float32(math.Sqrt(float64(dx*dx + dy*dy)))
 	if segLen < 0.5 {
 		return
 	}
-	hw := float32(width * scale / 2)
+	hw := float32(width / 2)
 	if hw < 0.5 {
 		hw = 0.5
 	}
@@ -238,7 +238,7 @@ func drawSagPathFromSVG(ras *vector.Rasterizer, svgPath string, scale, midZ floa
 			first = false
 			continue
 		}
-		strokeLine(ras, prevZ, prevY, z, y, 0.3, scale, midZ)
+		strokeLine(ras, prevZ, prevY, z, y, 1.0, scale, midZ)
 		prevZ, prevY = z, y
 	}
 }

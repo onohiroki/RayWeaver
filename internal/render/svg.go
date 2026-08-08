@@ -88,20 +88,20 @@ func LensSVG(cfg Config) string {
 	b.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f">`,
 		canvasW, canvasH, canvasW, canvasH))
 
-	lw := 0.1
+	lw := 1.5
 	if cfg.LensWidth > 0 {
 		lw = cfg.LensWidth
 	}
-	rw := 0.1
+	rw := 1.5
 	if cfg.RayWidth > 0 {
 		rw = cfg.RayWidth
 	}
 	b.WriteString("<defs><style>\n")
-	b.WriteString(fmt.Sprintf(".lens-body{stroke:rgb(180,180,180);stroke-width:%.1f;opacity:0.75}\n", lw))
-	b.WriteString(".air-line{fill:none;stroke:rgb(130,130,130);stroke-width:0.3;opacity:0.6}\n")
-	b.WriteString(fmt.Sprintf(".ray{fill:none;stroke-width:%.1f;opacity:0.7}\n", rw))
-	b.WriteString(".axis{fill:none;stroke:rgb(160,160,160);stroke-width:0.3;stroke-dasharray:3,3;opacity:0.5}\n")
-	b.WriteString(".stop{fill:none;stroke:rgb(80,80,80);stroke-width:0.6}\n")
+	b.WriteString(fmt.Sprintf(".lens-body{stroke:rgb(180,180,180);stroke-width:%f;opacity:0.75}\n", lw/scale))
+	b.WriteString(fmt.Sprintf(".air-line{fill:none;stroke:rgb(130,130,130);stroke-width:%f;opacity:0.6}\n", 1.0/scale))
+	b.WriteString(fmt.Sprintf(".ray{fill:none;stroke-width:%f;opacity:0.7}\n", rw/scale))
+	b.WriteString(fmt.Sprintf(".axis{fill:none;stroke:rgb(160,160,160);stroke-width:%f;stroke-dasharray:%f,%f;opacity:0.5}\n", 1.0/scale, 3.0/scale, 3.0/scale))
+	b.WriteString(fmt.Sprintf(".stop{fill:none;stroke:rgb(80,80,80);stroke-width:%f}\n", 2.0/scale))
 	b.WriteString("</style></defs>")
 
 	// Main group: center the full content span (minZ..maxZ) in the viewport

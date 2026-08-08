@@ -282,7 +282,7 @@ Output: augmented YAML with paraxial_result: section:
 See: samples/us2645157.yaml (reference values)
 `)
 	case "plot":
-		fmt.Print(`Usage: rayweave plot [-o file.svg|.png] [--config ID] [--lens-width 0.1] [--ray-width 0.1] < input.yaml
+		fmt.Print(`Usage: rayweave plot [-o file.svg|.png] [--config ID] [--lens-width 1.5] [--ray-width 1.5] < input.yaml
 
 Generates a cross-section drawing (SVG or PNG) of the lens
 system with ray paths overlaid.
@@ -290,8 +290,8 @@ system with ray paths overlaid.
 Options:
   -o, --output file.svg   output file (.svg or .png; default: stdout = SVG)
   --config ID          select a config by id (multi-config mode)
-  --lens-width 0.1     lens body stroke width
-  --ray-width 0.1      ray path stroke width
+  --lens-width 1.5     lens body stroke width in pixels
+  --ray-width 1.5      ray path stroke width in pixels
   --scale 0            SVG/PNG scale factor (0 = auto)
   --right-margin 20    right-side margin beyond image plane (% of lens length)
 
