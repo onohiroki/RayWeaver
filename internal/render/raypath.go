@@ -152,7 +152,9 @@ func extractFieldAngle(id string, chiefRays []types.ChiefRayResult) float64 {
 		return chiefRays[n].FieldAngle
 	}
 	for _, cr := range chiefRays {
-		if cr.ChiefRay.ID == id || strings.HasPrefix(id, "chief_") {
+		// Traced chief rays are renamed "chief_<angle>deg" (%.0f) at emission;
+		// the stored ChiefRayResult.ChiefRay keeps its original (empty) ID.
+		if cr.ChiefRay.ID == id || id == fmt.Sprintf("chief_%.0fdeg", cr.FieldAngle) {
 			return cr.FieldAngle
 		}
 	}
