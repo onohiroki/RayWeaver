@@ -249,8 +249,12 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 		if engine != nil {
 			f = maxValidFraction(e.dir)
 		}
-		if f < 0.005 {
-			continue // effectively no marginal on this side (fully vignetted)
+		if f <= 0 {
+			// Even the chief fraction does not pass on this side; there is no
+			// marginal ray at all. Otherwise emit the largest fraction that
+			// passes every surface, however small, so both sides always get a
+			// marginal.
+			continue
 		}
 		if r := construct(f, e.dir, e.tag, true); r != nil {
 			rays = append(rays, *r)

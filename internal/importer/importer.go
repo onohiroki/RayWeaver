@@ -32,6 +32,12 @@ type ParseResult struct {
 	// when no FTYP line is present.
 	FieldType int
 
+	// FieldTypes holds the per-field ZEMAX FTYP codes (FTYP[0] is the global
+	// type above; FieldTypes[i] is the type of ZEMAX field i+1, 1-indexed). It
+	// is only populated when the FTYP line lists per-field codes; newField uses
+	// the matching entry when available and falls back to FieldType otherwise.
+	FieldTypes []int
+
 	// Multi-config support (ZEMAX): surfaces hold the base (config-0)
 	// geometry; the per-config thickness/diameter overrides by config index
 	// and surface ID are reported here. Non-nil when a lens declares at
@@ -82,12 +88,12 @@ var commonGlass = map[string]struct {
 	// Optical plastics and resins.
 	"PMMA":    {1.49180, 57.40},
 	"ACRYLIC": {1.49180, 57.40},
-	"OKP4":   {1.52500, 56.00},
-	"OKP4HT": {1.52500, 56.00},
-	"330R":   {1.50940, 56.20},
-	"F52R":   {1.53530, 56.00},
-	"K26R":   {1.53530, 56.00},
-	"WATER":  {1.33300, 55.50},
+	"OKP4":    {1.52500, 56.00},
+	"OKP4HT":  {1.52500, 56.00},
+	"330R":    {1.50940, 56.20},
+	"F52R":    {1.53530, 56.00},
+	"K26R":    {1.53530, 56.00},
+	"WATER":   {1.33300, 55.50},
 	// Hoya legacy glasses (H- naming used in patents; discontinued from HOYA's
 	// current catalog). Values from the 湖北新华光 (NHG) / CDGM / OHARA AGF
 	// equivalents of the same glasses.

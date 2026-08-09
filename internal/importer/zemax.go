@@ -368,11 +368,17 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 		}
 	case "PWAV":
 	case "FTYP":
-		// FTYP <global-type> <f0> <f1> ... — system field type. Only the global
-		// (per-volume) type is honored; per-field overrides are rare and all
-		// point to the same representation in the sample corpus.
+		// FTYP <global-type> <f1> <f2> ... — system field type. FTYP[0] is the
+		// global (per-volume) type; the remaining entries give per-field codes
+		// for ZEMAX field 1, 2, ... (1-indexed; field 0 is the on-axis field).
 		if len(args) > 0 {
 			result.FieldType = int(parseFloat(args[0]))
+			if len(args) > 1 {
+				result.FieldTypes = make([]int, 0, len(args)-1)
+				for _, a := range args[1:] {
+					result.FieldTypes = append(result.FieldTypes, int(parseFloat(a)))
+				}
+			}
 		}
 	case "UNIT":
 	case "VERS":
@@ -384,14 +390,20 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 	}
 }
 
-// newField builds a FieldItem from a YFLN/XFLN value using the system field
-// type: type 0 is a half-angle in degrees, types 1..3 are object/image heights.
+// newField builds a FieldItem from a YFLN/XFLN value. The meaning of the value
+// is given by the per-field FTYP code: type 0 is a half-angle in degrees,
+// types 1..3 are object/image heights. The per-field code for ZEMAX field i+1
+// (1-indexed) is FieldTypes[i]; when absent the global FieldType applies.
 func newField(result *ParseResult, v float64) types.FieldItem {
 	f := types.FieldItem{
 		ID:     len(result.Fields),
 		Weight: 1.0,
 	}
-	switch result.FieldType {
+	ft := result.FieldType
+	if k := len(result.Fields); k < len(result.FieldTypes) {
+		ft = result.FieldTypes[k]
+	}
+	switch ft {
 	case 1, 2, 3:
 		f.ImageHeight = v
 	default:

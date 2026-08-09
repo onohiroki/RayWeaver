@@ -1914,42 +1914,51 @@ func searchAngleForImageHeight(
 	}
 
 	// Bracket search: start with 0–15° and expand as needed.
+	// targetY is a positive magnitude, while the traced image heights are signed
+	// (a positive lens forms an inverted image, so they are negative). Compare
+	// absolute values so the sign of the image height never defeats the bracket.
+	mag := math.Abs
 	loDeg, hiDeg := 0.0, 15.0
 	yLo, okLo := heightFn(loDeg)
 	yHi, okHi := heightFn(hiDeg)
+	aLo, aHi := mag(yLo), mag(yHi)
 
 	for iter := 0; iter < 25; iter++ {
-		if okLo && okHi && yLo <= targetY && targetY <= yHi {
+		if okLo && okHi && aLo <= targetY && targetY <= aHi {
 			break
 		}
 		if hiDeg > 70 {
 			hiDeg = 70
 			yHi, okHi = heightFn(hiDeg)
+			aHi = mag(yHi)
 		}
-		if !okLo || yLo > targetY {
+		if !okLo || aLo > targetY {
 			loDeg -= 3.0
 			if loDeg < -80 {
 				return 0
 			}
 			yLo, okLo = heightFn(loDeg)
+			aLo = mag(yLo)
 		} else if !okHi {
 			hiDeg = (loDeg + hiDeg) / 2
 			if math.Abs(hiDeg-loDeg) < 1e-12 {
 				return 0
 			}
 			yHi, okHi = heightFn(hiDeg)
-		} else if yHi < targetY {
+			aHi = mag(yHi)
+		} else if aHi < targetY {
 			hiDeg += 3.0
 			if hiDeg > 80 {
 				return 0
 			}
 			yHi, okHi = heightFn(hiDeg)
+			aHi = mag(yHi)
 		} else {
 			break
 		}
 	}
 
-	if !okLo || !okHi || yLo > targetY || yHi < targetY {
+	if !okLo || !okHi || aLo > targetY || aHi < targetY {
 		return 0
 	}
 
@@ -1964,15 +1973,14 @@ func searchAngleForImageHeight(
 			}
 			continue
 		}
-		if math.Abs(yMid-targetY) < 1e-12 {
+		aMid := mag(yMid)
+		if math.Abs(aMid-targetY) < 1e-12 {
 			return midDeg
 		}
-		if yMid < targetY {
+		if aMid < targetY {
 			loDeg = midDeg
-			yLo = yMid
 		} else {
 			hiDeg = midDeg
-			yHi = yMid
 		}
 		if math.Abs(hiDeg-loDeg) < 1e-12 {
 			break
@@ -1998,39 +2006,51 @@ func imageHeightForAnglePT(
 ) (float64, bool) {
 	thetaRad := raymath.DegToRad(angleDeg)
 	zStart := -100.0
-	sinT := math.Sin(thetaRad)
-	cosT := math.Cos(thetaRad)
-	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
-
 	path := dls.BuildPath(system.Surfaces)
 
-	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, pt.Surface, pt.Coordinate.Y,
-		path, wavelength, pol, engine, system.Surfaces, pupilZ, false,
-		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
+	// Prefer the same robust backward-from-stop construction as the actual chief
+	// ray; fall back to the forward origin search. This keeps the image-height
+	// probe consistent with the chief -- the forward search can fail on steep or
+	// folded fields where the backward trace succeeds.
+	var origin, rayDir types.Vec3
+	if o, d, ok := backwardChiefOrigin(engine, system.Surfaces, path, pt.Surface,
+		pt.Coordinate, thetaRad, dx, dy, zStart, wavelength); ok {
+		origin, rayDir = o, d
+	} else {
+		rayDir = types.Vec3{X: math.Sin(thetaRad) * dx, Y: math.Sin(thetaRad) * dy, Z: math.Cos(thetaRad)}.Normalize()
 
-	originX := 0.0
-	if math.Abs(rayDir.X) > 1e-12 || math.Abs(pt.Coordinate.X) > 1e-12 {
-		originX = searchOriginForTarget(rayDir.X, rayDir, zStart, pt.Surface, pt.Coordinate.X,
-			path, wavelength, pol, engine, system.Surfaces, pupilZ, true,
-			func(sr types.SurfaceResult) float64 { return sr.Position.X })
+		originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, pt.Surface, pt.Coordinate.Y,
+			path, wavelength, pol, engine, system.Surfaces, pupilZ, false,
+			func(sr types.SurfaceResult) float64 { return sr.Position.Y })
+
+		originX := 0.0
+		if math.Abs(rayDir.X) > 1e-12 || math.Abs(pt.Coordinate.X) > 1e-12 {
+			originX = searchOriginForTarget(rayDir.X, rayDir, zStart, pt.Surface, pt.Coordinate.X,
+				path, wavelength, pol, engine, system.Surfaces, pupilZ, true,
+				func(sr types.SurfaceResult) float64 { return sr.Position.X })
+		}
+
+		origin = types.Vec3{X: originX, Y: originY, Z: zStart}
 	}
 
-	origin := types.Vec3{X: originX, Y: originY, Z: zStart}
-
+	// Trace Lenient like the actual chief ray: a steep field may graze a surface
+	// aperture near the edge of the image circle (the chief tolerates that and
+	// still reaches the image), so do not fail the probe on a minor clip.
 	ray := types.Ray{
 		Wavelength: wavelength,
 		Initial:    types.RayState{Origin: origin, Direction: rayDir},
 		Path:       path,
 		Jones:      pol,
+		Lenient:    true,
 	}
 
 	traceResult := engine.TraceRay(ray, system.Surfaces)
-	if traceResult.Error != "" {
-		return 0, false
-	}
 
 	for _, sr := range traceResult.Surfaces {
 		if sr.SurfaceID == refSurfaceID {
+			if math.IsNaN(sr.Position.Y) || math.IsInf(sr.Position.Y, 0) {
+				return 0, false
+			}
 			return sr.Position.Y, true
 		}
 	}

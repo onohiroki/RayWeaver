@@ -266,11 +266,13 @@ SURF 1
 	if len(result.Fields) != 2 {
 		t.Fatalf("expected 2 fields, got %d", len(result.Fields))
 	}
-	if result.Fields[0].ImageHeight != 15 || result.Fields[0].AngleDeg != 0 {
-		t.Errorf("field 0: expected image height 15, got ih=%g angle=%g", result.Fields[0].ImageHeight, result.Fields[0].AngleDeg)
+	// FTYP 3 0 3 3: the global type is 3, but per-field types are
+	// 0 (angle) for ZEMAX field 1 and 3 (image height) for field 2.
+	if result.Fields[0].AngleDeg != 15 || result.Fields[0].ImageHeight != 0 {
+		t.Errorf("field 0: expected angle 15, got ih=%g angle=%g", result.Fields[0].ImageHeight, result.Fields[0].AngleDeg)
 	}
-	if result.Fields[1].ImageHeight != 21 {
-		t.Errorf("field 1: expected image height 21, got %g", result.Fields[1].ImageHeight)
+	if result.Fields[1].ImageHeight != 21 || result.Fields[1].AngleDeg != 0 {
+		t.Errorf("field 1: expected image height 21, got ih=%g angle=%g", result.Fields[1].ImageHeight, result.Fields[1].AngleDeg)
 	}
 }
 
