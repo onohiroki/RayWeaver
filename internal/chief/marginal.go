@@ -172,14 +172,18 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 		}
 	}
 
-	// traces reports whether the candidate ray stays within every surface's
-	// clear aperture (effective diameter). It runs in Lenient mode and rejects
-	// the ray only when a surface other than the stop clips it by aperture; the
-	// marginal is meant to graze the stop edge itself, so an aperture_stop at the
-	// stop is ignored (it may be a hair over on a folded curved stop). A
-	// total-internal-reflection or a geometric miss is not vignetting and does
-	// not reject the ray (otherwise folded/reflective systems would lose their
-	// marginals).
+	// traces reports whether the candidate ray can actually pass through the
+	// lens. It runs in Lenient mode and rejects the ray when:
+	//   - a surface other than the stop clips it by aperture (effective
+	//     diameter): this is the vignetting the marginal is adjusted for. An
+	//     aperture_stop at the stop is ignored, since the marginal is meant to
+	//     graze the stop edge itself (it may be a hair over on a folded curved
+	//     stop);
+	//   - it misses a surface geometry or undergoes total internal reflection,
+	//     anywhere: such a ray cannot traverse the lens and is not a valid
+	//     marginal, so it is rejected too.
+	// Glass-path (edge-thickness) constraints are deliberately not considered
+	// during the search.
 	traces := func(cand *types.Ray) bool {
 		if cand == nil || engine == nil {
 			return cand != nil
@@ -187,7 +191,12 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 		cand.Lenient = true
 		res := engine.TraceRay(*cand, surfaces)
 		for _, s := range res.Surfaces {
-			if s.ErrorCode == string(ray.ErrApertureStop) && s.SurfaceID != stop.ID {
+			switch s.ErrorCode {
+			case string(ray.ErrApertureStop):
+				if s.SurfaceID != stop.ID {
+					return false
+				}
+			case string(ray.ErrMissedSurface), string(ray.ErrTIR):
 				return false
 			}
 		}
