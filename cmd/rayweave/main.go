@@ -569,13 +569,14 @@ simultaneously correct the shared (common) OPD across fields while penalising
 inter-field conflict, manufacturing difficulty and optimisation instability.
 
 Options:
-  --rings N          polar cell radial rings (default 8)
-  --angles N         polar cell angular sectors (default 16)
-  --pupil-samples N  pupil grid radial samples (default 21)
-  --top-k N          number of top-ranked surfaces to fit (default 3)
-  --sag-scale α      initial sag scale (default 0.2; try 0.05..0.5)
-  --config ID        select config by id (multi-config mode)
-  --glass-dir DIR    AGF glass catalog directory
+  --rings N               polar cell radial rings (default 8)
+  --angles N              polar cell angular sectors (default 16)
+  --pupil-samples N       pupil grid radial samples (default 21)
+  --sensitivity-samples N sensitivity trace radial samples (default 9; 0 = analytic proxy)
+  --top-k N               number of top-ranked surfaces to fit (default 3)
+  --sag-scale α           initial sag scale (default 0.2; try 0.05..0.5)
+  --config ID             select config by id (multi-config mode)
+  --glass-dir DIR         AGF glass catalog directory
 
 Input: standard system YAML with a chief section (fields + optional
 stop_surface). Candidate surfaces default to every non-mirror surface; restrict

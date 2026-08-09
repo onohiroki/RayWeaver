@@ -689,6 +689,7 @@ type AsphereCandidateConfig struct {
 	CellRings               int                 `yaml:"cell_rings,omitempty"`
 	CellAngles              int                 `yaml:"cell_angles,omitempty"`
 	PupilSamplesRadial      int                 `yaml:"pupil_samples_radial,omitempty"`
+	SensitivitySamples      *int                `yaml:"sensitivity_samples,omitempty"`
 	RemovePiston            *bool               `yaml:"remove_piston,omitempty"`
 	RemoveTilt              *bool               `yaml:"remove_tilt,omitempty"`
 	RemoveDefocus           *bool               `yaml:"remove_defocus,omitempty"`
@@ -736,21 +737,31 @@ type AsphereCoeffs struct {
 	A12   float64 `yaml:"A12,omitempty"`
 }
 
+// AsphereSensitivityMatrix is the finite-difference sensitivity of the traced
+// merit to each even-order coefficient on a candidate surface.
+type AsphereSensitivityMatrix struct {
+	BaseMerit    float64   `yaml:"base_merit"`     // weighted RMS OPD without an asphere
+	AsphereMerit float64   `yaml:"asphere_merit"`  // weighted RMS OPD with the fitted asphere applied
+	Improvement  float64   `yaml:"improvement"`    // relative merit reduction (1 - asphere/base)
+	DMeritDCoef  []float64 `yaml:"d_merit_d_coef,omitempty"` // per-coefficient ∂Merit/∂c_j
+}
+
 // AsphereSurfaceScore is one candidate surface's ranking breakdown and fitted
 // coefficients.
 type AsphereSurfaceScore struct {
-	SurfaceID            int           `yaml:"surface_id"`
-	Score                float64       `yaml:"score"`
-	Coverage             float64       `yaml:"coverage"`
-	CommonEnergy         float64       `yaml:"common_energy"`
-	Conflict             float64       `yaml:"conflict"`
-	UniqueEnergy         float64       `yaml:"unique_energy"`
-	FitQuality           float64       `yaml:"fit_quality"`
-	ManufacturingPenalty float64       `yaml:"manufacturing_penalty"`
-	SensitivityPenalty   float64       `yaml:"sensitivity_penalty"`
-	Coefficients         AsphereCoeffs `yaml:"coefficients,omitempty"`
-	ScaledCoefficients   AsphereCoeffs `yaml:"scaled_coefficients,omitempty"`
-	Warnings             []string      `yaml:"warnings,omitempty"`
+	SurfaceID            int                     `yaml:"surface_id"`
+	Score                float64                 `yaml:"score"`
+	Coverage             float64                 `yaml:"coverage"`
+	CommonEnergy         float64                 `yaml:"common_energy"`
+	Conflict             float64                 `yaml:"conflict"`
+	UniqueEnergy         float64                 `yaml:"unique_energy"`
+	FitQuality           float64                 `yaml:"fit_quality"`
+	ManufacturingPenalty float64                 `yaml:"manufacturing_penalty"`
+	SensitivityPenalty   float64                 `yaml:"sensitivity_penalty"`
+	Coefficients         AsphereCoeffs           `yaml:"coefficients,omitempty"`
+	ScaledCoefficients   AsphereCoeffs           `yaml:"scaled_coefficients,omitempty"`
+	Sensitivity          *AsphereSensitivityMatrix `yaml:"sensitivity,omitempty"`
+	Warnings             []string                `yaml:"warnings,omitempty"`
 }
 
 // AsphereCandidateResult is the `asphere` command's ranking output.

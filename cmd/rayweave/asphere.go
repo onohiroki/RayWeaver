@@ -20,6 +20,7 @@ func runAsphere(data []byte) {
 	rings := fs.Int("rings", 0, "polar cell radial rings (default 8)")
 	angles := fs.Int("angles", 0, "polar cell angular sectors (default 16)")
 	pupilSamples := fs.Int("pupil-samples", 0, "pupil grid radial samples (default 21)")
+	sensitivitySamples := fs.Int("sensitivity-samples", -1, "sensitivity trace radial samples (default 9; 0 = disable, use analytic proxy)")
 	topK := fs.Int("top-k", 0, "number of top-ranked surfaces to fit (default 3)")
 	sagScale := fs.Float64("sag-scale", 0, "initial sag scale alpha (default 0.2)")
 	fs.Parse(os.Args[2:])
@@ -48,6 +49,9 @@ func runAsphere(data []byte) {
 	}
 	if *pupilSamples > 0 {
 		cfg.PupilSamplesRadial = *pupilSamples
+	}
+	if *sensitivitySamples >= 0 {
+		cfg.SensitivitySamples = *sensitivitySamples
 	}
 	if *topK > 0 {
 		cfg.TopK = *topK

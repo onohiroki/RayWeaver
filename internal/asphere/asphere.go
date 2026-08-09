@@ -7,6 +7,8 @@
 package asphere
 
 import (
+	"math"
+
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -26,6 +28,7 @@ type Config struct {
 	CellRings               int
 	CellAngles              int
 	PupilSamplesRadial      int
+	SensitivitySamples      int
 	RemovePiston            bool
 	RemoveTilt              bool
 	RemoveDefocus           bool
@@ -47,6 +50,7 @@ func DefaultConfig() Config {
 		CellRings:               8,
 		CellAngles:              16,
 		PupilSamplesRadial:      21,
+		SensitivitySamples:      9,
 		RemovePiston:            true,
 		RemoveTilt:              true,
 		RemoveDefocus:           false,
@@ -102,6 +106,9 @@ func ConfigFromYAML(c *types.AsphereCandidateConfig) Config {
 	}
 	if c.PupilSamplesRadial > 0 {
 		cfg.PupilSamplesRadial = c.PupilSamplesRadial
+	}
+	if c.SensitivitySamples != nil {
+		cfg.SensitivitySamples = *c.SensitivitySamples
 	}
 	if c.RemovePiston != nil {
 		cfg.RemovePiston = *c.RemovePiston
@@ -184,11 +191,43 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 		index[s.ID] = mediaIndices(surfaces, s.ID, primaryWL, gc)
 	}
 
-	stopZ, hasStop := stopSurfaceZ(surfaces, stopSurface)
-	rankings := RankSurfaces(candidates, cellsBySurf, index, cfg.ScoreWeights, cfg.MaxEvenOrder, stopZ, hasStop)
+	// Phase 3: measure the traced sensitivity of every candidate surface. Each
+	// surface gets a provisional fit, then the merit (weighted RMS OPD) is
+	// traced with the scaled asphere applied and compared against the shared
+	// base system merit. The relative improvement (1 - asphere/base) is the
+	// measured sensitivity term H used by the ranking — it directly measures
+	// how much an asphere on that surface reduces the residual, unlike the
+	// analytic index-contrast proxy.
+	measuredH := make(map[int]float64, len(candidates))
+	sensitivity := make(map[int]types.AsphereSensitivityMatrix, len(candidates))
+	if cfg.SensitivitySamples > 0 {
+		base := traceMerit(surfaces, fields, wavelengths, cfg.SensitivitySamples, gc, pupilZs, cfg)
+		for _, s := range candidates {
+			pair := index[s.ID]
+			coeffs, _ := FitAsphereCoeffs(cellsBySurf[s.ID], s, pair[0], pair[1], cfg)
+			scaled := ScaleCoefficients(coeffs, cfg.SagScale)
+			// Always measure, even for a zero (unfit) asphere: such a surface
+			// gets improvement ≈ 0 and is correctly demoted instead of falling
+			// back to the analytic proxy.
+			sens := Sensitivity(surfaces, fields, wavelengths, cfg.SensitivitySamples, gc, pupilZs, s.ID, scaled, cfg, base)
+			if !math.IsNaN(sens.Improvement) {
+				measuredH[s.ID] = sens.Improvement
+			}
+			if !math.IsNaN(sens.BaseMerit) && !math.IsNaN(sens.AsphereMerit) {
+				sensitivity[s.ID] = sens
+			}
+		}
+	}
 
+	stopZ, hasStop := stopSurfaceZ(surfaces, stopSurface)
+	rankings := RankSurfaces(candidates, cellsBySurf, index, cfg.ScoreWeights, cfg.MaxEvenOrder, stopZ, hasStop, measuredH)
+
+	// Select the top-K surfaces that actually yield a valid asphere fit.
+	// Surfaces whose fit fails (e.g. degenerate index difference, no
+	// footprint) are skipped so the top-K are all genuinely aspherisable.
+	fitted := 0
 	for i := range rankings {
-		if i >= cfg.TopK {
+		if fitted >= cfg.TopK {
 			break
 		}
 		rs := &rankings[i]
@@ -202,6 +241,15 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 		rs.ScaledCoefficients = ScaleCoefficients(coeffs, cfg.SagScale)
 		rs.Warnings = append(rs.Warnings, warns...)
 		result.Warnings = append(result.Warnings, warns...)
+
+		// Attach the measured sensitivity matrix (merits + per-coefficient
+		// derivatives) computed in the Phase-3 pass.
+		if sens, ok := sensitivity[rs.SurfaceID]; ok {
+			rs.Sensitivity = &sens
+		}
+		if coeffs != (types.AsphereCoeffs{}) {
+			fitted++
+		}
 	}
 
 	result.Rankings = rankings

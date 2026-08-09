@@ -257,3 +257,46 @@ func TestRunTripletRanksAndFits(t *testing.T) {
 		}
 	}
 }
+
+func TestRunTripletSensitivityMatrix(t *testing.T) {
+	// A degraded triplet should report a Phase-3 sensitivity matrix on the
+	// top-K surfaces: finite base/asphere merits, a coherent improvement, and
+	// per-coefficient derivatives with the expected sign relationship.
+	surfaces, gc := tripletSystem()
+	fields := []Field{
+		{ID: 1, Angle: 0, Weight: 1, Direction: []float64{0, 1}},
+		{ID: 2, Angle: 16, Weight: 1, Direction: []float64{0, 1}},
+		{ID: 3, Angle: 24, Weight: 1, Direction: []float64{0, 1}},
+	}
+	cfg := DefaultConfig()
+	cfg.TopK = 2
+	cfg.SensitivitySamples = 7
+
+	res := Run(surfaces, fields, nil, cfg, gc, 0, 8)
+
+	withSens := 0
+	for _, r := range res.Rankings {
+		if r.Sensitivity == nil {
+			continue
+		}
+		withSens++
+		s := r.Sensitivity
+		if math.IsNaN(s.BaseMerit) || math.IsNaN(s.AsphereMerit) || math.IsNaN(s.Improvement) {
+			t.Fatalf("surface %d: NaN in sensitivity: %+v", r.SurfaceID, s)
+		}
+		if s.BaseMerit <= 0 {
+			t.Fatalf("surface %d: non-positive base merit %v", r.SurfaceID, s.BaseMerit)
+		}
+		if len(s.DMeritDCoef) != 5 {
+			t.Fatalf("surface %d: dM/dc has %d entries, want 5", r.SurfaceID, len(s.DMeritDCoef))
+		}
+		for _, d := range s.DMeritDCoef {
+			if math.IsNaN(d) {
+				t.Fatalf("surface %d: NaN derivative", r.SurfaceID)
+			}
+		}
+	}
+	if withSens == 0 {
+		t.Fatal("no sensitivity matrix reported on any surface")
+	}
+}

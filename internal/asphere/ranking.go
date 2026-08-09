@@ -15,6 +15,11 @@ type ScoreOptions struct {
 	StopZ        float64 // stop surface physical Z
 	HasStop      bool
 	MaxEvenOrder int
+	// MeasuredH is the traced relative merit improvement of the surface's
+	// scaled asphere (Phase 3). When HasMeasuredH is set it replaces the
+	// analytic index-contrast sensitivity proxy.
+	MeasuredH    float64
+	HasMeasuredH bool
 }
 
 // ScoreSurface computes one candidate surface's composite score from its cell
@@ -25,7 +30,8 @@ type ScoreOptions struct {
 //
 // E^common / E^unique are the shared/unique OPD energies normalised by the
 // total cell OPD energy on the surface; F is the rotationally-symmetric fit
-// quality (R²); H the index-contrast sensitivity; C the weighted inter-field
+// quality (R²); H the sensitivity (traced relative merit improvement when
+// available, else the index-contrast proxy); C the weighted inter-field
 // variance; M the manufacturing penalty; U the stop-proximity instability.
 func ScoreSurface(cells []types.AsphereCellStat, surf types.Surface, n1, n2 float64, weights types.AsphereScoreWeights, opts ScoreOptions) types.AsphereSurfaceScore {
 	score := types.AsphereSurfaceScore{SurfaceID: surf.ID}
@@ -76,11 +82,14 @@ func ScoreSurface(cells []types.AsphereCellStat, surf types.Surface, n1, n2 floa
 		_, score.FitQuality = fitRadial(sharedCells, maxOrder(opts.MaxEvenOrder))
 	}
 
-	// Sensitivity: index contrast normalised by the strongest candidate,
-	// scaled by the fraction of OPD energy the asphere can address.
-	contrast := math.Abs(n2 - n1)
+	// Sensitivity H: the traced relative merit improvement of the scaled
+	// asphere when Phase 3 measured it; otherwise the analytic index-contrast
+	// proxy scaled by the fraction of OPD energy the asphere can address.
 	sens := 0.0
-	if opts.MaxContrast > 0 {
+	if opts.HasMeasuredH {
+		sens = opts.MeasuredH
+	} else if opts.MaxContrast > 0 {
+		contrast := math.Abs(n2 - n1)
 		sens = (contrast / opts.MaxContrast) * score.Coverage
 	}
 
@@ -113,7 +122,10 @@ func ScoreSurface(cells []types.AsphereCellStat, surf types.Surface, n1, n2 floa
 
 // RankSurfaces computes and sorts the composite score of every candidate
 // surface. index maps surface ID to the (n1, n2) refractive indices before/after.
-func RankSurfaces(surfaces []types.Surface, cellsBySurf map[int][]types.AsphereCellStat, index map[int][2]float64, weights types.AsphereScoreWeights, maxEvenOrder int, stopZ float64, hasStop bool) []types.AsphereSurfaceScore {
+// measuredH maps surface ID to the Phase-3 traced relative merit improvement
+// (1 - asphere/base) used as the sensitivity term; surfaces absent from the map
+// fall back to the analytic index-contrast proxy.
+func RankSurfaces(surfaces []types.Surface, cellsBySurf map[int][]types.AsphereCellStat, index map[int][2]float64, weights types.AsphereScoreWeights, maxEvenOrder int, stopZ float64, hasStop bool, measuredH map[int]float64) []types.AsphereSurfaceScore {
 	maxCurvature := 0.0
 	maxContrast := 0.0
 	for _, s := range surfaces {
@@ -143,6 +155,13 @@ func RankSurfaces(surfaces []types.Surface, cellsBySurf map[int][]types.AsphereC
 		var n1, n2 float64
 		if pair, ok := index[s.ID]; ok {
 			n1, n2 = pair[0], pair[1]
+		}
+		if h, ok := measuredH[s.ID]; ok {
+			opts.MeasuredH = h
+			opts.HasMeasuredH = true
+		} else {
+			opts.MeasuredH = 0
+			opts.HasMeasuredH = false
 		}
 		out = append(out, ScoreSurface(cells, s, n1, n2, weights, opts))
 	}
