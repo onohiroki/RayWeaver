@@ -159,9 +159,35 @@ func TestIntersectAsphereOnAxis(t *testing.T) {
 	}
 	origin := types.Vec3{X: 0, Y: 0, Z: -10}
 	dir := types.Vec3{X: 0, Y: 0, Z: 1}
-	tHit, ok := IntersectAsphere(origin, dir, sag, 20, 1e-12)
+	tHit, ok := IntersectAsphere(origin, dir, sag, 100, 20, 1e-12)
 	if !ok || math.Abs(tHit-10) > 1e-6 {
 		t.Errorf("IntersectAsphere on-axis: t = %v, want 10", tHit)
+	}
+}
+
+func TestIntersectAsphereOffAxisMatchesSphere(t *testing.T) {
+	// A zero-coefficient asphere is a pure sphere; its intersection must match
+	// the analytic sphere intersection even for an off-axis ray whose root lies
+	// far along the ray (the sphere seed must converge).
+	R := 100.0
+	sag := func(h float64) float64 {
+		return h * h / (R * (1 + math.Sqrt(1-h*h/(R*R))))
+	}
+	// 12° ray offset so it passes through the sphere's clear aperture.
+	dir := DirectionFromAngle(12)
+	zStart := -200.0
+	offset := -(10.0 - zStart) * math.Tan(DegToRad(12)) // pupil offset for pupilZ=10
+	origin := types.Vec3{X: offset, Y: 0, Z: zStart}
+	tSphere, ok := IntersectSphere(origin, dir, R)
+	if !ok {
+		t.Fatal("sphere intersection failed for reference")
+	}
+	tAsp, ok := IntersectAsphere(origin, dir, sag, R, 30, 1e-9)
+	if !ok {
+		t.Fatalf("IntersectAsphere off-axis: miss, want t≈%v", tSphere)
+	}
+	if math.Abs(tAsp-tSphere) > 1e-4 {
+		t.Errorf("IntersectAsphere off-axis: t = %v, sphere = %v", tAsp, tSphere)
 	}
 }
 

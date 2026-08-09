@@ -575,6 +575,9 @@ Options:
   --sensitivity-samples N sensitivity trace radial samples (default 9; 0 = analytic proxy)
   --top-k N               number of top-ranked surfaces to fit (default 3)
   --sag-scale α           initial sag scale (default 0.2; try 0.05..0.5)
+  --validate              run a short DLS per fitted surface to verify the asphere improves the merit
+  --dls-iter N            DLS iterations per validated surface (default 20, with --validate)
+  --num-rays N            pupil grid rays for validation DLS (default 64)
   --config ID             select config by id (multi-config mode)
   --glass-dir DIR         AGF glass catalog directory
 
@@ -595,8 +598,11 @@ with the asphere_candidate: section:
                      conflict: 0.10, manufacturing: 0.05}
 
 Output: YAML with an asphere_candidate_result: section (rankings with
-coefficients and scaled_coefficients). Pipe into optimize to apply:
+coefficients, scaled_coefficients, sensitivity and, with --validate, a
+validation block per fitted surface reporting the before/after short-DLS
+merit). Pipe into optimize to apply:
   rayweave asphere < lens.yaml | rayweave optimize > optimized.yaml
+  rayweave asphere --validate < lens.yaml | rayweave optimize > optimized.yaml
 `)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml

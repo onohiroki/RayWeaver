@@ -194,9 +194,13 @@ func ZernikeAsphereSag(h, radius, conic float64, coefficients []float64, normRad
 	return sag2nd + sagZernike
 }
 
-func IntersectAsphere(origin, dir types.Vec3, sagFunc func(float64) float64, maxIter int, tol float64) (float64, bool) {
-	t := 0.0
-	for i := 0; i < maxIter; i++ {
+// IntersectAsphere finds the ray parameter t at which the ray hits the surface
+// whose sag is given by sagFunc. Newton is seeded from the analytic base-sphere
+// intersection (radius), so an off-axis ray whose root lies far along the ray
+// still converges: the sphere seed is within the asphere's sag perturbation.
+// Returns false on a miss (no forward root or NaN sag).
+func IntersectAsphere(origin, dir types.Vec3, sagFunc func(float64) float64, radius float64, maxIter int, tol float64) (float64, bool) {
+	f := func(t float64) float64 {
 		p := types.Vec3{
 			X: origin.X + dir.X*t,
 			Y: origin.Y + dir.Y*t,
@@ -204,23 +208,90 @@ func IntersectAsphere(origin, dir types.Vec3, sagFunc func(float64) float64, max
 		}
 		h := math.Sqrt(p.X*p.X + p.Y*p.Y)
 		sag := sagFunc(h)
+		if math.IsNaN(sag) {
+			return math.NaN()
+		}
+		return p.Z - sag
+	}
 
-		f := p.Z - sag
-		if math.Abs(f) < tol {
+	// Seed from the base sphere when a radius is known; otherwise from t=0.
+	t := 0.0
+	if radius != 0 {
+		if s1, _, ok := IntersectSphereBoth(origin, dir, radius); ok && s1 > 1e-12 {
+			t = s1
+		}
+	}
+
+	// Walk forward if the seed is before the root (f < 0), guarding NaN sag.
+	if fv := f(t); !math.IsNaN(fv) && fv < 0 {
+		step := 1.0
+		lo := t
+		hi := 0.0
+		for i := 0; i < 200; i++ {
+			cand := t + step
+			fc := f(cand)
+			if math.IsNaN(fc) {
+				step *= 0.5
+				if step < 1e-9 {
+					return 0, false
+				}
+				continue
+			}
+			if fc >= 0 {
+				hi = cand
+				break
+			}
+			lo = cand
+			step *= 2
+		}
+		if hi > lo {
+			// Bisect [lo, hi] to 1e-9.
+			for i := 0; i < 80; i++ {
+				mid := (lo + hi) / 2
+				fm := f(mid)
+				if math.IsNaN(fm) {
+					hi = mid
+					continue
+				}
+				if fm >= 0 {
+					hi = mid
+				} else {
+					lo = mid
+				}
+				if hi-lo < 1e-9 {
+					break
+				}
+			}
+			t = (lo + hi) / 2
+		}
+	}
+
+	// Newton polish.
+	for i := 0; i < maxIter; i++ {
+		fv := f(t)
+		if math.IsNaN(fv) {
+			return 0, false
+		}
+		if math.Abs(fv) < tol {
 			return t, true
 		}
-
 		dh := 1e-6
-		dsagDh := (sagFunc(h+dh) - sagFunc(h-dh)) / (2 * dh)
-		var dhDt float64
-		if h > 1e-12 {
-			dhDt = (p.X*dir.X + p.Y*dir.Y) / h
-		}
-		df := dir.Z - dsagDh*dhDt
-		if df == 0 {
+		df := (f(t+dh) - f(t-dh)) / (2 * dh)
+		if math.IsNaN(df) || df == 0 {
 			break
 		}
-		t -= f / df
+		nt := t - fv/df
+		if math.IsNaN(nt) || nt <= 0 {
+			break
+		}
+		t = nt
+	}
+	if math.Abs(f(t)) < tol {
+		return t, true
+	}
+	// Fall back to the bisected point when Newton did not fully converge.
+	if math.Abs(f(t)) < 1e-6 {
+		return t, true
 	}
 	return 0, false
 }

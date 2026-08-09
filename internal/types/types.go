@@ -761,6 +761,7 @@ type AsphereSurfaceScore struct {
 	Coefficients         AsphereCoeffs           `yaml:"coefficients,omitempty"`
 	ScaledCoefficients   AsphereCoeffs           `yaml:"scaled_coefficients,omitempty"`
 	Sensitivity          *AsphereSensitivityMatrix `yaml:"sensitivity,omitempty"`
+	Validation           *AsphereValidation        `yaml:"validation,omitempty"`
 	Warnings             []string                `yaml:"warnings,omitempty"`
 }
 
@@ -768,6 +769,20 @@ type AsphereSurfaceScore struct {
 type AsphereCandidateResult struct {
 	Rankings []AsphereSurfaceScore `yaml:"rankings,omitempty"`
 	Warnings []string              `yaml:"warnings,omitempty"`
+}
+
+// AsphereValidation is the Phase-4 short-DLS validation of one inserted
+// asphere: the merit before insertion, after the short DLS solve, and the
+// relative improvement. An empty DLS run (validation disabled) leaves the
+// block nil.
+type AsphereValidation struct {
+	SurfaceID    int     `yaml:"surface_id"`
+	BeforeMerit  float64 `yaml:"before_merit"`
+	AfterMerit   float64 `yaml:"after_merit"`
+	Improvement  float64 `yaml:"improvement"` // 1 - after/before
+	Iterations   int     `yaml:"iterations"`
+	Status       string  `yaml:"status,omitempty"`
+	Warnings     []string `yaml:"warnings,omitempty"`
 }
 
 type Input struct {

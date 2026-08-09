@@ -42,7 +42,7 @@ func Normal(s types.Surface, p types.Vec3) types.Vec3 {
 func Intersect(s types.Surface, origin, dir types.Vec3) (float64, bool) {
 	switch s.Type {
 	case types.AspherePolynomial, types.AsphereZernike:
-		return raymath.IntersectAsphere(origin, dir, SagFunc(s), 50, 1e-12)
+		return raymath.IntersectAsphere(origin, dir, SagFunc(s), s.Radius(), 50, 1e-12)
 	default:
 		return raymath.IntersectSphere(origin, dir, s.Radius())
 	}

@@ -23,6 +23,9 @@ func runAsphere(data []byte) {
 	sensitivitySamples := fs.Int("sensitivity-samples", -1, "sensitivity trace radial samples (default 9; 0 = disable, use analytic proxy)")
 	topK := fs.Int("top-k", 0, "number of top-ranked surfaces to fit (default 3)")
 	sagScale := fs.Float64("sag-scale", 0, "initial sag scale alpha (default 0.2)")
+	validate := fs.Bool("validate", false, "run a short DLS per fitted surface to verify the asphere improves the merit")
+	dlsIter := fs.Int("dls-iter", 20, "DLS iterations per validated surface (with --validate)")
+	numRays := fs.Int("num-rays", 0, "pupil grid rays for validation DLS (default 64)")
 	fs.Parse(os.Args[2:])
 
 	input := parseYAML[types.Input](data)
@@ -74,6 +77,23 @@ func runAsphere(data []byte) {
 
 	res := asphere.Run(surfaces, fields, wavelengths, cfg, gc, stopSurface, input.Chief.ReferenceSurface)
 
+	// Phase 4: optionally validate each fitted top-K asphere with a short DLS.
+	if *validate && *dlsIter > 0 {
+		validateFields := asphereFieldsToItems(fields)
+		nr := *numRays
+		if nr <= 0 {
+			nr = 64
+		}
+		validations := validateAspheres(surfaces, res.Rankings, gc, cfg.TopK, *dlsIter, nr,
+			stopSurface, input.Chief.ReferenceSurface, computePupilZ(input, surfaces, gc), validateFields, wavelengths,
+			polarization(input), input.Chief.GridType, input.Chief.PassThrough)
+		for i := range res.Rankings {
+			if v, ok := validations[res.Rankings[i].SurfaceID]; ok {
+				res.Rankings[i].Validation = v
+			}
+		}
+	}
+
 	output := types.Output{
 		Input: input,
 		AsphereResult: &types.AsphereCandidateResult{
@@ -82,6 +102,16 @@ func runAsphere(data []byte) {
 		},
 	}
 	writeYAML(&output)
+}
+
+// asphereFieldsToItems converts asphere analysis fields into types.FieldItem
+// for the validation DLS merit terms.
+func asphereFieldsToItems(fields []asphere.Field) []types.FieldItem {
+	var out []types.FieldItem
+	for _, f := range fields {
+		out = append(out, types.FieldItem{ID: f.ID, AngleDeg: f.Angle, Weight: f.Weight})
+	}
+	return out
 }
 
 // resolveAsphereFields returns the analysis fields from the per-config fields
