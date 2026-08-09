@@ -321,3 +321,185 @@ func TestTraceRayReflectFlagTilted(t *testing.T) {
 		}
 	}
 }
+
+// highIndexTIRSetup builds a flat-entry / convex-exit lens with a high-refractive-
+// index model glass (nd=5.0) so that a moderately angled ray undergoes TIR at the
+// exit surface.
+func highIndexTIRSetup() (*Engine, []types.Surface) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "hi-n", ND: 5.0, VD: 15.0})
+	engine := NewEngine(gc, nil)
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 5.0,
+			Material: types.Material{ND: 5.0, VD: 15.0}, Diameter: 40.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.1, Thickness: 100.0,
+			Material: types.Material{}, Diameter: 40.0},
+	}
+	surface.Precompute(surfaces)
+	return engine, surfaces
+}
+
+func TestTraceRayLenientMissesAperture(t *testing.T) {
+	engine, surfaces := simpleSingletEngine()
+	r := types.Ray{
+		ID:         "offaxis",
+		Wavelength: 0.00058756,
+		Lenient:    true,
+		Path:       []int{1, 2},
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: 100.0, Z: -100.0},
+			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
+		},
+	}
+	result := engine.TraceRay(r, surfaces)
+	if result.Error != "" {
+		t.Fatalf("Lenient ray should not error on aperture miss: %v", result.Error)
+	}
+	for _, sr := range result.Surfaces {
+		if sr.SurfaceID == 1 && sr.ErrorCode != string(ErrApertureStop) {
+			t.Errorf("Surface 1 ErrorCode = %q, want %q", sr.ErrorCode, string(ErrApertureStop))
+		}
+	}
+}
+
+func TestTraceRayStrictMissesAperture(t *testing.T) {
+	engine, surfaces := simpleSingletEngine()
+	r := types.Ray{
+		ID:         "offaxis",
+		Wavelength: 0.00058756,
+		Lenient:    false,
+		Path:       []int{1, 2},
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: 100.0, Z: -100.0},
+			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
+		},
+	}
+	result := engine.TraceRay(r, surfaces)
+	if result.Error == "" {
+		t.Fatal("Strict ray should error on aperture miss")
+	}
+	if result.ErrorCode != string(ErrApertureStop) {
+		t.Errorf("ErrorCode = %q, want %q", result.ErrorCode, string(ErrApertureStop))
+	}
+}
+
+func TestTraceRayLenientMissedSurface(t *testing.T) {
+	engine, surfaces := simpleSingletEngine()
+	// Y=150 is beyond the sphere radius (~100) so the ray misses geometry entirely
+	r := types.Ray{
+		ID:         "miss",
+		Wavelength: 0.00058756,
+		Lenient:    true,
+		Path:       []int{1, 2},
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: 150.0, Z: -100.0},
+			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
+		},
+	}
+	result := engine.TraceRay(r, surfaces)
+	if result.Error != "" {
+		t.Fatalf("Lenient ray should not error on geometric miss: %v", result.Error)
+	}
+	for _, sr := range result.Surfaces {
+		if sr.SurfaceID == 1 && sr.ErrorCode != string(ErrMissedSurface) {
+			t.Errorf("Surface 1 ErrorCode = %q, want %q", sr.ErrorCode, string(ErrMissedSurface))
+		}
+	}
+}
+
+func TestTraceRayLenientTIR(t *testing.T) {
+	engine, surfaces := highIndexTIRSetup()
+
+	// Strict mode: TIR should fail
+	strict := types.Ray{
+		ID:         "tir-strict",
+		Wavelength: 0.00058756,
+		Lenient:    false,
+		Path:       []int{0, 1, 2},
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: -49.75, Z: -100.0},
+			Direction: types.Vec3{X: 0, Y: 0.5, Z: 0.866},
+		},
+	}
+	strictResult := engine.TraceRay(strict, surfaces)
+	if strictResult.Error == "" {
+		t.Fatal("Strict mode should fail on TIR")
+	}
+	if strictResult.ErrorCode != string(ErrTIR) {
+		t.Errorf("Strict ErrorCode = %q, want %q", strictResult.ErrorCode, string(ErrTIR))
+	}
+
+	// Lenient mode: TIR → treated as reflection, trace continues
+	lax := types.Ray{
+		ID:         "tir-lenient",
+		Wavelength: 0.00058756,
+		Lenient:    true,
+		Path:       []int{0, 1, 2},
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: -49.75, Z: -100.0},
+			Direction: types.Vec3{X: 0, Y: 0.5, Z: 0.866},
+		},
+	}
+	result := engine.TraceRay(lax, surfaces)
+	if result.Error != "" {
+		t.Fatalf("Lenient ray should not error on TIR: %v", result.Error)
+	}
+	if len(result.Surfaces) < 3 {
+		t.Fatalf("Expected at least 3 surface results (0,1,2), got %d", len(result.Surfaces))
+	}
+	var ti types.SurfaceResult
+	found := false
+	for _, sr := range result.Surfaces {
+		if sr.SurfaceID == 2 {
+			ti = sr
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("Surface 2 not found in results")
+	}
+	if ti.Interaction != types.Reflect {
+		t.Errorf("Surface 2 interaction = %v, want Reflect (TIR in lenient mode)", ti.Interaction)
+	}
+	if ti.ErrorCode != string(ErrTIR) {
+		t.Errorf("Surface 2 ErrorCode = %q, want %q", ti.ErrorCode, string(ErrTIR))
+	}
+	if ti.IntensityS != 1.0 || ti.IntensityP != 1.0 {
+		t.Errorf("TIR intensities = (%v, %v), want (1.0, 1.0)", ti.IntensityS, ti.IntensityP)
+	}
+}
+
+func TestTraceRayLenientGlassPathShort(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	engine := NewEngine(gc, nil)
+	s := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 5.0,
+			Material: types.Material{Key: "N-BK7"}, Diameter: 50.0,
+			MinGlassPath: 15.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 100.0,
+			Material: types.Material{}, Diameter: 50.0},
+	}
+	surface.Precompute(s)
+
+	// On-axis ray through 5mm glass: glass path = 5mm < 15mm → fails
+	r := types.Ray{
+		ID:         "gpath",
+		Wavelength: 0.00058756,
+		Lenient:    true,
+		Path:       []int{0, 1, 2},
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: 0, Z: -50.0},
+			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
+		},
+	}
+	result := engine.TraceRay(r, s)
+	if result.Error != "" {
+		t.Fatalf("Lenient ray should not error on short glass path: %v", result.Error)
+	}
+	for _, sr := range result.Surfaces {
+		if sr.SurfaceID == 2 && sr.ErrorCode != string(ErrGlassPathShort) {
+			t.Errorf("Surface 2 ErrorCode = %q, want %q", sr.ErrorCode, string(ErrGlassPathShort))
+		}
+	}
+}

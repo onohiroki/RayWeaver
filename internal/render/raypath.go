@@ -3,6 +3,7 @@ package render
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/hiroki/rayweaver/internal/types"
@@ -147,12 +148,40 @@ func buildRayPath(surfaces []types.SurfaceResult) string {
 }
 
 func extractFieldAngle(id string, chiefRays []types.ChiefRayResult) float64 {
+	if n, ok := marginalFieldIndex(id); ok && n < len(chiefRays) {
+		return chiefRays[n].FieldAngle
+	}
 	for _, cr := range chiefRays {
 		if cr.ChiefRay.ID == id || strings.HasPrefix(id, "chief_") {
 			return cr.FieldAngle
 		}
 	}
 	return 0
+}
+
+// marginalFieldIndex parses a marginal-ray id of the form "marginal_f{N}_..."
+// and returns the field index N it belongs to.
+func marginalFieldIndex(id string) (int, bool) {
+	const p = "marginal_f"
+	if !strings.HasPrefix(id, p) {
+		return 0, false
+	}
+	rest := id[len(p):]
+	if rest == "" {
+		return 0, false
+	}
+	j := 0
+	for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
+		j++
+	}
+	if j == 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest[:j])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 func fieldAngleColor(angle float64, colors []angleColorEntry) string {

@@ -101,6 +101,7 @@ func findBracket(
 	trace := func(v float64) (val float64, ok bool, clipped bool) {
 		t := *ray
 		t.PassThrough = nil
+		t.Lenient = false
 		apply(&t, v)
 		r := engine.TraceRay(t, surfaces)
 		if r.Error != "" {

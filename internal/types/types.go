@@ -29,6 +29,9 @@ type InteractionType string
 const (
 	Transmit InteractionType = "TRANSMIT"
 	Reflect  InteractionType = "REFLECT"
+	// Missed indicates the ray passed through a surface location without
+	// intersecting it (used in Lenient mode to record a skipped surface).
+	Missed InteractionType = "MISSED"
 )
 
 type GlassType string
@@ -228,6 +231,12 @@ type Ray struct {
 	// than from a self-clipped set of rays. Fixed (auto_aperture: false)
 	// surfaces still clip.
 	SkipAutoApertureCheck bool `yaml:"-"`
+	// Lenient, when true, traces the ray through all surfaces without enforcing
+	// aperture or glass-path checks, and continues past surfaces the ray misses
+	// or undergoes TIR at, recording each failure in the per-surface result.
+	// Chief rays and marginal rays use Lenient mode so they trace as far as the
+	// geometry allows even when partially vignetted.
+	Lenient bool `yaml:"lenient,omitempty"`
 }
 
 type SurfaceResult struct {
@@ -240,6 +249,7 @@ type SurfaceResult struct {
 	Jones       JonesVector     `yaml:"jones"`
 	IntensityS  float64         `yaml:"intensity_s"`
 	IntensityP  float64         `yaml:"intensity_p"`
+	ErrorCode   string          `yaml:"error_code,omitempty"`
 }
 
 type RayResult struct {

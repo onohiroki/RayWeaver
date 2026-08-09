@@ -121,7 +121,7 @@ func determineChiefRays(
 			pol, wavelength, dumpMap, gridType, passThrough, fanCfg, pupilZs)
 	}
 
-	setPupils(results, engine, system.Surfaces, pupilZs)
+	setPupils(results, engine, system.Surfaces, pupilZs, apertureRadius)
 
 	// Multi-wavelength spot stats
 	if len(wavelengths) > 0 {
@@ -386,23 +386,31 @@ func recomputeEntrancePupils(results []Result, cur []float64, engine *ray.Engine
 // only within a plausible window (the outgoing rays are nearly parallel on the
 // image side, so the crossing is ill-conditioned for strongly aberrated designs
 // and is then omitted).
-func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, pupilZs []float64) {
+func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, pupilZs []float64, apertureRadius float64) {
 	n := len(results)
 	if n == 0 {
 		return
 	}
 
+	// Entrance pupil: centre = chief-ray position at the pupil plane (full
+	// x/y/z, not only z) and radius = entrance-pupil radius. The full centre is
+	// required so stop-edge marginal rays and off-axis pupils are placed at the
+	// correct transverse position.
 	entMean, entCnt := 0.0, 0
 	for i := 1; i < n; i++ {
 		if results[i].EntrancePupil == nil {
 			continue
 		}
-		results[i].EntrancePupil.Center = types.Vec3{Z: pupilZs[i]}
-		entMean += pupilZs[i]
+		z := pupilZs[i]
+		results[i].EntrancePupil.Center = chiefAtZ(results[i].ChiefRay, z)
+		results[i].EntrancePupil.Radius = apertureRadius
+		entMean += z
 		entCnt++
 	}
 	if entCnt > 0 && results[0].EntrancePupil != nil {
-		results[0].EntrancePupil.Center = types.Vec3{Z: entMean / float64(entCnt)}
+		z := entMean / float64(entCnt)
+		results[0].EntrancePupil.Center = chiefAtZ(results[0].ChiefRay, z)
+		results[0].EntrancePupil.Radius = apertureRadius
 	}
 
 	if n < 2 {
@@ -431,6 +439,18 @@ func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, p
 	if extCnt > 0 {
 		results[0].ExitPupil = &types.Pupil{Center: types.Vec3{Z: extMean / float64(extCnt)}}
 	}
+}
+
+// chiefAtZ returns the point where the chief ray crosses the plane Z = z. If the
+// chief ray is degenerate (grazing, |dz|~0) the Z-only centre is returned.
+func chiefAtZ(chiefRay types.Ray, z float64) types.Vec3 {
+	o := chiefRay.Initial.Origin
+	d := chiefRay.Initial.Direction
+	if math.Abs(d.Z) < 1e-12 {
+		return types.Vec3{Z: z}
+	}
+	t := (z - o.Z) / d.Z
+	return types.Vec3{X: o.X + t*d.X, Y: o.Y + t*d.Y, Z: z}
 }
 
 // surfaceZRange returns the min/max physical Z over the surfaces and the total
@@ -1633,6 +1653,7 @@ func buildResult(
 		Initial:    types.RayState{Origin: origin, Direction: rayDir},
 		Path:       path,
 		Jones:      pol,
+		Lenient:    true,
 	}
 
 	// Trace chief ray for actual image height
@@ -1689,6 +1710,7 @@ func computeRayFan(
 		Initial:    types.RayState{Origin: origin, Direction: rayDir},
 		Path:       path,
 		Jones:      pol,
+		Lenient:    true,
 	}
 	var chiefX, chiefY float64
 	if tr := engine.TraceRay(chiefRay, system.Surfaces); tr.Error == "" {
@@ -1708,6 +1730,7 @@ func computeRayFan(
 			Initial:    types.RayState{Origin: rOrg, Direction: rDir},
 			Path:       path,
 			Jones:      pol,
+			Lenient:    true,
 		}
 		tr := engine.TraceRay(r, system.Surfaces)
 		if tr.Error != "" {

@@ -297,6 +297,7 @@ func rayFromTrace(fi int, t tracedRay, tag string, wavelength float64, path []in
 		Initial:    types.RayState{Origin: t.origin, Direction: t.dir},
 		Path:       path,
 		Jones:      pol,
+		Lenient:    true,
 	}
 	return &r
 }
@@ -327,6 +328,7 @@ func chiefPlaneFrame(engine *ray.Engine, surfaces []types.Surface, path []int, r
 			Initial:    types.RayState{Origin: r.ChiefRay.Initial.Origin, Direction: dir},
 			Path:       path,
 			Jones:      pol,
+			Lenient:    true,
 		}, surfaces)
 		if tr.Error == "" {
 			z := r.EntrancePupil.Center.Z

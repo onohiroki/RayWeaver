@@ -238,6 +238,14 @@ Input YAML — rays section:
 Output: YAML with results[] array.  Each result contains
   per-surface data (position, normal, Fresnel coefficients).
 
+Options:
+  --config ID          select config by id (multi-config mode)
+  --lenient            trace rays leniently: skip aperture and glass-path
+                          checks, and continue past missed surfaces and TIR
+                          instead of stopping. Missed/TIR surfaces are recorded
+                          per-surface with their interaction set to MISSED/REFLECT.
+  --verbose            print per-ray trace errors as JSONL to stderr
+
 The "chief" subcommand outputs YAML that can be piped directly
   into "rayweave trace".
 `)
@@ -970,7 +978,7 @@ func runChief(data []byte) {
 
 	// --- --marginal-rays: extract marginal rays from grid points ---
 	if *marginalRays && len(results) > 0 {
-		input.Rays.Rays = append(input.Rays.Rays, extractMarginalRays(results, wavelength, surfaces, pol)...)
+		input.Rays.Rays = append(input.Rays.Rays, extractMarginalRays(results, input.Chief.StopSurface, wavelength, surfaces, pol)...)
 	}
 
 	output := types.Output{
@@ -1000,11 +1008,13 @@ func runChief(data []byte) {
 
 // extractMarginalRays finds the grid rays with max/min image Y (and X for
 // fields with an X direction component) and returns them as marginal rays.
-func extractMarginalRays(results []chief.Result, wavelength float64, surfaces []types.Surface, pol types.JonesVector) []types.Ray {
+// With an aperture stop defined (stopSurfaceID > 0) the entrance-pupil edge is
+// used instead, which is correct for off-axis fields.
+func extractMarginalRays(results []chief.Result, stopSurfaceID int, wavelength float64, surfaces []types.Surface, pol types.JonesVector) []types.Ray {
 	var rays []types.Ray
 	path := dls.BuildPath(surfaces)
 	for fi, r := range results {
-		rays = append(rays, chief.MarginalRaysForField(fi, r, wavelength, path, pol)...)
+		rays = append(rays, chief.MarginalRays(fi, r, stopSurfaceID, surfaces, wavelength, path, pol)...)
 	}
 	return rays
 }
@@ -1110,6 +1120,7 @@ func runTrace(data []byte) {
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	traceVerbose := fs.Bool("verbose", false, "print per-ray trace info to stderr")
+	traceLenient := fs.Bool("lenient", false, "trace rays leniently: skip aperture/glass-path checks, continue past missed surfaces and TIR")
 	fs.Parse(args)
 
 	input := parseYAML[types.Input](data)
@@ -1155,6 +1166,9 @@ func runTrace(data []byte) {
 			for i := range jobs {
 				r := &input.Rays.Rays[i]
 				r.Jones = input.Rays.Polarization
+				if *traceLenient {
+					r.Lenient = true
+				}
 				ray.ResolveRay(r, surfaces, engine)
 				result := engine.TraceRay(*r, surfaces)
 				if result.Error != "" {

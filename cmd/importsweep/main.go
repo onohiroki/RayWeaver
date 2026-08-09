@@ -460,7 +460,7 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 		rays = append(rays, chiefRay)
 		m.ChiefRays++
 
-		margs := chief.MarginalRaysForField(fi, r, wavelength, path, pol)
+		margs := chief.MarginalRays(fi, r, stopSurface, surfaces, wavelength, path, pol)
 		m.MarginalRays += len(margs)
 		rays = append(rays, margs...)
 
