@@ -56,6 +56,9 @@ func TestAsphereValidateReportsImprovement(t *testing.T) {
 		if v.Improvement <= 0 {
 			t.Fatalf("surface %d: improvement %v not positive", r.SurfaceID, v.Improvement)
 		}
+		if v.Coefficients == (types.AsphereCoeffs{}) {
+			t.Fatalf("surface %d: validation has no DLS-solved coefficients", r.SurfaceID)
+		}
 	}
 	if validated == 0 {
 		t.Fatal("no surface produced a validation block")

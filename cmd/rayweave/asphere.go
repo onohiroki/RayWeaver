@@ -24,6 +24,7 @@ func runAsphere(data []byte) {
 	topK := fs.Int("top-k", 0, "number of top-ranked surfaces to fit (default 3)")
 	sagScale := fs.Float64("sag-scale", 0, "initial sag scale alpha (default 0.2)")
 	validate := fs.Bool("validate", false, "run a short DLS per fitted surface to verify the asphere improves the merit")
+	apply := fs.Bool("apply", false, "insert the top-ranked DLS-validated asphere onto its surface (implies --validate) and output the modified system")
 	dlsIter := fs.Int("dls-iter", 20, "DLS iterations per validated surface (with --validate)")
 	numRays := fs.Int("num-rays", 0, "pupil grid rays for validation DLS (default 64)")
 	fs.Parse(os.Args[2:])
@@ -78,18 +79,30 @@ func runAsphere(data []byte) {
 	res := asphere.Run(surfaces, fields, wavelengths, cfg, gc, stopSurface, input.Chief.ReferenceSurface)
 
 	// Phase 4: optionally validate each fitted top-K asphere with a short DLS.
-	if *validate && *dlsIter > 0 {
+	if (*validate || *apply) && *dlsIter > 0 {
 		validateFields := asphereFieldsToItems(fields)
 		nr := *numRays
 		if nr <= 0 {
 			nr = 64
 		}
+		pupilZ := computePupilZ(input, surfaces, gc)
 		validations := validateAspheres(surfaces, res.Rankings, gc, cfg.TopK, *dlsIter, nr,
-			stopSurface, input.Chief.ReferenceSurface, computePupilZ(input, surfaces, gc), validateFields, wavelengths,
+			stopSurface, input.Chief.ReferenceSurface, pupilZ, validateFields, wavelengths,
 			polarization(input), input.Chief.GridType, input.Chief.PassThrough)
 		for i := range res.Rankings {
 			if v, ok := validations[res.Rankings[i].SurfaceID]; ok {
 				res.Rankings[i].Validation = v
+			}
+		}
+		// --apply: insert the top validated asphere's DLS-solved coefficients
+		// back into the input system so the output is pipeline-compatible
+		// (asphere --validate --apply | chief | trace | plot).
+		if *apply {
+			if v := bestValidatedAsphere(res.Rankings); v != nil {
+				applyAsphereToConfigs(&input.Configs, v.SurfaceID, v.Coefficients)
+			} else {
+				errOut("Error: --apply requires at least one validated asphere (--dls-iter > 0)")
+				os.Exit(1)
 			}
 		}
 	}
@@ -147,6 +160,36 @@ func resolveAsphereFields(input types.Input, configFlag *string) ([]asphere.Fiel
 		return nil, fmt.Errorf("'fields' or 'field_angles' is required (chief section)")
 	}
 	return out, nil
+}
+
+// bestValidatedAsphere returns the highest-ranked ranking whose validation
+// produced DLS-solved coefficients, or nil if none validated.
+func bestValidatedAsphere(rankings []types.AsphereSurfaceScore) *types.AsphereValidation {
+	for _, r := range rankings {
+		if r.Validation != nil && r.Validation.Coefficients != (types.AsphereCoeffs{}) {
+			return r.Validation
+		}
+	}
+	return nil
+}
+
+// applyAsphereToConfigs converts surface surfaceID in every config into an
+// even-order polynomial asphere carrying the DLS-validated coefficients, with
+// the conic left at zero (the validation's isolation choice). Precompute is
+// refreshed so downstream PhysicalZ / ParaxialRadius data stays consistent.
+func applyAsphereToConfigs(configs *[]types.Config, surfaceID int, coeffs types.AsphereCoeffs) {
+	for i := range *configs {
+		for j := range (*configs)[i].Surfaces {
+			if (*configs)[i].Surfaces[j].ID == surfaceID {
+				(*configs)[i].Surfaces[j].Type = types.AspherePolynomial
+				(*configs)[i].Surfaces[j].Conic = 0
+				(*configs)[i].Surfaces[j].Coefficients = asphereCoefficientSlice(coeffs)
+			}
+		}
+		if len((*configs)[i].Surfaces) > 0 {
+			surface.Precompute((*configs)[i].Surfaces)
+		}
+	}
 }
 
 func asphereFieldsFromItems(items []types.FieldItem) []asphere.Field {

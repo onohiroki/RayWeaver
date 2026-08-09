@@ -576,6 +576,9 @@ Options:
   --top-k N               number of top-ranked surfaces to fit (default 3)
   --sag-scale α           initial sag scale (default 0.2; try 0.05..0.5)
   --validate              run a short DLS per fitted surface to verify the asphere improves the merit
+  --apply                 insert the top-ranked DLS-validated asphere onto its surface and
+                          output the modified system (implies --validate). Pipeline friendly:
+                          asphere --validate --apply < lens.yaml | chief | trace | plot
   --dls-iter N            DLS iterations per validated surface (default 20, with --validate)
   --num-rays N            pupil grid rays for validation DLS (default 64)
   --config ID             select config by id (multi-config mode)
@@ -600,9 +603,10 @@ with the asphere_candidate: section:
 Output: YAML with an asphere_candidate_result: section (rankings with
 coefficients, scaled_coefficients, sensitivity and, with --validate, a
 validation block per fitted surface reporting the before/after short-DLS
-merit). Pipe into optimize to apply:
+merit and the DLS-solved coefficients). Pipe into optimize to apply:
   rayweave asphere < lens.yaml | rayweave optimize > optimized.yaml
   rayweave asphere --validate < lens.yaml | rayweave optimize > optimized.yaml
+  rayweave asphere --validate --apply < lens.yaml | rayweave chief | rayweave trace | rayweave plot
 `)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml

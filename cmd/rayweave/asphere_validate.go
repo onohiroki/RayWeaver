@@ -50,12 +50,15 @@ func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, 
 		}
 	}
 
-	// Merit terms: one OPD-RMS term per (field, wavelength).
+	// Merit terms: one spot-RMS term per (field, wavelength). Spot RMS is used
+	// rather than OPD RMS because it is the quantity the pipeline's `chief`
+	// spot stats report, so the validation improvement stays coherent with the
+	// spot before/after comparison the demo shows.
 	var meritTerms []optimize.MeritTerm
 	for _, f := range fields {
 		for _, wl := range wavelengths {
 			meritTerms = append(meritTerms, optimize.MeritTerm{
-				Kind:        optimize.MeritOPDRMS,
+				Kind:        optimize.MeritSpotRMS,
 				FieldAngle:  f.AngleDeg,
 				FieldWeight: f.Weight,
 				Wavelength:  wl,
@@ -90,13 +93,36 @@ func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, 
 	res := opt.Optimize()
 
 	return &types.AsphereValidation{
-		SurfaceID:   rs.SurfaceID,
-		BeforeMerit: res.BeforeMerit,
-		AfterMerit:  res.AfterMerit,
-		Improvement: improvement(res.BeforeMerit, res.AfterMerit),
-		Iterations:  res.Iterations,
-		Status:      res.Status,
+		SurfaceID:    rs.SurfaceID,
+		BeforeMerit:  res.BeforeMerit,
+		AfterMerit:   res.AfterMerit,
+		Improvement:  improvement(res.BeforeMerit, res.AfterMerit),
+		Iterations:   res.Iterations,
+		Status:       res.Status,
+		Coefficients: asphereCoeffs(res.Variables),
 	}
+}
+
+// asphereCoeffs rebuilds the DLS-solved even-order asphere coefficients from
+// the optimisation's variable states (one state per used a4/a12 term). Any
+// term omitted from the variables (a zero scaled coefficient) stays zero.
+func asphereCoeffs(vars []optimize.VariableState) types.AsphereCoeffs {
+	out := types.AsphereCoeffs{}
+	for _, v := range vars {
+		switch v.Param {
+		case "a4":
+			out.A4 = v.After
+		case "a6":
+			out.A6 = v.After
+		case "a8":
+			out.A8 = v.After
+		case "a10":
+			out.A10 = v.After
+		case "a12":
+			out.A12 = v.After
+		}
+	}
+	return out
 }
 
 // chiefFieldDefsFromItems converts FieldItems to chief FieldDefs for the
