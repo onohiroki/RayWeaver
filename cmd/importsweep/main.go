@@ -438,6 +438,7 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 	path := dls.BuildPath(surfaces)
 	rays := make([]types.Ray, 0, len(chiefResults)*4)
 	chiefCRs := make([]types.ChiefRayResult, 0, len(chiefResults))
+	marginalEngine := ray.NewEngine(gc, nil)
 
 	m.ChiefOK = len(chiefResults) > 0
 	for fi, r := range chiefResults {
@@ -460,7 +461,7 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 		rays = append(rays, chiefRay)
 		m.ChiefRays++
 
-		margs := chief.MarginalRays(fi, r, stopSurface, surfaces, wavelength, path, pol)
+		margs := chief.MarginalRays(fi, r, stopSurface, surfaces, marginalEngine, wavelength, path, pol)
 		m.MarginalRays += len(margs)
 		rays = append(rays, margs...)
 

@@ -978,7 +978,8 @@ func runChief(data []byte) {
 
 	// --- --marginal-rays: extract marginal rays from grid points ---
 	if *marginalRays && len(results) > 0 {
-		input.Rays.Rays = append(input.Rays.Rays, extractMarginalRays(results, input.Chief.StopSurface, wavelength, surfaces, pol)...)
+		engine := ray.NewEngine(gc, nil)
+		input.Rays.Rays = append(input.Rays.Rays, extractMarginalRays(results, input.Chief.StopSurface, engine, wavelength, surfaces, pol)...)
 	}
 
 	output := types.Output{
@@ -1008,13 +1009,14 @@ func runChief(data []byte) {
 
 // extractMarginalRays finds the grid rays with max/min image Y (and X for
 // fields with an X direction component) and returns them as marginal rays.
-// With an aperture stop defined (stopSurfaceID > 0) the entrance-pupil edge is
-// used instead, which is correct for off-axis fields.
-func extractMarginalRays(results []chief.Result, stopSurfaceID int, wavelength float64, surfaces []types.Surface, pol types.JonesVector) []types.Ray {
+// With an aperture stop defined (stopSurfaceID > 0) the vignetted stop-edge is
+// used instead, which is correct for off-axis fields. engine (may be nil) drives
+// the vignetting bisection.
+func extractMarginalRays(results []chief.Result, stopSurfaceID int, engine *ray.Engine, wavelength float64, surfaces []types.Surface, pol types.JonesVector) []types.Ray {
 	var rays []types.Ray
 	path := dls.BuildPath(surfaces)
 	for fi, r := range results {
-		rays = append(rays, chief.MarginalRays(fi, r, stopSurfaceID, surfaces, wavelength, path, pol)...)
+		rays = append(rays, chief.MarginalRays(fi, r, stopSurfaceID, surfaces, engine, wavelength, path, pol)...)
 	}
 	return rays
 }

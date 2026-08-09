@@ -91,7 +91,7 @@ func TestExtractMarginalRaysHasX(t *testing.T) {
 		),
 	}
 
-	rays := extractMarginalRays([]chief.Result{xResult, yResult}, 0, 0.00058756, nil, types.JonesVector{})
+	rays := extractMarginalRays([]chief.Result{xResult, yResult}, 0, nil, 0.00058756, nil, types.JonesVector{})
 	ids := map[string]bool{}
 	for _, r := range rays {
 		ids[r.ID] = true

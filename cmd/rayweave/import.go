@@ -10,6 +10,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/importer"
 	"github.com/hiroki/rayweaver/internal/paraxial"
+	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -214,6 +215,7 @@ func runImport(data []byte) {
 		outputOut.ChiefRays = make([]types.ChiefRayResult, len(chiefResults))
 		rayList := make([]types.Ray, 0, len(chiefResults)*3)
 		path := dls.BuildPath(chiefSurfaces)
+		marginalEngine := ray.NewEngine(gc, nil)
 
 		for fi, r := range chiefResults {
 			cr := types.ChiefRayResult{
@@ -234,7 +236,7 @@ func runImport(data []byte) {
 			chiefRay.Jones = pol
 			rayList = append(rayList, chiefRay)
 
-			rayList = append(rayList, chief.MarginalRays(fi, r, stopSurface, surfaces, wavelength, path, pol)...)
+			rayList = append(rayList, chief.MarginalRays(fi, r, stopSurface, surfaces, marginalEngine, wavelength, path, pol)...)
 		}
 
 		outputOut.Rays = &types.RayInput{
