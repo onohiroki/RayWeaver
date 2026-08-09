@@ -31,11 +31,11 @@ func TestParseOslo_ModelGlassIndices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Surfaces) != 1 {
-		t.Fatalf("expected 1 surface, got %d", len(result.Surfaces))
+	if len(result.Surfaces) != 2 {
+		t.Fatalf("expected 2 surfaces (GLA + image), got %d", len(result.Surfaces))
 	}
 	if result.Surfaces[0].Material.Key != "MOD G1" {
-		t.Errorf("surface material: expected %q, got %q", "MOD G1", result.Surfaces[1].Material.Key)
+		t.Errorf("surface 0 material: expected %q, got %q", "MOD G1", result.Surfaces[0].Material.Key)
 	}
 
 	var g *types.Glass

@@ -1,9 +1,12 @@
 package importer
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -60,6 +63,10 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 			continue
 		}
 		if upper == "END" || strings.HasPrefix(upper, "END ") {
+			if current.Material != "" {
+				surfaces = append(surfaces, current)
+				current = nxtSurface{}
+			}
 			inLens = false
 			break
 		}
@@ -103,6 +110,10 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 			continue
 		}
 		if strings.HasPrefix(upper, "PY ") {
+			continue
+		}
+		if strings.HasPrefix(upper, "WRSP ") {
+			current.WRSP = parseFloat(line[5:])
 			continue
 		}
 		if strings.HasPrefix(upper, "WV ") || strings.HasPrefix(upper, "WV\t") {
@@ -187,6 +198,15 @@ func parseOsloNXT(input string) (*ParseResult, error) {
 		result.ImageSurface = last.ID
 	}
 
+	// WRSP Inf on the image surface signals an auto-image-distance solve
+	// (paraxial marginal ray height): the distance from the last optical
+	// surface to the image plane is determined by paraxial analysis, not
+	// by an explicit TH value. Record the flag so the caller can compute
+	// the right distance.
+	if len(surfaces) > 0 && math.IsInf(surfaces[len(surfaces)-1].WRSP, 0) {
+		result.NeedsImageDistance = true
+	}
+
 	result.Surfaces = surfList
 
 	fillDefaults(result)
@@ -200,6 +220,7 @@ type nxtSurface struct {
 	Radius         float64
 	Thickness      float64
 	ApertureRadius float64
+	WRSP           float64
 }
 
 // splitOsloGlassLine splits the value of an OSLO GLA/GLASS line into the glass
@@ -684,4 +705,23 @@ func stripComment(line string) string {
 		return strings.TrimSpace(line[:idx])
 	}
 	return line
+}
+
+// ApplyImageDistance computes the paraxial image distance and sets the
+// thickness of the last optical surface (second-to-last surface in the result)
+// to the paraxial back focal length. This implements the OSLO WRSP Inf
+// auto-image-distance solve (paraxial marginal ray height). The function is a
+// no-op when NeedsImageDistance is false or when there are fewer than two
+// surfaces. It should be called after the glass catalog is populated and
+// surface precomputation has been done so PhysicalZ values are available.
+func ApplyImageDistance(result *ParseResult, gc *glass.Catalog, wavelength float64) {
+	if !result.NeedsImageDistance || len(result.Surfaces) < 2 {
+		return
+	}
+	sys := types.System{Surfaces: result.Surfaces}
+	pr := paraxial.Compute(sys, wavelength, gc, 0, nil)
+	if pr.SecondPrincipalFocus <= 0 {
+		return
+	}
+	result.Surfaces[len(result.Surfaces)-2].Thickness = pr.SecondPrincipalFocus
 }

@@ -64,13 +64,24 @@ func runImport(data []byte) {
 
 	lastID := result.Surfaces[len(result.Surfaces)-1].ID
 
-	surfaces := result.Surfaces
-	surface.Precompute(surfaces)
-
 	gc := glass.NewCatalog()
 	for _, g := range result.GlassEntries {
 		gc.Add(g)
 	}
+
+	// Apply OSLO auto-image-distance solve (WRSP Inf): replace the last
+	// empty thickness with the paraxial back focal length.  The paraxial
+	// analysis needs precomputed PhysicalZ values, so precompute first,
+	// then apply the solve, and precompute again so the image-surface
+	// PhysicalZ reflects the computed distance.
+	surfaces := result.Surfaces
+	surface.Precompute(surfaces)
+	if *format == "oslo" {
+		wl := firstWavelength(result.Wavelengths)
+		importer.ApplyImageDistance(result, gc, wl)
+		surfaces = result.Surfaces
+	}
+	surface.Precompute(surfaces)
 
 	stopSurface := result.StopSurface
 	if stopSurface <= 0 {

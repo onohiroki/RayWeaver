@@ -46,6 +46,12 @@ type ParseResult struct {
 	ConfigIndexes   []int
 	ConfigThickness map[int]map[int]float64 // [config][surfaceID]
 	ConfigDiameter  map[int]map[int]float64 // [config][surfaceID]
+
+	// NeedsImageDistance is set by the OSLO parser when the image surface
+	// carries WRSP Inf, an auto-image-distance solve. The caller applies
+	// ApplyImageDistance to replace the last empty thickness with the
+	// paraxial back focal length.
+	NeedsImageDistance bool
 }
 
 // commonGlass is the built-in fallback glass dictionary. Entries added below
