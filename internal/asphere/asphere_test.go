@@ -147,6 +147,57 @@ func TestBuildCellGridBinsByPolarCell(t *testing.T) {
 	}
 }
 
+func TestBuildOPDProfilesPerFieldPerRing(t *testing.T) {
+	fp := []FieldFootprintData{
+		{
+			FieldID: 1,
+			Weight:  1,
+			RayHits: []RayHit{
+				{Hits: map[int]SurfaceHit{1: {Position: types.Vec3{X: 0.5, Y: 0}}}, OPD: 0.01, Weight: 1, OK: true},
+				{Hits: map[int]SurfaceHit{1: {Position: types.Vec3{X: 1.5, Y: 0}}}, OPD: 0.02, Weight: 1, OK: true},
+			},
+		},
+		{
+			FieldID: 2,
+			Weight:  1,
+			RayHits: []RayHit{
+				{Hits: map[int]SurfaceHit{1: {Position: types.Vec3{X: 0.5, Y: 0}}}, OPD: -0.01, Weight: 1, OK: true},
+				{Hits: map[int]SurfaceHit{1: {Position: types.Vec3{X: 1.5, Y: 0}}}, OPD: -0.02, Weight: 1, OK: true},
+			},
+		},
+	}
+	profiles := BuildOPDProfiles(fp, []int{1}, 1)
+	if len(profiles) != 1 {
+		t.Fatalf("expected 1 profile, got %d", len(profiles))
+	}
+	p := profiles[0]
+	if p.SurfaceID != 1 {
+		t.Fatalf("surface id = %d, want 1", p.SurfaceID)
+	}
+	if math.Abs(p.MaxR-1.5) > 1e-15 {
+		t.Fatalf("max_r = %v, want 1.5", p.MaxR)
+	}
+	if len(p.Fields) != 2 {
+		t.Fatalf("expected 2 field profiles, got %d", len(p.Fields))
+	}
+	// Each field has 1 ring (rings=1) holding both rays: OPD = weighted mean.
+	f1 := p.Fields[0]
+	f2 := p.Fields[1]
+	if len(f1.OPD) != 1 || len(f2.OPD) != 1 {
+		t.Fatalf("field profiles lengths = %d, %d, want 1 each", len(f1.OPD), len(f2.OPD))
+	}
+	if math.Abs(f1.OPD[0]-0.015) > 1e-12 {
+		t.Fatalf("field 1 OPD = %v, want 0.015", f1.OPD[0])
+	}
+	if math.Abs(f2.OPD[0]+0.015) > 1e-12 {
+		t.Fatalf("field 2 OPD = %v, want -0.015", f2.OPD[0])
+	}
+	// Ring radius is the weight-mean |r| (all weight 1 here).
+	if math.Abs(f1.RingRadius[0]-1.0) > 1e-12 {
+		t.Fatalf("field 1 ring radius = %v, want 1.0", f1.RingRadius[0])
+	}
+}
+
 func TestFitAsphereCoeffsSmallForSmoothOPD(t *testing.T) {
 	// A smooth r^4 spherical-aberration OPD should yield a small, non-pathological
 	// A4 estimate and no enormous higher orders.

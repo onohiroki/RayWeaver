@@ -154,6 +154,7 @@ func ConfigFromYAML(c *types.AsphereCandidateConfig) Config {
 // Result is the complete asphere candidate analysis output.
 type Result struct {
 	Rankings []types.AsphereSurfaceScore
+	Profiles []types.AsphereOPDProfile
 	Warnings []string
 }
 
@@ -221,6 +222,15 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 
 	stopZ, hasStop := stopSurfaceZ(surfaces, stopSurface)
 	rankings := RankSurfaces(candidates, cellsBySurf, index, cfg.ScoreWeights, cfg.MaxEvenOrder, stopZ, hasStop, measuredH)
+
+	// Per-field OPD overlap profiles for every candidate surface (the graph
+	// data behind the ranking: how each field's wavefront error varies across
+	// the surface and how much the field profiles overlap).
+	var candIDs []int
+	for _, s := range candidates {
+		candIDs = append(candIDs, s.ID)
+	}
+	result.Profiles = BuildOPDProfiles(footprints, candIDs, cfg.CellRings)
 
 	// Select the top-K surfaces that actually yield a valid asphere fit.
 	// Surfaces whose fit fails (e.g. degenerate index difference, no

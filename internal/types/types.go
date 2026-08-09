@@ -765,9 +765,30 @@ type AsphereSurfaceScore struct {
 	Warnings             []string                `yaml:"warnings,omitempty"`
 }
 
+// AsphereOPDField is one field's mean OPD profile across a surface's polar
+// rings. Ring i's OPD is the field's weight-mean OPD over the rays in that
+// ring, referenced to the field's mean (piston removed, tilt/defocus per the
+// asphere_candidate settings). RingRadius is the ring's mean |r| on the
+// surface.
+type AsphereOPDField struct {
+	FieldID    int       `yaml:"field_id"`
+	RingRadius []float64 `yaml:"ring_radius,omitempty"` // mean |r| per ring (mm)
+	OPD        []float64 `yaml:"opd,omitempty"`         // mean OPD per ring (mm)
+}
+
+// AsphereOPDProfile is the per-field OPD overlap data for one candidate
+// surface: how each field's beam's wavefront error varies across the surface,
+// and how much the fields' profiles overlap (the shared, aspherisable part).
+type AsphereOPDProfile struct {
+	SurfaceID int               `yaml:"surface_id"`
+	MaxR      float64           `yaml:"max_r"` // footprint max radius (mm)
+	Fields    []AsphereOPDField `yaml:"fields,omitempty"`
+}
+
 // AsphereCandidateResult is the `asphere` command's ranking output.
 type AsphereCandidateResult struct {
 	Rankings []AsphereSurfaceScore `yaml:"rankings,omitempty"`
+	Profiles []AsphereOPDProfile   `yaml:"opd_profiles,omitempty"`
 	Warnings []string              `yaml:"warnings,omitempty"`
 }
 

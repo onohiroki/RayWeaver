@@ -603,7 +603,9 @@ with the asphere_candidate: section:
 Output: YAML with an asphere_candidate_result: section (rankings with
 coefficients, scaled_coefficients, sensitivity and, with --validate, a
 validation block per fitted surface reporting the before/after short-DLS
-merit and the DLS-solved coefficients). Pipe into optimize to apply:
+merit and the DLS-solved coefficients, plus opd_profiles: each candidate
+surface's per-field mean OPD across the footprint radius for the
+OPD-overlap comparison). Pipe into optimize to apply:
   rayweave asphere < lens.yaml | rayweave optimize > optimized.yaml
   rayweave asphere --validate < lens.yaml | rayweave optimize > optimized.yaml
   rayweave asphere --validate --apply < lens.yaml | rayweave chief | rayweave trace | rayweave plot

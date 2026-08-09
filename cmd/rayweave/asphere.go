@@ -111,6 +111,7 @@ func runAsphere(data []byte) {
 		Input: input,
 		AsphereResult: &types.AsphereCandidateResult{
 			Rankings: res.Rankings,
+			Profiles: res.Profiles,
 			Warnings: res.Warnings,
 		},
 	}

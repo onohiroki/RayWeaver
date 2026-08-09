@@ -353,6 +353,128 @@ func BuildCellGrid(footprints []FieldFootprintData, surfaceID, rings, angles int
 	return out
 }
 
+// BuildOPDProfiles builds the per-field OPD overlap profile for every
+// candidate surface: for each field the weight-mean OPD per polar ring,
+// referenced to the field's mean (piston removed, tilt/defocus per the
+// asphere_candidate settings applied by PreprocessOPD). The profile answers
+// "how does each field's beam's wavefront error vary across this surface and
+// how much do the fields overlap" — the shared, aspherisable part.
+func BuildOPDProfiles(footprints []FieldFootprintData, surfaceIDs []int, rings int) []types.AsphereOPDProfile {
+	var out []types.AsphereOPDProfile
+	for _, sid := range surfaceIDs {
+		profile := types.AsphereOPDProfile{SurfaceID: sid}
+		buildSurfaceOPDProfile(&profile, footprints, rings)
+		if len(profile.Fields) > 0 {
+			out = append(out, profile)
+		}
+	}
+	return out
+}
+
+// buildSurfaceOPDProfile fills profile for one surface from the footprint
+// data, binning every ray by its footprint ring and field.
+func buildSurfaceOPDProfile(profile *types.AsphereOPDProfile, footprints []FieldFootprintData, rings int) {
+	if rings < 1 {
+		rings = 1
+	}
+	type ringAgg struct {
+		rSum  float64
+		wSum  float64
+		opdW  float64 // sum of weight*OPD
+	}
+	// maxR over all valid hits on this surface.
+	maxR := 0.0
+	for _, fd := range footprints {
+		for _, h := range fd.RayHits {
+			if !h.OK {
+				continue
+			}
+			sh, ok := h.Hits[profile.SurfaceID]
+			if !ok {
+				continue
+			}
+			if r := math.Hypot(sh.Position.X, sh.Position.Y); r > maxR {
+				maxR = r
+			}
+		}
+	}
+	if maxR <= 0 {
+		return
+	}
+	profile.MaxR = maxR
+
+	// Accumulate per (field, ring).
+	type fieldKey struct {
+		field int
+		ring  int
+	}
+	agg := make(map[fieldKey]*ringAgg)
+	fieldOrder := make(map[int]int)
+	var order []int
+	for _, fd := range footprints {
+		if _, ok := fieldOrder[fd.FieldID]; !ok {
+			fieldOrder[fd.FieldID] = len(order)
+			order = append(order, fd.FieldID)
+		}
+		for _, h := range fd.RayHits {
+			if !h.OK {
+				continue
+			}
+			sh, ok := h.Hits[profile.SurfaceID]
+			if !ok {
+				continue
+			}
+			r := math.Hypot(sh.Position.X, sh.Position.Y)
+			ring := int(r / maxR * float64(rings))
+			if ring >= rings {
+				ring = rings - 1
+			}
+			key := fieldKey{fd.FieldID, ring}
+			ra := agg[key]
+			if ra == nil {
+				ra = &ringAgg{}
+				agg[key] = ra
+			}
+			w := h.Weight
+			if w <= 0 {
+				w = 1
+			}
+			ra.rSum += w * r
+			ra.wSum += w
+			ra.opdW += w * h.OPD
+		}
+	}
+
+	// Order the ring radii ascending so the profile curves are continuous.
+	for _, fid := range order {
+		field := types.AsphereOPDField{FieldID: fid}
+		type ringPoint struct {
+			ring int
+			r    float64
+			opd  float64
+		}
+		var pts []ringPoint
+		for key, ra := range agg {
+			if key.field != fid {
+				continue
+			}
+			if ra.wSum <= 0 {
+				continue
+			}
+			pts = append(pts, ringPoint{ring: key.ring, r: ra.rSum / ra.wSum, opd: ra.opdW / ra.wSum})
+		}
+		if len(pts) == 0 {
+			continue
+		}
+		sort.Slice(pts, func(i, j int) bool { return pts[i].ring < pts[j].ring })
+		for _, p := range pts {
+			field.RingRadius = append(field.RingRadius, p.r)
+			field.OPD = append(field.OPD, p.opd)
+		}
+		profile.Fields = append(profile.Fields, field)
+	}
+}
+
 // ComputeCellStats aggregates each cell's hits into the shared statistics: the
 // occupied field set, the field-common OPD, the inter-field conflict, the
 // unique residual for single-field cells, the azimuthal variance, the radial
