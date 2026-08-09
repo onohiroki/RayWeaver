@@ -79,6 +79,7 @@ func runPlot(data []byte) {
 		ScaleOverride:  scaleOverride,
 		RightMarginPct: rightMarginPct,
 		MaxFanRays:     fanRays,
+		StopSurfaceID:  output.Chief.StopSurface,
 	}
 
 	if outPath != "" && strings.HasSuffix(strings.ToLower(outPath), ".png") {

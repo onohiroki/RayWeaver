@@ -23,6 +23,9 @@ type Config struct {
 	ScaleOverride  float64
 	RightMarginPct float64
 	MaxFanRays     int
+	// StopSurfaceID is the aperture-stop surface ID; when > 0 the renderer
+	// draws the stop aperture marker at that surface.
+	StopSurfaceID int
 }
 
 const (
@@ -140,6 +143,11 @@ func LensSVG(cfg Config) string {
 		if path != "" {
 			b.WriteString(fmt.Sprintf(`<path class="lens-body" d="%s" fill="%s"/>`, path, fill))
 		}
+	}
+
+	// Aperture stop marker (drawn on top of the lenses)
+	for _, p := range buildStopLines(cfg.Surfaces, zPos, cfg.StopSurfaceID) {
+		b.WriteString(fmt.Sprintf(`<path class="stop" d="%s"/>`, p))
 	}
 
 	b.WriteString("</g></g></svg>")

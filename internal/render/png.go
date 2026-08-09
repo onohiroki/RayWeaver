@@ -115,6 +115,14 @@ func LensPNG(cfg Config) ([]byte, error) {
 		drawElemOutline(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, lw, outlineCol)
 	}
 
+	// Aperture stop marker (drawn on top of the lenses)
+	stopCol := color.NRGBA{80, 80, 80, 255}
+	for _, p := range buildStopLines(cfg.Surfaces, zPos, cfg.StopSurfaceID) {
+		ras.Reset(canvasW, canvasH)
+		drawSagPathFromSVG(ras, p, scale, midZ)
+		ras.Draw(img, img.Bounds(), image.NewUniform(stopCol), image.Point{})
+	}
+
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
 		return nil, err

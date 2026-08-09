@@ -327,11 +327,23 @@ func buildAirLines(surfaces []types.Surface, zPos []float64) []string {
 	return out
 }
 
-func buildStopLines(surfaces []types.Surface, zPos []float64) []string {
+// buildStopLines returns the aperture-stop marker as SVG path commands: short
+// vertical line segments above and below the stop surface's clear aperture
+// (at ± half the stop diameter). It only draws a marker when a stop surface is
+// defined (stopID > 0) and found among the surfaces; otherwise nothing is
+// emitted. The returned paths start with "M " and are wrapped in a
+// <path class="stop"> by the SVG renderer or rasterized by the PNG renderer.
+func buildStopLines(surfaces []types.Surface, zPos []float64, stopID int) []string {
+	if stopID <= 0 {
+		return nil
+	}
 	var out []string
 	for i := 0; i < len(surfaces); i++ {
-		if surfaces[i].Diameter <= 0 {
+		if surfaces[i].ID != stopID {
 			continue
+		}
+		if surfaces[i].Diameter <= 0 {
+			return nil
 		}
 		z := zPos[i]
 		sag := globalSag(surfaces[i], 0)
@@ -341,8 +353,9 @@ func buildStopLines(surfaces []types.Surface, zPos []float64) []string {
 		if tick < 0.5 {
 			tick = 0.5
 		}
-		out = append(out, fmt.Sprintf(`<path class="stop" d="M %.6f,%.6f L %.6f,%.6f M %.6f,%.6f L %.6f,%.6f"/>`,
+		out = append(out, fmt.Sprintf("M %.6f,%.6f L %.6f,%.6f M %.6f,%.6f L %.6f,%.6f",
 			x, h, x, h+tick, x, -h, x, -h-tick))
+		return out
 	}
 	return out
 }
