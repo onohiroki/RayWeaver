@@ -141,6 +141,8 @@ func main() {
 		runImport(data)
 	case "scale":
 		runScale(data)
+	case "asphere":
+		runAsphere(data)
 	case "query":
 		runQuery(data)
 	default:
@@ -557,6 +559,44 @@ Options:
 Example:
   rayweave scale --efl 50 < ref25.yaml | rayweave optimize > optimized.yaml
 `)
+	case "asphere":
+		fmt.Print(`Usage: rayweave asphere [--rings 8] [--angles 16] [--pupil-samples 21] [--top-k 3] [--sag-scale 0.2] < system.yaml
+
+Ranks the candidate surfaces for asphere introduction and estimates safe initial
+even-order asphere coefficients (conic + A4..A12) from the per-field OPD
+residuals. The score rewards surfaces where a rotationally-symmetric asphere can
+simultaneously correct the shared (common) OPD across fields while penalising
+inter-field conflict, manufacturing difficulty and optimisation instability.
+
+Options:
+  --rings N          polar cell radial rings (default 8)
+  --angles N         polar cell angular sectors (default 16)
+  --pupil-samples N  pupil grid radial samples (default 21)
+  --top-k N          number of top-ranked surfaces to fit (default 3)
+  --sag-scale α      initial sag scale (default 0.2; try 0.05..0.5)
+  --config ID        select config by id (multi-config mode)
+  --glass-dir DIR    AGF glass catalog directory
+
+Input: standard system YAML with a chief section (fields + optional
+stop_surface). Candidate surfaces default to every non-mirror surface; restrict
+with the asphere_candidate: section:
+
+  asphere_candidate:
+    candidate_surfaces: [2, 4, 6, 8]
+    max_even_order: 10
+    include_conic: true
+    preserve_vertex_curvature: true
+    cell_rings: 8
+    cell_angles: 16
+    pupil_samples_radial: 21
+    remove_tilt: true
+    score_weights: {common: 0.35, unique: 0.15, fit: 0.20, sensitivity: 0.15,
+                     conflict: 0.10, manufacturing: 0.05}
+
+Output: YAML with an asphere_candidate_result: section (rankings with
+coefficients and scaled_coefficients). Pipe into optimize to apply:
+  rayweave asphere < lens.yaml | rayweave optimize > optimized.yaml
+`)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml
 
@@ -654,6 +694,7 @@ Subcommands:
   optimize   DLS optimization of lens surfaces
   escape     Escape-function global optimization (multiple local minima)
   scale      Scale a system so its EFL equals --efl TARGET
+  asphere    Rank surfaces for asphere introduction, estimate initial coefficients
   import     Import ZEMAX/OSLO/CODE V lens files
   query      Read-only YAML/JSONL selector (replace python3/PyYAML in demos)
 

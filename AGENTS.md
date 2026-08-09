@@ -17,7 +17,7 @@ go build -o rayweave ./cmd/rayweave/
 ./rayweave <subcommand> < input.yaml
 ```
 
-Tests: `go test ./...` (12 test files across all packages, no CI).
+Tests: `go test ./...` (13 test files across all packages, no CI).
 
 ## Dependencies
 
@@ -25,11 +25,13 @@ Tests: `go test ./...` (12 test files across all packages, no CI).
 
 ## Subcommands
 
-`chief` | `trace` | `paraxial` | `tmm` | `plot` | `vignette` | `optimize` | `escape` | `import`
+`chief` | `trace` | `paraxial` | `tmm` | `plot` | `vignette` | `optimize` | `escape` | `import` | `asphere`
 
 Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, writes YAML to stdout. `--config ID` on chief/trace/paraxial/plot for multi-config selection.
 
 `vignette` iteratively settles per-field vignetting and `auto_aperture` surface diameters using the dynamic pupil (see below). Output is pipeline-compatible: `vignette → trace → plot`.
+
+`asphere` (`rayweave asphere [--rings N] [--angles N] [--pupil-samples N] [--top-k N] [--sag-scale α]`) ranks candidate surfaces for asphere introduction and estimates safe initial even-order asphere coefficients (conic + A4..A12) from the per-field OPD residuals. Requires a `chief` section (fields + optional `stop_surface`). It traces a polar pupil grid per (field, wavelength), builds polar footprint cells on each candidate surface (`internal/asphere`), scores each surface for how well a rotationally-symmetric asphere can correct the shared (field-common) OPD while penalising inter-field conflict, manufacturing difficulty and optimisation instability, then fits the top-K surfaces' coefficients via a regularised even-order polynomial (fast OPD→sag approximation `dz ≈ -O/(n2-n1)`, r² defocus separated, radius normalised to the footprint, ridge-regularised). Output is pipeline-compatible (`asphere_candidate_result:` appended). Configure via the `asphere_candidate:` YAML section: `candidate_surfaces`, `max_even_order`, `include_conic`, `preserve_vertex_curvature`, `cell_rings`, `cell_angles`, `pupil_samples_radial`, `remove_piston/tilt/defocus`, `top_k`, `min_rays_per_cell`, `score_weights`. Piston is always removed; `remove_tilt`/`remove_defocus` default true/false respectively. The dynamic pupil (per-field chief-ray crossing Z, computed via a cheap `chief` pass) centres each grid; when ill-conditioned (e.g. a heavily degraded start) it falls back to the tightest fixed aperture's Z.
 
 `escape` (sub-subcommands: `escape` run, `escape extract --index N`) is the Ishiki-Ono style escape-function global optimiser: DLS cycles with merit-function bumps at discovered local minima. Outputs the best solution pipeline-compatible plus `escape_result.minima[]` (full surfaces per minimum, plus `features[].element_powers`: the thin-lens power of each lens element per config as a solution fingerprint).
 

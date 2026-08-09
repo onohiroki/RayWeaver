@@ -674,16 +674,102 @@ type Provenance struct {
 	OptimizerVersion string `yaml:"optimizer_version,omitempty"`
 }
 
+// AsphereCandidateConfig configures the asphere candidate selection and initial
+// sag estimation analysis (the `asphere` subcommand). All fields are optional;
+// the command fills defaults for unset values.
+type AsphereCandidateConfig struct {
+	CandidateSurfaces       []int               `yaml:"candidate_surfaces,omitempty"`
+	MaxEvenOrder            int                 `yaml:"max_even_order,omitempty"`
+	IncludeConic            *bool               `yaml:"include_conic,omitempty"`
+	PreserveVertexCurvature *bool               `yaml:"preserve_vertex_curvature,omitempty"`
+	SagScale                float64             `yaml:"sag_scale,omitempty"`
+	MaxSag                  float64             `yaml:"max_sag,omitempty"`
+	MaxSlopeDeg             float64             `yaml:"max_slope_deg,omitempty"`
+	MaxCurvatureVariation   float64             `yaml:"max_curvature_variation,omitempty"`
+	CellRings               int                 `yaml:"cell_rings,omitempty"`
+	CellAngles              int                 `yaml:"cell_angles,omitempty"`
+	PupilSamplesRadial      int                 `yaml:"pupil_samples_radial,omitempty"`
+	RemovePiston            *bool               `yaml:"remove_piston,omitempty"`
+	RemoveTilt              *bool               `yaml:"remove_tilt,omitempty"`
+	RemoveDefocus           *bool               `yaml:"remove_defocus,omitempty"`
+	TopK                    int                 `yaml:"top_k,omitempty"`
+	MinRaysPerCell          int                 `yaml:"min_rays_per_cell,omitempty"`
+	ScoreWeights            AsphereScoreWeights `yaml:"score_weights,omitempty"`
+}
+
+// AsphereScoreWeights are the weights of the composite surface score
+// S_s = w_com*E_common + w_uni*E_unique + w_fit*F + w_sens*H
+//   - w_conf*C - w_mfg*M - w_unstable*U.
+type AsphereScoreWeights struct {
+	Common        float64 `yaml:"common,omitempty"`
+	Unique        float64 `yaml:"unique,omitempty"`
+	Fit           float64 `yaml:"fit,omitempty"`
+	Sensitivity   float64 `yaml:"sensitivity,omitempty"`
+	Conflict      float64 `yaml:"conflict,omitempty"`
+	Manufacturing float64 `yaml:"manufacturing,omitempty"`
+	Unstable      float64 `yaml:"unstable,omitempty"`
+}
+
+// AsphereCellStat is one polar cell's aggregated statistics over the fields
+// that occupy it.
+type AsphereCellStat struct {
+	SurfaceID       int     `yaml:"surface_id"`
+	Ring            int     `yaml:"ring"`
+	Sector          int     `yaml:"sector"`
+	MeanR           float64 `yaml:"mean_r"`
+	OccupiedFields  []int   `yaml:"occupied_fields"`
+	CommonOPD       float64 `yaml:"common_opd"`
+	Conflict        float64 `yaml:"conflict"`
+	UniqueResidual  float64 `yaml:"unique_residual"`
+	AzimuthVariance float64 `yaml:"azimuth_variance"`
+	RadialGradient  float64 `yaml:"radial_gradient"`
+	Weight          float64 `yaml:"weight"`
+}
+
+// AsphereCoeffs holds an even-order polynomial asphere's coefficients.
+type AsphereCoeffs struct {
+	Conic float64 `yaml:"conic,omitempty"`
+	A4    float64 `yaml:"A4,omitempty"`
+	A6    float64 `yaml:"A6,omitempty"`
+	A8    float64 `yaml:"A8,omitempty"`
+	A10   float64 `yaml:"A10,omitempty"`
+	A12   float64 `yaml:"A12,omitempty"`
+}
+
+// AsphereSurfaceScore is one candidate surface's ranking breakdown and fitted
+// coefficients.
+type AsphereSurfaceScore struct {
+	SurfaceID            int           `yaml:"surface_id"`
+	Score                float64       `yaml:"score"`
+	Coverage             float64       `yaml:"coverage"`
+	CommonEnergy         float64       `yaml:"common_energy"`
+	Conflict             float64       `yaml:"conflict"`
+	UniqueEnergy         float64       `yaml:"unique_energy"`
+	FitQuality           float64       `yaml:"fit_quality"`
+	ManufacturingPenalty float64       `yaml:"manufacturing_penalty"`
+	SensitivityPenalty   float64       `yaml:"sensitivity_penalty"`
+	Coefficients         AsphereCoeffs `yaml:"coefficients,omitempty"`
+	ScaledCoefficients   AsphereCoeffs `yaml:"scaled_coefficients,omitempty"`
+	Warnings             []string      `yaml:"warnings,omitempty"`
+}
+
+// AsphereCandidateResult is the `asphere` command's ranking output.
+type AsphereCandidateResult struct {
+	Rankings []AsphereSurfaceScore `yaml:"rankings,omitempty"`
+	Warnings []string              `yaml:"warnings,omitempty"`
+}
+
 type Input struct {
-	GlassCatalog   *GlassCatalog       `yaml:"glass_catalog,omitempty"`
-	CoatingCatalog *CoatingCatalog     `yaml:"coating_catalog,omitempty"`
-	Version        int                 `yaml:"version,omitempty"`
-	System         System              `yaml:"-"`
-	Optimization   *OptimizationConfig `yaml:"optimization,omitempty"`
-	Configs        []Config            `yaml:"configs,omitempty"`
-	Chief          *ChiefInput         `yaml:"chief,omitempty"`
-	Rays           *RayInput           `yaml:"rays,omitempty"`
-	Paraxial       *ParaxialInput      `yaml:"paraxial,omitempty"`
+	GlassCatalog   *GlassCatalog           `yaml:"glass_catalog,omitempty"`
+	CoatingCatalog *CoatingCatalog         `yaml:"coating_catalog,omitempty"`
+	Version        int                     `yaml:"version,omitempty"`
+	System         System                  `yaml:"-"`
+	Optimization   *OptimizationConfig     `yaml:"optimization,omitempty"`
+	Configs        []Config                `yaml:"configs,omitempty"`
+	Chief          *ChiefInput             `yaml:"chief,omitempty"`
+	Rays           *RayInput               `yaml:"rays,omitempty"`
+	Paraxial       *ParaxialInput          `yaml:"paraxial,omitempty"`
+	Asphere        *AsphereCandidateConfig `yaml:"asphere_candidate,omitempty"`
 }
 
 type GridPoint struct {
@@ -837,14 +923,15 @@ type VignettingResult struct {
 
 type Output struct {
 	Input          `yaml:",inline"`
-	ChiefRays      []ChiefRayResult    `yaml:"chief_rays,omitempty"`
-	Results        []RayResult         `yaml:"results,omitempty"`
-	ParaxialResult *ParaxialResult     `yaml:"paraxial_result,omitempty"`
-	OptResults     *OptimizationResult `yaml:"opt_results,omitempty"`
-	EscapeResult   *EscapeResult       `yaml:"escape_result,omitempty"`
-	Vignetting     *VignettingResult   `yaml:"vignetting_result,omitempty"`
-	Provenance     *Provenance         `yaml:"provenance,omitempty"`
-	Stop           *StopInfo           `yaml:"stop,omitempty"`
+	ChiefRays      []ChiefRayResult        `yaml:"chief_rays,omitempty"`
+	Results        []RayResult             `yaml:"results,omitempty"`
+	ParaxialResult *ParaxialResult         `yaml:"paraxial_result,omitempty"`
+	OptResults     *OptimizationResult     `yaml:"opt_results,omitempty"`
+	EscapeResult   *EscapeResult           `yaml:"escape_result,omitempty"`
+	Vignetting     *VignettingResult       `yaml:"vignetting_result,omitempty"`
+	AsphereResult  *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
+	Provenance     *Provenance             `yaml:"provenance,omitempty"`
+	Stop           *StopInfo               `yaml:"stop,omitempty"`
 }
 
 type TMMInput struct {
