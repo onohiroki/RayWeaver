@@ -263,16 +263,21 @@ SURF 1
 	if result.FieldType != 3 {
 		t.Fatalf("field type: expected 3, got %d", result.FieldType)
 	}
-	if len(result.Fields) != 2 {
-		t.Fatalf("expected 2 fields, got %d", len(result.Fields))
+	if len(result.Fields) != 3 {
+		t.Fatalf("expected 3 fields (on-axis + 2), got %d", len(result.Fields))
 	}
-	// FTYP 3 0 3 3: the global type is 3, but per-field types are
-	// 0 (angle) for ZEMAX field 1 and 3 (image height) for field 2.
-	if result.Fields[0].AngleDeg != 15 || result.Fields[0].ImageHeight != 0 {
-		t.Errorf("field 0: expected angle 15, got ih=%g angle=%g", result.Fields[0].ImageHeight, result.Fields[0].AngleDeg)
+	// FTYP 3 0 3 3: Fields[0] is the on-axis (value 0), using the global type (3).
+	// Fields[1] is ZEMAX field 1: per-field type 0 (angle) with value 15.
+	// Fields[2] is ZEMAX field 2: per-field type 3 (image height) with value 21.
+	if result.Fields[0].ImageHeight != 0 || result.Fields[0].AngleDeg != 0 {
+		t.Errorf("field 0 (on-axis): expected angle=0 ih=0, got angle=%g ih=%g",
+			result.Fields[0].AngleDeg, result.Fields[0].ImageHeight)
 	}
-	if result.Fields[1].ImageHeight != 21 || result.Fields[1].AngleDeg != 0 {
-		t.Errorf("field 1: expected image height 21, got ih=%g angle=%g", result.Fields[1].ImageHeight, result.Fields[1].AngleDeg)
+	if result.Fields[1].AngleDeg != 15 || result.Fields[1].ImageHeight != 0 {
+		t.Errorf("field 1: expected angle 15, got ih=%g angle=%g", result.Fields[1].ImageHeight, result.Fields[1].AngleDeg)
+	}
+	if result.Fields[2].ImageHeight != 21 || result.Fields[2].AngleDeg != 0 {
+		t.Errorf("field 2: expected image height 21, got ih=%g angle=%g", result.Fields[2].ImageHeight, result.Fields[2].AngleDeg)
 	}
 }
 
@@ -288,8 +293,14 @@ SURF 1
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Fields[0].AngleDeg != 15 || result.Fields[1].AngleDeg != 21 {
-		t.Errorf("angle fields: expected 15/21, got %g/%g", result.Fields[0].AngleDeg, result.Fields[1].AngleDeg)
+	if len(result.Fields) != 3 {
+		t.Fatalf("expected 3 fields (on-axis + 2 angle), got %d", len(result.Fields))
+	}
+	if result.Fields[0].AngleDeg != 0 {
+		t.Errorf("on-axis field: expected angle 0, got %g", result.Fields[0].AngleDeg)
+	}
+	if result.Fields[1].AngleDeg != 15 || result.Fields[2].AngleDeg != 21 {
+		t.Errorf("angle fields: expected 15/21, got %g/%g", result.Fields[1].AngleDeg, result.Fields[2].AngleDeg)
 	}
 }
 

@@ -275,17 +275,19 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 	case "YFLN":
 		// YFLN <f0> <f1> ... — field values for the y direction. The meaning of
 		// the values is given by the system field type (FTYP): 0 = half-angle in
-		// degrees, otherwise an object/image height in mm. The first column is
-		// the on-axis field (normally 0) and is skipped together with any other
-		// unused (zero) slots.
-		for _, a := range args[1:] {
+		// degrees, otherwise an object/image height in mm. The first column
+		// (f0) is the on-axis field (normally 0) and is always kept; subsequent
+		// entries that are zero are unused padding and are skipped.
+		for i, a := range args {
 			v := parseFloat(a)
-			if v > 0 {
+			if i == 0 || v > 0 {
 				result.Fields = append(result.Fields, newField(result, v))
 			}
 		}
 	case "XFLN":
 		// XFLN <x0> <x1> ... — x field values; nearly always zero.
+		// Non-zero entries create skew fields (non-default direction);
+		// the on-axis is already covered by YFLN.
 		for _, a := range args[1:] {
 			v := parseFloat(a)
 			if v > 0 {
@@ -400,8 +402,10 @@ func newField(result *ParseResult, v float64) types.FieldItem {
 		Weight: 1.0,
 	}
 	ft := result.FieldType
-	if k := len(result.Fields); k < len(result.FieldTypes) {
-		ft = result.FieldTypes[k]
+	// Fields[0] is the on-axis field -- use the global type; subsequent fields
+	// (ZEMAX field 1, 2, ...) look up the per-field code from FieldTypes.
+	if k := len(result.Fields); k > 0 && k-1 < len(result.FieldTypes) {
+		ft = result.FieldTypes[k-1]
 	}
 	switch ft {
 	case 1, 2, 3:
