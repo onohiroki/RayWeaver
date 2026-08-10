@@ -746,20 +746,29 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 		agfPath = input.GlassCatalog.Directory
 	}
 
+	// Glass keys actually referenced by the lens surfaces. An external AGF
+	// catalog is registered into the emitted glass_catalog only for these,
+	// keeping the piped YAML small even when the catalog carries thousands of
+	// glasses. The runtime catalog still receives every AGF glass so lookups
+	// (aliases, manufacturer suffixes, moulding grades) resolve identically.
+	referenced := referencedGlassKeys(input)
+
 	if agfPath != "" {
 		agfGlasses, err := glass.LoadAGFDir(agfPath)
 		if err != nil {
 			errOut("Warning: cannot load AGF directory %s: %v", agfPath, err)
 		}
+		needed := neededAGFKeys(referenced, agfGlasses)
 		for _, g := range agfGlasses {
 			gc.Add(g)
-			if !containsGlass(input.GlassCatalog.Entries, g) {
+			if needed[types.ResolveGlassKey(g)] && !containsGlass(input.GlassCatalog.Entries, g) {
 				input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
 			}
 		}
 	}
 
 	if agfPath == "" {
+		var allGlasses []types.Glass
 		for _, path := range input.GlassCatalog.Files {
 			agfData, err := os.ReadFile(path)
 			if err != nil {
@@ -771,11 +780,13 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 				errOut("Warning: cannot parse AGF file %s: %v", path, err)
 				continue
 			}
-			for _, g := range glasses {
-				gc.Add(g)
-				if !containsGlass(input.GlassCatalog.Entries, g) {
-					input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
-				}
+			allGlasses = append(allGlasses, glasses...)
+		}
+		needed := neededAGFKeys(referenced, allGlasses)
+		for _, g := range allGlasses {
+			gc.Add(g)
+			if needed[types.ResolveGlassKey(g)] && !containsGlass(input.GlassCatalog.Entries, g) {
+				input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
 			}
 		}
 	}
@@ -798,6 +809,45 @@ func containsGlass(entries []types.Glass, g types.Glass) bool {
 		}
 	}
 	return false
+}
+
+// referencedGlassKeys returns the set of glass catalog keys referenced by any
+// config's surfaces (material.key only). These are the only glasses a lens
+// needs resolved at runtime, so only they may be registered into the emitted
+// glass_catalog from an external AGF catalog.
+func referencedGlassKeys(input *types.Input) map[string]bool {
+	set := make(map[string]bool)
+	for i := range input.Configs {
+		for _, s := range input.Configs[i].Surfaces {
+			if s.Material.HasKey() {
+				set[s.Material.Key] = true
+			}
+		}
+	}
+	return set
+}
+
+// neededAGFKeys resolves every referenced glass key against the AGF glasses
+// using the same Catalog.Lookup normalization as runtime (hyphen/underscore
+// stripping, manufacturer suffix, moulding grade) and returns the set of AGF
+// glass keys that back a referenced material.
+func neededAGFKeys(referenced map[string]bool, agfGlasses []types.Glass) map[string]bool {
+	if len(referenced) == 0 || len(agfGlasses) == 0 {
+		return nil
+	}
+	agfGc := glass.NewCatalog()
+	for _, g := range agfGlasses {
+		agfGc.Add(g)
+	}
+	needed := make(map[string]bool)
+	for key := range referenced {
+		if g, ok := agfGc.Lookup(key); ok {
+			if resolved := types.ResolveGlassKey(*g); resolved != "" {
+				needed[resolved] = true
+			}
+		}
+	}
+	return needed
 }
 
 func runChief(data []byte) {
@@ -1017,12 +1067,11 @@ func runChief(data []byte) {
 		chiefRays[i] = cr
 	}
 
-	// Convert chief rays into a rays section so the output can be piped into trace
-	rayList := make([]types.Ray, len(chiefRays))
-	for i, cr := range chiefRays {
-		rayList[i] = cr.ChiefRay
-		rayList[i].ID = fmt.Sprintf("chief_%.0fdeg", cr.FieldAngle)
-	}
+	// The chief rays live in chief_rays[].chief_ray (single source); the rays
+	// section carries only the extras needed by `trace` (marginal rays) plus
+	// the polarization, so the output stays pipe-compatible without duplicating
+	// every chief ray.
+	rayList := []types.Ray(nil)
 	if !*preserveRays {
 		input.Rays = &types.RayInput{
 			Polarization: pol,
@@ -1181,11 +1230,6 @@ func runTrace(data []byte) {
 
 	input := parseYAML[types.Input](data)
 
-	if input.Rays == nil || len(input.Rays.Rays) == 0 {
-		errOut("Error: 'rays' section is required")
-		os.Exit(1)
-	}
-
 	gc, cc := loadCatalogs(&input, *glassDir)
 	surfaces := configSurfaces(input.Configs, configFlag)
 	surface.Precompute(surfaces)
@@ -1201,18 +1245,32 @@ func runTrace(data []byte) {
 		chiefRays = temp.ChiefRays
 	}
 
+	// The ray list to trace: the `rays` section (marginal / user rays) plus
+	// the per-field chief rays from `chief_rays` (see gatherTraceRays). Chief
+	// rays are the authoritative copy, so `trace` must accept a chief output
+	// whose rays section only carries the extras.
+	pol := types.NewCircularJones(true)
+	if input.Rays != nil {
+		pol = input.Rays.Polarization
+	}
+	rayList := gatherTraceRays(input.Rays, chiefRays, pol)
+	if len(rayList) == 0 {
+		errOut("Error: 'rays' or 'chief_rays' section is required")
+		os.Exit(1)
+	}
+
 	output := types.Output{
 		Input:     input,
-		Results:   make([]types.RayResult, len(input.Rays.Rays)),
+		Results:   make([]types.RayResult, len(rayList)),
 		ChiefRays: chiefRays,
 	}
 
-	results := make([]types.RayResult, len(input.Rays.Rays))
+	results := make([]types.RayResult, len(rayList))
 	var errorsMu sync.Mutex
 	var wg sync.WaitGroup
 	workers := runtime.GOMAXPROCS(0)
-	if workers > len(input.Rays.Rays) {
-		workers = len(input.Rays.Rays)
+	if workers > len(rayList) {
+		workers = len(rayList)
 	}
 	jobs := make(chan int)
 	for w := 0; w < workers; w++ {
@@ -1220,8 +1278,8 @@ func runTrace(data []byte) {
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				r := &input.Rays.Rays[i]
-				r.Jones = input.Rays.Polarization
+				r := &rayList[i]
+				r.Jones = pol
 				if *traceLenient {
 					r.Lenient = true
 				}
@@ -1241,7 +1299,7 @@ func runTrace(data []byte) {
 			}
 		}()
 	}
-	for i := range input.Rays.Rays {
+	for i := range rayList {
 		jobs <- i
 	}
 	close(jobs)
@@ -1250,6 +1308,40 @@ func runTrace(data []byte) {
 	output.Results = results
 
 	writeYAML(&output)
+}
+
+// gatherTraceRays returns the merged ray list to trace: the input `rays`
+// section plus the per-field chief rays from `chief_rays`. Chief rays are
+// identified in the rays section by the synthetic "chief_<angle>deg" ids, so a
+// duplicate copy there is not traced twice.
+func gatherTraceRays(rays *types.RayInput, chiefRays []types.ChiefRayResult, pol types.JonesVector) []types.Ray {
+	total := 0
+	if rays != nil {
+		total += len(rays.Rays)
+	}
+	total += len(chiefRays)
+	rayList := make([]types.Ray, 0, total)
+
+	seen := make(map[string]bool, len(chiefRays))
+	if rays != nil {
+		for _, r := range rays.Rays {
+			if r.ID != "" {
+				seen[r.ID] = true
+			}
+			rayList = append(rayList, r)
+		}
+	}
+	for _, cr := range chiefRays {
+		id := fmt.Sprintf("chief_%.0fdeg", cr.FieldAngle)
+		if seen[id] {
+			continue
+		}
+		r := cr.ChiefRay
+		r.ID = id
+		r.Jones = pol
+		rayList = append(rayList, r)
+	}
+	return rayList
 }
 
 func runParaxial(data []byte) {

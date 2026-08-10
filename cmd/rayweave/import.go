@@ -224,7 +224,7 @@ func runImport(data []byte) {
 		)
 
 		outputOut.ChiefRays = make([]types.ChiefRayResult, len(chiefResults))
-		rayList := make([]types.Ray, 0, len(chiefResults)*3)
+		rayList := make([]types.Ray, 0, len(chiefResults)*2)
 		path := dls.BuildPath(chiefSurfaces)
 		marginalEngine := ray.NewEngine(gc, nil)
 
@@ -240,12 +240,6 @@ func runImport(data []byte) {
 				cr.GridPoints = r.GridPoints
 			}
 			outputOut.ChiefRays[fi] = cr
-
-			chiefRay := r.ChiefRay
-			chiefRay.ID = fmt.Sprintf("chief_%.0fdeg", r.FieldAngle)
-			chiefRay.Path = path
-			chiefRay.Jones = pol
-			rayList = append(rayList, chiefRay)
 
 			rayList = append(rayList, chief.MarginalRays(fi, r, stopSurface, surfaces, marginalEngine, wavelength, path, pol)...)
 		}

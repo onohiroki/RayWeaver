@@ -64,7 +64,8 @@ spanned by the field vector and the optical axis.
 Augmented YAML with a `chief_rays[]` section, one entry per field:
 
 - `field_angle`, `image_height` — the image point of the chief ray
-- `chief_ray` — the chief ray itself, ready to pipe into `rayweave trace`
+- `chief_ray` — the chief ray itself (single source of chief-ray geometry;
+  `rayweave trace` reads it from here)
 - `entrance_pupil` — radius, and centre when ≥ 2 fields allow stop inference
 - `spot_stats` — `centroid`, `rms_x`/`rms_y`/`rms_r`, min/max extent,
   `traced_rays`/`missed_rays`
@@ -73,8 +74,11 @@ Augmented YAML with a `chief_rays[]` section, one entry per field:
 - `ray_fan` (with `--ray-fan`) — meridional / sagittal / rotated fans
 - `wavelengths` (when the config defines wavelengths) — per-wavelength stats
 
-The top-level `rays` section is replaced with the chief rays (unless
-`--preserve-rays`) so the output pipes into `trace`/`plot`.
+The top-level `rays` section carries only the extras needed for tracing
+(marginal rays with `--marginal-rays`) plus the polarization, so the chief-ray
+geometry is not duplicated; `trace` gathers the ray list from `chief_rays[]`
+and the `rays` section. With `--preserve-rays` the existing `rays` section is
+kept and `chief_rays` is omitted (aperture adjustment only).
 
 ## Examples
 

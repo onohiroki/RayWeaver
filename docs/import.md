@@ -37,8 +37,9 @@ polynomial coefficients (`AD`/`AE`/`AF`, `A4`/`A6`/`A8`/`A10`/`A12`) map to the
 
 Writes a YAML document with a `configs[0]` section (id/name from the flags)
 containing the converted `surfaces`. Unless `--no-chief` is given and the input
-carries field data, a `chief_rays[]`-compatible `rays` section (chief rays plus
-marginal rays) is added so the result can be piped into `rayweave trace`.
+carries field data, a `chief_rays[]` section (per-field chief rays, pupils, spot
+stats) plus a `rays` section carrying the marginal rays is added so the result
+can be piped into `rayweave trace`.
 
 Glass names found in the lens file are resolved against `--glass-dir` (AGF
 catalog) or carried through as catalog entries.

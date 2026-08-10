@@ -2,10 +2,8 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"os"
 
-	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/vignette"
@@ -86,10 +84,8 @@ func runVignette(data []byte) {
 		}
 	}
 
-	path := dls.BuildPath(surfaces)
-
 	chiefRays := make([]types.ChiefRayResult, len(res.ChiefRays))
-	rayList := make([]types.Ray, 0, len(res.ChiefRays)+2*len(res.Fields))
+	rayList := make([]types.Ray, 0, 2*len(res.Fields))
 	for i, r := range res.ChiefRays {
 		cr := types.ChiefRayResult{
 			FieldAngle:    r.FieldAngle,
@@ -103,14 +99,11 @@ func runVignette(data []byte) {
 			cr.GridPoints = r.GridPoints
 		}
 		chiefRays[i] = cr
-
-		chiefRay := r.ChiefRay
-		chiefRay.ID = fmt.Sprintf("chief_%.0fdeg", r.FieldAngle)
-		chiefRay.Path = path
-		chiefRay.Jones = pol
-		rayList = append(rayList, chiefRay)
 	}
 
+	// Chief rays live in chief_rays[].chief_ray (single source); the rays
+	// section carries only the marginal rays (plus polarization) so the output
+	// stays pipe-compatible without duplicating every chief ray.
 	for _, f := range res.Fields {
 		if f.MarginalUpper != nil {
 			rayList = append(rayList, *f.MarginalUpper)

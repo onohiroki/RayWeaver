@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -317,6 +318,56 @@ configs:
 			}
 			return cr.SpotStats.TracedRays
 		}())
+	}
+}
+
+// TestLoadCatalogsFiltersUnreferencedAGF verifies that --glass-dir registers
+// into the emitted glass_catalog only the glasses referenced by
+// configs[].surfaces.material.key, while the runtime catalog still keeps every
+// AGF glass for lookups.
+func TestLoadCatalogsFiltersUnreferencedAGF(t *testing.T) {
+	dir := t.TempDir()
+	// AGF line format: NM <name> <dispersion> <glasscode> <nd> <vd>.
+	agf := `NM GLASS_A 1 1 1.50 70.0
+NM GLASS_B 1 1 1.60 40.0
+NM GLASS_C 1 1 1.70 30.0
+`
+	agfPath := filepath.Join(dir, "test.agf")
+	if err := os.WriteFile(agfPath, []byte(agf), 0644); err != nil {
+		t.Fatalf("write AGF: %v", err)
+	}
+
+	yamlData := `configs:
+  - id: cfg1
+    active: true
+    surfaces:
+      - {id: 1, type: sphere, radius: 50, thickness: 5, material: {key: GLASS_A}}
+      - {id: 2, type: sphere, radius: -50, thickness: 100, material: {key: GLASS_B}}
+`
+	var input types.Input
+	if err := yaml.Unmarshal([]byte(yamlData), &input); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+
+	gc, _ := loadCatalogs(&input, dir)
+
+	// Only the referenced GLASS_A / GLASS_B are registered; GLASS_C is not.
+	got := map[string]bool{}
+	for _, g := range input.GlassCatalog.Entries {
+		got[types.ResolveGlassKey(g)] = true
+	}
+	if !got["GLASS_A"] || !got["GLASS_B"] {
+		t.Errorf("referenced glasses not registered: got %v", got)
+	}
+	if got["GLASS_C"] {
+		t.Errorf("unreferenced AGF glass GLASS_C must not be registered, got %v", got)
+	}
+
+	// Runtime catalog still resolves all AGF glasses.
+	for _, k := range []string{"GLASS_A", "GLASS_B", "GLASS_C"} {
+		if _, ok := gc.Lookup(k); !ok {
+			t.Errorf("runtime gc: %s not resolved", k)
+		}
 	}
 }
 
