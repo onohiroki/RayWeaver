@@ -340,11 +340,15 @@ Options:
 
 Input: standard system YAML. The chief section supplies fields / grid. Only
 surfaces marked auto_aperture: true are re-sized; auto_aperture: false
-surfaces are fixed limiters (the aperture never moves).
+surfaces are fixed limiters (the aperture never moves). Rays are vignetted by
+the glass-path (edge-thickness) check, fixed-surface apertures, and field 0's
+marginal-ray envelope at each field's entrance-pupil plane.
 
 Output: YAML with updated configs[].surfaces[].diameter, chief_rays[] with
-per-field entrance_pupil / exit_pupil (dynamic), rays[] = chief + marginal
-rays, and a vignetting_result: report. Pipe into trace then plot:
+per-field entrance_pupil / exit_pupil (dynamic), rays[] = marginal rays, and a
+vignetting_result: report (per-field vignetting, entrance/exit pupil Z,
+bound lower/upper envelope, marginal heights, auto_aperture diameters
+before/after). Pipe into trace then plot:
 
   rayweave vignette < lens.yaml | rayweave trace | rayweave plot -o out.png
 `)
@@ -590,15 +594,24 @@ with the asphere_candidate: section:
 
   asphere_candidate:
     candidate_surfaces: [2, 4, 6, 8]
-    max_even_order: 10
+    max_even_order: 10          # 8 -> A4..A8, 10 -> A4..A10, 12 -> A4..A12
     include_conic: true
     preserve_vertex_curvature: true
+    sag_scale: 0.2              # safe starting scale (try 0.05..0.5)
     cell_rings: 8
     cell_angles: 16
     pupil_samples_radial: 21
+    sensitivity_samples: 9      # 0 = analytic proxy only
     remove_tilt: true
+    remove_defocus: false
+    top_k: 3
+    min_rays_per_cell: 3
     score_weights: {common: 0.35, unique: 0.15, fit: 0.20, sensitivity: 0.15,
                      conflict: 0.10, manufacturing: 0.05}
+
+Piston is always removed (per-field OPD referenced to the field mean);
+remove_piston is accepted but has no effect. max_sag / max_slope_deg /
+max_curvature_variation are accepted for forward-compatibility but unused.
 
 Output: YAML with an asphere_candidate_result: section (rankings with
 coefficients, scaled_coefficients, sensitivity and, with --validate, a
@@ -609,6 +622,8 @@ OPD-overlap comparison). Pipe into optimize to apply:
   rayweave asphere < lens.yaml | rayweave optimize > optimized.yaml
   rayweave asphere --validate < lens.yaml | rayweave optimize > optimized.yaml
   rayweave asphere --validate --apply < lens.yaml | rayweave chief | rayweave trace | rayweave plot
+
+See docs/asphere.md and docs/methods/asphere-candidates.md for details.
 `)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml
@@ -703,6 +718,7 @@ Subcommands:
   trace      Trace ray(s) through the system
   paraxial   Paraxial (first-order) ray trace
   tmm        Thin-film coating analysis (transfer-matrix method)
+  vignette   Iteratively settle vignetting and auto_aperture diameters
   plot       Generate SVG cross-section drawing
   optimize   DLS optimization of lens surfaces
   escape     Escape-function global optimization (multiple local minima)

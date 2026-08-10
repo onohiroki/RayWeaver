@@ -15,6 +15,7 @@ instead.
 | [escape-function.md](escape-function.md) | escape-function global optimization |
 | [glass-dispersion.md](glass-dispersion.md) | Sellmeier / Schott / Cauchy / nd-vd dispersion models, glass hull |
 | [thin-film-tmm.md](thin-film-tmm.md) | transfer-matrix method for thin-film coatings |
+| [asphere-candidates.md](asphere-candidates.md) | asphere candidate ranking, initial sag estimation, measured sensitivity, DLS validation |
 | [efl-scaling.md](efl-scaling.md) | uniform EFL scaling and why it preserves f/# |
 
 ## Units and conventions used throughout

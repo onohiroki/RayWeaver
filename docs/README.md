@@ -19,10 +19,12 @@ output, and worked examples.
 | [chief.md](chief.md) | `rayweave chief` | chief rays, pupil grids, spot statistics, ray fans, clear aperture |
 | [paraxial.md](paraxial.md) | `rayweave paraxial` | first-order (paraxial) analysis: EFL, pupils, cardinal points |
 | [tmm.md](tmm.md) | `rayweave tmm` | thin-film coating analysis (transfer-matrix method) |
+| [vignette.md](vignette.md) | `rayweave vignette` | settle per-field vignetting and `auto_aperture` diameters with the dynamic pupil |
 | [plot.md](plot.md) | `rayweave plot` | SVG / PNG cross-section diagrams |
 | [scale.md](scale.md) | `rayweave scale` | scale a system so its EFL matches a target |
 | [optimize.md](optimize.md) | `rayweave optimize` | DLS (damped least squares) local optimization |
 | [escape.md](escape.md) | `rayweave escape` | escape-function global optimization |
+| [asphere.md](asphere.md) | `rayweave asphere` | rank candidate surfaces for asphere introduction and estimate initial coefficients |
 | [query.md](query.md) | `rayweave query` | read-only YAML/JSONL selector for pipelines |
 
 ## Calculation methods
@@ -40,6 +42,7 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
 - [methods/escape-function.md](methods/escape-function.md) — escape-function global optimization
 - [methods/glass-dispersion.md](methods/glass-dispersion.md) — Sellmeier / Schott / Cauchy / nd-vd models, glass hull
 - [methods/thin-film-tmm.md](methods/thin-film-tmm.md) — transfer-matrix method for coatings
+- [methods/asphere-candidates.md](methods/asphere-candidates.md) — asphere candidate ranking, initial sag estimation, measured sensitivity, DLS validation
 - [methods/efl-scaling.md](methods/efl-scaling.md) — uniform EFL scaling
 
 ## Conventions

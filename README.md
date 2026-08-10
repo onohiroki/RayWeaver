@@ -47,10 +47,10 @@ Subcommands are grouped by their role in the data flow
 | Analysis | `paraxial` | First-order / cardinal properties: EFL, BFL, FFL, principal points, pupil positions, f/#. | system → paraxial_result |
 | Analysis | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. | system + coating → R/T/phase |
 | Transform | `scale` | Uniformly scale a system so its EFL equals `--efl TARGET` (exact; preserves f/#). Useful for building a starting point before optimizing. | system → scaled system |
-| Synthesis | `vignette` | Iteratively settle per-field vignetting and `auto_aperture` surface diameters using the dynamic pupil; glass-path (edge-thickness) rejection and fixed (`auto_aperture: false`) surfaces narrow the beam. Flags: `--iterations`, `--min-glass-path`, `--margin-mm`, `--config`. | system → sized system + `vignetting_result` |
+| Synthesis | `vignette` | Iteratively settle per-field vignetting and `auto_aperture` surface diameters using the dynamic pupil; glass-path (edge-thickness) rejection and fixed (`auto_aperture: false`) surfaces narrow the beam. Flags: `--iterations`, `--min-glass-path`, `--margin-mm`, `--config`. See `docs/vignette.md`. | system → sized system + `vignetting_result` |
 | Synthesis | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. `--verbose` also emits a per-term merit breakdown. `--exclude-param` drops target params (e.g. asphere coefficients) from the variable set. | system + merit → optimized system |
 | Synthesis | `escape` | Escape-function global optimization (Ishiki-Ono style): repeatedly run DLS, adding a smooth merit-function bump at each discovered local minimum so the next run escapes the valley and finds other minima. Sub-command `escape extract --index N` pulls one minimum out as a clean lens. Flags: `--glass-dir`, `--verbose`, `--log FILE`, `--save FILE` (versioned per-minimum files), `--index N` (extract). See `docs/escape.md`. | system + merit → best solution + `escape_result` |
-| Synthesis | `asphere` | Rank candidate surfaces for aspheric introduction and fit safe initial even-order asphere coefficients (conic + A4..A12) from the per-field OPD residuals. `--validate` runs a short DLS against the spot RMS per fitted surface (`validation:` block with the DLS-solved coefficients); `--apply` inserts the top-ranked validated asphere (implies `--validate`) so `asphere --validate --apply \| chief \| trace \| plot` shows all-spherical vs aspherized. | system + `chief` fields → `asphere_candidate_result` (+ modified system with `--apply`) |
+| Synthesis | `asphere` | Rank candidate surfaces for aspheric introduction and fit safe initial even-order asphere coefficients (conic + A4..A12) from the per-field OPD residuals. `--validate` runs a short DLS against the spot RMS per fitted surface (`validation:` block with the DLS-solved coefficients); `--apply` inserts the top-ranked validated asphere (implies `--validate`) so `asphere --validate --apply \| chief \| trace \| plot` shows all-spherical vs aspherized. See `docs/asphere.md` and `docs/methods/asphere-candidates.md`. | system + `chief` fields → `asphere_candidate_result` (+ modified system with `--apply`) |
 | Presentation | `plot` | Render an SVG or PNG cross-section diagram. Flags: `-o file.svg|.png`, `--lens-width`, `--ray-width`, `--scale`, `--right-margin`, `--config`. | system + rays → diagram |
 | Tooling | `query` | Read-only YAML/JSONL selector: extract values, iterate arrays, aggregate, evaluate expressions and pass-gates from a shell pipeline. Replaces `python3 + PyYAML` / `yq` in the sample demos. See `docs/query.md`. | YAML/JSONL → plain text / YAML / JSON / CSV |
 
@@ -65,16 +65,18 @@ Per-subcommand usage manuals live in [`docs/`](docs/):
 | [docs/chief.md](docs/chief.md) | chief rays, pupil grids, spot stats, ray fans, clear aperture |
 | [docs/paraxial.md](docs/paraxial.md) | first-order / cardinal analysis |
 | [docs/tmm.md](docs/tmm.md) | thin-film coating analysis |
+| [docs/vignette.md](docs/vignette.md) | vignetting and `auto_aperture` diameter settlement |
 | [docs/plot.md](docs/plot.md) | SVG / PNG diagrams |
 | [docs/scale.md](docs/scale.md) | EFL scaling |
 | [docs/optimize.md](docs/optimize.md) | DLS optimization |
 | [docs/escape.md](docs/escape.md) | escape-function global optimization |
+| [docs/asphere.md](docs/asphere.md) | asphere candidate ranking and initial coefficient estimation |
 | [docs/query.md](docs/query.md) | YAML/JSONL selector |
 
 The numerical methods behind the analyses and optimizations are described
 separately in [`docs/methods/`](docs/methods/README.md) (ray tracing, chief-ray
 and spot computation, paraxial optics, merit functions, DLS, escape functions,
-glass dispersion, thin-film TMM, and EFL scaling).
+glass dispersion, thin-film TMM, asphere candidate selection, and EFL scaling).
 
 ## Pipeline examples
 
