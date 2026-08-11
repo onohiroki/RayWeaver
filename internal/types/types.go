@@ -224,6 +224,9 @@ type Ray struct {
 	PassThrough        *PassThroughTarget `yaml:"pass_through,omitempty"`
 	Path               []int              `yaml:"path"`
 	Jones              JonesVector        `yaml:"-"`
+	// InitialField optionally overrides the 3D input electric field. When nil,
+	// the field is initialised from Jones as (Ex, Ey, 0) in global coordinates.
+	InitialField       *Vec3C             `yaml:"-"`
 	SkipGlassPathCheck bool               `yaml:"-"`
 	SkipApertureCheck  bool               `yaml:"-"`
 	// SkipAutoApertureCheck skips the aperture check on auto_aperture surfaces
@@ -247,6 +250,9 @@ type SurfaceResult struct {
 	Thickness   float64         `yaml:"thickness"`
 	OPL         float64         `yaml:"opl"`
 	Jones       JonesVector     `yaml:"jones"`
+	// Field is the propagated 3D complex electric field in global coordinates
+	// at this surface, produced by the polarized ray tracer.
+	Field       Vec3C           `yaml:"-"`
 	IntensityS  float64         `yaml:"intensity_s"`
 	IntensityP  float64         `yaml:"intensity_p"`
 	ErrorCode   string          `yaml:"error_code,omitempty"`
@@ -818,6 +824,7 @@ type Input struct {
 	Rays           *RayInput               `yaml:"rays,omitempty"`
 	Paraxial       *ParaxialInput          `yaml:"paraxial,omitempty"`
 	Asphere        *AsphereCandidateConfig `yaml:"asphere_candidate,omitempty"`
+	PSF            *PSFConfig              `yaml:"psf,omitempty"`
 }
 
 type GridPoint struct {
@@ -969,6 +976,55 @@ type VignettingResult struct {
 	Fields       []VignettingField `yaml:"fields"`
 }
 
+// PSFConfig configures the `psf` subcommand (the `psf:` YAML section).
+// All fields are optional; flags on the command line override them.
+type PSFConfig struct {
+	ReferenceSurface int        `yaml:"reference_surface,omitempty"`
+	GridSize         int        `yaml:"grid_size,omitempty"`
+	HalfWidth        float64    `yaml:"half_width,omitempty"`
+	NumRays          int        `yaml:"num_rays,omitempty"`
+	Fields           []int      `yaml:"fields,omitempty"`
+	Wavelengths      []float64  `yaml:"wavelengths,omitempty"`
+	Polarization     string     `yaml:"polarization,omitempty"`
+}
+
+// PolarizationLabel identifies an input polarization state in PSF output.
+type PolarizationLabel string
+
+const (
+	PolRCP    PolarizationLabel = "RCP"
+	PolLCP    PolarizationLabel = "LCP"
+	PolX      PolarizationLabel = "X"
+	PolY      PolarizationLabel = "Y"
+	PolRCPLCP PolarizationLabel = "RCP+LCP"
+)
+
+// PSFResult is the per-field/wavelength/polarization PSF summary carried in
+// the pipeline YAML. The full intensity grid is written to --yaml/--csv files
+// (see PSFResult.OutputFile) to keep the pipeline stream small.
+type PSFResult struct {
+	FieldIndex       int     `yaml:"field_index"`
+	FieldAngle       float64 `yaml:"field_angle"`
+	Wavelength       float64 `yaml:"wavelength"`
+	Polarization     string  `yaml:"polarization"`
+	StrehlRatio      float64 `yaml:"strehl_ratio"`
+	FWHMX            float64 `yaml:"fwhm_x"`
+	FWHMY            float64 `yaml:"fwhm_y"`
+	CentroidX        float64 `yaml:"centroid_x"`
+	CentroidY        float64 `yaml:"centroid_y"`
+	PeakValue        float64 `yaml:"peak_value"`
+	PeakX            float64 `yaml:"peak_x"`
+	PeakY            float64 `yaml:"peak_y"`
+	EncircledEnergy50 float64 `yaml:"encircled_energy_50"`
+	AiryRadius       float64 `yaml:"airy_radius"`
+	GridSize         int     `yaml:"grid_size"`
+	Resolution       float64 `yaml:"resolution"`
+	TotalRays        int     `yaml:"total_rays"`
+	ValidRays        int     `yaml:"valid_rays"`
+	Vignetted        int     `yaml:"vignetted,omitempty"`
+	OutputFile       string  `yaml:"output_file,omitempty"`
+}
+
 type Output struct {
 	Input          `yaml:",inline"`
 	ChiefRays      []ChiefRayResult        `yaml:"chief_rays,omitempty"`
@@ -978,6 +1034,7 @@ type Output struct {
 	EscapeResult   *EscapeResult           `yaml:"escape_result,omitempty"`
 	Vignetting     *VignettingResult       `yaml:"vignetting_result,omitempty"`
 	AsphereResult  *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
+	PsfResults     []PSFResult             `yaml:"psf_results,omitempty"`
 	Provenance     *Provenance             `yaml:"provenance,omitempty"`
 	Stop           *StopInfo               `yaml:"stop,omitempty"`
 }

@@ -143,6 +143,8 @@ func main() {
 		runScale(data)
 	case "asphere":
 		runAsphere(data)
+	case "psf":
+		runPSF(data)
 	case "query":
 		runQuery(data)
 	default:
@@ -624,6 +626,50 @@ OPD-overlap comparison). Pipe into optimize to apply:
   rayweave asphere --validate --apply < lens.yaml | rayweave chief | rayweave trace | rayweave plot
 
 See docs/asphere.md and docs/methods/asphere-candidates.md for details.
+`)
+	case "psf":
+		fmt.Print(`Usage: rayweave psf [--ref-surface N] [--psf-grid 64] [--psf-width W] [--num-rays 400] < input.yaml
+
+Computes the point-spread function on the flat image plane for each field and
+wavelength via direct vector Huygens integration:
+  per-field polarized ray tracing → non-uniform wavefront samples (Delaunay-
+  triangulated reference surface) → vector Huygens integral → PSF(x,y).
+No FFT; works for fisheye and other strongly non-paraxial systems. The default
+input polarization is right-handed circular (RCP); RCP+LCP gives the
+polarization-averaged (unpolarised) PSF.
+
+Options:
+  --ref-surface N     reference surface ID for wavefront sampling
+                        (default: the last optical surface)
+  --psf-grid N        image-plane pixels per side (default 64)
+  --psf-width W       evaluation half-width in mm (default: auto from Airy
+                        disk and geometric spot)
+  --num-rays N        pupil grid rays (default 400 ≈ 20×20 polar)
+  --fields I1,I2,...  field indices to compute (default: all)
+  --wavelengths W1,...  wavelengths in mm (default: chief wavelengths,
+                        else 587.56 nm)
+  --polarization S    RCP (default) | LCP | X | Y | RCP+LCP
+  --yaml FILE         write full structured data (intensity, Ex/Ey/Ez,
+                        encircled energy, wavefront OPD) to FILE, one
+                        index-suffixed file per result
+  --csv FILE          write a gnuplot x,y,intensity map to FILE, one
+                        index-suffixed file per result
+  --config ID         select config by id (multi-config mode)
+  --glass-dir DIR     AGF glass catalog directory
+
+Input YAML — psf section (optional; flags override):
+  psf:
+    reference_surface: 7
+    grid_size: 64
+    half_width: 0.01
+    num_rays: 400
+    fields: [0, 1]
+    wavelengths: [0.00058756, 0.00048613]
+    polarization: "RCP+LCP"
+
+Output: augmented YAML with a lightweight psf_results[] summary (Strehl,
+FWHM, centroid, encircled energy, Airy radius, sampling counts). Full grids
+are written to --yaml/--csv files referenced by output_file.
 `)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml

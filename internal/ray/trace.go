@@ -6,6 +6,7 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/coating"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/polarization"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -43,6 +44,15 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 	state := ray.Initial
 	jones := ray.Jones
 
+	// field is the propagated 3D complex electric field in global coordinates.
+	// It starts from the ray's Jones vector (global XY convention) unless the
+	// caller supplied an explicit 3D field (e.g. a transverse-to-chief-ray
+	// frame for an off-axis field).
+	field := types.Vec3C{X: ray.Jones.Ex, Y: ray.Jones.Ey}
+	if ray.InitialField != nil {
+		field = *ray.InitialField
+	}
+
 	var glassEntryPos types.Vec3
 	var glassEntrySurfaceID int
 
@@ -65,6 +75,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 				Thickness:   0,
 				OPL:         0,
 				Jones:       jones,
+				Field:       field,
 				IntensityS:  1.0,
 				IntensityP:  1.0,
 			}
@@ -90,6 +101,10 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 
 		localOrigin := currentSurf.GlobalToLocal.MultiplyPoint(state.Origin)
 		localDir := currentSurf.GlobalToLocal.MultiplyVector(state.Direction).Normalize()
+
+		// The incoming global direction at this surface, used for the
+		// polarization s/p frame.
+		incidentGlobal := state.Direction
 
 		t, ok := intersect(currentSurf, localOrigin, localDir)
 		if !ok {
@@ -227,12 +242,18 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 
 		var intensityS, intensityP float64
 		var cosTheta2 float64
+		// ampS/ampP are the complex amplitude coefficients (Fresnel ts/tp,
+		// rs/rp, or 1 for an ideal mirror) applied to the s/p components of
+		// the propagated electric field.
+		var ampS, ampP complex128 = 1, 1
+		coatingApplied := false
 
 		if tir {
 			// TIR in Lenient mode: 100 % reflection.
 			intensityS = 1.0
 			intensityP = 1.0
 			cosTheta2 = cosTheta1
+			ampS, ampP = 1, 1
 		} else if interaction == types.Reflect {
 			cosTheta2 = math.Sqrt(math.Max(0, 1-(n1/n2)*(n1/n2)*(1-cosTheta1*cosTheta1)))
 			rs, rp, _, _ := raymath.FresnelAmplitude(n1, n2, cosTheta1, cosTheta2)
@@ -240,16 +261,19 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 				// Fold mirror: ideal reflection.
 				intensityS = 1.0
 				intensityP = 1.0
+				ampS, ampP = 1, 1
 			} else {
 				// Path-encoded ghost reflection at a lens surface: Fresnel.
 				intensityS = rs * rs
 				intensityP = rp * rp
+				ampS, ampP = complex(rs, 0), complex(rp, 0)
 			}
 		} else {
 			cosTheta2 = math.Sqrt(math.Max(0, 1-(n1/n2)*(n1/n2)*(1-cosTheta1*cosTheta1)))
 			_, _, ts, tp := raymath.FresnelAmplitude(n1, n2, cosTheta1, cosTheta2)
 			intensityS = ts * ts * (n2 * cosTheta2) / (n1 * cosTheta1)
 			intensityP = tp * tp * (n2 * cosTheta2) / (n1 * cosTheta1)
+			ampS, ampP = complex(ts, 0), complex(tp, 0)
 		}
 
 		if currentSurf.Coating != "" && e.Coating != nil {
@@ -262,7 +286,38 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 					intensityS *= tmmResult.Ts
 					intensityP *= tmmResult.Tp
 				}
+				// The TMM gives intensity (power) coefficients; the field
+				// amplitudes scale by their square roots.
+				if interaction == types.Reflect {
+					ampS *= complex(math.Sqrt(tmmResult.Rs), 0)
+					ampP *= complex(math.Sqrt(tmmResult.Rp), 0)
+				} else {
+					ampS *= complex(math.Sqrt(tmmResult.Ts), 0)
+					ampP *= complex(math.Sqrt(tmmResult.Tp), 0)
+				}
+				coatingApplied = true
 			}
+		}
+
+		// --- Polarization propagation ---
+		// The surface normal in global coordinates, oriented against the
+		// incident ray. The s vector (d×n) is invariant across the surface;
+		// the p direction rotates with the outgoing ray.
+		nGlobal := currentSurf.LocalToGlobal.MultiplyVector(normal).Normalize()
+		dOut := state.Direction
+		if interaction == types.Reflect && currentSurf.Reflects() {
+			// Ideal fold mirror: reflect the field vector across the surface
+			// normal (|E| preserved, correct transverse orientation).
+			field = polarization.MirrorReflect(field, nGlobal)
+			if coatingApplied {
+				b := polarization.ComputeSPBasis(incidentGlobal, nGlobal)
+				es, ep := b.Project(field)
+				field = polarization.FromSP(b.S, b.OutgoingP(dOut), ampS*es, ampP*ep)
+			}
+		} else {
+			b := polarization.ComputeSPBasis(incidentGlobal, nGlobal)
+			es, ep := b.Project(field)
+			field = polarization.FromSP(b.S, b.OutgoingP(dOut), ampS*es, ampP*ep)
 		}
 
 		globalPos := currentSurf.LocalToGlobal.MultiplyPoint(hitPoint)
@@ -343,6 +398,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			Thickness:   t,
 			OPL:         segmentOPL,
 			Jones:       jones,
+			Field:       field,
 			IntensityS:  intensityS,
 			IntensityP:  intensityP,
 		}
