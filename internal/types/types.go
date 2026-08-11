@@ -871,6 +871,7 @@ type Input struct {
 	Paraxial       *ParaxialInput          `yaml:"paraxial,omitempty"`
 	Asphere        *AsphereCandidateConfig `yaml:"asphere_candidate,omitempty"`
 	PSF            *PSFConfig              `yaml:"psf,omitempty"`
+	Wavefront      *WavefrontConfig        `yaml:"wavefront,omitempty"`
 	Vignette       *VignetteConfig         `yaml:"vignette,omitempty"`
 	Scale          *ScaleConfig            `yaml:"scale,omitempty"`
 }
@@ -1119,6 +1120,47 @@ type PSFConfig struct {
 	MTFCfg *PSFMTFConfig `yaml:"mtf_config,omitempty"`
 }
 
+// WavefrontConfig configures the `wavefront` subcommand (the `wavefront:`
+// YAML section). All fields are optional; flags on the command line override
+// them (CLI wins, effective values written back).
+type WavefrontConfig struct {
+	// ReferenceSurface is the surface on which the wavefront is sampled.
+	// 0 (default) = the last optical surface.
+	ReferenceSurface int `yaml:"reference_surface,omitempty"`
+	// NumRays is the entrance-pupil grid ray count per field (default 400).
+	NumRays int `yaml:"num_rays,omitempty"`
+	// Fields selects which chief field indices to analyse (default: all).
+	Fields []int `yaml:"fields,omitempty"`
+	// Wavelengths in mm (default: chief wavelengths, else 587.56 nm).
+	Wavelengths []float64 `yaml:"wavelengths,omitempty"`
+	// Polarization input state: RCP (default) | LCP | X | Y | RCP+LCP.
+	Polarization string `yaml:"polarization,omitempty"`
+	// Workers bounds the per-field task parallelism (0 = runtime.NumCPU()).
+	Workers int `yaml:"workers,omitempty"`
+	// ZernikeMaxOrder is the highest Fringe index to fit (default 15).
+	ZernikeMaxOrder int `yaml:"zernike_max_order,omitempty"`
+	// MapGrid is the per-side resolution of the interpolated wavefront map
+	// written by --csv (default 64).
+	MapGrid int `yaml:"map_grid,omitempty"`
+	// BestFocus configures the weighted best-image-plane shift.
+	BestFocus *WavefrontBestFocusConfig `yaml:"best_focus,omitempty"`
+}
+
+// WavefrontBestFocusConfig is the best-focus sub-section of the wavefront:
+// section. When enabled, the best-fit-sphere center Z per field is combined
+// (weight_type: uniform | custom) into a single image-plane shift that is
+// applied to the output configs' image-plane decenter.
+type WavefrontBestFocusConfig struct {
+	Enabled bool `yaml:"enabled,omitempty"`
+	// WeightType is "uniform" (default) or "custom".
+	WeightType string `yaml:"weight_type,omitempty"`
+	// CustomWeights is used when WeightType == "custom". It must match the
+	// number of analysed fields.
+	CustomWeights []float64 `yaml:"custom_weights,omitempty"`
+	// OutputShiftedLens writes a standalone shifted-lens document to FILE.
+	OutputShiftedLens string `yaml:"output_shifted_lens,omitempty"`
+}
+
 // PolarizationLabel identifies an input polarization state in PSF output.
 type PolarizationLabel string
 
@@ -1161,6 +1203,134 @@ type PSFResult struct {
 	MTF *PSFMTFSummary `yaml:"mtf,omitempty"`
 }
 
+// WavefrontResult is the per-run wavefront analysis carried in the pipeline
+// YAML. It holds per-field paraboloid / best-fit-sphere / stabilized Zernike
+// summaries (coefficients only — wavefront maps go to --yaml/--csv files) and,
+// when best focus is enabled, the weighted image-plane shift.
+type WavefrontResult struct {
+	// Fields is one entry per analysed (field, wavelength, polarization).
+	Fields []WavefrontFieldResult `yaml:"fields"`
+	// BestFocus is present when the best-focus shift was computed.
+	BestFocus *WavefrontBestFocus `yaml:"best_focus,omitempty"`
+}
+
+// WavefrontFieldResult is the wavefront analysis of one (field, wavelength,
+// polarization): the always-computed paraboloid, the best-fit sphere seeded
+// from it, the stabilized Zernike decomposition of the residual, and summary
+// statistics. All OPD/RMS values are in mm.
+type WavefrontFieldResult struct {
+	FieldIndex   int     `yaml:"field_index"`
+	FieldAngle   float64 `yaml:"field_angle"`
+	Wavelength   float64 `yaml:"wavelength"`
+	Polarization string  `yaml:"polarization"`
+	// Paraboloid is the least-squares quadratic fit
+	// ax² + by² + cxy + dx + ey + f to the sampled OPD.
+	Paraboloid WavefrontParaboloid `yaml:"paraboloid"`
+	// Sphere is the best-fit sphere (radius + center), seeded analytically
+	// from the paraboloid.
+	Sphere WavefrontSphere `yaml:"best_fit_sphere"`
+	// Zernike is the Fringe decomposition of the residual after removing the
+	// paraboloid + best-fit-sphere low-order terms.
+	Zernike    WavefrontZernike    `yaml:"zernike"`
+	Statistics WavefrontStatistics `yaml:"statistics"`
+	Samples    WavefrontSamples    `yaml:"samples"`
+	// OutputFile references the full structured data written by --yaml.
+	OutputFile string `yaml:"output_file,omitempty"`
+}
+
+// WavefrontParaboloid holds the paraboloid fit coefficients (in mm per mm² /
+// mm / mm as appropriate) and the derived low-order aberration magnitudes.
+type WavefrontParaboloid struct {
+	X2          float64 `yaml:"x2"`
+	Y2          float64 `yaml:"y2"`
+	XY          float64 `yaml:"xy"`
+	X           float64 `yaml:"x"`
+	Y           float64 `yaml:"y"`
+	Constant    float64 `yaml:"constant"`
+	Defocus     float64 `yaml:"defocus"`
+	Astigmatism float64 `yaml:"astigmatism"`
+	Tilt        float64 `yaml:"tilt"`
+	// RMSResidual is the RMS of OPD minus the paraboloid, in mm.
+	RMSResidual float64 `yaml:"rms_residual"`
+}
+
+// WavefrontSphere is the best-fit sphere to the sampled OPD, in the reference
+// surface's local frame (vertex at the origin).
+type WavefrontSphere struct {
+	Radius float64 `yaml:"radius"`
+	Center Vec3    `yaml:"center"`
+	// RMSResidual is the RMS of OPD minus the sphere, in mm.
+	RMSResidual float64 `yaml:"rms_residual"`
+}
+
+// WavefrontZernike is a Fringe-Zernike decomposition of the wavefront
+// residual (low-order paraboloid/sphere terms removed).
+type WavefrontZernike struct {
+	Basis        string               `yaml:"basis"`
+	MaxOrder     int                  `yaml:"max_order"`
+	RemovedTerms []int                `yaml:"removed_terms"`
+	Terms        []WavefrontZernikeTerm `yaml:"terms"`
+	// RMSResidual is the RMS of the fitted residual, in mm.
+	RMSResidual float64 `yaml:"rms_residual"`
+}
+
+// WavefrontZernikeTerm is one Fringe Zernike term. The coefficient is in the
+// Zemax convention (peak value on the unit circle = coefficient).
+type WavefrontZernikeTerm struct {
+	Index       int     `yaml:"index"`
+	Name        string  `yaml:"name"`
+	Coefficient float64 `yaml:"coefficient"`
+}
+
+// WavefrontStatistics summarizes the wavefront residual after best-fit-sphere
+// removal.
+type WavefrontStatistics struct {
+	// RMS is the residual RMS OPD in mm.
+	RMS float64 `yaml:"rms"`
+	// PV is the residual peak-to-valley OPD in mm.
+	PV float64 `yaml:"pv"`
+	// Strehl is the Marechal approximation exp(-(2π·rms)²).
+	Strehl float64 `yaml:"strehl"`
+}
+
+// WavefrontSamples counts the pupil grid rays by outcome.
+type WavefrontSamples struct {
+	Total  int `yaml:"total"`
+	Valid  int `yaml:"valid"`
+	Missed int `yaml:"missed"`
+}
+
+// WavefrontBestFocus is the weighted best-image-plane shift computed from the
+// per-field best-fit-sphere centers, plus the shift applied to the output
+// configs' image plane.
+type WavefrontBestFocus struct {
+	WeightType      string                   `yaml:"weight_type"`
+	PerField        []WavefrontFocusPerField `yaml:"per_field"`
+	WeightedAverage WavefrontFocusAverage    `yaml:"weighted_average"`
+	ShiftedLens     WavefrontShiftedLens     `yaml:"shifted_lens"`
+}
+
+// WavefrontFocusPerField is one field's contribution to the best-focus shift.
+type WavefrontFocusPerField struct {
+	FieldIndex       int     `yaml:"field_index"`
+	ShiftWavelengths float64 `yaml:"shift_wavelengths"`
+	ShiftMM          float64 `yaml:"shift_mm"`
+	Weight           float64 `yaml:"weight"`
+}
+
+// WavefrontFocusAverage is the weighted average of the per-field shifts.
+type WavefrontFocusAverage struct {
+	ShiftWavelengths float64 `yaml:"shift_wavelengths"`
+	ShiftMM          float64 `yaml:"shift_mm"`
+}
+
+// WavefrontShiftedLens records the image-plane shift and the (optional)
+// shifted-lens file written by --output-shifted-lens.
+type WavefrontShiftedLens struct {
+	ShiftMM    float64 `yaml:"shift_mm"`
+	OutputFile string  `yaml:"output_file,omitempty"`
+}
+
 type Output struct {
 	Input          `yaml:",inline"`
 	ChiefRays      []ChiefRayResult        `yaml:"chief_rays,omitempty"`
@@ -1171,6 +1341,7 @@ type Output struct {
 	Vignetting     *VignettingResult       `yaml:"vignetting_result,omitempty"`
 	AsphereResult  *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
 	PsfResults     []PSFResult             `yaml:"psf_results,omitempty"`
+	WavefrontResults *WavefrontResult      `yaml:"wavefront_result,omitempty"`
 	Provenance     *Provenance             `yaml:"provenance,omitempty"`
 	Stop           *StopInfo               `yaml:"stop,omitempty"`
 }

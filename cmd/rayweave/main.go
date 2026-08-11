@@ -145,6 +145,8 @@ func main() {
 		runAsphere(data)
 	case "psf":
 		runPSF(data)
+	case "wavefront":
+		runWavefront(data)
 	case "query":
 		runQuery(data)
 	default:
@@ -714,6 +716,65 @@ Notes:
     sphere (piston + tilt + defocus removed), the standard wavefront
     aberration definition.
 `)
+	case "wavefront":
+		fmt.Print(`Usage: rayweave wavefront [flags] < pipeline.yaml
+
+Wavefront analysis on the reference surface (default: the last optical
+surface): per-field polarized ray tracing → always-computed paraboloid fit
+(ax² + by² + cxy + dx + ey + f) → best-focus sphere (geometric spot RMS along
+the image-plane normal) → stabilized Fringe-Zernike decomposition of the
+low-order-removed residual → weighted best-image-plane shift.
+
+The pipeline YAML carries a lightweight wavefront_result summary (coefficients
+and RMS/PV/Strehl only). Full wavefront data (scattered samples + interpolated
+residual-OPD map) go to --yaml/--csv files referenced by output_file.
+
+Options:
+  --ref-surface N      reference surface ID for wavefront sampling
+                         (default: the last optical surface)
+  --num-rays N         pupil grid rays (default 400)
+  --fields I1,I2,...   field indices to compute (default: all)
+  --wavelengths W1,...   wavelengths in mm (default: chief wavelengths,
+                         else 587.56 nm)
+  --polarization S     RCP (default) | LCP | X | Y | RCP+LCP
+  --zernike-order N    highest Fringe Zernike index to fit (default 15)
+  --wavefront-workers N  per-field task parallelism (default: GOMAXPROCS)
+  --map-grid N         wavefront map resolution per side for --csv (default 64)
+  --best-focus         compute the weighted best image-plane shift and apply it
+                         to the output configs' image-plane decenter
+  --focus-weight T     best-focus weighting: uniform (default) | custom
+  --focus-weights W1,...  per-field weights when --focus-weight custom
+  --output-shifted-lens FILE  write the shifted lens document to FILE
+  --yaml FILE          write full structured data (scattered samples + map) to
+                         FILE, one index-suffixed file per result
+  --csv FILE           write a gnuplot x,y,opd wavefront map to FILE, one
+                         index-suffixed file per result
+  --config ID          select config by id (multi-config mode)
+  --glass-dir DIR      AGF glass catalog directory
+
+Input YAML — wavefront section (optional; flags override):
+  wavefront:
+    reference_surface: 7
+    num_rays: 400
+    fields: [0, 1]
+    wavelengths: [0.00058756]
+    polarization: "RCP"
+    zernike_max_order: 15
+    workers: 8
+    map_grid: 64
+    best_focus:
+      enabled: true
+      weight_type: "uniform"   # uniform | custom
+      custom_weights: []
+      output_shifted_lens: "shifted.yaml"
+
+Output: augmented YAML with a wavefront_result (per-field paraboloid,
+best-fit-sphere, stabilized Fringe-Zernike, statistics; plus best_focus when
+enabled). With --best-focus the image plane of each output config is moved to
+the weighted best-fit-sphere focus by adjusting its decenter Z shift, so the
+output can be piped straight into psf (or trace/plot) for a best-focus
+PSF.
+`)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml
 
@@ -814,6 +875,7 @@ Subcommands:
   scale      Scale a system so its EFL equals --efl TARGET
   asphere    Rank surfaces for asphere introduction, estimate initial coefficients
   psf        Point-spread function via direct vector Huygens integration
+  wavefront  Wavefront analysis (paraboloid, best-fit sphere, Fringe Zernike, best focus)
   import     Import ZEMAX/OSLO/CODE V lens files
   query      Read-only YAML/JSONL selector (replace python3/PyYAML in demos)
 

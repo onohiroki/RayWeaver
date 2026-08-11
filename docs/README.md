@@ -24,6 +24,7 @@ system → ray bundle → quantities
 | [escape.md](escape.md) | `rayweave escape` | escape-function global optimization |
 | [asphere.md](asphere.md) | `rayweave asphere` | rank candidate surfaces for asphere introduction and estimate initial coefficients |
 | [psf.md](psf.md) | `rayweave psf` | point-spread function on the flat image plane via direct vector Huygens integration |
+| [wavefront.md](wavefront.md) | `rayweave wavefront` | wavefront analysis: paraboloid, best-focus sphere, Fringe-Zernike, best image plane |
 | [query.md](query.md) | `rayweave query` | read-only YAML/JSONL selector for pipelines |
 
 ## Calculation methods
