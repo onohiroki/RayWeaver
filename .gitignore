@@ -33,6 +33,8 @@ samples/glass-chief-init-w*.yaml
 samples/optimize-demo-*
 samples/escape-demo-*
 samples/asphere-demo-*
+samples/psf-demo-*
+samples/psf-demo_*
 samples/*element-powers.dat
 samples/glass-chief-opt-w*.yaml
 samples/us2645157-scaled50.yaml
