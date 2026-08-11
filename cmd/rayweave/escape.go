@@ -708,6 +708,7 @@ func reportEscape(res escape.Result) {
 
 // writeEscapeOutput writes the final YAML to stdout.
 func writeEscapeOutput(input types.Input, escResult *types.EscapeResult) {
+	withOutputMetadata(&input, "escape", subcmdArgs())
 	output := types.Output{
 		Input:        input,
 		EscapeResult: escResult,
@@ -752,6 +753,7 @@ func runEscapeExtract(data []byte, index int) {
 		os.Exit(1)
 	}
 
+	withOutputMetadata(&output.Input, "escape extract", subcmdArgs())
 	writeYAML(&output)
 }
 

@@ -358,6 +358,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	output := types.Output{
 		Input: input,
 	}
+	withOutputMetadata(&output.Input, "optimize", subcmdArgs())
 
 	// Report the final measured value of every active constraint (e.g. the
 	// vignetting factor) so callers can gate on what the optimizer enforced.

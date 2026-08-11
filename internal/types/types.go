@@ -689,6 +689,34 @@ type Provenance struct {
 	OptimizerVersion string `yaml:"optimizer_version,omitempty"`
 }
 
+// RayweaverTool is the canonical marker written in every pipeline document's
+// metadata.tool field, identifying it as RayWeaver-managed YAML.
+const RayweaverTool = "RayWeaver"
+
+// RayweaverURL is the project repository, written in metadata.url.
+const RayweaverURL = "https://github.com/onohiroki/RayWeaver"
+
+// SchemaVersion is the current RayWeaver pipeline-YAML schema version. It lives
+// in metadata.schema_version and replaces the old top-level `version` field.
+const SchemaVersion = 1
+
+// Metadata carries the file-format identity and provenance of a pipeline
+// document. `tool` marks the document as RayWeaver-managed; `schema_version` is
+// the pipeline-YAML schema version (currently 1). Subcommands write back their
+// generator/command/timestamp/version on output; the rest are round-tripped
+// from the input. Input files hand-written or produced by `import` carry only
+// the identity trio (tool, url, schema_version).
+type Metadata struct {
+	Tool          string   `yaml:"tool"`
+	URL           string   `yaml:"url"`
+	SchemaVersion int      `yaml:"schema_version"`
+	Generator     string   `yaml:"generator,omitempty"`
+	Command       []string `yaml:"command,omitempty"`
+	RayweaverVer  string   `yaml:"rayweaver_version,omitempty"`
+	CreatedAt     string   `yaml:"created_at,omitempty"` // RFC3339, UTC
+	Notes         string   `yaml:"notes,omitempty"`
+}
+
 // AsphereCandidateConfig configures the asphere candidate selection and initial
 // sag estimation analysis (the `asphere` subcommand). All fields are optional;
 // the command fills defaults for unset values.
@@ -834,7 +862,7 @@ type AsphereValidation struct {
 type Input struct {
 	GlassCatalog   *GlassCatalog           `yaml:"glass_catalog,omitempty"`
 	CoatingCatalog *CoatingCatalog         `yaml:"coating_catalog,omitempty"`
-	Version        int                     `yaml:"version,omitempty"`
+	Metadata       *Metadata               `yaml:"metadata,omitempty"`
 	System         System                  `yaml:"-"`
 	Optimization   *OptimizationConfig     `yaml:"optimization,omitempty"`
 	Configs        []Config                `yaml:"configs,omitempty"`

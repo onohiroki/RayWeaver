@@ -74,6 +74,7 @@ func runScale(data []byte) {
 	output := types.Output{
 		Input: input,
 	}
+	withOutputMetadata(&output.Input, "scale", subcmdArgs())
 	writeYAML(&output)
 
 	fmt.Fprintf(os.Stderr, "=== Scale complete ===\n")

@@ -134,6 +134,7 @@ func runAsphere(data []byte) {
 			Warnings: res.Warnings,
 		},
 	}
+	withOutputMetadata(&output.Input, "asphere", subcmdArgs())
 	writeYAML(&output)
 }
 

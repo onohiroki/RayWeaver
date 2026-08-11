@@ -9,11 +9,9 @@ system → ray bundle → quantities
 
 ## Subcommand manuals
 
-Each subcommand has a usage manual describing its flags, input YAML structure,
-output, and worked examples.
-
 | Manual | Subcommand | Purpose |
 |---|---|---|
+| [format.md](format.md) | _document format_ | top-level `metadata` block and pipeline document shape |
 | [import.md](import.md) | `rayweave import` | convert ZEMAX / OSLO / CODE V files to RayWeaver YAML |
 | [trace.md](trace.md) | `rayweave trace` | trace individual rays and report per-surface data |
 | [chief.md](chief.md) | `rayweave chief` | chief rays, pupil grids, spot statistics, ray fans, clear aperture |
@@ -61,3 +59,7 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
   `reflect: true` (tilt in degrees). Negative thicknesses are parse-time errors.
 - All output documents preserve the input document and add a section; pipelines
   such as `chief → trace → plot` and `chief → paraxial` therefore work.
+- Every document carries a top-level `metadata:` block identifying it as
+  RayWeaver-managed (`tool: RayWeaver`, `url`, `schema_version`) and, on output,
+  recording its generator command, build version and generation timestamp. See
+  [format.md](format.md).

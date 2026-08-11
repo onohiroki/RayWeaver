@@ -1209,6 +1209,7 @@ func runChief(data []byte) {
 	if *preserveRays {
 		output.ChiefRays = nil
 	}
+	withOutputMetadata(&output.Input, "chief", subcmdArgs())
 
 	stopID := input.Chief.StopSurface
 	if stopID > 0 {
@@ -1394,6 +1395,7 @@ func runTrace(data []byte) {
 		Results:   make([]types.RayResult, len(rayList)),
 		ChiefRays: chiefRays,
 	}
+	withOutputMetadata(&output.Input, "trace", subcmdArgs())
 
 	results := make([]types.RayResult, len(rayList))
 	var errorsMu sync.Mutex
@@ -1527,6 +1529,7 @@ func runParaxial(data []byte) {
 		Input:          input,
 		ParaxialResult: &result,
 	}
+	withOutputMetadata(&output.Input, "paraxial", subcmdArgs())
 
 	writeYAML(&output)
 }

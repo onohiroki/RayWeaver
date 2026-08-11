@@ -186,6 +186,7 @@ func runVignette(data []byte) {
 		ChiefRays:  chiefRays,
 		Vignetting: vr,
 	}
+	withOutputMetadata(&output.Input, "vignette", subcmdArgs())
 
 	writeYAML(&output)
 }

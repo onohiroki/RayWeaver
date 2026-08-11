@@ -160,7 +160,7 @@ func runImport(data []byte) {
 	}
 
 	output := types.Input{
-		Version: 1,
+		Metadata: newMetadata(),
 		GlassCatalog: &types.GlassCatalog{
 			Entries: result.GlassEntries,
 		},
@@ -188,6 +188,7 @@ func runImport(data []byte) {
 	if *glassDir != "" {
 		outputOut.GlassCatalog.Directory = *glassDir
 	}
+	withOutputMetadata(&outputOut.Input, "import", subcmdArgs())
 
 	// Chief rays are computed on the representative (first) config.
 	chiefSurfaces := configs[0].Surfaces

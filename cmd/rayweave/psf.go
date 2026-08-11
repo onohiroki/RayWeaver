@@ -167,6 +167,7 @@ func runPSF(data []byte) {
 	writeBackPSF(input, wavelengths, selected, opts)
 
 	output := types.Output{Input: input}
+	withOutputMetadata(&output.Input, "psf", subcmdArgs())
 	for i := range results {
 		r := results[i]
 		outFile := ""

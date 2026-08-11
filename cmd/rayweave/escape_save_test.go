@@ -32,7 +32,7 @@ func TestEscapeFileSaverVersioning(t *testing.T) {
 	base := filepath.Join(dir, "min")
 	build := func(p escape.Point) types.Input {
 		return types.Input{
-			Version: 1,
+			Metadata: newMetadata(),
 			Configs: []types.Config{{
 				ID: "c1",
 				Surfaces: []types.Surface{

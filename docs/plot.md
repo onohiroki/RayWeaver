@@ -12,7 +12,7 @@ rayweave plot [-o file.svg|.png] [flags] < input.yaml
 
 | Flag | Description |
 |---|---|
-| `-o, --output file.svg|.png` | output file (default: stdout, SVG) |
+| `-o, --output file.svg\|.png` | output file (default: stdout, SVG) |
 | `--config ID` | select a config by id (multi-config mode) |
 | `--lens-width 0.1` | lens-body stroke width |
 | `--ray-width 0.1` | ray-path stroke width |

@@ -4,6 +4,8 @@ import (
 	"flag"
 	"math"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -39,12 +41,84 @@ func writeBackGlassDir(input *types.Input, dir string) {
 	input.GlassCatalog.Directory = dir
 }
 
+// Version is the RayWeaver build version, intended to be injected at link time
+// via `-ldflags "-X main.Version=..."`. It defaults to "dev" for ad-hoc builds
+// and is stamped into output metadata.rayweaver_version when set.
+var Version = "dev"
+
+// subcmdArgs returns the subcommand's arguments (os.Args minus the binary and
+// subcommand names) for recording in metadata.command.
+func subcmdArgs() []string {
+	if len(os.Args) > 2 {
+		return os.Args[2:]
+	}
+	return nil
+}
+
+// newMetadata returns a fresh identity-only Metadata marking the document as
+// RayWeaver-managed (tool, repository URL, current schema version).
+func newMetadata() *types.Metadata {
+	return &types.Metadata{
+		Tool:          types.RayweaverTool,
+		URL:           types.RayweaverURL,
+		SchemaVersion: types.SchemaVersion,
+	}
+}
+
+// withOutputMetadata stamps a pipeline document with its generation provenance.
+// The caller's metadata (notes, created_at, tool) is otherwise preserved.
+// generator is the producing subcommand; argv are its arguments (excluding the
+// binary name). It returns the document pointer for convenience.
+func withOutputMetadata(input *types.Input, generator string, argv []string) *types.Input {
+	if input == nil {
+		return input
+	}
+	if input.Metadata == nil {
+		input.Metadata = newMetadata()
+	} else {
+		input.Metadata.Tool = types.RayweaverTool
+		input.Metadata.URL = types.RayweaverURL
+		input.Metadata.SchemaVersion = types.SchemaVersion
+	}
+	if generator != "" {
+		input.Metadata.Generator = generator
+	}
+	if len(argv) > 0 {
+		input.Metadata.Command = argv
+	}
+	if Version != "" {
+		input.Metadata.RayweaverVer = Version
+	}
+	input.Metadata.CreatedAt = time.Now().UTC().Format(time.RFC3339)
+	return input
+}
+
+// warnToolMismatch emits a stderr warning when a parsed document is marked as
+// managed by a different tool. It is a no-op for RayWeaver-managed or unmarked
+// documents.
+func warnToolMismatch(in *types.Input) {
+	if in == nil || in.Metadata == nil {
+		return
+	}
+	t := strings.TrimSpace(in.Metadata.Tool)
+	if t == "" || strings.EqualFold(t, types.RayweaverTool) {
+		return
+	}
+	errOut("input metadata.tool = %q is not RayWeaver; continuing", t)
+}
+
 // parseYAML unmarshals a document into a value of type T, exiting on error.
 func parseYAML[T any](data []byte) T {
 	var out T
 	if err := yaml.Unmarshal(data, &out); err != nil {
 		errOut("Error parsing YAML: %v", err)
 		os.Exit(1)
+	}
+	switch v := any(&out).(type) {
+	case *types.Input:
+		warnToolMismatch(v)
+	case *types.Output:
+		warnToolMismatch(&v.Input)
 	}
 	return out
 }

@@ -15,7 +15,7 @@ rayweave import --format codev < lens.seq > system.yaml
 
 | Flag | Description |
 |---|---|
-| `--format zemax|oslo|codev` | input format (required) |
+| `--format zemax\|oslo\|codev` | input format (required) |
 | `--config-id name` | config id in the output YAML (default `config1`) |
 | `--config-name name` | config display name (default `Config1`) |
 | `--no-chief` | skip automatic chief ray computation |
