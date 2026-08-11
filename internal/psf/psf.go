@@ -5,6 +5,7 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/ray"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -19,6 +20,16 @@ type Options struct {
 	// Workers bounds the Huygens-integration and wavefront-tracing parallelism
 	// (0 = runtime.NumCPU()).
 	Workers int
+	// SpectralCurve selects a polychromatic ("white") PSF computation: ""
+	// (monochromatic), "D65" or "FLAT". When set, each field's per-wavelength
+	// PSFs are combined with the SPD-weighted (and transmittance-weighted)
+	// intensity sum.
+	SpectralCurve string
+	// SpectralEntries overrides SpectralCurve with a custom spectral power
+	// distribution (wavelength nm, relative power).
+	SpectralEntries []types.SpectralEntry
+	// MTFCfg configures the OTF/MTF computation (nil = defaults).
+	MTFCfg *types.PSFMTFConfig
 }
 
 // Result is one computed PSF with its analysis summary.
@@ -44,6 +55,32 @@ type Result struct {
 	RMSOPD         float64 // wavefront error RMS relative to the focus reference (mm)
 	PVOPD          float64 // wavefront error peak-to-valley (mm)
 	Stats          WavefrontStats
+	// RawIntensitySum is the unnormalized window energy Σ (I·Δx·Δy) before
+	// Normalize.
+	RawIntensitySum float64
+	// Transmittance is the fraction of the reference-surface power captured
+	// in the sampled window: Σ(I·Δx·Δy) / Σ(|E|²·ΔA_ref).
+	Transmittance float64
+	// SpectralCurve names the SPD used; non-empty for polychromatic results.
+	SpectralCurve string
+	// Contributions lists each wavelength's weighted share of a
+	// polychromatic result (empty for monochromatic results).
+	Contributions []WavelengthContribution
+	// MTF is the OTF/MTF summary of the result's PSF grid.
+	MTF *types.PSFMTFSummary
+}
+
+// WavelengthContribution is one wavelength's weighted share of a
+// polychromatic PSF.
+type WavelengthContribution struct {
+	Wavelength     float64
+	SpectralWeight float64 // raw SPD weight
+	Transmittance  float64
+	PSFEnergy      float64 // weight·(window energy)
+	CentroidX      float64
+	CentroidY      float64
+	Grid           *FieldGrid
+	MTF            *types.PSFMTFSummary
 }
 
 // polState is one resolved coherent input state.
@@ -80,7 +117,9 @@ func resolvePolStates(labels []string) []polState {
 // Compute runs the full PSF pipeline: for every (field, wavelength,
 // polarization) it samples the entrance pupil, traces the polarized wavefront
 // to the reference surface, and integrates it onto the flat image plane via
-// the direct vector Huygens integral.
+// the direct vector Huygens integral. When opts.SpectralCurve is set (or
+// spectral entries are given), each field's monochromatic PSFs are combined
+// into one polychromatic result per polarization state.
 func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 	wavelengths []float64, opts Options) ([]Result, error) {
 	engine := ray.NewEngine(gc, nil)
@@ -102,8 +141,33 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 	pols := resolvePolStates(opts.Polarizations)
 	planeZ := imagePlaneZ(system.Surfaces)
 
+	white := opts.SpectralCurve != "" || len(opts.SpectralEntries) > 0
+	var spdCurve *spectral.Curve
+	if white {
+		switch {
+		case len(opts.SpectralEntries) > 0:
+			nm := make([]float64, len(opts.SpectralEntries))
+			rel := make([]float64, len(opts.SpectralEntries))
+			for i, e := range opts.SpectralEntries {
+				nm[i] = e.Wavelength
+				rel[i] = e.Relative
+			}
+			spdCurve = spectral.NewCurve(nm, rel)
+		case opts.SpectralCurve == "FLAT":
+			l := minFloat(wavelengths)
+			h := maxFloat(wavelengths)
+			spdCurve = spectral.Flat(l*1e6, h*1e6)
+		default: // "D65"
+			spdCurve = spectral.D65()
+		}
+	}
+
 	var results []Result
 	for fi, fd := range fields {
+		if white {
+			results = append(results, whiteField(engine, gc, system, fd, opts, planeZ, wavelengths, fi, spdCurve, pols)...)
+			continue
+		}
 		for _, wl := range wavelengths {
 			pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType)
 			if err != nil || len(pg.GridPoints) == 0 {
@@ -151,7 +215,9 @@ func computeOne(engine *ray.Engine, system types.System, pg *PupilGrid, fd types
 	// Evaluate actual + ideal in one shared pass (geometry computed once).
 	pair := fieldPair{samples: samples, center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)}
 	computePairs([]fieldPair{pair}, planeZ, nImage, wl, spec, opts.Workers)
-	return finishResult(pair.actual, pair.ideal, samples, center, nImage, wl, planeZ, fieldAngle, fi, label, stats)
+	r := finishResult(pair.actual, pair.ideal, samples, center, nImage, wl, planeZ, fieldAngle, fi, label, stats, samplePower(samples))
+	r.MTF = ComputeMTF(r.Grid.Intensity, r.Grid.Spec, opts.MTFCfg)
+	return r
 }
 
 // computeCombined computes the PSF for two coherent states (RCP and LCP) and
@@ -199,13 +265,243 @@ func computeCombined(engine *ray.Engine, system types.System, pg *PupilGrid, fd 
 	stats.Total += r2.stats.Total
 	stats.Valid += r2.stats.Valid
 	stats.Missed += r2.stats.Missed
-	return finishResult(comb, idealComb, r1.samples, center, nImage, wl, planeZ, fieldAngle, fi,
-		string(types.PolRCPLCP), stats)
+	r := finishResult(comb, idealComb, r1.samples, center, nImage, wl, planeZ, fieldAngle, fi,
+		string(types.PolRCPLCP), stats, samplePower(r1.samples)+samplePower(r2.samples))
+	r.MTF = ComputeMTF(r.Grid.Intensity, r.Grid.Spec, opts.MTFCfg)
+	return r
 }
 
-// finishResult analyses the (raw) intensity grid and fills the summary.
+// whiteField computes the polychromatic PSF for one field. Every polarization
+// state in pols yields one result; a combined state (2 entries, RCP+LCP) is
+// averaged incoherently per wavelength on the shared image grid. All
+// wavelengths share one evaluation window (centred on the reference
+// wavelength's spot, sized to the largest diffraction + spot envelope) so the
+// SPD-weighted intensities can be summed sample by sample.
+func whiteField(engine *ray.Engine, gc *glass.Catalog, system types.System, fd types.FieldDef,
+	opts Options, planeZ float64, wavelengths []float64, fi int, spdCurve *spectral.Curve,
+	pols []polState) []Result {
+	var results []Result
+	for pi := 0; pi < len(pols); pi++ {
+		st := pols[pi]
+		var group []polState
+		if st.combined {
+			if pi+1 >= len(pols) || !pols[pi+1].combined {
+				continue
+			}
+			group = []polState{st, pols[pi+1]}
+			pi++
+		} else {
+			group = []polState{st}
+		}
+		if r := whiteGroup(engine, gc, system, fd, opts, planeZ, wavelengths, fi, spdCurve, group); r != nil {
+			results = append(results, *r)
+		}
+	}
+	return results
+}
+
+// whiteGroup combines the given polarization group's per-wavelength
+// monochromatic PSFs into one polychromatic result. group holds one coherent
+// state or the two members of an RCP+LCP average.
+func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd types.FieldDef,
+	opts Options, planeZ float64, wavelengths []float64, fi int, spdCurve *spectral.Curve,
+	group []polState) *Result {
+
+	type traceData struct {
+		wl       float64
+		nImage   float64
+		chiefDir types.Vec3
+		samples  [][]WavefrontSample
+		stats    []WavefrontStats
+	}
+	var tds []traceData
+	for _, wl := range wavelengths {
+		if spdCurve.Weight(wl) <= 0 {
+			continue
+		}
+		pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType)
+		if err != nil || len(pg.GridPoints) == 0 {
+			continue
+		}
+		nImage := imageSpaceIndex(system.Surfaces, opts.ReferenceSurface, wl, gc)
+		samples := make([][]WavefrontSample, len(group))
+		stats := make([]WavefrontStats, len(group))
+		ok := false
+		for p := range group {
+			s, st := TraceWavefront(system, engine, pg, fd, opts.ReferenceSurface, wl, group[p].jones, opts.Workers)
+			samples[p] = s
+			stats[p] = st
+			if len(s) >= 3 {
+				ok = true
+			}
+		}
+		if !ok {
+			continue
+		}
+		tds = append(tds, traceData{wl: wl, nImage: nImage, chiefDir: pg.ChiefDir, samples: samples, stats: stats})
+	}
+	if len(tds) == 0 {
+		return nil
+	}
+
+	// Reference wavelength: the first traced one. Common window centred on
+	// its spot, sized to the largest diffraction + geometric-spot envelope
+	// across all wavelengths.
+	refIdx := firstValidPol(tds[0].samples)
+	if refIdx < 0 {
+		return nil
+	}
+	ref := tds[0]
+	cx, cy, _ := ImagePlaneSpot(ref.samples[refIdx], planeZ)
+	center := types.Vec3{X: cx, Y: cy, Z: planeZ}
+	half := 0.0
+	if opts.HalfWidth > 0 {
+		half = math.Max(opts.HalfWidth, 5e-3)
+	} else {
+		for _, td := range tds {
+			for _, s := range td.samples {
+				if len(s) < 3 {
+					continue
+				}
+				na := ComputeImageNA(s, center, td.nImage)
+				_, _, rms := ImagePlaneSpot(s, planeZ)
+				h := math.Max(4*AiryRadius(td.wl, na), 3*rms)
+				if h > half {
+					half = h
+				}
+			}
+		}
+	}
+	if half < 5e-3 {
+		half = 5e-3
+	}
+	spec := DefaultImageGrid(ref.samples[refIdx], center, ref.nImage, ref.wl, planeZ, cx, cy, half, opts.GridSize)
+
+	label := group[0].label
+	if len(group) == 2 {
+		label = string(types.PolRCPLCP)
+	}
+
+	whiteGrid := NewFieldGrid(spec)
+	idealWhite := NewFieldGrid(spec)
+	var contributions []WavelengthContribution
+	stats := WavefrontStats{}
+	var refPowerTotal, windowPowerTotal, whiteRawSum float64
+
+	for _, td := range tds {
+		// Evaluate each polarization on the shared grid, then combine
+		// incoherently (group of 1 or 2).
+		act := NewFieldGrid(spec)
+		ide := NewFieldGrid(spec)
+		for p := range group {
+			if len(td.samples[p]) < 3 {
+				continue
+			}
+			pair := fieldPair{samples: td.samples[p], center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)}
+			computePairs([]fieldPair{pair}, planeZ, td.nImage, td.wl, spec, opts.Workers)
+			for idx := range act.Intensity {
+				act.Intensity[idx] += pair.actual.Intensity[idx]
+				ide.Intensity[idx] += pair.ideal.Intensity[idx]
+			}
+		}
+
+		w := spdCurve.Weight(td.wl)
+		rp := 0.0
+		for p := range group {
+			rp += samplePower(td.samples[p])
+		}
+		wp := gridWindowPower(act)
+		tau := 0.0
+		if rp > 0 {
+			tau = wp / rp
+		}
+		weight := w * tau
+		for idx := range whiteGrid.Intensity {
+			whiteGrid.Intensity[idx] += weight * act.Intensity[idx]
+			idealWhite.Intensity[idx] += weight * ide.Intensity[idx]
+		}
+		refPowerTotal += w * rp
+		windowPowerTotal += w * wp
+		whiteRawSum += weight * wp
+		for p := range group {
+			stats.Total += td.stats[p].Total
+			stats.Valid += td.stats[p].Valid
+			stats.Missed += td.stats[p].Missed
+		}
+		cxw, cyw := act.Centroid()
+		contributions = append(contributions, WavelengthContribution{
+			Wavelength:     td.wl,
+			SpectralWeight: w,
+			Transmittance:  tau,
+			PSFEnergy:      weight * wp,
+			CentroidX:      cxw,
+			CentroidY:      cyw,
+			Grid:           act,
+			MTF:            ComputeMTF(act.Intensity, spec, opts.MTFCfg),
+		})
+	}
+	if len(contributions) == 0 {
+		return nil
+	}
+
+	actualPeak, _, _ := whiteGrid.Peak()
+	idealPeak, _, _ := idealWhite.Peak()
+	strehl := 0.0
+	if idealPeak > 0 {
+		strehl = actualPeak / idealPeak
+	}
+
+	na := ComputeImageNA(ref.samples[refIdx], center, ref.nImage)
+	_, _, spotRMS := ImagePlaneSpot(ref.samples[refIdx], planeZ)
+	rmsOPD, pvOPD := wavefrontOPD(ref.samples[refIdx], center, ref.nImage)
+
+	whiteGrid.Normalize()
+	peakVal, peakX, peakY := whiteGrid.Peak()
+	wcx, wcy := whiteGrid.Centroid()
+	fx, fy := whiteGrid.FWHM()
+	ee50 := whiteGrid.RadiusForEnergy(wcx, wcy, 0.5)
+
+	transmittance := 0.0
+	if refPowerTotal > 0 {
+		transmittance = windowPowerTotal / refPowerTotal
+	}
+
+	return &Result{
+		FieldIndex:      fi,
+		FieldAngle:      angleFromDir(ref.chiefDir),
+		Wavelength:      ref.wl,
+		Polarization:    label,
+		Grid:            whiteGrid,
+		IdealPeak:       idealPeak,
+		Strehl:          strehl,
+		FWHMX:           fx,
+		FWHMY:           fy,
+		CentroidX:       wcx,
+		CentroidY:       wcy,
+		PeakValue:       peakVal,
+		PeakX:           peakX,
+		PeakY:           peakY,
+		Encircled50:     ee50,
+		AiryRadius:      AiryRadius(ref.wl, na),
+		ImageNA:         na,
+		SpotRMS:         spotRMS,
+		RMSOPD:          rmsOPD,
+		PVOPD:           pvOPD,
+		Stats:           stats,
+		RawIntensitySum: whiteRawSum,
+		Transmittance:   transmittance,
+		SpectralCurve:   opts.SpectralCurve,
+		Contributions:   contributions,
+		MTF:             ComputeMTF(whiteGrid.Intensity, spec, opts.MTFCfg),
+	}
+}
+
+// finishResult analyses the (raw) intensity grid and fills the summary. The
+// grid is normalized in place. refPower is the reference-surface power the
+// window fraction is measured against.
 func finishResult(grid, ideal *FieldGrid, samples []WavefrontSample,
-	center types.Vec3, nImage, wl, planeZ, fieldAngle float64, fi int, label string, stats WavefrontStats) *Result {
+	center types.Vec3, nImage, wl, planeZ, fieldAngle float64, fi int, label string, stats WavefrontStats, refPower float64) *Result {
+	rawSum := gridWindowPower(grid)
 	idealPeak, _, _ := ideal.Peak()
 	actualPeak, _, _ := grid.Peak()
 	strehl := 0.0
@@ -221,30 +517,96 @@ func finishResult(grid, ideal *FieldGrid, samples []WavefrontSample,
 	cx, cy := grid.Centroid()
 	fx, fy := grid.FWHM()
 	ee50 := grid.RadiusForEnergy(cx, cy, 0.5)
+	transmittance := 0.0
+	if refPower > 0 {
+		transmittance = rawSum / refPower
+	}
 
 	return &Result{
-		FieldIndex:    fi,
-		FieldAngle:    fieldAngle,
-		Wavelength:    wl,
-		Polarization:  label,
-		Grid:          grid,
-		IdealPeak:     idealPeak,
-		Strehl:        strehl,
-		FWHMX:         fx,
-		FWHMY:         fy,
-		CentroidX:     cx,
-		CentroidY:     cy,
-		PeakValue:     peakVal,
-		PeakX:         peakX,
-		PeakY:         peakY,
-		Encircled50:    ee50,
-		AiryRadius:     AiryRadius(wl, na),
-		ImageNA:        na,
-		SpotRMS:        spotRMS,
-		RMSOPD:         rmsOPD,
-		PVOPD:          pvOPD,
-		Stats:          stats,
+		FieldIndex:      fi,
+		FieldAngle:      fieldAngle,
+		Wavelength:      wl,
+		Polarization:    label,
+		Grid:            grid,
+		IdealPeak:       idealPeak,
+		Strehl:          strehl,
+		FWHMX:           fx,
+		FWHMY:           fy,
+		CentroidX:       cx,
+		CentroidY:       cy,
+		PeakValue:       peakVal,
+		PeakX:           peakX,
+		PeakY:           peakY,
+		Encircled50:     ee50,
+		AiryRadius:      AiryRadius(wl, na),
+		ImageNA:         na,
+		SpotRMS:         spotRMS,
+		RMSOPD:          rmsOPD,
+		PVOPD:           pvOPD,
+		Stats:           stats,
+		RawIntensitySum: rawSum,
+		Transmittance:   transmittance,
+		MTF:             ComputeMTF(grid.Intensity, grid.Spec, nil),
 	}
+}
+
+// samplePower is the total power incident on the reference surface:
+// Σ |E|²·ΔA over the wavefront samples.
+func samplePower(samples []WavefrontSample) float64 {
+	var p float64
+	for _, s := range samples {
+		p += s.Intensity * s.Area
+	}
+	return p
+}
+
+// gridWindowPower is the unnormalized window energy Σ (I·Δx·Δy).
+func gridWindowPower(g *FieldGrid) float64 {
+	if g == nil || g.Spec.DX <= 0 || g.Spec.DY <= 0 {
+		return 0
+	}
+	var p float64
+	for _, v := range g.Intensity {
+		p += v
+	}
+	return p * g.Spec.DX * g.Spec.DY
+}
+
+// firstValidPol returns the index of the first polarization group member with
+// a usable (≥3) sample set, or -1.
+func firstValidPol(samples [][]WavefrontSample) int {
+	for i, s := range samples {
+		if len(s) >= 3 {
+			return i
+		}
+	}
+	return -1
+}
+
+func minFloat(a []float64) float64 {
+	if len(a) == 0 {
+		return 0
+	}
+	m := a[0]
+	for _, v := range a[1:] {
+		if v < m {
+			m = v
+		}
+	}
+	return m
+}
+
+func maxFloat(a []float64) float64 {
+	if len(a) == 0 {
+		return 0
+	}
+	m := a[0]
+	for _, v := range a[1:] {
+		if v > m {
+			m = v
+		}
+	}
+	return m
 }
 
 // wavefrontOPD computes the OPD of each sample relative to the perfect

@@ -85,3 +85,48 @@ func TestPSFApertureScaling(t *testing.T) {
 		t.Errorf("big aperture FWHM = %v", resBig[0].FWHMX)
 	}
 }
+
+// TestPSFWhite runs the polychromatic (white) pipeline on the singlet: the
+// result must carry a spectral curve, per-wavelength contributions and an MTF,
+// and the Strehl must stay physical.
+func TestPSFWhite(t *testing.T) {
+	fields := []types.FieldDef{{Angle: 0, Direction: []float64{0, 1}}}
+	wls := []float64{0.00045, 0.00055, 0.00065}
+
+	sys, gc := singletSystem(8)
+	res, err := Compute(sys, gc, fields, wls, Options{NumRays: 120, SpectralCurve: "FLAT"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) == 0 {
+		t.Fatal("no white result")
+	}
+	r := res[0]
+	if r.SpectralCurve != "FLAT" {
+		t.Errorf("SpectralCurve = %q, want FLAT", r.SpectralCurve)
+	}
+	if len(r.Contributions) != 3 {
+		t.Errorf("contributions = %d, want 3 (one per wavelength)", len(r.Contributions))
+	}
+	for _, c := range r.Contributions {
+		if c.SpectralWeight != 1 {
+			t.Errorf("FLAT weight at %v = %v, want 1", c.Wavelength, c.SpectralWeight)
+		}
+		if c.MTF == nil {
+			t.Errorf("contribution %v has no MTF", c.Wavelength)
+		}
+	}
+	if r.MTF == nil {
+		t.Fatal("white result has no MTF")
+	}
+	if len(r.MTF.Sagittal.Thresholds) != 3 || len(r.MTF.Tangential.Thresholds) != 3 {
+		t.Errorf("default MTF thresholds = %d/%d, want 3/3",
+			len(r.MTF.Sagittal.Thresholds), len(r.MTF.Tangential.Thresholds))
+	}
+	if r.Strehl <= 0 || r.Strehl > 1.0 {
+		t.Errorf("white Strehl = %v, want in (0, 1]", r.Strehl)
+	}
+	if r.Transmittance <= 0 || r.Transmittance > 1 {
+		t.Errorf("white transmittance = %v, want in (0, 1]", r.Transmittance)
+	}
+}

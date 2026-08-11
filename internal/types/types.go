@@ -976,6 +976,60 @@ type VignettingResult struct {
 	Fields       []VignettingField `yaml:"fields"`
 }
 
+// SpectralEntry is one point of a custom spectral power distribution
+// (wavelength in nm, relative power). Used by psf.spectral_entries.
+type SpectralEntry struct {
+	Wavelength float64 `yaml:"wavelength"`
+	Relative   float64 `yaml:"relative"`
+}
+
+// PSFMTFConfig configures the OTF/MTF computation derived from each PSF grid
+// (the psf.mtf_config YAML section). A nil / empty config uses the defaults.
+type PSFMTFConfig struct {
+	// Frequencies are user-selected spatial frequencies (cycles/mm) at which
+	// the OTF/MTF is reported under `evaluated`.
+	Frequencies []float64 `yaml:"frequencies,omitempty"`
+	// Thresholds are the MTF levels whose cut-off frequencies are reported
+	// (default [0.50, 0.30, 0.10]).
+	Thresholds []float64 `yaml:"thresholds,omitempty"`
+	// MaxFrequency caps the reported curves in cycles/mm; 0 = the Nyquist
+	// frequency of the image-plane grid.
+	MaxFrequency float64 `yaml:"max_frequency,omitempty"`
+	// FrequencyPoints is the number of samples along the reported curve; 0 =
+	// the FFT grid size / 2.
+	FrequencyPoints int `yaml:"frequency_points,omitempty"`
+}
+
+// PSFMTFPoint is one OTF/MTF sample at a spatial frequency.
+type PSFMTFPoint struct {
+	Frequency float64 `yaml:"frequency"` // cycles/mm
+	OTFReal   float64 `yaml:"otf_real"`
+	OTFImag   float64 `yaml:"otf_imag"`
+	MTF       float64 `yaml:"mtf"`
+	PTF       float64 `yaml:"ptf,omitempty"` // phase in radians, about the PSF centroid
+}
+
+// PSFMTFCross is an MTF-level crossing: the frequency at which the MTF equals
+// the given level.
+type PSFMTFCross struct {
+	MTF       float64 `yaml:"mtf"`
+	Frequency float64 `yaml:"frequency"` // cycles/mm
+}
+
+// PSFMTFAxis holds the OTF/MTF data along one image-plane axis
+// (sagittal = X, tangential = Y, the image-height direction).
+type PSFMTFAxis struct {
+	Curve      []PSFMTFPoint  `yaml:"curve,omitempty"`
+	Thresholds []PSFMTFCross  `yaml:"thresholds,omitempty"`
+	Evaluated  []PSFMTFPoint  `yaml:"evaluated,omitempty"`
+}
+
+// PSFMTFSummary is the MTF/OTF summary of one PSF result.
+type PSFMTFSummary struct {
+	Sagittal   PSFMTFAxis `yaml:"sagittal"`
+	Tangential PSFMTFAxis `yaml:"tangential"`
+}
+
 // PSFConfig configures the `psf` subcommand (the `psf:` YAML section).
 // All fields are optional; flags on the command line override them.
 type PSFConfig struct {
@@ -988,7 +1042,16 @@ type PSFConfig struct {
 	Polarization     string     `yaml:"polarization,omitempty"`
 	// Workers bounds the Huygens-integration and wavefront-tracing
 	// parallelism (0 = runtime.NumCPU()).
-	Workers          int        `yaml:"huygens_workers,omitempty"`
+	Workers int `yaml:"huygens_workers,omitempty"`
+	// SpectralCurve selects a polychromatic ("white") PSF computation:
+	// "D65" (CIE standard illuminant, the default) or "FLAT". When set, each
+	// field's monochromatic PSFs are combined with the SPD-weighted sum.
+	SpectralCurve string `yaml:"spectral_curve,omitempty"`
+	// SpectralEntries overrides SpectralCurve with a custom spectral power
+	// distribution (wavelength nm, relative power).
+	SpectralEntries []SpectralEntry `yaml:"spectral_entries,omitempty"`
+	// MTFCfg configures the OTF/MTF computation (defaults when absent).
+	MTFCfg *PSFMTFConfig `yaml:"mtf_config,omitempty"`
 }
 
 // PolarizationLabel identifies an input polarization state in PSF output.
@@ -1008,7 +1071,7 @@ const (
 type PSFResult struct {
 	FieldIndex       int     `yaml:"field_index"`
 	FieldAngle       float64 `yaml:"field_angle"`
-	Wavelength       float64 `yaml:"wavelength"`
+	Wavelength       float64 `yaml:"wavelength,omitempty"`
 	Polarization     string  `yaml:"polarization"`
 	StrehlRatio      float64 `yaml:"strehl_ratio"`
 	FWHMX            float64 `yaml:"fwhm_x"`
@@ -1026,6 +1089,11 @@ type PSFResult struct {
 	ValidRays        int     `yaml:"valid_rays"`
 	Vignetted        int     `yaml:"vignetted,omitempty"`
 	OutputFile       string  `yaml:"output_file,omitempty"`
+	// SpectralCurve is set for polychromatic results (wavelength is omitted).
+	SpectralCurve string `yaml:"spectral_curve,omitempty"`
+	// MTF is the OTF/MTF summary (thresholds, and evaluated frequencies when
+	// configured). Full curves go to the --yaml file.
+	MTF *PSFMTFSummary `yaml:"mtf,omitempty"`
 }
 
 type Output struct {

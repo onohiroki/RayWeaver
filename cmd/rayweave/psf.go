@@ -21,6 +21,10 @@ import (
 //
 // The pipeline YAML carries a lightweight summary (psf_results). Full
 // structured grids go to --yaml / --csv files so the pipe stays small.
+//
+// Every CLI flag mirrors a psf: YAML field; a flag always wins, and the
+// effective values are written back into the output's psf: section so the
+// pipeline reflects what was actually computed.
 func runPSF(data []byte) {
 	fs := flag.NewFlagSet("psf", flag.ExitOnError)
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
@@ -32,6 +36,7 @@ func runPSF(data []byte) {
 	fieldsFlag := fs.String("fields", "", "comma-separated field indices to compute (default: all)")
 	wlFlag := fs.String("wavelengths", "", "comma-separated wavelengths in mm (default: chief wavelengths, else 587.56 nm)")
 	polFlag := fs.String("polarization", "", "input polarization: RCP (default) | LCP | X | Y | RCP+LCP (unpolarised average)")
+	spectralFlag := fs.String("spectral", "", "polychromatic (white) PSF: D65 (default) | FLAT")
 	psfWorkers := fs.Int("psf-workers", 0, "Huygens/wavefront parallel workers (default: GOMAXPROCS)")
 	yamlOut := fs.String("yaml", "", "write full structured PSF data to FILE (index-suffixed per result)")
 	csvOut := fs.String("csv", "", "write gnuplot x,y,intensity map to FILE (index-suffixed per result)")
@@ -53,33 +58,26 @@ func runPSF(data []byte) {
 	system := types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface}
 
 	fields := chiefFieldDefs(input)
-	if *fieldsFlag != "" {
-		var kept []types.FieldDef
-		for _, tok := range strings.Split(*fieldsFlag, ",") {
-			idx, err := strconv.Atoi(strings.TrimSpace(tok))
-			if err != nil || idx < 0 || idx >= len(fields) {
-				errOut("Error: invalid field index %q", tok)
-				os.Exit(1)
-			}
-			kept = append(kept, fields[idx])
-		}
-		fields = kept
-	}
+	selected := selectedFieldIndices(fields, input.PSF, *fieldsFlag)
+	fields = applySelectedFields(fields, selected)
 	if len(fields) == 0 {
 		errOut("Error: no fields to compute")
 		os.Exit(1)
 	}
 
+	// Wavelengths: flag > psf.wavelengths > spectral default grid > chief
+	// wavelengths > 587.56 nm.
 	var wavelengths []float64
+	spectralMode := *spectralFlag != "" ||
+		(input.PSF != nil && (input.PSF.SpectralCurve != "" || len(input.PSF.SpectralEntries) > 0))
 	switch {
 	case *wlFlag != "":
-		for _, tok := range strings.Split(*wlFlag, ",") {
-			wl, err := strconv.ParseFloat(strings.TrimSpace(tok), 64)
-			if err != nil {
-				errOut("Error: invalid wavelength %q", tok)
-				os.Exit(1)
-			}
-			wavelengths = append(wavelengths, wl)
+		wavelengths = parseFloatList(*wlFlag, "wavelength")
+	case input.PSF != nil && len(input.PSF.Wavelengths) > 0:
+		wavelengths = input.PSF.Wavelengths
+	case spectralMode:
+		for wl := 400.0; wl <= 700; wl += 10 {
+			wavelengths = append(wavelengths, wl*1e-6)
 		}
 	case len(input.Chief.Wavelengths) > 0:
 		wavelengths = input.Chief.Wavelengths
@@ -87,9 +85,34 @@ func runPSF(data []byte) {
 		wavelengths = []float64{types.DefaultWavelength}
 	}
 
-	polLabels := []string{string(types.PolRCP)}
-	if *polFlag != "" {
+	var polLabels []string
+	switch {
+	case *polFlag != "":
 		polLabels = parsePolLabels(*polFlag)
+	case input.PSF != nil && input.PSF.Polarization != "":
+		polLabels = parsePolLabels(input.PSF.Polarization)
+	default:
+		polLabels = []string{string(types.PolRCP)}
+	}
+
+	var spectralEntries []types.SpectralEntry
+	if input.PSF != nil {
+		spectralEntries = input.PSF.SpectralEntries
+	}
+	var spectralCurve string
+	if input.PSF != nil && input.PSF.SpectralCurve != "" {
+		spectralCurve = input.PSF.SpectralCurve
+	}
+	if *spectralFlag != "" {
+		switch strings.ToUpper(strings.TrimSpace(*spectralFlag)) {
+		case "D65":
+			spectralCurve = "D65"
+		case "FLAT":
+			spectralCurve = "FLAT"
+		default:
+			errOut("Error: invalid --spectral %q (D65 | FLAT)", *spectralFlag)
+			os.Exit(1)
+		}
 	}
 
 	opts := psf.Options{
@@ -99,6 +122,8 @@ func runPSF(data []byte) {
 		HalfWidth:        *halfWidth,
 		Polarizations:    polLabels,
 		Workers:          *psfWorkers,
+		SpectralCurve:    spectralCurve,
+		SpectralEntries:  spectralEntries,
 	}
 	if input.PSF != nil {
 		if opts.ReferenceSurface <= 0 {
@@ -116,9 +141,7 @@ func runPSF(data []byte) {
 		if opts.Workers <= 0 {
 			opts.Workers = input.PSF.Workers
 		}
-		if len(input.PSF.Wavelengths) > 0 && *wlFlag == "" {
-			wavelengths = input.PSF.Wavelengths
-		}
+		opts.MTFCfg = input.PSF.MTFCfg
 	}
 
 	results, err := psf.Compute(system, gc, fields, wavelengths, opts)
@@ -130,6 +153,10 @@ func runPSF(data []byte) {
 		errOut("Error: no PSF results computed (check fields/wavelengths/reference surface)")
 		os.Exit(1)
 	}
+
+	// Write the effective options back into the output's psf: section so the
+	// pipeline reflects what was actually computed (flags override YAML).
+	writeBackPSF(input, wavelengths, selected, opts)
 
 	output := types.Output{Input: input}
 	for i := range results {
@@ -150,10 +177,14 @@ func runPSF(data []byte) {
 				os.Exit(1)
 			}
 		}
+		wl := r.Wavelength
+		if r.SpectralCurve != "" {
+			wl = 0
+		}
 		output.PsfResults = append(output.PsfResults, types.PSFResult{
 			FieldIndex:        r.FieldIndex,
 			FieldAngle:        r.FieldAngle,
-			Wavelength:        r.Wavelength,
+			Wavelength:        wl,
 			Polarization:      r.Polarization,
 			StrehlRatio:       r.Strehl,
 			FWHMX:             r.FWHMX,
@@ -171,9 +202,103 @@ func runPSF(data []byte) {
 			ValidRays:         r.Stats.Valid,
 			Vignetted:         r.Stats.Missed,
 			OutputFile:        outFile,
+			SpectralCurve:     r.SpectralCurve,
+			MTF:               psfMTFSummary(r.MTF),
 		})
 	}
 	writeYAML(&output)
+}
+
+// selectedFieldIndices filters the chief fields by --fields (flag wins) or
+// psf.fields, returning the kept global indices.
+func selectedFieldIndices(fields []types.FieldDef, pc *types.PSFConfig, flagVal string) []int {
+	spec := flagVal
+	if spec == "" && pc != nil && len(pc.Fields) > 0 {
+		spec = intsToCSV(pc.Fields)
+	}
+	var kept []int
+	if spec == "" {
+		for i := range fields {
+			kept = append(kept, i)
+		}
+		return kept
+	}
+	keptSet := make(map[int]bool)
+	for _, tok := range strings.Split(spec, ",") {
+		idx, err := strconv.Atoi(strings.TrimSpace(tok))
+		if err != nil || idx < 0 || idx >= len(fields) {
+			errOut("Error: invalid field index %q", tok)
+			os.Exit(1)
+		}
+		if !keptSet[idx] {
+			kept = append(kept, idx)
+			keptSet[idx] = true
+		}
+	}
+	return kept
+}
+
+// applySelectedFields narrows fields to the kept global indices.
+func applySelectedFields(fields []types.FieldDef, kept []int) []types.FieldDef {
+	out := make([]types.FieldDef, 0, len(kept))
+	for _, idx := range kept {
+		out = append(out, fields[idx])
+	}
+	return out
+}
+
+// writeBackPSF stores the effective options into the output psf: section.
+func writeBackPSF(input types.Input, wavelengths []float64, selected []int, opts psf.Options) {
+	if input.PSF == nil {
+		input.PSF = &types.PSFConfig{}
+	}
+	ps := input.PSF
+	ps.ReferenceSurface = opts.ReferenceSurface
+	ps.GridSize = opts.GridSize
+	ps.HalfWidth = opts.HalfWidth
+	ps.NumRays = opts.NumRays
+	ps.Workers = opts.Workers
+	ps.Polarization = strings.Join(opts.Polarizations, ",")
+	ps.Wavelengths = wavelengths
+	ps.Fields = selected
+	ps.SpectralCurve = opts.SpectralCurve
+	ps.SpectralEntries = opts.SpectralEntries
+	ps.MTFCfg = opts.MTFCfg
+}
+
+// psfMTFSummary returns a pipeline-light MTF summary (thresholds +
+// user-evaluated frequencies only; the full curves go to --yaml files).
+func psfMTFSummary(m *types.PSFMTFSummary) *types.PSFMTFSummary {
+	if m == nil {
+		return nil
+	}
+	s := &types.PSFMTFSummary{}
+	s.Sagittal.Thresholds = m.Sagittal.Thresholds
+	s.Sagittal.Evaluated = m.Sagittal.Evaluated
+	s.Tangential.Thresholds = m.Tangential.Thresholds
+	s.Tangential.Evaluated = m.Tangential.Evaluated
+	return s
+}
+
+func intsToCSV(v []int) string {
+	parts := make([]string, len(v))
+	for i, n := range v {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, ",")
+}
+
+func parseFloatList(s, what string) []float64 {
+	var out []float64
+	for _, tok := range strings.Split(s, ",") {
+		v, err := strconv.ParseFloat(strings.TrimSpace(tok), 64)
+		if err != nil {
+			errOut("Error: invalid %s %q", what, tok)
+			os.Exit(1)
+		}
+		out = append(out, v)
+	}
+	return out
 }
 
 // parsePolLabels converts a --polarization flag value into label(s).
@@ -204,29 +329,34 @@ func suffixFile(path string, idx int) string {
 
 // psfYAMLFile is the full structured per-result output written by --yaml.
 type psfYAMLFile struct {
-	FieldIndex       int       `yaml:"field_index"`
-	FieldAngle       float64   `yaml:"field_angle"`
-	Wavelength       float64   `yaml:"wavelength"`
-	Polarization     string    `yaml:"polarization"`
-	StrehlRatio      float64   `yaml:"strehl_ratio"`
-	FWHM             [2]float64 `yaml:"fwhm"`
-	Centroid         [2]float64 `yaml:"centroid"`
-	Peak             [3]float64 `yaml:"peak"`
-	EncircledEnergy50 float64  `yaml:"encircled_energy_50"`
-	AiryRadius       float64   `yaml:"airy_radius"`
-	ImageNA          float64   `yaml:"image_na"`
-	SpotRMS          float64   `yaml:"spot_rms"`
-	Grid             psfYAMLGrid `yaml:"grid"`
-	Intensity        []float64 `yaml:"intensity"`
-	ExReal           []float64 `yaml:"ex_real,omitempty"`
-	ExImag           []float64 `yaml:"ex_imag,omitempty"`
-	EyReal           []float64 `yaml:"ey_real,omitempty"`
-	EyImag           []float64 `yaml:"ey_imag,omitempty"`
-	EzReal           []float64 `yaml:"ez_real,omitempty"`
-	EzImag           []float64 `yaml:"ez_imag,omitempty"`
-	EncircledEnergy  psfYAMLEnclosure `yaml:"encircled_energy"`
-	Wavefront        psfYAMLWavefront `yaml:"wavefront"`
-	Samples          psfYAMLSamples   `yaml:"samples"`
+	FieldIndex        int                   `yaml:"field_index"`
+	FieldAngle        float64               `yaml:"field_angle"`
+	Wavelength        float64               `yaml:"wavelength,omitempty"`
+	Polarization      string                `yaml:"polarization"`
+	SpectralCurve     string                `yaml:"spectral_curve,omitempty"`
+	StrehlRatio       float64               `yaml:"strehl_ratio"`
+	FWHM              [2]float64            `yaml:"fwhm"`
+	Centroid          [2]float64            `yaml:"centroid"`
+	Peak              [3]float64            `yaml:"peak"`
+	EncircledEnergy50 float64               `yaml:"encircled_energy_50"`
+	AiryRadius        float64               `yaml:"airy_radius"`
+	ImageNA           float64               `yaml:"image_na"`
+	SpotRMS           float64               `yaml:"spot_rms"`
+	Transmittance     float64               `yaml:"transmittance,omitempty"`
+	RawEnergy         float64               `yaml:"raw_energy,omitempty"`
+	Grid              psfYAMLGrid           `yaml:"grid"`
+	Intensity         []float64             `yaml:"intensity"`
+	ExReal            []float64             `yaml:"ex_real,omitempty"`
+	ExImag            []float64             `yaml:"ex_imag,omitempty"`
+	EyReal            []float64             `yaml:"ey_real,omitempty"`
+	EyImag            []float64             `yaml:"ey_imag,omitempty"`
+	EzReal            []float64             `yaml:"ez_real,omitempty"`
+	EzImag            []float64             `yaml:"ez_imag,omitempty"`
+	EncircledEnergy   psfYAMLEnclosure      `yaml:"encircled_energy"`
+	Wavefront         psfYAMLWavefront      `yaml:"wavefront"`
+	Samples           psfYAMLSamples        `yaml:"samples"`
+	MTF               *types.PSFMTFSummary  `yaml:"mtf,omitempty"`
+	Contributions     []psfYAMLContribution `yaml:"wavelength_contributions,omitempty"`
 }
 
 type psfYAMLGrid struct {
@@ -252,6 +382,17 @@ type psfYAMLSamples struct {
 	Total  int `yaml:"total"`
 	Valid  int `yaml:"valid"`
 	Missed int `yaml:"missed"`
+}
+
+type psfYAMLContribution struct {
+	Wavelength     float64              `yaml:"wavelength"`
+	SpectralWeight float64              `yaml:"spectral_weight"`
+	Transmittance  float64              `yaml:"transmittance,omitempty"`
+	PSFEnergy      float64              `yaml:"psf_energy"`
+	Centroid       [2]float64           `yaml:"centroid"`
+	Grid           psfYAMLGrid          `yaml:"grid"`
+	Intensity      []float64            `yaml:"intensity"`
+	MTF            *types.PSFMTFSummary `yaml:"mtf,omitempty"`
 }
 
 func writePSFYAML(path string, r *psf.Result) error {
@@ -283,11 +424,16 @@ func writePSFYAML(path string, r *psf.Result) error {
 		eeF[k] = g.EncircledEnergy(cx, cy, rad)
 	}
 
+	wl := r.Wavelength
+	if r.SpectralCurve != "" {
+		wl = 0
+	}
 	out := psfYAMLFile{
 		FieldIndex:        r.FieldIndex,
 		FieldAngle:        r.FieldAngle,
-		Wavelength:        r.Wavelength,
+		Wavelength:        wl,
 		Polarization:      r.Polarization,
+		SpectralCurve:     r.SpectralCurve,
 		StrehlRatio:       r.Strehl,
 		FWHM:              [2]float64{r.FWHMX, r.FWHMY},
 		Centroid:          [2]float64{r.CentroidX, r.CentroidY},
@@ -296,6 +442,8 @@ func writePSFYAML(path string, r *psf.Result) error {
 		AiryRadius:        r.AiryRadius,
 		ImageNA:           r.ImageNA,
 		SpotRMS:           r.SpotRMS,
+		Transmittance:     r.Transmittance,
+		RawEnergy:         r.RawIntensitySum,
 		Grid: psfYAMLGrid{
 			NX: g.Spec.NX, NY: g.Spec.NY,
 			X0: g.Spec.X0, Y0: g.Spec.Y0,
@@ -315,12 +463,38 @@ func writePSFYAML(path string, r *psf.Result) error {
 			Valid:  r.Stats.Valid,
 			Missed: r.Stats.Missed,
 		},
+		MTF:           r.MTF,
+		Contributions: contributionsToYAML(r.Contributions),
 	}
 	data, err := yaml.Marshal(&out)
 	if err != nil {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+func contributionsToYAML(cs []psf.WavelengthContribution) []psfYAMLContribution {
+	if len(cs) == 0 {
+		return nil
+	}
+	out := make([]psfYAMLContribution, len(cs))
+	for i, c := range cs {
+		out[i] = psfYAMLContribution{
+			Wavelength:     c.Wavelength,
+			SpectralWeight: c.SpectralWeight,
+			Transmittance:  c.Transmittance,
+			PSFEnergy:      c.PSFEnergy,
+			Centroid:       [2]float64{c.CentroidX, c.CentroidY},
+			Grid: psfYAMLGrid{
+				NX: c.Grid.Spec.NX, NY: c.Grid.Spec.NY,
+				X0: c.Grid.Spec.X0, Y0: c.Grid.Spec.Y0,
+				DX: c.Grid.Spec.DX, DY: c.Grid.Spec.DY,
+			},
+			Intensity: c.Grid.Intensity,
+			MTF:       c.MTF,
+		}
+	}
+	return out
 }
 
 func writePSFCSV(path string, r *psf.Result) error {
