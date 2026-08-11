@@ -185,6 +185,9 @@ func runImport(data []byte) {
 	outputOut := types.Output{
 		Input: output,
 	}
+	if *glassDir != "" {
+		outputOut.GlassCatalog.Directory = *glassDir
+	}
 
 	// Chief rays are computed on the representative (first) config.
 	chiefSurfaces := configs[0].Surfaces

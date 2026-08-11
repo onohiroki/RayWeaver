@@ -185,7 +185,7 @@ Options:
   --fan-rotation DEG   compute fan(s) in planes rotated by DEG around Z
                          (0 = XZ, 90 = YZ; implies --ray-fan; repeatable or
                          space-separated: --fan-rotation 0 45 90)
-  --wl 0.00058756      reference wavelength (mm)
+  --wl 0.00058756      reference wavelength (mm; overrides chief.wavelength)
 
 Input YAML — chief section:
   fields:
@@ -199,6 +199,7 @@ Input YAML — chief section:
   num_rays: 512                # pupil samples (≈ √n × √n)
   grid_type: polar             # pupil grid: polar | square | hex
   dump_map: false              # output per-ray spot data (grid_points)
+  wavelength: 0.00058756       # reference wavelength (mm); overridden by --wl
 
   pass_through:                # optional: constrain chief ray to pass
     surface: 3                 #   through a specific surface coordinate
@@ -248,6 +249,8 @@ Options:
                           checks, and continue past missed surfaces and TIR
                           instead of stopping. Missed/TIR surfaces are recorded
                           per-surface with their interaction set to MISSED/REFLECT.
+                          (equivalent to rays.lenient: true in the input YAML;
+                          the effective value is written back into the output)
   --verbose            print per-ray trace errors as JSONL to stderr
 
 The "chief" subcommand outputs YAML that can be piped directly
@@ -345,6 +348,14 @@ surfaces marked auto_aperture: true are re-sized; auto_aperture: false
 surfaces are fixed limiters (the aperture never moves). Rays are vignetted by
 the glass-path (edge-thickness) check, fixed-surface apertures, and field 0's
 marginal-ray envelope at each field's entrance-pupil plane.
+
+Optional input YAML — vignette section (flags override, effective values are
+written back into the output):
+  vignette:
+    iterations: 3        # diameter/pupil passes
+    min_glass_path: 0.5  # minimum glass path (edge thickness) per element (mm)
+    margin_mm: 0.2       # beam-footprint clearance per side (mm)
+    wavelength: 0.00058756 # reference wavelength (mm)
 
 Output: YAML with updated configs[].surfaces[].diameter, chief_rays[] with
 per-field entrance_pupil / exit_pupil (dynamic), rays[] = marginal rays, and a
@@ -558,9 +569,15 @@ Useful for building a starting point at a target focal length before
 optimizing (e.g. a 25 mm patent lens scaled to a 50 mm standard).
 
 Options:
-  --efl TARGET     target effective focal length (mm, required)
+  --efl TARGET     target effective focal length (mm, required unless
+                   scale.efl is set in the input YAML)
   --config ID      select config by id (multi-config mode); its EFL sets the
                      scale factor applied to every config
+
+Input YAML — scale section (optional; --efl overrides, the effective value is
+written back into the output):
+  scale:
+    efl: 50.0        # target effective focal length (mm)
 
 Example:
   rayweave scale --efl 50 < ref25.yaml | rayweave optimize > optimized.yaml
@@ -608,8 +625,15 @@ with the asphere_candidate: section:
     remove_defocus: false
     top_k: 3
     min_rays_per_cell: 3
+    validate: false             # run the short-DLS validation (--validate)
+    apply: false                # insert the top validated asphere (--apply)
+    validation_dls_iter: 20     # --dls-iter
+    validation_num_rays: 64     # --num-rays
     score_weights: {common: 0.35, unique: 0.15, fit: 0.20, sensitivity: 0.15,
                      conflict: 0.10, manufacturing: 0.05}
+
+Flags override the asphere_candidate: values; the effective (flag-won) values
+are written back into the output's asphere_candidate: section (CLI/YAML rule).
 
 Piston is always removed (per-field OPD referenced to the field mean);
 remove_piston is accepted but has no effect. max_sag / max_slope_deg /
@@ -944,6 +968,7 @@ func runChief(data []byte) {
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(expandFanRotationArgs(os.Args[2:]))
+	wlSet := flagWasSet(fs, "wl")
 
 	if *fanPlane != "" && len(fanRotation) > 0 {
 		errOut("Error: --fan-plane and --fan-rotation are mutually exclusive")
@@ -985,9 +1010,19 @@ func runChief(data []byte) {
 		os.Exit(1)
 	}
 
+	// Reference wavelength: --wl (flag) wins over chief.wavelength (YAML),
+	// falling back to the built-in default.
 	wavelength := *wlFlag
+	if !wlSet && input.Chief.Wavelength > 0 {
+		wavelength = input.Chief.Wavelength
+	}
+	if wlSet {
+		// Principle 3: echo the effective value back into the output section.
+		input.Chief.Wavelength = wavelength
+	}
 
 	gc, _ := loadCatalogs(&input, *glassDir)
+	writeBackGlassDir(&input, *glassDir)
 
 	surfaces := configSurfaces(input.Configs, configFlag)
 	surface.Precompute(surfaces)
@@ -1309,6 +1344,7 @@ func runTrace(data []byte) {
 	input := parseYAML[types.Input](data)
 
 	gc, cc := loadCatalogs(&input, *glassDir)
+	writeBackGlassDir(&input, *glassDir)
 	surfaces := configSurfaces(input.Configs, configFlag)
 	surface.Precompute(surfaces)
 
@@ -1330,6 +1366,18 @@ func runTrace(data []byte) {
 	pol := types.NewCircularJones(true)
 	if input.Rays != nil {
 		pol = input.Rays.Polarization
+	}
+	// Lenient tracing: --lenient (flag) wins over rays.lenient (YAML).
+	lenient := *traceLenient
+	if !flagWasSet(fs, "lenient") && input.Rays != nil && input.Rays.Lenient {
+		lenient = input.Rays.Lenient
+	}
+	if flagWasSet(fs, "lenient") {
+		// Principle 3: echo the effective value back into the output section.
+		if input.Rays == nil {
+			input.Rays = &types.RayInput{Polarization: pol}
+		}
+		input.Rays.Lenient = lenient
 	}
 	rayList := gatherTraceRays(input.Rays, chiefRays, pol)
 	if len(rayList) == 0 {
@@ -1358,7 +1406,7 @@ func runTrace(data []byte) {
 			for i := range jobs {
 				r := &rayList[i]
 				r.Jones = pol
-				if *traceLenient {
+				if lenient {
 					r.Lenient = true
 				}
 				ray.ResolveRay(r, surfaces, engine)
@@ -1432,6 +1480,7 @@ func runParaxial(data []byte) {
 	input := parseYAML[types.Input](data)
 
 	gc, _ := loadCatalogs(&input, *glassDir)
+	writeBackGlassDir(&input, *glassDir)
 
 	surfaces := configSurfaces(input.Configs, configFlag)
 	surface.Precompute(surfaces)

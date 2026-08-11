@@ -18,6 +18,10 @@ rayweave optimize [--verbose] [--log FILE] [--glass-dir DIR] [--exclude-param LI
 | `--glass-dir DIR` | AGF glass catalog directory |
 | `--exclude-param LIST` | comma-separated target param names to drop from the optimization variables (e.g. `conic,a4,a6`) |
 
+`--glass-dir` is written back into the output's `glass_catalog.directory`
+(CLI/YAML rule); `--exclude-param` removes the named targets from the echoed
+`optimization.variables`; `--verbose` / `--log` are run-stream flags.
+
 ## Input — single-config mode
 
 ```yaml

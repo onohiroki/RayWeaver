@@ -217,18 +217,18 @@ type PassThroughTarget struct {
 }
 
 type Ray struct {
-	ID                 string             `yaml:"id"`
-	Wavelength         float64            `yaml:"wavelength"`
-	Initial            RayState           `yaml:"initial"`
-	Aim                *Vec3              `yaml:"aim,omitempty"`
-	PassThrough        *PassThroughTarget `yaml:"pass_through,omitempty"`
-	Path               []int              `yaml:"path"`
-	Jones              JonesVector        `yaml:"-"`
+	ID          string             `yaml:"id"`
+	Wavelength  float64            `yaml:"wavelength"`
+	Initial     RayState           `yaml:"initial"`
+	Aim         *Vec3              `yaml:"aim,omitempty"`
+	PassThrough *PassThroughTarget `yaml:"pass_through,omitempty"`
+	Path        []int              `yaml:"path"`
+	Jones       JonesVector        `yaml:"-"`
 	// InitialField optionally overrides the 3D input electric field. When nil,
 	// the field is initialised from Jones as (Ex, Ey, 0) in global coordinates.
-	InitialField       *Vec3C             `yaml:"-"`
-	SkipGlassPathCheck bool               `yaml:"-"`
-	SkipApertureCheck  bool               `yaml:"-"`
+	InitialField       *Vec3C `yaml:"-"`
+	SkipGlassPathCheck bool   `yaml:"-"`
+	SkipApertureCheck  bool   `yaml:"-"`
 	// SkipAutoApertureCheck skips the aperture check on auto_aperture surfaces
 	// only, so their diameter can be measured from the true beam extent rather
 	// than from a self-clipped set of rays. Fixed (auto_aperture: false)
@@ -252,10 +252,10 @@ type SurfaceResult struct {
 	Jones       JonesVector     `yaml:"jones"`
 	// Field is the propagated 3D complex electric field in global coordinates
 	// at this surface, produced by the polarized ray tracer.
-	Field       Vec3C           `yaml:"-"`
-	IntensityS  float64         `yaml:"intensity_s"`
-	IntensityP  float64         `yaml:"intensity_p"`
-	ErrorCode   string          `yaml:"error_code,omitempty"`
+	Field      Vec3C   `yaml:"-"`
+	IntensityS float64 `yaml:"intensity_s"`
+	IntensityP float64 `yaml:"intensity_p"`
+	ErrorCode  string  `yaml:"error_code,omitempty"`
 }
 
 type RayResult struct {
@@ -383,11 +383,20 @@ type ChiefInput struct {
 	DumpMap          bool               `yaml:"dump_map,omitempty"`
 	PassThrough      *PassThroughTarget `yaml:"pass_through,omitempty"`
 	Wavelengths      []float64          `yaml:"wavelengths,omitempty"`
+	// Wavelength is the scalar reference wavelength (mm) used for the grid
+	// ray trace, the YAML counterpart of the --wl flag. wavelengths is the
+	// additional multi-wavelength spot-grid list. The effective value (flag
+	// wins over YAML) is written back into this field on output.
+	Wavelength float64 `yaml:"wavelength,omitempty"`
 }
 
 type RayInput struct {
 	Polarization JonesVector `yaml:"polarization,omitempty"`
 	Rays         []Ray       `yaml:"rays"`
+	// Lenient relaxes ray tracing: skip aperture/glass-path checks and
+	// continue past missed surfaces and TIR (the trace --lenient flag). The
+	// effective value (flag wins over YAML) is written back on output.
+	Lenient bool `yaml:"lenient,omitempty"`
 }
 
 type FieldItem struct {
@@ -702,6 +711,15 @@ type AsphereCandidateConfig struct {
 	TopK                    int                 `yaml:"top_k,omitempty"`
 	MinRaysPerCell          int                 `yaml:"min_rays_per_cell,omitempty"`
 	ScoreWeights            AsphereScoreWeights `yaml:"score_weights,omitempty"`
+	// Validate runs the Phase-4 short-DLS verification per fitted surface
+	// (the --validate flag); Apply inserts the top-ranked validated asphere
+	// onto its surface (the --apply flag, implies validate). ValidationDLSIter
+	// and ValidationNumRays size that DLS (--dls-iter / --num-rays). Flags
+	// win and the effective values are written back on output.
+	Validate          *bool `yaml:"validate,omitempty"`
+	Apply             *bool `yaml:"apply,omitempty"`
+	ValidationDLSIter int   `yaml:"validation_dls_iter,omitempty"`
+	ValidationNumRays int   `yaml:"validation_num_rays,omitempty"`
 }
 
 // AsphereScoreWeights are the weights of the composite surface score
@@ -746,29 +764,29 @@ type AsphereCoeffs struct {
 // AsphereSensitivityMatrix is the finite-difference sensitivity of the traced
 // merit to each even-order coefficient on a candidate surface.
 type AsphereSensitivityMatrix struct {
-	BaseMerit    float64   `yaml:"base_merit"`     // weighted RMS OPD without an asphere
-	AsphereMerit float64   `yaml:"asphere_merit"`  // weighted RMS OPD with the fitted asphere applied
-	Improvement  float64   `yaml:"improvement"`    // relative merit reduction (1 - asphere/base)
+	BaseMerit    float64   `yaml:"base_merit"`               // weighted RMS OPD without an asphere
+	AsphereMerit float64   `yaml:"asphere_merit"`            // weighted RMS OPD with the fitted asphere applied
+	Improvement  float64   `yaml:"improvement"`              // relative merit reduction (1 - asphere/base)
 	DMeritDCoef  []float64 `yaml:"d_merit_d_coef,omitempty"` // per-coefficient ∂Merit/∂c_j
 }
 
 // AsphereSurfaceScore is one candidate surface's ranking breakdown and fitted
 // coefficients.
 type AsphereSurfaceScore struct {
-	SurfaceID            int                     `yaml:"surface_id"`
-	Score                float64                 `yaml:"score"`
-	Coverage             float64                 `yaml:"coverage"`
-	CommonEnergy         float64                 `yaml:"common_energy"`
-	Conflict             float64                 `yaml:"conflict"`
-	UniqueEnergy         float64                 `yaml:"unique_energy"`
-	FitQuality           float64                 `yaml:"fit_quality"`
-	ManufacturingPenalty float64                 `yaml:"manufacturing_penalty"`
-	SensitivityPenalty   float64                 `yaml:"sensitivity_penalty"`
-	Coefficients         AsphereCoeffs           `yaml:"coefficients,omitempty"`
-	ScaledCoefficients   AsphereCoeffs           `yaml:"scaled_coefficients,omitempty"`
+	SurfaceID            int                       `yaml:"surface_id"`
+	Score                float64                   `yaml:"score"`
+	Coverage             float64                   `yaml:"coverage"`
+	CommonEnergy         float64                   `yaml:"common_energy"`
+	Conflict             float64                   `yaml:"conflict"`
+	UniqueEnergy         float64                   `yaml:"unique_energy"`
+	FitQuality           float64                   `yaml:"fit_quality"`
+	ManufacturingPenalty float64                   `yaml:"manufacturing_penalty"`
+	SensitivityPenalty   float64                   `yaml:"sensitivity_penalty"`
+	Coefficients         AsphereCoeffs             `yaml:"coefficients,omitempty"`
+	ScaledCoefficients   AsphereCoeffs             `yaml:"scaled_coefficients,omitempty"`
 	Sensitivity          *AsphereSensitivityMatrix `yaml:"sensitivity,omitempty"`
 	Validation           *AsphereValidation        `yaml:"validation,omitempty"`
-	Warnings             []string                `yaml:"warnings,omitempty"`
+	Warnings             []string                  `yaml:"warnings,omitempty"`
 }
 
 // AsphereOPDField is one field's mean OPD profile across a surface's polar
@@ -803,14 +821,14 @@ type AsphereCandidateResult struct {
 // relative improvement. An empty DLS run (validation disabled) leaves the
 // block nil.
 type AsphereValidation struct {
-	SurfaceID    int            `yaml:"surface_id"`
-	BeforeMerit  float64        `yaml:"before_merit"`
-	AfterMerit   float64        `yaml:"after_merit"`
-	Improvement  float64        `yaml:"improvement"` // 1 - after/before
-	Iterations   int            `yaml:"iterations"`
-	Status       string         `yaml:"status,omitempty"`
-	Coefficients AsphereCoeffs  `yaml:"coefficients,omitempty"` // DLS-solved even-order coefficients
-	Warnings     []string       `yaml:"warnings,omitempty"`
+	SurfaceID    int           `yaml:"surface_id"`
+	BeforeMerit  float64       `yaml:"before_merit"`
+	AfterMerit   float64       `yaml:"after_merit"`
+	Improvement  float64       `yaml:"improvement"` // 1 - after/before
+	Iterations   int           `yaml:"iterations"`
+	Status       string        `yaml:"status,omitempty"`
+	Coefficients AsphereCoeffs `yaml:"coefficients,omitempty"` // DLS-solved even-order coefficients
+	Warnings     []string      `yaml:"warnings,omitempty"`
 }
 
 type Input struct {
@@ -825,6 +843,8 @@ type Input struct {
 	Paraxial       *ParaxialInput          `yaml:"paraxial,omitempty"`
 	Asphere        *AsphereCandidateConfig `yaml:"asphere_candidate,omitempty"`
 	PSF            *PSFConfig              `yaml:"psf,omitempty"`
+	Vignette       *VignetteConfig         `yaml:"vignette,omitempty"`
+	Scale          *ScaleConfig            `yaml:"scale,omitempty"`
 }
 
 type GridPoint struct {
@@ -933,10 +953,27 @@ type ParaxialInput struct {
 	ObjectHeight float64 `yaml:"object_height,omitempty"`
 }
 
+// ScaleConfig configures the `scale` subcommand (the `scale:` YAML section).
+// EFL is the target effective focal length, the counterpart of the --efl flag
+// (flag wins; the effective value is written back on output).
+type ScaleConfig struct {
+	EFL float64 `yaml:"efl,omitempty"`
+}
+
 type StopInfo struct {
 	SurfaceID int     `yaml:"surface_id"`
 	PhysicalZ float64 `yaml:"physical_z"`
 	Diameter  float64 `yaml:"diameter"`
+}
+
+// VignetteConfig configures the `vignette` subcommand (the `vignette:` YAML
+// section). All fields are optional; flags on the command line override them
+// and the effective values are written back into the output section.
+type VignetteConfig struct {
+	Iterations   int     `yaml:"iterations,omitempty"`
+	MinGlassPath float64 `yaml:"min_glass_path,omitempty"`
+	MarginMM     float64 `yaml:"margin_mm,omitempty"`
+	Wavelength   float64 `yaml:"wavelength,omitempty"`
 }
 
 // VignettingField reports the per-field vignetting result for the `vignette`
@@ -1019,9 +1056,9 @@ type PSFMTFCross struct {
 // PSFMTFAxis holds the OTF/MTF data along one image-plane axis
 // (sagittal = X, tangential = Y, the image-height direction).
 type PSFMTFAxis struct {
-	Curve      []PSFMTFPoint  `yaml:"curve,omitempty"`
-	Thresholds []PSFMTFCross  `yaml:"thresholds,omitempty"`
-	Evaluated  []PSFMTFPoint  `yaml:"evaluated,omitempty"`
+	Curve      []PSFMTFPoint `yaml:"curve,omitempty"`
+	Thresholds []PSFMTFCross `yaml:"thresholds,omitempty"`
+	Evaluated  []PSFMTFPoint `yaml:"evaluated,omitempty"`
 }
 
 // PSFMTFSummary is the MTF/OTF summary of one PSF result.
@@ -1033,13 +1070,13 @@ type PSFMTFSummary struct {
 // PSFConfig configures the `psf` subcommand (the `psf:` YAML section).
 // All fields are optional; flags on the command line override them.
 type PSFConfig struct {
-	ReferenceSurface int        `yaml:"reference_surface,omitempty"`
-	GridSize         int        `yaml:"grid_size,omitempty"`
-	HalfWidth        float64    `yaml:"half_width,omitempty"`
-	NumRays          int        `yaml:"num_rays,omitempty"`
-	Fields           []int      `yaml:"fields,omitempty"`
-	Wavelengths      []float64  `yaml:"wavelengths,omitempty"`
-	Polarization     string     `yaml:"polarization,omitempty"`
+	ReferenceSurface int       `yaml:"reference_surface,omitempty"`
+	GridSize         int       `yaml:"grid_size,omitempty"`
+	HalfWidth        float64   `yaml:"half_width,omitempty"`
+	NumRays          int       `yaml:"num_rays,omitempty"`
+	Fields           []int     `yaml:"fields,omitempty"`
+	Wavelengths      []float64 `yaml:"wavelengths,omitempty"`
+	Polarization     string    `yaml:"polarization,omitempty"`
 	// Workers bounds the Huygens-integration and wavefront-tracing
 	// parallelism (0 = runtime.NumCPU()).
 	Workers int `yaml:"huygens_workers,omitempty"`
@@ -1069,26 +1106,26 @@ const (
 // the pipeline YAML. The full intensity grid is written to --yaml/--csv files
 // (see PSFResult.OutputFile) to keep the pipeline stream small.
 type PSFResult struct {
-	FieldIndex       int     `yaml:"field_index"`
-	FieldAngle       float64 `yaml:"field_angle"`
-	Wavelength       float64 `yaml:"wavelength,omitempty"`
-	Polarization     string  `yaml:"polarization"`
-	StrehlRatio      float64 `yaml:"strehl_ratio"`
-	FWHMX            float64 `yaml:"fwhm_x"`
-	FWHMY            float64 `yaml:"fwhm_y"`
-	CentroidX        float64 `yaml:"centroid_x"`
-	CentroidY        float64 `yaml:"centroid_y"`
-	PeakValue        float64 `yaml:"peak_value"`
-	PeakX            float64 `yaml:"peak_x"`
-	PeakY            float64 `yaml:"peak_y"`
+	FieldIndex        int     `yaml:"field_index"`
+	FieldAngle        float64 `yaml:"field_angle"`
+	Wavelength        float64 `yaml:"wavelength,omitempty"`
+	Polarization      string  `yaml:"polarization"`
+	StrehlRatio       float64 `yaml:"strehl_ratio"`
+	FWHMX             float64 `yaml:"fwhm_x"`
+	FWHMY             float64 `yaml:"fwhm_y"`
+	CentroidX         float64 `yaml:"centroid_x"`
+	CentroidY         float64 `yaml:"centroid_y"`
+	PeakValue         float64 `yaml:"peak_value"`
+	PeakX             float64 `yaml:"peak_x"`
+	PeakY             float64 `yaml:"peak_y"`
 	EncircledEnergy50 float64 `yaml:"encircled_energy_50"`
-	AiryRadius       float64 `yaml:"airy_radius"`
-	GridSize         int     `yaml:"grid_size"`
-	Resolution       float64 `yaml:"resolution"`
-	TotalRays        int     `yaml:"total_rays"`
-	ValidRays        int     `yaml:"valid_rays"`
-	Vignetted        int     `yaml:"vignetted,omitempty"`
-	OutputFile       string  `yaml:"output_file,omitempty"`
+	AiryRadius        float64 `yaml:"airy_radius"`
+	GridSize          int     `yaml:"grid_size"`
+	Resolution        float64 `yaml:"resolution"`
+	TotalRays         int     `yaml:"total_rays"`
+	ValidRays         int     `yaml:"valid_rays"`
+	Vignetted         int     `yaml:"vignetted,omitempty"`
+	OutputFile        string  `yaml:"output_file,omitempty"`
 	// SpectralCurve is set for polychromatic results (wavelength is omitted).
 	SpectralCurve string `yaml:"spectral_curve,omitempty"`
 	// MTF is the OTF/MTF summary (thresholds, and evaluated frequencies when

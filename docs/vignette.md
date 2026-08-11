@@ -30,6 +30,20 @@ rayweave vignette < lens.yaml | rayweave trace | rayweave plot -o out.png
 | `--config ID` | select config by id (multi-config mode) |
 | `--glass-dir DIR` | AGF glass catalog directory |
 
+## Input YAML — `vignette` section (optional)
+
+Every setting can be given under a top-level `vignette:` section (also valid as
+a computation setting under the CLI/YAML rules; the flags override, and the
+effective flag-won values are written back into the output section):
+
+```yaml
+vignette:
+  iterations: 3           # number of diameter/pupil passes
+  min_glass_path: 0.5     # minimum glass path (edge thickness) per element (mm)
+  margin_mm: 0.2          # beam-footprint clearance per side (mm)
+  wavelength: 0.00058756  # reference wavelength (mm)
+```
+
 ## Input
 
 The system must carry a `chief` section providing the fields (`fields` or

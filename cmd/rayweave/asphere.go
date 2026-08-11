@@ -37,6 +37,7 @@ func runAsphere(data []byte) {
 	}
 
 	gc, _ := loadCatalogs(&input, *glassDir)
+	writeBackGlassDir(&input, *glassDir)
 
 	surfaces := configSurfaces(input.Configs, configFlag)
 	if len(surfaces) == 0 {
@@ -64,6 +65,24 @@ func runAsphere(data []byte) {
 		cfg.SagScale = *sagScale
 	}
 
+	// Principle 3: echo the flag-won analysis values back into the output's
+	// asphere_candidate: section (only for flags actually set).
+	writeBackAsphereConfig(&input, cfg, fs)
+
+	// Validation settings: --validate/--apply/--dls-iter/--num-rays (flags)
+	// win over asphere_candidate.validate/apply/validation_dls_iter/
+	// validation_num_rays (YAML).
+	validateEff, applyEff := resolveAsphereValidation(&input, *validate, *apply, fs)
+	dlsIterEff := *dlsIter
+	if !flagWasSet(fs, "dls-iter") && input.Asphere != nil && input.Asphere.ValidationDLSIter > 0 {
+		dlsIterEff = input.Asphere.ValidationDLSIter
+	}
+	numRaysEff := *numRays
+	if !flagWasSet(fs, "num-rays") && input.Asphere != nil && input.Asphere.ValidationNumRays > 0 {
+		numRaysEff = input.Asphere.ValidationNumRays
+	}
+	writeBackAsphereValidation(&input, validateEff, applyEff, dlsIterEff, numRaysEff, fs)
+
 	fields, err := resolveAsphereFields(input, configFlag)
 	if err != nil {
 		errOut("Error: %v", err)
@@ -79,14 +98,14 @@ func runAsphere(data []byte) {
 	res := asphere.Run(surfaces, fields, wavelengths, cfg, gc, stopSurface, input.Chief.ReferenceSurface)
 
 	// Phase 4: optionally validate each fitted top-K asphere with a short DLS.
-	if (*validate || *apply) && *dlsIter > 0 {
+	if (validateEff || applyEff) && dlsIterEff > 0 {
 		validateFields := asphereFieldsToItems(fields)
-		nr := *numRays
+		nr := numRaysEff
 		if nr <= 0 {
 			nr = 64
 		}
 		pupilZ := computePupilZ(input, surfaces, gc)
-		validations := validateAspheres(surfaces, res.Rankings, gc, cfg.TopK, *dlsIter, nr,
+		validations := validateAspheres(surfaces, res.Rankings, gc, cfg.TopK, dlsIterEff, nr,
 			stopSurface, input.Chief.ReferenceSurface, pupilZ, validateFields, wavelengths,
 			polarization(input), input.Chief.GridType, input.Chief.PassThrough)
 		for i := range res.Rankings {
@@ -97,7 +116,7 @@ func runAsphere(data []byte) {
 		// --apply: insert the top validated asphere's DLS-solved coefficients
 		// back into the input system so the output is pipeline-compatible
 		// (asphere --validate --apply | chief | trace | plot).
-		if *apply {
+		if applyEff {
 			if v := bestValidatedAsphere(res.Rankings); v != nil {
 				applyAsphereToConfigs(&input.Configs, v.SurfaceID, v.Coefficients)
 			} else {
@@ -116,6 +135,85 @@ func runAsphere(data []byte) {
 		},
 	}
 	writeYAML(&output)
+}
+
+// writeBackAsphereConfig echoes the flag-won analysis settings into the
+// output's asphere_candidate: section (principle 3 of the CLI/YAML rule).
+// Only flags actually given are written back; untouched YAML stays as-is.
+func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.FlagSet) {
+	if !(flagWasSet(fs, "rings") || flagWasSet(fs, "angles") ||
+		flagWasSet(fs, "pupil-samples") || flagWasSet(fs, "sensitivity-samples") ||
+		flagWasSet(fs, "top-k") || flagWasSet(fs, "sag-scale")) {
+		return
+	}
+	if input.Asphere == nil {
+		input.Asphere = &types.AsphereCandidateConfig{}
+	}
+	if flagWasSet(fs, "rings") {
+		input.Asphere.CellRings = cfg.CellRings
+	}
+	if flagWasSet(fs, "angles") {
+		input.Asphere.CellAngles = cfg.CellAngles
+	}
+	if flagWasSet(fs, "pupil-samples") {
+		input.Asphere.PupilSamplesRadial = cfg.PupilSamplesRadial
+	}
+	if flagWasSet(fs, "sensitivity-samples") {
+		v := cfg.SensitivitySamples
+		input.Asphere.SensitivitySamples = &v
+	}
+	if flagWasSet(fs, "top-k") {
+		input.Asphere.TopK = cfg.TopK
+	}
+	if flagWasSet(fs, "sag-scale") {
+		input.Asphere.SagScale = cfg.SagScale
+	}
+}
+
+// resolveAsphereValidation resolves whether the Phase-4 validation (and its
+// --apply insertion) runs: --validate/--apply (flags) win over
+// asphere_candidate.validate/apply (YAML). --apply implies --validate.
+func resolveAsphereValidation(input *types.Input, validateFlag, applyFlag bool, fs *flag.FlagSet) (validate, apply bool) {
+	validate = validateFlag
+	apply = applyFlag
+	if !flagWasSet(fs, "validate") && !flagWasSet(fs, "apply") &&
+		input.Asphere != nil && input.Asphere.Validate != nil {
+		validate = *input.Asphere.Validate
+	}
+	if !flagWasSet(fs, "apply") && input.Asphere != nil && input.Asphere.Apply != nil {
+		apply = *input.Asphere.Apply
+	}
+	if apply {
+		validate = true
+	}
+	return validate, apply
+}
+
+// writeBackAsphereValidation echoes the flag-won validation settings into the
+// output's asphere_candidate: section (principle 3). Only flags actually
+// given are written back.
+func writeBackAsphereValidation(input *types.Input, validate, apply bool, dlsIter, numRays int, fs *flag.FlagSet) {
+	if !(flagWasSet(fs, "validate") || flagWasSet(fs, "apply") ||
+		flagWasSet(fs, "dls-iter") || flagWasSet(fs, "num-rays")) {
+		return
+	}
+	if input.Asphere == nil {
+		input.Asphere = &types.AsphereCandidateConfig{}
+	}
+	if flagWasSet(fs, "validate") {
+		v := validate
+		input.Asphere.Validate = &v
+	}
+	if flagWasSet(fs, "apply") {
+		v := apply
+		input.Asphere.Apply = &v
+	}
+	if flagWasSet(fs, "dls-iter") {
+		input.Asphere.ValidationDLSIter = dlsIter
+	}
+	if flagWasSet(fs, "num-rays") {
+		input.Asphere.ValidationNumRays = numRays
+	}
 }
 
 // asphereFieldsToItems converts asphere analysis fields into types.FieldItem

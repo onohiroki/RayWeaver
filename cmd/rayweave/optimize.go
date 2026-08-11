@@ -52,6 +52,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	}
 
 	gc, _ := loadCatalogs(&input, glassDir)
+	writeBackGlassDir(&input, glassDir)
 
 	// Build the per-config optimisation inputs (shared/local variables are
 	// read below; the unified Optimizer drives all configs together).

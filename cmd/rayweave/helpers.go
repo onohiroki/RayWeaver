@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"math"
 	"os"
 
@@ -11,6 +12,32 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
 )
+
+// flagWasSet reports whether name was explicitly given on the command line.
+// It distinguishes "flag not given" from a flag's default value, which the
+// CLI/YAML precedence rule needs so an unset flag never overrides YAML.
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
+// writeBackGlassDir records the --glass-dir CLI value into the output YAML's
+// glass_catalog.directory (principle 3 of the CLI/YAML rule). It is a no-op
+// when the flag was not given, so an unset flag leaves the YAML untouched.
+func writeBackGlassDir(input *types.Input, dir string) {
+	if dir == "" {
+		return
+	}
+	if input.GlassCatalog == nil {
+		input.GlassCatalog = &types.GlassCatalog{}
+	}
+	input.GlassCatalog.Directory = dir
+}
 
 // parseYAML unmarshals a document into a value of type T, exiting on error.
 func parseYAML[T any](data []byte) T {

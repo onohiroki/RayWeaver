@@ -38,6 +38,7 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	}
 
 	gc, _ := loadCatalogs(&input, glassDir)
+	writeBackGlassDir(&input, glassDir)
 
 	progress := escape.NewProgress()
 	var logFiles []*os.File

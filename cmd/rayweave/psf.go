@@ -49,6 +49,7 @@ func runPSF(data []byte) {
 	}
 
 	gc, _ := loadCatalogs(&input, *glassDir)
+	writeBackGlassDir(&input, *glassDir)
 	surfaces := configSurfaces(input.Configs, configFlag)
 	if len(surfaces) == 0 {
 		errOut("Error: no surfaces to process")

@@ -33,7 +33,9 @@ It reads standard system YAML, writes pipeline-compatible YAML with an
 | `--config ID` | select config by id (multi-config mode) |
 | `--glass-dir DIR` | AGF glass catalog directory |
 
-Flags override the corresponding `asphere_candidate:` YAML values.
+Flags override the corresponding `asphere_candidate:` YAML values; the
+effective (flag-won) values are written back into the output's
+`asphere_candidate:` section (CLI/YAML rule).
 
 ## Input
 
@@ -80,6 +82,10 @@ asphere_candidate:
     sensitivity: 0.15
     conflict: 0.10
     manufacturing: 0.05
+  validate: false                    # enable the short-DLS validation (--validate)
+  apply: false                       # insert the top validated asphere (--apply)
+  validation_dls_iter: 20            # validation DLS iterations (--dls-iter)
+  validation_num_rays: 64            # validation pupil-grid rays (--num-rays)
 ```
 
 Piston is **always** removed (per-field OPD is referenced to the field's mean

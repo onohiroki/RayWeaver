@@ -42,7 +42,10 @@ stats) plus a `rays` section carrying the marginal rays is added so the result
 can be piped into `rayweave trace`.
 
 Glass names found in the lens file are resolved against `--glass-dir` (AGF
-catalog) or carried through as catalog entries.
+catalog) or carried through as catalog entries. When `--glass-dir` is given,
+the written YAML's `glass_catalog.directory` records it so the downstream
+pipeline (`chief` / `trace` / `optimize` / …) resolves the same AGF catalog
+without re-passing the flag.
 
 ## Examples
 

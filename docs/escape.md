@@ -21,6 +21,10 @@ rayweave escape extract --index N < escape-output.yaml
 | `--save FILE` | save every discovered local minimum to `FILE1.yaml`, `FILE2.yaml`, … (see [Saving minima](#saving-minima)) |
 | `--index N` | (with `escape extract`) local minimum index to extract |
 
+`--glass-dir` is written back into the output's `glass_catalog.directory`
+(CLI/YAML rule); `--save` records the per-minimum files in
+`escape_result.minima[].file`; `--verbose` / `--log` are run-stream flags.
+
 Sub-commands:
 
 - `escape` (default) — run the global optimization loop

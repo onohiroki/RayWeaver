@@ -23,14 +23,27 @@ func runScale(data []byte) {
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(os.Args[2:])
 
-	if *eflTarget <= 0 {
-		errOut("Error: --efl TARGET (mm) is required")
-		os.Exit(1)
-	}
-
 	input := parseYAML[types.Input](data)
 
+	// Target EFL: --efl (flag) wins over scale.efl (YAML).
+	target := *eflTarget
+	if !flagWasSet(fs, "efl") && input.Scale != nil && input.Scale.EFL > 0 {
+		target = input.Scale.EFL
+	}
+	if target <= 0 {
+		errOut("Error: --efl TARGET (mm) is required (or set scale.efl in the input YAML)")
+		os.Exit(1)
+	}
+	if flagWasSet(fs, "efl") {
+		// Principle 3: echo the effective value back into the output section.
+		if input.Scale == nil {
+			input.Scale = &types.ScaleConfig{}
+		}
+		input.Scale.EFL = target
+	}
+
 	gc, _ := loadCatalogs(&input, *glassDir)
+	writeBackGlassDir(&input, *glassDir)
 
 	refSurfaces := configSurfaces(input.Configs, configFlag)
 	if len(refSurfaces) == 0 {
@@ -47,7 +60,7 @@ func runScale(data []byte) {
 		os.Exit(1)
 	}
 
-	s := *eflTarget / cur
+	s := target / cur
 
 	// Scale every config's surfaces by the same factor (keeps zoom ratios).
 	for ci := range input.Configs {
@@ -64,7 +77,7 @@ func runScale(data []byte) {
 	writeYAML(&output)
 
 	fmt.Fprintf(os.Stderr, "=== Scale complete ===\n")
-	fmt.Fprintf(os.Stderr, "  EFL:      %.4f -> %.4f mm\n", cur, *eflTarget)
+	fmt.Fprintf(os.Stderr, "  EFL:      %.4f -> %.4f mm\n", cur, target)
 	fmt.Fprintf(os.Stderr, "  Factor:   %.6f\n", s)
 }
 

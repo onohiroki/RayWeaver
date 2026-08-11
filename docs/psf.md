@@ -49,7 +49,10 @@ single flat exit pupil would break down.
 | `--config ID` | select config by id (multi-config mode) |
 | `--glass-dir DIR` | AGF glass catalog directory |
 
-Flags override the corresponding `psf:` YAML values.
+Flags override the corresponding `psf:` YAML values, and the effective
+(flag-won) values are written back into the output's `psf:` section;
+`--glass-dir` is written back into `glass_catalog.directory` (CLI/YAML rule,
+`psf` is the reference implementation).
 
 ## Polarization
 

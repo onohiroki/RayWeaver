@@ -26,7 +26,51 @@ func runVignette(data []byte) {
 		os.Exit(1)
 	}
 
+	// Resolve effective settings: flag (if set) > vignette: YAML section >
+	// built-in default.
+	vcfg := input.Vignette
+	if vcfg == nil {
+		vcfg = &types.VignetteConfig{}
+	}
+	iterationsEff := *iterations
+	if !flagWasSet(fs, "iterations") && vcfg.Iterations > 0 {
+		iterationsEff = vcfg.Iterations
+	}
+	minGlassPathEff := *minGlassPath
+	if !flagWasSet(fs, "min-glass-path") && vcfg.MinGlassPath > 0 {
+		minGlassPathEff = vcfg.MinGlassPath
+	}
+	marginMMEff := *marginMM
+	if !flagWasSet(fs, "margin-mm") && vcfg.MarginMM > 0 {
+		marginMMEff = vcfg.MarginMM
+	}
+	wlEff := *wlFlag
+	if !flagWasSet(fs, "wl") && vcfg.Wavelength > 0 {
+		wlEff = vcfg.Wavelength
+	}
+	// Principle 3: echo the flag-won values back into the output section
+	// (only for flags actually set; unset flags never inject defaults).
+	if flagWasSet(fs, "iterations") || flagWasSet(fs, "min-glass-path") ||
+		flagWasSet(fs, "margin-mm") || flagWasSet(fs, "wl") {
+		if input.Vignette == nil {
+			input.Vignette = &types.VignetteConfig{}
+		}
+		if flagWasSet(fs, "iterations") {
+			input.Vignette.Iterations = iterationsEff
+		}
+		if flagWasSet(fs, "min-glass-path") {
+			input.Vignette.MinGlassPath = minGlassPathEff
+		}
+		if flagWasSet(fs, "margin-mm") {
+			input.Vignette.MarginMM = marginMMEff
+		}
+		if flagWasSet(fs, "wl") {
+			input.Vignette.Wavelength = wlEff
+		}
+	}
+
 	gc, _ := loadCatalogs(&input, *glassDir)
+	writeBackGlassDir(&input, *glassDir)
 
 	surfaces := configSurfaces(input.Configs, configFlag)
 	if len(surfaces) == 0 {
@@ -66,10 +110,10 @@ func runVignette(data []byte) {
 		StopSurface:  input.Chief.StopSurface,
 		NumRays:      input.Chief.NumRays,
 		GridType:     input.Chief.GridType,
-		Wavelength:   *wlFlag,
-		MinGlassPath: *minGlassPath,
-		MarginMM:     *marginMM,
-		Iterations:   *iterations,
+		Wavelength:   wlEff,
+		MinGlassPath: minGlassPathEff,
+		MarginMM:     marginMMEff,
+		Iterations:   iterationsEff,
 	}, gc)
 
 	// Write back the settled diameters and applied min_glass_path values.

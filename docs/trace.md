@@ -14,20 +14,26 @@ rayweave trace [--config ID] [--glass-dir DIR] [--verbose] < system.yaml
 |---|---|
 | `--config ID` | select a config by id (multi-config mode); defaults to `configs[0]` |
 | `--glass-dir DIR` | AGF glass catalog directory (for resolving material names) |
+| `--lenient` | trace leniently: skip aperture/glass-path checks and continue past missed surfaces and TIR (equivalent to `rays.lenient: true`; written back into the output) |
 | `--verbose` | print per-ray trace info to stderr (JSONL) |
 
 ## Input YAML — `rays` section
 
 ```yaml
-polarization: [1, 0, 0, 1]      # Jones vector [ReEx, ImEx, ReEy, ImEy]
 rays:
-  - id: "my_ray"
-    wavelength: 0.00058756      # mm
-    initial:
-      origin: [0, 0, -100]      # [x, y, z] start point (mm)
-      direction: [0, 0.1, 1]    # [dx, dy, dz] direction vector (normalised)
-    path: [0, 1, 2, ..., N]     # surface IDs to trace (0 = object plane)
+  polarization: [1, 0, 0, 1]      # Jones vector [ReEx, ImEx, ReEy, ImEy]
+  lenient: false                  # lenient tracing (--lenient overrides)
+  rays:
+    - id: "my_ray"
+      wavelength: 0.00058756      # mm
+      initial:
+        origin: [0, 0, -100]      # [x, y, z] start point (mm)
+        direction: [0, 0.1, 1]    # [dx, dy, dz] direction vector (normalised)
+      path: [0, 1, 2, ..., N]     # surface IDs to trace (0 = object plane)
 ```
+
+`--glass-dir` is written back into the output's `glass_catalog.directory`
+(CLI/YAML rule).
 
 Alternative ray definitions:
 

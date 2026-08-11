@@ -42,6 +42,37 @@ The ranking's sensitivity term is measured, not analytic: for every candidate su
 `escape` (sub-subcommands: `escape` run, `escape extract --index N`) is the Ishiki-Ono style escape-function global optimiser: DLS cycles with merit-function bumps at discovered local minima. Outputs the best solution pipeline-compatible plus `escape_result.minima[]` (full surfaces per minimum, plus `features[].element_powers`: the thin-lens power of each lens element per config as a solution fingerprint).
 ## Key conventions
 
+### CLI options vs input YAML (three principles)
+
+Every YAML-pipeline subcommand follows three rules:
+
+1. **YAML-specifiable** — every computation-setting CLI flag has a counterpart in
+   the input YAML section (`--wl` ↔ `chief.wavelength`, `asphere --rings` ↔
+   `asphere_candidate.cell_rings`, `psf --psf-grid` ↔ `psf.grid_size`, `--glass-dir`
+   ↔ `glass_catalog.directory`, ...). The default flag value is always 0/""/false
+   ("unset"); the YAML value (or the built-in default) fills the gap, so an unset
+   flag never overrides YAML.
+2. **CLI wins** — when both a flag and the YAML value are present, the flag wins
+   (resolved with `flagWasSet` so "not given" is distinguishable from a default).
+3. **Write-back** — when the run used CLI options, the pipeline output YAML carries
+   the effective (flag-won) values in the corresponding section. Scalar settings are
+   written back only for flags actually set (never inject built-in defaults into
+   every output); `--glass-dir` is written back into `glass_catalog.directory`.
+
+Exemptions (documented, not YAML-specifiable):
+- `--config` is a config *selection*, not a setting.
+- `plot` is a terminal renderer (SVG/PNG); its render flags never flow into pipeline YAML.
+- `import` reads a foreign format (not YAML) — no input-YAML settings to overwrite.
+- Action/stream flags record their **effects** in the output instead of a setting:
+  chief `--clear-aperture*` / `--marginal-rays` / `--preserve-rays` / `--ray-fan` /
+  `--fan-plane` / `--fan-rotation` (effects: diameters, `rays[]`, `ray_fan`),
+  `--verbose` / `--log`, `escape --save` (effect: `escape_result.minima[].file`),
+  `psf --yaml` / `--csv` (effect: `psf_results[].output_file`).
+- `escape extract --index` selects a stored minimum.
+
+`psf` is the reference implementation (every flag ↔ `psf:` field, CLI wins,
+`writeBackPSF` echoes the effective values into the output).
+
 - Surfaces use `curvature` (not `radius`) as primary field. `radius` in YAML is converted at parse time.
 - Chief field types: `angle` (degrees) + optional `direction [dx, dy]`, `image_height` (mm), or `height` + `object_z` (finite conjugate). Use `--wl` flag for multi-wavelength spot grids.
 - `import --format zemax|oslo|codev` produces multi-config YAML with automatic chief+marginal rays.

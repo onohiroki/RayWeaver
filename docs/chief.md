@@ -41,6 +41,7 @@ chief:
   num_rays: 512                # pupil samples (≈ √n × √n)
   grid_type: polar             # pupil grid: polar | square | hex
   dump_map: false              # output per-ray spot data (grid_points)
+  wavelength: 0.00058756       # reference wavelength (mm); overridden by --wl
   pass_through:                # optional: constrain chief ray to pass
     surface: 3                 #   through a specific surface coordinate
     coordinate: [0, 0, 0]      #   (default [0, 0, 0] = surface centre)
@@ -58,6 +59,10 @@ spanned by the field vector and the optical axis.
 - **With `pass_through`** — the chief ray is the ray from the field that passes
   through the given coordinate on the given surface (the traditional
   "stop-centre" definition).
+
+Flags override the corresponding YAML values (`--wl` → `chief.wavelength`,
+`--pass-through` → `pass_through.surface`); the effective values are written
+back into the output YAML (CLI/YAML rule).
 
 ## Output
 

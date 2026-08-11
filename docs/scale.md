@@ -15,8 +15,19 @@ rayweave scale --efl TARGET [--config ID] < system.yaml > scaled.yaml
 
 | Flag | Description |
 |---|---|
-| `--efl TARGET` | target effective focal length in mm (required) |
+| `--efl TARGET` | target effective focal length in mm (required unless `scale.efl` is set) |
 | `--config ID` | select a config by id (multi-config mode); its EFL sets the scale factor applied to every config |
+| `--glass-dir DIR` | AGF glass catalog directory |
+
+## Input YAML — `scale` section (optional)
+
+```yaml
+scale:
+  efl: 50.0        # target effective focal length (mm); --efl overrides
+```
+
+The effective value is echoed back into the output `scale:` section when it
+came from a flag (CLI/YAML rule).
 
 ## Output
 
