@@ -670,6 +670,18 @@ Input YAML — psf section (optional; flags override):
 Output: augmented YAML with a lightweight psf_results[] summary (Strehl,
 FWHM, centroid, encircled energy, Airy radius, sampling counts). Full grids
 are written to --yaml/--csv files referenced by output_file.
+
+Notes:
+  - The default reference surface is the last optical surface (the surface
+    before the image plane). The wavefront is sampled there and propagated to
+    the fixed flat image plane; field curvature and defocus therefore appear
+    naturally in the PSF.
+  - For strongly aberrated fields the PSF is a coherent speckle pattern whose
+    peak (and hence Strehl) is sensitive to the pupil sampling. Increase
+    --num-rays (e.g. 900..1600) for reliable off-axis metrics.
+  - The reported wavefront rms_opd/pv_opd are referenced to the best-fit
+    sphere (piston + tilt + defocus removed), the standard wavefront
+    aberration definition.
 `)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml
@@ -770,6 +782,7 @@ Subcommands:
   escape     Escape-function global optimization (multiple local minima)
   scale      Scale a system so its EFL equals --efl TARGET
   asphere    Rank surfaces for asphere introduction, estimate initial coefficients
+  psf        Point-spread function via direct vector Huygens integration
   import     Import ZEMAX/OSLO/CODE V lens files
   query      Read-only YAML/JSONL selector (replace python3/PyYAML in demos)
 

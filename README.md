@@ -13,6 +13,7 @@ RayWeaver is a CLI ray tracing engine for optical systems, written in Go.
 - Folded systems (mirrors): positive thicknesses only, fold via `decenter: [{tilt: [0, 180, 0], scope: both}]` + top-level `reflect: true`, fold-aware paraxial/chief/ray tracing
 - Glass dispersion via Sellmeier or Cauchy models
 - Jones-matrix polarization tracking
+- Point-spread function via direct vector Huygens integration (no FFT, fisheye-safe, RCP/LCP/X/Y input)
 - DLS (damped least squares) local optimization of lens surfaces
 - Escape-function global optimization that finds multiple local minima
 - Parallel computation for pupil grids and optimization Jacobians
@@ -51,6 +52,7 @@ Subcommands are grouped by their role in the data flow
 | Synthesis | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. `--verbose` also emits a per-term merit breakdown. `--exclude-param` drops target params (e.g. asphere coefficients) from the variable set. | system + merit → optimized system |
 | Synthesis | `escape` | Escape-function global optimization (Ishiki-Ono style): repeatedly run DLS, adding a smooth merit-function bump at each discovered local minimum so the next run escapes the valley and finds other minima. Sub-command `escape extract --index N` pulls one minimum out as a clean lens. Flags: `--glass-dir`, `--verbose`, `--log FILE`, `--save FILE` (versioned per-minimum files), `--index N` (extract). See `docs/escape.md`. | system + merit → best solution + `escape_result` |
 | Synthesis | `asphere` | Rank candidate surfaces for aspheric introduction and fit safe initial even-order asphere coefficients (conic + A4..A12) from the per-field OPD residuals. `--validate` runs a short DLS against the spot RMS per fitted surface (`validation:` block with the DLS-solved coefficients); `--apply` inserts the top-ranked validated asphere (implies `--validate`) so `asphere --validate --apply \| chief \| trace \| plot` shows all-spherical vs aspherized. See `docs/asphere.md` and `docs/methods/asphere-candidates.md`. | system + `chief` fields → `asphere_candidate_result` (+ modified system with `--apply`) |
+| Analysis | `psf` | Point-spread function on the flat image plane via per-field polarized ray tracing, non-uniform wavefront sampling (Delaunay-triangulated reference surface) and a direct vector Huygens integral (no FFT; fisheye-safe). Flags: `--ref-surface`, `--psf-grid`, `--psf-width`, `--num-rays`, `--fields`, `--wavelengths`, `--polarization RCP\|LCP\|X\|Y\|RCP+LCP`, `--yaml FILE` (full structured data), `--csv FILE` (gnuplot map). See `docs/psf.md` and `docs/methods/psf.md`. | system + `chief` fields → `psf_results` summary (+ `--yaml`/`--csv` files) |
 | Presentation | `plot` | Render an SVG or PNG cross-section diagram. Flags: `-o file.svg|.png`, `--lens-width`, `--ray-width`, `--scale`, `--right-margin`, `--config`. | system + rays → diagram |
 | Tooling | `query` | Read-only YAML/JSONL selector: extract values, iterate arrays, aggregate, evaluate expressions and pass-gates from a shell pipeline. Replaces `python3 + PyYAML` / `yq` in the sample demos. See `docs/query.md`. | YAML/JSONL → plain text / YAML / JSON / CSV |
 
@@ -71,12 +73,14 @@ Per-subcommand usage manuals live in [`docs/`](docs/):
 | [docs/optimize.md](docs/optimize.md) | DLS optimization |
 | [docs/escape.md](docs/escape.md) | escape-function global optimization |
 | [docs/asphere.md](docs/asphere.md) | asphere candidate ranking and initial coefficient estimation |
+| [docs/psf.md](docs/psf.md) | point-spread function via direct vector Huygens integration |
 | [docs/query.md](docs/query.md) | YAML/JSONL selector |
 
 The numerical methods behind the analyses and optimizations are described
 separately in [`docs/methods/`](docs/methods/README.md) (ray tracing, chief-ray
 and spot computation, paraxial optics, merit functions, DLS, escape functions,
-glass dispersion, thin-film TMM, asphere candidate selection, and EFL scaling).
+glass dispersion, thin-film TMM, asphere candidate selection, point-spread
+function via vector Huygens integration, and EFL scaling).
 
 ## Pipeline examples
 

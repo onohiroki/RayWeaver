@@ -25,9 +25,11 @@ Tests: `go test ./...` (13 test files across all packages, no CI).
 
 ## Subcommands
 
-`chief` | `trace` | `paraxial` | `tmm` | `plot` | `vignette` | `optimize` | `escape` | `import` | `asphere`
+`chief` | `trace` | `paraxial` | `tmm` | `plot` | `vignette` | `optimize` | `escape` | `import` | `asphere` | `psf`
 
 Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, writes YAML to stdout. `--config ID` on chief/trace/paraxial/plot for multi-config selection.
+
+`psf` (`rayweaver psf [--ref-surface N] [--psf-grid 64] [--psf-width W] [--num-rays 400] [--fields I,...] [--wavelengths W,...] [--polarization RCP|LCP|X|Y|RCP+LCP] [--yaml FILE] [--csv FILE]`) computes the point-spread function on the **fixed flat image plane** via per-field polarized ray tracing, non-uniform wavefront sampling (Delaunay-triangulated reference surface) and a **direct vector Huygens integral** — no FFT, fisheye-safe. Requires a `chief` section (fields). It reuses the chief dynamic-pupil / stop grid to sample each field's entrance pupil, traces the polarized wavefront to the reference surface (default: the last optical surface) with full Jones tracking (`SurfaceResult.Field`), weights the samples by 3D Delaunay triangle areas (`internal/mesh`), and coherently sums secondary wavelets `E(P) = Σ E_j·exp(ik(OPL_j + n·R_j))·K_j·ΔA_j/R_j`. The pipeline YAML carries a lightweight `psf_results[]` summary (Strehl vs a same-samples diffraction-limited reference, FWHM, centroid, encircled-energy 50%, Airy radius, sampling counts); full grids (intensity + Ex/Ey/Ez, encircled-energy curve, best-fit-sphere wavefront `rms_opd`/`pv_opd`) go to `--yaml` files and gnuplot pm3d maps (blank-line-separated rows, `set datafile separator ","`) to `--csv` files, one index-suffixed file per result. Default input polarization is RCP; `RCP+LCP` averages intensities incoherently. See `docs/psf.md` and `docs/methods/psf.md`. Strongly aberrated off-axis fields give speckle PSFs whose Strehl is sampling-sensitive — raise `--num-rays` (900..1600) for those.
 
 `vignette` iteratively settles per-field vignetting and `auto_aperture` surface diameters using the dynamic pupil (see below). Output is pipeline-compatible: `vignette → trace → plot`.
 

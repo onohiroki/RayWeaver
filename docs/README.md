@@ -25,6 +25,7 @@ output, and worked examples.
 | [optimize.md](optimize.md) | `rayweave optimize` | DLS (damped least squares) local optimization |
 | [escape.md](escape.md) | `rayweave escape` | escape-function global optimization |
 | [asphere.md](asphere.md) | `rayweave asphere` | rank candidate surfaces for asphere introduction and estimate initial coefficients |
+| [psf.md](psf.md) | `rayweave psf` | point-spread function on the flat image plane via direct vector Huygens integration |
 | [query.md](query.md) | `rayweave query` | read-only YAML/JSONL selector for pipelines |
 
 ## Calculation methods
@@ -43,6 +44,7 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
 - [methods/glass-dispersion.md](methods/glass-dispersion.md) — Sellmeier / Schott / Cauchy / nd-vd models, glass hull
 - [methods/thin-film-tmm.md](methods/thin-film-tmm.md) — transfer-matrix method for coatings
 - [methods/asphere-candidates.md](methods/asphere-candidates.md) — asphere candidate ranking, initial sag estimation, measured sensitivity, DLS validation
+- [methods/psf.md](methods/psf.md) — point-spread function: polarized ray tracing, Delaunay-weighted wavefront sampling, vector Huygens integration
 - [methods/efl-scaling.md](methods/efl-scaling.md) — uniform EFL scaling
 
 ## Conventions
