@@ -216,18 +216,12 @@ extract_radial() {
 }
 
 # Per-field MTF helper: pull the sagittal (then tangential) (frequency, mtf)
-# curve out of a per-field --yaml file into a two-column data file.
+# curve out of a per-field --yaml file into a two-column data file. Uses the
+# `rayweave query --csv` path through the real result parser so the curve is
+# always frequency-sorted and never includes stray threshold/evaluated rows.
 extract_mtf() {
   local yaml=$1 axis=$2 out=$3
-  # Match the block: "    <axis>:" then "        curve:" then "frequency:" /
-  # "mtf:" pairs (each list item carries a leading "- ").
-  awk -v axis="$axis" '
-    $0 ~ "^    " axis ":" { inaxis=1; next }
-    inaxis && /^        curve:/ { incurve=1; next }
-    inaxis && incurve && /^    [a-z]/ && /:/ { incurve=0; inaxis=0 }
-    incurve && /frequency:/ { sub(/^.*frequency:/, ""); gsub(/[ \t]/, ""); f=$0; nf=1; next }
-    incurve && nf && /mtf:/ { sub(/^.*mtf:/, ""); gsub(/[ \t]/, ""); print f, $0; nf=0 }
-  ' "$yaml" > "$out"
+  $RAYWEAVE query --csv "mtf.$axis.curve:frequency,mtf" < "$yaml" > "$out"
 }
 
 # 3. Per-field 2D intensity maps + the radial/MTF overlay charts.
@@ -304,6 +298,7 @@ if [[ -n "$MTF_SPEC" ]]; then
     set grid xtics ytics lc rgb "#d0d0d0"
     set yrange [0:1]
     set xrange [0:$MAXFREQ]
+    set datafile separator ","
     plot $MTF_SPEC
 GPLOT
   echo "Written: $OUTDIR/$STEM-mtf.png"
