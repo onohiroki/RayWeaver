@@ -986,6 +986,9 @@ type PSFConfig struct {
 	Fields           []int      `yaml:"fields,omitempty"`
 	Wavelengths      []float64  `yaml:"wavelengths,omitempty"`
 	Polarization     string     `yaml:"polarization,omitempty"`
+	// Workers bounds the Huygens-integration and wavefront-tracing
+	// parallelism (0 = runtime.NumCPU()).
+	Workers          int        `yaml:"huygens_workers,omitempty"`
 }
 
 // PolarizationLabel identifies an input polarization state in PSF output.

@@ -186,6 +186,17 @@ summed across incoherent states, so no fictitious interference is introduced.
 
 - The integral cost is `O(N_rays × N_pixels)`; for a 64×64 grid and 400 rays
   this is ~1.6M complex operations per field per wavelength, trivial in Go.
+- **Parallelism**: the wavefront tracing and the Huygens integral are
+  row-parallel across `runtime.NumCPU()` workers (or `huygens_workers` /
+  `--psf-workers`). Each image-plane row is computed by exactly one worker and
+  writes to a disjoint output slice, so no locking is needed. The actual and
+  ideal (diffraction-reference) grids of a state share one pass over the pixel
+  geometry, and the RCP+LCP states are traced concurrently and evaluated
+  through a single shared pool. Wavefront samples are sorted by their
+  entrance-pupil launch coordinates before integration so the summation order —
+  and hence the result — is independent of the worker count (the residual
+  run-to-run variation is one floating-point ULP, inherited from the shared
+  `chief` centroid accumulation).
 - Strongly aberrated fields produce a coherent speckle pattern; the peak (and
   hence Strehl) of a speckle is sensitive to the pupil sampling, so off-axis
   metrics need a denser grid (`--num-rays` 900..1600). Near-diffraction-limited

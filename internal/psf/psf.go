@@ -13,9 +13,12 @@ type Options struct {
 	ReferenceSurface int
 	NumRays          int
 	GridType         types.GridType
-	GridSize         int    // image-plane pixels per side (0 = auto)
+	GridSize         int     // image-plane pixels per side (0 = auto)
 	HalfWidth        float64 // evaluation half-width mm (0 = auto)
 	Polarizations    []string
+	// Workers bounds the Huygens-integration and wavefront-tracing parallelism
+	// (0 = runtime.NumCPU()).
+	Workers int
 }
 
 // Result is one computed PSF with its analysis summary.
@@ -137,47 +140,66 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 // computeOne computes and analyses the PSF for a single coherent state.
 func computeOne(engine *ray.Engine, system types.System, pg *PupilGrid, fd types.FieldDef,
 	opts Options, planeZ, nImage, wl, fieldAngle float64, fi int, label string, pol types.JonesVector) *Result {
-	samples, stats := TraceWavefront(system, engine, pg, fd, opts.ReferenceSurface, wl, pol)
+	samples, stats := TraceWavefront(system, engine, pg, fd, opts.ReferenceSurface, wl, pol, opts.Workers)
 	if len(samples) < 3 {
 		return nil
 	}
 	cx, cy, _ := ImagePlaneSpot(samples, planeZ)
 	center := types.Vec3{X: cx, Y: cy, Z: planeZ}
 	spec := DefaultImageGrid(samples, center, nImage, wl, planeZ, cx, cy, opts.HalfWidth, opts.GridSize)
-	grid := ComputeField(samples, center, planeZ, nImage, wl, spec, false)
-	ideal := ComputeField(samples, center, planeZ, nImage, wl, spec, true)
-	return finishResult(grid, ideal, samples, center, nImage, wl, planeZ, fieldAngle, fi, label, stats)
+
+	// Evaluate actual + ideal in one shared pass (geometry computed once).
+	pair := fieldPair{samples: samples, center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)}
+	computePairs([]fieldPair{pair}, planeZ, nImage, wl, spec, opts.Workers)
+	return finishResult(pair.actual, pair.ideal, samples, center, nImage, wl, planeZ, fieldAngle, fi, label, stats)
 }
 
 // computeCombined computes the PSF for two coherent states (RCP and LCP) and
-// averages their intensities incoherently.
+// averages their intensities incoherently. The two wavefronts are traced
+// concurrently, then their actual/ideal grids are evaluated together through a
+// single shared row-parallel pool.
 func computeCombined(engine *ray.Engine, system types.System, pg *PupilGrid, fd types.FieldDef,
 	opts Options, planeZ, nImage, wl, fieldAngle float64, fi int, pol1, pol2 types.JonesVector) *Result {
-	s1, stats1 := TraceWavefront(system, engine, pg, fd, opts.ReferenceSurface, wl, pol1)
-	s2, stats2 := TraceWavefront(system, engine, pg, fd, opts.ReferenceSurface, wl, pol2)
-	if len(s1) < 3 || len(s2) < 3 {
+	type wfRes struct {
+		samples []WavefrontSample
+		stats   WavefrontStats
+	}
+	ch := make(chan wfRes, 2)
+	go func() {
+		s, st := TraceWavefront(system, engine, pg, fd, opts.ReferenceSurface, wl, pol1, opts.Workers)
+		ch <- wfRes{s, st}
+	}()
+	go func() {
+		s, st := TraceWavefront(system, engine, pg, fd, opts.ReferenceSurface, wl, pol2, opts.Workers)
+		ch <- wfRes{s, st}
+	}()
+	r1 := <-ch
+	r2 := <-ch
+	if len(r1.samples) < 3 || len(r2.samples) < 3 {
 		return nil
 	}
-	cx, cy, _ := ImagePlaneSpot(s1, planeZ)
+	cx, cy, _ := ImagePlaneSpot(r1.samples, planeZ)
 	center := types.Vec3{X: cx, Y: cy, Z: planeZ}
-	spec := DefaultImageGrid(s1, center, nImage, wl, planeZ, cx, cy, opts.HalfWidth, opts.GridSize)
-	g1 := ComputeField(s1, center, planeZ, nImage, wl, spec, false)
-	g2 := ComputeField(s2, center, planeZ, nImage, wl, spec, false)
-	ideal1 := ComputeField(s1, center, planeZ, nImage, wl, spec, true)
-	ideal2 := ComputeField(s2, center, planeZ, nImage, wl, spec, true)
+	spec := DefaultImageGrid(r1.samples, center, nImage, wl, planeZ, cx, cy, opts.HalfWidth, opts.GridSize)
+
+	pairs := []fieldPair{
+		{samples: r1.samples, center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)},
+		{samples: r2.samples, center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)},
+	}
+	computePairs(pairs, planeZ, nImage, wl, spec, opts.Workers)
 
 	// Incoherent sum of intensities.
 	comb := NewFieldGrid(spec)
 	idealComb := NewFieldGrid(spec)
 	for i := range comb.Intensity {
-		comb.Intensity[i] = g1.Intensity[i] + g2.Intensity[i]
-		idealComb.Intensity[i] = ideal1.Intensity[i] + ideal2.Intensity[i]
+		comb.Intensity[i] = pairs[0].actual.Intensity[i] + pairs[1].actual.Intensity[i]
+		idealComb.Intensity[i] = pairs[0].ideal.Intensity[i] + pairs[1].ideal.Intensity[i]
 	}
-	stats := stats1
-	stats.Total += stats2.Total
-	stats.Valid += stats2.Valid
-	stats.Missed += stats2.Missed
-	return finishResult(comb, idealComb, s1, center, nImage, wl, planeZ, fieldAngle, fi,
+	stats := r1.stats
+	stats.Total += r2.stats.Total
+	stats.Valid += r2.stats.Valid
+	stats.Missed += r2.stats.Missed
+	return finishResult(comb, idealComb, r1.samples, center, nImage, wl, planeZ, fieldAngle, fi,
 		string(types.PolRCPLCP), stats)
 }
 

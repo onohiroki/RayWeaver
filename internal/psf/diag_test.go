@@ -60,7 +60,7 @@ func TestPupilCoverage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}
-		samples, stats := TraceWavefront(c.sys, engine, fg, c.field, ref, types.DefaultWavelength, types.NewCircularJones(true))
+		samples, stats := TraceWavefront(c.sys, engine, fg, c.field, ref, types.DefaultWavelength, types.NewCircularJones(true), 0)
 
 		if stats.Valid == 0 {
 			t.Errorf("%s: no valid wavefront samples", c.name)

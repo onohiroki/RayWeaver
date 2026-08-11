@@ -43,6 +43,7 @@ single flat exit pupil would break down.
 | `--fields I1,I2,...` | field indices to compute (default: all fields in the `chief` section) |
 | `--wavelengths W1,...` | wavelengths in mm (default: `chief.wavelengths`, else 587.56 nm) |
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` (unpolarised average) |
+| `--psf-workers N` | parallel workers for the Huygens integral and wavefront tracing (default: GOMAXPROCS) |
 | `--yaml FILE` | write full structured data to FILE, one index-suffixed file per result (`FILE_0.yaml`, `FILE_1.yaml`, …) |
 | `--csv FILE` | write a gnuplot `x,y,intensity` pm3d map to FILE, one index-suffixed file per result |
 | `--config ID` | select config by id (multi-config mode) |
@@ -94,6 +95,7 @@ psf:
   grid_size: 128              # image-plane pixels per side
   half_width: 0.02            # evaluation half-width mm (0 = auto)
   num_rays: 900               # pupil grid rays
+  huygens_workers: 8          # parallel workers (0 = GOMAXPROCS)
   fields: [0, 1]              # field indices (default: all)
   wavelengths: [0.00058756]   # mm (default: chief wavelengths)
   polarization: "RCP+LCP"     # RCP | LCP | X | Y | RCP+LCP

@@ -3,6 +3,7 @@ package psf
 import (
 	"fmt"
 	"runtime"
+	"sort"
 	"sync"
 
 	"github.com/hiroki/rayweaver/internal/chief"
@@ -23,6 +24,8 @@ type WavefrontSample struct {
 	Field     types.Vec3C  // global complex electric field at the surface
 	Area      float64      // reference-surface area element (mm²)
 	Intensity float64      // |E|² at the surface
+	launchX   float64      // entrance-pupil launch X (deterministic sort key)
+	launchY   float64      // entrance-pupil launch Y (deterministic sort key)
 }
 
 // PupilGrid is the per-field entrance-pupil sampling shared across
@@ -77,8 +80,9 @@ func ComputeFieldGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 // TraceWavefront traces the field grid through the system with full Jones
 // tracking and records a wavefront sample at the reference surface for every
 // ray that reaches it. The samples carry Delaunay-derived area weights.
+// workers bounds the per-ray tracing parallelism (0 = runtime.NumCPU()).
 func TraceWavefront(system types.System, engine *ray.Engine, fg *PupilGrid,
-	fd types.FieldDef, refSurface int, wavelength float64, pol types.JonesVector) ([]WavefrontSample, WavefrontStats) {
+	fd types.FieldDef, refSurface int, wavelength float64, pol types.JonesVector, workers int) ([]WavefrontSample, WavefrontStats) {
 	path := dls.BuildPath(system.Surfaces)
 	if len(fd.Path) > 0 {
 		path = append([]int{}, fd.Path...)
@@ -95,9 +99,15 @@ func TraceWavefront(system types.System, engine *ray.Engine, fg *PupilGrid,
 	stats := WavefrontStats{Total: len(fg.GridPoints)}
 	samples := make([]WavefrontSample, 0, len(fg.GridPoints))
 
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+	if workers < 1 {
+		workers = 1
+	}
 	var mu sync.Mutex
 	var wg sync.WaitGroup
-	sem := make(chan struct{}, runtime.NumCPU())
+	sem := make(chan struct{}, workers)
 
 	for _, gp := range fg.GridPoints {
 		wg.Add(1)
@@ -136,11 +146,24 @@ func TraceWavefront(system types.System, engine *ray.Engine, fg *PupilGrid,
 				OPL:       sr.OPL,
 				Field:     sr.Field,
 				Intensity: sr.Field.AbsSq(),
+				launchX:   gp.Origin.X,
+				launchY:   gp.Origin.Y,
 			})
 		}(gp)
 	}
 	wg.Wait()
 	close(sem)
+
+	// The parallel trace appends samples in completion order; sort by the
+	// intrinsic entrance-pupil launch coordinates so the Huygens summation
+	// order (and therefore the floating-point result) is independent of the
+	// worker count and of chief's internal grid completion order.
+	sort.Slice(samples, func(a, b int) bool {
+		if samples[a].launchX != samples[b].launchX {
+			return samples[a].launchX < samples[b].launchX
+		}
+		return samples[a].launchY < samples[b].launchY
+	})
 
 	// Area weights via Delaunay triangulation of the reference-surface hits.
 	if len(samples) >= 3 {

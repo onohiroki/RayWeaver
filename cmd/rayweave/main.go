@@ -649,6 +649,8 @@ Options:
   --wavelengths W1,...  wavelengths in mm (default: chief wavelengths,
                         else 587.56 nm)
   --polarization S    RCP (default) | LCP | X | Y | RCP+LCP
+  --psf-workers N     parallel workers for the Huygens integral and wavefront
+                        tracing (default: GOMAXPROCS)
   --yaml FILE         write full structured data (intensity, Ex/Ey/Ez,
                         encircled energy, wavefront OPD) to FILE, one
                         index-suffixed file per result
@@ -663,6 +665,7 @@ Input YAML — psf section (optional; flags override):
     grid_size: 64
     half_width: 0.01
     num_rays: 400
+    huygens_workers: 8
     fields: [0, 1]
     wavelengths: [0.00058756, 0.00048613]
     polarization: "RCP+LCP"

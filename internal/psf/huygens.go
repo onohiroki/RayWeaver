@@ -2,6 +2,8 @@ package psf
 
 import (
 	"math"
+	"runtime"
+	"sync"
 
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -44,54 +46,210 @@ func NewFieldGrid(spec ImageGridSpec) *FieldGrid {
 // When ideal is true the OPL is replaced by a perfect converging sphere to the
 // grid centre (n·|q_j - centre|), giving the diffraction-limited reference
 // used for the Strehl ratio.
+//
+// The image-plane rows are evaluated in parallel (runtime.NumCPU() workers,
+// or opts.Workers when > 0); each row writes to a disjoint slice of the
+// output grid, so no locking is needed.
 func ComputeField(samples []WavefrontSample, center types.Vec3, imagePlaneZ float64,
 	nImage, wavelength float64, spec ImageGridSpec, ideal bool) *FieldGrid {
+	return computeField(samples, center, imagePlaneZ, nImage, wavelength, spec, ideal, 0)
+}
+
+// computeField is ComputeField with an explicit worker count (0 = NumCPU).
+func computeField(samples []WavefrontSample, center types.Vec3, imagePlaneZ float64,
+	nImage, wavelength float64, spec ImageGridSpec, ideal bool, workers int) *FieldGrid {
 	grid := NewFieldGrid(spec)
 	k := 2 * math.Pi / wavelength
 
-	for j := 0; j < spec.NY; j++ {
-		for i := 0; i < spec.NX; i++ {
-			p := types.Vec3{
-				X: spec.X0 + (float64(i)+0.5)*spec.DX,
-				Y: spec.Y0 + (float64(j)+0.5)*spec.DY,
-				Z: imagePlaneZ,
-			}
-			idx := j*spec.NX + i
-			var ex, ey, ez complex128
-			for _, s := range samples {
-				Rvec := p.Subtract(s.Position)
-				R := Rvec.Length()
-				if R < 1e-9 {
-					continue
-				}
-				Rhat := Rvec.Scale(1 / R)
-				obliquity := 0.5 * (1 + s.Direction.Dot(Rhat))
-				if obliquity < 0 {
-					obliquity = 0
-				}
-
-				opl := s.OPL
-				if ideal {
-					opl = -nImage * s.Position.Subtract(center).Length()
-				}
-				phase := k * (opl + nImage*R)
-				w := obliquity * s.Area / R
-				cf := complex(w*math.Cos(phase), w*math.Sin(phase))
-				ex += cf * s.Field.X
-				ey += cf * s.Field.Y
-				ez += cf * s.Field.Z
-			}
-			grid.Ex[idx] = ex
-			grid.Ey[idx] = ey
-			grid.Ez[idx] = ez
-			grid.Intensity[idx] = absSq(ex) + absSq(ey) + absSq(ez)
+	// Precompute the ideal OPL reference distance for every sample once,
+	// instead of recomputing it for each image-plane pixel.
+	idealOPL := make([]float64, len(samples))
+	if ideal {
+		for i, s := range samples {
+			idealOPL[i] = -nImage * s.Position.Subtract(center).Length()
 		}
 	}
+
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > spec.NY {
+		workers = spec.NY
+	}
+
+	var wg sync.WaitGroup
+	rowsPerWorker := (spec.NY + workers - 1) / workers
+	for w := 0; w < workers; w++ {
+		j0 := w * rowsPerWorker
+		j1 := j0 + rowsPerWorker
+		if j1 > spec.NY {
+			j1 = spec.NY
+		}
+		if j0 >= j1 {
+			continue
+		}
+		wg.Add(1)
+		go func(j0, j1 int) {
+			defer wg.Done()
+			for j := j0; j < j1; j++ {
+				for i := 0; i < spec.NX; i++ {
+					p := types.Vec3{
+						X: spec.X0 + (float64(i)+0.5)*spec.DX,
+						Y: spec.Y0 + (float64(j)+0.5)*spec.DY,
+						Z: imagePlaneZ,
+					}
+					idx := j*spec.NX + i
+					var ex, ey, ez complex128
+					for si, s := range samples {
+						Rvec := p.Subtract(s.Position)
+						R := Rvec.Length()
+						if R < 1e-9 {
+							continue
+						}
+						Rhat := Rvec.Scale(1 / R)
+						obliquity := 0.5 * (1 + s.Direction.Dot(Rhat))
+						if obliquity < 0 {
+							obliquity = 0
+						}
+
+						opl := s.OPL
+						if ideal {
+							opl = idealOPL[si]
+						}
+						phase := k * (opl + nImage*R)
+						w := obliquity * s.Area / R
+						cf := complex(w*math.Cos(phase), w*math.Sin(phase))
+						ex += cf * s.Field.X
+						ey += cf * s.Field.Y
+						ez += cf * s.Field.Z
+					}
+					grid.Ex[idx] = ex
+					grid.Ey[idx] = ey
+					grid.Ez[idx] = ez
+					grid.Intensity[idx] = absSq(ex) + absSq(ey) + absSq(ez)
+				}
+			}
+		}(j0, j1)
+	}
+	wg.Wait()
 	return grid
 }
 
 func absSq(c complex128) float64 {
 	return real(c)*real(c) + imag(c)*imag(c)
+}
+
+// fieldPair is one sample set's actual + ideal (diffraction-limited reference)
+// grids. The pair shares the per-pixel geometry (R, obliquity, area weight)
+// across the two variants, so evaluating them in one pass is cheaper than two
+// separate ComputeField calls.
+type fieldPair struct {
+	samples []WavefrontSample
+	center  types.Vec3
+	actual  *FieldGrid
+	ideal   *FieldGrid
+}
+
+// computePairs evaluates several field pairs (actual + ideal) through a single
+// shared row-parallel worker pool. Geometry is computed once per (pixel,
+// sample) and shared between the actual and ideal phases of each pair. All
+// pairs are processed by the same pool, so the CPU is fully utilised across
+// them without oversubscription. workers 0 = runtime.NumCPU().
+func computePairs(pairs []fieldPair, imagePlaneZ, nImage, wavelength float64,
+	spec ImageGridSpec, workers int) {
+	if len(pairs) == 0 || spec.NX == 0 || spec.NY == 0 {
+		return
+	}
+	k := 2 * math.Pi / wavelength
+
+	// Precompute each pair's ideal OPL reference once.
+	idealOPL := make([][]float64, len(pairs))
+	for pi := range pairs {
+		idealOPL[pi] = make([]float64, len(pairs[pi].samples))
+		for si, s := range pairs[pi].samples {
+			idealOPL[pi][si] = -nImage * s.Position.Subtract(pairs[pi].center).Length()
+		}
+	}
+
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	if workers > spec.NY {
+		workers = spec.NY
+	}
+
+	var wg sync.WaitGroup
+	rowsPerWorker := (spec.NY + workers - 1) / workers
+	for w := 0; w < workers; w++ {
+		j0 := w * rowsPerWorker
+		j1 := j0 + rowsPerWorker
+		if j1 > spec.NY {
+			j1 = spec.NY
+		}
+		if j0 >= j1 {
+			continue
+		}
+		wg.Add(1)
+		go func(j0, j1 int) {
+			defer wg.Done()
+			for j := j0; j < j1; j++ {
+				for i := 0; i < spec.NX; i++ {
+					p := types.Vec3{
+						X: spec.X0 + (float64(i)+0.5)*spec.DX,
+						Y: spec.Y0 + (float64(j)+0.5)*spec.DY,
+						Z: imagePlaneZ,
+					}
+					idx := j*spec.NX + i
+					for pi := range pairs {
+						pr := &pairs[pi]
+						var ax, ay, az, ix, iy, iz complex128
+						for si, s := range pr.samples {
+							Rvec := p.Subtract(s.Position)
+							R := Rvec.Length()
+							if R < 1e-9 {
+								continue
+							}
+							Rhat := Rvec.Scale(1 / R)
+							obliquity := 0.5 * (1 + s.Direction.Dot(Rhat))
+							if obliquity < 0 {
+								obliquity = 0
+							}
+							w := obliquity * s.Area / R
+
+							// actual phase
+							phaseA := k * (s.OPL + nImage*R)
+							cfA := complex(w*math.Cos(phaseA), w*math.Sin(phaseA))
+							ax += cfA * s.Field.X
+							ay += cfA * s.Field.Y
+							az += cfA * s.Field.Z
+
+							// ideal phase (shared geometry)
+							phaseI := k * (idealOPL[pi][si] + nImage*R)
+							cfI := complex(w*math.Cos(phaseI), w*math.Sin(phaseI))
+							ix += cfI * s.Field.X
+							iy += cfI * s.Field.Y
+							iz += cfI * s.Field.Z
+						}
+						pr.actual.Ex[idx] = ax
+						pr.actual.Ey[idx] = ay
+						pr.actual.Ez[idx] = az
+						pr.actual.Intensity[idx] = absSq(ax) + absSq(ay) + absSq(az)
+						pr.ideal.Ex[idx] = ix
+						pr.ideal.Ey[idx] = iy
+						pr.ideal.Ez[idx] = iz
+						pr.ideal.Intensity[idx] = absSq(ix) + absSq(iy) + absSq(iz)
+					}
+				}
+			}
+		}(j0, j1)
+	}
+	wg.Wait()
 }
 
 // Normalize scales the intensity grid so its sum over the sampled window

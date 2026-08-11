@@ -32,6 +32,7 @@ func runPSF(data []byte) {
 	fieldsFlag := fs.String("fields", "", "comma-separated field indices to compute (default: all)")
 	wlFlag := fs.String("wavelengths", "", "comma-separated wavelengths in mm (default: chief wavelengths, else 587.56 nm)")
 	polFlag := fs.String("polarization", "", "input polarization: RCP (default) | LCP | X | Y | RCP+LCP (unpolarised average)")
+	psfWorkers := fs.Int("psf-workers", 0, "Huygens/wavefront parallel workers (default: GOMAXPROCS)")
 	yamlOut := fs.String("yaml", "", "write full structured PSF data to FILE (index-suffixed per result)")
 	csvOut := fs.String("csv", "", "write gnuplot x,y,intensity map to FILE (index-suffixed per result)")
 	fs.Parse(os.Args[2:])
@@ -97,6 +98,7 @@ func runPSF(data []byte) {
 		GridSize:         *gridSize,
 		HalfWidth:        *halfWidth,
 		Polarizations:    polLabels,
+		Workers:          *psfWorkers,
 	}
 	if input.PSF != nil {
 		if opts.ReferenceSurface <= 0 {
@@ -110,6 +112,9 @@ func runPSF(data []byte) {
 		}
 		if opts.NumRays <= 0 {
 			opts.NumRays = input.PSF.NumRays
+		}
+		if opts.Workers <= 0 {
+			opts.Workers = input.PSF.Workers
 		}
 		if len(input.PSF.Wavelengths) > 0 && *wlFlag == "" {
 			wavelengths = input.PSF.Wavelengths
