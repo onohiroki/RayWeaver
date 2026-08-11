@@ -10,7 +10,7 @@ integral** — no FFT. The numerical method is described in
 ```
 rayweave psf [--ref-surface N] [--psf-grid 64] [--psf-width W]
              [--num-rays 400] [--fields I1,I2,...] [--wavelengths W1,...]
-             [--polarization S] [--yaml FILE] [--csv FILE] < system.yaml
+             [--polarization S] [--max-freq N] [--yaml FILE] [--csv FILE] < system.yaml
 ```
 
 It reads standard system YAML (a `chief` section is required for the fields),
@@ -44,6 +44,7 @@ single flat exit pupil would break down.
 | `--wavelengths W1,...` | wavelengths in mm (default: `chief.wavelengths`, else 587.56 nm) |
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` (unpolarised average) |
 | `--psf-workers N` | parallel workers for the Huygens integral and wavefront tracing (default: GOMAXPROCS) |
+| `--max-freq N` | MTF frequency cap in cycles/mm (default: `psf.mtf_config.max_frequency`, else the Nyquist) |
 | `--yaml FILE` | write full structured data to FILE, one index-suffixed file per result (`FILE_0.yaml`, `FILE_1.yaml`, …) |
 | `--csv FILE` | write a gnuplot `x,y,intensity` pm3d map to FILE, one index-suffixed file per result |
 | `--config ID` | select config by id (multi-config mode) |

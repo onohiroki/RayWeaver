@@ -675,6 +675,8 @@ Options:
   --polarization S    RCP (default) | LCP | X | Y | RCP+LCP
   --psf-workers N     parallel workers for the Huygens integral and wavefront
                         tracing (default: GOMAXPROCS)
+  --max-freq N        MTF frequency cap in cycles/mm (default:
+                        psf.mtf_config.max_frequency, else the Nyquist)
   --yaml FILE         write full structured data (intensity, Ex/Ey/Ez,
                         encircled energy, wavefront OPD) to FILE, one
                         index-suffixed file per result
@@ -693,6 +695,8 @@ Input YAML — psf section (optional; flags override):
     fields: [0, 1]
     wavelengths: [0.00058756, 0.00048613]
     polarization: "RCP+LCP"
+    mtf_config:
+      max_frequency: 200
 
 Output: augmented YAML with a lightweight psf_results[] summary (Strehl,
 FWHM, centroid, encircled energy, Airy radius, sampling counts). Full grids

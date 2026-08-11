@@ -38,6 +38,7 @@ func runPSF(data []byte) {
 	polFlag := fs.String("polarization", "", "input polarization: RCP (default) | LCP | X | Y | RCP+LCP (unpolarised average)")
 	spectralFlag := fs.String("spectral", "", "polychromatic (white) PSF: D65 (default) | FLAT")
 	psfWorkers := fs.Int("psf-workers", 0, "Huygens/wavefront parallel workers (default: GOMAXPROCS)")
+	maxFreq := fs.Float64("max-freq", 0, "MTF frequency cap in cycles/mm (0 = Nyquist; default psf.mtf_config.max_frequency)")
 	yamlOut := fs.String("yaml", "", "write full structured PSF data to FILE (index-suffixed per result)")
 	csvOut := fs.String("csv", "", "write gnuplot x,y,intensity map to FILE (index-suffixed per result)")
 	fs.Parse(os.Args[2:])
@@ -143,6 +144,12 @@ func runPSF(data []byte) {
 			opts.Workers = input.PSF.Workers
 		}
 		opts.MTFCfg = input.PSF.MTFCfg
+	}
+	if *maxFreq > 0 {
+		if opts.MTFCfg == nil {
+			opts.MTFCfg = &types.PSFMTFConfig{}
+		}
+		opts.MTFCfg.MaxFrequency = *maxFreq
 	}
 
 	results, err := psf.Compute(system, gc, fields, wavelengths, opts)

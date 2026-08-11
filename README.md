@@ -208,7 +208,7 @@ The [`samples/`](samples/) directory contains:
 - `ar-coating.yaml` — single-layer MgF2 AR coating on N-SK16.
 - `dielectric-mirror.yaml` — 9-layer quarter-wave Bragg reflector (SiO2/TiO2).
 - `run-demo.bash` — end-to-end demo script producing spot diagrams, SVG, and TMM results.
-- `psf-mtf-demo.yaml` + `psf-mtf-demo.bash` — PSF/OTF/MTF demo on the escape-optimised US2645157 triplet: a single `rayweave psf` run (RCP+LCP) computes the PSF and FFT-derived OTF/MTF for all fields, then prints a Strehl/FWHM/EE50/Airy/MTF50-30-10 table and draws per-field pm3d maps, a radial-profile overlay, and an MTF overlay (sagittal/tangential per field).
+- `psf-mtf-demo.yaml` + `psf-mtf-demo.bash` — PSF/OTF/MTF demo on the escape-optimised US2645157 triplet: a single `rayweave psf` run (RCP+LCP) computes the PSF and FFT-derived OTF/MTF, then prints a Strehl/FWHM/EE50/Airy/MTF50-30-10 table (MTF reported up to 200 c/mm via `--max-freq`) and draws per-field pm3d maps, a radial-profile overlay, and an MTF overlay (sagittal/tangential per field). The default input is restricted to the center field (0°); `--lens doublegauss` (or any YAML path) switches to another lens with the MTF cap kept by the CLI flag.
 - `optimize-demo.bash` — draws before/after SVG cross-sections of the US2645157 triplet (degraded → optimized).
 - `README.md` — detailed documentation of all sample files and workflow.
 

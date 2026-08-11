@@ -2,7 +2,10 @@
 # triplet after the escape-function global optimiser, see escape-demo.bash).
 # Cleaned copy: only the sections the `psf` subcommand consumes (glass_catalog,
 # configs, chief); the optimization/escape_result history lives in the original
-# escape-demo-result.yaml (untracked). Fields 0/16/24 deg, reference surface 8.
+# escape-demo-result.yaml (untracked). Center field (0 deg) only, reference
+# surface 8. MTF is reported up to psf.mtf_config.max_frequency (200 c/mm) —
+# the demo script's --max-freq CLI flag overrides this, so the cap stays
+# effective even when the run uses a different lens YAML.
 glass_catalog:
     entries:
         - type: model
@@ -24,12 +27,6 @@ configs:
         - id: 0
           angle_deg: 0
           weight: 1
-        - id: 1
-          angle_deg: 16
-          weight: 1
-        - id: 2
-          angle_deg: 24
-          weight: 0.5
       wavelengths:
         - id: 0
           value: 0.0004861
@@ -98,65 +95,9 @@ configs:
           conic: 0
           thickness: 0
           material: AIR
-      merit:
-        type: weighted_sum
-        terms:
-            - kind: spot_rms
-              field: 0
-              wavelength: 0.0004861
-              surface_set: []
-              weight: 1
-            - kind: spot_rms
-              field: 0
-              wavelength: 0.0005876
-              surface_set: []
-              weight: 1
-            - kind: spot_rms
-              field: 0
-              wavelength: 0.0006563
-              surface_set: []
-              weight: 1
-            - kind: spot_rms
-              field: 1
-              wavelength: 0.0004861
-              surface_set: []
-              weight: 1
-            - kind: spot_rms
-              field: 1
-              wavelength: 0.0005876
-              surface_set: []
-              weight: 1
-            - kind: spot_rms
-              field: 1
-              wavelength: 0.0006563
-              surface_set: []
-              weight: 1
-            - kind: spot_rms
-              field: 2
-              wavelength: 0.0004861
-              surface_set: []
-              weight: 0.5
-            - kind: spot_rms
-              field: 2
-              wavelength: 0.0005876
-              surface_set: []
-              weight: 0.5
-            - kind: spot_rms
-              field: 2
-              wavelength: 0.0006563
-              surface_set: []
-              weight: 0.5
 chief:
     fields:
         - angle: 0
-          direction:
-            - 0
-            - 1
-        - angle: 16
-          direction:
-            - 0
-            - 1
-        - angle: 24
           direction:
             - 0
             - 1
@@ -164,3 +105,6 @@ chief:
     num_rays: 512
     grid_type: hex
     dump_map: true
+psf:
+    mtf_config:
+        max_frequency: 200
