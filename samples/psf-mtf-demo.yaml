@@ -1,0 +1,166 @@
+# PSF / OTF / MTF demo input — escape-optimised US2645157 triplet (patent
+# triplet after the escape-function global optimiser, see escape-demo.bash).
+# Cleaned copy: only the sections the `psf` subcommand consumes (glass_catalog,
+# configs, chief); the optimization/escape_result history lives in the original
+# escape-demo-result.yaml (untracked). Fields 0/16/24 deg, reference surface 8.
+glass_catalog:
+    entries:
+        - type: model
+          key: 1.63854:55.42
+          name: SK18
+          nd: 1.63854
+          vd: 55.42
+        - type: model
+          key: 1.64831:33.84
+          name: SF12
+          nd: 1.64831
+          vd: 33.84
+configs:
+    - id: config0
+      name: degraded_start
+      weight: 0
+      active: true
+      fields:
+        - id: 0
+          angle_deg: 0
+          weight: 1
+        - id: 1
+          angle_deg: 16
+          weight: 1
+        - id: 2
+          angle_deg: 24
+          weight: 0.5
+      wavelengths:
+        - id: 0
+          value: 0.0004861
+          weight: 1
+        - id: 1
+          value: 0.0005876
+          weight: 1
+        - id: 2
+          value: 0.0006563
+          weight: 1
+      ray_paths: []
+      surfaces:
+        - id: 1
+          type: sphere
+          curvature: 0.09812809155147201
+          conic: 0
+          thickness: 1.524
+          material:
+            key: SK18
+          auto_aperture: true
+        - id: 2
+          type: sphere
+          radius: -239.39679547519998
+          conic: 0
+          thickness: 2.3368
+          material: AIR
+          auto_aperture: true
+        - id: 3
+          type: sphere
+          curvature: -0.07535859913673881
+          conic: 0
+          thickness: 0.508
+          material:
+            key: SF12
+          auto_aperture: true
+        - id: 4
+          type: sphere
+          radius: 10.5917184406
+          conic: 0
+          thickness: 1.4986
+          material: AIR
+          auto_aperture: true
+        - id: 5
+          type: sphere
+          conic: 0
+          thickness: 1.016
+          material: AIR
+          diameter: 3.7825297358
+        - id: 6
+          type: sphere
+          curvature: 0.016357695586724123
+          conic: 0
+          thickness: 1.524
+          material:
+            key: SK18
+          auto_aperture: true
+        - id: 7
+          type: sphere
+          curvature: -0.09614478504368834
+          conic: 0
+          thickness: 21.36695183553
+          material: AIR
+          auto_aperture: true
+        - id: 8
+          type: sphere
+          conic: 0
+          thickness: 0
+          material: AIR
+      merit:
+        type: weighted_sum
+        terms:
+            - kind: spot_rms
+              field: 0
+              wavelength: 0.0004861
+              surface_set: []
+              weight: 1
+            - kind: spot_rms
+              field: 0
+              wavelength: 0.0005876
+              surface_set: []
+              weight: 1
+            - kind: spot_rms
+              field: 0
+              wavelength: 0.0006563
+              surface_set: []
+              weight: 1
+            - kind: spot_rms
+              field: 1
+              wavelength: 0.0004861
+              surface_set: []
+              weight: 1
+            - kind: spot_rms
+              field: 1
+              wavelength: 0.0005876
+              surface_set: []
+              weight: 1
+            - kind: spot_rms
+              field: 1
+              wavelength: 0.0006563
+              surface_set: []
+              weight: 1
+            - kind: spot_rms
+              field: 2
+              wavelength: 0.0004861
+              surface_set: []
+              weight: 0.5
+            - kind: spot_rms
+              field: 2
+              wavelength: 0.0005876
+              surface_set: []
+              weight: 0.5
+            - kind: spot_rms
+              field: 2
+              wavelength: 0.0006563
+              surface_set: []
+              weight: 0.5
+chief:
+    fields:
+        - angle: 0
+          direction:
+            - 0
+            - 1
+        - angle: 16
+          direction:
+            - 0
+            - 1
+        - angle: 24
+          direction:
+            - 0
+            - 1
+    reference_surface: 8
+    num_rays: 512
+    grid_type: hex
+    dump_map: true

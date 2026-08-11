@@ -208,7 +208,7 @@ The [`samples/`](samples/) directory contains:
 - `ar-coating.yaml` — single-layer MgF2 AR coating on N-SK16.
 - `dielectric-mirror.yaml` — 9-layer quarter-wave Bragg reflector (SiO2/TiO2).
 - `run-demo.bash` — end-to-end demo script producing spot diagrams, SVG, and TMM results.
-- `psf-demo.bash` — point-spread function demo: per-field PSF maps (gnuplot pm3d) and a radial-profile overlay for the US2645157 triplet via `rayweave psf` (RCP+LCP), plus a Strehl/FWHM/EE50 comparison table.
+- `psf-mtf-demo.yaml` + `psf-mtf-demo.bash` — PSF/OTF/MTF demo on the escape-optimised US2645157 triplet: a single `rayweave psf` run (RCP+LCP) computes the PSF and FFT-derived OTF/MTF for all fields, then prints a Strehl/FWHM/EE50/Airy/MTF50-30-10 table and draws per-field pm3d maps, a radial-profile overlay, and an MTF overlay (sagittal/tangential per field).
 - `optimize-demo.bash` — draws before/after SVG cross-sections of the US2645157 triplet (degraded → optimized).
 - `README.md` — detailed documentation of all sample files and workflow.
 
