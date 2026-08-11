@@ -226,25 +226,47 @@ func finishResult(grid, ideal *FieldGrid, samples []WavefrontSample,
 }
 
 // wavefrontOPD computes the OPD of each sample relative to the perfect
-// converging sphere to the given focus: OPD_j = OPL_j + n·|q_j - focus|,
-// referenced to its mean. Returns RMS and peak-to-valley.
+// converging sphere to the given focus: OPD_j = OPL_j + n·|q_j - focus|.
+// A best-fit reference sphere (piston + tilt + defocus) is then subtracted so
+// the reported values are the true wavefront aberration, not the absolute
+// optical path (which for an angle-based field is dominated by the launch
+// geometry). Returns the residual RMS and peak-to-valley in mm.
 func wavefrontOPD(samples []WavefrontSample, focus types.Vec3, nImage float64) (rms, pv float64) {
 	opds := make([]float64, len(samples))
 	for i, s := range samples {
 		opds[i] = s.OPL + nImage*s.Position.Subtract(focus).Length()
 	}
-	mean := 0.0
-	for _, o := range opds {
-		mean += o
-	}
-	if len(opds) == 0 {
+
+	// Least-squares fit of opd = a + b·x + c·y + d·(x²+y²) on the reference
+	// surface. The residual is the wavefront aberration.
+	type row struct{ x, y, r2, o float64 }
+	n := len(opds)
+	if n == 0 {
 		return 0, 0
 	}
-	mean /= float64(len(opds))
+	rows := make([]row, n)
+	for i, s := range samples {
+		rows[i] = row{s.Position.X, s.Position.Y, s.Position.X*s.Position.X + s.Position.Y*s.Position.Y, opds[i]}
+	}
+	var m [4][5]float64 // augmented normal matrix
+	for _, r := range rows {
+		cols := []float64{1, r.x, r.y, r.r2}
+		for i := 0; i < 4; i++ {
+			for j := 0; j < 4; j++ {
+				m[i][j] += cols[i] * cols[j]
+			}
+			m[i][4] += cols[i] * r.o
+		}
+	}
+	coef, ok := solve4x4(m)
+	if !ok {
+		return 0, 0
+	}
 	minV, maxV := math.Inf(1), math.Inf(-1)
 	sumSq := 0.0
-	for _, o := range opds {
-		d := o - mean
+	for _, r := range rows {
+		fit := coef[0] + coef[1]*r.x + coef[2]*r.y + coef[3]*r.r2
+		d := r.o - fit
 		sumSq += d * d
 		if d < minV {
 			minV = d
@@ -253,9 +275,41 @@ func wavefrontOPD(samples []WavefrontSample, focus types.Vec3, nImage float64) (
 			maxV = d
 		}
 	}
-	rms = math.Sqrt(sumSq / float64(len(opds)))
+	rms = math.Sqrt(sumSq / float64(n))
 	pv = maxV - minV
 	return rms, pv
+}
+
+// solve4x4 solves a 4x4 linear system given as an augmented matrix
+// [A|b] (m[i][4] is the right-hand side). Returns false when singular.
+func solve4x4(m [4][5]float64) ([4]float64, bool) {
+	for col := 0; col < 4; col++ {
+		best := col
+		for r := col + 1; r < 4; r++ {
+			if math.Abs(m[r][col]) > math.Abs(m[best][col]) {
+				best = r
+			}
+		}
+		m[col], m[best] = m[best], m[col]
+		piv := m[col][col]
+		if math.Abs(piv) < 1e-15 {
+			return [4]float64{}, false
+		}
+		for r := 0; r < 4; r++ {
+			if r == col {
+				continue
+			}
+			f := m[r][col] / piv
+			for c := col; c < 5; c++ {
+				m[r][c] -= f * m[col][c]
+			}
+		}
+	}
+	var x [4]float64
+	for i := 0; i < 4; i++ {
+		x[i] = m[i][4] / m[i][i]
+	}
+	return x, true
 }
 
 // angleFromDir returns the field angle (degrees) of a direction relative to
