@@ -150,10 +150,8 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 		pols = resolvePolStates(nil)
 	}
 
-	// Reference-surface local frame: transform every field's samples into it
-	// so the sphere fit sees the true 3D geometry (the surface sag is not
-	// mistaken for wavefront curvature). The image-plane distance is measured
-	// in the same frame.
+	// The image-plane distance is measured in the reference-surface local frame
+	// so the weighted best-focus shift is a surface-local quantity.
 	surface.Precompute(system.Surfaces)
 	refIdx := -1
 	for i, s := range system.Surfaces {
@@ -167,7 +165,6 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 	}
 	refG2L := system.Surfaces[refIdx].GlobalToLocal
 	imgVertex := system.Surfaces[len(system.Surfaces)-1].LocalToGlobal.MultiplyPoint(types.Vec3{})
-	planeZ := imgVertex.Z            // global image-plane Z
 	imagePlaneZ := refG2L.MultiplyPoint(imgVertex).Z // reference-surface-local image distance
 
 	type task struct {
@@ -204,7 +201,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 		go func(idx int, t task) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			fr, err := computeField(engine, system, gc, t.fd, opts.ReferenceSurface, opts.NumRays, opts.ZernikeMaxOrder, t.wl, t.pol, rayWorkers, refG2L, planeZ)
+			fr, err := computeField(engine, system, gc, t.fd, opts.ReferenceSurface, opts.NumRays, opts.ZernikeMaxOrder, t.wl, t.pol, rayWorkers)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -251,12 +248,11 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 }
 
 // computeField performs the single-field analysis pipeline for one
-// (field, wavelength) using the given polarization state. The wavefront
-// samples are transformed into the reference-surface local frame, and the OPD
-// is referenced to the current image point (where the beam lands on the image
-// plane) so off-axis fields are analysed correctly.
+// (field, wavelength) using the given polarization state: sample the entrance
+// pupil, trace the wavefront to the reference surface, and run the shared
+// analysis (paraboloid, best-fit sphere, Zernike, statistics).
 func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd types.FieldDef,
-	refSurface, numRays, zernikeOrder int, wl float64, p polState, rayWorkers int, refG2L types.Mat4, planeZ float64) (FieldResult, error) {
+	refSurface, numRays, zernikeOrder int, wl float64, p polState, rayWorkers int) (FieldResult, error) {
 	var fr FieldResult
 
 	pg, err := psf.ComputeFieldGrid(system, gc, fd, refSurface, numRays, wl, types.GridPolar)
@@ -269,7 +265,60 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 		return fr, fmt.Errorf("only %d valid grid rays", stats.Valid)
 	}
 
-	nImage := imageSpaceIndex(system.Surfaces, refSurface, wl, gc)
+	an, err := analyzeSamples(global, system.Surfaces, refSurface, wl, gc, zernikeOrder)
+	if err != nil {
+		return fr, err
+	}
+	fr.Paraboloid = an.Paraboloid
+	fr.Sphere = an.Sphere
+	fr.Zernike = an.Zernike
+	fr.Statistics = an.Statistics
+	fr.Data = an.Data
+	return fr, nil
+}
+
+// fieldAnalysis is the complete wavefront analysis of one set of
+// reference-surface samples: the always-computed paraboloid, the best-fit
+// sphere, the (optional) Fringe-Zernike decomposition of the paraboloid
+// residual, and the reference-sphere statistics.
+type fieldAnalysis struct {
+	Paraboloid Paraboloid
+	Sphere     Sphere
+	Zernike    Zernike
+	Statistics Statistics
+	Data       []SampleData
+}
+
+// analyzeSamples runs the wavefront analysis on the traced global samples: it
+// transforms them into the reference-surface local frame, references the OPD to
+// the best-focus point (geometric spot-RMS minimization along the image-plane
+// normal, robust against angle-field OPL artifacts), then fits the paraboloid
+// (always), the Fringe-Zernike decomposition of its residual (when
+// zernikeOrder > 0), and the reference-sphere statistics. It is the shared
+// analysis behind both the wavefront command and the optimizer's wavefront
+// merit terms.
+func analyzeSamples(global []psf.WavefrontSample, surfaces []types.Surface, refSurfaceID int, wl float64, gc *glass.Catalog, zernikeOrder int) (fieldAnalysis, error) {
+	var an fieldAnalysis
+
+	surface.Precompute(surfaces)
+	refIdx := -1
+	for i, s := range surfaces {
+		if s.ID == refSurfaceID {
+			refIdx = i
+			break
+		}
+	}
+	if refIdx < 0 || refIdx >= len(surfaces)-1 {
+		return an, fmt.Errorf("reference surface %d not found before the image plane", refSurfaceID)
+	}
+
+	// Reference-surface local frame: the sphere fit sees the true 3D geometry
+	// (the surface sag is not mistaken for wavefront curvature).
+	refG2L := surfaces[refIdx].GlobalToLocal
+	imgVertex := surfaces[len(surfaces)-1].LocalToGlobal.MultiplyPoint(types.Vec3{})
+	planeZ := imgVertex.Z // global image-plane Z
+
+	nImage := imageSpaceIndex(surfaces, refSurfaceID, wl, gc)
 
 	// Image-plane normal in the reference-surface local frame.
 	dir := refG2L.MultiplyPoint(types.Vec3{Z: 1})
@@ -284,7 +333,7 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 	// (global frame, robust against angle-field OPL artifacts).
 	sph, err := FitSphereShift(global, planeZ)
 	if err != nil {
-		return fr, err
+		return an, err
 	}
 	Fbest := sph.Center() // global best-focus point
 	FbestLocal := refG2L.MultiplyPoint(Fbest)
@@ -303,18 +352,21 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 
 	pab, err := FitParaboloid(opdSamples)
 	if err != nil {
-		return fr, err
+		return an, err
 	}
 
 	// Stabilized Zernike on the paraboloid residual of the OPD (terms 1-6
 	// removed: the paraboloid accounts for piston/tilt/defocus/astigmatism).
+	var zen Zernike
 	residual := make([]float64, len(opdSamples))
 	for i, s := range opdSamples {
 		residual[i] = s.OPL - pab.Eval(s.Position.X, s.Position.Y)
 	}
-	zen, err := FitZernike(opdSamples, residual, zernikeOrder)
-	if err != nil {
-		return fr, err
+	if zernikeOrder > 0 {
+		zen, err = FitZernike(opdSamples, residual, zernikeOrder)
+		if err != nil {
+			return an, err
+		}
 	}
 
 	// Statistics at best focus: the wavefront error relative to the reference
@@ -322,7 +374,7 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 	// standard wavefront-aberration definition (matches PSF's rms_opd).
 	refSph, err := FitReferenceSphere(opdSamples)
 	if err != nil {
-		return fr, err
+		return an, err
 	}
 	sphereRes := make([]float64, len(opdSamples))
 	for i, s := range opdSamples {
@@ -332,8 +384,8 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 	pv := refSph.PV
 	strehl := exactStrehl(opdSamples, sphereRes, wl)
 
-	fr.Paraboloid = pab
-	fr.Sphere = Sphere{
+	an.Paraboloid = pab
+	an.Sphere = Sphere{
 		CenterX:     FbestLocal.X,
 		CenterY:     FbestLocal.Y,
 		CenterZ:     FbestLocal.Z,
@@ -342,11 +394,11 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 		SpotRMS:     sph.SpotRMS,
 		RMSResidual: rms,
 	}
-	fr.Zernike = zen
-	fr.Statistics = Statistics{RMS: rms, PV: pv, Strehl: strehl}
-	fr.Data = make([]SampleData, 0, len(samples))
+	an.Zernike = zen
+	an.Statistics = Statistics{RMS: rms, PV: pv, Strehl: strehl}
+	an.Data = make([]SampleData, 0, len(samples))
 	for i, s := range samples {
-		fr.Data = append(fr.Data, SampleData{
+		an.Data = append(an.Data, SampleData{
 			X:              s.Position.X,
 			Y:              s.Position.Y,
 			OPL:            s.OPL,
@@ -354,7 +406,7 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 			SphereResidual: sphereRes[i],
 		})
 	}
-	return fr, nil
+	return an, nil
 }
 
 // toLocalFrame copies the samples with their positions transformed into the

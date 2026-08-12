@@ -9,6 +9,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
+	"github.com/hiroki/rayweaver/internal/wavefront"
 )
 
 func singletSurfaces() []types.Surface {
@@ -565,5 +566,68 @@ func TestUpdatePupils(t *testing.T) {
 	}
 	if math.Abs(zLo-zHi) < 1e-6 {
 		t.Errorf("pupil Z did not follow the variables: x=0 -> %v, x=1 -> %v", zLo, zHi)
+	}
+}
+
+// TestOptimizerWavefrontKinds verifies the wavefront paraboloid merit kinds
+// evaluate the same coefficients the standalone wavefront analysis fits: with
+// each term's target equal to the wavefront.Compute paraboloid value of the
+// (on-axis, pupil-independent) field, the merit must be ~0.
+func TestOptimizerWavefrontKinds(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	system := types.System{Surfaces: []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 30.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 100.0, Material: types.Material{}, Diameter: 30.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 30.0},
+	}}
+	surface.Precompute(system.Surfaces)
+	const wl = 0.00058756
+
+	wf, err := wavefront.Compute(system, gc, []types.FieldDef{{Angle: 0, Direction: []float64{0, 1}}}, []float64{wl}, wavefront.Options{NumRays: 64, ReferenceSurface: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wf.Fields) == 0 {
+		t.Fatal("no wavefront result")
+	}
+	pab := wf.Fields[0].Paraboloid
+
+	targets := map[string]float64{
+		MeritWavefrontDefocus:     pab.Defocus,
+		MeritWavefrontAstigmatism: pab.Astigmatism,
+		MeritWavefrontTilt:        pab.Tilt,
+		MeritWavefrontRMSResidual: pab.RMSResidual,
+		MeritWavefrontX2:          pab.X2,
+		MeritWavefrontY2:          pab.Y2,
+		MeritWavefrontXY:          pab.XY,
+		MeritWavefrontX:           pab.X,
+		MeritWavefrontY:           pab.Y,
+		MeritWavefrontConstant:    pab.Constant,
+	}
+
+	for kind, target := range targets {
+		cfg := Config{
+			Surfaces:  system.Surfaces,
+			Variables: []Variable{},
+			MeritTerms: []MeritTerm{{
+				Kind:        kind,
+				FieldAngle:  0.0,
+				FieldWeight: 1.0,
+				Wavelength:  wl,
+				WavWeight:   1.0,
+				Weight:      1.0,
+				Target:      target,
+			}},
+			GlassCatalog: gc,
+			NumRays:      64,
+		}
+		opt := NewOptimizer(cfg)
+		x := opt.getInitialState()
+		merit := opt.EvaluateMerit(x)
+		if merit > 1e-10 {
+			t.Errorf("%s: merit with target = wavefront-computed value = %v, want ~0", kind, merit)
+		}
 	}
 }

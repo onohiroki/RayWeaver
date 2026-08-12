@@ -32,6 +32,8 @@ small). Weighting lets the designer balance fields, wavelengths and configs
 | `lateral_color` | lateral colour |
 | `longitudinal_color` | longitudinal colour |
 | `seidel_spherical` / `seidel_coma` / `seidel_astigmatism` / `seidel_distortion` | third-order Seidel coefficients |
+| `wavefront_defocus` / `wavefront_astigmatism` / `wavefront_tilt` / `wavefront_rms_residual` | derived low-order paraboloid-fit magnitudes |
+| `wavefront_x2` / `wavefront_y2` / `wavefront_xy` / `wavefront_x` / `wavefront_y` / `wavefront_constant` | raw paraboloid-fit coefficients |
 
 ### spot_rms
 
@@ -54,6 +56,36 @@ OPD_RMS = √( (1/N) Σ (OPLᵢ − OPL̄)² )
 
 This is a convenient aberration measure that does not require a chosen
 reference sphere.
+
+### wavefront paraboloid coefficients
+
+The `wavefront_*` kinds evaluate the least-squares quadratic (paraboloid) fit
+
+```
+P(x,y) = a·x² + b·y² + c·xy + d·x + e·y + f
+```
+
+of the field's OPD sampled on the reference surface (default: the last optical
+surface, overridable via `chief.reference_surface`). The OPD is referenced to
+the **best-focus point** — the geometric spot-RMS minimization along the
+image-plane normal — exactly like the `wavefront` command, so:
+`wavefront_defocus = (a+b)/2`, `wavefront_astigmatism = √(((a−b)/2)² + (c/2)²)`,
+`wavefront_tilt = √(d²+e²)`, and `wavefront_rms_residual` is the area-weighted
+RMS of `OPD − P` (the high-order residual after removing
+piston/tilt/defocus/astigmatism). The raw coefficients `wavefront_x2` … 
+`wavefront_constant` address `a…f` directly.
+
+Setting `target` on such a term drives the corresponding low-order aberration to
+zero (or any value): e.g. `wavefront_astigmatism` with `target: 0` forces
+astigmatism-free design, while `wavefront_rms_residual` minimises the residual
+aberration. The values match `wavefront_result.fields[].paraboloid`.
+
+The entrance-pupil grid follows `optimization.num_rays` and
+`optimization.aperture_margin`, and — like every grid term — is centred on the
+config's per-iteration **frozen** pupil Z, so the DLS base point and its
+Jacobian perturbations share one pupil (the wavefront analysis itself settles
+the dynamic pupil once per iteration). A degenerate fit (no grid, fewer than
+six valid rays) returns the 1e6 penalty.
 
 ### distortion_pct
 

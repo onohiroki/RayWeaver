@@ -141,6 +141,21 @@ A `CONF` operand selects which config's merit terms are active for each rule.
 | `lateral_color` | lateral colour (chief-ray height difference between two wavelengths) |
 | `longitudinal_color` | longitudinal colour (EFL difference between two wavelengths) |
 | `seidel_spherical` / `seidel_coma` / `seidel_astigmatism` / `seidel_distortion` | the corresponding third-order Seidel coefficient |
+| `wavefront_defocus` | paraboloid defocus `(a+b)/2` of the fitted wavefront OPD |
+| `wavefront_astigmatism` | paraboloid astigmatism `√(((a-b)/2)² + (c/2)²)` |
+| `wavefront_tilt` | paraboloid tilt `√(d²+e²)` |
+| `wavefront_rms_residual` | RMS of OPD minus the paraboloid (high-order residual) |
+| `wavefront_x2` / `wavefront_y2` / `wavefront_xy` / `wavefront_x` / `wavefront_y` / `wavefront_constant` | the raw paraboloid fit coefficients `a…f` |
+
+The wavefront kinds fit the least-squares quadratic
+`P(x,y) = a·x² + b·y² + c·xy + d·x + e·y + f` to the field's OPD sampled on the
+reference surface (default: the last optical surface; override via
+`chief.reference_surface`). The OPD is referenced to the best-focus point
+(geometric spot-RMS minimization), exactly like the `wavefront` command, so the
+coefficient values match `wavefront_result.fields[].paraboloid`. The pupil grid
+follows `optimization.num_rays` and `optimization.aperture_margin`, and — like
+every grid term — is centred on the config's per-iteration frozen pupil, so the
+DLS Jacobian stays consistent. A degenerate fit returns merit `1e6`.
 
 ### Constraints
 
