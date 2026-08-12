@@ -44,18 +44,18 @@ func TestEscapeFileSaverVersioning(t *testing.T) {
 	s := newEscapeFileSaver(base, build)
 
 	s.record(0, escape.Point{X: []float64{1.0}, Merit: 5.0}, true, 0)
-	cur := base + "1.yaml"
+	cur := base + "0.yaml"
 	if _, err := os.Stat(cur); err != nil {
 		t.Fatalf("expected %s after a new record: %v", cur, err)
 	}
 	if got := thicknessOf(t, cur); got != 1.0 {
-		t.Fatalf("min1 thickness = %v, want 1.0", got)
+		t.Fatalf("min0 thickness = %v, want 1.0", got)
 	}
 
 	// Improved version of minimum 0: the old file is renamed to .1.yaml and
-	// the better point is written back to min1.yaml.
+	// the better point is written back to min0.yaml.
 	s.record(0, escape.Point{X: []float64{0.5}, Merit: 2.0}, false, 1)
-	archived := base + "1.1.yaml"
+	archived := base + "0.1.yaml"
 	if _, err := os.Stat(archived); err != nil {
 		t.Fatalf("expected archived %s after improvement: %v", archived, err)
 	}
@@ -63,19 +63,19 @@ func TestEscapeFileSaverVersioning(t *testing.T) {
 		t.Fatalf("archived thickness = %v, want 1.0 (old version)", got)
 	}
 	if got := thicknessOf(t, cur); got != 0.5 {
-		t.Fatalf("current min1 thickness = %v, want 0.5 (improved)", got)
+		t.Fatalf("current min0 thickness = %v, want 0.5 (improved)", got)
 	}
 
 	// A second distinct minimum.
 	s.record(1, escape.Point{X: []float64{2.0}, Merit: 3.0}, true, 0)
-	cur2 := base + "2.yaml"
+	cur2 := base + "1.yaml"
 	if _, err := os.Stat(cur2); err != nil {
 		t.Fatalf("expected %s after a second new record: %v", cur2, err)
 	}
 
-	// Second improvement of minimum 0: current min1.yaml (v2) -> min1.2.yaml.
+	// Second improvement of minimum 0: current min0.yaml (v2) -> min0.2.yaml.
 	s.record(0, escape.Point{X: []float64{0.25}, Merit: 1.0}, false, 2)
-	archived2 := base + "1.2.yaml"
+	archived2 := base + "0.2.yaml"
 	if _, err := os.Stat(archived2); err != nil {
 		t.Fatalf("expected archived %s after second improvement: %v", archived2, err)
 	}
@@ -83,7 +83,7 @@ func TestEscapeFileSaverVersioning(t *testing.T) {
 		t.Fatalf("second-archived thickness = %v, want 0.5", got)
 	}
 	if got := thicknessOf(t, cur); got != 0.25 {
-		t.Fatalf("current min1 thickness = %v, want 0.25", got)
+		t.Fatalf("current min0 thickness = %v, want 0.25", got)
 	}
 }
 

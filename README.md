@@ -188,7 +188,7 @@ Notes:
   thin-lens `element_powers` of each lens element) as a compact fingerprint for
   comparing the minima. A repeat of a known minimum with a better merit replaces
   the stored point ("keep the better data"). `escape --save FILE` writes each
-  minimum to `FILE1.yaml`, `FILE2.yaml`, … (improvements are kept as
+  minimum to `FILE0.yaml`, `FILE1.yaml`, … (improvements are kept as
   `FILE N.<version>.yaml`), and a `SIGINT`/`SIGTERM` stops the search gracefully
   (`interrupted: true`, exit 0): the first signal waits for the cycle boundary,
   the second interrupts the running DLS within one iteration (preserving its

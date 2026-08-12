@@ -18,7 +18,7 @@ rayweave escape extract --index N < escape-output.yaml
 | `--glass-dir DIR` | AGF glass catalog directory |
 | `--verbose` | print escape progress to stderr as JSONL (local minima, escape-parameter changes, per-cycle DLS status); every event carries a wall-clock `time` and `elapsed` seconds |
 | `--log FILE` | write the same JSONL progress stream to `FILE` |
-| `--save FILE` | save every discovered local minimum to `FILE1.yaml`, `FILE2.yaml`, … (see [Saving minima](#saving-minima)) |
+| `--save FILE` | save every discovered local minimum to `FILE0.yaml`, `FILE1.yaml`, … (see [Saving minima](#saving-minima)) |
 | `--index N` | (with `escape extract`) local minimum index to extract |
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`
@@ -210,8 +210,9 @@ never loses already-discovered minima.
 pipeline-compatible lens YAML (the full `Input` with that minimum's surfaces
 applied, ready for `chief`/`trace`/`plot` or a re-optimisation):
 
-- `FILE1.yaml`, `FILE2.yaml`, … in **discovery order** (a trailing `.yaml`/
-  `.yml` on `FILE` is treated as the extension).
+- `FILE0.yaml`, `FILE1.yaml`, … in **discovery order**, matching the 0-based
+  `index` of the JSONL `minimum` events (a trailing `.yaml`/`.yml` on `FILE` is
+  treated as the extension).
 - When a minimum is improved, the current `FILE N.yaml` is renamed to
   `FILE N.<version>.yaml` (the old, worse version is kept) and the better point
   is written to `FILE N.yaml`.
@@ -249,7 +250,7 @@ escape_result:
   minima:
     - index: 0
       merit: ...
-      file: result1.yaml        # --save output file for this minimum (if any)
+      file: result0.yaml        # --save output file for this minimum (if any)
       features:                  # compact fingerprint of the minimum (per config)
         - id: config1
           element_powers: [0.0075, -0.0041, 0.0022]
@@ -275,7 +276,7 @@ stays intact).
 rayweave escape < samples/escape-demo.yaml | tee escape-result.yaml \
   | rayweave trace | rayweave plot -o best.svg
 
-# Save every discovered minimum to result1.yaml, result2.yaml, ...
+# Save every discovered minimum to result0.yaml, result1.yaml, ...
 rayweave escape --save result < samples/escape-demo.yaml > escape-result.yaml
 
 # Extract a specific local minimum as a clean lens

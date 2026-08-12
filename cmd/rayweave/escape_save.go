@@ -15,8 +15,9 @@ import (
 )
 
 // escapeFileSaver writes every recorded local minimum to a versioned YAML
-// file. With base "result", the first minimum goes to result1.yaml, the second
-// to result2.yaml, and so on (discovery order). When a recorded minimum is
+// file. With base "result", the first minimum goes to result0.yaml, the second
+// to result1.yaml, and so on (discovery order, matching the 0-based store
+// index reported by the JSONL minimum events). When a recorded minimum is
 // improved, the current resultN.yaml is first renamed to resultN.<version>.yaml
 // so the older (worse) version is kept, then the better point is written to
 // resultN.yaml. All writes are atomic (temp file + fsync + rename), so a
@@ -30,7 +31,7 @@ type escapeFileSaver struct {
 	err   error
 }
 
-// newEscapeFileSaver creates a saver writing to base1.yaml, base2.yaml, ...
+// newEscapeFileSaver creates a saver writing to base0.yaml, base1.yaml, ...
 func newEscapeFileSaver(base string, build func(escape.Point) types.Input) *escapeFileSaver {
 	stem, ext := splitSaveBase(base)
 	return &escapeFileSaver{stem: stem, ext: ext, build: build}
@@ -62,9 +63,9 @@ func (s *escapeFileSaver) record(idx int, p escape.Point, isNew bool, version in
 		s.err = fmt.Errorf("escape: marshal minimum %d: %w", idx, err)
 		return
 	}
-	current := fmt.Sprintf("%s%d%s", s.stem, idx+1, s.ext)
+	current := fmt.Sprintf("%s%d%s", s.stem, idx, s.ext)
 	if !isNew && version > 0 {
-		archived := fmt.Sprintf("%s%d.%d%s", s.stem, idx+1, version, s.ext)
+		archived := fmt.Sprintf("%s%d.%d%s", s.stem, idx, version, s.ext)
 		if err := os.Rename(current, archived); err != nil && !os.IsNotExist(err) {
 			s.err = fmt.Errorf("escape: rename %s -> %s: %w", current, archived, err)
 			return
@@ -74,7 +75,7 @@ func (s *escapeFileSaver) record(idx int, p escape.Point, isNew bool, version in
 		s.err = fmt.Errorf("escape: write %s: %w", current, err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "escape: minimum %d saved to %s (merit=%.6e)\n", idx+1, current, p.Merit)
+	fmt.Fprintf(os.Stderr, "escape: minimum %d saved to %s (merit=%.6e)\n", idx, current, p.Merit)
 }
 
 // writeFileAtomic writes data to path via a temp file in the same directory,

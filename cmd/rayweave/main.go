@@ -100,7 +100,7 @@ func main() {
 			fs.BoolVar(&optEscapeVerbose, "verbose", false, "print escape progress (local minima, parameter changes) to stderr (JSONL)")
 			fs.StringVar(&optEscapeGlassDir, "glass-dir", "", "AGF glass catalog directory")
 			fs.StringVar(&optEscapeLogFile, "log", "", "write escape progress to file (JSONL)")
-			fs.StringVar(&optEscapeSaveFile, "save", "", "save each discovered local minimum to FILE1.yaml, FILE2.yaml, ...")
+			fs.StringVar(&optEscapeSaveFile, "save", "", "save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...")
 			fs.Parse(args[1:])
 		}
 	}
@@ -464,7 +464,7 @@ Options:
                    found, escape-parameter changes, per-cycle DLS status);
                    every event carries a wall-clock time and elapsed seconds
   --log FILE       write the same JSONL progress stream to FILE
-  --save FILE      save each discovered local minimum to FILE1.yaml, FILE2.yaml,
+  --save FILE      save each discovered local minimum to FILE0.yaml, FILE1.yaml,
                    ... (discovery order). When a minimum is improved, the
                    current FILE N.yaml is renamed to FILE N.<version>.yaml and
                    the better point is written as FILE N.yaml. Writes are

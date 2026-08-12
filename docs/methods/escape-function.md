@@ -156,7 +156,7 @@ only the second signal does.
 ## 4c. Saving minima
 
 `escape --save FILE` writes each recorded minimum to a versioned YAML file as it
-is discovered (see `docs/escape.md`): `FILE1.yaml`, `FILE2.yaml`, … in discovery
+is discovered (see `docs/escape.md`): `FILE0.yaml`, `FILE1.yaml`, … in discovery
 order, with `FILE N.<version>.yaml` archives for superseded improvements. The
 saver is wired through `Store.SetOnRecord` (invoked under the store lock, so
 invocations from parallel workers are serialised), materialises each minimum via
