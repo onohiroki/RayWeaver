@@ -11,40 +11,48 @@ set -euo pipefail
 #   direct vector Huygens integral (PSF) -> FFT -> OTF/MTF.
 # It then:
 #   1. prints a comparison table (Strehl, FWHM, encircled-energy 50%, Airy
-#      radius, sampling counts, and the MTF-50/30/10 cut-off frequencies) to
-#      stdout and <stem>-result.txt,
+#      radius, effective grid, sampling counts, and the MTF-50/30/10 cut-off
+#      frequencies) to stdout and <stem>-result.txt,
 #   2. draws one 2D pm3d intensity map PNG per field,
 #   3. draws one radial-profile overlay PNG (all fields through their peak),
 #   4. draws one MTF-overlay PNG (sagittal & tangential curves per field).
 #
-# The default lens is the escape-optimised US2645157 triplet restricted to the
-# center field (0 deg) — its strongly aberrated 16°/24° fields are excluded
-# (see samples/psf-mtf-demo.yaml). Any other lens YAML with a `chief` section
-# can be substituted with --lens; the MTF frequency cap keeps working via the
-# --max-freq CLI flag (default 200 c/mm) even if that YAML carries no `psf:`
-# section, because --max-freq overrides psf.mtf_config.max_frequency.
+# The default lens is the DLS+escape-optimised folded D=200 F/1.93 Schmidt
+# camera (samples/my-schmidt.yaml): BK7 corrector plate + spherical primary +
+# aspheric 2-element field flattener, evaluated at its usable fields
+# 0/1/2/2.8° (the legacy 3.22° full-frame edge vignettes and is dropped).
+# --lens triplet switches back to the escape-optimised US2645157 triplet
+# restricted to the center field (0°). Any other lens YAML with a `chief`
+# section can be substituted with --lens; the MTF frequency cap keeps working
+# via the --max-freq CLI flag (default 100 c/mm) even if that YAML carries no
+# `psf:` section, because --max-freq overrides psf.mtf_config.max_frequency.
 #
 # Input polarization is RCP+LCP (the polarization-averaged / unpolarised PSF).
 #
 # Options
 #   --clean       remove every generated artifact; the tracked input YAMLs are
 #                 never touched.
-#   --lens NAME   select the lens: 'triplet' (default, psf-mtf-demo.yaml) or
+#   --lens NAME   select the lens: 'my-schmidt' (default, my-schmidt.yaml),
+#                 'triplet' (psf-mtf-demo.yaml),
 #                 'doublegauss' (samples/doublegauss-init.yaml), or a path to
 #                 any input YAML with a chief section.
-#   --max-freq N  MTF frequency cap in cycles/mm (default 200); passed to
+#   --max-freq N  MTF frequency cap in cycles/mm (default 100); passed to
 #                 `rayweave psf` so it works regardless of the lens YAML.
 #   --num-rays N  pupil grid rays (default 400)
 #   --psf-grid N  image-plane pixels per side (default 96)
 #
 # How to read the output
-#   - 0° is nearly diffraction-limited: a tight Airy core (Strehl ~0.87), a
-#     symmetric FWHM, and an MTF that stays high out to ~200 cycles/mm before
-#     dropping through the 0.5/0.3/0.1 cut-off frequencies. Thresholds that
-#     fall beyond the --max-freq chart cap are printed as '-' in the table.
+#   - The Schmidt default is NOT diffraction limited across the field: the fast
+#     mirror leaves a residual spherical aberration (Strehl ~0.03-0.05 on-axis,
+#     MTF-50 at a few c/mm), far below the ~880 c/mm diffraction cut-off. The
+#     geometric spot dominates the auto-sized evaluation window, so the image
+#     grid is auto-enlarged until the Airy core (1.4 um) is resolved: the
+#     effective grid (Grid column) exceeds the requested --psf-grid 96.
+#   - With --lens triplet, 0° is nearly diffraction-limited: a tight Airy core
+#     (Strehl ~0.87) and an MTF that stays high out to ~200 cycles/mm.
 #   - The MTF overlay makes the sagittal/tangential difference visible at a
-#     glance; the radial overlay shows the 0° ring structure (first dark ring
-#     at ~0.61·λ/NA).
+#     glance; the radial overlay shows the on-axis ring structure (first dark
+#     ring at ~0.61·λ/NA).
 #   - With --lens doublegauss the 4 fields (0/10/16/23 deg) are all aberrated
 #     to varying degrees; the same table and charts adapt to their count.
 # =============================================================================
@@ -53,8 +61,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTDIR="$SCRIPT_DIR"
 
-LENS="triplet"
-MAXFREQ=200
+LENS="my-schmidt"
+MAXFREQ=100
 NUM_RAYS=400
 PSF_GRID=96
 CLEAN=false
@@ -66,7 +74,7 @@ while [[ $# -gt 0 ]]; do
       shift
       LENS="${1:-}"
       if [[ -z "$LENS" ]]; then
-        echo "error: --lens expects 'triplet', 'doublegauss', or a YAML path" >&2
+        echo "error: --lens expects 'my-schmidt', 'triplet', 'doublegauss', or a YAML path" >&2
         exit 1
       fi
       shift
@@ -98,9 +106,14 @@ done
 
 # Resolve the input YAML and the output stem for the chosen lens.
 case "$LENS" in
+  my-schmidt)
+    YAML="$SCRIPT_DIR/my-schmidt.yaml"
+    STEM="psf-mtf-demo"
+    LENS_NAME="DLS+escape-optimised folded Schmidt (my-schmidt.yaml)"
+    ;;
   triplet)
     YAML="$SCRIPT_DIR/psf-mtf-demo.yaml"
-    STEM="psf-mtf-demo"
+    STEM="psf-mtf-demo-triplet"
     LENS_NAME="escape-optimised US2645157 triplet (center field)"
     ;;
   doublegauss)
@@ -114,7 +127,7 @@ case "$LENS" in
       STEM="psf-mtf-demo"
       LENS_NAME="$(basename "$LENS")"
     else
-      echo "error: --lens must be 'triplet', 'doublegauss', or a path to an input YAML (got '$LENS')" >&2
+      echo "error: --lens must be 'my-schmidt', 'triplet', 'doublegauss', or a path to an input YAML (got '$LENS')" >&2
       exit 1
     fi
     ;;
@@ -130,7 +143,7 @@ MTF_BASE="$OUTDIR/$STEM-mtf"
 # Clean-only mode: remove generated files for every known stem and exit
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
-  for s in psf-mtf-demo psf-mtf-demo-doublegauss; do
+  for s in psf-mtf-demo psf-mtf-demo-triplet psf-mtf-demo-doublegauss; do
     rm -f "$OUTDIR/$s-result.yaml" "$OUTDIR/$s-result.txt"
     rm -f "$OUTDIR/$s"_*.csv "$OUTDIR/$s"_*.yaml
     rm -f "$OUTDIR/$s"-*.png
@@ -174,8 +187,8 @@ $RAYWEAVE psf --polarization RCP+LCP --num-rays "$NUM_RAYS" --psf-grid "$PSF_GRI
 #    a threshold beyond the frequency cap is printed as '-'.
 NF=$($RAYWEAVE query --len "psf_results" < "$RESULT_YAML")
 {
-  echo "PSF/OTF/MTF summary — $LENS_NAME, RCP+LCP, ${NUM_RAYS} rays, ${PSF_GRID}^2 grid, MTF cap ${MAXFREQ} c/mm"
-  echo "field  angle   Strehl   FWHM_x    FWHM_y    EE50      Airy      MTF50/30/10 (c/mm)  valid/total"
+  echo "PSF/OTF/MTF summary — $LENS_NAME, RCP+LCP, ${NUM_RAYS} rays, ${PSF_GRID}^2 requested grid, MTF cap ${MAXFREQ} c/mm"
+  echo "field  angle   Strehl   FWHM_x    FWHM_y    EE50      Airy      Grid   MTF50/30/10 (c/mm)  valid/total"
   for ((i = 0; i < NF; i++)); do
     F="psf_results[$i]"
     fi=$($RAYWEAVE query -r "$F.field_index" < "$RESULT_YAML")
@@ -185,6 +198,7 @@ NF=$($RAYWEAVE query --len "psf_results" < "$RESULT_YAML")
     fy=$($RAYWEAVE query -r "$F.fwhm_y" < "$RESULT_YAML")
     ee=$($RAYWEAVE query -r "$F.encircled_energy_50" < "$RESULT_YAML")
     ai=$($RAYWEAVE query -r "$F.airy_radius" < "$RESULT_YAML")
+    g=$($RAYWEAVE query -r "$F.grid_size" < "$RESULT_YAML")
     m50=$($RAYWEAVE query -r --default "" "$F.mtf.sagittal.thresholds[mtf=0.5].frequency" < "$RESULT_YAML")
     m30=$($RAYWEAVE query -r --default "" "$F.mtf.sagittal.thresholds[mtf=0.3].frequency" < "$RESULT_YAML")
     m10=$($RAYWEAVE query -r --default "" "$F.mtf.sagittal.thresholds[mtf=0.1].frequency" < "$RESULT_YAML")
@@ -193,9 +207,9 @@ NF=$($RAYWEAVE query --len "psf_results" < "$RESULT_YAML")
     [[ -n "$m50" ]] && mtf50=$(printf '%6.1f' "$m50") || mtf50=$(printf '%6s' '-')
     [[ -n "$m30" ]] && mtf30=$(printf '%6.1f' "$m30") || mtf30=$(printf '%6s' '-')
     [[ -n "$m10" ]] && mtf10=$(printf '%6.1f' "$m10") || mtf10=$(printf '%6s' '-')
-    printf '  %2d   %6.1f  %7.4f  %8.5f  %8.5f  %8.5f  %8.5f  %s/%s/%s   %s/%s\n' \
+    printf '  %2d   %6.1f  %7.4f  %8.5f  %8.5f  %8.5f  %8.5f  %4d  %s/%s/%s   %s/%s\n' \
       "${fi:-$i}" "${ang:-0}" "${s:-0}" "${fx:-0}" "${fy:-0}" "${ee:-0}" "${ai:-0}" \
-      "$mtf50" "$mtf30" "$mtf10" "${v:-0}" "${t:-0}"
+      "${g:-0}" "$mtf50" "$mtf30" "$mtf10" "${v:-0}" "${t:-0}"
   done
 } | tee "$RESULT_TXT"
 echo "Written: $RESULT_TXT"

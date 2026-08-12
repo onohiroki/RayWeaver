@@ -37,8 +37,6 @@ samples/psf-mtf-demo-*
 samples/psf-mtf-demo_*
 samples/wavefront-demo-*
 samples/wavefront-demo_*
-samples/schmidt-psf-demo-*
-samples/schmidt-psf-demo_*
 samples/*element-powers.dat
 samples/glass-chief-opt-w*.yaml
 samples/us2645157-scaled50.yaml
