@@ -18,6 +18,10 @@ import (
 // runPSF implements the `psf` subcommand: per-field polarized ray tracing,
 // non-uniform wavefront sampling (Delaunay-triangulated reference surface)
 // and a direct vector Huygens integration onto the flat image plane.
+// With --best-focus each field is evaluated at its best-focus image plane
+// (the spot-RMS-minimizing shift, as in the wavefront command), so a
+// field-curved system's defocus-dominated fixed-plane Strehl is replaced by
+// the wavefront-quality number.
 //
 // The pipeline YAML carries a lightweight summary (psf_results). Full
 // structured grids go to --yaml / --csv files so the pipe stays small.
@@ -41,6 +45,7 @@ func runPSF(data []byte) {
 	maxFreq := fs.Float64("max-freq", 0, "MTF frequency cap in cycles/mm (0 = Nyquist; default psf.mtf_config.max_frequency)")
 	yamlOut := fs.String("yaml", "", "write full structured PSF data to FILE (index-suffixed per result)")
 	csvOut := fs.String("csv", "", "write gnuplot x,y,intensity map to FILE (index-suffixed per result)")
+	bestFocus := fs.Bool("best-focus", false, "evaluate each field at its best-focus image plane (removes field-curvature defocus)")
 	fs.Parse(os.Args[2:])
 
 	input := parseYAML[types.Input](data)
@@ -143,7 +148,13 @@ func runPSF(data []byte) {
 		if opts.Workers <= 0 {
 			opts.Workers = input.PSF.Workers
 		}
+		if !flagWasSet(fs, "best-focus") {
+			opts.BestFocus = input.PSF.BestFocus
+		}
 		opts.MTFCfg = input.PSF.MTFCfg
+	}
+	if *bestFocus {
+		opts.BestFocus = true
 	}
 	if *maxFreq > 0 {
 		if opts.MTFCfg == nil {
@@ -164,7 +175,7 @@ func runPSF(data []byte) {
 
 	// Write the effective options back into the output's psf: section so the
 	// pipeline reflects what was actually computed (flags override YAML).
-	writeBackPSF(&input, wavelengths, selected, opts)
+	writeBackPSF(&input, wavelengths, selected, opts, flagWasSet(fs, "best-focus"))
 
 	output := types.Output{Input: input}
 	withOutputMetadata(&output.Input, "psf", subcmdArgs())
@@ -212,6 +223,7 @@ func runPSF(data []byte) {
 			Vignetted:         r.Stats.Missed,
 			OutputFile:        outFile,
 			SpectralCurve:     r.SpectralCurve,
+			BestFocusShift:    r.BestFocusShift,
 			MTF:               psfMTFSummary(r.MTF),
 		})
 	}
@@ -257,7 +269,7 @@ func applySelectedFields(fields []types.FieldDef, kept []int) []types.FieldDef {
 }
 
 // writeBackPSF stores the effective options into the output psf: section.
-func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opts psf.Options) {
+func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opts psf.Options, bestFocusSet bool) {
 	if input.PSF == nil {
 		input.PSF = &types.PSFConfig{}
 	}
@@ -272,6 +284,11 @@ func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opt
 	ps.Fields = selected
 	ps.SpectralCurve = opts.SpectralCurve
 	ps.SpectralEntries = opts.SpectralEntries
+	// Only echo best_focus when the flag set it or the YAML requested it
+	// (never inject the false default into every output).
+	if bestFocusSet || opts.BestFocus {
+		ps.BestFocus = opts.BestFocus
+	}
 	ps.MTFCfg = opts.MTFCfg
 }
 
@@ -351,6 +368,7 @@ type psfYAMLFile struct {
 	AiryRadius        float64               `yaml:"airy_radius"`
 	ImageNA           float64               `yaml:"image_na"`
 	SpotRMS           float64               `yaml:"spot_rms"`
+	BestFocusShift    float64               `yaml:"best_focus_shift_mm,omitempty"`
 	Transmittance     float64               `yaml:"transmittance,omitempty"`
 	RawEnergy         float64               `yaml:"raw_energy,omitempty"`
 	Grid              psfYAMLGrid           `yaml:"grid"`
@@ -451,6 +469,7 @@ func writePSFYAML(path string, r *psf.Result) error {
 		AiryRadius:        r.AiryRadius,
 		ImageNA:           r.ImageNA,
 		SpotRMS:           r.SpotRMS,
+		BestFocusShift:    r.BestFocusShift,
 		Transmittance:     r.Transmittance,
 		RawEnergy:         r.RawIntensitySum,
 		Grid: psfYAMLGrid{

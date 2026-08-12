@@ -679,6 +679,10 @@ Options:
                         tracing (default: GOMAXPROCS)
   --max-freq N        MTF frequency cap in cycles/mm (default:
                         psf.mtf_config.max_frequency, else the Nyquist)
+  --best-focus        evaluate each field at its best-focus image plane
+                        (the spot-RMS-minimizing shift, as in wavefront), so a
+                        field-curved system's defocus-dominated fixed-plane
+                        Strehl is replaced by the wavefront-quality number
   --yaml FILE         write full structured data (intensity, Ex/Ey/Ez,
                         encircled energy, wavefront OPD) to FILE, one
                         index-suffixed file per result
@@ -697,6 +701,7 @@ Input YAML — psf section (optional; flags override):
     fields: [0, 1]
     wavelengths: [0.00058756, 0.00048613]
     polarization: "RCP+LCP"
+    best_focus: false
     mtf_config:
       max_frequency: 200
 
@@ -709,6 +714,12 @@ Notes:
     before the image plane). The wavefront is sampled there and propagated to
     the fixed flat image plane; field curvature and defocus therefore appear
     naturally in the PSF.
+  - --best-focus (or psf.best_focus) evaluates each field at its best-focus
+    image plane instead: the plane shift that minimizes the geometric spot RMS
+    is applied per field before the Huygens integral, removing field-curvature
+    defocus. Use it when the fixed-plane Strehl is dominated by focus, e.g. to
+    compare against the wavefront command's best-focus rms/strehl. The applied
+    shift is reported per result as best_focus_shift_mm.
   - The image grid is auto-enlarged when the requested grid would leave the
     Airy core smaller than a pixel (fast or aberrated systems, where the
     geometric spot dominates the window): the peak-ratio Strehl is only

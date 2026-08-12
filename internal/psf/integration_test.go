@@ -13,15 +13,61 @@ import (
 // a flat image plane, all in air. The stop aperture is the fixed surface
 // diameter (dynamic pupil).
 func singletSystem(diameter float64) (types.System, *glass.Catalog) {
+	return singletSystemBFL(diameter, 100)
+}
+
+// singletSystemBFL builds the same singlet with the image plane placed bfl mm
+// behind the rear vertex (surface 2). Paraxial back focal length ≈ 95.1 mm,
+// so bfl > 95.1 puts the image plane behind focus (defocus-dominated).
+func singletSystemBFL(diameter, bfl float64) (types.System, *glass.Catalog) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: diameter},
-		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: diameter},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: bfl, Material: types.Material{}, Diameter: diameter},
 		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: diameter},
 	}
 	surface.Precompute(surfaces)
 	return types.System{Surfaces: surfaces}, gc
+}
+
+// TestPSFBestFocusDefocusDominance verifies that a low on-axis fixed-plane
+// Strehl is caused by image-plane defocus (field curvature), not by the
+// Huygens model: the same on-axis field evaluated at its best-focus image
+// plane (the geometric spot-RMS minimum, as in the wavefront command) must
+// recover a near-diffraction-limited Strehl, and the recovered shift must
+// match the deliberate back-focal displacement. This is the property that
+// makes psf --best-focus and the wavefront best-focus metrics agree.
+func TestPSFBestFocusDefocusDominance(t *testing.T) {
+	// Image plane 3 mm behind the ~95.1 mm paraxial focus: defocused on-axis.
+	sys, gc := singletSystemBFL(8, 98.1)
+	fields := []types.FieldDef{{Angle: 0, Direction: []float64{0, 1}}}
+	wl := []float64{testWavelength}
+
+	fixed, err := Compute(sys, gc, fields, wl, Options{NumRays: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bf, err := Compute(sys, gc, fields, wl, Options{NumRays: 200, BestFocus: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fixed) == 0 || len(bf) == 0 {
+		t.Fatal("no result")
+	}
+	rf, rb := fixed[0], bf[0]
+	if rf.Strehl >= rb.Strehl {
+		t.Errorf("fixed-plane Strehl %v must be below best-focus Strehl %v", rf.Strehl, rb.Strehl)
+	}
+	if rb.Strehl <= 0.5 {
+		t.Errorf("best-focus on-axis Strehl %v should be near diffraction limited", rb.Strehl)
+	}
+	if math.Abs(rb.BestFocusShift) < 2.0 {
+		t.Errorf("best-focus shift %v mm should recover the ~3 mm deliberate defocus", rb.BestFocusShift)
+	}
+	if rb.SpotRMS >= rf.SpotRMS {
+		t.Errorf("best-focus spot RMS %v must be below fixed-plane %v", rb.SpotRMS, rf.SpotRMS)
+	}
 }
 
 // TestPSFRealSinglet runs the full pipeline (polarized ray tracing → wavefront

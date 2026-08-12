@@ -1116,6 +1116,9 @@ type PSFConfig struct {
 	// SpectralEntries overrides SpectralCurve with a custom spectral power
 	// distribution (wavelength nm, relative power).
 	SpectralEntries []SpectralEntry `yaml:"spectral_entries,omitempty"`
+	// BestFocus evaluates each field at its best-focus image plane (removes
+	// field-curvature defocus before the Huygens integral).
+	BestFocus bool `yaml:"best_focus,omitempty"`
 	// MTFCfg configures the OTF/MTF computation (defaults when absent).
 	MTFCfg *PSFMTFConfig `yaml:"mtf_config,omitempty"`
 }
@@ -1196,6 +1199,8 @@ type PSFResult struct {
 	ValidRays         int     `yaml:"valid_rays"`
 	Vignetted         int     `yaml:"vignetted,omitempty"`
 	OutputFile        string  `yaml:"output_file,omitempty"`
+	// BestFocusShift is the applied image-plane shift in mm; 0 = fixed plane.
+	BestFocusShift float64 `yaml:"best_focus_shift_mm,omitempty"`
 	// SpectralCurve is set for polychromatic results (wavelength is omitted).
 	SpectralCurve string `yaml:"spectral_curve,omitempty"`
 	// MTF is the OTF/MTF summary (thresholds, and evaluated frequencies when

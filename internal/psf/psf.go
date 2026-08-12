@@ -30,6 +30,12 @@ type Options struct {
 	SpectralEntries []types.SpectralEntry
 	// MTFCfg configures the OTF/MTF computation (nil = defaults).
 	MTFCfg *types.PSFMTFConfig
+	// BestFocus evaluates each field at its best-focus image plane: the plane
+	// shift δ minimizing the geometric spot RMS (BestFocusShift) is applied per
+	// field before the Huygens integral, removing field-curvature defocus so
+	// the peak-ratio Strehl and rms_opd are wavefront-quality numbers. False =
+	// evaluate at the fixed image plane (field curvature appears naturally).
+	BestFocus bool
 }
 
 // Result is one computed PSF with its analysis summary.
@@ -63,6 +69,9 @@ type Result struct {
 	Transmittance float64
 	// SpectralCurve names the SPD used; non-empty for polychromatic results.
 	SpectralCurve string
+	// BestFocusShift is the applied image-plane shift (mm) when opts.BestFocus
+	// was set (0 when evaluated at the fixed plane).
+	BestFocusShift float64
 	// Contributions lists each wavelength's weighted share of a
 	// polychromatic result (empty for monochromatic results).
 	Contributions []WavelengthContribution
@@ -208,14 +217,19 @@ func computeOne(engine *ray.Engine, system types.System, pg *PupilGrid, fd types
 	if len(samples) < 3 {
 		return nil
 	}
-	cx, cy, _ := ImagePlaneSpot(samples, planeZ)
-	center := types.Vec3{X: cx, Y: cy, Z: planeZ}
-	spec := DefaultImageGrid(samples, center, nImage, wl, planeZ, cx, cy, opts.HalfWidth, opts.GridSize)
+	evaluateZ := planeZ
+	if opts.BestFocus {
+		evaluateZ = planeZ + BestFocusShift(samples, planeZ)
+	}
+	cx, cy, _ := ImagePlaneSpot(samples, evaluateZ)
+	center := types.Vec3{X: cx, Y: cy, Z: evaluateZ}
+	spec := DefaultImageGrid(samples, center, nImage, wl, evaluateZ, cx, cy, opts.HalfWidth, opts.GridSize)
 
 	// Evaluate actual + ideal in one shared pass (geometry computed once).
 	pair := fieldPair{samples: samples, center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)}
-	computePairs([]fieldPair{pair}, planeZ, nImage, wl, spec, opts.Workers)
-	r := finishResult(pair.actual, pair.ideal, samples, center, nImage, wl, planeZ, fieldAngle, fi, label, stats, samplePower(samples))
+	computePairs([]fieldPair{pair}, evaluateZ, nImage, wl, spec, opts.Workers)
+	r := finishResult(pair.actual, pair.ideal, samples, center, nImage, wl, evaluateZ, fieldAngle, fi, label, stats, samplePower(samples))
+	r.BestFocusShift = evaluateZ - planeZ
 	r.MTF = ComputeMTF(r.Grid.Intensity, r.Grid.Spec, opts.MTFCfg)
 	return r
 }
@@ -244,15 +258,19 @@ func computeCombined(engine *ray.Engine, system types.System, pg *PupilGrid, fd 
 	if len(r1.samples) < 3 || len(r2.samples) < 3 {
 		return nil
 	}
-	cx, cy, _ := ImagePlaneSpot(r1.samples, planeZ)
-	center := types.Vec3{X: cx, Y: cy, Z: planeZ}
-	spec := DefaultImageGrid(r1.samples, center, nImage, wl, planeZ, cx, cy, opts.HalfWidth, opts.GridSize)
+	evaluateZ := planeZ
+	if opts.BestFocus {
+		evaluateZ = planeZ + BestFocusShift(r1.samples, planeZ)
+	}
+	cx, cy, _ := ImagePlaneSpot(r1.samples, evaluateZ)
+	center := types.Vec3{X: cx, Y: cy, Z: evaluateZ}
+	spec := DefaultImageGrid(r1.samples, center, nImage, wl, evaluateZ, cx, cy, opts.HalfWidth, opts.GridSize)
 
 	pairs := []fieldPair{
 		{samples: r1.samples, center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)},
 		{samples: r2.samples, center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)},
 	}
-	computePairs(pairs, planeZ, nImage, wl, spec, opts.Workers)
+	computePairs(pairs, evaluateZ, nImage, wl, spec, opts.Workers)
 
 	// Incoherent sum of intensities.
 	comb := NewFieldGrid(spec)
@@ -265,8 +283,9 @@ func computeCombined(engine *ray.Engine, system types.System, pg *PupilGrid, fd 
 	stats.Total += r2.stats.Total
 	stats.Valid += r2.stats.Valid
 	stats.Missed += r2.stats.Missed
-	r := finishResult(comb, idealComb, r1.samples, center, nImage, wl, planeZ, fieldAngle, fi,
+	r := finishResult(comb, idealComb, r1.samples, center, nImage, wl, evaluateZ, fieldAngle, fi,
 		string(types.PolRCPLCP), stats, samplePower(r1.samples)+samplePower(r2.samples))
+	r.BestFocusShift = evaluateZ - planeZ
 	r.MTF = ComputeMTF(r.Grid.Intensity, r.Grid.Spec, opts.MTFCfg)
 	return r
 }
@@ -352,8 +371,12 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 		return nil
 	}
 	ref := tds[0]
-	cx, cy, _ := ImagePlaneSpot(ref.samples[refIdx], planeZ)
-	center := types.Vec3{X: cx, Y: cy, Z: planeZ}
+	evaluateZ := planeZ
+	if opts.BestFocus {
+		evaluateZ = planeZ + BestFocusShift(ref.samples[refIdx], planeZ)
+	}
+	cx, cy, _ := ImagePlaneSpot(ref.samples[refIdx], evaluateZ)
+	center := types.Vec3{X: cx, Y: cy, Z: evaluateZ}
 	half := 0.0
 	if opts.HalfWidth > 0 {
 		half = math.Max(opts.HalfWidth, 5e-3)
@@ -364,7 +387,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 					continue
 				}
 				na := ComputeImageNA(s, center, td.nImage)
-				_, _, rms := ImagePlaneSpot(s, planeZ)
+				_, _, rms := ImagePlaneSpot(s, evaluateZ)
 				h := math.Max(4*AiryRadius(td.wl, na), 3*rms)
 				if h > half {
 					half = h
@@ -375,7 +398,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 	if half < 5e-3 {
 		half = 5e-3
 	}
-	spec := DefaultImageGrid(ref.samples[refIdx], center, ref.nImage, ref.wl, planeZ, cx, cy, half, opts.GridSize)
+	spec := DefaultImageGrid(ref.samples[refIdx], center, ref.nImage, ref.wl, evaluateZ, cx, cy, half, opts.GridSize)
 
 	label := group[0].label
 	if len(group) == 2 {
@@ -398,7 +421,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 				continue
 			}
 			pair := fieldPair{samples: td.samples[p], center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)}
-			computePairs([]fieldPair{pair}, planeZ, td.nImage, td.wl, spec, opts.Workers)
+			computePairs([]fieldPair{pair}, evaluateZ, td.nImage, td.wl, spec, opts.Workers)
 			for idx := range act.Intensity {
 				act.Intensity[idx] += pair.actual.Intensity[idx]
 				ide.Intensity[idx] += pair.ideal.Intensity[idx]
@@ -452,7 +475,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 	}
 
 	na := ComputeImageNA(ref.samples[refIdx], center, ref.nImage)
-	_, _, spotRMS := ImagePlaneSpot(ref.samples[refIdx], planeZ)
+	_, _, spotRMS := ImagePlaneSpot(ref.samples[refIdx], evaluateZ)
 	rmsOPD, pvOPD := wavefrontOPD(ref.samples[refIdx], center, ref.nImage)
 
 	whiteGrid.Normalize()
@@ -491,6 +514,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 		RawIntensitySum: whiteRawSum,
 		Transmittance:   transmittance,
 		SpectralCurve:   opts.SpectralCurve,
+		BestFocusShift:  evaluateZ - planeZ,
 		Contributions:   contributions,
 		MTF:             ComputeMTF(whiteGrid.Intensity, spec, opts.MTFCfg),
 	}

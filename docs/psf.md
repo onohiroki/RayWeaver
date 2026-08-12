@@ -10,7 +10,8 @@ integral** — no FFT. The numerical method is described in
 ```
 rayweave psf [--ref-surface N] [--psf-grid 64] [--psf-width W]
              [--num-rays 400] [--fields I1,I2,...] [--wavelengths W1,...]
-             [--polarization S] [--max-freq N] [--yaml FILE] [--csv FILE] < system.yaml
+             [--polarization S] [--best-focus] [--max-freq N]
+             [--yaml FILE] [--csv FILE] < system.yaml
 ```
 
 It reads standard system YAML (a `chief` section is required for the fields),
@@ -45,6 +46,7 @@ single flat exit pupil would break down.
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` (unpolarised average) |
 | `--psf-workers N` | parallel workers for the Huygens integral and wavefront tracing (default: GOMAXPROCS) |
 | `--max-freq N` | MTF frequency cap in cycles/mm (default: `psf.mtf_config.max_frequency`, else the Nyquist) |
+| `--best-focus` | evaluate each field at its **best-focus image plane**: the plane shift minimizing the geometric spot RMS is applied per field before the Huygens integral, removing field-curvature defocus |
 | `--yaml FILE` | write full structured data to FILE, one index-suffixed file per result (`FILE_0.yaml`, `FILE_1.yaml`, …) |
 | `--csv FILE` | write a gnuplot `x,y,intensity` pm3d map to FILE, one index-suffixed file per result |
 | `--config ID` | select config by id (multi-config mode) |
@@ -103,6 +105,7 @@ psf:
   fields: [0, 1]              # field indices (default: all)
   wavelengths: [0.00058756]   # mm (default: chief wavelengths)
   polarization: "RCP+LCP"     # RCP | LCP | X | Y | RCP+LCP
+  best_focus: false           # per-field best-focus image plane (default: fixed plane)
 ```
 
 ## Output
@@ -117,6 +120,7 @@ psf_results:
     wavelength: 0.00058756
     polarization: RCP
     strehl_ratio: 0.958
+    best_focus_shift_mm: 0.0   # only with --best-focus
     fwhm_x: 0.00408
     fwhm_y: 0.00408
     centroid_x: 2.5e-07
@@ -137,6 +141,7 @@ psf_results:
 | Field | Meaning |
 |---|---|
 | `strehl_ratio` | peak intensity of the actual PSF divided by the peak of the diffraction-limited PSF computed from the **same** samples (a converging sphere to the window centre). A perfect system gives 1.0. |
+| `best_focus_shift_mm` | with `--best-focus`: the image-plane shift applied to this field (plane at the best-focus spot-RMS minimum) before the Huygens integral; the sign is the plane displacement, so `+` means the best focus lies **beyond** the fixed plane |
 | `fwhm_x` / `fwhm_y` | full width at half maximum through the peak, sub-pixel interpolated |
 | `centroid_x` / `centroid_y` | intensity-weighted centroid of the sampled PSF |
 | `peak_value` / `peak_x` / `peak_y` | peak of the intensity-normalised grid (Σ I·Δx·Δy = 1) |
@@ -175,6 +180,12 @@ rayweave psf --polarization RCP+LCP --yaml psf.yaml --csv psf.csv < lens.yaml
 # A single field, finer sampling for a reliable off-axis Strehl
 rayweave psf --fields 2 --num-rays 1600 --psf-grid 128 < lens.yaml
 
+# Best-focus PSF (removes field-curvature defocus; comparable with wavefront)
+rayweave psf --best-focus < lens.yaml
+
+# Best-focus via the input YAML section (equivalent)
+rayweave psf < psf-bestfocus.yaml
+
 # Pipe from chief (the chief_rays output is ignored; the grid is re-derived)
 rayweave chief < lens.yaml | rayweave psf > psf-summary.yaml
 ```
@@ -186,6 +197,16 @@ rayweave chief < lens.yaml | rayweave psf > psf-summary.yaml
 - The default reference surface is the **last optical surface**. Sampling the
   wavefront there and propagating to the fixed image plane means field curvature
   and defocus appear naturally in the PSF (they are not refocused away).
+- `--best-focus` (or `psf.best_focus`) instead propagates each field to its
+  best-focus plane: the shift that minimizes the geometric spot RMS is applied
+  per field before the Huygens integral, removing field-curvature defocus. Use it
+  when the fixed-plane Strehl is dominated by focus — the result then measures
+  wavefront quality directly and is comparable with the `wavefront` command's
+  best-focus `rms`/`strehl` (the two agree; `wavefront_result.best_focus.
+  per_field[].shift_mm` carries the same magnitude with the opposite sign). The
+  on-axis field of a field-curved system typically gains the most (e.g. the
+  Schmidt flat-field example: fixed-plane Strehl 0.04–0.08 → best-focus
+  0.04–0.096 across the field).
 - The evaluation window is centred on the geometric spot centroid and sized to
   cover both the diffraction core and the geometric spot. Set `--psf-width` to
   override. When the geometric spot dominates the window (fast or aberrated
