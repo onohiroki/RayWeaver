@@ -38,16 +38,13 @@ func (s Sphere) Center() types.Vec3 {
 // RMS spot radius of the samples propagated to the flat image plane moved by δ
 // along its normal. The samples carry their emergent Direction and Intensity;
 // planeZ is the current image-plane position (all in the samples' frame). The
-// one-dimensional minimization uses golden-section search.
+// shift delegates to psf.BestFocusShift so the wavefront best-focus reference
+// and psf --best-focus evaluate the same spot-RMS objective.
 func FitSphereShift(samples []psf.WavefrontSample, planeZ float64) (Sphere, error) {
 	if len(samples) < 4 {
 		return Sphere{}, fmt.Errorf("sphere fit needs >= 4 samples, got %d", len(samples))
 	}
-	b := math.Max(2*math.Abs(planeZ), 1.0)
-	delta := minimize1D(func(d float64) float64 {
-		_, rms := spotAtShift(samples, planeZ, d)
-		return rms
-	}, -b, b)
+	delta := psf.BestFocusShift(samples, planeZ)
 	centroid, spotRMS := spotAtShift(samples, planeZ, delta)
 
 	return Sphere{
@@ -96,35 +93,4 @@ func lineDist(p, F0, dir types.Vec3, delta float64) float64 {
 	dy := p.Y - F0.Y - delta*dir.Y
 	dz := p.Z - F0.Z - delta*dir.Z
 	return math.Sqrt(dx*dx + dy*dy + dz*dz)
-}
-
-// minimize1D finds the minimizer of f over [lo, hi] by golden-section search.
-func minimize1D(f func(float64) float64, lo, hi float64) float64 {
-	const resphi = 2 - 1.618033988749895
-	a, b := lo, hi
-	c := a + resphi*(b-a) // left interior point
-	d := b - resphi*(b-a) // right interior point
-	fc, fd := f(c), f(d)
-	for iter := 0; iter < 120; iter++ {
-		if math.Abs(b-a) < 1e-12*(1+math.Abs(b)+math.Abs(a)) {
-			break
-		}
-		if fc < fd {
-			// Minimum lies in [a, d].
-			b, d = d, c
-			fd = fc
-			c = a + resphi*(b-a)
-			fc = f(c)
-		} else {
-			// Minimum lies in [c, b].
-			a, c = c, d
-			fc = fd
-			d = b - resphi*(b-a)
-			fd = f(d)
-		}
-	}
-	if fc < fd {
-		return c
-	}
-	return d
 }

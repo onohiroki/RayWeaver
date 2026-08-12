@@ -44,7 +44,9 @@ type SampleData struct {
 type Statistics struct {
 	// RMS and PV are in mm of OPL.
 	RMS, PV float64
-	// Strehl is the Marechal approximation exp(-(2π·σ/λ)²).
+	// Strehl is the exact peak-ratio Strehl of the residual wavefront:
+	// |⟨e^{i(2π/λ)W}⟩|², the pupil-area-weighted coherent average over the
+	// samples. Meaningful beyond the Marechal limit (σ ≲ 0.2λ).
 	Strehl float64
 }
 
@@ -269,10 +271,7 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 
 	nImage := imageSpaceIndex(system.Surfaces, refSurface, wl, gc)
 
-	// Current image point: intensity-weighted spot centroid on the flat image
-	// plane (global), then into the reference-surface local frame.
-	cx, cy, _ := psf.ImagePlaneSpot(global, planeZ)
-	F0 := refG2L.MultiplyPoint(types.Vec3{X: cx, Y: cy, Z: planeZ})
+	// Image-plane normal in the reference-surface local frame.
 	dir := refG2L.MultiplyPoint(types.Vec3{Z: 1})
 	dirLen := dir.Length()
 	if dirLen > 0 {
@@ -288,14 +287,18 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 		return fr, err
 	}
 	Fbest := sph.Center() // global best-focus point
+	FbestLocal := refG2L.MultiplyPoint(Fbest)
 
 	samples := toLocalFrame(global, refG2L)
 
-	// OPD samples referenced to the current focus: OPD = OPL + n·|P - F0|.
+	// OPD samples referenced to the best-focus point: OPD = OPL + n·|P - Fbest|.
+	// Using the spot-RMS best focus (the same reference psf --best-focus
+	// evaluates at) keeps the wavefront rms/pv/strehl consistent with the PSF's
+	// best-focus rms_opd/pv_opd and Strehl.
 	opdSamples := make([]psf.WavefrontSample, len(samples))
 	for i, s := range samples {
 		opdSamples[i] = s
-		opdSamples[i].OPL = s.OPL + nImage*lineDist(s.Position, F0, dir, 0)
+		opdSamples[i].OPL = s.OPL + nImage*lineDist(s.Position, FbestLocal, dir, 0)
 	}
 
 	pab, err := FitParaboloid(opdSamples)
@@ -327,9 +330,8 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 	}
 	rms := refSph.RMSResidual
 	pv := refSph.PV
-	strehl := math.Exp(-math.Pow(2*math.Pi*rms/wl, 2))
+	strehl := exactStrehl(opdSamples, sphereRes, wl)
 
-	FbestLocal := refG2L.MultiplyPoint(Fbest)
 	fr.Paraboloid = pab
 	fr.Sphere = Sphere{
 		CenterX:     FbestLocal.X,
@@ -399,6 +401,30 @@ func computeBestFocus(results []FieldResult, imagePlaneZ float64, cfg FocusConfi
 // fieldAngle returns the chief-ray field angle (degrees) of a field result.
 func fieldAngle(fr FieldResult, fd types.FieldDef) float64 {
 	return fd.Angle
+}
+
+// exactStrehl is the peak-ratio Strehl of the residual wavefront at the
+// reference-sphere focus: |⟨e^{i(2π/λ)W}⟩|² with the pupil-area-weighted
+// coherent average over the samples. Unlike the Marechal approximation
+// exp(-(2πσ/λ)²) — valid only for σ ≲ 0.2λ, beyond which it collapses towards
+// 0 — the exact average never exceeds 1 and stays meaningful for highly
+// aberrated fields, matching psf's peak-ratio Strehl at best focus.
+func exactStrehl(samples []psf.WavefrontSample, residual []float64, wl float64) float64 {
+	if len(samples) == 0 || len(samples) != len(residual) {
+		return 0
+	}
+	k := 2 * math.Pi / wl
+	var sumA, re, im float64
+	for i, s := range samples {
+		w := k * residual[i]
+		sumA += s.Area
+		re += s.Area * math.Cos(w)
+		im += s.Area * math.Sin(w)
+	}
+	if sumA <= 0 {
+		return 0
+	}
+	return (re*re + im*im) / (sumA * sumA)
 }
 
 // imageSpaceIndex returns the refractive index of the medium immediately

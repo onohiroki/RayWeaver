@@ -791,6 +791,14 @@ enabled). With --best-focus the image plane of each output config is moved to
 the weighted best-fit-sphere focus by adjusting its decenter Z shift, so the
 output can be piped straight into psf (or trace/plot) for a best-focus
 PSF.
+
+Notes:
+  - statistics.rms/pv/strehl are referenced to the best-fit sphere (piston +
+    tilt + defocus removed, astigmatism retained) and match psf --best-focus's
+    rms_opd/pv_opd and Strehl. Strehl is the exact peak-ratio
+    |<e^{i(2pi/lambda)W}>|^2 (pupil-area-weighted coherent average of the
+    residual wavefront W), which stays meaningful for residual RMS beyond the
+    Marechal limit (~0.2 lambda) where exp(-(2π·σ/λ)²) collapses towards 0.
 `)
 	case "tmm":
 		fmt.Print(`Usage: rayweave tmm < input.yaml

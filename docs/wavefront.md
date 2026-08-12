@@ -37,17 +37,19 @@ pipeline-compatible YAML with a lightweight `wavefront_result` appended
 ## Pipeline
 
 ```
-per-field polarized ray tracing → OPD referenced to the current image point →
+per-field polarized ray tracing → OPD referenced to the best-focus point →
 paraboloid fit (always) → best-focus sphere (geometric spot RMS) →
 stabilized Fringe-Zernike on the low-order-removed residual → statistics
 ```
 
-The OPD at each sampled point is `OPL + n·|P − F|` referenced to the current
-image point `F` (the beam's landing point on the image plane). Angle fields
-carry a launch-geometry component in their recorded OPL; referencing to the
-image point and removing the low-order terms absorbs it, so the reported
-coefficients and residual match the standard wavefront-aberration definition
-(the statistics `rms`/`pv` agree with `psf`'s `rms_opd`/`pv_opd`).
+The OPD at each sampled point is `OPL + n·|P − Fbest|` referenced to the
+**best-focus point** `Fbest` (the best-fit-sphere center found by minimizing the
+geometric spot RMS, so the reference follows the true refocus even without
+`--best-focus`). Angle fields carry a launch-geometry component in their
+recorded OPL; referencing to the best-focus point and removing the low-order
+terms absorbs it, so the reported coefficients and residual match the standard
+wavefront-aberration definition (the statistics `rms`/`pv`/`strehl` agree with
+`psf --best-focus`'s `rms_opd`/`pv_opd` and `strehl_ratio`).
 
 ## Options
 
@@ -159,10 +161,14 @@ computes the PSF at the best-focus image plane in one pipeline.
 
 ## Notes
 
-- The statistics `rms`/`pv` are the wavefront error relative to the reference
-  sphere (piston + tilt + defocus removed, **astigmatism retained**), matching
-  `psf`'s `rms_opd`/`pv_opd`. The paraboloid's `rms_residual` additionally
-  removes astigmatism (higher-order only).
+- The statistics `rms`/`pv`/`strehl` are referenced to the best-fit sphere
+  (piston + tilt + defocus removed, **astigmatism retained**), matching `psf
+  --best-focus`'s `rms_opd`/`pv_opd` and `strehl_ratio`. `strehl` is the exact
+  peak ratio `|<e^{i(2π/λ)W}>|²` — the pupil-area-weighted coherent average of
+  the residual wavefront `W` — which stays meaningful for residual RMS beyond
+  the Maréchal limit (~0.2 λ) where the `exp(−(2πσ/λ)²)` approximation collapses
+  towards zero. The paraboloid's `rms_residual` additionally removes astigmatism
+  (higher-order only).
 - For angle fields, the paraboloid's low-order terms include the field-launch
   geometry component; the best-focus shift is computed geometrically and is
   unaffected by it.

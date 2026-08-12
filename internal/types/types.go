@@ -1294,7 +1294,12 @@ type WavefrontStatistics struct {
 	RMS float64 `yaml:"rms"`
 	// PV is the residual peak-to-valley OPD in mm.
 	PV float64 `yaml:"pv"`
-	// Strehl is the Marechal approximation exp(-(2π·rms)²).
+	// Strehl is the exact peak-ratio Strehl |⟨e^{i(2π/λ)W}⟩|² of the residual
+	// wavefront W: the pupil-area-weighted coherent average over the samples.
+	// Unlike the Marechal approximation exp(-(2πσ/λ)²) — valid only for
+	// σ ≲ 0.2λ, beyond which it collapses towards 0 — the exact average stays
+	// meaningful for highly aberrated fields and matches psf's peak-ratio
+	// Strehl at best focus.
 	Strehl float64 `yaml:"strehl"`
 }
 
