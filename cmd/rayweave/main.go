@@ -709,6 +709,12 @@ Notes:
     before the image plane). The wavefront is sampled there and propagated to
     the fixed flat image plane; field curvature and defocus therefore appear
     naturally in the PSF.
+  - The image grid is auto-enlarged when the requested grid would leave the
+    Airy core smaller than a pixel (fast or aberrated systems, where the
+    geometric spot dominates the window): the peak-ratio Strehl is only
+    meaningful when the diffraction-limited reference core is resolved, so the
+    grid is raised until the pixel pitch is <= Airy radius/2. The effective
+    grid size is reported in psf_results[].grid_size.
   - For strongly aberrated fields the PSF is a coherent speckle pattern whose
     peak (and hence Strehl) is sensitive to the pupil sampling. Increase
     --num-rays (e.g. 900..1600) for reliable off-axis metrics.

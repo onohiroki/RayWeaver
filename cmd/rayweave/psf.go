@@ -164,7 +164,7 @@ func runPSF(data []byte) {
 
 	// Write the effective options back into the output's psf: section so the
 	// pipeline reflects what was actually computed (flags override YAML).
-	writeBackPSF(input, wavelengths, selected, opts)
+	writeBackPSF(&input, wavelengths, selected, opts)
 
 	output := types.Output{Input: input}
 	withOutputMetadata(&output.Input, "psf", subcmdArgs())
@@ -257,7 +257,7 @@ func applySelectedFields(fields []types.FieldDef, kept []int) []types.FieldDef {
 }
 
 // writeBackPSF stores the effective options into the output psf: section.
-func writeBackPSF(input types.Input, wavelengths []float64, selected []int, opts psf.Options) {
+func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opts psf.Options) {
 	if input.PSF == nil {
 		input.PSF = &types.PSFConfig{}
 	}

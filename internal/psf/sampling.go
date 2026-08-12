@@ -132,8 +132,14 @@ func ChiefImagePoint(chiefDir, chiefOrigin types.Vec3, planeZ float64) types.Vec
 // DefaultImageGrid returns a square image-plane grid spec centred on (cx, cy)
 // sized to cover both the diffraction core and the geometric spot. When
 // halfWidth is > 0 it overrides the auto-sized half-extent. The pixel count
-// is the caller's gridSize (default 64): over a half-width of ~4× the Airy
-// radius this resolves the diffraction core (res ≈ Airy/8).
+// starts from the caller's gridSize (default 64) and is raised as needed so the
+// diffraction core stays resolved: over a half-width of ~4× the Airy radius the
+// default grid already resolves it (res ≈ Airy/8), but when the geometric spot
+// dominates the window (fast or aberrated systems) the requested grid would
+// leave the Airy core smaller than a pixel — under-resolving the ideal
+// (diffraction-limited) reference PSF core and making the peak-ratio Strehl
+// unreliable (it can exceed 1). The grid is therefore auto-enlarged to enforce
+// res ≤ Airy/2, so the ideal peak is measured correctly and Strehl ≤ 1.
 func DefaultImageGrid(samples []WavefrontSample, focus types.Vec3, nImage, wavelength float64,
 	planeZ, cx, cy, halfWidth float64, gridSize int) ImageGridSpec {
 	na := ComputeImageNA(samples, focus, nImage)
@@ -147,8 +153,22 @@ func DefaultImageGrid(samples []WavefrontSample, focus types.Vec3, nImage, wavel
 		half = 5e-3
 	}
 	res := 2 * half / float64(gridSize)
+	n := gridSize
+	if airy > 0 && res > airy/2 {
+		need := int(math.Ceil(2 * half / (airy / 2)))
+		if need > n {
+			n = need
+		}
+	}
+	if n < 16 {
+		n = 16
+	}
+	if n > 2048 {
+		n = 2048
+	}
+	res = 2 * half / float64(n)
 	return ImageGridSpec{
-		NX: gridSize, NY: gridSize,
+		NX: n, NY: n,
 		X0: cx - half, Y0: cy - half,
 		DX: res, DY: res,
 	}

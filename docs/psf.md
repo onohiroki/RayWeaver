@@ -188,7 +188,12 @@ rayweave chief < lens.yaml | rayweave psf > psf-summary.yaml
   and defocus appear naturally in the PSF (they are not refocused away).
 - The evaluation window is centred on the geometric spot centroid and sized to
   cover both the diffraction core and the geometric spot. Set `--psf-width` to
-  override.
+  override. When the geometric spot dominates the window (fast or aberrated
+  systems), the grid is **auto-enlarged** so the pixel pitch stays ≤ Airy
+  radius/2: the peak-ratio Strehl is only meaningful when the ideal
+  (diffraction-limited) reference core is resolved — an under-resolved core
+  would make Strehl unreliable and can exceed 1. The effective grid size is
+  reported in `psf_results[].grid_size`.
 - For strongly aberrated fields the PSF is a coherent speckle pattern whose peak
   (and therefore Strehl) is sensitive to the pupil sampling; increase
   `--num-rays` for stable off-axis metrics. Near-diffraction-limited systems are
