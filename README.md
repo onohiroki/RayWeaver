@@ -27,6 +27,12 @@ go build -o rayweave ./cmd/rayweave/
 
 No external dependencies beyond `gopkg.in/yaml.v3`.
 
+Windows usage is covered in [docs/windows.md](docs/windows.md): installing Go
+and PowerShell 7.2+ (the recommended shell), the `rayweaver.exe` build, and
+running the bash demo scripts under Git Bash / MSYS2 / WSL. Linux and macOS
+need no special handling — the build, `docs/`, and `samples/*.bash` all work as
+written.
+
 ## Quick start
 
 ```sh
@@ -75,6 +81,7 @@ Per-subcommand usage manuals live in [`docs/`](docs/):
 | [docs/asphere.md](docs/asphere.md) | asphere candidate ranking and initial coefficient estimation |
 | [docs/psf.md](docs/psf.md) | point-spread function via direct vector Huygens integration |
 | [docs/query.md](docs/query.md) | YAML/JSONL selector |
+| [docs/windows.md](docs/windows.md) | Windows usage: Go/PowerShell 7.2+ install, `rayweaver.exe` build, bash demos |
 
 The numerical methods behind the analyses and optimizations are described
 separately in [`docs/methods/`](docs/methods/README.md) (ray tracing, chief-ray

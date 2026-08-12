@@ -64,3 +64,12 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
   RayWeaver-managed (`tool: RayWeaver`, `url`, `schema_version`) and, on output,
   recording its generator command, build version and generation timestamp. See
   [format.md](format.md).
+
+## Platform notes
+
+- [windows.md](windows.md) — building and running RayWeaver on Windows:
+  installing Go and PowerShell 7.2+, differences from Windows PowerShell 5.1,
+  and how to run the bash demo scripts (Git Bash / MSYS2 / WSL).
+
+Linux and macOS need no special handling; the build and every documented
+pipeline work as written.
