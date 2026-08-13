@@ -534,7 +534,11 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 		for p := range group {
 			rp += samplePower(td.samples[p])
 		}
-		wp := gridWindowPower(act)
+		// The Huygens integral carries a 1/λ prefactor, so the window power
+		// scales as 1/λ². Rescale it to physical units (×λ²) so the per-wavelength
+		// transmittance, the white-grid weights and the energy totals all stay
+		// comparable across wavelengths (as in finishResult).
+		wp := gridWindowPower(act) * td.wl * td.wl
 		tau := 0.0
 		if rp > 0 {
 			tau = wp / rp
@@ -644,7 +648,11 @@ func finishResult(grid, ideal *FieldGrid, samples []WavefrontSample,
 	ee50 := grid.RadiusForEnergy(cx, cy, 0.5)
 	transmittance := 0.0
 	if refPower > 0 {
-		transmittance = rawSum / refPower
+		// The Huygens integral carries a 1/λ prefactor, so the window power
+		// scales as 1/λ² while the reference-surface power does not. Scale the
+		// window power back to physical units (×λ²) so the transmittance is the
+		// true fraction of the reference-surface power captured by the window.
+		transmittance = (rawSum * wl * wl) / refPower
 	}
 
 	return &Result{

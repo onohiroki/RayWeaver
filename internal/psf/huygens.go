@@ -121,7 +121,7 @@ func computeField(samples []WavefrontSample, center types.Vec3, imagePlaneZ floa
 						}
 						phase := k * (opl + nImage*R)
 						w := obliquity * s.Area / R
-						cf := complex(w*math.Cos(phase), w*math.Sin(phase))
+						cf := complex((w*math.Cos(phase))/wavelength, (w*math.Sin(phase))/wavelength)
 						ex += cf * s.Field.X
 						ey += cf * s.Field.Y
 						ez += cf * s.Field.Z
@@ -224,14 +224,14 @@ func computePairs(pairs []fieldPair, imagePlaneZ, nImage, wavelength float64,
 
 							// actual phase
 							phaseA := k * (s.OPL + nImage*R)
-							cfA := complex(w*math.Cos(phaseA), w*math.Sin(phaseA))
+							cfA := complex((w*math.Cos(phaseA))/wavelength, (w*math.Sin(phaseA))/wavelength)
 							ax += cfA * s.Field.X
 							ay += cfA * s.Field.Y
 							az += cfA * s.Field.Z
 
 							// ideal phase (shared geometry)
 							phaseI := k * (idealOPL[pi][si] + nImage*R)
-							cfI := complex(w*math.Cos(phaseI), w*math.Sin(phaseI))
+							cfI := complex((w*math.Cos(phaseI))/wavelength, (w*math.Sin(phaseI))/wavelength)
 							ix += cfI * s.Field.X
 							iy += cfI * s.Field.Y
 							iz += cfI * s.Field.Z
