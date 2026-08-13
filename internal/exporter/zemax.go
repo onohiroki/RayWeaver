@@ -298,6 +298,7 @@ func writeZemaxMultiConfig(b *strings.Builder, input *types.Input, configs []int
 		if len(cs) != len(base) {
 			warnf(warn, "config %q surface count differs from the base; overrides limited to the common range", cfg.ID)
 		}
+		wroteRow := false
 		for j := range base {
 			if j >= len(cs) {
 				break
@@ -308,13 +309,27 @@ func writeZemaxMultiConfig(b *strings.Builder, input *types.Input, configs []int
 			znum := baseEntry[j].znum
 			if cs[j].Thickness != base[j].Thickness {
 				fmt.Fprintf(b, "THIC %d %d %s\n", znum, k+1, num(cs[j].Thickness))
+				wroteRow = true
 			}
 			if cs[j].Diameter != base[j].Diameter {
 				fmt.Fprintf(b, "SDIA %d %d %s\n", znum, k+1, num(cs[j].Diameter))
+				wroteRow = true
 			}
 			if cs[j].Curvature != base[j].Curvature || cs[j].Conic != base[j].Conic ||
 				!sameCoeffs(cs[j].Coefficients, base[j].Coefficients) {
 				warnf(warn, "config %q: surface %d curvature/conic/asphere differs per config; not representable in ZEMAX THIC/SDIA", cfg.ID, base[j].ID)
+			}
+		}
+		// A config whose surfaces all match the base would otherwise carry no
+		// override rows and disappear on re-import; emit a redundant row for
+		// the first surface so every config survives the round trip.
+		if !wroteRow {
+			for j := range base {
+				if j >= len(cs) || baseEntry[j] == nil || baseEntry[j].coordBrk {
+					continue
+				}
+				fmt.Fprintf(b, "THIC %d %d %s\n", baseEntry[j].znum, k+1, num(cs[j].Thickness))
+				break
 			}
 		}
 	}
@@ -344,6 +359,9 @@ func decenterCoordBrks(s *types.Surface, warn Warn) []zemaxCoordBrk {
 	if len(steps) == 1 {
 		if steps[0].Scope.Bends() {
 			warnf(warn, "surface %d: frame-bending decenter exported as ZEMAX COORDBRK (frame returns)", s.ID)
+		}
+		if steps[0].Shift.Z != 0 {
+			warnf(warn, "surface %d: Z decenter not representable in ZEMAX COORDBRK; dropped", s.ID)
 		}
 		return []zemaxCoordBrk{{step: steps[0]}}
 	}

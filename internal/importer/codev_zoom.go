@@ -248,6 +248,10 @@ func buildCodeVZoomConfigs(result *ParseResult, z *codeVZoomOverlay) {
 				}
 			}
 		}
+		// Negative dummy-spacing zoom positions (the CODE V dummy-plane idiom)
+		// are normalised the same way the base surfaces are, so a per-position
+		// negative thickness never survives into the downstream pipeline.
+		normalizeNegativeDummy(surfs)
 		if changed {
 			if result.ConfigSurfaces == nil {
 				result.ConfigSurfaces = map[int][]types.Surface{}
@@ -309,6 +313,24 @@ func buildZoomFieldVignetting(z *codeVZoomOverlay, pos int, result *ParseResult)
 		}
 	}
 	return out
+}
+
+// normalizeNegativeDummy converts the negative-spacing dummy-surface idiom
+// (a zero-power reference plane with a negative thickness) into rayweave's
+// all-positive model for one surface list: the plane keeps its global vertex
+// through a scope-surface decenter shift and its thickness becomes 0. Mirrors
+// and powered surfaces with negative spacings are left untouched (they encode
+// genuine return paths handled by the fold model).
+func normalizeNegativeDummy(surfaces []types.Surface) {
+	for i := range surfaces {
+		s := &surfaces[i]
+		if s.Thickness < 0 && isDummySurface(s) {
+			s.Decenter = append(s.Decenter, types.DecenterStep{
+				Shift: types.Vec3{Z: s.Thickness},
+			})
+			s.Thickness = 0
+		}
+	}
 }
 
 // splitQualifier splits a CODE V index qualifier like "S4" or "F1" into its

@@ -92,36 +92,54 @@ func writeCodeVWavelengths(b *strings.Builder, cfg *types.Config) {
 	fmt.Fprintf(b, "REF %d\n", ref)
 }
 
-// writeCodeVFields writes the YAN/YIM + XAN + WTF field rows. Object-height
-// (finite-conjugate) fields are skipped with a warning: compact CODE V field
-// spec has no object-height type.
+// writeCodeVFields writes the YAN/XAN or YIM + WTF field rows. The CODE V
+// field spec is single-type (angles or image heights), so every field is
+// written under one type: image height when any field is one, else angle. A
+// field whose image height is zero (a "YIM 0" on-axis entry) classifies as an
+// angle after the omitempty round trip, so it still lands in the image-height
+// column with value 0 and is not dropped. Object-height (finite-conjugate)
+// fields are skipped with a warning: compact CODE V field spec has no
+// object-height type.
 func writeCodeVFields(b *strings.Builder, fields []types.FieldItem, ftyp fieldClass, warn Warn) {
 	if len(fields) == 0 {
 		return
 	}
-	var yan, xan, wtf []string
-	var yim []string
+	useYIM := false
 	for i := range fields {
-		f := &fields[i]
-		w := num(f.Weight)
-		switch classifyField(f) {
-		case fieldObjectHeight:
-			warnf(warn, "field %d: object-height (finite conjugate) not representable in CODE V; skipped", i)
-			continue
-		case fieldImageHeight:
-			yim = append(yim, num(f.ImageHeight))
-			wtf = append(wtf, w)
-		default: // angle
-			x, y := fieldXY(f)
-			yan = append(yan, num(y))
-			xan = append(xan, num(x))
-			wtf = append(wtf, w)
+		if classifyField(&fields[i]) == fieldImageHeight {
+			useYIM = true
+			break
 		}
 	}
-	if len(yim) > 0 {
-		codeVLine(b, "YIM ", yim, 100)
-	} else if len(yan) > 0 {
-		codeVLine(b, "YAN ", yan, 100)
+	if useYIM && ftyp == fieldAngle {
+		warnf(warn, "mixed angle / image-height fields; exporting all as image height")
+	}
+	var vals, xan, wtf []string
+	for i := range fields {
+		f := &fields[i]
+		if classifyField(f) == fieldObjectHeight {
+			warnf(warn, "field %d: object-height (finite conjugate) not representable in CODE V; skipped", i)
+			continue
+		}
+		if useYIM {
+			if f.ImageHeight > 0 {
+				vals = append(vals, num(f.ImageHeight))
+			} else {
+				// image-height 0 (or an angle in a mixed config): best-effort
+				// value, kept so no field is dropped.
+				vals = append(vals, num(f.AngleDeg))
+			}
+		} else {
+			x, y := fieldXY(f)
+			vals = append(vals, num(y))
+			xan = append(xan, num(x))
+		}
+		wtf = append(wtf, num(f.Weight))
+	}
+	if useYIM {
+		codeVLine(b, "YIM ", vals, 100)
+	} else {
+		codeVLine(b, "YAN ", vals, 100)
 		codeVLine(b, "XAN ", xan, 100)
 	}
 	if len(wtf) > 0 {
@@ -323,30 +341,30 @@ func ndvdOf(gc *glass.Catalog, m types.Material) (nd, vd float64, ok bool) {
 // codeVGlassName converts a catalog glass key to the CODE V spelling:
 // uppercase, hyphens/underscores removed from the glass name, with the
 // manufacturer (from the catalog) appended after an underscore. When the
-// catalog cannot resolve the key, an already-split "GLASS_MFR" key keeps its
-// suffix so the round trip stays stable; otherwise the separators are
-// stripped.
+// manufacturer is unknown (no catalog entry or the entry carries none), an
+// already-split "GLASS_MFR" key keeps its suffix so the round trip stays
+// stable; otherwise the separators are stripped.
 func codeVGlassName(gc *glass.Catalog, key string) string {
+	name := key
+	mfr := ""
 	if gc != nil {
 		if g, ok := gc.Lookup(key); ok {
-			name := g.Name
-			if name == "" {
-				name = key
+			if g.Name != "" {
+				name = g.Name
 			}
-			base := glass.NormalizeName(name)
-			if g.Manufacturer != "" {
-				return base + "_" + strings.ToUpper(g.Manufacturer)
-			}
-			return base
+			mfr = g.Manufacturer
 		}
 	}
-	if i := strings.LastIndexByte(key, '_'); i > 0 {
-		prefix, suffix := key[:i], key[i+1:]
+	if mfr != "" {
+		return glass.NormalizeName(name) + "_" + strings.ToUpper(mfr)
+	}
+	if i := strings.LastIndexByte(name, '_'); i > 0 {
+		prefix, suffix := name[:i], name[i+1:]
 		if suffix != "" && strings.ToUpper(suffix) == suffix {
 			return glass.NormalizeName(prefix) + "_" + suffix
 		}
 	}
-	return glass.NormalizeName(key)
+	return glass.NormalizeName(name)
 }
 
 // writeCodeVZoomRows emits the ZOO rows for the configs after the base: one
@@ -361,6 +379,19 @@ func writeCodeVZoomRows(b *strings.Builder, input *types.Input, configs []int, b
 	}
 	for j := range base {
 		numS := j + 1
+		// Per-config decenter/material/reflect differences cannot be expressed
+		// in CODE V zoom rows; warn when they occur so the loss is visible.
+		for k := 1; k < len(configs); k++ {
+			cs := input.Configs[configs[k]].Surfaces
+			if j < len(cs) {
+				if !sameDecenters(cs[j].Decenter, base[j].Decenter) {
+					warnf(warn, "config %q: surface %d decenter differs per config; CODE V zoom rows cannot express it, exported from the base", input.Configs[configs[k]].ID, base[j].ID)
+				}
+				if cs[j].Reflect != base[j].Reflect || cs[j].Material.String() != base[j].Material.String() {
+					warnf(warn, "config %q: surface %d material/reflect differs per config; CODE V zoom rows cannot express it, exported from the base", input.Configs[configs[k]].ID, base[j].ID)
+				}
+			}
+		}
 		if t, ok := zoomThicknessValues(input, configs, j); ok {
 			codeVLine(b, "ZOO THI S"+itoa(numS)+" ", t, 120)
 		}
@@ -532,4 +563,17 @@ func hasAnyNonZero(v []float64) bool {
 		}
 	}
 	return false
+}
+
+// sameDecenters reports whether two decenter step lists are identical.
+func sameDecenters(a, b []types.DecenterStep) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
