@@ -566,10 +566,15 @@ Examples:
 
 Exports a RayWeaver system back out as a native lens file for another optical
 design tool. This is the inverse of "rayweave import". The output is plain
-text written to stdout (foreign format, so no pipeline YAML flows on).
+text written to stdout (foreign format). With -o/--output FILE the foreign
+format is written to FILE instead and the input YAML passes through to stdout,
+so the pipeline keeps flowing (like "rayweave plot -o").
 
 Options:
   --format zemax|codev|oslo   output format (required)
+  -o, --output FILE   write the foreign format to FILE and pass the input YAML
+                        through to stdout; without it the foreign format goes
+                        to stdout
   --config ID         export a single config; otherwise ZEMAX and CODE V
                         export every config (as ZEMAX multi-config MNUM/CONFIG/
                         THIC/SDIA, CODE V zoom positions ZOOM n + ZOO rows) and
@@ -607,6 +612,7 @@ Examples:
   rayweave export --format zemax < system.yaml > out.zmx
   rayweave export --format codev < system.yaml | rayweave import --format codev
   rayweave export --format oslo --config config1 < system.yaml > out.len
+  rayweave export --format zemax -o out.zmx < system.yaml | rayweave plot -o lens.svg
 `)
 	case "scale":
 		fmt.Print(`Usage: rayweave scale --efl TARGET [--config ID] < system.yaml > scaled.yaml

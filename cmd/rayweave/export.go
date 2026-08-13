@@ -18,12 +18,18 @@ import (
 // Config selection: ZEMAX and CODE V export every config by default (as ZEMAX
 // multi-config / CODE V zoom positions); OSLO exports config 0. --config
 // forces a single config in every case.
+//
+// Output: with -o/--output FILE the foreign format is written to FILE and the
+// input YAML is passed through to stdout unchanged (like `plot -o`), so the
+// pipeline keeps flowing; without it the foreign format goes to stdout.
 func runExport(data []byte) {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	format := fs.String("format", "", "zemax|codev|oslo")
 	configFlag := fs.String("config", "", "select config by id (single-config export)")
 	ndVD := fs.Bool("nd-vd", false, "CODE V: write every glass as its inline nd:vd model form instead of the catalog name")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
+	outPath := fs.String("o", "", "output file path (default: stdout); with -o the foreign format is written to FILE and the YAML passes through to stdout")
+	fs.StringVar(outPath, "output", "", "alias for -o")
 	fs.Parse(os.Args[2:])
 
 	if *format == "" {
@@ -60,7 +66,23 @@ func runExport(data []byte) {
 		errOut("Error: export failed: %v", err)
 		os.Exit(1)
 	}
-	os.Stdout.Write(out)
+	exportOutput(*outPath, out, data)
+}
+
+// exportOutput writes the exported foreign format. With outPath the format is
+// written to the file and the input data (the pipeline YAML) is passed through
+// to stdout unchanged (plot -o semantics); without it the foreign format goes
+// to stdout.
+func exportOutput(outPath string, foreign, data []byte) {
+	if outPath == "" {
+		os.Stdout.Write(foreign)
+		return
+	}
+	if err := os.WriteFile(outPath, foreign, 0644); err != nil {
+		errOut("Error writing %s: %v", outPath, err)
+		os.Exit(1)
+	}
+	os.Stdout.Write(data)
 }
 
 // configIndicesForExport resolves the configs to write: with --config a single

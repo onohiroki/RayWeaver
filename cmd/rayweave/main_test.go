@@ -541,3 +541,47 @@ func TestConfigIndicesForExport(t *testing.T) {
 func itoaTest(v int) string {
 	return fmt.Sprintf("%d", v)
 }
+
+func TestExportOutput(t *testing.T) {
+	captureStdout := func(fn func()) []byte {
+		t.Helper()
+		old := os.Stdout
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		os.Stdout = w
+		fn()
+		w.Close()
+		os.Stdout = old
+		out, err := io.ReadAll(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	foreign := []byte("SURF 1\n")
+	yaml := []byte("metadata: {tool: RayWeaver}\n")
+
+	// Without -o the foreign format goes to stdout.
+	got := captureStdout(func() { exportOutput("", foreign, yaml) })
+	if string(got) != string(foreign) {
+		t.Errorf("no -o: stdout = %q, want foreign %q", got, foreign)
+	}
+
+	// With -o the foreign format goes to the file and the YAML passes through.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "out.zmx")
+	got = captureStdout(func() { exportOutput(path, foreign, yaml) })
+	if string(got) != string(yaml) {
+		t.Errorf("with -o: stdout = %q, want input YAML %q", got, yaml)
+	}
+	fb, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(fb) != string(foreign) {
+		t.Errorf("file = %q, want foreign %q", fb, foreign)
+	}
+}
