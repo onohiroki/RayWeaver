@@ -1438,6 +1438,13 @@ func tracePupilGrid(
 
 	isHeightBased := rayOrigin.Z != 0 || rayOrigin.X != 0 || rayOrigin.Y != 0
 
+	// For a parallel angle-field bundle the wavefront is perpendicular to
+	// rayDir. Projecting each launch origin onto the wavefront plane through
+	// the grid centre removes the launch-geometry OPL tilt (the linear ramp
+	// that otherwise contaminates off-axis OPD and shifts the Huygens PSF
+	// peak). The projection is along rayDir so the ray line is unchanged.
+	wavefrontC := types.Vec3{X: pupilCenterX, Y: pupilCenterY, Z: zStart}
+
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, runtime.NumCPU())
@@ -1463,7 +1470,8 @@ func tracePupilGrid(
 					Z: zStart - rayOrigin.Z,
 				}.Normalize()
 			} else {
-				rOrg = types.Vec3{X: px, Y: py, Z: zStart}
+				rOrg = raymath.ProjectOntoWavefront(
+					types.Vec3{X: px, Y: py, Z: zStart}, wavefrontC, rayDir)
 				rDir = rayDir
 			}
 
@@ -1724,7 +1732,9 @@ func computeRayFan(
 
 	traceOne := func(px, py, cosA, sinA float64) (types.FanPoint, bool) {
 		rDir := rayDir
-		rOrg := types.Vec3{X: pupilCenterX + px, Y: pupilCenterY + py, Z: zStart}
+		rOrg := raymath.ProjectOntoWavefront(
+			types.Vec3{X: pupilCenterX + px, Y: pupilCenterY + py, Z: zStart},
+			types.Vec3{X: pupilCenterX, Y: pupilCenterY, Z: zStart}, rayDir)
 		r := types.Ray{
 			Wavelength: wavelength,
 			Initial:    types.RayState{Origin: rOrg, Direction: rDir},

@@ -344,3 +344,69 @@ func TestSolveLinearSingular(t *testing.T) {
 		t.Error("SolveLinear should report false for a singular matrix")
 	}
 }
+
+func TestProjectOntoWavefront(t *testing.T) {
+	// dir along +Z: projection is identity in x/y, plane through c.
+	dir := types.Vec3{X: 0, Y: 0, Z: 1}
+	c := types.Vec3{X: 1, Y: 2, Z: 5}
+	for _, p := range []types.Vec3{
+		{X: 0, Y: 0, Z: -100},
+		{X: 3, Y: -4, Z: 0},
+	} {
+		got := ProjectOntoWavefront(p, c, dir)
+		// (got - c)·dir == 0
+		if math.Abs((got.X-c.X)*dir.X+(got.Y-c.Y)*dir.Y+(got.Z-c.Z)*dir.Z) > 1e-12 {
+			t.Errorf("projected point not on wavefront: got %v c %v", got, c)
+		}
+		// x,y unchanged when dir=(0,0,1)
+		if got.X != p.X || got.Y != p.Y {
+			t.Errorf("x/y should be unchanged: got %v want %v", got, p)
+		}
+		// moving origin along dir by (c-p)·dir preserves the ray line: the
+		// point p + dir*((c-p)·dir) is on the same line as p.
+		delta := c.Subtract(p).Dot(dir)
+		want := types.Vec3{X: p.X, Y: p.Y, Z: p.Z + delta}
+		if got.Z != want.Z {
+			t.Errorf("z = %v, want %v", got.Z, want.Z)
+		}
+	}
+
+	// 45° in the YZ plane: origin shift equals (c-p)·dir along dir; the
+	// projected origin still lies on the ray through p in direction dir.
+	rad := math.Pi / 4
+	dir = types.Vec3{X: 0, Y: math.Sin(rad), Z: math.Cos(rad)}
+	c = types.Vec3{X: 0, Y: 0, Z: 0}
+	p := types.Vec3{X: 0, Y: 0, Z: -100}
+	got := ProjectOntoWavefront(p, c, dir)
+	// On the wavefront: (got - c)·dir == 0.
+	if math.Abs(got.Dot(dir)) > 1e-12 {
+		t.Errorf("45° projection not on wavefront: %v", got)
+	}
+	// On the ray line through p along dir: got - p is parallel to dir.
+	diff := got.Subtract(p)
+	par := diff.Cross(dir)
+	if par.Length() > 1e-12 {
+		t.Errorf("projected origin not on the ray line: diff %v not parallel to dir", diff)
+	}
+}
+
+// TestProjectOntoWavefront90Deg verifies the projection stays finite at 90°
+// incidence (dir.Z = 0), where a tanθ formulation would diverge.
+func TestProjectOntoWavefront90Deg(t *testing.T) {
+	dir := types.Vec3{X: 0, Y: 1, Z: 0} // 90° field: horizontal ray
+	c := types.Vec3{X: 0, Y: 0, Z: 10}
+	p := types.Vec3{X: 2, Y: 3, Z: -100}
+	got := ProjectOntoWavefront(p, c, dir)
+	if math.IsNaN(got.X) || math.IsNaN(got.Y) || math.IsNaN(got.Z) || math.IsInf(got.Z, 0) {
+		t.Fatalf("90° projection produced non-finite result: %v", got)
+	}
+	// On the wavefront plane through c.
+	if math.Abs(got.Subtract(c).Dot(dir)) > 1e-12 {
+		t.Errorf("90° projection not on wavefront: %v", got)
+	}
+	// Shift is along dir: the difference is parallel to dir.
+	diff := got.Subtract(p)
+	if math.Abs(diff.X) > 1e-12 || math.Abs(diff.Z) > 1e-12 {
+		t.Errorf("90° projection should only shift along Y: diff %v", diff)
+	}
+}

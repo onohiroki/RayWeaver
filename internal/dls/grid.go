@@ -51,11 +51,12 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	zStart := -100.0
 	grid := generatePupilGrid(numRays, apertureRadius, rotationOffset)
 
+	pupilOffsetX, pupilOffsetY := 0.0, 0.0
 	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
 	if rayDir.Z > 1e-12 && tanComponent > 1e-12 {
 		tanComponent /= rayDir.Z
-		pupilOffsetX := -(pupilZ - zStart) * tanComponent * dx
-		pupilOffsetY := -(pupilZ - zStart) * tanComponent * dy
+		pupilOffsetX = -(pupilZ - zStart) * tanComponent * dx
+		pupilOffsetY = -(pupilZ - zStart) * tanComponent * dy
 		for i := range grid {
 			grid[i].X += pupilOffsetX
 			grid[i].Y += pupilOffsetY
@@ -65,9 +66,16 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	points := make([]IPoint, len(grid))
 	perRayMax := make([]map[int]float64, len(grid))
 
+	// Parallel angle-field bundle: project each launch origin onto the
+	// wavefront plane through the grid centre (perpendicular to rayDir) so the
+	// OPL carries no launch-geometry tilt. The shift is along rayDir, leaving
+	// the ray line (and all surface intersections) unchanged.
+	wavefrontC := types.Vec3{X: pupilOffsetX, Y: pupilOffsetY, Z: zStart}
+
 	trace := func(i int) {
 		pt := grid[i]
-		origin := types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}
+		origin := raymath.ProjectOntoWavefront(
+			types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}, wavefrontC, rayDir)
 		r := types.Ray{
 			Wavelength:         wavelength,
 			Initial:            types.RayState{Origin: origin, Direction: rayDir},

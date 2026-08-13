@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"github.com/hiroki/rayweaver/internal/ray"
+	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -161,6 +162,11 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 			}
 			t := (edgeW.Z - zStart) / d.Z
 			origin = edgeW.Subtract(d.Scale(t))
+			// Launch from the wavefront plane (perpendicular to rayDir)
+			// through the chief ray's launch point, so the marginal's OPL
+			// shares the same reference as the grid rays and carries no
+			// launch-geometry tilt.
+			origin = raymath.ProjectOntoWavefront(origin, origin0, d)
 		}
 		return &types.Ray{
 			ID:         fmt.Sprintf("marginal_%s_%s", fid, tag),

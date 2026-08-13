@@ -107,11 +107,14 @@ func frozenPupilGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 
 	samples := chief.GenerateGridPoints(numRays, apertureRadius, types.GridPolar)
 	grid := make([]types.GridPoint, len(samples))
+	wavefrontC := types.Vec3{X: pupilOffsetX, Y: pupilOffsetY, Z: zStart}
 	for i, p := range samples {
 		grid[i] = types.GridPoint{
-			PupilX:    p.X,
-			PupilY:    p.Y,
-			Origin:    types.Vec3{X: p.X + pupilOffsetX, Y: p.Y + pupilOffsetY, Z: zStart},
+			PupilX: p.X,
+			PupilY: p.Y,
+			Origin: raymath.ProjectOntoWavefront(
+				types.Vec3{X: p.X + pupilOffsetX, Y: p.Y + pupilOffsetY, Z: zStart},
+				wavefrontC, rayDir),
 			Direction: rayDir,
 		}
 	}

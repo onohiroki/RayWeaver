@@ -28,6 +28,22 @@ func DirectionFromAngle(angleDeg float64) types.Vec3 {
 	return types.Vec3{X: 0, Y: math.Sin(rad), Z: math.Cos(rad)}.Normalize()
 }
 
+// ProjectOntoWavefront projects the launch point p onto the wavefront plane
+// that passes through the reference point c and is perpendicular to the
+// propagation direction dir. For a parallel angle-field bundle this moves each
+// ray's OPL reference onto the common wavefront, removing the launch-geometry
+// tilt (a linear OPL ramp across the pupil from launching off-axis rays from a
+// plane perpendicular to the optical axis rather than to the ray direction).
+//
+// The shift is along dir, so the ray line (and therefore every surface
+// intersection and the pupil footprint) is unchanged — only the OPL baseline
+// moves, by exactly (c - p)·dir. dir must be unit length. The projection uses
+// only the direction vector, so it stays finite at any angle including 90°
+// incidence (dir.Z → 0): no tanθ appears.
+func ProjectOntoWavefront(p, c, dir types.Vec3) types.Vec3 {
+	return p.Add(dir.Scale(c.Subtract(p).Dot(dir)))
+}
+
 func Refract(d, n types.Vec3, n1, n2 float64) (types.Vec3, bool) {
 	cosTheta1 := -d.Dot(n)
 	eta := n1 / n2

@@ -91,11 +91,13 @@ func GenerateFootprints(surfaces []types.Surface, fields []Field, wavelengths []
 				grid[i].X += offsetX
 				grid[i].Y += offsetY
 			}
+			wavefrontC := types.Vec3{X: offsetX, Y: offsetY, Z: zStart}
 
 			fd.RayHits = make([]RayHit, len(grid))
 			parallelFor(len(grid), func(i int) {
 				pt := grid[i]
-				origin := types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}
+				origin := raymath.ProjectOntoWavefront(
+					types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}, wavefrontC, dir)
 				r := types.Ray{
 					Wavelength: wl,
 					Initial:    types.RayState{Origin: origin, Direction: dir},
