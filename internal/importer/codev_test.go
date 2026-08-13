@@ -1207,3 +1207,167 @@ END
 		t.Error("DAR mirror should Reflects()")
 	}
 }
+
+func TestCodeV_CCYIgnored(t *testing.T) {
+	// CCY is a variable/control-designation keyword in CODE V, not the conic
+	// constant (K is). A "CCY <value>" line must not set the conic.
+	input := `SEQ
+S -1058.98937 -276.006853 REFL
+CCY 0.5
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) != 2 {
+		t.Fatalf("expected 2 surfaces, got %d", len(result.Surfaces))
+	}
+	if result.Surfaces[0].Conic != 0 {
+		t.Errorf("CCY must not set the conic constant: got %g", result.Surfaces[0].Conic)
+	}
+	// And the compact-mode statement walker must ignore CCY too.
+	input = `SEQ
+S 0.02 5.0
+CCY 0.3; THC 0
+SI 0 0
+END
+`
+	result, err = ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Surfaces[0].Conic != 0 {
+		t.Errorf("compact CCY must not set the conic constant: got %g", result.Surfaces[0].Conic)
+	}
+}
+
+func TestCodeV_VignettingRows(t *testing.T) {
+	input := `SEQ
+YAN 0 30
+WTF 1 1
+VUX -0.1 0.0
+VLX -0.1 0.0
+VUY 0.1 0.0
+VLY 0.05 0.0
+S 100 5
+SI 0 0
+END
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Fields) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(result.Fields))
+	}
+	// Field 1: VUY=0.1, VLY=0.05 -> decenterY=(0.05-0.1)/2=-0.025,
+	// compressionY=(0.1+0.05)/2=0.075; VUX=VLX=-0.1 -> decenterX=0,
+	// compressionX=-0.1.
+	f0 := result.Fields[0].Vignetting
+	if f0 == nil {
+		t.Fatal("field 1 should carry vignetting")
+	}
+	if math.Abs(f0.DecenterY+0.025) > 1e-12 || math.Abs(f0.CompressionY-0.075) > 1e-12 {
+		t.Errorf("field 1 Y: expected decenter=-0.025 compression=0.075, got %+v", f0)
+	}
+	if f0.DecenterX != 0 || math.Abs(f0.CompressionX+0.1) > 1e-12 {
+		t.Errorf("field 1 X: expected decenter=0 compression=-0.1, got %+v", f0)
+	}
+	// Field 2: all four zero -> no vignetting.
+	if result.Fields[1].Vignetting != nil {
+		t.Errorf("field 2 should have no vignetting, got %+v", result.Fields[1].Vignetting)
+	}
+}
+
+func TestCodeV_ZoomPositions(t *testing.T) {
+	input := `SEQ
+ZOOM 3
+YAN 0 30
+S 0.02 5.0 1.5:60
+SI 0 0
+ZOO THI S1 5.0 7.0 9.0
+ZOO RDY S1 50.0 60.0 70.0
+ZOO K S1 0.0 -0.1 -0.2
+ZOO CIR S1 10.0 12.0 14.0
+GO
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Surfaces) != 2 {
+		t.Fatalf("expected 2 surfaces, got %d", len(result.Surfaces))
+	}
+	idx := ConfigIndexes(result)
+	if len(idx) != 2 || idx[0] != 2 || idx[1] != 3 {
+		t.Fatalf("expected configs [2 3], got %v", idx)
+	}
+	// Config 2 (position 2): THI 7.0, radius 60 -> curv 1/60, conic -0.1,
+	// CIR 12 -> diameter 24.
+	c1 := ConfigSurfaceSet(result, 2)
+	if len(c1) != 2 {
+		t.Fatalf("config 1: expected 2 surfaces, got %d", len(c1))
+	}
+	if math.Abs(c1[0].Thickness-7.0) > 1e-12 {
+		t.Errorf("config 1 THI: expected 7.0, got %g", c1[0].Thickness)
+	}
+	if math.Abs(c1[0].Curvature-(1.0/60.0)) > 1e-12 {
+		t.Errorf("config 1 RDY: expected curv %g, got %g", 1.0/60.0, c1[0].Curvature)
+	}
+	if math.Abs(c1[0].Conic+0.1) > 1e-12 {
+		t.Errorf("config 1 K: expected -0.1, got %g", c1[0].Conic)
+	}
+	if math.Abs(c1[0].Diameter-24.0) > 1e-12 {
+		t.Errorf("config 1 CIR: expected diameter 24, got %g", c1[0].Diameter)
+	}
+	// Base (config 0) is unchanged.
+	if result.Surfaces[0].Thickness != 5.0 {
+		t.Errorf("base THI must stay 5.0, got %g", result.Surfaces[0].Thickness)
+	}
+	// Config 3 (position 3).
+	c2 := ConfigSurfaceSet(result, 3)
+	if math.Abs(c2[0].Thickness-9.0) > 1e-12 || math.Abs(c2[0].Conic+0.2) > 1e-12 {
+		t.Errorf("config 3 overlays not applied: %+v", c2[0])
+	}
+}
+
+func TestCodeV_ZoomVignetting(t *testing.T) {
+	input := `SEQ
+ZOOM 2
+YAN 0 30
+S 0.02 5.0
+SI 0 0
+ZOO VUY F1 0.0 0.1
+ZOO VLY F1 0.0 0.1
+ZOO VUX F1 0.0 0.05
+ZOO VLX F1 0.0 0.05
+GO
+`
+	result, err := ParseCodeV(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fv := ConfigFields(result, 2)
+	if len(fv) != 2 {
+		t.Fatalf("config 2: expected 2 fields, got %d", len(fv))
+	}
+	v := fv[0].Vignetting
+	if v == nil {
+		t.Fatal("config 2 field 1 should carry zoom vignetting")
+	}
+	if math.Abs(v.DecenterY) > 1e-12 || math.Abs(v.CompressionY-0.1) > 1e-12 {
+		t.Errorf("config 2 field 1: expected compressionY=0.1, got %+v", v)
+	}
+	if math.Abs(v.CompressionX-0.05) > 1e-12 {
+		t.Errorf("config 2 field 1: expected compressionX=0.05, got %+v", v)
+	}
+	if fv[1].Vignetting != nil {
+		t.Errorf("config 2 field 2 should have no vignetting, got %+v", fv[1].Vignetting)
+	}
+	// Base fields keep no vignetting (all-zero rows were not written).
+	if result.Fields[0].Vignetting != nil {
+		t.Errorf("base field 1 should have no vignetting, got %+v", result.Fields[0].Vignetting)
+	}
+}

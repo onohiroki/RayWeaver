@@ -139,6 +139,8 @@ func main() {
 		}
 	case "import":
 		runImport(data)
+	case "export":
+		runExport(data)
 	case "scale":
 		runScale(data)
 	case "asphere":
@@ -552,12 +554,52 @@ Options:
 Supported surface types:
   ZEMAX: STANDARD → sphere, EVENASPH → asphere_polynomial
   OSLO:  SRF (RD/TH/GL/AP/CV) → sphere, NXT format
-  CODE V: RDY/THI/GLA/CCY/DIA/STO → sphere, ASP/AD/AE/AF → asphere_polynomial
+  CODE V: RDY/THI/GLA/K/CIR/STO → sphere, ASP/A..J → asphere_polynomial
 
 Examples:
   rayweave import --format zemax < lens.zmx > system.yaml
   rayweave import --format oslo < lens.len | rayweave trace
   rayweave import --format zemax < lens.zmx | rayweave plot -o lens.svg
+`)
+	case "export":
+		fmt.Print(`Usage: rayweave export --format zemax|codev|oslo [--config ID] < system.yaml > out.zmx|.seq|.len
+
+Exports a RayWeaver system back out as a native lens file for another optical
+design tool. This is the inverse of "rayweave import". The output is plain
+text written to stdout (foreign format, so no pipeline YAML flows on).
+
+Options:
+  --format zemax|codev|oslo   output format (required)
+  --config ID         export a single config; otherwise ZEMAX and CODE V
+                        export every config (as ZEMAX multi-config MNUM/CONFIG/
+                        THIC/SDIA, CODE V zoom positions ZOOM n + ZOO rows) and
+                        OSLO exports config 0
+  --glass-dir DIR     AGF glass catalog directory (for resolving glass
+                        names / OSLO model-glass indices)
+
+Config / format mapping:
+  ZEMAX  all configs -> multi-config (base geometry + THIC/SDIA thickness &
+         diameter overrides; per-config curvature differences are warned)
+  CODE V all configs -> zoom positions (ZOOM n + ZOO RDY/THI/K/CIR/A..J rows;
+         per-config vignetting as ZOO VUY/VLY/VUX/VLX F<n> rows)
+  OSLO   single config only (NXT format)
+
+Surface features:
+  sphere / conic / even polynomial asphere, catalog + model glasses, fields,
+  wavelengths, aperture stop, diameters, per-surface decenters
+  (ZEMAX COORDBRK, CODE V DAR), ZEMAX/CODE V vignetting.
+
+Limitations (reported on stderr):
+  folded mirrors are exported as transmit surfaces (no unfolding)
+  Zernike aspheres export as sphere + conic
+  OSLO cannot represent conics/aspheres/decenters (exported as spheres)
+  multi-config per-config curvature differences cannot be expressed in ZEMAX
+    THIC/SDIA (warned)
+
+Examples:
+  rayweave export --format zemax < system.yaml > out.zmx
+  rayweave export --format codev < system.yaml | rayweave import --format codev
+  rayweave export --format oslo --config config1 < system.yaml > out.len
 `)
 	case "scale":
 		fmt.Print(`Usage: rayweave scale --efl TARGET [--config ID] < system.yaml > scaled.yaml
@@ -902,6 +944,7 @@ Subcommands:
   psf        Point-spread function via direct vector Huygens integration
   wavefront  Wavefront analysis (paraboloid, best-fit sphere, Fringe Zernike, best focus)
   import     Import ZEMAX/OSLO/CODE V lens files
+  export     Export system to ZEMAX ZMX / CODE V SEQ / OSLO LEN
   query      Read-only YAML/JSONL selector (replace python3/PyYAML in demos)
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"

@@ -314,8 +314,13 @@ func leadingDigits(s string) (float64, bool) {
 // ConfigSurfaceSet returns the surfaces for a given config index: the base
 // (config-0) geometry with that config's thickness/diameter overrides
 // applied. When the config has no overrides the base surfaces are returned
-// unchanged.
+// unchanged. CODE V zoom positions override the base through prebuilt
+// ConfigSurfaces (see ParseCodeV); when present they take precedence over the
+// ZEMAX-style thickness/diameter overlay.
 func ConfigSurfaceSet(result *ParseResult, config int) []types.Surface {
+	if s, ok := result.ConfigSurfaces[config]; ok {
+		return s
+	}
 	thick, okThick := result.ConfigThickness[config]
 	diam, okDiam := result.ConfigDiameter[config]
 	if !okThick && !okDiam {
@@ -335,10 +340,32 @@ func ConfigSurfaceSet(result *ParseResult, config int) []types.Surface {
 	return out
 }
 
+// ConfigFields returns the fields for a given config index: the shared base
+// fields with that config's per-field vignetting overrides applied (CODE V
+// zoom vignetting). Config 0 (and configs without overrides) return the base
+// fields unchanged.
+func ConfigFields(result *ParseResult, config int) []types.FieldItem {
+	if len(result.ConfigFieldVignetting) == 0 {
+		return result.Fields
+	}
+	over, ok := result.ConfigFieldVignetting[config]
+	if !ok {
+		return result.Fields
+	}
+	out := make([]types.FieldItem, len(result.Fields))
+	copy(out, result.Fields)
+	for i := range out {
+		if v, ok := over[i]; ok && !v.IsZero() {
+			out[i].Vignetting = &v
+		}
+	}
+	return out
+}
+
 // ConfigIndexes returns the distinct config indices declared by the file
-// (from THIC/SDIA overrides). Empty when the lens has no per-config
-// overrides (a single-config lens) — the caller then uses the base surfaces
-// directly as config 0.
+// (from THIC/SDIA overrides or CODE V zoom positions). Empty when the lens has
+// no per-config overrides (a single-config lens) — the caller then uses the
+// base surfaces directly as config 0.
 func ConfigIndexes(result *ParseResult) []int {
 	seen := map[int]bool{}
 	var idx []int
@@ -349,6 +376,12 @@ func ConfigIndexes(result *ParseResult) []int {
 		}
 	}
 	for c := range result.ConfigDiameter {
+		if !seen[c] {
+			seen[c] = true
+			idx = append(idx, c)
+		}
+	}
+	for c := range result.ConfigSurfaces {
 		if !seen[c] {
 			seen[c] = true
 			idx = append(idx, c)

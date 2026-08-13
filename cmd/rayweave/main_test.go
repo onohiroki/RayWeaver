@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -502,4 +503,41 @@ func TestBuildGlassMapResolvesNormalizedNames(t *testing.T) {
 	if m := buildGlassMap(output, surfaces); len(m) != 0 {
 		t.Errorf("expected no resolution for unknown material, got %v", m)
 	}
+}
+
+func TestConfigIndicesForExport(t *testing.T) {
+	mkInput := func(n int) *types.Input {
+		in := &types.Input{}
+		for i := 0; i < n; i++ {
+			in.Configs = append(in.Configs, types.Config{ID: "config" + itoaTest(i+1), Surfaces: []types.Surface{{ID: 1}}})
+		}
+		return in
+	}
+	cfg1 := "config1"
+	cfg2 := "config2"
+	cases := []struct {
+		name   string
+		format string
+		flag   *string
+		n      int
+		want   []int
+	}{
+		{name: "zemax all", format: "zemax", n: 3, want: []int{0, 1, 2}},
+		{name: "codev all", format: "codev", n: 3, want: []int{0, 1, 2}},
+		{name: "oslo default", format: "oslo", n: 3, want: []int{0}},
+		{name: "zemax single", format: "zemax", flag: &cfg2, n: 3, want: []int{1}},
+		{name: "oslo single", format: "oslo", flag: &cfg1, n: 3, want: []int{0}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := configIndicesForExport(mkInput(c.n), c.format, c.flag)
+			if !reflect.DeepEqual(got, c.want) {
+				t.Errorf("configIndicesForExport = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
+
+func itoaTest(v int) string {
+	return fmt.Sprintf("%d", v)
 }

@@ -27,11 +27,13 @@ rayweave import --format codev < lens.seq > system.yaml
 |---|---|---|
 | ZEMAX | `STANDARD`, `EVENASPH` | `sphere`, `asphere_polynomial` |
 | OSLO | `SRF` (`RD`/`TH`/`GL`/`AP`/`CV`), `NXT` | `sphere` |
-| CODE V | `RDY`/`THI`/`GLA`/`CCY`/`DIA`/`STO`; `ASP`/`AD`/`AE`/`AF` | `sphere`, `asphere_polynomial` |
+| CODE V | `RDY`/`THI`/`GLA`/`K`/`CIR`/`STO`; `ASP`/`A..J` | `sphere`, `asphere_polynomial` |
 
-Conic constants (`CCY`, `CONIC`) map to the `conic` field. Even asphere
-polynomial coefficients (`AD`/`AE`/`AF`, `A4`/`A6`/`A8`/`A10`/`A12`) map to the
-`coefficients` array of `asphere_polynomial`.
+Conic constants (`K`, `CON`, `CONI`) map to the `conic` field. Even asphere
+polynomial coefficients (`A`/`B`/`C`/`D`/`E`/`F`/`G`/`H`/`J`, `A4`/`A6`/
+`A8`/`A10`/`A12`) map to the `coefficients` array of `asphere_polynomial`.
+CODE V `CCY` is a variable/control-designation keyword, not the conic constant,
+and is ignored.
 
 ## ZEMAX fields and vignetting
 
@@ -60,6 +62,23 @@ is truncated at its trailing fill run (the unused-slot placeholder value is not
 imported as real wavelengths); modern files use `WAVL`/`WWGT` directly. ZEMAX
 `FNUM` and `ENPD`/`ENVD` set the F-number / entrance-pupil diameter used for
 stop-aperture sizing when the file carries no per-surface diameters.
+
+## CODE V vignetting and zoom
+
+CODE V field vignetting (`VUX`/`VLX`/`VUY`/`VLY`, slot-aligned per field) is
+imported as `fields[].vignetting` (ZEMAX convention). The four marginal-ray
+factors convert via
+
+```
+decenterY = (VLY - VUY)/2     decenterX = (VLX - VUX)/2
+compressionY = (VUY + VLY)/2  compressionX = (VUX + VLX)/2
+```
+
+Multi-config CODE V files use zoom positions: a `ZOOM n` header plus `ZOO
+<code> S<n> <v1> ... <vn>` rows (surface data: `RDY`/`THI`/`K`/`CIR`/`A..J`)
+and `ZOO VUY|VLY|VUX|VLX F<n> <v1> ... <vn>` rows (per-field vignetting). The
+base geometry is zoom position 1; positions 2..n become separate configs. Per-
+config field vignetting lands in each config's `fields[].vignetting`.
 
 ## Output
 

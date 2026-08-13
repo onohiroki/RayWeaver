@@ -39,6 +39,13 @@ func ParseCodeV(input string) (*ParseResult, error) {
 	result := &ParseResult{StopSurface: 0, ReferenceWavelengthIdx: -1}
 	surfMap := make(map[int]*codeVSurf)
 
+	// Zoom-position and field-vignetting state: "ZOOM n" + "ZOO ..." rows
+	// collect per-position overlays; VUX/VLX/VUY/VLY rows collect the base
+	// field vignetting factors.
+	zoom := &codeVZoomOverlay{}
+	var fvig codeVFieldVignette
+	headerState := &codeVHeaderState{zoom: zoom, vig: &fvig}
+
 	beforeLens := true
 	inchMode := false
 	stopSurface := 0
@@ -99,7 +106,7 @@ func ParseCodeV(input string) (*ParseResult, error) {
 				continue
 			}
 
-			if parseCodeVHeader(upper, tokens, result, &inchMode) {
+			if parseCodeVHeader(upper, tokens, result, &inchMode, headerState) {
 				continue
 			}
 			// Some SEQ files omit the SEQ keyword entirely.
@@ -115,7 +122,14 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			break
 		}
 
-		if parseCodeVHeader(upper, tokens, result, &inchMode) {
+		// ZOO rows declare per-zoom-position parameter values; they may trail
+		// the surface data (before END/GO) or interleave with it.
+		if first == "ZOO" {
+			zoom.addRow(tokens)
+			continue
+		}
+
+		if parseCodeVHeader(upper, tokens, result, &inchMode, headerState) {
 			continue
 		}
 
@@ -250,11 +264,11 @@ func ParseCodeV(input string) (*ParseResult, error) {
 
 		if compactMode && lastSurfNum > 0 {
 			switch first {
-			case "CCY", "CON", "K":
+			case "CON", "K":
 				// Compact-mode conic statements. "CON" declares a conic type
 				// (the value may follow on the same line or in the next "K"
-				// line); "K <k>" / "CCY <k>" set the conic value directly. A
-				// line may join several statements with ';' (e.g.
+				// line); "K <k>" sets the conic value directly. A line may join
+				// several statements with ';' (e.g.
 				// "K 0.226106; A 0.368950E-10"), so delegate to the statement
 				// walker. The 3-token "K <surf> <k>" keyword form falls
 				// through to the surface-prefixed handler below.
@@ -284,7 +298,7 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		}
 
 		switch first {
-		case "RDM", "RDY", "RD", "THI", "TH", "GLA", "CCY", "K",
+		case "RDM", "RDY", "RD", "THI", "TH", "GLA", "K",
 			"DIA", "SDI", "SPS", "SPC", "SI":
 			if len(tokens) < 2 {
 				break
@@ -450,6 +464,12 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		result.Wavelengths[result.ReferenceWavelengthIdx].Primary = true
 	}
 
+	// The base field vignetting (VUX/VLX/VUY/VLY rows) and the zoom-position
+	// overlays (ZOOM n + ZOO rows) are applied on top of the fold-normalised
+	// base geometry.
+	applyCodeVFieldVignetting(result, &fvig)
+	buildCodeVZoomConfigs(result, zoom)
+
 	fillDefaults(result)
 
 	return result, nil
@@ -540,16 +560,36 @@ func parseCodeVRDMDirective(upper string, tokens []string, radiusMode *bool) boo
 	return true
 }
 
+// codeVHeaderState carries the zoom-position count and the base field
+// vignetting rows collected while parsing header-level data.
+type codeVHeaderState struct {
+	zoom *codeVZoomOverlay
+	vig  *codeVFieldVignette
+}
+
 // parseCodeVHeader handles header-level keywords (wavelengths, fields, FNO,
-// DIM) that may appear before or after the SEQ keyword. It reports whether
-// the line was consumed.
-func parseCodeVHeader(upper string, tokens []string, result *ParseResult, inchMode *bool) bool {
+// DIM, zoom count, vignetting factors) that may appear before or after the SEQ
+// keyword. It reports whether the line was consumed.
+func parseCodeVHeader(upper string, tokens []string, result *ParseResult, inchMode *bool, st *codeVHeaderState) bool {
 	if strings.HasPrefix(upper, "WVL ") || strings.HasPrefix(upper, "WL ") {
 		parseCodeVWavelengths(tokens[1:], result)
 		return true
 	}
 	if strings.HasPrefix(upper, "WTW ") {
 		parseCodeVWeights(tokens[1:], result)
+		return true
+	}
+	if strings.HasPrefix(upper, "ZOOM ") && len(tokens) >= 2 {
+		// Zoom-position count: the number of positions the ZOO rows vary.
+		if n := int(parseFloat(tokens[1])); n >= 1 {
+			st.zoom.count = n
+		}
+		return true
+	}
+	if strings.HasPrefix(upper, "VUX ") || strings.HasPrefix(upper, "VLX ") ||
+		strings.HasPrefix(upper, "VUY ") || strings.HasPrefix(upper, "VLY ") {
+		// Field-spec vignetting factors, slot-aligned per field.
+		st.vig.add(strings.ToUpper(tokens[0]), tokens[1:])
 		return true
 	}
 	if strings.HasPrefix(upper, "YAN ") {
@@ -620,14 +660,14 @@ func parseCodeVHeader(upper string, tokens []string, result *ParseResult, inchMo
 
 // applyCodeVCompactOps applies compact-mode conic and asphere statements to a
 // surface. A line may join several statements with ';' (e.g. "K 0.226106; A
-// 0.368950E-10" or "CCY 0; THC 0"); tokens are walked in "keyword value" pairs
-// where a trailing ';' is absorbed by parseFloat. CCY/CON/K set the conic
-// constant, asphere letters set polynomial coefficients, and any other
-// statement (e.g. THC) is ignored.
+// 0.368950E-10" or "K 0; THC 0"); tokens are walked in "keyword value" pairs
+// where a trailing ';' is absorbed by parseFloat. CON/K set the conic constant
+// (a bare CON only declares the conic type), asphere letters set polynomial
+// coefficients, and any other statement (e.g. THC, CCY) is ignored.
 func applyCodeVCompactOps(surf *codeVSurf, tokens []string) {
 	for i := 0; i+1 < len(tokens); i += 2 {
 		switch tokens[i] {
-		case "CCY", "CON", "K":
+		case "CON", "K":
 			surf.Conic = parseFloat(tokens[i+1])
 		default:
 			if isAsphereLetter(tokens[i]) {
@@ -677,10 +717,6 @@ func processCodeVKeyword(surf *codeVSurf, keyword string, tokens []string) {
 		if len(tokens) >= 3 {
 			raw := strings.Trim(tokens[2], "'\"")
 			surf.Material = raw
-		}
-	case "CCY":
-		if len(tokens) >= 3 {
-			surf.Conic = parseFloat(tokens[2])
 		}
 	case "K":
 		if len(tokens) >= 3 {

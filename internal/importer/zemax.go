@@ -90,6 +90,13 @@ func ParseZemax(input string) (*ParseResult, error) {
 	buildZemaxFields(result, hdr, objectZ)
 	buildZemaxWavelengths(result, hdr)
 
+	// ZEMAX PWAV selects the primary (reference) wavelength by 1-based index;
+	// mark it so downstream selection (FNO sizing, chief wavelength, merit)
+	// uses it.
+	if result.ReferenceWavelengthIdx >= 0 && result.ReferenceWavelengthIdx < len(result.Wavelengths) {
+		result.Wavelengths[result.ReferenceWavelengthIdx].Primary = true
+	}
+
 	seenIDs := make(map[int]bool)
 	var pendingDecenter types.DecenterStep
 	var pendingTiltFirst bool
@@ -420,6 +427,11 @@ func parseZemaxHeader(hdr *zemaxHeader, keyword string, args []string) {
 			}
 		}
 	case "PWAV":
+		// PWAV <n> — the 1-based index of the primary (reference) wavelength.
+		// Applied once the WAVL/WAVM tables are built.
+		if len(args) > 0 {
+			result.ReferenceWavelengthIdx = int(parseFloat(args[0])) - 1
+		}
 	case "FTYP":
 		// FTYP <global-type> <flags...> — system field type. Only the first
 		// value is used: 0 = angle (deg), 1 = object height, 2 = paraxial image

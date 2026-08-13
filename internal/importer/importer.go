@@ -43,6 +43,18 @@ type ParseResult struct {
 	ConfigThickness map[int]map[int]float64 // [config][surfaceID]
 	ConfigDiameter  map[int]map[int]float64 // [config][surfaceID]
 
+	// Multi-config support (CODE V zoom): per-config full surface sets built
+	// from the ZOO zoom-position overlays over the base (position-1) surfaces.
+	// Config index c = zoom position c (positions 2..n are the extra configs;
+	// position 1 is the base, config 0). When present, ConfigSurfaceSet
+	// returns these directly.
+	ConfigSurfaces map[int][]types.Surface
+
+	// ConfigFieldVignetting carries per-config per-field vignetting from CODE V
+	// zoom vignetting rows (ZOO VUY/VLY/VUX/VLX F<n> ...), keyed [config][field
+	// index], where config index c = zoom position c.
+	ConfigFieldVignetting map[int]map[int]types.VignettingDef
+
 	// NeedsImageDistance is set by the OSLO parser when the image surface
 	// carries WRSP Inf, an auto-image-distance solve. The caller applies
 	// ApplyImageDistance to replace the last empty thickness with the

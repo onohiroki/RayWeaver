@@ -132,6 +132,18 @@ func runImport(data []byte) {
 	configIdx := importer.ConfigIndexes(result)
 	if len(configIdx) == 0 {
 		configIdx = []int{0}
+	} else {
+		// The base (config 0) is always emitted alongside the override
+		// configs. A config index of 1 duplicates the base in the external
+		// 1-based numbering (ZEMAX config 1 / CODE V zoom position 1) and is
+		// dropped so the config IDs stay unique.
+		var extras []int
+		for _, c := range configIdx {
+			if c > 1 {
+				extras = append(extras, c)
+			}
+		}
+		configIdx = append([]int{0}, extras...)
 	}
 
 	// Per-config ray tracking: chief rays are resolved on the first config
@@ -157,7 +169,7 @@ func runImport(data []byte) {
 			Name:        cfgName,
 			Weight:      1.0,
 			Active:      true,
-			Fields:      result.Fields,
+			Fields:      importer.ConfigFields(result, c),
 			Wavelengths: result.Wavelengths,
 			RayPaths: []types.RayPath{{
 				ObjectSurface: 0,

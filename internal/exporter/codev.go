@@ -1,0 +1,461 @@
+package exporter
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/types"
+)
+
+// WriteCodeV renders a system as a CODE V SEQ file (compact mode, millimetres,
+// curvature entry). configs is the ordered list of config indices to write;
+// the first is the base (zoom position 1). Extra configs are emitted as CODE V
+// zoom positions: a "ZOOM n" header plus "ZOO <code> S<n>|<F<n>> <values per
+// position>" rows for every parameter that differs across configs. Fields,
+// wavelengths and the stop come from the first config.
+func WriteCodeV(input *types.Input, configs []int, gc *glass.Catalog, warn Warn) ([]byte, error) {
+	if len(configs) == 0 {
+		return nil, fmt.Errorf("no configs to export")
+	}
+	baseCfg := &input.Configs[configs[0]]
+	base := baseCfg.Surfaces
+	if len(base) == 0 {
+		return nil, fmt.Errorf("config %q has no surfaces", baseCfg.ID)
+	}
+
+	var b strings.Builder
+	stopIdx := resolveStop(baseCfg, input.Chief.StopSurface)
+	ftyp := dominantFieldClass(baseCfg.Fields, warn)
+
+	b.WriteString("RDM N;LEN \"RayWeaver export\"\n")
+	if name := configName(input, baseCfg); name != "" {
+		b.WriteString("TITLE '" + strings.ReplaceAll(name, "'", " ") + "'\n")
+	}
+	if len(configs) > 1 {
+		fmt.Fprintf(&b, "ZOOM %d\n", len(configs))
+	}
+	writeCodeVWavelengths(&b, baseCfg)
+	writeCodeVFields(&b, baseCfg.Fields, ftyp, warn)
+	writeCodeVVignetting(&b, baseCfg.Fields)
+
+	// Object surface: curvature 0 with a huge distance for infinite conjugate,
+	// else the first field's object distance.
+	objDist := "0.1E+15"
+	if ftyp == fieldObjectHeight {
+		oz := objectDistance(baseCfg.Fields)
+		if oz > 0 {
+			objDist = num(oz)
+		} else {
+			warnf(warn, "finite-conjugate object fields are not representable in compact CODE V; using infinite object distance")
+		}
+	}
+	fmt.Fprintf(&b, "SO 0.0 %s\n", objDist)
+
+	// Surface data: base geometry (zoom position 1).
+	for i := range base {
+		s := base[i]
+		last := i == len(base)-1
+		writeCodeVSurface(&b, &s, i+1, last, i == stopIdx, warn)
+	}
+
+	// Zoom-position differences: one ZOO row per parameter that changes across
+	// configs, values covering all positions (position 1 = base).
+	if len(configs) > 1 {
+		writeCodeVZoomRows(&b, input, configs, base, warn)
+	}
+
+	b.WriteString("GO\n")
+	return []byte(b.String()), nil
+}
+
+func writeCodeVWavelengths(b *strings.Builder, cfg *types.Config) {
+	if len(cfg.Wavelengths) == 0 {
+		return
+	}
+	var wls, wws []string
+	ref := 1
+	for i, wl := range cfg.Wavelengths {
+		wls = append(wls, num(wl.Value*1e6))
+		wws = append(wws, num(wl.Weight))
+		if wl.Primary {
+			ref = i + 1
+		}
+	}
+	codeVLine(b, "WL ", wls, 100)
+	codeVLine(b, "WTW ", wws, 100)
+	fmt.Fprintf(b, "REF %d\n", ref)
+}
+
+// writeCodeVFields writes the YAN/YIM + XAN + WTF field rows. Object-height
+// (finite-conjugate) fields are skipped with a warning: compact CODE V field
+// spec has no object-height type.
+func writeCodeVFields(b *strings.Builder, fields []types.FieldItem, ftyp fieldClass, warn Warn) {
+	if len(fields) == 0 {
+		return
+	}
+	var yan, xan, wtf []string
+	var yim []string
+	for i := range fields {
+		f := &fields[i]
+		w := num(f.Weight)
+		switch classifyField(f) {
+		case fieldObjectHeight:
+			warnf(warn, "field %d: object-height (finite conjugate) not representable in CODE V; skipped", i)
+			continue
+		case fieldImageHeight:
+			yim = append(yim, num(f.ImageHeight))
+			wtf = append(wtf, w)
+		default: // angle
+			x, y := fieldXY(f)
+			yan = append(yan, num(y))
+			xan = append(xan, num(x))
+			wtf = append(wtf, w)
+		}
+	}
+	if len(yim) > 0 {
+		codeVLine(b, "YIM ", yim, 100)
+	} else if len(yan) > 0 {
+		codeVLine(b, "YAN ", yan, 100)
+		codeVLine(b, "XAN ", xan, 100)
+	}
+	if len(wtf) > 0 {
+		codeVLine(b, "WTF ", wtf, 100)
+	}
+}
+
+// writeCodeVVignetting writes the base (position 1) per-field vignetting
+// factors VUX/VLX/VUY/VLY, slot-aligned, converting from the ZEMAX-convention
+// VignettingDef (decenter/compression fractions of the pupil radius):
+//
+//	VUY = compressionY - decenterY    VLY = compressionY + decenterY
+//	VUX = compressionX - decenterX    VLX = compressionX + decenterX
+func writeCodeVVignetting(b *strings.Builder, fields []types.FieldItem) {
+	if !anyVignetting(fields) {
+		return
+	}
+	var vux, vlx, vuy, vly []string
+	for i := range fields {
+		v := codeVVignette(fields[i].Vignetting)
+		vux = append(vux, num(v.vux))
+		vlx = append(vlx, num(v.vlx))
+		vuy = append(vuy, num(v.vuy))
+		vly = append(vly, num(v.vly))
+	}
+	codeVLine(b, "VUX ", vux, 100)
+	codeVLine(b, "VLX ", vlx, 100)
+	codeVLine(b, "VUY ", vuy, 100)
+	codeVLine(b, "VLY ", vly, 100)
+}
+
+type codeVVig struct{ vux, vlx, vuy, vly float64 }
+
+func codeVVignette(v *types.VignettingDef) codeVVig {
+	if v == nil {
+		return codeVVig{}
+	}
+	return codeVVig{
+		vux: v.CompressionX - v.DecenterX,
+		vlx: v.CompressionX + v.DecenterX,
+		vuy: v.CompressionY - v.DecenterY,
+		vly: v.CompressionY + v.DecenterY,
+	}
+}
+
+func anyVignetting(fields []types.FieldItem) bool {
+	for i := range fields {
+		if !fields[i].Vignetting.IsZero() {
+			return true
+		}
+	}
+	return false
+}
+
+// writeCodeVSurface writes one compact-mode surface row plus its asphere,
+// decenter, aperture and stop statements. The image plane is written as SI.
+func writeCodeVSurface(b *strings.Builder, s *types.Surface, surfNum int, isImage, isStop bool, warn Warn) {
+	prefix := "S"
+	if isImage {
+		prefix = "SI"
+	}
+	line := fmt.Sprintf("%s %s %s", prefix, num(s.Curvature), num(s.Thickness))
+	g := glassOf(s.Material)
+	if g.keyed {
+		line += " " + g.name
+	} else if g.nd > 0 {
+		line += " " + glassName(s.Material, ":")
+	}
+	b.WriteString(line + "\n")
+
+	if s.Reflect {
+		warnf(warn, "surface %d: folded mirror not unfolded; exported as a transmit surface", s.ID)
+	}
+	if s.Type == types.AsphereZernike {
+		warnf(warn, "surface %d: Zernike asphere not representable in CODE V; exported as sphere + conic", s.ID)
+	}
+
+	asphere := s.Type == types.AspherePolynomial
+	if asphere && !hasAnyNonZero(s.Coefficients) && s.Conic == 0 {
+		asphere = false
+	}
+
+	if asphere {
+		b.WriteString("  ASP\n")
+		fmt.Fprintf(b, "  K %s\n", num(s.Conic))
+		b.WriteString("  CUF 0.0\n")
+		writeCodeVAsphereCoeffs(b, s.Coefficients)
+	} else if s.Conic != 0 {
+		// A conic sphere: CON declares the conic surface, K its constant.
+		fmt.Fprintf(b, "  CON\n  K %s\n", num(s.Conic))
+	}
+
+	steps := codeVDecenterSteps(s, warn)
+	if len(steps) > 0 {
+		b.WriteString("  DAR\n")
+		for _, st := range steps {
+			if st.Shift.Y != 0 {
+				fmt.Fprintf(b, "  YDE %s\n", num(st.Shift.Y))
+			}
+			if st.Shift.X != 0 {
+				fmt.Fprintf(b, "  XDE %s\n", num(st.Shift.X))
+			}
+			if st.Shift.Z != 0 {
+				fmt.Fprintf(b, "  ZDE %s\n", num(st.Shift.Z))
+			}
+			if st.Tilt.X != 0 {
+				fmt.Fprintf(b, "  ADE %s\n", num(st.Tilt.X))
+			}
+			if st.Tilt.Y != 0 {
+				fmt.Fprintf(b, "  BDE %s\n", num(st.Tilt.Y))
+			}
+			if st.Tilt.Z != 0 {
+				fmt.Fprintf(b, "  CDE %s\n", num(st.Tilt.Z))
+			}
+		}
+	}
+
+	if s.Diameter > 0 {
+		fmt.Fprintf(b, "  CIR %s\n", num(semiDiameter(s.Diameter)))
+	}
+	if isStop {
+		b.WriteString("  STO\n")
+	}
+}
+
+func writeCodeVAsphereCoeffs(b *strings.Builder, coeffs []float64) {
+	var parts []string
+	for i, c := range coeffs {
+		if c == 0 {
+			continue
+		}
+		if letter := codeVLetter(2*i + 4); letter != "" {
+			parts = append(parts, letter+" "+num(c))
+		}
+	}
+	if len(parts) > 0 {
+		codeVLine(b, "  ", parts, 120)
+	}
+}
+
+// codeVDecenterSteps reduces a surface's decenter steps to the CODE V DAR
+// representation (one block per surface), dropping the mirror fold step and
+// warning on anything lossy.
+func codeVDecenterSteps(s *types.Surface, warn Warn) []types.DecenterStep {
+	var steps []types.DecenterStep
+	for _, d := range s.Decenter {
+		if d == (types.DecenterStep{Tilt: types.Vec3{Y: 180}, Scope: types.ScopeBoth}) {
+			continue
+		}
+		steps = append(steps, d)
+	}
+	if len(steps) <= 1 {
+		return steps
+	}
+	warnf(warn, "surface %d: %d decenter steps; CODE V DAR carries one block per surface, exporting the first", s.ID, len(steps))
+	return steps[:1]
+}
+
+// writeCodeVZoomRows emits the ZOO rows for the configs after the base: one
+// row per surface parameter that differs across configs, and one per field
+// vignetting factor. Values cover every zoom position (position 1 = base).
+func writeCodeVZoomRows(b *strings.Builder, input *types.Input, configs []int, base []types.Surface, warn Warn) {
+	baseCfg := &input.Configs[configs[0]]
+	for k := 1; k < len(configs); k++ {
+		if len(input.Configs[configs[k]].Surfaces) != len(base) {
+			warnf(warn, "config %q surface count differs from the base; zoom overrides limited to the common range", input.Configs[configs[k]].ID)
+		}
+	}
+	for j := range base {
+		numS := j + 1
+		if t, ok := zoomThicknessValues(input, configs, j); ok {
+			codeVLine(b, "ZOO THI S"+itoa(numS)+" ", t, 120)
+		}
+		if r, ok := zoomRadiusValues(input, configs, j); ok {
+			codeVLine(b, "ZOO RDY S"+itoa(numS)+" ", r, 120)
+		}
+		if c, ok := zoomConicValues(input, configs, j); ok {
+			codeVLine(b, "ZOO K S"+itoa(numS)+" ", c, 120)
+		}
+		if d, ok := zoomDiameterValues(input, configs, j); ok {
+			codeVLine(b, "ZOO CIR S"+itoa(numS)+" ", d, 120)
+		}
+		for _, ord := range zoomAsphereOrders(input, configs, j) {
+			if letter := codeVLetter(ord); letter != "" {
+				if a, ok := zoomAsphereValues(input, configs, j, ord); ok {
+					codeVLine(b, "ZOO "+letter+" S"+itoa(numS)+" ", a, 120)
+				}
+			}
+		}
+	}
+	// Field vignetting differences.
+	for fi := range baseCfg.Fields {
+		if vu, vl, vx, vxx, ok := zoomVignetteValues(input, configs, fi); ok {
+			codeVLine(b, "ZOO VUY F"+itoa(fi+1)+" ", vu, 120)
+			codeVLine(b, "ZOO VLY F"+itoa(fi+1)+" ", vl, 120)
+			codeVLine(b, "ZOO VUX F"+itoa(fi+1)+" ", vx, 120)
+			codeVLine(b, "ZOO VLX F"+itoa(fi+1)+" ", vxx, 120)
+		}
+	}
+}
+
+func itoa(v int) string { return fmt.Sprintf("%d", v) }
+
+// perConfigSurf returns the j-th surface of every config, as a slice indexed
+// by the configs list.
+func perConfigSurf(input *types.Input, configs []int, j int) []types.Surface {
+	out := make([]types.Surface, len(configs))
+	for k, ci := range configs {
+		cs := input.Configs[ci].Surfaces
+		if j < len(cs) {
+			out[k] = cs[j]
+		}
+	}
+	return out
+}
+
+// diffValues returns the per-config values for a scalar surface parameter,
+// ok=false when all configs agree.
+func diffValues(input *types.Input, configs []int, j int, get func(*types.Surface) float64) ([]string, bool) {
+	surfs := perConfigSurf(input, configs, j)
+	if len(surfs) == 0 {
+		return nil, false
+	}
+	v0 := get(&surfs[0])
+	diff := false
+	for k := 1; k < len(surfs); k++ {
+		if get(&surfs[k]) != v0 {
+			diff = true
+			break
+		}
+	}
+	if !diff {
+		return nil, false
+	}
+	out := make([]string, len(surfs))
+	for k := range surfs {
+		out[k] = num(get(&surfs[k]))
+	}
+	return out, true
+}
+
+func zoomThicknessValues(input *types.Input, configs []int, j int) ([]string, bool) {
+	return diffValues(input, configs, j, func(s *types.Surface) float64 { return s.Thickness })
+}
+
+func zoomRadiusValues(input *types.Input, configs []int, j int) ([]string, bool) {
+	return diffValues(input, configs, j, func(s *types.Surface) float64 {
+		if s.Curvature == 0 {
+			return 0
+		}
+		return 1.0 / s.Curvature
+	})
+}
+
+func zoomConicValues(input *types.Input, configs []int, j int) ([]string, bool) {
+	return diffValues(input, configs, j, func(s *types.Surface) float64 { return s.Conic })
+}
+
+func zoomDiameterValues(input *types.Input, configs []int, j int) ([]string, bool) {
+	return diffValues(input, configs, j, func(s *types.Surface) float64 { return semiDiameter(s.Diameter) })
+}
+
+func zoomAsphereOrders(input *types.Input, configs []int, j int) []int {
+	seen := map[int]bool{}
+	var orders []int
+	for _, s := range perConfigSurf(input, configs, j) {
+		for _, o := range asphereOrders(&s) {
+			if !seen[o] {
+				seen[o] = true
+				orders = append(orders, o)
+			}
+		}
+	}
+	return orders
+}
+
+func zoomAsphereValues(input *types.Input, configs []int, j, order int) ([]string, bool) {
+	idx := order/2 - 2
+	return diffValues(input, configs, j, func(s *types.Surface) float64 {
+		if idx < len(s.Coefficients) {
+			return s.Coefficients[idx]
+		}
+		return 0
+	})
+}
+
+// zoomVignetteValues returns the per-config CODE V vignetting factors for one
+// field, ok=false when all configs agree.
+func zoomVignetteValues(input *types.Input, configs []int, fi int) (vuy, vly, vux, vlx []string, ok bool) {
+	base := codeVVignette(nil)
+	same := true
+	vuy = make([]string, len(configs))
+	vly = make([]string, len(configs))
+	vux = make([]string, len(configs))
+	vlx = make([]string, len(configs))
+	for k, ci := range configs {
+		cfg := &input.Configs[ci]
+		var v codeVVig
+		if fi < len(cfg.Fields) {
+			v = codeVVignette(cfg.Fields[fi].Vignetting)
+		}
+		if k == 0 {
+			base = v
+		} else if v != base {
+			same = false
+		}
+		vuy[k], vly[k], vux[k], vlx[k] = num(v.vuy), num(v.vly), num(v.vux), num(v.vlx)
+	}
+	if same {
+		return nil, nil, nil, nil, false
+	}
+	return vuy, vly, vux, vlx, true
+}
+
+// codeVLine writes a wrapped line: prefix + space-joined parts, breaking at
+// spaces with the CODE V '&' continuation when the line would exceed maxLen.
+func codeVLine(b *strings.Builder, prefix string, parts []string, maxLen int) {
+	if len(parts) == 0 {
+		return
+	}
+	cur := prefix + strings.Join(parts, " ")
+	if len(cur) <= maxLen {
+		b.WriteString(cur + "\n")
+		return
+	}
+	// Break at the last space before maxLen.
+	idx := strings.LastIndex(cur[:maxLen], " ")
+	if idx < len(prefix) {
+		b.WriteString(cur + "\n")
+		return
+	}
+	b.WriteString(cur[:idx] + " &\n " + cur[idx+1:] + "\n")
+}
+
+func hasAnyNonZero(v []float64) bool {
+	for _, x := range v {
+		if x != 0 {
+			return true
+		}
+	}
+	return false
+}
