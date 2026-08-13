@@ -79,7 +79,7 @@ func WriteZemax(input *types.Input, configs []int, gc *glass.Catalog, warn Warn)
 	for i := range baseCfg.Fields {
 		f := &baseCfg.Fields[i]
 		x, y := fieldXY(f)
-		if classifyField(f) != ftyp {
+		if !fieldNeutral(f) && classifyField(f) != ftyp {
 			warnf(warn, "field %d type does not match the dominant type; exported under FTYP %d (%s)", i, zemaxFTYP(ftyp), ftyp)
 		}
 		xf = append(xf, num(x))

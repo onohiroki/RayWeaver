@@ -99,8 +99,20 @@ func classifyField(f *types.FieldItem) fieldClass {
 	}
 }
 
+// fieldNeutral reports whether a field carries no value in any type (angle,
+// image height and object height all zero). Such a field is the on-axis field
+// of an image-height/object-height system that lost its type through the
+// omitempty round trip (image_height: 0 is omitted from YAML and re-read as
+// angle 0); it is written under the dominant type and never triggers a
+// mixed-field-type warning.
+func fieldNeutral(f *types.FieldItem) bool {
+	return f.AngleDeg == 0 && f.ImageHeight == 0 && f.Height == 0
+}
+
 // dominantFieldClass returns the field type shared by most fields, warning
-// when mixed types would otherwise be lossy.
+// when genuinely mixed types (non-zero fields of different classes) would
+// otherwise be lossy. Neutral on-axis fields (all values zero) do not count:
+// they are value-0 under any interpretation.
 func dominantFieldClass(fields []types.FieldItem, w Warn) fieldClass {
 	if len(fields) == 0 {
 		return fieldAngle
@@ -108,6 +120,9 @@ func dominantFieldClass(fields []types.FieldItem, w Warn) fieldClass {
 	counts := map[fieldClass]int{}
 	best := fieldAngle
 	for _, f := range fields {
+		if fieldNeutral(&f) {
+			continue
+		}
 		c := classifyField(&f)
 		counts[c]++
 		if counts[c] > counts[best] {

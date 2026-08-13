@@ -111,8 +111,15 @@ func writeCodeVFields(b *strings.Builder, fields []types.FieldItem, ftyp fieldCl
 			break
 		}
 	}
+	// Only genuinely mixed non-zero fields (a non-zero angle alongside image
+	// heights) are lossy; a neutral on-axis field is value 0 under either type.
 	if useYIM && ftyp == fieldAngle {
-		warnf(warn, "mixed angle / image-height fields; exporting all as image height")
+		for i := range fields {
+			if !fieldNeutral(&fields[i]) && classifyField(&fields[i]) != fieldImageHeight {
+				warnf(warn, "mixed angle / image-height fields; exporting all as image height")
+				break
+			}
+		}
 	}
 	var vals, xan, wtf []string
 	for i := range fields {

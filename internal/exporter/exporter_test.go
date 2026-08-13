@@ -571,3 +571,51 @@ func TestExportNoChief(t *testing.T) {
 		})
 	}
 }
+
+func TestNeutralOnAxisFieldNoMixedWarning(t *testing.T) {
+	// Regression: an image-height system whose on-axis field has image height 0
+	// reads back as an angle-0 field (omitempty), which used to trip the
+	// "mixed field types" warning even though the round trip is lossless.
+	in := testInput()
+	in.Configs[0].Fields = []types.FieldItem{
+		{ID: 0, AngleDeg: 0, Weight: 1},         // image-height 0 (on-axis)
+		{ID: 1, ImageHeight: 15.141, Weight: 1}, // image height
+		{ID: 2, ImageHeight: 21.63, Weight: 1},
+	}
+	var log []string
+	for _, format := range []string{"zemax", "codev"} {
+		t.Run(format, func(t *testing.T) {
+			log = nil
+			pr := roundTrip(t, format, in, []int{0}, collectWarn(&log))
+			for _, msg := range log {
+				if strings.Contains(msg, "mixed") || strings.Contains(msg, "does not match") {
+					t.Errorf("unexpected warning: %q", msg)
+				}
+			}
+			if len(pr.Fields) != 3 {
+				t.Errorf("expected 3 fields, got %d", len(pr.Fields))
+			}
+		})
+	}
+}
+
+func TestGenuinelyMixedFieldsStillWarn(t *testing.T) {
+	// A non-zero angle alongside image heights is genuinely unrepresentable
+	// and must still warn.
+	in := testInput()
+	in.Configs[0].Fields = []types.FieldItem{
+		{ID: 0, AngleDeg: 10, Weight: 1},
+		{ID: 1, ImageHeight: 5, Weight: 1},
+	}
+	var log []string
+	roundTrip(t, "codev", in, []int{0}, collectWarn(&log))
+	found := false
+	for _, msg := range log {
+		if strings.Contains(msg, "mixed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected a mixed-field warning, got %v", log)
+	}
+}
