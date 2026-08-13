@@ -191,7 +191,13 @@ func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {
 		out[i] = types.FieldDef{
 			Angle:       f.AngleDeg,
 			ImageHeight: f.ImageHeight,
-			Direction:   []float64{0, 1},
+			Height:      f.Height,
+			ObjectZ:     f.ObjectZ,
+			Direction:   f.Direction,
+			Vignetting:  f.Vignetting,
+		}
+		if len(f.Direction) == 0 {
+			out[i].Direction = []float64{0, 1}
 		}
 	}
 	return out

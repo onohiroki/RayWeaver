@@ -521,3 +521,61 @@ func TestAngleGridOriginsOnWavefront(t *testing.T) {
 		t.Error("chief ray image height is zero; grid not centred on pupil")
 	}
 }
+
+// TestVignettingClipsGrid verifies that a field's vignetting ellipse drops
+// pupil samples outside it, shrinking the traced grid and shifting the chief
+// ray to the vignetted-pupil centroid.
+func TestVignettingClipsGrid(t *testing.T) {
+	sys, gc := singletSystem()
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+
+	full := []types.FieldDef{
+		{Angle: 0.0, Direction: []float64{0, 1}},
+	}
+	fullRes := DetermineChiefRaysGrid(sys, full, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+
+	// Clip the pupil to a small central disk: heavy Y compression.
+	clip := &types.VignettingDef{CompressionX: 0.7, CompressionY: 0.7}
+	vig := []types.FieldDef{
+		{Angle: 0.0, Direction: []float64{0, 1}, Vignetting: clip},
+	}
+	vigRes := DetermineChiefRaysGrid(sys, vig, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+
+	if len(fullRes) != 1 || len(vigRes) != 1 {
+		t.Fatalf("expected 1 result each, got %d/%d", len(fullRes), len(vigRes))
+	}
+	nFull := countTraced(fullRes[0].GridPoints)
+	nVig := countTraced(vigRes[0].GridPoints)
+	if nVig >= nFull {
+		t.Errorf("vignetted grid (%d traced) not smaller than full grid (%d)", nVig, nFull)
+	}
+	if nVig == 0 {
+		t.Fatal("vignetted grid traced nothing")
+	}
+
+	// Every vignetted sample must lie inside the clip ellipse.
+	ep := vigRes[0].EntrancePupil
+	if ep == nil || ep.Radius <= 0 {
+		t.Fatal("no entrance pupil for vignetted field")
+	}
+	for _, gp := range vigRes[0].GridPoints {
+		if gp.ImageX == nil {
+			continue
+		}
+		dx := gp.PupilX - ep.Center.X
+		dy := gp.PupilY - ep.Center.Y
+		if !clip.Contains(dx, dy, ep.Radius) {
+			t.Errorf("vignetted sample (%g,%g) outside clip ellipse (R=%g)", dx, dy, ep.Radius)
+		}
+	}
+}
+
+func countTraced(pts []types.GridPoint) int {
+	n := 0
+	for _, gp := range pts {
+		if gp.ImageX != nil {
+			n++
+		}
+	}
+	return n
+}

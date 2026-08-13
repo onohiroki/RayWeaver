@@ -101,17 +101,22 @@ func frozenPupilGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	pupilOffsetX, pupilOffsetY := gcpt.X, gcpt.Y
 
 	samples := chief.GenerateGridPoints(numRays, apertureRadius, types.GridPolar)
-	grid := make([]types.GridPoint, len(samples))
+	grid := make([]types.GridPoint, 0, len(samples))
 	wavefrontC := types.Vec3{X: pupilOffsetX, Y: pupilOffsetY, Z: zStart}
-	for i, p := range samples {
-		grid[i] = types.GridPoint{
+	for _, p := range samples {
+		// Clip to the field's vignetted entrance-pupil ellipse (the sample
+		// offsets are relative to the grid centre at the pupil plane).
+		if !fd.Vignetting.IsZero() && !fd.Vignetting.Contains(p.X, p.Y, apertureRadius) {
+			continue
+		}
+		grid = append(grid, types.GridPoint{
 			PupilX: p.X,
 			PupilY: p.Y,
 			Origin: raymath.ProjectOntoWavefront(
 				types.Vec3{X: p.X + pupilOffsetX, Y: p.Y + pupilOffsetY, Z: zStart},
 				wavefrontC, rayDir),
 			Direction: rayDir,
-		}
+		})
 	}
 
 	return &psf.PupilGrid{

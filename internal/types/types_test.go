@@ -2,8 +2,8 @@ package types
 
 import (
 	"bytes"
-	"strings"
 	"math"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -217,5 +217,53 @@ func TestSurfaceTopLevelReflect(t *testing.T) {
 	}
 	if !bytes.Contains(out, []byte("reflect: true")) {
 		t.Errorf("marshal output = %s, want reflect: true", out)
+	}
+}
+
+func TestVignettingDefContains(t *testing.T) {
+	// Nil and zero vignetting pass every point inside the unit disk.
+	if (*VignettingDef)(nil).Contains(0.9, 0, 10) != true {
+		t.Error("nil vignetting should pass all points")
+	}
+	zero := &VignettingDef{}
+	if !zero.Contains(9, 0, 10) || !zero.Contains(7.07, 7.07, 10) {
+		t.Error("zero vignetting should behave as a full circular pupil")
+	}
+	if zero.Contains(10.01, 0, 10) {
+		t.Error("zero vignetting must still clip outside the unit circle")
+	}
+
+	// Compression shrinks the semi-axes: 1 - 0.5 = 0.5 -> radius 5.
+	comp := &VignettingDef{CompressionX: 0.5, CompressionY: 0.5}
+	if !comp.Contains(4, 0, 10) {
+		t.Error("point at 4 should be inside the compressed pupil (semi-axis 5)")
+	}
+	if comp.Contains(5.1, 0, 10) {
+		t.Error("point at 5.1 should be outside the compressed pupil (semi-axis 5)")
+	}
+
+	// Decenter shifts the ellipse centre: +0.2*R = +2 in X.
+	dec := &VignettingDef{DecenterX: 0.2}
+	if !dec.Contains(11, 0, 10) {
+		t.Error("point at 11 should be inside the de-centered pupil")
+	}
+	if dec.Contains(13, 0, 10) {
+		t.Error("point at 13 should be outside the de-centered pupil")
+	}
+
+	// Rotation: with tangent=1 the ellipse is at 45°; a point at (0, 6) in a
+	// de-centered-and-rotated pupil... verify a full compression keeps a
+	// far-axis point out.
+	rot := &VignettingDef{Tangent: 1, CompressionX: 0.2}
+	// Rotated 45°, semi-axis X = 0.8*R: the point (5.656854, 5.656854) is on the
+	// rotated major axis at radius 8 <= 8, inside.
+	if !rot.Contains(5.656854, 5.656854, 10) {
+		t.Error("point on rotated major axis at radius 8 should be inside")
+	}
+	// The same radial distance on the rotated minor axis (perp direction)
+	// is outside when it exceeds the minor semi-axis 1*R.
+	perp := &VignettingDef{Tangent: 1, CompressionY: 0.8}
+	if perp.Contains(5.656854, -5.656854, 10) {
+		t.Error("point on rotated minor axis at radius 8 should be outside (semi-axis 2)")
 	}
 }

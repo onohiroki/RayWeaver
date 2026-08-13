@@ -78,7 +78,7 @@ Exemptions (documented, not YAML-specifiable):
 
 - Surfaces use `curvature` (not `radius`) as primary field. `radius` in YAML is converted at parse time.
 - Chief field types: `angle` (degrees) + optional `direction [dx, dy]`, `image_height` (mm), or `height` + `object_z` (finite conjugate). Use `--wl` flag for multi-wavelength spot grids.
-- `import --format zemax|oslo|codev` produces multi-config YAML with automatic chief+marginal rays.
+- `import --format zemax|oslo|codev` produces multi-config YAML with automatic chief+marginal rays. The ZEMAX importer reads both the legacy slot rows (`XFLN`/`YFLN`, `FWGN`) and the modern `XFLD`/`YFLD`/`FWGT` rows, interpreting values by `FTYP[0]` only (0 angle → `angle_deg`, 1 object height → `height`+`object_z`, 2/3 image height → `image_height`; trailing FTYP values are ignored as internal flags). Field weights map to `fields[].weight`; the per-field vignetting factors (`VDXN`/`VDYN`/`VCXN`/`VCYN`/`VANN`) map to `fields[].vignetting` (`decenter_x/y`, `compression_x/y`, `tangent`), which `chief`/`wavefront` apply as an entrance-pupil ellipse grid mask. The 24-slot `WAVM` table is truncated at its trailing fill run; `FNUM`/`ENPD`/`ENVD` set F-number/EPD for stop sizing when no diameters exist.
 - Optimize auto-detects multi-config mode when `shared_variables`, `local_variables`, or `configs[].merit` exist.
 - Surface 0 = implicit object plane (no intersection/refraction). Ray `path` must start with `0`.
 - New surface fields: `auto_aperture` (vignetting), `min_glass_path`/`max_glass_path` (edge-thickness constraints).

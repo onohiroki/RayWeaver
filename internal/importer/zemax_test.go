@@ -266,18 +266,13 @@ SURF 1
 	if len(result.Fields) != 3 {
 		t.Fatalf("expected 3 fields (on-axis + 2), got %d", len(result.Fields))
 	}
-	// FTYP 3 0 3 3: Fields[0] is the on-axis (value 0), using the global type (3).
-	// Fields[1] is ZEMAX field 1: per-field type 0 (angle) with value 15.
-	// Fields[2] is ZEMAX field 2: per-field type 3 (image height) with value 21.
-	if result.Fields[0].ImageHeight != 0 || result.Fields[0].AngleDeg != 0 {
-		t.Errorf("field 0 (on-axis): expected angle=0 ih=0, got angle=%g ih=%g",
-			result.Fields[0].AngleDeg, result.Fields[0].ImageHeight)
-	}
-	if result.Fields[1].AngleDeg != 15 || result.Fields[1].ImageHeight != 0 {
-		t.Errorf("field 1: expected angle 15, got ih=%g angle=%g", result.Fields[1].ImageHeight, result.Fields[1].AngleDeg)
-	}
-	if result.Fields[2].ImageHeight != 21 || result.Fields[2].AngleDeg != 0 {
-		t.Errorf("field 2: expected image height 21, got ih=%g angle=%g", result.Fields[2].ImageHeight, result.Fields[2].AngleDeg)
+	// FTYP 3 0 3 3: only FTYP[0] (the global type) is meaningful; the trailing
+	// values are internal flags and every field is a (real) image height.
+	for i, want := range []float64{0, 15, 21} {
+		if result.Fields[i].ImageHeight != want || result.Fields[i].AngleDeg != 0 {
+			t.Errorf("field %d: expected image_height %g, got ih=%g angle=%g",
+				i, want, result.Fields[i].ImageHeight, result.Fields[i].AngleDeg)
+		}
 	}
 }
 
@@ -301,6 +296,208 @@ SURF 1
 	}
 	if result.Fields[1].AngleDeg != 15 || result.Fields[2].AngleDeg != 21 {
 		t.Errorf("angle fields: expected 15/21, got %g/%g", result.Fields[1].AngleDeg, result.Fields[2].AngleDeg)
+	}
+}
+
+func TestZemax_ModernFieldFormat(t *testing.T) {
+	// Modern ZEMAX (2016+) field/wavelength rows: XFLD/YFLD/FWGT/WAVL/WWGT.
+	input := `UNIT MM
+FTYP 2 0
+XFLD 0 0 0
+YFLD 0 20 40
+FWGT 1 0.8 0.5
+WAVL 5.500000e-01
+WWGT 1.000000e+00
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+  GLAS BK7
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Fields) != 3 {
+		t.Fatalf("expected 3 fields (XFLD/YFLD), got %d", len(result.Fields))
+	}
+	// FTYP 2 = paraxial image height for every field.
+	for i, want := range []float64{0, 20, 40} {
+		f := result.Fields[i]
+		if f.ImageHeight != want {
+			t.Errorf("field %d image_height: expected %g, got %g", i, want, f.ImageHeight)
+		}
+	}
+	wantW := []float64{1, 0.8, 0.5}
+	for i, w := range wantW {
+		if result.Fields[i].Weight != w {
+			t.Errorf("field %d weight: expected %g, got %g", i, w, result.Fields[i].Weight)
+		}
+	}
+	if len(result.Wavelengths) != 1 || result.Wavelengths[0].Value != 0.00055 {
+		t.Errorf("WAVL: expected single 0.00055 mm wavelength, got %v", result.Wavelengths)
+	}
+}
+
+func TestZemax_ObjectHeightFiniteConjugate(t *testing.T) {
+	// FTYP 1 (object height) with a finite object distance (surface 0).
+	input := `FTYP 1 0 3 3 0 0 0
+YFLN 0 9.75 13.92 0 0 0 0 0 0 0 0 0
+SURF 0
+  TYPE STANDARD
+  CURV 0
+  DISZ 133.06
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(result.Fields))
+	}
+	for i, want := range []float64{0, 9.75, 13.92} {
+		f := result.Fields[i]
+		if f.Height != want {
+			t.Errorf("field %d height: expected %g, got %g", i, want, f.Height)
+		}
+		if math.Abs(f.ObjectZ+133.06) > 1e-9 {
+			t.Errorf("field %d object_z: expected -133.06, got %g", i, f.ObjectZ)
+		}
+	}
+}
+
+func TestZemax_SkewFieldDirection(t *testing.T) {
+	// Non-zero XFLD creates a skew field with a direction.
+	input := `FTYP 0 0 0 0 0 0 0
+XFLD 0 10 0
+YFLD 0 0 20
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(result.Fields))
+	}
+	f := result.Fields[1]
+	if math.Abs(f.AngleDeg-math.Hypot(10, 0)) > 1e-9 {
+		t.Errorf("field 1 angle: expected %g, got %g", math.Hypot(10, 0), f.AngleDeg)
+	}
+	if len(f.Direction) != 2 || f.Direction[0] != 10 || f.Direction[1] != 0 {
+		t.Errorf("field 1 direction: expected [10 0], got %v", f.Direction)
+	}
+	// The on-axis field keeps no direction.
+	if len(result.Fields[0].Direction) != 0 {
+		t.Errorf("field 0 direction: expected none, got %v", result.Fields[0].Direction)
+	}
+}
+
+func TestZemax_VignettingFactors(t *testing.T) {
+	input := `FTYP 0 0 0 0 0 0 0
+YFLN 0 5 10 0 0 0 0 0 0 0 0 0
+VDXN 0 0.1 0 0 0 0 0 0 0 0 0 0
+VDYN 0 0 0.2 0 0 0 0 0 0 0 0 0
+VCXN 0 0 0 0 0 0 0 0 0 0 0 0
+VCYN 0 0.15 0 0 0 0 0 0 0 0 0 0
+VANN 0 0 0 0 0 0 0 0 0 0 0 0
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(result.Fields))
+	}
+	if result.Fields[0].Vignetting != nil {
+		t.Errorf("field 0 vignetting: expected none, got %+v", result.Fields[0].Vignetting)
+	}
+	v1 := result.Fields[1].Vignetting
+	if v1 == nil {
+		t.Fatal("field 1 vignetting: expected factors")
+	}
+	if v1.DecenterX != 0.1 || v1.CompressionY != 0.15 {
+		t.Errorf("field 1 vignetting: expected decenter_x=0.1 compression_y=0.15, got %+v", v1)
+	}
+	v2 := result.Fields[2].Vignetting
+	if v2 == nil || v2.DecenterY != 0.2 {
+		t.Errorf("field 2 vignetting: expected decenter_y=0.2, got %+v", v2)
+	}
+}
+
+func TestZemax_WAVMPlaceholderTruncation(t *testing.T) {
+	input := `WAVM 1 0.4861327 1
+WAVM 2 0.5875618 1
+WAVM 3 0.6562725 1
+WAVM 4 0.550 1
+WAVM 5 0.550 1
+WAVM 6 0.550 1
+WAVM 7 0.550 1
+WAVM 8 0.550 1
+WAVM 9 0.550 1
+WAVM 10 0.550 1
+WAVM 11 0.550 1
+WAVM 12 0.550 1
+WAVM 13 0.550 1
+WAVM 14 0.550 1
+WAVM 15 0.550 1
+WAVM 16 0.550 1
+WAVM 17 0.550 1
+WAVM 18 0.550 1
+WAVM 19 0.550 1
+WAVM 20 0.550 1
+WAVM 21 0.550 1
+WAVM 22 0.550 1
+WAVM 23 0.550 1
+WAVM 24 0.550 1
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []float64{0.0004861327, 0.0005875618, 0.0006562725}
+	if len(result.Wavelengths) != len(want) {
+		t.Fatalf("expected %d wavelengths (fill truncated), got %d", len(want), len(result.Wavelengths))
+	}
+	for i, w := range want {
+		if math.Abs(result.Wavelengths[i].Value-w) > 1e-12 {
+			t.Errorf("wavelength %d: expected %g, got %g", i, w, result.Wavelengths[i].Value)
+		}
+	}
+}
+
+func TestZemax_FNUMAndENPD(t *testing.T) {
+	input := `FNUM 1.85 0
+ENPD 46.5 1 0
+SURF 1
+  TYPE STANDARD
+  CURV 0.02
+  THIC 5.0
+`
+	result, err := ParseZemax(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.FNO != 1.85 {
+		t.Errorf("FNO: expected 1.85, got %g", result.FNO)
+	}
+	if result.EntrancePupilDiameter != 46.5 {
+		t.Errorf("entrance pupil diameter: expected 46.5, got %g", result.EntrancePupilDiameter)
 	}
 }
 

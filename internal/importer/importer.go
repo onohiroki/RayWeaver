@@ -29,14 +29,10 @@ type ParseResult struct {
 	// FieldType is the ZEMAX system field type (FTYP code) controlling how the
 	// YFLN/XFLN values are interpreted: 0 = angle (deg), 1 = object height,
 	// 2 = paraxial image height, 3 = real image height. Defaults to 0 (angle)
-	// when no FTYP line is present.
+	// when no FTYP line is present. Only FTYP[0] (the global type) is used: the
+	// trailing FTYP values are internal compatibility flags, not per-field
+	// codes, and are ignored.
 	FieldType int
-
-	// FieldTypes holds the per-field ZEMAX FTYP codes (FTYP[0] is the global
-	// type above; FieldTypes[i] is the type of ZEMAX field i+1, 1-indexed). It
-	// is only populated when the FTYP line lists per-field codes; newField uses
-	// the matching entry when available and falls back to FieldType otherwise.
-	FieldTypes []int
 
 	// Multi-config support (ZEMAX): surfaces hold the base (config-0)
 	// geometry; the per-config thickness/diameter overrides by config index

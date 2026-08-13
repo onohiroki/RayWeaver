@@ -109,6 +109,24 @@ func runImport(data []byte) {
 				}
 			}
 		}
+	} else if result.EntrancePupilDiameter > 0 {
+		// Explicit entrance-pupil diameter (ZEMAX ENPD/ENVD, CODE V EPD):
+		// applied to the stop surface when the file carries no diameters.
+		hasDiam := false
+		for _, s := range surfaces {
+			if s.Diameter > 0 {
+				hasDiam = true
+				break
+			}
+		}
+		if !hasDiam {
+			for i := range surfaces {
+				if surfaces[i].ID == stopSurface {
+					surfaces[i].Diameter = result.EntrancePupilDiameter
+					break
+				}
+			}
+		}
 	}
 
 	configIdx := importer.ConfigIndexes(result)
@@ -197,6 +215,10 @@ func runImport(data []byte) {
 		chiefFields[i] = types.FieldDef{
 			Angle:       f.AngleDeg,
 			ImageHeight: f.ImageHeight,
+			Height:      f.Height,
+			ObjectZ:     f.ObjectZ,
+			Direction:   f.Direction,
+			Vignetting:  f.Vignetting,
 		}
 	}
 

@@ -224,10 +224,10 @@ func traceFields(
 			thetaRad := raymath.DegToRad(angle)
 			if passThrough != nil && passThrough.Surface > 0 {
 				result = computeChiefRayAngleGridWithPassThrough(system, engine, path, thetaRad, dx, dy,
-					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough, pupilZ)
+					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough, pupilZ, fd.Vignetting)
 			} else {
 				result = computeChiefRayAngleGrid(system, engine, path, thetaRad, dx, dy,
-					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ)
+					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting)
 			}
 			result.FieldAngle = angle
 
@@ -238,10 +238,10 @@ func traceFields(
 			}
 			if passThrough != nil && passThrough.Surface > 0 {
 				result = computeChiefRayHeightGridWithPassThrough(system, engine, path, fd.Height, dx, dy,
-					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough)
+					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough, fd.Vignetting)
 			} else {
 				result = computeChiefRayHeightGrid(system, engine, path, fd.Height, dx, dy,
-					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType)
+					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, fd.Vignetting)
 			}
 			result.FieldHeight = fd.Height
 
@@ -249,10 +249,10 @@ func traceFields(
 			thetaRad := raymath.DegToRad(fd.Angle)
 			if passThrough != nil && passThrough.Surface > 0 {
 				result = computeChiefRayAngleGridWithPassThrough(system, engine, path, thetaRad, dx, dy,
-					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough, pupilZ)
+					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough, pupilZ, fd.Vignetting)
 			} else {
 				result = computeChiefRayAngleGrid(system, engine, path, thetaRad, dx, dy,
-					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ)
+					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting)
 			}
 			result.FieldAngle = fd.Angle
 		}
@@ -486,7 +486,7 @@ func computeChiefRayAngle(
 	dumpMap bool,
 	pupilZ float64,
 ) Result {
-	return computeChiefRayAngleGrid(system, engine, dls.BuildPath(system.Surfaces), thetaRad, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar, pupilZ)
+	return computeChiefRayAngleGrid(system, engine, dls.BuildPath(system.Surfaces), thetaRad, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar, pupilZ, nil)
 }
 
 func computeChiefRayAngleGrid(
@@ -502,6 +502,7 @@ func computeChiefRayAngleGrid(
 	dumpMap bool,
 	gridType types.GridType,
 	pupilZ float64,
+	vig *types.VignettingDef,
 ) Result {
 	zStart := -100.0
 
@@ -522,7 +523,7 @@ func computeChiefRayAngleGrid(
 
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, dumpMap, gridType)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
 
 	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, refSurfaceID, cy,
 		path, wavelength, pol, engine, system.Surfaces, pupilZ, false,
@@ -917,6 +918,7 @@ func computeChiefRayAngleGridWithPassThrough(
 	gridType types.GridType,
 	pt *types.PassThroughTarget,
 	pupilZ float64,
+	vig *types.VignettingDef,
 ) Result {
 	zStart := -100.0
 
@@ -965,7 +967,7 @@ func computeChiefRayAngleGridWithPassThrough(
 
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, dumpMap, gridType)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
 
 	return buildResult(engine, system, path, origin, rayDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
@@ -986,6 +988,7 @@ func computeChiefRayHeightGridWithPassThrough(
 	dumpMap bool,
 	gridType types.GridType,
 	pt *types.PassThroughTarget,
+	vig *types.VignettingDef,
 ) Result {
 	objectPoint := types.Vec3{X: height * dx, Y: height * dy, Z: objectZ}
 	zStart := objectZ + (0.0-objectZ)*0.5
@@ -1020,7 +1023,7 @@ func computeChiefRayHeightGridWithPassThrough(
 
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		0, 0, zStart, refinedDir, objectPoint,
-		refSurfaceID, pol, wavelength, dumpMap, gridType)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
 
 	return buildResult(engine, system, path, objectPoint, refinedDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
@@ -1039,7 +1042,7 @@ func computeChiefRayHeight(
 	wavelength float64,
 	dumpMap bool,
 ) Result {
-	return computeChiefRayHeightGrid(system, engine, dls.BuildPath(system.Surfaces), height, dx, dy, objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar)
+	return computeChiefRayHeightGrid(system, engine, dls.BuildPath(system.Surfaces), height, dx, dy, objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar, nil)
 }
 
 func computeChiefRayHeightGrid(
@@ -1054,6 +1057,7 @@ func computeChiefRayHeightGrid(
 	wavelength float64,
 	dumpMap bool,
 	gridType types.GridType,
+	vig *types.VignettingDef,
 ) Result {
 	objectPoint := types.Vec3{X: height * dx, Y: height * dy, Z: objectZ}
 
@@ -1070,7 +1074,7 @@ func computeChiefRayHeightGrid(
 	// Sample grid and get centroid.
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		0, 0, zStart, baseDir, objectPoint,
-		refSurfaceID, pol, wavelength, dumpMap, gridType)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
 
 	// Refine the direction so the chief ray passes through the centroid at reference surface.
 	refinedDir := searchDirectionForTarget(objectPoint, refSurfaceID, cy, baseDir,
@@ -1433,7 +1437,11 @@ func GenerateGridPoints(numRays int, apertureRadius float64, gridType types.Grid
 }
 
 // tracePupilGrid distributes numRays samples in the given grid pattern
-// centred on (pupilCenterX, pupilCenterY) at plane zStart.
+// centred on (pupilCenterX, pupilCenterY) at plane zStart. A non-nil vig clips
+// the grid to the field's vignetted entrance-pupil ellipse: samples whose
+// pupil offset falls outside the ellipse are dropped, so the grid (and with it
+// the chief-ray centroid, spot stats and any downstream Huygens/wavefront
+// sampling) reflects the vignetted pupil.
 func tracePupilGrid(
 	system types.System,
 	engine *ray.Engine,
@@ -1447,6 +1455,7 @@ func tracePupilGrid(
 	wavelength float64,
 	dumpMap bool,
 	gridType types.GridType,
+	vig *types.VignettingDef,
 ) (cx, cy float64, grid []types.GridPoint) {
 	var totalWeight float64
 	var weightedX, weightedY float64
@@ -1466,6 +1475,12 @@ func tracePupilGrid(
 
 	samples := GenerateGridPoints(numRays, apertureRadius, gridType)
 	for i := range samples {
+		// Clip to the vignetted entrance-pupil ellipse: the transverse sample
+		// offset relative to the grid centre is preserved along the ray line to
+		// the entrance-pupil plane, so the mask applies to the offset directly.
+		if !vig.Contains(samples[i].X, samples[i].Y, apertureRadius) {
+			continue
+		}
 		px := pupilCenterX + samples[i].X
 		py := pupilCenterY + samples[i].Y
 
@@ -1903,7 +1918,7 @@ func imageHeightForAngle(
 
 	cx, cy, grid := tracePupilGrid(system, engine, dls.BuildPath(system.Surfaces), numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, false, gridType)
+		refSurfaceID, pol, wavelength, false, gridType, nil)
 
 	height := cx*dx + cy*dy
 	for _, gp := range grid {

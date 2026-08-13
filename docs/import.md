@@ -33,6 +33,34 @@ Conic constants (`CCY`, `CONIC`) map to the `conic` field. Even asphere
 polynomial coefficients (`AD`/`AE`/`AF`, `A4`/`A6`/`A8`/`A10`/`A12`) map to the
 `coefficients` array of `asphere_polynomial`.
 
+## ZEMAX fields and vignetting
+
+ZEMAX field data is read from both the legacy slot rows (`XFLN`/`YFLN`,
+`FWGN` weights) and the modern 2016+ rows (`XFLD`/`YFLD`, `FWGT` weights). The
+values are interpreted by the system field type `FTYP[0]`:
+
+| FTYP | ZEMAX meaning | RayWeaver field |
+| --: | --- | --- |
+| `0` | Angle (deg) | `angle_deg` (+ `direction` when `XFLD` ≠ 0) |
+| `1` | Object height | `height` + `object_z` (object distance = surface-0 thickness) |
+| `2` | Paraxial image height | `image_height` (chief ray resolved to that height) |
+| `3` | Real image height | `image_height` |
+
+Only the first `FTYP` value is used: the trailing values are internal
+compatibility flags, not per-field field types. Field weights (`FWGN`/`FWGT`)
+map to `fields[].weight`.
+
+ZEMAX vignetting factors (`VDXN`/`VDYN`/`VCXN`/`VCYN`/`VANN`) are imported per
+field as `fields[].vignetting` (`decenter_x`, `decenter_y`, `compression_x`,
+`compression_y`, `tangent`) — an entrance-pupil ellipse clip in the ZEMAX
+fraction-of-pupil convention. The `chief` (and `wavefront`) commands apply it as
+a per-field entrance-pupil grid mask, so spot diagrams, PSF and wavefront
+sampling honor the vignetted pupil. The legacy 24-slot `WAVM` wavelength table
+is truncated at its trailing fill run (the unused-slot placeholder value is not
+imported as real wavelengths); modern files use `WAVL`/`WWGT` directly. ZEMAX
+`FNUM` and `ENPD`/`ENVD` set the F-number / entrance-pupil diameter used for
+stop-aperture sizing when the file carries no per-surface diameters.
+
 ## Output
 
 Writes a YAML document with a `configs[0]` section (id/name from the flags)

@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -18,6 +19,7 @@ func ParseZemax(input string) (*ParseResult, error) {
 		StopSurface:  0,
 		GlassEntries: nil,
 	}
+	hdr := &zemaxHeader{result: result}
 
 	var currentSurface *zemaxSurface
 	var surfParams []zemaxSurface
@@ -63,18 +65,30 @@ func ParseZemax(input string) (*ParseResult, error) {
 			// read, so route them to header parsing rather than corrupting the
 			// current surface.
 			if (keyword == "THIC" || keyword == "SDIA") && isConfigOverrideLine(args) {
-				parseZemaxHeader(result, keyword, args)
+				parseZemaxHeader(hdr, keyword, args)
 				continue
 			}
 			parseZemaxSurfaceParam(currentSurface, keyword, args)
 		} else {
-			parseZemaxHeader(result, keyword, args)
+			parseZemaxHeader(hdr, keyword, args)
 		}
 	}
 
 	if currentSurface != nil {
 		surfParams = append(surfParams, *currentSurface)
 	}
+
+	// Object distance (surface 0 thickness) for finite-conjugate (FTYP 1,
+	// object-height) fields. The object plane sits at z = -T before surface 1.
+	var objectZ float64
+	for _, sp := range surfParams {
+		if sp.ID == 0 {
+			objectZ = -sp.Thickness
+			break
+		}
+	}
+	buildZemaxFields(result, hdr, objectZ)
+	buildZemaxWavelengths(result, hdr)
 
 	seenIDs := make(map[int]bool)
 	var pendingDecenter types.DecenterStep
@@ -253,7 +267,38 @@ func parseZemaxSurfaceParam(s *zemaxSurface, keyword string, args []string) {
 	}
 }
 
-func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
+// zemaxHeader accumulates the header-level system data whose meaning depends on
+// other keywords (FTYP for the field values, the wavefront count for WAVM).
+// Field values, weights and vignetting factors are collected slot-aligned and
+// resolved into FieldItems once parsing completes.
+type zemaxHeader struct {
+	result *ParseResult
+
+	// Slot-aligned field data from XFLD/XFLN (x) and YFLD/YFLN (y), FWGT/FWGN
+	// (weights) and VDXN/VDYN/VCXN/VCYN/VANN (vignetting factors).
+	fieldX []float64
+	fieldY []float64
+	weight []float64
+	vig    []zemaxVignette
+
+	// WAVM rows: [value µm, weight]. The ZMX format pads unused wavelength
+	// slots to 24 with a constant fill value; the trailing fill run is removed
+	// once parsing completes.
+	wavmRows [][2]float64
+}
+
+// zemaxVignette holds one field's five ZEMAX vignetting factors (VDXN/VDYN/
+// VCXN/VCYN/VANN), interpreted against the entrance-pupil radius.
+type zemaxVignette struct {
+	vdx, vdy, vcx, vcy, van float64
+}
+
+func (v zemaxVignette) IsZero() bool {
+	return v.vdx == 0 && v.vdy == 0 && v.vcx == 0 && v.vcy == 0 && v.van == 0
+}
+
+func parseZemaxHeader(hdr *zemaxHeader, keyword string, args []string) {
+	result := hdr.result
 	switch keyword {
 	case "STOP":
 		if len(args) > 0 {
@@ -272,28 +317,36 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 			}
 			result.Wavelengths = append(result.Wavelengths, wl)
 		}
-	case "YFLN":
-		// YFLN <f0> <f1> ... — field values for the y direction. The meaning of
-		// the values is given by the system field type (FTYP): 0 = half-angle in
-		// degrees, otherwise an object/image height in mm. The first column
-		// (f0) is the on-axis field (normally 0) and is always kept; subsequent
-		// entries that are zero are unused padding and are skipped.
-		for i, a := range args {
-			v := parseFloat(a)
-			if i == 0 || v > 0 {
-				result.Fields = append(result.Fields, newField(result, v))
-			}
+	case "YFLD", "YFLN":
+		// YFLD/YFLN <f0> <f1> ... — y field values, slot-aligned with XFLD/XFLN
+		// and the FWGT/FWGN weights and vignetting rows. The meaning of the
+		// values is given by the system field type (FTYP[0]).
+		for _, a := range args {
+			hdr.fieldY = append(hdr.fieldY, parseFloat(a))
 		}
-	case "XFLN":
-		// XFLN <x0> <x1> ... — x field values; nearly always zero.
-		// Non-zero entries create skew fields (non-default direction);
-		// the on-axis is already covered by YFLN.
-		for _, a := range args[1:] {
-			v := parseFloat(a)
-			if v > 0 {
-				result.Fields = append(result.Fields, newField(result, v))
-			}
+	case "XFLD", "XFLN":
+		// XFLD/XFLN <x0> <x1> ... — x field values; nearly always zero. Non-zero
+		// entries create skew fields (non-default direction).
+		for _, a := range args {
+			hdr.fieldX = append(hdr.fieldX, parseFloat(a))
 		}
+	case "FWGT", "FWGN":
+		// Field weights, slot-aligned with the field values.
+		for _, a := range args {
+			hdr.weight = append(hdr.weight, parseFloat(a))
+		}
+	case "VDXN":
+		for _, a := range args {
+			hdr.vig = append(hdr.vig, zemaxVignette{vdx: parseFloat(a)})
+		}
+	case "VDYN":
+		appendVignetteField(&hdr.vig, len(args), func(v *zemaxVignette, f float64) { v.vdy = f }, args)
+	case "VCXN":
+		appendVignetteField(&hdr.vig, len(args), func(v *zemaxVignette, f float64) { v.vcx = f }, args)
+	case "VCYN":
+		appendVignetteField(&hdr.vig, len(args), func(v *zemaxVignette, f float64) { v.vcy = f }, args)
+	case "VANN":
+		appendVignetteField(&hdr.vig, len(args), func(v *zemaxVignette, f float64) { v.van = f }, args)
 	case "THIC", "SDIA":
 		// Config-override rows: <surf> <config> <value> <flags...>. They appear
 		// after the surface blocks and carry a leading surface ID plus a config
@@ -350,17 +403,15 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 			result.Fields = append(result.Fields, f)
 		}
 	case "WAVM":
+		// WAVM <index> <value µm> <weight>. Collected and truncated in
+		// buildZemaxWavelengths: the ZMX format pads unused slots to 24 with a
+		// constant fill value that must not be imported as real wavelengths.
 		if len(args) >= 2 {
-			wl := types.WavelengthItem{
-				ID:    len(result.Wavelengths),
-				Value: parseFloat(args[1]) / 1000.0,
-			}
+			w := 1.0
 			if len(args) >= 3 {
-				wl.Weight = parseFloat(args[2])
-			} else {
-				wl.Weight = 1.0
+				w = parseFloat(args[2])
 			}
-			result.Wavelengths = append(result.Wavelengths, wl)
+			hdr.wavmRows = append(hdr.wavmRows, [2]float64{parseFloat(args[1]), w})
 		}
 	case "WWGT":
 		for i := range result.Wavelengths {
@@ -370,50 +421,160 @@ func parseZemaxHeader(result *ParseResult, keyword string, args []string) {
 		}
 	case "PWAV":
 	case "FTYP":
-		// FTYP <global-type> <f1> <f2> ... — system field type. FTYP[0] is the
-		// global (per-volume) type; the remaining entries give per-field codes
-		// for ZEMAX field 1, 2, ... (1-indexed; field 0 is the on-axis field).
+		// FTYP <global-type> <flags...> — system field type. Only the first
+		// value is used: 0 = angle (deg), 1 = object height, 2 = paraxial image
+		// height, 3 = real image height. The trailing values are internal
+		// compatibility flags, not per-field codes, and are ignored.
 		if len(args) > 0 {
 			result.FieldType = int(parseFloat(args[0]))
-			if len(args) > 1 {
-				result.FieldTypes = make([]int, 0, len(args)-1)
-				for _, a := range args[1:] {
-					result.FieldTypes = append(result.FieldTypes, int(parseFloat(a)))
-				}
-			}
 		}
 	case "UNIT":
 	case "VERS":
 	case "MODE":
 	case "NAME":
 	case "NOTE":
-	case "ENPD":
+	case "FNUM":
+		// FNUM <f-number> <flag...> — system F-number for aperture sizing when
+		// the file carries no per-surface diameters.
+		if len(args) > 0 {
+			result.FNO = parseFloat(args[0])
+		}
+	case "ENPD", "ENVD":
+		// Entrance-pupil diameter (ENPD) / envelope diameter (ENVD) header,
+		// applied to the stop surface when the file carries no diameters.
+		if len(args) > 0 {
+			result.EntrancePupilDiameter = parseFloat(args[0])
+		}
 	case "APER":
 	}
 }
 
-// newField builds a FieldItem from a YFLN/XFLN value. The meaning of the value
-// is given by the per-field FTYP code: type 0 is a half-angle in degrees,
-// types 1..3 are object/image heights. The per-field code for ZEMAX field i+1
-// (1-indexed) is FieldTypes[i]; when absent the global FieldType applies.
-func newField(result *ParseResult, v float64) types.FieldItem {
-	f := types.FieldItem{
-		ID:     len(result.Fields),
-		Weight: 1.0,
+// appendVignetteField assigns one slot-aligned vignetting-factor row to the
+// parallel vignette slice, extending it with zero rows as needed.
+func appendVignetteField(vig *[]zemaxVignette, n int, set func(*zemaxVignette, float64), args []string) {
+	for len(*vig) < n {
+		*vig = append(*vig, zemaxVignette{})
 	}
-	ft := result.FieldType
-	// Fields[0] is the on-axis field -- use the global type; subsequent fields
-	// (ZEMAX field 1, 2, ...) look up the per-field code from FieldTypes.
-	if k := len(result.Fields); k > 0 && k-1 < len(result.FieldTypes) {
-		ft = result.FieldTypes[k-1]
+	for i := 0; i < n && i < len(args); i++ {
+		set(&(*vig)[i], parseFloat(args[i]))
 	}
-	switch ft {
-	case 1, 2, 3:
-		f.ImageHeight = v
-	default:
-		f.AngleDeg = v
+}
+
+// buildZemaxFields converts the slot-aligned X/Y field values, weights and
+// vignetting factors into FieldItems. The meaning of the values is given by
+// the global field type (FTYP[0]): 0 = half-angle in degrees, 1 = object
+// height (finite conjugate, object distance objectZ), 2/3 = paraxial/real
+// image height. Trailing all-zero padding slots are dropped; slot 0 (the
+// on-axis field) is always kept. Non-zero X values create a skew field via
+// Direction (the unnormalized X/Y azimuth).
+func buildZemaxFields(result *ParseResult, hdr *zemaxHeader, objectZ float64) {
+	x, y, weight, vig := hdr.fieldX, hdr.fieldY, hdr.weight, hdr.vig
+	n := len(y)
+	if len(x) > n {
+		n = len(x)
 	}
-	return f
+	if n == 0 {
+		return
+	}
+	at := func(s []float64, i int) float64 {
+		if i < len(s) {
+			return s[i]
+		}
+		return 0
+	}
+	for n > 1 {
+		w := at(weight, n-1)
+		if w == 0 {
+			w = 1
+		}
+		v := zemaxVignette{}
+		if n-1 < len(vig) {
+			v = vig[n-1]
+		}
+		if at(x, n-1) == 0 && at(y, n-1) == 0 && w == 1 && v.IsZero() {
+			n--
+			continue
+		}
+		break
+	}
+
+	for i := 0; i < n; i++ {
+		vx, vy := at(x, i), at(y, i)
+		mag := math.Hypot(vx, vy)
+		var dir []float64
+		if vx != 0 {
+			dir = []float64{vx, vy}
+		}
+		var vigd *types.VignettingDef
+		if i < len(vig) && !vig[i].IsZero() {
+			vigd = &types.VignettingDef{
+				DecenterX:    vig[i].vdx,
+				DecenterY:    vig[i].vdy,
+				CompressionX: vig[i].vcx,
+				CompressionY: vig[i].vcy,
+				Tangent:      vig[i].van,
+			}
+		}
+		f := types.FieldItem{
+			ID:         len(result.Fields),
+			Weight:     at(weight, i),
+			Direction:  dir,
+			Vignetting: vigd,
+		}
+		if f.Weight == 0 {
+			f.Weight = 1.0
+		}
+		switch result.FieldType {
+		case 1:
+			// Object height: finite-conjugate field at z = objectZ.
+			f.Height = mag
+			f.ObjectZ = objectZ
+		case 2, 3:
+			// Paraxial (2) / real (3) image height. RayWeaver resolves the
+			// chief-ray angle that lands at this image height; the paraxial
+			// vs real distinction is not modelled separately.
+			f.ImageHeight = mag
+		default: // 0 = angle, degrees
+			f.AngleDeg = mag
+		}
+		result.Fields = append(result.Fields, f)
+	}
+}
+
+// buildZemaxWavelengths appends the effective WAVM rows (trailing fill run
+// removed) to the already-parsed WAVL/WWGT wavelengths.
+func buildZemaxWavelengths(result *ParseResult, hdr *zemaxHeader) {
+	n := effectiveWAVMCount(hdr.wavmRows)
+	for i := 0; i < n; i++ {
+		row := hdr.wavmRows[i]
+		result.Wavelengths = append(result.Wavelengths, types.WavelengthItem{
+			ID:     len(result.Wavelengths),
+			Value:  row[0] / 1000.0,
+			Weight: row[1],
+		})
+	}
+}
+
+// effectiveWAVMCount trims the ZMX wavelength-table padding. Old ZMX files
+// always write 24 WAVM rows, filling unused slots with a constant placeholder
+// value; the effective set is the leading rows before the trailing constant
+// run. A single all-placeholder table collapses to one wavelength.
+func effectiveWAVMCount(rows [][2]float64) int {
+	if len(rows) <= 1 {
+		return len(rows)
+	}
+	last := rows[len(rows)-1][0]
+	run := 1
+	for i := len(rows) - 2; i >= 0 && rows[i][0] == last; i-- {
+		run++
+	}
+	if run == len(rows) {
+		return 1
+	}
+	if run >= 2 {
+		return len(rows) - run
+	}
+	return len(rows)
 }
 
 func splitLine(line string) []string {

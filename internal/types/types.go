@@ -371,6 +371,9 @@ type FieldDef struct {
 	ObjectZ     float64   `yaml:"object_z,omitempty"`
 	Direction   []float64 `yaml:"direction,omitempty"`
 	Path        []int     `yaml:"path,omitempty"`
+	// Vignetting clips the field's entrance-pupil grid to the ZEMAX-style
+	// vignetted pupil ellipse (see VignettingDef). Nil = no clipping.
+	Vignetting *VignettingDef `yaml:"vignetting,omitempty"`
 }
 
 type ChiefInput struct {
@@ -400,10 +403,61 @@ type RayInput struct {
 }
 
 type FieldItem struct {
-	ID          int     `yaml:"id"`
-	AngleDeg    float64 `yaml:"angle_deg"`
-	ImageHeight float64 `yaml:"image_height,omitempty"`
-	Weight      float64 `yaml:"weight"`
+	ID          int       `yaml:"id"`
+	AngleDeg    float64   `yaml:"angle_deg"`
+	ImageHeight float64   `yaml:"image_height,omitempty"`
+	Height      float64   `yaml:"height,omitempty"`
+	ObjectZ     float64   `yaml:"object_z,omitempty"`
+	Direction   []float64 `yaml:"direction,omitempty"`
+	Weight      float64   `yaml:"weight"`
+	// Vignetting clips the field's entrance-pupil grid to the ZEMAX-style
+	// vignetted pupil ellipse (see VignettingDef). Nil = no clipping.
+	Vignetting *VignettingDef `yaml:"vignetting,omitempty"`
+}
+
+// VignettingDef is a per-field entrance-pupil ellipse clip in the ZEMAX
+// vignetting-factor convention (VDX/VDY/VCX/VCY/VANN). Relative to the nominal
+// entrance pupil of radius R centred on the pupil centre, the vignetted pupil
+// is an ellipse centred at (DecenterX·R, DecenterY·R) with semi-axes
+// (1−CompressionX)·R and (1−CompressionY)·R, rotated by atan(Tangent).
+// All-zero factors describe no vignetting.
+type VignettingDef struct {
+	DecenterX    float64 `yaml:"decenter_x"`
+	DecenterY    float64 `yaml:"decenter_y"`
+	CompressionX float64 `yaml:"compression_x"`
+	CompressionY float64 `yaml:"compression_y"`
+	Tangent      float64 `yaml:"tangent,omitempty"`
+}
+
+// IsZero reports whether no vignetting clip is active.
+func (v *VignettingDef) IsZero() bool {
+	return v == nil || (v.DecenterX == 0 && v.DecenterY == 0 &&
+		v.CompressionX == 0 && v.CompressionY == 0 && v.Tangent == 0)
+}
+
+// Contains reports whether the point (x, y) at the entrance-pupil plane (both
+// relative to the nominal pupil centre) survives the vignetted-pupil clip for
+// the nominal entrance-pupil radius R. An absent/zero vignetting passes every
+// point inside the unit circle.
+func (v *VignettingDef) Contains(x, y, radius float64) bool {
+	if v == nil {
+		return true
+	}
+	theta := math.Atan(v.Tangent)
+	ct := math.Cos(theta)
+	st := math.Sin(theta)
+	dx := x - v.DecenterX*radius
+	dy := y - v.DecenterY*radius
+	sx := (1 - v.CompressionX) * radius
+	sy := (1 - v.CompressionY) * radius
+	if sx <= 0 || sy <= 0 {
+		return false
+	}
+	// Rotate into the ellipse frame: u along the major axis (at angle -theta).
+	u := dx*ct + dy*st
+	vr := -dx*st + dy*ct
+	norm := (u*u)/(sx*sx) + (vr*vr)/(sy*sy)
+	return norm <= 1
 }
 
 type WavelengthItem struct {
@@ -1290,9 +1344,9 @@ type WavefrontSphere struct {
 // WavefrontZernike is a Fringe-Zernike decomposition of the wavefront
 // residual (low-order paraboloid/sphere terms removed).
 type WavefrontZernike struct {
-	Basis        string               `yaml:"basis"`
-	MaxOrder     int                  `yaml:"max_order"`
-	RemovedTerms []int                `yaml:"removed_terms"`
+	Basis        string                 `yaml:"basis"`
+	MaxOrder     int                    `yaml:"max_order"`
+	RemovedTerms []int                  `yaml:"removed_terms"`
 	Terms        []WavefrontZernikeTerm `yaml:"terms"`
 	// RMSResidual is the RMS of the fitted residual, in mm.
 	RMSResidual float64 `yaml:"rms_residual"`
@@ -1361,18 +1415,18 @@ type WavefrontShiftedLens struct {
 }
 
 type Output struct {
-	Input          `yaml:",inline"`
-	ChiefRays      []ChiefRayResult        `yaml:"chief_rays,omitempty"`
-	Results        []RayResult             `yaml:"results,omitempty"`
-	ParaxialResult *ParaxialResult         `yaml:"paraxial_result,omitempty"`
-	OptResults     *OptimizationResult     `yaml:"opt_results,omitempty"`
-	EscapeResult   *EscapeResult           `yaml:"escape_result,omitempty"`
-	Vignetting     *VignettingResult       `yaml:"vignetting_result,omitempty"`
-	AsphereResult  *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
-	PsfResults     []PSFResult             `yaml:"psf_results,omitempty"`
-	WavefrontResults *WavefrontResult      `yaml:"wavefront_result,omitempty"`
-	Provenance     *Provenance             `yaml:"provenance,omitempty"`
-	Stop           *StopInfo               `yaml:"stop,omitempty"`
+	Input            `yaml:",inline"`
+	ChiefRays        []ChiefRayResult        `yaml:"chief_rays,omitempty"`
+	Results          []RayResult             `yaml:"results,omitempty"`
+	ParaxialResult   *ParaxialResult         `yaml:"paraxial_result,omitempty"`
+	OptResults       *OptimizationResult     `yaml:"opt_results,omitempty"`
+	EscapeResult     *EscapeResult           `yaml:"escape_result,omitempty"`
+	Vignetting       *VignettingResult       `yaml:"vignetting_result,omitempty"`
+	AsphereResult    *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
+	PsfResults       []PSFResult             `yaml:"psf_results,omitempty"`
+	WavefrontResults *WavefrontResult        `yaml:"wavefront_result,omitempty"`
+	Provenance       *Provenance             `yaml:"provenance,omitempty"`
+	Stop             *StopInfo               `yaml:"stop,omitempty"`
 }
 
 type TMMInput struct {
