@@ -52,15 +52,11 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	grid := generatePupilGrid(numRays, apertureRadius, rotationOffset)
 
 	pupilOffsetX, pupilOffsetY := 0.0, 0.0
-	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
-	if rayDir.Z > 1e-12 && tanComponent > 1e-12 {
-		tanComponent /= rayDir.Z
-		pupilOffsetX = -(pupilZ - zStart) * tanComponent * dx
-		pupilOffsetY = -(pupilZ - zStart) * tanComponent * dy
-		for i := range grid {
-			grid[i].X += pupilOffsetX
-			grid[i].Y += pupilOffsetY
-		}
+	gcpt := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
+	pupilOffsetX, pupilOffsetY = gcpt.X, gcpt.Y
+	for i := range grid {
+		grid[i].X += pupilOffsetX
+		grid[i].Y += pupilOffsetY
 	}
 
 	points := make([]IPoint, len(grid))

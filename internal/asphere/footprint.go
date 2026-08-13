@@ -147,20 +147,12 @@ func rayDirection(f Field) types.Vec3 {
 
 // gridOffset shifts the pupil grid so the field's chief ray crosses the
 // optical axis at the entrance-pupil plane z=pupilZ, mirroring the chief/optimize
-// grid centring.
+// grid centring. Vector-based (no tanθ), degrading to the wavefront plane
+// through the pupil at grazing incidence.
 func gridOffset(f Field, pupilZ float64, zStart float64) (float64, float64) {
-	rad := raymath.DegToRad(f.Angle)
-	tanComp := math.Tan(rad)
-	dx, dy := 0.0, 1.0
-	if len(f.Direction) >= 2 {
-		norm := math.Hypot(f.Direction[0], f.Direction[1])
-		if norm > 0 {
-			dx = f.Direction[0] / norm
-			dy = f.Direction[1] / norm
-		}
-	}
-	off := -(pupilZ - zStart) * tanComp
-	return off * dx, off * dy
+	dir := rayDirection(f)
+	gcpt := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, dir, zStart)
+	return gcpt.X, gcpt.Y
 }
 
 // polarGrid generates a polar pupil grid: `samples` rings, linearly spaced in

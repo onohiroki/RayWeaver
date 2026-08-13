@@ -97,13 +97,8 @@ func frozenPupilGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
 
 	zStart := -100.0
-	pupilOffsetX, pupilOffsetY := 0.0, 0.0
-	tanComponent := math.Sqrt(rayDir.X*rayDir.X + rayDir.Y*rayDir.Y)
-	if rayDir.Z > 1e-12 && tanComponent > 1e-12 {
-		tanComponent /= rayDir.Z
-		pupilOffsetX = -(pupilZ - zStart) * tanComponent * dx
-		pupilOffsetY = -(pupilZ - zStart) * tanComponent * dy
-	}
+	gcpt := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
+	pupilOffsetX, pupilOffsetY := gcpt.X, gcpt.Y
 
 	samples := chief.GenerateGridPoints(numRays, apertureRadius, types.GridPolar)
 	grid := make([]types.GridPoint, len(samples))

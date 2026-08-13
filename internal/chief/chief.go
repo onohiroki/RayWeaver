@@ -513,9 +513,12 @@ func computeChiefRayAngleGrid(
 		Z: cosT,
 	}.Normalize()
 
-	tanT := sinT / cosT
-	pupilCenterX := -(pupilZ - zStart) * tanT * dx
-	pupilCenterY := -(pupilZ - zStart) * tanT * dy
+	// Grid centre: the point on the launch plane whose ray (direction rayDir)
+	// passes through the entrance-pupil centre (0,0,pupilZ). Vector-based, so it
+	// degrades to the wavefront plane through the pupil at grazing incidence
+	// instead of diverging via tanθ.
+	gc := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
+	pupilCenterX, pupilCenterY := gc.X, gc.Y
 
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
@@ -952,8 +955,13 @@ func computeChiefRayAngleGridWithPassThrough(
 	}
 
 	t := (pupilZ - origin.Z) / rayDir.Z
-	pupilCenterX := origin.X + t*rayDir.X
-	pupilCenterY := origin.Y + t*rayDir.Y
+	pupilCenter := types.Vec3{X: origin.X + t*rayDir.X, Y: origin.Y + t*rayDir.Y, Z: pupilZ}
+
+	// Grid centre on the launch plane: the point whose ray (direction rayDir)
+	// passes through the entrance-pupil centre pupilCenter. For this path the
+	// chief-ray origin at zStart already has that property.
+	gc := raymath.WavefrontGridCenter(pupilCenter, rayDir, zStart)
+	pupilCenterX, pupilCenterY := gc.X, gc.Y
 
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
@@ -1091,8 +1099,15 @@ func searchOriginForTarget(
 		return 0
 	}
 
-	tanComp := dirComp / math.Sqrt(1-dirComp*dirComp)
-	geoEst := -(pupilZ - zStart) * tanComp
+	// Geometric estimate of the origin component on the zStart plane whose ray
+	// passes through the entrance-pupil centre (0,0,pupilZ): vector-based
+	// (no tanθ), degrading to the wavefront plane through the pupil at grazing
+	// incidence instead of diverging.
+	gc := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
+	geoEst := gc.X
+	if !isX {
+		geoEst = gc.Y
+	}
 
 	makeRay := func(originComp float64) types.Ray {
 		orig := types.Vec3{X: 0, Y: 0, Z: zStart}
@@ -1709,8 +1724,8 @@ func computeRayFan(
 	// chief ray crosses the stop. Without this offset, off-axis fields would
 	// start fan rays near the axis and miss the lens aperture entirely.
 	rayDirN := rayDir.Normalize()
-	pupilCenterX := -(pupilZ - zStart) * rayDirN.X / rayDirN.Z
-	pupilCenterY := -(pupilZ - zStart) * rayDirN.Y / rayDirN.Z
+	pupilCenter := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDirN, zStart)
+	pupilCenterX, pupilCenterY := pupilCenter.X, pupilCenter.Y
 
 	// Chief ray image point
 	chiefRay := types.Ray{
@@ -1883,9 +1898,8 @@ func imageHeightForAngle(
 	zStart := -100.0
 	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
 
-	tanT := sinT / cosT
-	pupilCenterX := -(pupilZ - zStart) * tanT * dx
-	pupilCenterY := -(pupilZ - zStart) * tanT * dy
+	gc := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
+	pupilCenterX, pupilCenterY := gc.X, gc.Y
 
 	cx, cy, grid := tracePupilGrid(system, engine, dls.BuildPath(system.Surfaces), numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},

@@ -410,3 +410,38 @@ func TestProjectOntoWavefront90Deg(t *testing.T) {
 		t.Errorf("90° projection should only shift along Y: diff %v", diff)
 	}
 }
+
+func TestWavefrontGridCenter(t *testing.T) {
+	zStart := -100.0
+	// On-axis: dir = +Z, centre = (0,0,zStart).
+	c := types.Vec3{X: 0, Y: 0, Z: 50}
+	dir := types.Vec3{X: 0, Y: 0, Z: 1}
+	got := WavefrontGridCenter(c, dir, zStart)
+	if math.Abs(got.X) > 1e-12 || math.Abs(got.Y) > 1e-12 || math.Abs(got.Z-zStart) > 1e-12 {
+		t.Errorf("on-axis centre = %v, want (0,0,%v)", got, zStart)
+	}
+	// 30° in YZ: centre offset = -(50-(-100))·tan(30°) = -86.6 in Y.
+	rad := math.Pi / 6
+	dir = types.Vec3{X: 0, Y: math.Sin(rad), Z: math.Cos(rad)}
+	got = WavefrontGridCenter(c, dir, zStart)
+	wantY := -(c.Z - zStart) * math.Sin(rad) / math.Cos(rad)
+	if math.Abs(got.Y-wantY) > 1e-9 || math.Abs(got.X) > 1e-12 || math.Abs(got.Z-zStart) > 1e-12 {
+		t.Errorf("30° centre = %v, want (0,%v,%v)", got, wantY, zStart)
+	}
+	// Ray from centre in direction dir crosses c: centre + t·dir == c at
+	// t = (c.Z - zStart)/dir.Z.
+	tc := (c.Z - zStart) / dir.Z
+	rayAt := got.Add(dir.Scale(tc))
+	if rayAt.Subtract(c).Length() > 1e-9 {
+		t.Errorf("centre ray does not cross c: %v vs %v", rayAt, c)
+	}
+	// 90°: dir.Z = 0 → fall back to c.
+	dir90 := types.Vec3{X: 0, Y: 1, Z: 0}
+	if g := WavefrontGridCenter(c, dir90, zStart); g != c {
+		t.Errorf("90° centre = %v, want c %v", g, c)
+	}
+	// 90° stays finite.
+	if g := WavefrontGridCenter(c, dir90, zStart); math.IsNaN(g.X) || math.IsInf(g.Z, 0) {
+		t.Errorf("90° centre non-finite: %v", g)
+	}
+}

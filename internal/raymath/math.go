@@ -44,6 +44,24 @@ func ProjectOntoWavefront(p, c, dir types.Vec3) types.Vec3 {
 	return p.Add(dir.Scale(c.Subtract(p).Dot(dir)))
 }
 
+// WavefrontGridCenter returns the grid centre for a parallel angle-field
+// bundle. The grid must be centred so its rays (direction dir) pass through the
+// entrance-pupil centre c. When the rays are not parallel to the launch plane
+// (the plane z = zStart, perpendicular to the optical axis) the centre is the
+// point on the zStart plane whose ray crosses c — the classic
+// -(pupilZ-zStart)·tanθ offset, expressed with direction vectors only (no tanθ,
+// so it is well-behaved as θ grows). When the ray is nearly parallel to the
+// launch plane (θ → 90°, dir.Z ≈ 0) that crossing is at infinity; the centre
+// then falls back to c itself, placing the grid on the wavefront plane through
+// the entrance pupil, which is the correct grazing-incidence limit.
+func WavefrontGridCenter(c, dir types.Vec3, zStart float64) types.Vec3 {
+	if math.Abs(dir.Z) < 1e-9 {
+		return c
+	}
+	t := (c.Z - zStart) / dir.Z
+	return c.Subtract(dir.Scale(t))
+}
+
 func Refract(d, n types.Vec3, n1, n2 float64) (types.Vec3, bool) {
 	cosTheta1 := -d.Dot(n)
 	eta := n1 / n2
