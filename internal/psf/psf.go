@@ -36,6 +36,15 @@ type Options struct {
 	// the peak-ratio Strehl and rms_opd are wavefront-quality numbers. False =
 	// evaluate at the fixed image plane (field curvature appears naturally).
 	BestFocus bool
+	// ConvergeCheck, when enabled, re-evaluates each (field, wavelength,
+	// polarization) at a higher ray count (1.5× NumRays) to estimate sampling
+	// convergence. The reported grid stays at NumRays; the comparison Strehl
+	// populates Result.Converged / StrehlRelChange. Default (false) keeps the
+	// internal API fast; the psf command turns it on by default.
+	ConvergeCheck bool
+	// ConvergeTol is the relative Strehl change threshold used by ConvergeCheck
+	// (default 0.10 = 10%).
+	ConvergeTol float64
 }
 
 // Result is one computed PSF with its analysis summary.
@@ -72,6 +81,13 @@ type Result struct {
 	// BestFocusShift is the applied image-plane shift (mm) when opts.BestFocus
 	// was set (0 when evaluated at the fixed plane).
 	BestFocusShift float64
+	// Converged is true when the sampling-convergence check was enabled and the
+	// Strehl at NumRays differed from the higher-ray-count re-evaluation by less
+	// than ConvergeTol. StrehlRelChange is the relative change (|s2-s1|/max(s1,eps)).
+	// CheckRays is the higher ray count used for the check (0 when disabled).
+	Converged       bool
+	StrehlRelChange float64
+	CheckRays       int
 	// Contributions lists each wavelength's weighted share of a
 	// polychromatic result (empty for monochromatic results).
 	Contributions []WavelengthContribution
@@ -188,7 +204,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 			for pi := 0; pi < len(pols); pi++ {
 				st := pols[pi]
 				if !st.combined {
-					r := computeOne(engine, system, pg, fd, opts, planeZ, nImage, wl, fieldAngle, fi, st.label, st.jones)
+					r := computeOne(engine, gc, system, pg, fd, opts, planeZ, nImage, wl, fieldAngle, fi, st.label, st.jones)
 					if r != nil {
 						results = append(results, *r)
 					}
@@ -199,7 +215,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 					continue
 				}
 				st2 := pols[pi+1]
-				r := computeCombined(engine, system, pg, fd, opts, planeZ, nImage, wl, fieldAngle, fi, st.jones, st2.jones)
+				r := computeCombined(engine, gc, system, pg, fd, opts, planeZ, nImage, wl, fieldAngle, fi, st.jones, st2.jones)
 				if r != nil {
 					results = append(results, *r)
 				}
@@ -211,7 +227,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 }
 
 // computeOne computes and analyses the PSF for a single coherent state.
-func computeOne(engine *ray.Engine, system types.System, pg *PupilGrid, fd types.FieldDef,
+func computeOne(engine *ray.Engine, gc *glass.Catalog, system types.System, pg *PupilGrid, fd types.FieldDef,
 	opts Options, planeZ, nImage, wl, fieldAngle float64, fi int, label string, pol types.JonesVector) *Result {
 	samples, stats := TraceWavefront(system, engine, pg, fd, opts.ReferenceSurface, wl, pol, opts.Workers)
 	if len(samples) < 3 {
@@ -231,6 +247,7 @@ func computeOne(engine *ray.Engine, system types.System, pg *PupilGrid, fd types
 	r := finishResult(pair.actual, pair.ideal, samples, center, nImage, wl, evaluateZ, fieldAngle, fi, label, stats, samplePower(samples))
 	r.BestFocusShift = evaluateZ - planeZ
 	r.MTF = ComputeMTF(r.Grid.Intensity, r.Grid.Spec, opts.MTFCfg)
+	applyConvergence(r, engine, system, gc, fd, opts, planeZ, nImage, wl, fieldAngle, fi, pol)
 	return r
 }
 
@@ -238,7 +255,7 @@ func computeOne(engine *ray.Engine, system types.System, pg *PupilGrid, fd types
 // averages their intensities incoherently. The two wavefronts are traced
 // concurrently, then their actual/ideal grids are evaluated together through a
 // single shared row-parallel pool.
-func computeCombined(engine *ray.Engine, system types.System, pg *PupilGrid, fd types.FieldDef,
+func computeCombined(engine *ray.Engine, gc *glass.Catalog, system types.System, pg *PupilGrid, fd types.FieldDef,
 	opts Options, planeZ, nImage, wl, fieldAngle float64, fi int, pol1, pol2 types.JonesVector) *Result {
 	type wfRes struct {
 		samples []WavefrontSample
@@ -287,7 +304,91 @@ func computeCombined(engine *ray.Engine, system types.System, pg *PupilGrid, fd 
 		string(types.PolRCPLCP), stats, samplePower(r1.samples)+samplePower(r2.samples))
 	r.BestFocusShift = evaluateZ - planeZ
 	r.MTF = ComputeMTF(r.Grid.Intensity, r.Grid.Spec, opts.MTFCfg)
+	applyConvergenceCombined(r, engine, system, gc, fd, opts, planeZ, nImage, wl, fieldAngle, fi, pol1, pol2)
 	return r
+}
+
+// checkRayCount returns a strictly higher ray count used for the convergence
+// re-evaluation: 1.5× NumRays rounded up, at least NumRays+1.
+func checkRayCount(n int) int {
+	if n <= 0 {
+		n = 1
+	}
+	hi := int(math.Ceil(1.5 * float64(n)))
+	if hi <= n {
+		hi = n + 1
+	}
+	return hi
+}
+
+// applyConvergence fills a result's sampling-convergence fields by re-evaluating
+// the same coherent state at a higher ray count. No-op when opts.ConvergeCheck
+// is false (the reported grid stays at NumRays; the check only labels
+// reliability). threshold defaults to ConvergeTol (10%).
+func applyConvergence(r *Result, engine *ray.Engine, system types.System, gc *glass.Catalog,
+	fd types.FieldDef, opts Options, planeZ, nImage, wl, fieldAngle float64, fi int, pol types.JonesVector) {
+	if !opts.ConvergeCheck {
+		return
+	}
+	checkRays := checkRayCount(opts.NumRays)
+	co := opts
+	co.NumRays = checkRays
+	co.ConvergeCheck = false
+	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType)
+	if err != nil || len(pg.GridPoints) == 0 {
+		r.Converged = false
+		r.CheckRays = checkRays
+		r.StrehlRelChange = 1.0
+		return
+	}
+	r2 := computeOne(engine, gc, system, pg, fd, co, planeZ, nImage, wl, fieldAngle, fi, r.Polarization, pol)
+	setConvergence(r, r2, checkRays, opts.ConvergeTol)
+}
+
+// applyConvergenceCombined is applyConvergence for an RCP+LCP (incoherently
+// averaged) result.
+func applyConvergenceCombined(r *Result, engine *ray.Engine, system types.System, gc *glass.Catalog,
+	fd types.FieldDef, opts Options, planeZ, nImage, wl, fieldAngle float64, fi int, pol1, pol2 types.JonesVector) {
+	if !opts.ConvergeCheck {
+		return
+	}
+	checkRays := checkRayCount(opts.NumRays)
+	co := opts
+	co.NumRays = checkRays
+	co.ConvergeCheck = false
+	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType)
+	if err != nil || len(pg.GridPoints) == 0 {
+		r.Converged = false
+		r.CheckRays = checkRays
+		r.StrehlRelChange = 1.0
+		return
+	}
+	r2 := computeCombined(engine, gc, system, pg, fd, co, planeZ, nImage, wl, fieldAngle, fi, pol1, pol2)
+	setConvergence(r, r2, checkRays, opts.ConvergeTol)
+}
+
+// setConvergence computes the relative Strehl change between the reported
+// result and the higher-ray-count re-evaluation and labels convergence.
+func setConvergence(r *Result, r2 *Result, checkRays int, tol float64) {
+	r.CheckRays = checkRays
+	if r2 == nil {
+		r.Converged = false
+		r.StrehlRelChange = 1.0
+		return
+	}
+	s1, s2 := r.Strehl, r2.Strehl
+	rel := 0.0
+	den := math.Max(math.Abs(s1), math.Abs(s2))
+	if den > 1e-12 {
+		rel = math.Abs(s2-s1) / den
+	} else if s1 != s2 {
+		rel = 1.0
+	}
+	if tol <= 0 {
+		tol = 0.10
+	}
+	r.StrehlRelChange = rel
+	r.Converged = rel <= tol
 }
 
 // whiteField computes the polychromatic PSF for one field. Every polarization

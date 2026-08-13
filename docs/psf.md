@@ -47,6 +47,8 @@ single flat exit pupil would break down.
 | `--psf-workers N` | parallel workers for the Huygens integral and wavefront tracing (default: GOMAXPROCS) |
 | `--max-freq N` | MTF frequency cap in cycles/mm (default: `psf.mtf_config.max_frequency`, else the Nyquist) |
 | `--best-focus` | evaluate each field at its **best-focus image plane**: the plane shift minimizing the geometric spot RMS is applied per field before the Huygens integral, removing field-curvature defocus |
+| `--converge-check` | label sampling convergence by re-evaluating each result at a higher ray count (**on by default**; use `--converge-check=false` to disable) |
+| `--converge-tol T` | relative Strehl change threshold for convergence (default 0.10) |
 | `--yaml FILE` | write full structured data to FILE, one index-suffixed file per result (`FILE_0.yaml`, `FILE_1.yaml`, …) |
 | `--csv FILE` | write a gnuplot `x,y,intensity` pm3d map to FILE, one index-suffixed file per result |
 | `--config ID` | select config by id (multi-config mode) |
@@ -106,6 +108,8 @@ psf:
   wavelengths: [0.00058756]   # mm (default: chief wavelengths)
   polarization: "RCP+LCP"     # RCP | LCP | X | Y | RCP+LCP
   best_focus: false           # per-field best-focus image plane (default: fixed plane)
+  converge_check: true        # label sampling convergence (default: on)
+  converge_tol: 0.10          # relative Strehl change threshold (default 0.10)
 ```
 
 ## Output
@@ -135,6 +139,9 @@ psf_results:
     total_rays: 400
     valid_rays: 400
     vignetted: 0
+    converged: true             # sampling-convergence label (only when converge_check is on)
+    strehl_rel_change: 0.021   # relative Strehl change vs the higher-ray-count re-check
+    check_rays: 600           # higher ray count used for the convergence re-check
     output_file: psf_0.yaml     # only when --yaml was given
 ```
 
@@ -148,6 +155,7 @@ psf_results:
 | `encircled_energy_50` | radius enclosing 50 % of the energy, from the centroid |
 | `airy_radius` | `0.61·λ/NA` with the image-space NA from the reference-surface footprint as seen from the focus |
 | `total_rays` / `valid_rays` / `vignetted` | pupil grid rays, those reaching the reference surface, and those clipped by apertures |
+| `converged` / `strehl_rel_change` / `check_rays` | sampling-convergence report (only when `converge_check` is on): the result is re-evaluated at `check_rays` = 1.5× the ray count and `strehl_rel_change` is the relative Strehl change; `converged` is true when it is below `converge_tol` (0.10). Strongly aberrated / speckle off-axis PSFs stay `converged: false` until `--num-rays` is raised. Costs ~1.5× the run time. |
 | `output_file` | path of the full `--yaml` data file for this result |
 
 ### `--yaml` full structured data

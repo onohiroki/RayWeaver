@@ -1119,6 +1119,17 @@ type PSFConfig struct {
 	// BestFocus evaluates each field at its best-focus image plane (removes
 	// field-curvature defocus before the Huygens integral).
 	BestFocus bool `yaml:"best_focus,omitempty"`
+	// GridType selects the entrance-pupil grid ("polar" default, "square",
+	// "hex"); "" keeps the default.
+	GridType GridType `yaml:"grid_type,omitempty"`
+	// ConvergeCheck re-evaluates each result at a higher ray count to label
+	// sampling convergence (Converged / strehl_rel_change in psf_results[]).
+	// A nil pointer means "not specified" — the psf command then defaults to ON;
+	// false explicitly disables. Ptr distinguishes "absent" from "set false".
+	ConvergeCheck *bool `yaml:"converge_check,omitempty"`
+	// ConvergeTol is the relative Strehl change threshold for convergence
+	// (default 0.10); ignored when ConvergeCheck is false.
+	ConvergeTol float64 `yaml:"converge_tol,omitempty"`
 	// MTFCfg configures the OTF/MTF computation (defaults when absent).
 	MTFCfg *PSFMTFConfig `yaml:"mtf_config,omitempty"`
 }
@@ -1201,6 +1212,14 @@ type PSFResult struct {
 	OutputFile        string  `yaml:"output_file,omitempty"`
 	// BestFocusShift is the applied image-plane shift in mm; 0 = fixed plane.
 	BestFocusShift float64 `yaml:"best_focus_shift_mm,omitempty"`
+	// Sampling-convergence report (present when psf.converge_check is on):
+	// Converged is whether the Strehl was stable when re-evaluated at the higher
+	// ray count CheckRays; StrehlRelChange is the relative Strehl change. The
+	// pointer keeps `converged: false` visible in the output (omitempty would
+	// hide it) while remaining absent when the check is disabled.
+	Converged       *bool   `yaml:"converged,omitempty"`
+	StrehlRelChange float64 `yaml:"strehl_rel_change,omitempty"`
+	CheckRays       int     `yaml:"check_rays,omitempty"`
 	// SpectralCurve is set for polychromatic results (wavelength is omitted).
 	SpectralCurve string `yaml:"spectral_curve,omitempty"`
 	// MTF is the OTF/MTF summary (thresholds, and evaluated frequencies when

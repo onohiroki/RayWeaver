@@ -46,6 +46,8 @@ func runPSF(data []byte) {
 	yamlOut := fs.String("yaml", "", "write full structured PSF data to FILE (index-suffixed per result)")
 	csvOut := fs.String("csv", "", "write gnuplot x,y,intensity map to FILE (index-suffixed per result)")
 	bestFocus := fs.Bool("best-focus", false, "evaluate each field at its best-focus image plane (removes field-curvature defocus)")
+	convergeCheck := fs.Bool("converge-check", false, "label sampling convergence by re-evaluating each result at a higher ray count (default: on)")
+	convergeTol := fs.Float64("converge-tol", 0, "relative Strehl change threshold for convergence (default 0.10)")
 	fs.Parse(os.Args[2:])
 
 	input := parseYAML[types.Input](data)
@@ -148,13 +150,32 @@ func runPSF(data []byte) {
 		if opts.Workers <= 0 {
 			opts.Workers = input.PSF.Workers
 		}
+		if opts.GridType == "" {
+			opts.GridType = input.PSF.GridType
+		}
 		if !flagWasSet(fs, "best-focus") {
 			opts.BestFocus = input.PSF.BestFocus
 		}
 		opts.MTFCfg = input.PSF.MTFCfg
+		if opts.ConvergeTol <= 0 {
+			opts.ConvergeTol = input.PSF.ConvergeTol
+		}
 	}
 	if *bestFocus {
 		opts.BestFocus = true
+	}
+	// Sampling-convergence labelling. The command default is ON; an explicit
+	// --converge-check=false disables it (CLI wins). `psf.converge_check: false`
+	// in the input YAML also disables it; a YAML-absence keeps the default ON.
+	opts.ConvergeCheck = true
+	if input.PSF != nil && !flagWasSet(fs, "converge-check") && input.PSF.ConvergeCheck != nil {
+		opts.ConvergeCheck = *input.PSF.ConvergeCheck
+	}
+	if flagWasSet(fs, "converge-check") {
+		opts.ConvergeCheck = *convergeCheck
+	}
+	if *convergeTol > 0 {
+		opts.ConvergeTol = *convergeTol
 	}
 	if *maxFreq > 0 {
 		if opts.MTFCfg == nil {
@@ -224,6 +245,9 @@ func runPSF(data []byte) {
 			OutputFile:        outFile,
 			SpectralCurve:     r.SpectralCurve,
 			BestFocusShift:    r.BestFocusShift,
+			Converged:          convergenceFlag(opts.ConvergeCheck, r.Converged),
+			StrehlRelChange:    r.StrehlRelChange,
+			CheckRays:          r.CheckRays,
 			MTF:               psfMTFSummary(r.MTF),
 		})
 	}
@@ -268,6 +292,15 @@ func applySelectedFields(fields []types.FieldDef, kept []int) []types.FieldDef {
 	return out
 }
 
+// convergenceFlag returns a *bool reporting the convergence verdict, or nil
+// when the check was disabled (so `converged` stays absent from the output).
+func convergenceFlag(checked, converged bool) *bool {
+	if !checked {
+		return nil
+	}
+	return &converged
+}
+
 // writeBackPSF stores the effective options into the output psf: section.
 func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opts psf.Options, bestFocusSet bool) {
 	if input.PSF == nil {
@@ -288,6 +321,13 @@ func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opt
 	// (never inject the false default into every output).
 	if bestFocusSet || opts.BestFocus {
 		ps.BestFocus = opts.BestFocus
+	}
+	ps.GridType = opts.GridType
+	// Convergence labelling defaults to ON for this command, so always reflect
+	// the effective state (enables turning it off via --converge-check=false).
+	ps.ConvergeCheck = &opts.ConvergeCheck
+	if opts.ConvergeTol > 0 {
+		ps.ConvergeTol = opts.ConvergeTol
 	}
 	ps.MTFCfg = opts.MTFCfg
 }
