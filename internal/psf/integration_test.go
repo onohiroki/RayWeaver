@@ -176,3 +176,30 @@ func TestPSFWhite(t *testing.T) {
 		t.Errorf("white transmittance = %v, want in (0, 1]", r.Transmittance)
 	}
 }
+
+// TestPSFOffAxisWavefrontLaunch verifies the launch-geometry fix: an off-axis
+// field on a well-corrected singlet must reach a near-diffraction-limited
+// best-focus Strehl. Before the wavefront-plane launch, the angle-field OPL
+// carried a linear launch tilt that shifted the Huygens PSF peak off the image
+// grid, collapsing the peak-ratio Strehl to ~0.03 even for a near-ideal field.
+func TestPSFOffAxisWavefrontLaunch(t *testing.T) {
+	fields := []types.FieldDef{
+		{Angle: 0, Direction: []float64{0, 1}},
+		{Angle: 1.0, Direction: []float64{0, 1}},
+	}
+	wl := []float64{testWavelength}
+	sys, gc := singletSystem(8)
+	res, err := Compute(sys, gc, fields, wl, Options{NumRays: 300, BestFocus: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(res))
+	}
+	// The 1° field on a small singlet is nearly diffraction limited; its
+	// best-focus peak-ratio Strehl must be high (not the ~0.03 launch-tilt
+	// artifact).
+	if res[1].Strehl < 0.5 {
+		t.Errorf("off-axis best-focus Strehl = %v, want >= 0.5 (launch tilt should be removed)", res[1].Strehl)
+	}
+}

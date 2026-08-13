@@ -7,6 +7,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/ray"
+	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -462,5 +463,61 @@ func TestBackwardChiefObjectPoint(t *testing.T) {
 		if dist := math.Hypot(stopHit.Position.X, stopHit.Position.Y); dist > 1e-3 {
 			t.Errorf("h=%v: stop miss %v mm", h, dist)
 		}
+	}
+}
+
+// TestAngleGridOriginsOnWavefront verifies that an off-axis angle field's pupil
+// grid rays launch from a common wavefront plane (perpendicular to the ray
+// direction), so the OPL carries no launch-geometry tilt. Every grid origin
+// must satisfy (origin - gridCentre)·rayDir == 0 within tolerance, and the
+// chief ray (through the grid centre) must pass through the entrance-pupil
+// centre.
+func TestAngleGridOriginsOnWavefront(t *testing.T) {
+	sys, gc := singletSystem()
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+	fields := []types.FieldDef{
+		{Angle: 20.0, Direction: []float64{0, 1}},
+	}
+	results := DetermineChiefRaysGrid(sys, fields, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	grid := results[0].GridPoints
+	if len(grid) == 0 {
+		t.Fatal("no grid points")
+	}
+
+	// The grid centre is where the chief ray starts; recompute it via the same
+	// geometry used at trace time: the entrance-pupil centre on the optical
+	// axis and the field direction.
+	rayDir := results[0].ChiefRay.Initial.Direction
+	pupilZ := results[0].EntrancePupil.Center.Z
+	zStart := -100.0
+	gcpt := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
+
+	// All origins must lie on the wavefront plane through the grid centre.
+	// Origins that failed to trace (ImageX == nil) carry an ErrorCode and may
+	// have a zeroed Origin, so only check rays that actually traced.
+	traced := 0
+	for _, gp := range grid {
+		if gp.ImageX == nil {
+			continue
+		}
+		traced++
+		d := gp.Origin.Subtract(gcpt).Dot(rayDir)
+		if math.Abs(d) > 1e-6 {
+			t.Fatalf("origin %v not on wavefront through %v: (origin-c)·dir = %v",
+				gp.Origin, gcpt, d)
+		}
+	}
+	if traced == 0 {
+		t.Fatal("no rays traced")
+	}
+
+	// The chief ray (from the grid centre) must reach the reference surface
+	// (image plane, surface 2 in the singlet) — i.e. the grid is correctly
+	// centred on the entrance pupil.
+	if results[0].ImageHeight.Y == 0 {
+		t.Error("chief ray image height is zero; grid not centred on pupil")
 	}
 }

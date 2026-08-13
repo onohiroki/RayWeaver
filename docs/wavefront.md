@@ -9,9 +9,7 @@ polarization. It produces three complementary descriptions:
    derived low-order magnitudes (defocus, astigmatism, tilt).
 2. **Best-fit sphere** — the reference sphere through the vertex, whose center
    (focus) is found by minimizing the **geometric spot RMS** along the
-   image-plane normal. This is robust against the launch-geometry artifacts
-   that contaminate angle-field OPL curvature, so the reported shift is the
-   true refocus amount.
+   image-plane normal.
 3. **Stabilized Fringe-Zernike** — the decomposition of the OPD residual after
    the low-order terms (piston, tilt, defocus, astigmatism) are removed, so
    off-axis coefficients stay stable and meaningful.
@@ -45,11 +43,12 @@ stabilized Fringe-Zernike on the low-order-removed residual → statistics
 The OPD at each sampled point is `OPL + n·|P − Fbest|` referenced to the
 **best-focus point** `Fbest` (the best-fit-sphere center found by minimizing the
 geometric spot RMS, so the reference follows the true refocus even without
-`--best-focus`). Angle fields carry a launch-geometry component in their
-recorded OPL; referencing to the best-focus point and removing the low-order
-terms absorbs it, so the reported coefficients and residual match the standard
-wavefront-aberration definition (the statistics `rms`/`pv`/`strehl` agree with
-`psf --best-focus`'s `rms_opd`/`pv_opd` and `strehl_ratio`).
+`--best-focus`). Angle fields are launched from the wavefront plane
+perpendicular to the ray direction, so their OPL carries no launch-geometry
+tilt; referencing to the best-focus point and removing the low-order terms
+yields the standard wavefront-aberration definition (the statistics
+`rms`/`pv`/`strehl` agree with `psf --best-focus`'s `rms_opd`/`pv_opd` and
+`strehl_ratio`).
 
 ## Options
 
@@ -169,8 +168,8 @@ computes the PSF at the best-focus image plane in one pipeline.
   the Maréchal limit (~0.2 λ) where the `exp(−(2πσ/λ)²)` approximation collapses
   towards zero. The paraboloid's `rms_residual` additionally removes astigmatism
   (higher-order only).
-- For angle fields, the paraboloid's low-order terms include the field-launch
-  geometry component; the best-focus shift is computed geometrically and is
-  unaffected by it.
+- For angle fields, rays are launched from the wavefront plane perpendicular to
+  the ray direction, so the OPL carries no launch-geometry tilt (the linear
+  `Δpx·sinθ` ramp previously present in angle-field OPL is gone at the source).
 - Strongly aberrated off-axis fields give large coma/astigmatism and low
   Strehl; raise `--num-rays` for stable off-axis coefficients.
