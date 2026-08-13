@@ -18,11 +18,14 @@ set -euo pipefail
 #   4. draws one MTF-overlay PNG (sagittal & tangential curves per field).
 #
 # The default lens is the escape-optimised US2645157 triplet restricted to the
-# center field (0 deg) — its strongly aberrated 16°/24° fields are excluded
-# (see samples/psf-mtf-demo.yaml). Any other lens YAML with a `chief` section
-# can be substituted with --lens; the MTF frequency cap keeps working via the
-# --max-freq CLI flag (default 200 c/mm) even if that YAML carries no `psf:`
-# section, because --max-freq overrides psf.mtf_config.max_frequency.
+# center field (0 deg) for a clean single-field Airy-core / MTF walkthrough
+# (see samples/psf-mtf-demo.yaml). The 16°/24° fields now trace correctly too
+# (Strehl ~0.11 / ~0.86 at best focus, thanks to the wavefront-plane launch),
+# but the demo keeps the single-field YAML so the charts are easy to read. Any
+# other lens YAML with a `chief` section can be substituted with --lens; the MTF
+# frequency cap keeps working via the --max-freq CLI flag (default 200 c/mm)
+# even if that YAML carries no `psf:` section, because --max-freq overrides
+# psf.mtf_config.max_frequency.
 #
 # Input polarization is RCP+LCP (the polarization-averaged / unpolarised PSF).
 #

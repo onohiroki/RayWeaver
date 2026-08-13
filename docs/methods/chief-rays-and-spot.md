@@ -38,10 +38,18 @@ The pupil is sampled with `num_rays` points in one of three patterns
 | `square` | √n × √n cells, kept if `x² + y² ≤ 1` |
 | `hex` | hexagonally packed rows inside the aperture |
 
-For angle fields the grid is centred on the **pupil centre**, which is the point
-at the start plane where a chief ray parallel to the field direction crosses the
-stop: `(px, py) = (0,0) − (z_stop − z_start) · tan θ · (dx, dy)`. For finite
-conjugate fields the grid is centred on the object-projected pupil.
+For angle fields the grid is centred on the **pupil centre**, the point on the
+start plane `z = z_start` whose ray (parallel to the field direction) crosses
+the stop. It is computed vectorially (`raymath.WavefrontGridCenter`) from the
+entrance-pupil centre `C = (0,0,z_stop)` as
+`(px, py) = C − (C.z − z_start)·rayDir.XY / rayDir.Z` — the classic
+`−(z_stop − z_start)·tan θ·(dx, dy)` offset expressed with direction-vector
+ratios, so it stays finite up to 90° incidence (at grazing angles the grid
+falls back to the wavefront plane through the pupil centre). Rays are launched
+from the **wavefront plane** perpendicular to the ray direction through the grid
+centre (`raymath.ProjectOntoWavefront`), so their OPL is referenced to a common
+wavefront and carries no launch-geometry tilt. For finite conjugate fields the
+grid is centred on the object-projected pupil.
 
 Each pupil point becomes a ray. Rays are traced in parallel; rays that miss or
 are vignetted are recorded with a nil image and `error_code`, so vignetting is

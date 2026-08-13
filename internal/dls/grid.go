@@ -62,16 +62,21 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	points := make([]IPoint, len(grid))
 	perRayMax := make([]map[int]float64, len(grid))
 
-	// Parallel angle-field bundle: project each launch origin onto the
-	// wavefront plane through the grid centre (perpendicular to rayDir) so the
-	// OPL carries no launch-geometry tilt. The shift is along rayDir, leaving
-	// the ray line (and all surface intersections) unchanged.
+	// Parallel angle-field bundle: the OPL must carry no launch-geometry tilt.
+	// The wavefront-plane launch projects each origin along rayDir onto the
+	// wavefront through the grid centre; moving the origin along the ray leaves
+	// the ray line (and every surface intersection) unchanged, so the OPL
+	// correction is exactly (wavefrontC - origin)·dir. Here the origin stays at
+	// zStart and that tilt is subtracted from the recorded OPL directly: this
+	// keeps the ray positions (and therefore spot_rms / aperture extents)
+	// bit-identical to the unprojected trace, so the DLS merit and Jacobian are
+	// not perturbed by ~1e-15 floating-point noise from a moved origin, while
+	// opd_rms still gets the corrected OPL.
 	wavefrontC := types.Vec3{X: pupilOffsetX, Y: pupilOffsetY, Z: zStart}
 
 	trace := func(i int) {
 		pt := grid[i]
-		origin := raymath.ProjectOntoWavefront(
-			types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}, wavefrontC, rayDir)
+		origin := types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}
 		r := types.Ray{
 			Wavelength:         wavelength,
 			Initial:            types.RayState{Origin: origin, Direction: rayDir},
@@ -103,7 +108,8 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 
 		if len(result.Surfaces) > 0 {
 			last := result.Surfaces[len(result.Surfaces)-1]
-			points[i] = IPoint{X: last.Position.X, Y: last.Position.Y, OPL: result.OPLTotal, OK: true}
+			opl := result.OPLTotal - wavefrontC.Subtract(origin).Dot(rayDir)
+			points[i] = IPoint{X: last.Position.X, Y: last.Position.Y, OPL: opl, OK: true}
 		} else {
 			points[i] = IPoint{OK: false}
 		}

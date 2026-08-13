@@ -173,7 +173,7 @@ optimization:
           param: thickness
 
     - name: s7_thickness
-      min: -5.0
+      min: 0.5
       max: 5.0
       active: true
       bindings:

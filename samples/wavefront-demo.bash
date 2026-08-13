@@ -39,9 +39,12 @@ set -euo pipefail
 #
 # How to read the output
 #   - 0° is near diffraction-limited: tiny paraboloid terms, Strehl ~0.99 and a
-#     nearly flat OPD map. The 16°/24° fields are coma+astigmatism dominated
-#     (large Zernike coma coefficients, Strehl -> 0), clearly visible as the
-#     asymmetric (non-rotationally-symmetric) OPD maps.
+#     nearly flat OPD map. The 16° field is coma+astigmatism dominated (large
+#     Zernike coma coefficients, Strehl ~0.03) and 24° has moderate aberrations
+#     (Strehl ~0.4), clearly visible as the asymmetric (non-rotationally-
+#     symmetric) OPD maps. (The wavefront-plane launch removed the old
+#     launch-geometry OPL tilt, so these off-axis Strehls are the true
+#     aberration values, not the ~0.001-0.005 launch artifact.)
 #   - The "defocus before / after" table shows the weighted best-focus shift
 #     removing the common defocus: the after column is the residual field
 #     curvature at the flat best-focus plane.
@@ -296,11 +299,12 @@ fi
                  i, a, db, da, rb, ra }'
   done
   echo
-  echo "Note: the weighted shift removes the common (on-axis) defocus. For"
-  echo "off-axis angle fields the paraboloid defocus includes the field-launch"
-  echo "geometry, so it does not vanish with a flat-plane shift — the on-axis"
-  echo "row is the clean indicator. Use --defocus D to see the correction"
-  echo "directly."
+  echo "Note: the weighted shift removes the common (on-axis) defocus. The"
+  echo "angle fields are launched from the wavefront plane (perpendicular to"
+  echo "the ray direction), so their OPL carries no launch-geometry tilt and the"
+  echo "paraboloid defocus is the true field curvature — it vanishes with the"
+  echo "weighted flat-plane shift (see the 'defocus after' column). Use --defocus"
+  echo "D to see the correction applied to a deliberately defocused lens."
 } | tee -a "$RESULT_TXT"
 echo
 

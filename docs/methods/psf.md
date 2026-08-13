@@ -84,8 +84,11 @@ Each sample records:
 
 - `q_j` — global position on the reference surface
 - `s_j` — emergent direction
-- `OPL_j` — optical path length from the object (launch plane for infinite
-  conjugates) to the reference surface
+- `OPL_j` — optical path length to the reference surface. For angle
+  (infinite-conjugate) fields the ray is launched from the **wavefront plane**
+  perpendicular to the ray direction (`raymath.ProjectOntoWavefront`), so the
+  OPL is referenced to a common wavefront and carries no launch-geometry tilt
+  (the linear `Δpx·sinθ` ramp that used to pollute off-axis OPD)
 - `E_j` — global complex electric field vector at the surface
 
 ### Area weights (Delaunay triangulation)
@@ -159,9 +162,9 @@ OPD_j = OPL_j + n·|q_j − P0|
 
 referenced to the converging sphere to `P0`. A best-fit reference sphere
 (piston + tilt + defocus) is subtracted so the reported `rms_opd` / `pv_opd` are
-the standard wavefront aberration (not the launch geometry). For an angle-based
-(infinite-conjugate) field the OPL already contains the geometric tilt that
-focuses the beam; removing the fitted tilt leaves the true aberration.
+the standard wavefront aberration. Because angle fields are launched from the
+wavefront plane, their OPL is already free of the launch-geometry tilt; the
+fitted low-order terms remove only the true field-dependent tilt and defocus.
 
 ## 4. Analysis
 
