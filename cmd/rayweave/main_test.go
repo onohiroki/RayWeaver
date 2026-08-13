@@ -585,3 +585,36 @@ func TestExportOutput(t *testing.T) {
 		t.Errorf("file = %q, want foreign %q", fb, foreign)
 	}
 }
+
+func TestFormatFromExt(t *testing.T) {
+	cases := []struct{ path, want string }{
+		{"out.zmx", "zemax"},
+		{"lens.ZMX", "zemax"},
+		{"out.seq", "codev"},
+		{"out.len", "oslo"},
+		{"out.txt", ""},
+		{"noext", ""},
+	}
+	for _, c := range cases {
+		if got := formatFromExt(c.path); got != c.want {
+			t.Errorf("formatFromExt(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}
+
+func TestResolveExportFormat(t *testing.T) {
+	cases := []struct{ format, outPath, want string }{
+		{"zemax", "", "zemax"},        // explicit flag wins
+		{"codev", "out.zmx", "codev"}, // explicit flag beats extension
+		{"", "out.zmx", "zemax"},      // inferred from extension
+		{"", "out.seq", "codev"},
+		{"", "out.len", "oslo"},
+		{"", "", ""},        // nothing to infer from
+		{"", "out.txt", ""}, // unrecognized extension
+	}
+	for _, c := range cases {
+		if got := resolveExportFormat(c.format, c.outPath); got != c.want {
+			t.Errorf("resolveExportFormat(%q, %q) = %q, want %q", c.format, c.outPath, got, c.want)
+		}
+	}
+}

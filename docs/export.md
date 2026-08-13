@@ -18,16 +18,18 @@ the text output.
 
 | Flag | Description |
 |---|---|
-| `--format zemax\|codev\|oslo` | output format (required) |
+| `--format zemax\|codev\|oslo` | output format; required unless `-o` is given — then the format is inferred from the file extension (`.zmx` / `.seq` / `.len`) |
 | `-o, --output FILE` | write the foreign format to FILE and pass the input YAML through to stdout unchanged (like `plot -o`); without it the foreign format goes to stdout |
 | `--config ID` | export a single config; otherwise ZEMAX/CODE V export every config, OSLO exports config 0 |
 | `--nd-vd` | CODE V: write every glass as its inline `nd:vd` model form instead of the catalog name |
 | `--glass-dir dir` | load an AGF glass catalog from a directory (resolves glass names / OSLO model-glass indices) |
 
-With `-o FILE` the pipeline keeps flowing:
+With `-o FILE` the pipeline keeps flowing, and `--format` may be omitted when
+the extension determines it:
 
 ```
-rayweave export --format zemax -o out.zmx < system.yaml | rayweave plot -o lens.svg
+rayweave export -o out.zmx < system.yaml | rayweave plot -o lens.svg
+rayweave export -o out.seq < system.yaml | rayweave import --format codev
 ```
 
 ## Config mapping
@@ -114,8 +116,8 @@ warned.
 ```sh
 rayweave export --format zemax < system.yaml > out.zmx
 rayweave export --format codev < system.yaml > out.seq
+rayweave export -o out.zmx < system.yaml | rayweave plot -o lens.svg
 rayweave export --format oslo --config config1 < system.yaml > out.len
-rayweave export --format zemax -o out.zmx < system.yaml | rayweave plot -o lens.svg
 ```
 
 Round-trip: `rayweave export --format codev < system.yaml | rayweave import --format codev`

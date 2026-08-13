@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/hiroki/rayweaver/internal/exporter"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -24,7 +26,7 @@ import (
 // pipeline keeps flowing; without it the foreign format goes to stdout.
 func runExport(data []byte) {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
-	format := fs.String("format", "", "zemax|codev|oslo")
+	format := fs.String("format", "", "zemax|codev|oslo (defaults to the -o file extension)")
 	configFlag := fs.String("config", "", "select config by id (single-config export)")
 	ndVD := fs.Bool("nd-vd", false, "CODE V: write every glass as its inline nd:vd model form instead of the catalog name")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
@@ -32,8 +34,11 @@ func runExport(data []byte) {
 	fs.StringVar(outPath, "output", "", "alias for -o")
 	fs.Parse(os.Args[2:])
 
-	if *format == "" {
-		errOut("Error: --format is required (zemax|codev|oslo)")
+	// The format is the explicit --format flag, else the -o file extension
+	// (.zmx / .seq / .len), like plot inferring SVG/PNG from the extension.
+	formatName := resolveExportFormat(*format, *outPath)
+	if formatName == "" {
+		errOut("Error: --format is required (zemax|codev|oslo), or give -o FILE with a .zmx/.seq/.len extension")
 		os.Exit(1)
 	}
 
@@ -43,11 +48,11 @@ func runExport(data []byte) {
 		errOut(format, args...)
 	}
 
-	configs := configIndicesForExport(&input, *format, configFlag)
+	configs := configIndicesForExport(&input, formatName, configFlag)
 
 	var out []byte
 	var err error
-	switch *format {
+	switch formatName {
 	case "zemax":
 		out, err = exporter.WriteZemax(&input, configs, gc, warn)
 	case "codev":
@@ -59,7 +64,7 @@ func runExport(data []byte) {
 		}
 		out, err = exporter.WriteOslo(&input, idx, gc, warn)
 	default:
-		errOut("Error: unknown format %q", *format)
+		errOut("Error: unknown format %q", formatName)
 		os.Exit(1)
 	}
 	if err != nil {
@@ -67,6 +72,30 @@ func runExport(data []byte) {
 		os.Exit(1)
 	}
 	exportOutput(*outPath, out, data)
+}
+
+// resolveExportFormat returns the effective export format: the explicit
+// --format flag, else the format inferred from the -o output file extension
+// (.zmx/.seq/.len). It returns "" when neither determines one.
+func resolveExportFormat(format, outPath string) string {
+	if format != "" {
+		return format
+	}
+	return formatFromExt(outPath)
+}
+
+// formatFromExt maps an output file extension to the export format, or "" when
+// the extension is not one of .zmx / .seq / .len.
+func formatFromExt(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".zmx":
+		return "zemax"
+	case ".seq":
+		return "codev"
+	case ".len":
+		return "oslo"
+	}
+	return ""
 }
 
 // exportOutput writes the exported foreign format. With outPath the format is

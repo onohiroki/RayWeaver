@@ -71,7 +71,8 @@ Exemptions (documented, not YAML-specifiable):
   multi-config `MNUM`/`THIC`/`SDIA` and zoom `ZOOM n`+`ZOO` rows — OSLO exports config 0,
   `--config` forces a single config in every case; `--nd-vd` makes CODE V write every
   glass as its inline `nd:vd` model form; `-o FILE` writes the foreign format to FILE and
-  passes the input YAML through to stdout unchanged, like `plot -o`).
+  passes the input YAML through to stdout unchanged, like `plot -o`, and the format is
+  inferred from the file extension (`.zmx`/`.seq`/`.len`) when `--format` is omitted).
 - Action/stream flags record their **effects** in the output instead of a setting:
   chief `--clear-aperture*` / `--marginal-rays` / `--preserve-rays` / `--ray-fan` /
   `--fan-plane` / `--fan-rotation` (effects: diameters, `rays[]`, `ray_fan`),

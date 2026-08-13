@@ -571,7 +571,9 @@ format is written to FILE instead and the input YAML passes through to stdout,
 so the pipeline keeps flowing (like "rayweave plot -o").
 
 Options:
-  --format zemax|codev|oslo   output format (required)
+  --format zemax|codev|oslo   output format; when -o/--output is given and
+                        --format is omitted, the format is inferred from the
+                        file extension (.zmx / .seq / .len)
   -o, --output FILE   write the foreign format to FILE and pass the input YAML
                         through to stdout; without it the foreign format goes
                         to stdout
@@ -610,9 +612,9 @@ Limitations (reported on stderr):
 
 Examples:
   rayweave export --format zemax < system.yaml > out.zmx
+  rayweave export -o out.zmx < system.yaml | rayweave plot -o lens.svg
   rayweave export --format codev < system.yaml | rayweave import --format codev
   rayweave export --format oslo --config config1 < system.yaml > out.len
-  rayweave export --format zemax -o out.zmx < system.yaml | rayweave plot -o lens.svg
 `)
 	case "scale":
 		fmt.Print(`Usage: rayweave scale --efl TARGET [--config ID] < system.yaml > scaled.yaml
