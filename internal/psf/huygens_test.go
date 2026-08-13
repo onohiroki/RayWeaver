@@ -215,3 +215,34 @@ func TestEncircledEnergyAiry(t *testing.T) {
 		t.Errorf("encircled energy at Airy radius = %.3f, want ≈ 0.84", ee)
 	}
 }
+
+// TestRadiusForEnergy verifies RadiusForEnergy returns the radius that encloses
+// the requested energy fraction. The grid has all intensity in a thin ring at a
+// known radius, so the 50% and 100% enclosing radii are both well defined and
+// small grids exercise the sort path.
+func TestRadiusForEnergy(t *testing.T) {
+	const n = 64
+	ringR := 2.0
+	spec := ImageGridSpec{NX: n, NY: n, X0: -4, Y0: -4, DX: 8.0 / n, DY: 8.0 / n}
+	grid := NewFieldGrid(spec)
+	for j := 0; j < n; j++ {
+		for i := 0; i < n; i++ {
+			x := spec.X0 + (float64(i)+0.5)*spec.DX
+			y := spec.Y0 + (float64(j)+0.5)*spec.DY
+			r2 := x*x + y*y
+			// Intensity inside a thin annulus at radius ~ringR, zero elsewhere.
+			if math.Abs(math.Sqrt(r2)-ringR) < 0.1 {
+				grid.Intensity[j*n+i] = 1.0
+			}
+		}
+	}
+	grid.Normalize()
+	r50 := grid.RadiusForEnergy(0, 0, 0.5)
+	r100 := grid.RadiusForEnergy(0, 0, 1.0)
+	if math.Abs(r50-ringR) > 0.15 {
+		t.Errorf("50%% energy radius = %.3f, want ~%.3f", r50, ringR)
+	}
+	if math.Abs(r100-ringR) > 0.15 {
+		t.Errorf("100%% energy radius = %.3f, want ~%.3f", r100, ringR)
+	}
+}

@@ -39,6 +39,10 @@ set -euo pipefail
 #                 `rayweave psf` so it works regardless of the lens YAML.
 #   --num-rays N  pupil grid rays (default 400)
 #   --psf-grid N  image-plane pixels per side (default 96)
+#   --best-focus  evaluate each field at its best-focus image plane (removes
+#                 field-curvature defocus; also avoids the image-grid auto-
+#                 enlargement that a defocused fixed-plane PSF triggers).
+#   --no-best-focus  force fixed-plane evaluation (default for --lens triplet).
 #
 # How to read the output
 #   - 0° is nearly diffraction-limited: a tight Airy core (Strehl ~0.87), a
@@ -60,6 +64,7 @@ LENS="triplet"
 MAXFREQ=200
 NUM_RAYS=400
 PSF_GRID=96
+BEST_FOCUS="auto"
 CLEAN=false
 
 while [[ $# -gt 0 ]]; do
@@ -74,6 +79,10 @@ while [[ $# -gt 0 ]]; do
       fi
       shift
       ;;
+    --best-focus)
+      BEST_FOCUS="true"; shift ;;
+    --no-best-focus)
+      BEST_FOCUS="false"; shift ;;
     --max-freq)
       MAXFREQ="$2"; shift 2
       if ! awk -v x="$MAXFREQ" 'BEGIN { exit !(x >= 0) }' /dev/null; then
@@ -110,6 +119,13 @@ case "$LENS" in
     YAML="$SCRIPT_DIR/doublegauss-init.yaml"
     STEM="psf-mtf-demo-doublegauss"
     LENS_NAME="6-element double-Gauss (f/2.8 50 mm)"
+    # The double-Gauss input starts ~8 mm out of focus: a fixed-plane PSF is
+    # meaningless and its large spot auto-enlarges the image grid to 2048²
+    # (very slow). Default to best-focus so the demo is fast and meaningful;
+    # --no-best-focus overrides.
+    if [[ "$BEST_FOCUS" == "auto" ]]; then
+      BEST_FOCUS="true"
+    fi
     ;;
   *)
     if [[ -f "$LENS" ]]; then
@@ -122,6 +138,9 @@ case "$LENS" in
     fi
     ;;
 esac
+if [[ "$BEST_FOCUS" == "auto" ]]; then
+  BEST_FOCUS="false"
+fi
 
 RESULT_YAML="$OUTDIR/$STEM-result.yaml"
 RESULT_TXT="$OUTDIR/$STEM-result.txt"
@@ -167,10 +186,13 @@ fi
 #    one index-suffixed intensity map per field; --yaml writes the full
 #    structured result (including the sagittal/tangential OTF/MTF curves) per
 #    field; the pipeline YAML carries psf_results[] with the MTF summary.
-echo "=== PSF + OTF + MTF computation: $LENS_NAME (RCP+LCP, ${NUM_RAYS} rays, ${PSF_GRID}^2 grid, MTF cap ${MAXFREQ} c/mm) ==="
-$RAYWEAVE psf --polarization RCP+LCP --num-rays "$NUM_RAYS" --psf-grid "$PSF_GRID" \
-  --max-freq "$MAXFREQ" --csv "$CSV_BASE.csv" --yaml "$YAML_BASE.yaml" \
-  < "$YAML" > "$RESULT_YAML"
+echo "=== PSF + OTF + MTF computation: $LENS_NAME (RCP+LCP, ${NUM_RAYS} rays, ${PSF_GRID}^2 grid, MTF cap ${MAXFREQ} c/mm, best-focus: ${BEST_FOCUS}) ==="
+PSF_ARGS=(--polarization RCP+LCP --num-rays "$NUM_RAYS" --psf-grid "$PSF_GRID" \
+  --max-freq "$MAXFREQ" --csv "$CSV_BASE.csv" --yaml "$YAML_BASE.yaml")
+if [[ "$BEST_FOCUS" == "true" ]]; then
+  PSF_ARGS+=(--best-focus)
+fi
+$RAYWEAVE psf "${PSF_ARGS[@]}" < "$YAML" > "$RESULT_YAML"
 
 # 2. Comparison table (stdout + <stem>-result.txt). The MTF cut-off
 #    frequencies come from each result's sagittal thresholds (MTF 50/30/10);

@@ -3,6 +3,7 @@ package psf
 import (
 	"math"
 	"runtime"
+	"sort"
 	"sync"
 
 	"github.com/hiroki/rayweaver/internal/types"
@@ -397,9 +398,11 @@ func (g *FieldGrid) EncircledEnergy(cx, cy float64, radius float64) float64 {
 	return inside / total
 }
 
-// pixelRadius is a sorted pixel distance/weight pair for energy sweeps.
+// pixelRadius is a sorted pixel distance²/weight pair for energy sweeps. The
+// distance is stored squared so the build loop and the sort key avoid a sqrt
+// per pixel; the caller sqrt's only the returned radius.
 type pixelRadius struct {
-	r, w float64
+	r2, w float64
 }
 
 // RadiusForEnergy returns the smallest radius (from the centre) enclosing the
@@ -422,7 +425,7 @@ func (g *FieldGrid) RadiusForEnergy(cx, cy, fraction float64) float64 {
 			x := g.Spec.X0 + (float64(i)+0.5)*g.Spec.DX
 			y := g.Spec.Y0 + (float64(j)+0.5)*g.Spec.DY
 			dx, dy := x-cx, y-cy
-			pts = append(pts, pixelRadius{r: math.Hypot(dx, dy), w: w})
+			pts = append(pts, pixelRadius{r2: dx*dx + dy*dy, w: w})
 		}
 	}
 	sortPixels(pts)
@@ -430,16 +433,12 @@ func (g *FieldGrid) RadiusForEnergy(cx, cy, fraction float64) float64 {
 	for _, p := range pts {
 		acc += p.w
 		if acc/total >= fraction {
-			return p.r
+			return math.Sqrt(p.r2)
 		}
 	}
 	return 0
 }
 
 func sortPixels(pts []pixelRadius) {
-	for i := 1; i < len(pts); i++ {
-		for j := i; j > 0 && pts[j-1].r > pts[j].r; j-- {
-			pts[j-1], pts[j] = pts[j], pts[j-1]
-		}
-	}
+	sort.Slice(pts, func(i, j int) bool { return pts[i].r2 < pts[j].r2 })
 }
