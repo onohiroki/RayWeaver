@@ -20,6 +20,7 @@ the text output.
 |---|---|
 | `--format zemax\|codev\|oslo` | output format (required) |
 | `--config ID` | export a single config; otherwise ZEMAX/CODE V export every config, OSLO exports config 0 |
+| `--nd-vd` | CODE V: write every glass as its inline `nd:vd` model form instead of the catalog name |
 | `--glass-dir dir` | load an AGF glass catalog from a directory (resolves glass names / OSLO model-glass indices) |
 
 ## Config mapping
@@ -52,6 +53,24 @@ Per-config curvature/conic/asphere differences cannot be expressed in ZEMAX
 Diameters export as semi-diameters (`DIAM`, `CIR`, `AP`), matching the import
 convention. The ZEMAX `SDIA` override row carries the full diameter to match
 the importer's reading.
+
+## CODE V glass names
+
+CODE V references glasses without the separators used in AGF names and with the
+manufacturer appended after an underscore (`N-BK7` from Schott →
+`NBK7_SCHOTT`). The CODE V exporter follows that convention:
+
+- the glass name is uppercased with hyphens and underscores removed
+  (`N-BK7` → `NBK7`, `H-ZF72` → `HZF72`);
+- when the glass catalog (`glass_catalog` entries or `--glass-dir`) knows the
+  manufacturer, it is appended: `NBK7_SCHOTT`; a glass of unknown manufacturer
+  is written as just the normalized name (`NBK7`);
+- `--nd-vd` instead resolves every glass to its inline `nd:vd` model form
+  (`1.5168:64.17`); an unresolvable key falls back to the CODE V name with a
+  warning.
+
+On re-import, the importer resolves these names back to the catalog glass
+(`NBK7_SCHOTT` → N-BK7), so the round trip keeps the dispersion.
 
 ## CODE V vignetting
 

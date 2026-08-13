@@ -574,6 +574,8 @@ Options:
                         export every config (as ZEMAX multi-config MNUM/CONFIG/
                         THIC/SDIA, CODE V zoom positions ZOOM n + ZOO rows) and
                         OSLO exports config 0
+  --nd-vd             CODE V: write every glass as its inline nd:vd model form
+                        instead of the NAME_MANUFACTURER catalog name
   --glass-dir DIR     AGF glass catalog directory (for resolving glass
                         names / OSLO model-glass indices)
 
@@ -588,6 +590,11 @@ Surface features:
   sphere / conic / even polynomial asphere, catalog + model glasses, fields,
   wavelengths, aperture stop, diameters, per-surface decenters
   (ZEMAX COORDBRK, CODE V DAR), ZEMAX/CODE V vignetting.
+
+CODE V glass names follow the NAME_MANUFACTURER convention (uppercase, no
+  hyphens/underscores in the glass name; the manufacturer comes from the glass
+  catalog and is omitted when unknown). --nd-vd writes "nd:vd" model glasses
+  instead.
 
 Limitations (reported on stderr):
   folded mirrors are exported as transmit surfaces (no unfolding)

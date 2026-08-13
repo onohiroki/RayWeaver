@@ -33,7 +33,10 @@ Conic constants (`K`, `CON`, `CONI`) map to the `conic` field. Even asphere
 polynomial coefficients (`A`/`B`/`C`/`D`/`E`/`F`/`G`/`H`/`J`, `A4`/`A6`/
 `A8`/`A10`/`A12`) map to the `coefficients` array of `asphere_polynomial`.
 CODE V `CCY` is a variable/control-designation keyword, not the conic constant,
-and is ignored.
+and is ignored. CODE V glass names use the `NAME_MANUFACTURER` spelling
+(`NBK7_SCHOTT` for `N-BK7`); the importer strips the separators and the
+manufacturer suffix when resolving the built-in glass dictionary, so the
+dispersion is recovered without an AGF catalog.
 
 ## ZEMAX fields and vignetting
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/importer"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -37,19 +38,26 @@ func testInput() *types.Input {
 	}
 }
 
-// roundTrip exports the input in the given format and re-imports it, returning
-// the parsed result.
+// roundTrip exports the input in the given format (no glass catalog, no
+// inline-nd:vd option) and re-imports it.
 func roundTrip(t *testing.T, format string, in *types.Input, configs []int, w Warn) *importer.ParseResult {
+	t.Helper()
+	return roundTripWith(t, format, in, configs, nil, false, w)
+}
+
+// roundTripWith is roundTrip with an explicit glass catalog and the CODE V
+// inline-nd:vd option.
+func roundTripWith(t *testing.T, format string, in *types.Input, configs []int, gc *glass.Catalog, inlineNDVD bool, w Warn) *importer.ParseResult {
 	t.Helper()
 	var out []byte
 	var err error
 	switch format {
 	case "zemax":
-		out, err = WriteZemax(in, configs, nil, w)
+		out, err = WriteZemax(in, configs, gc, w)
 	case "codev":
-		out, err = WriteCodeV(in, configs, nil, w)
+		out, err = WriteCodeV(in, configs, gc, w, inlineNDVD)
 	case "oslo":
-		out, err = WriteOslo(in, configs[0], nil, w)
+		out, err = WriteOslo(in, configs[0], gc, w)
 	}
 	if err != nil {
 		t.Fatalf("%s export failed: %v", format, err)
@@ -69,7 +77,7 @@ func roundTrip(t *testing.T, format string, in *types.Input, configs []int, w Wa
 	return pr
 }
 
-func assertSurface(t *testing.T, label string, got, want types.Surface) {
+func assertSurface(t *testing.T, format, label string, got, want types.Surface) {
 	t.Helper()
 	if math.Abs(got.Curvature-want.Curvature) > 1e-9 {
 		t.Errorf("%s curvature: expected %g, got %g", label, want.Curvature, got.Curvature)
@@ -86,8 +94,16 @@ func assertSurface(t *testing.T, label string, got, want types.Surface) {
 	if !sameCoeffs(got.Coefficients, want.Coefficients) {
 		t.Errorf("%s coefficients: expected %v, got %v", label, want.Coefficients, got.Coefficients)
 	}
-	if want.Material.HasKey() && got.Material.Key != want.Material.Key {
-		t.Errorf("%s material key: expected %q, got %q", label, want.Material.Key, got.Material.Key)
+	if want.Material.HasKey() {
+		wantKey := want.Material.Key
+		if strings.HasPrefix(format, "codev") {
+			// CODE V glass names round-trip through the normalized
+			// NAME_MANUFACTURER spelling (no catalog in these tests).
+			wantKey = codeVGlassName(nil, want.Material.Key)
+		}
+		if got.Material.Key != wantKey {
+			t.Errorf("%s material key: expected %q, got %q", label, wantKey, got.Material.Key)
+		}
 	}
 	if want.Material.HasModel() && got.Material.HasModel() &&
 		(math.Abs(got.Material.ND-want.Material.ND) > 1e-6 || math.Abs(got.Material.VD-want.Material.VD) > 1e-3) {
@@ -101,7 +117,7 @@ func assertSurfaces(t *testing.T, format string, got []types.Surface, want []typ
 		t.Fatalf("%s surface count: expected %d, got %d", format, len(want), len(got))
 	}
 	for i := range want {
-		assertSurface(t, format+fmtSurface(i), got[i], want[i])
+		assertSurface(t, format, format+fmtSurface(i), got[i], want[i])
 	}
 }
 
@@ -192,7 +208,7 @@ func TestConicAsphereRoundTrip(t *testing.T) {
 	in.Configs[0].Surfaces[0].Coefficients = []float64{1e-5, -2e-7, 3e-9}
 	for _, format := range []string{"zemax", "codev"} {
 		pr := roundTrip(t, format, in, []int{0}, nil)
-		assertSurface(t, format, pr.Surfaces[0], in.Configs[0].Surfaces[0])
+		assertSurface(t, format, format, pr.Surfaces[0], in.Configs[0].Surfaces[0])
 	}
 }
 
@@ -392,7 +408,7 @@ func TestExportWarnings(t *testing.T) {
 
 func TestSingleConfigNoZoomRows(t *testing.T) {
 	in := multiConfigInput()
-	out, err := WriteCodeV(in, []int{0}, nil, nil)
+	out, err := WriteCodeV(in, []int{0}, nil, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,5 +421,90 @@ func TestSingleConfigNoZoomRows(t *testing.T) {
 	}
 	if strings.Contains(string(out), "MNUM") || strings.Contains(string(out), "THIC") {
 		t.Error("single-config export must not emit multi-config rows")
+	}
+}
+
+// testCatalog builds a glass catalog with a manufacturer for codeVGlassName
+// and --nd-vd tests.
+func testCatalog() *glass.Catalog {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeCatalog, Name: "N-BK7", Key: "N-BK7", Manufacturer: "SCHOTT", ND: 1.5168, VD: 64.17})
+	gc.Add(types.Glass{Type: types.GlassTypeCatalog, Name: "SF5", Key: "SF5", Manufacturer: "SCHOTT", ND: 1.67270, VD: 32.21})
+	return gc
+}
+
+func TestCodeVGlassName(t *testing.T) {
+	gc := testCatalog()
+	cases := []struct {
+		name string
+		gc   *glass.Catalog
+		key  string
+		want string
+	}{
+		{name: "normalized no catalog", key: "N-BK7", want: "NBK7"},
+		{name: "plain key no catalog", key: "SF5", want: "SF5"},
+		{name: "manufacturer from catalog", gc: gc, key: "N-BK7", want: "NBK7_SCHOTT"},
+		{name: "manufacturer from catalog sf5", gc: gc, key: "SF5", want: "SF5_SCHOTT"},
+		{name: "already codev form preserved", key: "NBK7_SCHOTT", want: "NBK7_SCHOTT"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := codeVGlassName(c.gc, c.key); got != c.want {
+				t.Errorf("codeVGlassName(%q) = %q, want %q", c.key, got, c.want)
+			}
+		})
+	}
+}
+
+func TestCodeVGlassLabelNDVD(t *testing.T) {
+	gc := testCatalog()
+	var log []string
+	warn := collectWarn(&log)
+
+	// Model glass keeps the inline form.
+	m := types.Material{ND: 1.77, VD: 49.6}
+	if got := codeVGlassLabel(nil, m, false, warn); got != "1.77:49.6" {
+		t.Errorf("model label = %q", got)
+	}
+	// Keyed glass resolves to nd:vd through the catalog.
+	if got := codeVGlassLabel(gc, types.Material{Key: "N-BK7"}, true, warn); got != "1.5168:64.17" {
+		t.Errorf("nd:vd label = %q, want 1.5168:64.17", got)
+	}
+	// Unresolvable key warns and falls back to the CODE V name.
+	if got := codeVGlassLabel(nil, types.Material{Key: "N-BK7"}, true, warn); got != "NBK7" {
+		t.Errorf("fallback label = %q, want NBK7", got)
+	}
+	found := false
+	for _, msg := range log {
+		if strings.Contains(msg, "not resolvable") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected an unresolvable-glass warning, got %v", log)
+	}
+}
+
+func TestCodeVInlineNDVDRoundTrip(t *testing.T) {
+	in := testInput()
+	gc := testCatalog()
+	pr := roundTripWith(t, "codev", in, []int{0}, gc, true, nil)
+	if len(pr.Surfaces) != 4 {
+		t.Fatalf("surface count: expected 4, got %d", len(pr.Surfaces))
+	}
+	// N-BK7 and SF5 were exported as nd:vd; the re-imported surfaces carry
+	// keyed references to the registered model glasses, resolvable to the
+	// same nd.
+	for idx, key := range map[int]string{0: "N-BK7", 2: "SF5"} {
+		nd, _ := resolvedNDV(pr, pr.Surfaces[idx].Material)
+		want := 0.0
+		if g, ok := gc.Lookup(key); ok {
+			if d, _, ok2 := glass.NDVD(g); ok2 {
+				want = d
+			}
+		}
+		if math.Abs(nd-want) > 1e-6 {
+			t.Errorf("surface %d: expected nd=%.6f, got %.6f", idx, want, nd)
+		}
 	}
 }

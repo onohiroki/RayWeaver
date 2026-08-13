@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"math"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/types"
@@ -159,5 +160,29 @@ func TestEnhance_EmptyAGF(t *testing.T) {
 	}
 	if got[0].Type != types.GlassTypeModel {
 		t.Errorf("expected type=model (unchanged), got %q", got[0].Type)
+	}
+}
+
+func TestLookupGlassCodeVNames(t *testing.T) {
+	cases := []struct {
+		name  string
+		wantN float64
+		ok    bool
+	}{
+		{"NBK7", 1.5168, true},        // N-BK7, hyphen stripped
+		{"NBK7_SCHOTT", 1.5168, true}, // + manufacturer suffix
+		{"SF5", 1.6727, true},         // plain key
+		{"HLAF2", 1.7432, true},       // H_LAF2, underscore stripped
+		{"NOTAGLASS", 0, false},
+	}
+	for _, c := range cases {
+		nd, _, ok := LookupGlass(c.name)
+		if ok != c.ok {
+			t.Errorf("%s: ok = %v, want %v", c.name, ok, c.ok)
+			continue
+		}
+		if c.ok && math.Abs(nd-c.wantN) > 1e-9 {
+			t.Errorf("%s: nd = %g, want %g", c.name, nd, c.wantN)
+		}
 	}
 }

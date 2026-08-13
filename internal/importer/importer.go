@@ -3,6 +3,7 @@ package importer
 import (
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -147,6 +148,24 @@ func LookupGlass(name string) (nd, vd float64, ok bool) {
 		}
 		if g, ok := commonGlass[alt]; ok {
 			return g.ND, g.VD, true
+		}
+	}
+	// CODE V names carry no separators ("LLAL12" for "L-LAL12") and may carry
+	// a manufacturer suffix ("LLAL12_OHARA"). Match each common glass by its
+	// normalized (hyphen/underscore-stripped, uppercased) key.
+	norm := glass.NormalizeName(name)
+	for key, g := range commonGlass {
+		if glass.NormalizeName(key) == norm {
+			return g.ND, g.VD, true
+		}
+	}
+	if i := strings.LastIndexByte(name, '_'); i > 0 {
+		prefix := name[:i]
+		prefixNorm := glass.NormalizeName(prefix)
+		for key, g := range commonGlass {
+			if glass.NormalizeName(key) == prefixNorm {
+				return g.ND, g.VD, true
+			}
 		}
 	}
 	return 0, 0, false

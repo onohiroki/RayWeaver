@@ -66,10 +66,11 @@ Exemptions (documented, not YAML-specifiable):
 - `--config` is a config *selection*, not a setting.
 - `plot` is a terminal renderer (SVG/PNG); its render flags never flow into pipeline YAML.
 - `import` / `export` read/write a foreign format (not YAML) — no input-YAML settings
-  to overwrite (`export --format zemax|codev|oslo [--config ID]` writes ZMX / SEQ / LEN
-  text to stdout; the config policy: ZEMAX/CODE V export every config — as multi-config
-  `MNUM`/`THIC`/`SDIA` and zoom `ZOOM n`+`ZOO` rows — OSLO exports config 0, `--config`
-  forces a single config in every case).
+  to overwrite (`export --format zemax|codev|oslo [--config ID] [--nd-vd]` writes ZMX /
+  SEQ / LEN text to stdout; the config policy: ZEMAX/CODE V export every config — as
+  multi-config `MNUM`/`THIC`/`SDIA` and zoom `ZOOM n`+`ZOO` rows — OSLO exports config 0,
+  `--config` forces a single config in every case; `--nd-vd` makes CODE V write every
+  glass as its inline `nd:vd` model form).
 - Action/stream flags record their **effects** in the output instead of a setting:
   chief `--clear-aperture*` / `--marginal-rays` / `--preserve-rays` / `--ray-fan` /
   `--fan-plane` / `--fan-rotation` (effects: diameters, `rays[]`, `ray_fan`),

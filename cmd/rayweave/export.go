@@ -22,6 +22,7 @@ func runExport(data []byte) {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	format := fs.String("format", "", "zemax|codev|oslo")
 	configFlag := fs.String("config", "", "select config by id (single-config export)")
+	ndVD := fs.Bool("nd-vd", false, "CODE V: write every glass as its inline nd:vd model form instead of the catalog name")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(os.Args[2:])
 
@@ -44,7 +45,7 @@ func runExport(data []byte) {
 	case "zemax":
 		out, err = exporter.WriteZemax(&input, configs, gc, warn)
 	case "codev":
-		out, err = exporter.WriteCodeV(&input, configs, gc, warn)
+		out, err = exporter.WriteCodeV(&input, configs, gc, warn, *ndVD)
 	case "oslo":
 		idx := 0
 		if len(configs) > 0 {

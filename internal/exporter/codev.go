@@ -14,7 +14,12 @@ import (
 // zoom positions: a "ZOOM n" header plus "ZOO <code> S<n>|<F<n>> <values per
 // position>" rows for every parameter that differs across configs. Fields,
 // wavelengths and the stop come from the first config.
-func WriteCodeV(input *types.Input, configs []int, gc *glass.Catalog, warn Warn) ([]byte, error) {
+//
+// Glass labels follow the CODE V convention "NAME_MANUFACTURER" (uppercase,
+// hyphens/underscores stripped from the glass name; the manufacturer comes
+// from the glass catalog and is omitted when unknown). With inlineNDVD, every
+// glass is written as its "nd:vd" model form instead.
+func WriteCodeV(input *types.Input, configs []int, gc *glass.Catalog, warn Warn, inlineNDVD bool) ([]byte, error) {
 	if len(configs) == 0 {
 		return nil, fmt.Errorf("no configs to export")
 	}
@@ -56,7 +61,7 @@ func WriteCodeV(input *types.Input, configs []int, gc *glass.Catalog, warn Warn)
 	for i := range base {
 		s := base[i]
 		last := i == len(base)-1
-		writeCodeVSurface(&b, &s, i+1, last, i == stopIdx, warn)
+		writeCodeVSurface(&b, &s, i+1, last, i == stopIdx, gc, inlineNDVD, warn)
 	}
 
 	// Zoom-position differences: one ZOO row per parameter that changes across
@@ -173,17 +178,14 @@ func anyVignetting(fields []types.FieldItem) bool {
 
 // writeCodeVSurface writes one compact-mode surface row plus its asphere,
 // decenter, aperture and stop statements. The image plane is written as SI.
-func writeCodeVSurface(b *strings.Builder, s *types.Surface, surfNum int, isImage, isStop bool, warn Warn) {
+func writeCodeVSurface(b *strings.Builder, s *types.Surface, surfNum int, isImage, isStop bool, gc *glass.Catalog, inlineNDVD bool, warn Warn) {
 	prefix := "S"
 	if isImage {
 		prefix = "SI"
 	}
 	line := fmt.Sprintf("%s %s %s", prefix, num(s.Curvature), num(s.Thickness))
-	g := glassOf(s.Material)
-	if g.keyed {
-		line += " " + g.name
-	} else if g.nd > 0 {
-		line += " " + glassName(s.Material, ":")
+	if label := codeVGlassLabel(gc, s.Material, inlineNDVD, warn); label != "" {
+		line += " " + label
 	}
 	b.WriteString(line + "\n")
 
@@ -273,6 +275,78 @@ func codeVDecenterSteps(s *types.Surface, warn Warn) []types.DecenterStep {
 	}
 	warnf(warn, "surface %d: %d decenter steps; CODE V DAR carries one block per surface, exporting the first", s.ID, len(steps))
 	return steps[:1]
+}
+
+// codeVGlassLabel returns the CODE V glass label for a surface material:
+//   - model glasses (no catalog key) use the inline "nd:vd" form;
+//   - keyed glasses use the CODE V convention "NAME_MANUFACTURER" (uppercase,
+//     hyphens/underscores stripped from the glass name; the manufacturer comes
+//     from the glass catalog and is omitted when unknown);
+//   - with inlineNDVD, keyed glasses resolve to the inline "nd:vd" form, which
+//     is the --nd-vd CLI option; an unresolvable key falls back to the CODE V
+//     name with a warning.
+func codeVGlassLabel(gc *glass.Catalog, m types.Material, inlineNDVD bool, warn Warn) string {
+	if m.HasModel() {
+		return glassName(m, ":")
+	}
+	if !m.HasKey() {
+		return ""
+	}
+	if inlineNDVD {
+		if nd, vd, ok := ndvdOf(gc, m); ok {
+			return fmt.Sprintf("%s:%s", num(nd), num(vd))
+		}
+		warnf(warn, "glass %q: nd/vd not resolvable; exporting the CODE V name", m.Key)
+	}
+	return codeVGlassName(gc, m.Key)
+}
+
+// ndvdOf resolves a material's nd/vd: inline for model glasses, through the
+// catalog for keyed ones.
+func ndvdOf(gc *glass.Catalog, m types.Material) (nd, vd float64, ok bool) {
+	if m.HasModel() {
+		if m.ND > 0 {
+			return m.ND, m.VD, true
+		}
+		return 0, 0, false
+	}
+	if gc != nil {
+		if g, found := gc.Lookup(m.Key); found {
+			if nd, vd, ok := glass.NDVD(g); ok {
+				return nd, vd, true
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// codeVGlassName converts a catalog glass key to the CODE V spelling:
+// uppercase, hyphens/underscores removed from the glass name, with the
+// manufacturer (from the catalog) appended after an underscore. When the
+// catalog cannot resolve the key, an already-split "GLASS_MFR" key keeps its
+// suffix so the round trip stays stable; otherwise the separators are
+// stripped.
+func codeVGlassName(gc *glass.Catalog, key string) string {
+	if gc != nil {
+		if g, ok := gc.Lookup(key); ok {
+			name := g.Name
+			if name == "" {
+				name = key
+			}
+			base := glass.NormalizeName(name)
+			if g.Manufacturer != "" {
+				return base + "_" + strings.ToUpper(g.Manufacturer)
+			}
+			return base
+		}
+	}
+	if i := strings.LastIndexByte(key, '_'); i > 0 {
+		prefix, suffix := key[:i], key[i+1:]
+		if suffix != "" && strings.ToUpper(suffix) == suffix {
+			return glass.NormalizeName(prefix) + "_" + suffix
+		}
+	}
+	return glass.NormalizeName(key)
 }
 
 // writeCodeVZoomRows emits the ZOO rows for the configs after the base: one
