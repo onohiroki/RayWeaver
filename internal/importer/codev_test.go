@@ -77,8 +77,8 @@ func TestCodeV_CompactFormat(t *testing.T) {
 	if len(result.Fields) != 6 {
 		t.Errorf("expected 6 fields, got %d", len(result.Fields))
 	}
-	if math.Abs(result.Wavelengths[0].Value-0.5875618) > 1e-10 {
-		t.Errorf("wavelength: expected 0.5875618, got %g", result.Wavelengths[0].Value)
+	if math.Abs(result.Wavelengths[0].Value-0.0005875618) > 1e-12 {
+		t.Errorf("wavelength: expected 0.0005875618 (587.5618 nm), got %g", result.Wavelengths[0].Value)
 	}
 	angles := []float64{0, 30, 45, 60, 90, 100}
 	for i, f := range result.Fields {

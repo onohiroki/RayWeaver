@@ -497,13 +497,15 @@ func joinContinuationLines(rawLines []string) []string {
 	return out
 }
 
+// parseCodeVWavelengths converts a CODE V WL row (wavelengths in nm) into
+// millimetres, the internal ray-trace wavelength unit.
 func parseCodeVWavelengths(args []string, result *ParseResult) {
 	for _, p := range args {
 		val := parseFloat(p)
 		if val > 0 {
 			result.Wavelengths = append(result.Wavelengths, types.WavelengthItem{
 				ID:     len(result.Wavelengths),
-				Value:  val / 1000.0,
+				Value:  val / 1e6,
 				Weight: 1.0,
 			})
 		}

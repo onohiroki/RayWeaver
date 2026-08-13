@@ -35,7 +35,7 @@ func WriteZemax(input *types.Input, configs []int, gc *glass.Catalog, warn Warn)
 	}
 
 	var b strings.Builder
-	stopIdx := resolveStop(baseCfg, input.Chief.StopSurface)
+	stopIdx := resolveStop(baseCfg, input.Chief)
 
 	// Build the ZEMAX surface sequence: a COORDBRK surface precedes every
 	// decentered surface. Each entry gets a sequential ZEMAX surface number
@@ -71,7 +71,7 @@ func WriteZemax(input *types.Input, configs []int, gc *glass.Catalog, warn Warn)
 		b.WriteString("NOTE 0 " + strings.TrimSpace(input.Metadata.Notes) + "\n")
 	}
 	b.WriteString("UNIT MM\n")
-	b.WriteString(fmt.Sprintf("FTYP %d\n", int(ftyp)))
+	b.WriteString(fmt.Sprintf("FTYP %d\n", zemaxFTYP(ftyp)))
 
 	// Fields: XFLD/YFLD are slot-aligned per field; the interpretation is
 	// given by FTYP (0 = angle deg, 1 = object height, 2 = image height).
@@ -80,7 +80,7 @@ func WriteZemax(input *types.Input, configs []int, gc *glass.Catalog, warn Warn)
 		f := &baseCfg.Fields[i]
 		x, y := fieldXY(f)
 		if classifyField(f) != ftyp {
-			warnf(warn, "field %d type does not match the dominant type; exported under FTYP %d", i, int(ftyp))
+			warnf(warn, "field %d type does not match the dominant type; exported under FTYP %d (%s)", i, zemaxFTYP(ftyp), ftyp)
 		}
 		xf = append(xf, num(x))
 		yf = append(yf, num(y))

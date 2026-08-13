@@ -63,6 +63,31 @@ const (
 	fieldObjectHeight
 )
 
+func (c fieldClass) String() string {
+	switch c {
+	case fieldImageHeight:
+		return "image height"
+	case fieldObjectHeight:
+		return "object height"
+	default:
+		return "angle"
+	}
+}
+
+// zemaxFTYP maps a field class to the ZEMAX system field type (FTYP) code:
+// 0 = angle (deg), 1 = object height, 2 = image height. The codes are not the
+// same as the fieldClass enum values, so the mapping is explicit.
+func zemaxFTYP(c fieldClass) int {
+	switch c {
+	case fieldObjectHeight:
+		return 1
+	case fieldImageHeight:
+		return 2
+	default:
+		return 0
+	}
+}
+
 func classifyField(f *types.FieldItem) fieldClass {
 	switch {
 	case f.ImageHeight > 0:
@@ -96,8 +121,8 @@ func dominantFieldClass(fields []types.FieldItem, w Warn) fieldClass {
 }
 
 // resolveStop returns the stop surface index (into the surfaces slice) for a
-// config, or -1 when no stop is declared.
-func resolveStop(cfg *types.Config, chiefStop int) int {
+// config, or -1 when no stop is declared. The chief section is optional.
+func resolveStop(cfg *types.Config, chief *types.ChiefInput) int {
 	if cfg != nil {
 		for _, rp := range cfg.RayPaths {
 			if rp.StopSurface > 0 {
@@ -105,8 +130,8 @@ func resolveStop(cfg *types.Config, chiefStop int) int {
 			}
 		}
 	}
-	if chiefStop > 0 && cfg != nil {
-		return surfaceIndex(cfg.Surfaces, chiefStop)
+	if chief != nil && chief.StopSurface > 0 && cfg != nil {
+		return surfaceIndex(cfg.Surfaces, chief.StopSurface)
 	}
 	return -1
 }

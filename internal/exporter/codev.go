@@ -30,7 +30,7 @@ func WriteCodeV(input *types.Input, configs []int, gc *glass.Catalog, warn Warn,
 	}
 
 	var b strings.Builder
-	stopIdx := resolveStop(baseCfg, input.Chief.StopSurface)
+	stopIdx := resolveStop(baseCfg, input.Chief)
 	ftyp := dominantFieldClass(baseCfg.Fields, warn)
 
 	b.WriteString("RDM N;LEN \"RayWeaver export\"\n")

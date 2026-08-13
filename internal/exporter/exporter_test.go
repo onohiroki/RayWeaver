@@ -508,3 +508,66 @@ func TestCodeVInlineNDVDRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+func TestZemaxImageHeightFieldsRoundTrip(t *testing.T) {
+	// Regression: the fieldClass enum values were written as the ZEMAX FTYP
+	// code, so image-height fields (class 1) came out as FTYP 1 (object
+	// height) and lost their values. FTYP 0/1/2 are angle/object/image height.
+	in := testInput()
+	in.Configs[0].Fields = []types.FieldItem{
+		{ID: 0, AngleDeg: 0, Weight: 1},
+		{ID: 1, ImageHeight: 15.141, Weight: 1},
+		{ID: 2, ImageHeight: 21.63, Weight: 1},
+	}
+	pr := roundTrip(t, "zemax", in, []int{0}, nil)
+	if len(pr.Fields) != 3 {
+		t.Fatalf("expected 3 fields, got %d", len(pr.Fields))
+	}
+	want := []float64{15.141, 21.63}
+	for i, ih := range want {
+		if math.Abs(pr.Fields[i+1].ImageHeight-ih) > 1e-9 {
+			t.Errorf("field %d image_height: expected %g, got %g", i+1, ih, pr.Fields[i+1].ImageHeight)
+		}
+	}
+}
+
+func TestZemaxFTYPCode(t *testing.T) {
+	cases := []struct {
+		c    fieldClass
+		want int
+	}{
+		{fieldAngle, 0},
+		{fieldObjectHeight, 1},
+		{fieldImageHeight, 2},
+	}
+	for _, c := range cases {
+		if got := zemaxFTYP(c.c); got != c.want {
+			t.Errorf("zemaxFTYP(%v) = %d, want %d", c.c, got, c.want)
+		}
+	}
+}
+
+func TestExportNoChief(t *testing.T) {
+	// Regression: exporting a config without a chief section (nil pointer)
+	// used to panic in the stop resolution.
+	in := testInput()
+	in.Chief = nil
+	for _, format := range []string{"zemax", "codev", "oslo"} {
+		t.Run(format, func(t *testing.T) {
+			switch format {
+			case "zemax":
+				if _, err := WriteZemax(in, []int{0}, nil, nil); err != nil {
+					t.Fatalf("WriteZemax: %v", err)
+				}
+			case "codev":
+				if _, err := WriteCodeV(in, []int{0}, nil, nil, false); err != nil {
+					t.Fatalf("WriteCodeV: %v", err)
+				}
+			case "oslo":
+				if _, err := WriteOslo(in, 0, nil, nil); err != nil {
+					t.Fatalf("WriteOslo: %v", err)
+				}
+			}
+		})
+	}
+}

@@ -51,7 +51,7 @@ func WriteOslo(input *types.Input, configIdx int, gc *glass.Catalog, warn Warn) 
 	fmt.Fprintf(&b, "TH   %s\n", num(objDist))
 	fmt.Fprintf(&b, "AP   %s\n", num(objDist/2))
 
-	stopIdx := resolveStop(cfg, input.Chief.StopSurface)
+	stopIdx := resolveStop(cfg, input.Chief)
 	for i := range base {
 		s := base[i]
 		b.WriteString("NXT\n")
