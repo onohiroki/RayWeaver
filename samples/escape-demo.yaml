@@ -177,7 +177,7 @@ configs:
         - kind: wavefront_astigmatism
           field: 1
           wavelength: 0.0004861
-          weight: 1000.0
+          weight: 2000.0
           target: 0
         - kind: spot_rms
           field: 1
@@ -198,7 +198,7 @@ configs:
         - kind: wavefront_astigmatism
           field: 1
           wavelength: 0.0005876
-          weight: 1000.0
+          weight: 2000.0
           target: 0
         - kind: spot_rms
           field: 1
@@ -219,7 +219,7 @@ configs:
         - kind: wavefront_astigmatism
           field: 1
           wavelength: 0.0006563
-          weight: 1000.0
+          weight: 2000.0
           target: 0
         - kind: spot_rms_worst
           field: 2

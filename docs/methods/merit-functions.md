@@ -143,9 +143,9 @@ weight up to 1000 still degraded the 24° spot in DLS (frozen-pupil evaluation
 diverging from the chief-measured spot). The 24° residual is better controlled
 through its spot terms (`spot_rms_worst` / `spot_rms_weighted` /
 `spot_ee_radius` raised to weight 1.0) than through the wavefront residual. The
-16° `wavefront_astigmatism` term (weight 1000) is safe: a DLS re-optimisation
-of the escape best lifts the 16° Strehl from 0.06 to 0.15 and the 24° Strehl
-from 0.77 to 0.91 while keeping 0° near-diffraction-limited.
+16° `wavefront_astigmatism` term (weight 2000) is safe: a DLS re-optimisation
+of the escape best lifts the 16° Strehl from 0.06 to ~0.15 and the 24° Strehl
+from 0.77 to ~0.92 while keeping 0° near-diffraction-limited.
 
 ### distortion_pct
 
