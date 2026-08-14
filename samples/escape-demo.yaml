@@ -1,3 +1,15 @@
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    Input for samples/escape-demo.bash (default lens).
+    Escape-function global optimisation of a degraded US2645157 triplet:
+    3 fields (0/16/24 deg), d/F/C wavelengths, 4 curvature variables
+    (s1/s3/s6/s7), DLS max_iter 200 with 4 escape cycles / 3 workers.
+    Feed to `rayweave escape` to get escape_result.minima[]; the bash script
+    wraps it with --verbose + JSONL progress.
+
 glass_catalog:
   entries:
     - name: "SK18"

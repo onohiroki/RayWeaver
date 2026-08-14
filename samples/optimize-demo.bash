@@ -14,21 +14,27 @@ set -euo pipefail
 #                          -> optimize-demo-spotrms.yaml
 #   2. optimize off-axis : DLS with the off-axis spot merit kinds
 #                          -> optimize-demo-offaxis.yaml
-#   3. chief         : re-evaluate the RMS spot radius per field, before /
-#                      spot_rms / off-axis, and write optimize-demo-result.txt
-#   4. breakdown     : per-kind final values of the off-axis merit, extracted
+#   3. vignette      : settle auto_aperture diameters + per-field vignetting
+#                      on the off-axis optimum
+#                      -> optimize-demo-vignette.yaml
+#   4. chief         : re-evaluate the RMS spot radius per field, before /
+#                      spot_rms / off-axis / vignette, and write
+#                      optimize-demo-result.txt
+#   5. breakdown     : per-kind final values of the off-axis merit, extracted
 #                      from the optimize --log breakdown event
 #
 # How to read the result
-#   - RMS before/spot_rms/off-axis is the geometric RMS spot radius (mm) per
-#     field, measured by `chief` on the degraded start, the spot_rms-only
-#     optimum and the off-axis optimum (identical pupil-grid sampling, so
-#     apples-to-apples).
+#   - RMS before/spot_rms/off-axis/vignette is the geometric RMS spot radius
+#     (mm) per field, measured by `chief` on the degraded start, the
+#     spot_rms-only optimum, the off-axis optimum and the off-axis optimum
+#     after `vignette --iterations 3 --min-glass-path 0.5` (identical
+#     pupil-grid sampling, so apples-to-apples).
 #   - The off-axis merit replaces spot_rms on the 16° field with
 #     spot_rms_t/s/worst and adds spot_rms_worst/weighted/ee_radius on the
 #     24° field, so the off-axis fields are corrected against coma/astigmatism
 #     and energy concentration, not just the rotationally-symmetric RMS.
-#   - Pass gate: on-axis (f0) RMS < 0.3 mm after optimisation.
+#   - Pass gate: on-axis (f0) RMS < 0.3 mm after optimisation (checked on the
+#     vignetted lens).
 # =============================================================================
 
 # Resolve the script's own directory so the demo runs from any CWD
@@ -43,6 +49,7 @@ OPT_SPOTRMS="$OUTDIR/optimize-demo-spotrms.yaml"
 OPT_OFFAX="$OUTDIR/optimize-demo-offaxis.yaml"
 LOG_SPOTRMS="$OUTDIR/optimize-demo-spotrms.log"
 LOG_OFFAX="$OUTDIR/optimize-demo-offaxis.log"
+VIGN_YAML="$OUTDIR/optimize-demo-vignette.yaml"
 RESULT_FILE="$OUTDIR/optimize-demo-result.txt"
 
 # CLI options
@@ -57,13 +64,13 @@ done
 # Clean-only mode: remove generated files and exit
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
-  rm -f "$OPT_SPOTRMS" "$OPT_OFFAX" "$LOG_SPOTRMS" "$LOG_OFFAX" "$RESULT_FILE"
-  rm -f "$OUTDIR/optimize-demo-init.png" "$OUTDIR/optimize-demo-offaxis.png"
+  rm -f "$OPT_SPOTRMS" "$OPT_OFFAX" "$VIGN_YAML" "$LOG_SPOTRMS" "$LOG_OFFAX" "$RESULT_FILE"
+  rm -f "$OUTDIR/optimize-demo-init.png" "$OUTDIR/optimize-demo-offaxis.png" "$OUTDIR/optimize-demo-vignette.png"
   # legacy artifact names from the pre-rename demo (old/new)
   rm -f "$OUTDIR/optimize-demo-old.yaml" "$OUTDIR/optimize-demo-old.log" "$OUTDIR/optimize-demo-old.png"
   rm -f "$OUTDIR/optimize-demo-new.yaml" "$OUTDIR/optimize-demo-new.log" "$OUTDIR/optimize-demo-new.png"
   rm -f "$OUTDIR/optimize-demo-result.yaml" "$OUTDIR/optimize-demo-opt.png"
-  echo "  Removed: PNGs, spotrms/offaxis YAML+logs, $RESULT_FILE"
+  echo "  Removed: PNGs, spotrms/offaxis/vignette YAML+logs, $RESULT_FILE"
   exit 0
 fi
 
@@ -87,10 +94,19 @@ append_interpretation() {
 cat >> "$RESULT_FILE" <<'EOF'
 
 === How to interpret this result ===
-- "RMS before / spot_rms / off-axis" is the geometric RMS spot radius (mm) of
-  the chief-ray pupil grid: before optimisation, after the spot_rms-only merit
-  (us2645157-degraded-spotrms.yaml) and after the off-axis-merit
-  (us2645157-degraded.yaml). Same pupil-grid sampling for both optima.
+- "RMS before / spot_rms / off-axis / vignette" is the geometric RMS spot
+  radius (mm) of the chief-ray pupil grid: before optimisation, after the
+  spot_rms-only merit (us2645157-degraded-spotrms.yaml), after the off-axis
+  merit (us2645157-degraded.yaml), and after the off-axis optimum is passed
+  through `vignette --iterations 3 --min-glass-path 0.5`
+  (optimize-demo-vignette.yaml). Same pupil-grid sampling for every phase.
+- The vignette step re-sets auto_aperture surface diameters to the beam
+  envelope and settles the per-field vignetting (glass-path edge-thickness
+  >= 0.5 mm). It leaves the curvatures untouched, so the vignette column
+  matches the off-axis column on-axis; off-axis the per-field vignetting
+  factors clip the outer pupil rays, so a strongly vignetted field (here
+  24°: vig=0.741) shows a markedly smaller RMS on the surviving bundle —
+  that is the beam the sensor actually sees.
 - f0/f1/f2 = 0/16/24 deg fields. The 16° field is corrected against
   tangential/sagittal (spot_rms_t/s) and its worst axis (spot_rms_worst); the
   24° field adds energy-concentration terms (spot_rms_weighted, spot_ee_radius).
@@ -103,7 +119,8 @@ cat >> "$RESULT_FILE" <<'EOF'
 - The "off-axis-kind final values" section is the per-term breakdown of the
   off-axis merit at the optimum (from optimize --log): value = sqrt(contribution /
   (weight * fieldWeight * wavWeight)), target 0.
-- Pass gate: on-axis (f0) RMS < 0.3 mm after optimisation.
+- Pass gate: on-axis (f0) RMS < 0.3 mm after optimisation, checked on the
+  vignetted lens (optimize-demo-vignette.yaml).
 - If "Optimization failed" appears, DLS did not converge; try more
   iterations or relax the merit weights in the YAML.
 EOF
@@ -120,7 +137,16 @@ echo
 echo "=== DLS optimisation (off-axis spot merit kinds) ==="
 $RAYWEAVE optimize --verbose --log "$LOG_OFFAX" < "$OFFAX_YAML" > "$OPT_OFFAX"
 echo
-
+echo "=== Vignette: settle auto_aperture diameters + per-field vignetting ==="
+$RAYWEAVE vignette --iterations 3 --min-glass-path 0.5 < "$OPT_OFFAX" > "$VIGN_YAML"
+echo "Written: $VIGN_YAML"
+echo "  auto_aperture diameter changes (before -> after):"
+$RAYWEAVE query --each 'vignetting_result.diameters[]:surface_id,before,after' \
+  --printf '    s%-2d  %8.4f -> %8.4f' < "$VIGN_YAML"
+echo "  per-field vignetting (1.0 = no vignetting):"
+$RAYWEAVE query --each 'vignetting_result.fields[]:field_index,angle_deg,vignetting' \
+  --printf '    f%d  %5.1f deg  vig=%5.3f' < "$VIGN_YAML"
+echo
 echo "--- PNG diagrams ---"
 echo "=== Initial diagram ==="
 $RAYWEAVE chief --clear-aperture --ray-fan < "$OFFAX_YAML" | $RAYWEAVE chief --marginal-rays \
@@ -129,11 +155,11 @@ $RAYWEAVE chief --clear-aperture --ray-fan < "$OFFAX_YAML" | $RAYWEAVE chief --m
 echo "Written: $OUTDIR/optimize-demo-init.png"
 echo
 
-echo "=== Optimized diagram (off-axis merit) ==="
-$RAYWEAVE chief --clear-aperture --ray-fan < "$OPT_OFFAX" | $RAYWEAVE chief --marginal-rays \
+echo "=== Optimized diagram (off-axis merit + vignette) ==="
+$RAYWEAVE chief --clear-aperture --ray-fan < "$VIGN_YAML" | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
-  | $RAYWEAVE plot -o "$OUTDIR/optimize-demo-offaxis.png" >/dev/null
-echo "Written: $OUTDIR/optimize-demo-offaxis.png"
+  | $RAYWEAVE plot -o "$OUTDIR/optimize-demo-vignette.png" >/dev/null
+echo "Written: $OUTDIR/optimize-demo-vignette.png"
 echo
 
 # ── Spot RMS comparison (chief-measured, same sampling for both optima) ──
@@ -144,12 +170,13 @@ rms_field() {
 }
 {
   echo "=== Spot RMS Comparison (chief measurement, mm) ==="
-  printf "  %-8s %6s  %10s  %10s  %10s  %10s\n" "Phase" "Field" "before" "spot_rms" "off-axis" "rms->off"
-  printf "  %-8s %6s  %10s  %10s  %10s  %10s\n" "-----" "-----" "--------" "--------" "--------" "---------"
+  printf "  %-8s %6s  %10s  %10s  %10s  %10s  %10s\n" "Phase" "Field" "before" "spot_rms" "off-axis" "vignette" "rms->off"
+  printf "  %-8s %6s  %10s  %10s  %10s  %10s  %10s\n" "-----" "-----" "--------" "--------" "--------" "--------" "---------"
   for fi in 0 1 2; do
     rms_before=$(rms_field "$OFFAX_YAML" "$fi")
     rms_spotrms=$(rms_field "$OPT_SPOTRMS" "$fi")
     rms_offax=$(rms_field "$OPT_OFFAX" "$fi")
+    rms_vignette=$(rms_field "$VIGN_YAML" "$fi")
     delta=""
     if [ "$rms_spotrms" != "-1" ] && [ "$rms_offax" != "-1" ]; then
       delta=$(printf "%.1f%%" "$(echo "scale=3; ($rms_spotrms-$rms_offax)/$rms_spotrms*100" | bc 2>/dev/null || echo 0)")
@@ -162,7 +189,7 @@ rms_field() {
         mark="   ✗"
       fi
     fi
-    printf "  %-8s %6s  %10.4f  %10.4f  %10.4f  %10s%s\n" "optimize" "f$fi" "$rms_before" "$rms_spotrms" "$rms_offax" "$delta" "$mark"
+    printf "  %-8s %6s  %10.4f  %10.4f  %10.4f  %10.4f  %10s%s\n" "optimize" "f$fi" "$rms_before" "$rms_spotrms" "$rms_offax" "$rms_vignette" "$delta" "$mark"
   done
   echo
 } | tee "$RESULT_FILE"
@@ -209,10 +236,10 @@ breakdown_value() {
   echo
 } | tee -a "$RESULT_FILE"
 
-# ── On-axis RMS threshold check ──
+# ── On-axis RMS threshold check (on the vignetted lens) ──
 THRESHOLD=0.3
-printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this)\n"
-  rms_onaxis=$(rms_field "$OPT_OFFAX" 0)
+printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this; checked on the vignetted lens)\n"
+  rms_onaxis=$(rms_field "$VIGN_YAML" 0)
 if [ "$rms_onaxis" != "-1" ] && $RAYWEAVE query --gate "rms >= $THRESHOLD" --set rms="$rms_onaxis" < /dev/null > /dev/null; then
   msg="  >>> Optimization failed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
   echo "$msg" | tee -a "$RESULT_FILE"
