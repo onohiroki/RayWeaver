@@ -1,9 +1,18 @@
-# Vignette demo input: the double-Gauss start system
-# (samples/doublegauss-init.yaml, f/3.1 50 mm — the fixed stop D=15.8 at
-# surface 7 gives EFL 49.7 mm -> f/3.14) with auto_aperture: true on the
-# real lens surfaces so `rayweave vignette` can re-size their diameters to the
-# surviving-beam envelope. Surface 7 (diameter 15.8, the aperture) and surface
-# 14 (image plane) are fixed (auto_aperture: false) and never re-sized.
+# Vignette demo input: the OPTIMIZED double-Gauss with overspecified
+# (inflated) effective diameters.
+#
+# The base lens is samples/doublegauss-result.yaml — the fully DLS-optimized
+# 6-element 50 mm f/2.8 double-Gauss (on-axis spot RMS ~0.06 mm, so the rays
+# come to a tight focus). Every auto_aperture: true surface is deliberately
+# inflated to a uniform 36 mm diameter so the "before" state reads as wasteful
+# glass: the beam only fills the center of each element. `rayweave vignette`
+# then shrinks each auto_aperture surface to its surviving-beam envelope
+# (2x extent + margin), settles per-field vignetting, and applies the
+# min_glass_path (edge-thickness >= 0.5 mm) constraint, so the "after" state
+# has just-right effective apertures with manufacturable edge thickness.
+#
+# Surface 7 (fixed aperture D=17.5, the f/2.8 stop) and surface 14 (image
+# plane) are fixed (auto_aperture: false) and never re-sized.
 #
 # No chief.stop_surface is set: the entrance/exit pupils are derived from the
 # chief-ray crossings (dynamic pupil).
@@ -33,17 +42,109 @@ configs:
       weight: 0
       active: true
       surfaces:
-        - {id: 1, type: sphere, radius: 60.606061, thickness: 3.5, material: {key: SK18}, diameter: 36.0, auto_aperture: true}
-        - {id: 2, type: sphere, radius: -454.545455, thickness: 0.5, material: AIR, diameter: 36.0, auto_aperture: true}
-        - {id: 3, type: sphere, radius: 121.212121, thickness: 1.2, material: {key: SF12}, diameter: 28.0, auto_aperture: true}
-        - {id: 4, type: sphere, radius: 45.454545, thickness: 3.0, material: AIR, diameter: 28.0, auto_aperture: true}
-        - {id: 5, type: sphere, radius: 54.545455, thickness: 2.5, material: {key: SK18}, diameter: 26.0, auto_aperture: true}
-        - {id: 6, type: sphere, radius: 181.818182, thickness: 3.0, material: AIR, diameter: 26.0, auto_aperture: true}
-        - {id: 7, type: sphere, thickness: 3.0, material: AIR, diameter: 15.8}
-        - {id: 8, type: sphere, radius: -181.818182, thickness: 2.5, material: {key: SK18}, diameter: 26.0, auto_aperture: true}
-        - {id: 9, type: sphere, radius: -54.545455, thickness: 3.0, material: AIR, diameter: 26.0, auto_aperture: true}
-        - {id: 10, type: sphere, radius: -45.454545, thickness: 1.2, material: {key: SF12}, diameter: 28.0, auto_aperture: true}
-        - {id: 11, type: sphere, radius: -121.212121, thickness: 0.5, material: AIR, diameter: 28.0, auto_aperture: true}
-        - {id: 12, type: sphere, radius: 454.545455, thickness: 3.5, material: {key: SK18}, diameter: 36.0, auto_aperture: true}
-        - {id: 13, type: sphere, radius: -60.606061, thickness: 42.0, material: AIR, diameter: 36.0, auto_aperture: true}
-        - {id: 14, type: sphere, thickness: 0.0, material: AIR, diameter: 44.0}
+        - id: 1
+          type: sphere
+          radius: 33.56596215098807
+          thickness: 3.9606080741488947
+          material:
+            nd: 1.6479054045957615
+            vd: 55.99968862378612
+          diameter: 36.0
+          auto_aperture: true
+        - id: 2
+          type: sphere
+          radius: 241.80593748187223
+          thickness: 1.1431075710335505
+          material: AIR
+          diameter: 36.0
+          auto_aperture: true
+        - id: 3
+          type: sphere
+          radius: -97.84670882017936
+          thickness: 1.6411303452513841
+          material:
+            nd: 1.6447460448732198
+            vd: 33.370063241967586
+          diameter: 36.0
+          auto_aperture: true
+        - id: 4
+          type: sphere
+          radius: 55.99580673968172
+          thickness: 3.5746475721623603
+          material: AIR
+          diameter: 36.0
+          auto_aperture: true
+        - id: 5
+          type: sphere
+          radius: 53.343957716370966
+          thickness: 2.8998786681153645
+          material:
+            nd: 1.6479054045957615
+            vd: 55.99968862378612
+          diameter: 36.0
+          auto_aperture: true
+        - id: 6
+          type: sphere
+          radius: 89.78008756427992
+          thickness: 3.697084046177597
+          material: AIR
+          diameter: 36.0
+          auto_aperture: true
+        - id: 7
+          type: sphere
+          thickness: 3.0
+          material: AIR
+          diameter: 17.50278054973999
+        - id: 8
+          type: sphere
+          radius: -79.5392983239215
+          thickness: 3.013299663903782
+          material:
+            nd: 1.6479054045957615
+            vd: 55.99968862378612
+          diameter: 36.0
+          auto_aperture: true
+        - id: 9
+          type: sphere
+          radius: -67.94565959206305
+          thickness: 3.330893754449909
+          material: AIR
+          diameter: 36.0
+          auto_aperture: true
+        - id: 10
+          type: sphere
+          radius: -70.16508667678417
+          thickness: 1.7808286650571612
+          material:
+            nd: 1.6447460448732198
+            vd: 33.370063241967586
+          diameter: 36.0
+          auto_aperture: true
+        - id: 11
+          type: sphere
+          radius: -58.40120797313765
+          thickness: 0.5
+          material: AIR
+          diameter: 36.0
+          auto_aperture: true
+        - id: 12
+          type: sphere
+          radius: 123.0787597276495
+          thickness: 3.864591699904343
+          material:
+            nd: 1.6479054045957615
+            vd: 55.99968862378612
+          diameter: 36.0
+          auto_aperture: true
+        - id: 13
+          type: sphere
+          radius: -68.94881899484034
+          thickness: 40.51095990998758
+          material: AIR
+          diameter: 36.0
+          auto_aperture: true
+        - id: 14
+          type: sphere
+          thickness: 0.0
+          material: AIR
+          diameter: 44.0
