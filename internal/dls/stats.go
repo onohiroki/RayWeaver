@@ -1,7 +1,7 @@
 package dls
 
 import (
-    "math"
+	"math"
 
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -10,10 +10,19 @@ type IPoint struct {
 	X, Y float64
 	OPL  float64
 	OK   bool
+	// Area is the pupil-cell area weight (∝ r/R for the polar grid): the
+	// fraction of the entrance-pupil flux each grid ray represents.
+	Area float64
+	// Intensity is the mean transmitted s/p intensity of the ray
+	// ((IntensityS+IntensityP)/2), capturing Fresnel/TMM reflection losses.
+	Intensity float64
 }
 
 type pupilPoint struct {
 	X, Y float64
+	// area is the pupil-cell area weight (∝ r/R), the fraction of the
+	// entrance-pupil flux the ray represents, set by generatePupilGrid.
+	area float64
 }
 
 func Centroid(points []IPoint) (cx, cy float64, count int) {

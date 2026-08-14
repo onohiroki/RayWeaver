@@ -483,8 +483,11 @@ type MeritTerm struct {
 	Wavelength  float64 `yaml:"wavelength"`
 	Wavelength2 float64 `yaml:"wavelength2,omitempty"`
 	Target      float64 `yaml:"target,omitempty"`
-	SurfaceSet  []int   `yaml:"surface_set"`
-	Weight      float64 `yaml:"weight"`
+	// Fraction is the encircled-energy fraction for the spot_ee_radius kind
+	// (0..1, default 0.8 = EE80). Ignored by other kinds.
+	Fraction   float64 `yaml:"fraction,omitempty"`
+	SurfaceSet []int   `yaml:"surface_set"`
+	Weight     float64 `yaml:"weight"`
 }
 
 type MeritFunction struct {

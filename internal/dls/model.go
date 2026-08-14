@@ -1,6 +1,13 @@
 package dls
 
-const MeritSpotRMS = "spot_rms"
+const (
+	MeritSpotRMS      = "spot_rms"
+	MeritSpotRMST     = "spot_rms_t"
+	MeritSpotRMSS     = "spot_rms_s"
+	MeritSpotRMSWorst = "spot_rms_worst"
+	MeritSpotWeighted = "spot_rms_weighted"
+	MeritSpotEERadius = "spot_ee_radius"
+)
 
 // StatusInterrupted is the solver status returned when the Stop channel is
 // closed mid-solve: the best point found so far is returned instead of a

@@ -136,6 +136,10 @@ A `CONF` operand selects which config's merit terms are active for each rule.
 | Kind | Quantity minimized |
 |---|---|
 | `spot_rms` | RMS spot radius on the reference surface |
+| `spot_rms_t` / `spot_rms_s` | flux-weighted tangential / sagittal RMS spot (off-axis decomposition) |
+| `spot_rms_worst` | `max`(tangential RMS, sagittal RMS) |
+| `spot_rms_weighted` | flux-weighted (pupil-cell-area × intensity) RMS spot |
+| `spot_ee_radius` | encircled-energy radius (`fraction` on the term, default 0.8) |
 | `opd_rms` | RMS optical path difference across the pupil |
 | `distortion_pct` | percent distortion (chief-ray vs paraxial height) |
 | `lateral_color` | lateral colour (chief-ray height difference between two wavelengths) |
@@ -156,6 +160,20 @@ coefficient values match `wavefront_result.fields[].paraboloid`. The pupil grid
 follows `optimization.num_rays` and `optimization.aperture_margin`, and — like
 every grid term — is centred on the config's per-iteration frozen pupil, so the
 DLS Jacobian stays consistent. A degenerate fit returns merit `1e6`.
+
+The off-axis spot kinds (`spot_rms_t`/`_s`/`_worst`/`spot_rms_weighted`/
+`spot_ee_radius`) address the blind spot of the rotationally symmetric,
+uniformly-weighted `spot_rms`: it cannot separate coma (a tangential flare) from
+astigmatism, is dominated by a sparse comatic tail, and ignores vignetting and
+Fresnel reflection losses. Each grid ray is weighted by its pupil-cell area ×
+mean transmitted intensity (see `docs/methods/merit-functions.md`), the
+deviation is decomposed into the field's tangential axis (the image-plane
+azimuth of `fields[].direction`, default Y) and the perpendicular sagittal axis,
+and the five kinds target the tangential/sagittal/worst RMS, the flux-weighted
+RMS, and the encircled-energy radius respectively. All five contribute
+`(value − target)²`; they reuse the same frozen-pupil grid, so the DLS Jacobian
+remains consistent. These kinds are the reference implementation of the
+area-weighted spot statistics also reported by `chief`/`vignette`.
 
 ### Constraints
 

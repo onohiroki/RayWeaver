@@ -15,6 +15,11 @@ import (
 
 const (
 	MeritSpotRMS           = "spot_rms"
+	MeritSpotRMST          = "spot_rms_t"
+	MeritSpotRMSS          = "spot_rms_s"
+	MeritSpotRMSWorst      = "spot_rms_worst"
+	MeritSpotWeightedRMS   = "spot_rms_weighted"
+	MeritSpotEERadius      = "spot_ee_radius"
 	MeritDistortionPct     = "distortion_pct"
 	MeritLateralColor      = "lateral_color"
 	MeritLongitudinalColor = "longitudinal_color"
@@ -55,6 +60,9 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		}
 		return ComputeOPDRMS(points)
 	default:
+		if isGridKind(term.kind) {
+			return o.evaluateGridKind(cfg, term, surfaces, gc)
+		}
 		if isWavefrontKind(term.kind) {
 			return o.evaluateWavefrontTerm(cfg, term, surfaces, gc)
 		}
@@ -148,15 +156,22 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 // wavefront paraboloid kinds require an Optimizer to trace the grid and return
 // 0 when o is nil.
 func EvaluateMeritKind(kind string, term MeritTerm, surfaces []types.Surface, gc *glass.Catalog, o *Optimizer) float64 {
-	if kind == MeritOPDRMS || isWavefrontKind(kind) {
+	if kind == MeritOPDRMS || isWavefrontKind(kind) || isGridKind(kind) {
 		if o == nil {
 			return 0
 		}
 		cfg := o.primaryConfig()
+		dx, dy := 0.0, 1.0
+		if len(term.FieldDir) >= 2 {
+			dx, dy = normalizeDir(term.FieldDir)
+		}
 		mt := meritTerm{
 			kind:       kind,
 			fieldAngle: term.FieldAngle,
+			fieldDirX:  dx,
+			fieldDirY:  dy,
 			wavelength: term.Wavelength,
+			fraction:   term.Fraction,
 		}
 		return o.evaluateKindTerm(cfg, &mt, surfaces, gc)
 	}

@@ -88,6 +88,7 @@ type MeritTerm struct {
 	WavWeight   float64
 	Weight      float64
 	Target      float64
+	Fraction    float64
 }
 
 type Result struct {
@@ -143,6 +144,13 @@ type meritTerm struct {
 	wavWeight      float64
 	weight         float64
 	target         float64
+	// fieldDirX/fieldDirY is the field's image-plane azimuth unit vector,
+	// used by the tangential/sagittal spot kinds (spot_rms_t / _s / _worst).
+	// Defaults to the Y axis (0, 1).
+	fieldDirX float64
+	fieldDirY float64
+	// fraction is the encircled-energy fraction for spot_ee_radius (default 0.8).
+	fraction float64
 }
 
 // resolvePupilZ returns the pupil Z used to centre grid traces for a config:
@@ -176,6 +184,28 @@ func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {
 		}
 	}
 	return out
+}
+
+// normalizeDir returns the unit vector of a non-degenerate 2D direction,
+// falling back to the Y axis.
+func normalizeDir(dir []float64) (float64, float64) {
+	dx, dy := dir[0], dir[1]
+	norm := math.Hypot(dx, dy)
+	if norm == 0 {
+		return 0, 1
+	}
+	return dx / norm, dy / norm
+}
+
+// fieldDir resolves a field's image-plane azimuth to a unit vector. It returns
+// ok=false when the field carries no explicit direction (the caller keeps the
+// Y-axis default).
+func fieldDir(dir []float64) (float64, float64, bool) {
+	if len(dir) < 2 {
+		return 0, 1, false
+	}
+	dx, dy := normalizeDir(dir)
+	return dx, dy, true
 }
 
 // UpdatePupils re-derives each config's dynamic entrance pupil at the current
@@ -258,15 +288,22 @@ func NewOptimizer(cfg Config) *Optimizer {
 		constraints: cfg.Constraints,
 	}
 	for _, t := range cfg.MeritTerms {
+		dx, dy := 0.0, 1.0
+		if len(t.FieldDir) >= 2 {
+			dx, dy = normalizeDir(t.FieldDir)
+		}
 		c.meritTerms = append(c.meritTerms, meritTerm{
 			kind:        t.Kind,
 			fieldAngle:  t.FieldAngle,
+			fieldDirX:   dx,
+			fieldDirY:   dy,
 			fieldWeight: t.FieldWeight,
 			wavelength:  t.Wavelength,
 			wavelength2: t.Wavelength2,
 			wavWeight:   t.WavWeight,
 			weight:      t.Weight,
 			target:      t.Target,
+			fraction:    t.Fraction,
 		})
 	}
 	variables := make([]Variable, len(cfg.Variables))
@@ -361,6 +398,9 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 		wavelength2: t.Wavelength2,
 		weight:      t.Weight,
 		target:      t.Target,
+		fraction:    t.Fraction,
+		fieldDirX:   0,
+		fieldDirY:   1,
 		fieldWeight: 1.0,
 		wavWeight:   1.0,
 	}
@@ -374,6 +414,9 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 			}
 			if f.Weight > 0 {
 				mt.fieldWeight = f.Weight
+			}
+			if dx, dy, ok := fieldDir(f.Direction); ok {
+				mt.fieldDirX, mt.fieldDirY = dx, dy
 			}
 			break
 		}
@@ -727,6 +770,46 @@ func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, 
 	return points
 }
 
+// isGridKind reports whether the merit kind is evaluated from the pupil-grid
+// spot statistics (rather than a chief-ray/paraxial/Seidel/wavefront kind).
+// The legacy empty kind means spot_rms.
+func isGridKind(kind string) bool {
+	switch kind {
+	case "", dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
+		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius:
+		return true
+	}
+	return false
+}
+
+// evaluateGridKind traces the pupil grid for a grid merit term and returns the
+// term's value (the metric itself). spot_rms is the legacy metric; the new
+// kinds use the flux-weighted spot statistics. The term's target is applied by
+// the caller.
+func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	points := o.traceFieldGrid(gc, surfaces, cfg, term)
+	switch term.kind {
+	case dls.MeritSpotRMST:
+		rmsT, _ := dls.ComputeSpotAxisRMS(points, term.fieldDirX, term.fieldDirY)
+		return rmsT
+	case dls.MeritSpotRMSS:
+		_, rmsS := dls.ComputeSpotAxisRMS(points, term.fieldDirX, term.fieldDirY)
+		return rmsS
+	case dls.MeritSpotRMSWorst:
+		rmsT, rmsS := dls.ComputeSpotAxisRMS(points, term.fieldDirX, term.fieldDirY)
+		if rmsT > rmsS {
+			return rmsT
+		}
+		return rmsS
+	case dls.MeritSpotWeighted:
+		return dls.ComputeSpotWeightedRMS(points)
+	case dls.MeritSpotEERadius:
+		return dls.ComputeSpotEERadius(points, term.fraction)
+	default:
+		return dls.ComputeSpotRMS(points)
+	}
+}
+
 // gridWorkers returns the number of goroutines for grid-ray parallelism. The
 // Jacobian column loop already runs o.workers goroutines per residual call, so
 // the grid workers are capped so the two levels do not oversubscribe the CPU.
@@ -796,7 +879,7 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 	extents := make(map[int]float64)
 	for ti := range cfg.meritTerms {
 		term := &cfg.meritTerms[ti]
-		if term.kind != "" && term.kind != dls.MeritSpotRMS {
+		if !isGridKind(term.kind) {
 			continue
 		}
 		angle := o.termFieldAngle(cfg, term, surfaces, gc)
@@ -832,10 +915,14 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 		cfgMerit := 0.0
 		for ti := range cfg.meritTerms {
 			term := &cfg.meritTerms[ti]
-			if term.kind == "" || term.kind == dls.MeritSpotRMS {
-				points := o.traceFieldGrid(gc, surfaces, cfg, term)
-				rms := dls.ComputeSpotRMS(points)
-				cfgMerit += term.weight * term.fieldWeight * term.wavWeight * rms * rms
+			if isGridKind(term.kind) {
+				val := o.evaluateGridKind(cfg, term, surfaces, gc)
+				if term.kind == "" || term.kind == dls.MeritSpotRMS {
+					cfgMerit += term.weight * term.fieldWeight * term.wavWeight * val * val
+				} else {
+					diff := val - term.target
+					cfgMerit += term.weight * term.fieldWeight * term.wavWeight * diff * diff
+				}
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
 				diff := val - term.target
@@ -872,10 +959,14 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 		for ti := range cfg.meritTerms {
 			term := &cfg.meritTerms[ti]
 			var contrib float64
-			if term.kind == "" || term.kind == dls.MeritSpotRMS {
-				points := o.traceFieldGrid(gc, surfaces, cfg, term)
-				rms := dls.ComputeSpotRMS(points)
-				contrib = term.weight * term.fieldWeight * term.wavWeight * rms * rms
+			if isGridKind(term.kind) {
+				val := o.evaluateGridKind(cfg, term, surfaces, gc)
+				if term.kind == "" || term.kind == dls.MeritSpotRMS {
+					contrib = term.weight * term.fieldWeight * term.wavWeight * val * val
+				} else {
+					diff := val - term.target
+					contrib = term.weight * term.fieldWeight * term.wavWeight * diff * diff
+				}
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
 				diff := val - term.target
@@ -909,9 +1000,13 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 		for ti := range cfg.meritTerms {
 			term := &cfg.meritTerms[ti]
 			w := math.Sqrt(cfg.weight * term.weight * term.fieldWeight * term.wavWeight)
-			if term.kind == "" || term.kind == dls.MeritSpotRMS {
-				points := o.traceFieldGrid(gc, surfaces, cfg, term)
-				allR = append(allR, w*dls.ComputeSpotRMS(points))
+			if isGridKind(term.kind) {
+				val := o.evaluateGridKind(cfg, term, surfaces, gc)
+				if term.kind == "" || term.kind == dls.MeritSpotRMS {
+					allR = append(allR, w*val)
+				} else {
+					allR = append(allR, w*(val-term.target))
+				}
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
 				allR = append(allR, w*(val-term.target))

@@ -109,7 +109,8 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 		if len(result.Surfaces) > 0 {
 			last := result.Surfaces[len(result.Surfaces)-1]
 			opl := result.OPLTotal - wavefrontC.Subtract(origin).Dot(rayDir)
-			points[i] = IPoint{X: last.Position.X, Y: last.Position.Y, OPL: opl, OK: true}
+			intensity := (result.IntensityS + result.IntensityP) / 2
+			points[i] = IPoint{X: last.Position.X, Y: last.Position.Y, OPL: opl, OK: true, Area: pt.area, Intensity: intensity}
 		} else {
 			points[i] = IPoint{OK: false}
 		}
@@ -139,9 +140,11 @@ func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float
 		for j := 0; j < n; j++ {
 			r := (float64(i) + 0.5) / float64(n) * apertureRadius
 			theta := 2*math.Pi*(float64(j)+0.5)/float64(n) + rotationOffset
+			area := r / apertureRadius
 			pts = append(pts, pupilPoint{
-				X: r * math.Cos(theta),
-				Y: r * math.Sin(theta),
+				X:    r * math.Cos(theta),
+				Y:    r * math.Sin(theta),
+				area: area,
 			})
 		}
 	}

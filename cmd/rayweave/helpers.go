@@ -316,10 +316,14 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 				}
 
 				var fieldAngle, fieldWeight float64
+				var fieldDir = []float64{0, 1}
 				for _, f := range cfg.Fields {
 					if f.ID == mt.Field {
 						fieldAngle = f.AngleDeg
 						fieldWeight = f.Weight
+						if len(f.Direction) >= 2 {
+							fieldDir = f.Direction
+						}
 						break
 					}
 				}
@@ -341,13 +345,14 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 				terms = append(terms, optimize.MeritTerm{
 					Kind:        kind,
 					FieldAngle:  fieldAngle,
-					FieldDir:    []float64{0, 1},
+					FieldDir:    fieldDir,
 					FieldWeight: fieldWeight,
 					Wavelength:  mt.Wavelength,
 					Wavelength2: mt.Wavelength2,
 					WavWeight:   wavWeight,
 					Weight:      mt.Weight,
 					Target:      mt.Target,
+					Fraction:    mt.Fraction,
 				})
 			}
 		}

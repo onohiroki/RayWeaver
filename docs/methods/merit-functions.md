@@ -25,8 +25,11 @@ small). Weighting lets the designer balance fields, wavelengths and configs
 ## 2. Term kinds
 
 | Kind | Residual |
-|---|---|
+|---|---|---|
 | `spot_rms` | RMS radial spot size on the reference surface (see below) |
+| `spot_rms_t` / `spot_rms_s` / `spot_rms_worst` | flux-weighted tangential / sagittal spot RMS and their maximum (see below) |
+| `spot_rms_weighted` | flux-weighted (pupil-cell-area × intensity) RMS spot size |
+| `spot_ee_radius` | encircled-energy radius (EE fraction via `fraction`, default 0.8) |
 | `opd_rms` | RMS optical path difference across the pupil grid |
 | `distortion_pct` | percent distortion |
 | `lateral_color` | lateral colour |
@@ -43,6 +46,35 @@ radius about the centroid is computed (see
 `optimization.num_rays`, and the pupil is scaled by
 `optimization.aperture_margin` (clamped ≥ 1). Polychromatic spot RMS uses the
 per-wavelength grid re-trace.
+
+### Off-axis spot kinds (spot_rms_t / _s / _worst / spot_rms_weighted / spot_ee_radius)
+
+Plain `spot_rms` measures a rotationally symmetric, uniformly-weighted RMS about
+the centroid, which limits off-axis-field optimisation: it cannot tell coma
+(a tangential flare) from astigmatism from field curvature, is dominated by a
+sparse comatic tail, and ignores vignetting / reflection-loss energy weighting.
+The five off-axis kinds reuse the same pupil grid but weight and decompose it:
+
+- **Flux weighting.** Each grid ray carries `area` (its polar pupil cell area,
+  ∝ radius — the entrance-pupil flux it represents) and `intensity` (mean
+  transmitted s/p intensity, Fresnel/TMM reflection losses). The weight is
+  `area × intensity`, falling back to area, then to equal weight, for grids
+  without the data. This mirrors the chief path's intensity-weighted centroid
+  and measures vignetted, asymmetric off-axis pupils correctly.
+- `spot_rms_t` / `spot_rms_s` — the flux-weighted RMS of the spot deviation
+  decomposed into the tangential direction (the field's image-plane azimuth,
+  from `fields[].direction`, default the Y axis) and the perpendicular sagittal
+  direction. A comatic spot has RMS_T ≫ RMS_S; astigmatism separates the two
+  even at the circle of least confusion.
+- `spot_rms_worst` — `max(RMS_T, RMS_S)`, attacking the dominant axis directly.
+- `spot_rms_weighted` — the flux-weighted RMS about the flux-weighted centroid.
+- `spot_ee_radius` — the radius about the flux-weighted centroid enclosing the
+  `fraction` of the total flux (default 0.8 = EE80, set via the term's
+  `fraction` YAML field). Insensitive to a sparse tail, so it correlates with
+  MTF better than RMS for off-axis fields.
+
+All five contribute `(value − target)²`, so `target: 0` minimises them and a
+non-zero target drives them to that value.
 
 ### opd_rms
 

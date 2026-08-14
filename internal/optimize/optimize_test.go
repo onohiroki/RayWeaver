@@ -80,6 +80,89 @@ func TestOptimizerEvaluateMerit(t *testing.T) {
 	}
 }
 
+// TestOptimizerOffAxisGridKinds verifies the new off-axis spot grid kinds
+// evaluate to finite, positive merit and that with target = current value the
+// contribution vanishes (so the target semantics work end to end).
+func TestOptimizerOffAxisGridKinds(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	// A fast singlet (f=100) clips the 16° chief ray at its 50mm aperture
+	// (tan16°·100 ≈ 28.7 > 25), so use a wide aperture for this test.
+	wide := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 200.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 200.0},
+	}
+	surface.Precompute(wide)
+
+	terms := []MeritTerm{
+		{Kind: MeritSpotRMST, FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0},
+		{Kind: MeritSpotRMSS, FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0},
+		{Kind: MeritSpotRMSWorst, FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0},
+		{Kind: MeritSpotWeightedRMS, FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0},
+		{Kind: MeritSpotEERadius, FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0, Fraction: 0.5},
+	}
+
+	cfg := Config{
+		Surfaces:     wide,
+		Variables:    []Variable{},
+		MeritTerms:   terms,
+		GlassCatalog: gc,
+		NumRays:      16,
+	}
+
+	opt := NewOptimizer(cfg)
+	x := opt.getInitialState()
+
+	bd := opt.MeritBreakdown(x)
+	if len(bd)-1 != len(terms) {
+		t.Fatalf("MeritBreakdown returned %d terms, want %d", len(bd)-1, len(terms))
+	}
+	for k, v := range bd {
+		if k == "objective_total" {
+			continue
+		}
+		if math.IsInf(v, 0) || math.IsNaN(v) || v < 0 {
+			t.Errorf("breakdown %q = %v, want finite positive", k, v)
+		}
+	}
+
+	// Residuals must be finite and equal to the metric value (target 0).
+	residuals := opt.ComputeResiduals(x)
+	if len(residuals) != len(terms) {
+		t.Fatalf("ComputeResiduals returned %d, want %d", len(residuals), len(terms))
+	}
+	for i, r := range residuals {
+		if math.IsInf(r, 0) || math.IsNaN(r) {
+			t.Errorf("residual[%d] = %v, want finite", i, r)
+		}
+	}
+
+	// With target = the metric's own value the (value-target)^2 contribution
+	// must be ~0 for the targeted kinds.
+	for ti, term := range terms {
+		val := opt.evaluateGridKind(opt.primaryConfig(), &meritTerm{
+			kind:       term.Kind,
+			fieldAngle: term.FieldAngle,
+			fieldDirX:  0,
+			fieldDirY:  1,
+			wavelength: term.Wavelength,
+			fraction:   term.Fraction,
+		}, opt.primaryConfig().surfaces, gc)
+		if term.Kind == MeritSpotEERadius && val >= 1e6 {
+			t.Errorf("%s evaluated to the 1e6 degenerate penalty: %v", term.Kind, val)
+		}
+		targeted := cfg
+		targeted.MeritTerms = []MeritTerm{term}
+		targeted.MeritTerms[0].Target = val
+		opt2 := NewOptimizer(targeted)
+		m := opt2.EvaluateMerit(x)
+		if m > 1e-8 {
+			t.Errorf("%s with target = value: merit = %v, want ~0 (ti=%d)", term.Kind, m, ti)
+		}
+	}
+}
+
 func TestOptimizerApplyVariablesCurvature(t *testing.T) {
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
