@@ -8,15 +8,19 @@ This directory contains sample optical system data and demo scripts for the
 | File | Description |
 |---|---|
 | `us2645157.yaml` | Triplet-derivative lens from US patent 2,645,157 (MIT license, ©2014 Daniel J. Reiley). Converted from a ZMX file obtained from [lens-designs.com](https://www.lens-designs.com/). The original patent data was validated against [LensForge](https://www.ripplon.com/LensForge/) trace output (`lens-designs.com/US02645157-1-Trace*.txt`) — ray positions at every surface are consistent. |
+| `us2645157-degraded.yaml` | Degraded US2645157 triplet (curvatures distorted so every field is badly out of focus) with the **off-axis spot merit kinds** (`spot_rms_t`/`spot_rms_s`/`spot_rms_worst` on the 16° field, `spot_rms_worst`/`spot_rms_weighted`/`spot_ee_radius` on the 24° field). Input of `optimize-demo.bash`. |
+| `us2645157-degraded-spotrms.yaml` | The same degraded triplet with the plain `spot_rms`-only merit — the "old" baseline that `optimize-demo.bash` compares the off-axis merit against. |
+| `escape-demo.yaml` | Degraded US2645157 triplet (auto-aperture surfaces) with the escape-function merit: `spot_rms` (on-axis, weight 2.0), `spot_rms_t`/`spot_rms_s`/`spot_rms_worst` (with a `spot_rms` anchor) on the 16° field, and `spot_rms_worst`/`spot_rms_weighted`/`spot_ee_radius` on the 24° field. Input of `escape-demo.bash` (triplet mode). |
 | `ar-coating.yaml` | Single-layer MgF2 anti-reflection coating on N-SK16 glass, quarter-wave at 550 nm. |
 | `dielectric-mirror.yaml` | 9-layer quarter-wave Bragg reflector (SiO2/TiO2) on glass, design wavelength 550 nm. |
 | `glass-optimize-demo.yaml` | 3-lens 7-surface system with glass-model variables (nd/vd) intended for DLS optimisation. 3 fields (0°, 10°, 16°), 4 wavelengths (g/F/d/C). |
 | `multi-config-zoom.yaml` | 3-config zoom demo. Uses `entrance_pupil_diameter` **equality** constraints (now supported), `edge_thickness` with the `surface2` back-surface field, and vignetting constraints. |
 | `simple-zoom.yaml` | 3-config zoom with fuzzy image-height / incident-angle constraints and `ray_paths` (render-only metadata). |
 | `asphere-optimize.yaml` | Singlet whose first surface is `asphere_polynomial`; optimizes `conic` and `a4`/`a6` coefficients (asphere variables). |
-| `doublegauss-init.yaml` | 6-element symmetric double-Gauss starting point for a 35mm-format 50 mm f/2.8 standard lens. The structure was synthesised by an AI agent (see `design/REPORT_designs.md` appendix) via curvature-scale search to hit EFL ≈ 50 mm, then handed to DLS optimisation. The optimised result reaches on-axis RMS < 0.1 mm (see `doublegauss-demo.bash`). It also carries an `optimization.escape` section so the same file drives the escape-function demo (`escape-demo.bash --lens doublegauss`); the normal `doublegauss-demo.bash` ignores it. |
+| `doublegauss-init.yaml` | 6-element symmetric double-Gauss starting point for a 35mm-format 50 mm f/2.8 standard lens. The structure was synthesised by an AI agent (see `design/REPORT_designs.md` appendix) via curvature-scale search to hit EFL ≈ 50 mm, then handed to DLS optimisation. The optimised result reaches on-axis RMS < 0.1 mm (see `doublegauss-demo.bash`). It also carries an `optimization.escape` section so the same file drives the escape-function demo (`escape-demo.bash --lens doublegauss`); the normal `doublegauss-demo.bash` ignores it. The merit uses the off-axis spot kinds: `spot_rms` (on-axis, weight 3.0), `spot_rms_t`/`spot_rms_s`/`spot_rms_worst` on the 10°/16° fields, `spot_rms_worst`/`spot_rms_weighted`/`spot_ee_radius` on the 23° field, plus `lateral_color` — no `opd_rms`. |
 | `doublegauss-ghost.yaml` | Ghost-ray trace sample on the optimised double-Gauss. Uses the surface-sequence encoding of Ono et al. (Optical Review 32:402-411): each ray carries an ordered surface-ID list; a direction reversal in the list means reflection. One ghost path `[0,1,2,3,4,3,2,3,4,...,14]` (reflect at surface 4, reversed refraction through surface 3, reflect at surface 2) plus a normal reference ray, and a `chief` section for re-adjusting the lens effective diameters. See `ghost-demo.bash`. |
 | `run-demo.bash` | End-to-end demo script using `us2645157.yaml`. |
+| `optimize-demo.bash` | DLS optimisation of the degraded US2645157 triplet, comparing the `spot_rms`-only merit against the off-axis spot merit kinds: per-field spot RMS before/old/new (chief), the new-merit final values from the `--log` breakdown, and PNG diagrams. |
 | `psf-mtf-demo.yaml` | PSF/OTF/MTF demo input: the US2645157 triplet after the escape-function global optimiser (see `escape-demo.bash`). Cleaned copy of the escape result — only the sections `psf` consumes (glass_catalog / configs / chief) are kept. Center field (0 deg) only, reference surface 8; the strongly aberrated 16°/24° fields are excluded. Reports MTF up to `psf.mtf_config.max_frequency` (200 c/mm). The 0° field is nearly diffraction-limited (Strehl ≈ 0.87, MTF50 ≈ 80 c/mm). |
 | `psf-mtf-demo.bash` | PSF + OTF + MTF demo. Default lens `psf-mtf-demo.yaml` (center field): a single `rayweave psf` run (RCP+LCP, `--max-freq 200` cap) computes the image-plane PSF and the FFT-derived OTF/MTF, then prints a Strehl / FWHM / EE50 / Airy / MTF50-30-10 table (`<stem>-result.txt`) and draws per-field pm3d maps, a radial-profile overlay, and a sagittal/tangential MTF-overlay PNG. `--lens doublegauss` (or any YAML path) switches the lens — the MTF cap keeps working via `--max-freq`, which overrides `psf.mtf_config.max_frequency` even when the chosen YAML has no `psf:` section. |
 | `glass-optimize-demo.bash` | Glass optimisation demo using `glass-optimize-demo.yaml`. |
@@ -66,6 +70,16 @@ a message and skip those renderings.
 |---|---|
 | `us2645157-chief-result.yaml` | Chief-ray computation result with pupil grid and spot statistics. |
 | `us2645157.svg` | SVG cross-section raytrace diagram. |
+
+### Output of `optimize-demo.bash`
+
+| File | Description |
+|---|---|
+| `optimize-demo-old.yaml` | Optimised system with the `spot_rms`-only merit (baseline). |
+| `optimize-demo-new.yaml` | Optimised system with the off-axis spot merit kinds. |
+| `optimize-demo-old.log` / `optimize-demo-new.log` | DLS logs; the new one ends with the per-term `{"event":"breakdown"}` for the new merit. |
+| `optimize-demo-result.txt` | Per-field spot RMS before / old / new (chief measurement, same sampling), the new-merit final values (RMS_T/S/worst, weighted RMS, EE80), and the on-axis threshold check. |
+| `optimize-demo-init.png` / `-old.png` / `-new.png` | Raytrace diagrams of the degraded start and the two optima. |
 
 ### Output of `doublegauss-demo.bash`
 
@@ -151,6 +165,9 @@ RAYWEAVE=/path/to/rayweave bash samples/run-demo.bash
 # Glass optimisation demo (runs DLS, generates SVGs + spot diagrams)
 bash samples/glass-optimize-demo.bash
 
+# Optimise demo: old (spot_rms-only) vs new (off-axis spot merit kinds)
+bash samples/optimize-demo.bash
+
 # Folded Schmidt demo (chief + trace + paraxial + diagrams)
 bash samples/schmidt-demo.bash
 
@@ -170,9 +187,29 @@ bash samples/ghost-demo.bash
 
 5. **TMM coating analysis** — `rayweave tmm` computes reflectance/transmittance for the AR coating and the dielectric mirror via the transfer-matrix method.
 
-## What `glass-optimize-demo.bash` does
+## What `optimize-demo.bash` does
 
-1. **DLS optimisation** — `rayweave optimize` runs damped least-squares (DLS) on the 3-lens system, varying curvatures (6), glass nd/vd pairs (3 × 2), and air gaps (2) — 14 variables total. Log saved as `glass-optimize-log.jsonl`.
+1. **Two DLS optimisations** — `rayweave optimize` runs on the degraded triplet
+   twice: once with the `spot_rms`-only merit (`us2645157-degraded-spotrms.yaml`,
+   the "old" baseline) and once with the off-axis spot merit kinds
+   (`us2645157-degraded.yaml`, the "new" merit). Logs are saved as
+   `optimize-demo-old.log` / `optimize-demo-new.log`.
+
+2. **Per-field spot RMS comparison** — `rayweave chief` re-measures the
+   geometric RMS spot radius per field (0/16/24°) on the degraded start, the old
+   optimum and the new optimum (same pupil-grid sampling), and writes
+   `optimize-demo-result.txt` with the before/old/new table and the old→new
+   improvement.
+
+3. **New-merit breakdown** — the new run's `breakdown` event is read via
+   `rayweave query --jsonl`, giving the final values of `spot_rms_t`/`spot_rms_s`/
+   `spot_rms_worst` (16°), `spot_rms_worst`/`spot_rms_weighted`/`spot_ee_radius`
+   (24°) at the optimum.
+
+4. **PNG diagrams** — `chief --clear-aperture --ray-fan | chief --marginal-rays
+   | trace | plot` draws the degraded start, the old optimum and the new optimum.
+
+## What `glass-optimize-demo.bash` does1. **DLS optimisation** — `rayweave optimize` runs damped least-squares (DLS) on the 3-lens system, varying curvatures (6), glass nd/vd pairs (3 × 2), and air gaps (2) — 14 variables total. Log saved as `glass-optimize-log.jsonl`.
 
 2. **Results summary** — Displays before/after glass values, surface curvatures and diameters, plus diffraction-limit comparison (Airy disk radius vs RMS spot radius).
 
