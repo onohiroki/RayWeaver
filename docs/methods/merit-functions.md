@@ -173,6 +173,34 @@ The difference in paraxial EFL between two wavelengths:
 longitudinal_color = EFL(λ₂) − EFL(λ₁)
 ```
 
+### glass_role
+
+Pushes the Abbe number of a lens element's glass toward the role its element
+power requires, so a negative-power element becomes a flint (low vd) and a
+positive-power element a crown (high vd). The element is identified by
+`surface_set[0]` (the ID of one of its bounding glass surfaces). Its thin-lens
+power φ is computed at the d-line (`paraxial.ElementPowers`, the same grouping
+the `asphere` command uses) and mapped to a target Abbe number:
+
+```
+vd_target = vd_center + Δ·tanh(γ·φ)
+residual  = vd_actual − vd_target
+```
+
+with fixed defaults `vd_center = 45`, `Δ = 16` (targets span 29…61) and
+`γ = 1.0`. `vd_actual` is the element's Abbe number — the `surface_set[0]`
+material, resolved through the in-flight glass catalog when keyed, read inline
+for model glasses. A positive-power element (φ > 0) is steered to the crown end
+of the range, a negative-power one to the flint end. `surface_set[0]` is
+required; the term contributes 0 when absent.
+
+**Weight calibration.** The residual is in Abbe-number units, so `residual²` is
+of order a few hundred for a swapped element, versus ~1e-2 for the colour terms
+and ~1e-4 for the spot terms. A weight around 1e-4…1e-3 therefore balances the
+term against the spot terms; combined with the colour-only `color_first` mode of
+a merit schedule (§5) it drives the glass directly while the imaging merit is
+still unconverged.
+
 ### Seidel coefficients
 
 Third-order (Seidel) aberration coefficients computed for a field and
@@ -196,3 +224,66 @@ kinds: `equality`, `inequality_upper`, `inequality_lower`, `band`, `fuzzy`.
   traces rather than a full grid, so they are cheap.
 - The `breakdown` event in `optimize --log`/`--verbose` JSONL output lists the
   per-term residual values, which helps find which term dominates the merit.
+
+## 5. Smooth merit blending (`optimization.merit_schedule`)
+
+By default the merit is a fixed weighted sum. `optimization.merit_schedule`
+replaces it with a **blend of named merit modes** whose weights depend
+continuously on the current evaluation state — e.g. run a colour-only merit
+while the imaging merit is still unconverged (so the glass alone fixes chromatic
+aberration), then ramp the imaging terms in. `curve: step` reduces the blend to
+a hard mode switch, so the same machinery covers both styles.
+
+Each config declares its modes as `merit_modes` (a list of `{name, terms}`);
+the schedule assigns every mode a weight that is a monotone function of a scalar
+state metric `s(x)`:
+
+```
+merit(x) = Σ_configs  w_cfg · Σ_modes  w_k(s(x)) · M_{cfg,k}(x)
+```
+
+where `M_{cfg,k}` is the config's merit built from that mode's terms. A config
+without `merit_modes` keeps its ordinary `merit` terms, always active at full
+weight. The residual vector carries each term scaled by `√w_k`, so
+`Σ residual² == merit` exactly — the same least-squares identity the fixed
+merit uses.
+
+### Metrics
+
+`s(x)` is evaluated at the current variable state:
+
+| `metric` | value |
+|---|---|
+| `merit_ratio` (default) | `EvaluateMerit(x) / initialMerit` |
+| `iteration` | the DLS iteration number |
+| `glass_role` | Σ over `glass_surfaces` of `|vd_actual − vd_target|` (the glass-role residual of §2, aggregated over every config) |
+
+### Weight curve
+
+The metric is normalised to `t ∈ [0,1]` between the schedule anchors,
+`t = clamp((s − anchor_from)/(anchor_to − anchor_from), 0, 1)` (t = 0.5 when the
+anchors coincide), then each mode's weight is interpolated:
+
+| `curve` | weight of mode k |
+|---|---|
+| `linear` (default) | `weight_from + (weight_to − weight_from)·t` |
+| `sigmoid` | `weight_from + (weight_to − weight_from)·σ(t)`, `σ(t) = 1/(1+exp(−10(t−0.5)))` |
+| `step` | `weight_from` when `t < 0.5`, else `weight_to` |
+
+A two-mode schedule `color_first {weight_from: 1, weight_to: 0}` /
+`full {weight_from: 0, weight_to: 1}` over `merit_ratio` therefore runs the
+colour-only merit while the objective is large and blends to the full merit as
+it improves.
+
+### Freezing and convergence
+
+Like the dynamic pupil, the weights are computed once per DLS iteration at the
+current `x` and **frozen for the whole iteration**, so the base-point residual
+and every Jacobian finite-difference share the same weights — the Jacobian
+matches the merit actually minimised. The weights and metric are reported per
+iteration as a JSONL `{"event":"weights",...}` record, and the final weights /
+dominant mode are echoed in the output's `opt_results.active_mode` /
+`opt_results.mode_weights` / `opt_results.mode_changes`. Because the merit
+definition itself changes, the DLS convergence test applies to the blend in its
+current state; a schedule that ends one-hot (`weight_to: 1` on the final mode)
+makes the final optimum the plain optimum of that mode.

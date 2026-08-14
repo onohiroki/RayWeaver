@@ -144,6 +144,7 @@ A `CONF` operand selects which config's merit terms are active for each rule.
 | `distortion_pct` | percent distortion (chief-ray vs paraxial height) |
 | `lateral_color` | lateral colour (chief-ray height difference between two wavelengths) |
 | `longitudinal_color` | longitudinal colour (EFL difference between two wavelengths) |
+| `glass_role` | Abbe number vs the element-power role target (`surface_set[0]`, see below) |
 | `seidel_spherical` / `seidel_coma` / `seidel_astigmatism` / `seidel_distortion` | the corresponding third-order Seidel coefficient |
 | `wavefront_defocus` | paraboloid defocus `(a+b)/2` of the fitted wavefront OPD |
 | `wavefront_astigmatism` | paraboloid astigmatism `√(((a-b)/2)² + (c/2)²)` |
@@ -174,6 +175,79 @@ RMS, and the encircled-energy radius respectively. All five contribute
 `(value − target)²`; they reuse the same frozen-pupil grid, so the DLS Jacobian
 remains consistent. These kinds are the reference implementation of the
 area-weighted spot statistics also reported by `chief`/`vignette`.
+
+`glass_role` steers an element's Abbe number toward the role its power requires
+(negative power → flint, positive power → crown) via
+`vd_target = 45 + 16·tanh(φ)` and contributes `(vd_actual − vd_target)²`. The
+element is the one whose bounding surfaces include `surface_set[0]` (see
+`docs/methods/merit-functions.md`, §2). It is the directed gradient that
+recovers a swapped flint/crown arrangement even when the imagery is not yet
+converged.
+
+### Conditional merit schedule (`optimization.merit_schedule`)
+
+A fixed weighted-sum merit can be replaced by a **blend of named merit modes**
+whose weights follow the evaluation state — e.g. run a colour-only merit while
+the imaging merit is still unconverged, then ramp the imaging terms in. The mode
+term lists are declared per config:
+
+```yaml
+configs:
+  - id: config1
+    merit_modes:
+      - name: color_first
+        terms:
+          - kind: longitudinal_color
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 1.0
+          - kind: lateral_color
+            field: 1
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 0.5
+          - kind: glass_role
+            surface_set: [3, 5]
+            weight: 0.01
+      - name: full
+        terms:
+          - kind: spot_rms
+            field: 0
+            wavelength: 0.0005876
+            weight: 1.0
+          - kind: longitudinal_color
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 1.0
+```
+
+and the weights are scheduled globally:
+
+```yaml
+optimization:
+  merit_schedule:
+    metric: merit_ratio        # merit_ratio | iteration | glass_role
+    curve: linear              # linear | sigmoid | step
+    anchor_from: 1.0
+    anchor_to: 0.05
+    glass_surfaces: [3, 5]     # required when metric is glass_role
+    modes:
+      - name: color_first
+        weight_from: 1.0
+        weight_to: 0.0
+      - name: full
+        weight_from: 0.0
+        weight_to: 1.0
+```
+
+`configs[].merit_modes` replaces that config's `merit`; configs without
+`merit_modes` keep their fixed `merit` at full weight. The schedule's weights
+are continuous functions of the state metric (`merit_ratio`, `iteration`, or
+the `glass_role` residual aggregated over `glass_surfaces`), are recomputed once
+per DLS iteration and frozen for it, and `Σ residual² == merit` is preserved via
+per-term `√weight` scaling (see `docs/methods/merit-functions.md`, §5). The
+active mode is reported in the output (`opt_results.active_mode`) and the
+per-iteration weights as JSONL `weights` events.
 
 ### Constraints
 
