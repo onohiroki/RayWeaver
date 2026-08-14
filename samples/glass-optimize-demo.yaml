@@ -1,26 +1,26 @@
 glass_catalog:
   entries:
-    - name: "model1"
-      nd: 1.5
-      vd: 60.0
-    - name: "model2"
-      label: "model2"
-      nd: 1.5
-      vd: 70.0
-    - name: "model3"
-      label: "model3"
-      nd: 1.7
-      vd: 30.0
+    - name: "SK18"
+      nd: 1.63854
+      vd: 55.42
+    - name: "SF12"
+      nd: 1.64831
+      vd: 33.84
 
+# The real US2645157 Cooke triplet, but the negative-power element (S3) carries
+# a crown (SK18 values) and the positive-power element (S6) a flint (SF12
+# values) — the flint/crown arrangement is swapped. S3/S6 are inline model
+# glasses (no catalogue key) so the glass variables touch only their own
+# surfaces.
 chief:
   fields:
     - angle: 0.0
       direction: [0, 1]
-    - angle: 10.0
-      direction: [0, 1]
     - angle: 16.0
       direction: [0, 1]
-  reference_surface: 7
+    - angle: 24.0
+      direction: [0, 1]
+  reference_surface: 8
   num_rays: 512
   grid_type: hex
   dump_map: true
@@ -28,141 +28,57 @@ chief:
 
 optimization:
   method: dls
-  max_iter: 500
+  max_iter: 300
+  mu: 0.01
   tol: 1e-4
   epsilon: 1e-4
   num_rays: 256
   mu_con_max: 50.0
   aperture_margin: 1.0
-  glass_hull:
-    enabled: true
-    margin: 0.02
-    weight: 1.0
+  # Smooth merit blend: while the colour-only merit is still large the glass is
+  # driven by the colour terms alone (imagery not yet converged); as the colour
+  # errors collapse the full merit (spot RMS included) fades in.
+  merit_schedule:
+    metric: merit_ratio
+    curve: linear
+    anchor_from: 1.0
+    anchor_to: 0.05
+    modes:
+      - name: color_first
+        weight_from: 1.0
+        weight_to: 0.0
+      - name: full
+        weight_from: 0.0
+        weight_to: 1.0
   variables:
-    - name: s1_curvature
+    - name: s3_nd
       target:
         type: surface
-        id: 1
-        param: curvature
-      min: -0.1
-      max: 0.1
-      active: true
-    - name: s2_curvature
-      target:
-        type: surface
-        id: 2
-        param: curvature
-      min: -0.1
-      max: 0.1
-      active: true
-    - name: lens_nd
-      target:
-        type: surface
-        id: 1
+        id: 3
         param: nd
       min: 1.4
       max: 1.9
       active: true
-    - name: lens_vd
+    - name: s3_vd
       target:
         type: surface
-        id: 1
+        id: 3
         param: vd
       min: 20.0
       max: 80.0
       active: true
-    - name: s3_curvature
-      target:
-        type: surface
-        id: 3
-        param: curvature
-      min: -0.1
-      max: 0.1
-      active: true
-    - name: s4_curvature
-      target:
-        type: surface
-        id: 4
-        param: curvature
-      min: -0.1
-      max: 0.1
-      active: true
-    - name: s5_curvature
-      target:
-        type: surface
-        id: 5
-        param: curvature
-      min: -0.1
-      max: 0.1
-      active: true
-    - name: s6_curvature
+    - name: s6_nd
       target:
         type: surface
         id: 6
-        param: curvature
-      min: -0.1
-      max: 0.1
-      active: true
-    - name: s2_thickness
-      target:
-        type: surface
-        id: 2
-        param: thickness
-      min: 1.0
-      max: 30.0
-      active: true
-    - name: s4_thickness
-      target:
-        type: surface
-        id: 4
-        param: thickness
-      min: 1.0
-      max: 20.0
-      active: true
-    - name: s3_thickness
-      target:
-        type: surface
-        id: 3
-        param: thickness
-      min: 0.3
-      max: 15.0
-      active: true
-    - name: s5_thickness
-      target:
-        type: surface
-        id: 5
-        param: thickness
-      min: 0.3
-      max: 15.0
-      active: true
-    - name: model2_nd
-      target:
-        type: surface
-        id: 3
         param: nd
       min: 1.4
       max: 1.9
       active: true
-    - name: model2_vd
+    - name: s6_vd
       target:
         type: surface
-        id: 3
-        param: vd
-      min: 20.0
-      max: 80.0
-      active: true
-    - name: model3_nd
-      target:
-        type: surface
-        id: 5
-        param: nd
-      min: 1.4
-      max: 1.9
-      active: true
-    - name: model3_vd
-      target:
-        type: surface
-        id: 5
+        id: 6
         param: vd
       min: 20.0
       max: 80.0
@@ -177,10 +93,10 @@ configs:
         angle_deg: 0.0
         weight: 1.0
       - id: 1
-        angle_deg: 10.0
-        weight: 2.0
-      - id: 2
         angle_deg: 16.0
+        weight: 1.0
+      - id: 2
+        angle_deg: 24.0
         weight: 0.5
     wavelengths:
       - id: 0
@@ -198,151 +114,139 @@ configs:
     surfaces:
       - id: 1
         type: "sphere"
-        curvature: 0.015
-        thickness: 6.0
-        material: {key: model1}
-        diameter: 15.0
-        auto_aperture: true
-        min_glass_path: 1.0
+        radius: 10.2871491742
+        thickness: 1.524
+        material: {key: SK18}
+        diameter: 10.0
       - id: 2
         type: "sphere"
-        curvature: -0.01
-        thickness: 6.0
+        radius: -239.3967954752
+        thickness: 2.3368
         material: AIR
-        diameter: 15.0
-        auto_aperture: true
+        diameter: 10.0
       - id: 3
         type: "sphere"
-        curvature: 0.0
-        thickness: 3.0
-        material: {key: model2}
-        diameter: 9.0
-        auto_aperture: false
+        radius: -12.8269871730
+        thickness: 0.508
+        material: {nd: 1.63854, vd: 55.42}   # crown on the negative element (swapped)
+        diameter: 6.0
       - id: 4
         type: "sphere"
-        curvature: 0.0
-        thickness: 3.0
+        radius: 10.5917184406
+        thickness: 1.4986
         material: AIR
-        diameter: 12.0
-        auto_aperture: true
+        diameter: 6.0
       - id: 5
         type: "sphere"
-        curvature: 0.0
-        thickness: 3.0
-        material: {key: model3}
-        diameter: 12.0
-        auto_aperture: true
-        min_glass_path: 0.3
+        radius: 0.0
+        thickness: 1.016
+        material: AIR
+        diameter: 3.7825297358
       - id: 6
         type: "sphere"
-        curvature: 0.0
-        thickness: 20.0
-        material: AIR
-        diameter: 12.0
-        auto_aperture: true
+        radius: 61.8456294200
+        thickness: 1.524
+        material: {nd: 1.64831, vd: 33.84}   # flint on the positive element (swapped)
+        diameter: 6.0
       - id: 7
         type: "sphere"
-        curvature: 0.0
+        radius: -10.0074859032
+        thickness: 21.36695183553
+        material: AIR
+        diameter: 6.0
+      - id: 8
+        type: "sphere"
+        radius: 0.0
         thickness: 0.0
         material: AIR
-    merit:
-      type: weighted_sum
-      terms:
-        - kind: spot_rms
-          field: 0
-          wavelength: 0.0004358
-          weight: 1.0
-        - kind: spot_rms
-          field: 0
-          wavelength: 0.0004861
-          weight: 1.0
-        - kind: spot_rms
-          field: 0
-          wavelength: 0.0005876
-          weight: 1.0
-        - kind: spot_rms
-          field: 0
-          wavelength: 0.0006563
-          weight: 1.0
-        - kind: spot_rms
-          field: 1
-          wavelength: 0.0004358
-          weight: 1.0
-        - kind: spot_rms
-          field: 1
-          wavelength: 0.0004861
-          weight: 1.0
-        - kind: spot_rms
-          field: 1
-          wavelength: 0.0005876
-          weight: 1.0
-        - kind: spot_rms
-          field: 1
-          wavelength: 0.0006563
-          weight: 1.0
-        - kind: spot_rms
-          field: 2
-          wavelength: 0.0004358
-          weight: 0.3
-        - kind: spot_rms
-          field: 2
-          wavelength: 0.0004861
-          weight: 0.3
-        - kind: spot_rms
-          field: 2
-          wavelength: 0.0005876
-          weight: 0.3
-        - kind: spot_rms
-          field: 2
-          wavelength: 0.0006563
-          weight: 0.3
-        - kind: lateral_color
-          field: 0
-          wavelength: 0.0004358
-          wavelength2: 0.0006563
-          weight: 0.5
-        - kind: lateral_color
-          field: 1
-          wavelength: 0.0004358
-          wavelength2: 0.0006563
-          weight: 0.5
-        - kind: lateral_color
-          field: 2
-          wavelength: 0.0004358
-          wavelength2: 0.0006563
-          weight: 0.2
-        - kind: seidel_astigmatism
-          field: 1
-          weight: 0.001
-        - kind: seidel_astigmatism
-          field: 2
-          weight: 0.0005
-        - kind: seidel_coma
-          field: 1
-          weight: 0.0005
-        - kind: seidel_coma
-          field: 2
-          weight: 0.0003
-        - kind: opd_rms
-          field: 0
-          wavelength: 0.0005876
-          weight: 0.5
-        - kind: opd_rms
-          field: 1
-          wavelength: 0.0005876
-          weight: 0.3
-    constraints:
-      - id: vig_f1
-        kind: inequality_lower
-        measure: vignetting_factor
-        field: 1
-        lower: 0.5
-        weight: 10.0
-        active: true
-      - id: vig_f2
-        kind: inequality_lower
-        measure: vignetting_factor
-        field: 2
-        lower: 0.55
-        weight: 100.0
-        active: true
+    merit_modes:
+      - name: color_first
+        terms:
+          - kind: lateral_color
+            field: 0
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 1.0
+          - kind: lateral_color
+            field: 1
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 1.0
+          - kind: lateral_color
+            field: 2
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 0.5
+          - kind: longitudinal_color
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 1.0
+      - name: full
+        terms:
+          - kind: spot_rms
+            field: 0
+            wavelength: 0.0004358
+            weight: 1.0
+          - kind: spot_rms
+            field: 0
+            wavelength: 0.0004861
+            weight: 1.0
+          - kind: spot_rms
+            field: 0
+            wavelength: 0.0005876
+            weight: 1.0
+          - kind: spot_rms
+            field: 0
+            wavelength: 0.0006563
+            weight: 1.0
+          - kind: spot_rms
+            field: 1
+            wavelength: 0.0004358
+            weight: 1.0
+          - kind: spot_rms
+            field: 1
+            wavelength: 0.0004861
+            weight: 1.0
+          - kind: spot_rms
+            field: 1
+            wavelength: 0.0005876
+            weight: 1.0
+          - kind: spot_rms
+            field: 1
+            wavelength: 0.0006563
+            weight: 1.0
+          - kind: spot_rms
+            field: 2
+            wavelength: 0.0004358
+            weight: 0.5
+          - kind: spot_rms
+            field: 2
+            wavelength: 0.0004861
+            weight: 0.5
+          - kind: spot_rms
+            field: 2
+            wavelength: 0.0005876
+            weight: 0.5
+          - kind: spot_rms
+            field: 2
+            wavelength: 0.0006563
+            weight: 0.5
+          - kind: lateral_color
+            field: 0
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 1.0
+          - kind: lateral_color
+            field: 1
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 1.0
+          - kind: lateral_color
+            field: 2
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 0.5
+          - kind: longitudinal_color
+            wavelength: 0.0004358
+            wavelength2: 0.0006563
+            weight: 1.0
