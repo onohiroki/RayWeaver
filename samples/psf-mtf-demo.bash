@@ -274,7 +274,7 @@ for ((i = 0; i < NF; i++)); do
     set output "$OUTDIR/$STEM-${label}.png"
     set datafile separator ","
     set pm3d map
-    set palette gray
+    set palette defined (0 "#000000", 0.2 "#0000ff", 0.4 "#00ffff", 0.6 "#00ff00", 0.8 "#ffff00", 1 "#ffffff")
     set size square
     set title "${ang}° field — Strehl ${strehl}"
     set xlabel "x (mm)"
