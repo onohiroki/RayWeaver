@@ -16,6 +16,18 @@
 #
 # No chief.stop_surface is set: the entrance/exit pupils are derived from the
 # chief-ray crossings (dynamic pupil).
+#
+# The `rays` section carries hand-written marginal rays so the initial diagram
+# draws every field's bundle at the SAME thickness (12.5 mm): each bundle is a
+# parallel set launched from z=-100 at the field chief ray's height +- 6.25 mm
+# along the field direction. This is a schematic choice — the physically
+# vignetted off-axis bundles would be narrower, and drawing them at the
+# on-axis's full aperture makes the outer rays refract wildly off the rear
+# elements (they no longer reach focus). 12.5 mm is the widest uniform bundle
+# that focuses cleanly for all four fields. The `chief_rays` section records
+# the per-field chief rays so `trace | plot` draws them (and colors the
+# bundles) directly from this file; `chief`/`vignette` recompute and overwrite
+# it, so it only affects the direct trace plot.
 glass_catalog:
     entries:
         - {type: model, name: SK18, nd: 1.63854, vd: 55.42}
@@ -148,3 +160,101 @@ configs:
           thickness: 0.0
           material: AIR
           diameter: 44.0
+
+rays:
+    polarization: [1, 0, 0, 1]
+    rays:
+        - id: marginal_f0_Yplus
+          wavelength: 0.00058756
+          initial:
+            origin: [0, 6.25, -100]
+            direction: [0, 0, 1]
+          path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+          lenient: true
+        - id: marginal_f0_Yminus
+          wavelength: 0.00058756
+          initial:
+            origin: [0, -6.25, -100]
+            direction: [0, 0, 1]
+          path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+          lenient: true
+        - id: marginal_f1_Yplus
+          wavelength: 0.00058756
+          initial:
+            origin: [0, -14.741977981736348, -100]
+            direction: [0, 0.17364817766693033, 0.9848077530122081]
+          path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+          lenient: true
+        - id: marginal_f1_Yminus
+          wavelength: 0.00058756
+          initial:
+            origin: [0, -27.241977981736348, -100]
+            direction: [0, 0.17364817766693033, 0.9848077530122081]
+          path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+          lenient: true
+        - id: marginal_f2_Yplus
+          wavelength: 0.00058756
+          initial:
+            origin: [0, -28.42229620626527, -100]
+            direction: [0, 0.2756373558169992, 0.9612616959383189]
+          path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+          lenient: true
+        - id: marginal_f2_Yminus
+          wavelength: 0.00058756
+          initial:
+            origin: [0, -40.92229620626527, -100]
+            direction: [0, 0.2756373558169992, 0.9612616959383189]
+          path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+          lenient: true
+        - id: marginal_f3_Yplus
+          wavelength: 0.00058756
+          initial:
+            origin: [0, -44.28844048989606, -100]
+            direction: [0, 0.39073112848927377, 0.9205048534524404]
+          path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+          lenient: true
+        - id: marginal_f3_Yminus
+          wavelength: 0.00058756
+          initial:
+            origin: [0, -56.78844048989606, -100]
+            direction: [0, 0.39073112848927377, 0.9205048534524404]
+          path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+          lenient: true
+
+chief_rays:
+    - field_angle: 0
+      chief_ray:
+        id: ""
+        wavelength: 0.00058756
+        initial:
+          origin: [0, 0, -100]
+          direction: [0, 0, 1]
+        path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        lenient: true
+    - field_angle: 10
+      chief_ray:
+        id: ""
+        wavelength: 0.00058756
+        initial:
+          origin: [0, -20.991977981736348, -100]
+          direction: [0, 0.17364817766693033, 0.9848077530122081]
+        path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        lenient: true
+    - field_angle: 16
+      chief_ray:
+        id: ""
+        wavelength: 0.00058756
+        initial:
+          origin: [0, -34.67229620626527, -100]
+          direction: [0, 0.2756373558169992, 0.9612616959383189]
+        path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        lenient: true
+    - field_angle: 23
+      chief_ray:
+        id: ""
+        wavelength: 0.00058756
+        initial:
+          origin: [0, -50.53844048989606, -100]
+          direction: [0, 0.39073112848927377, 0.9205048534524404]
+        path: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        lenient: true

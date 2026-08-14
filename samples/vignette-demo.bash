@@ -19,13 +19,18 @@ set -euo pipefail
 #
 # Steps
 #   1. chief        : dynamic-pupil chief (per-field entrance/exit pupil)
-#   2. marginal-rays + plot : initial diagram — marginal rays through the
-#                             oversized (36 mm) lens, rays in focus
+#   2. trace + plot : initial diagram from the hand-written rays in the YAML —
+#                     every field's bundle drawn at the SAME 12.5 mm thickness
+#                     (the widest uniform bundle that still focuses cleanly for
+#                     all four fields) through the oversized (36 mm) lens
 #   3. vignette     : 3 passes shrinking diameters to the beam envelope,
 #                     settling per-field vignetting and applying the
 #                     min_glass_path (edge-thickness >= 0.5 mm) constraint
-#   4. plot         : final diagram (chief + marginal rays) — just-right
-#                     effective apertures, edge thickness maintained
+#   4. chief --marginal-rays + trace + plot : final diagram — the marginal rays
+#                     are re-extracted from the vignetted system's pupil grid
+#                     (coherent upper/lower rays) instead of the vignette
+#                     output's scattered image-Y extremes, so the rays draw
+#                     cleanly and all land on their field's image point
 #   5. spot RMS     : before/after (vignette leaves curvatures untouched, so
 #                     the rays stay focused)
 # =============================================================================
@@ -74,11 +79,12 @@ $RAYWEAVE chief < "$YAML" > "$OUTDIR/${PREFIX}chief.yaml"
 echo "  Written: $OUTDIR/${PREFIX}chief.yaml"
 echo "  (per-field entrance/exit pupils are reported in vignetting_result below)"
 
-echo "--- 2. Initial diagram (marginal rays through the oversized lens) ---"
-$RAYWEAVE chief --marginal-rays < "$YAML" | $RAYWEAVE trace \
+echo "--- 2. Initial diagram (uniform-thickness bundles through the oversized lens) ---"
+$RAYWEAVE trace < "$YAML" \
   | $RAYWEAVE plot -o "$OUTDIR/${PREFIX}init.png" >/dev/null
 echo "  Written: $OUTDIR/${PREFIX}init.png"
-echo "  (rays are in focus; the 36 mm lens bodies are clearly oversized)"
+echo "  (every field's bundle is drawn at the same 12.5 mm width — the widest"
+echo "   uniform bundle that focuses cleanly for all fields; rays are in focus,"
 
 echo "--- 3. Vignette: 3 passes settling diameters + vignetting ---"
 $RAYWEAVE vignette --iterations 3 --min-glass-path 0.5 < "$YAML" > "$RESULT"
@@ -94,11 +100,14 @@ $RAYWEAVE query --each 'vignetting_result.diameters[]:surface_id,before,after' \
   --printf '    s%-2d  %8.3f -> %8.3f' < "$RESULT"
 echo "  Written: $RESULT"
 
-echo "--- 4. Final diagram (chief + marginal rays) ---"
-$RAYWEAVE vignette --iterations 3 --min-glass-path 0.5 < "$YAML" | $RAYWEAVE trace \
+echo "--- 4. Final diagram (chief + marginal rays re-extracted from the pupil grid) ---"
+$RAYWEAVE vignette --iterations 3 --min-glass-path 0.5 < "$YAML" \
+  | $RAYWEAVE chief --marginal-rays \
+  | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/${PREFIX}final.png" >/dev/null
 echo "  Written: $OUTDIR/${PREFIX}final.png"
-echo "  (effective diameters now fit the beam; edge thickness >= 0.5 mm enforced)"
+echo "  (effective diameters now fit the beam; edge thickness >= 0.5 mm enforced;"
+echo "   the vignetted off-axis bundles draw narrower but stay coherent)"
 
 echo "--- 5. Spot RMS before/after (vignette does not touch curvatures) ---"
 BEFORE_CHIEF=$( $RAYWEAVE chief < "$YAML" 2>/dev/null )
@@ -116,10 +125,22 @@ cat >> "$RESULT" <<EOF
 - The base lens is the DLS-optimized double-Gauss (on-axis spot RMS ~0.06 mm),
   so the rays come to a tight focus in both diagrams; vignette only re-sizes
   the effective diameters (curvatures untouched, spot RMS unchanged).
+- The initial diagram draws every field's bundle at the same 12.5 mm thickness
+  (hand-written rays in vignette-demo.yaml, chief ray height +- 6.25 mm at
+  z=-100). The physically vignetted off-axis bundles are narrower, and drawing
+  them at the on-axis's full aperture makes the outer rays refract wildly off
+  the rear elements; 12.5 mm is the widest uniform bundle that focuses cleanly
+  for all four fields.
 - vignetting_result.fields[].vignetting is the surviving fraction of each
   field's pupil grid (1.0 = no vignetting). The on-axis field is the reference
   envelope; wide fields are vignetted by the fixed aperture (s7) and by the
   glass-path (edge-thickness) check.
+- The final diagram re-extracts the marginal rays with 'chief --marginal-rays'
+  from the vignetted system: the vignette output's own marginal rays pick the
+  surviving grid rays with the extreme image Y, which after heavy vignetting
+  can come from scattered pupil regions and land far from the field's image
+  point (crossing, messy lines). Re-extraction gives the coherent pupil
+  top/bottom rays, so the vignetted off-axis bundles stay clean.
 - diameters[] list the auto_aperture: true surfaces before and after: every
   one starts at the deliberate 36.0 mm (oversized / wasteful glass) and is
   shrunk to 2x its surviving-beam extent + margin (~16 .. 25 mm). Fixed
