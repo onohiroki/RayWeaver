@@ -1,5 +1,7 @@
-# PSF / OTF / MTF demo input — escape-optimised US2645157 triplet (patent
-# triplet after the escape-function global optimiser, see escape-demo.bash).
+# PSF / OTF / MTF demo input — US2645157 triplet refined with the 16° 
+# wavefront_astigmatism merit (see escape-demo.yaml; the DLS re-optimisation of
+# the escape best with the 16° astigmatism term lifts the 16° Strehl to ~0.15
+# and the 24° to ~0.91 while keeping 0° near-diffraction-limited).
 # Cleaned copy: only the sections the `psf` subcommand consumes (glass_catalog,
 # configs, chief); the optimization/escape_result history lives in the original
 # escape-demo-result.yaml (untracked). Three fields (0/16/24 deg), reference
@@ -47,7 +49,7 @@ configs:
       surfaces:
         - id: 1
           type: sphere
-          curvature: 0.09698153007081993
+          curvature: 0.09591117189173479
           conic: 0
           thickness: 1.524
           material:
@@ -62,7 +64,7 @@ configs:
           auto_aperture: true
         - id: 3
           type: sphere
-          curvature: -0.0777641155662992
+          curvature: -0.07730044432963222
           conic: 0
           thickness: 0.508
           material:
@@ -83,7 +85,7 @@ configs:
           diameter: 3.7825297358
         - id: 6
           type: sphere
-          curvature: 0.017951674464199745
+          curvature: 0.017884708560785233
           conic: 0
           thickness: 1.524
           material:
@@ -91,7 +93,7 @@ configs:
           auto_aperture: true
         - id: 7
           type: sphere
-          curvature: -0.09825204751521123
+          curvature: -0.09939686879727823
           conic: 0
           thickness: 21.36695183553
           material: AIR

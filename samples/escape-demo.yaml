@@ -177,7 +177,7 @@ configs:
         - kind: wavefront_astigmatism
           field: 1
           wavelength: 0.0004861
-          weight: 4000.0
+          weight: 1000.0
           target: 0
         - kind: spot_rms
           field: 1
@@ -198,7 +198,7 @@ configs:
         - kind: wavefront_astigmatism
           field: 1
           wavelength: 0.0005876
-          weight: 4000.0
+          weight: 1000.0
           target: 0
         - kind: spot_rms
           field: 1
@@ -219,59 +219,44 @@ configs:
         - kind: wavefront_astigmatism
           field: 1
           wavelength: 0.0006563
-          weight: 4000.0
+          weight: 1000.0
           target: 0
         - kind: spot_rms_worst
           field: 2
           wavelength: 0.0004861
-          weight: 0.3
+          weight: 1.0
         - kind: spot_rms_weighted
           field: 2
           wavelength: 0.0004861
-          weight: 0.2
+          weight: 1.0
         - kind: spot_ee_radius
           field: 2
           wavelength: 0.0004861
-          weight: 0.2
+          weight: 1.0
           fraction: 0.8
-        - kind: wavefront_rms_residual
-          field: 2
-          wavelength: 0.0004861
-          weight: 8000.0
-          target: 0
         - kind: spot_rms_worst
           field: 2
           wavelength: 0.0005876
-          weight: 0.3
+          weight: 1.0
         - kind: spot_rms_weighted
           field: 2
           wavelength: 0.0005876
-          weight: 0.2
+          weight: 1.0
         - kind: spot_ee_radius
           field: 2
           wavelength: 0.0005876
-          weight: 0.2
+          weight: 1.0
           fraction: 0.8
-        - kind: wavefront_rms_residual
-          field: 2
-          wavelength: 0.0005876
-          weight: 8000.0
-          target: 0
         - kind: spot_rms_worst
           field: 2
           wavelength: 0.0006563
-          weight: 0.3
+          weight: 1.0
         - kind: spot_rms_weighted
           field: 2
           wavelength: 0.0006563
-          weight: 0.2
+          weight: 1.0
         - kind: spot_ee_radius
           field: 2
           wavelength: 0.0006563
-          weight: 0.2
+          weight: 1.0
           fraction: 0.8
-        - kind: wavefront_rms_residual
-          field: 2
-          wavelength: 0.0006563
-          weight: 8000.0
-          target: 0

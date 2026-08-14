@@ -119,6 +119,34 @@ Jacobian perturbations share one pupil (the wavefront analysis itself settles
 the dynamic pupil once per iteration). A degenerate fit (no grid, fewer than
 six valid rays) returns the 1e6 penalty.
 
+**Reference-surface fallback.** The wavefront fit needs a sampling surface
+strictly before the image plane. A `chief.reference_surface` set to the image
+plane (the conventional last surface) is rejected and falls back to the last
+optical surface — the same default the standalone `wavefront` command uses —
+instead of returning the penalty.
+
+**Dynamic-pupil retry.** The frozen-grid fit does not apply the fixed-surface
+vignetting cut, so a strongly off-axis field whose beam clips a fixed aperture
+can produce a singular paraboloid fit (e.g. the 24° field of the US2645157
+triplet at an un-resolved `pupilZ`). On a failed fit the term retries once with
+the dynamic pupil (chief resolves the entrance pupil), matching the standalone
+`wavefront` command's grid, before giving the 1e6 penalty.
+
+**Weight design (escape-demo).** The term weight must be balanced against the
+measured residual, not the idealised value: with `wavefront_rms_residual` the
+contribution is `weight × value²`, so a weight chosen from an optimistic
+`value` can dominate the merit ~10× once the solver moves. In `escape-demo.yaml`
+the 24° `wavefront_rms_residual` term at weight 8000 (designed for value 4.5e-5)
+measured 3.9e-4 against the spot terms' ~3.5e-5 and drove the solver to
+solutions with a **broken 24° pupil** (spot RMS ~1 mm); the same term at any
+weight up to 1000 still degraded the 24° spot in DLS (frozen-pupil evaluation
+diverging from the chief-measured spot). The 24° residual is better controlled
+through its spot terms (`spot_rms_worst` / `spot_rms_weighted` /
+`spot_ee_radius` raised to weight 1.0) than through the wavefront residual. The
+16° `wavefront_astigmatism` term (weight 1000) is safe: a DLS re-optimisation
+of the escape best lifts the 16° Strehl from 0.06 to 0.15 and the 24° Strehl
+from 0.77 to 0.91 while keeping 0° near-diffraction-limited.
+
 ### distortion_pct
 
 ```
