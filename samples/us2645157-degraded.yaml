@@ -1,3 +1,13 @@
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    Degraded US2645157 triplet (curvatures distorted so every field is badly
+    out of focus) carrying the OFF-AXIS spot merit kinds: spot_rms_t/_s/_worst
+    on the 16 deg field, spot_rms_worst/_weighted/_ee_radius on the 24 deg
+    field. Input of optimize-demo.bash (the "new" off-axis merit run).
+
 glass_catalog:
   entries:
     - name: "SK18"

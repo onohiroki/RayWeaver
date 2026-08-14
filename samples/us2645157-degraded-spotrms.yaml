@@ -1,3 +1,12 @@
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    The same degraded US2645157 triplet as us2645157-degraded.yaml but with the
+    plain rotationally-symmetric `spot_rms`-only merit -- the "old" baseline
+    that optimize-demo.bash compares the off-axis spot merit kinds against.
+
 glass_catalog:
   entries:
     - name: "SK18"

@@ -1,3 +1,14 @@
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    US2645157 patent triplet (MIT license, (c)2014 Daniel J. Reiley), converted
+    from the lens-designs.com ZMX file. EFL ~25 mm, f/5.42, 3 fields (0/16/24
+    deg), d/F/C wavelengths, stop on surface 5. Primary input of run-demo.bash
+    (chief -> trace -> plot -> tmm), scale-demo.bash (scale to EFL 50), and
+    wavefront-demo.bash (--lens triplet).
+
 glass_catalog:
   entries:
     - name: "SK18"

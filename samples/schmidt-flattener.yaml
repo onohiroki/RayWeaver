@@ -22,6 +22,18 @@
 # corrector compensates the mirror + FF spherical aberration but leaves a
 # visible residual at the full aperture.
 
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    Folded Schmidt camera (D=200, F/1.93, EFL~386): BK7 corrector plate +
+    spherical primary + 2-element field flattener, sensor folded back to
+    Z=400. Demonstrates the fold model: positive thicknesses only, fold
+    carried by the primary's decenter [{tilt: [0, 180, 0], scope: both}] plus
+    top-level `reflect: true`; radii after the mirror are in the beam frame.
+    Input of schmidt-demo.bash.
+
 glass_catalog:
   entries:
     - name: "N-BK7"

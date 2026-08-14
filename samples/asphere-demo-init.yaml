@@ -1,3 +1,14 @@
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    Optimized 6-element double-Gauss (f/2.8 50 mm) whose curvatures carry NO
+    aspherical correction -- the all-spherical baseline for asphere-demo.bash.
+    The demo ranks candidate surfaces for asphere introduction, fits even-order
+    coefficients from the per-field OPD residuals, validates each top-K fit
+    with a short DLS, and (with --apply) inserts the top-ranked asphere.
+
 glass_catalog:
   entries:
     - type: model

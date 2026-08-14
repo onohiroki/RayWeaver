@@ -9,6 +9,20 @@
 # surface 8. MTF is reported up to psf.mtf_config.max_frequency (200 c/mm) —
 # the demo script's --max-freq CLI flag overrides this, so the cap stays
 # effective even when the run uses a different lens YAML.
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    PSF/OTF/MTF demo input: the US2645157 triplet after the escape-function
+    global optimiser plus a DLS re-optimisation with the 16 deg
+    wavefront_astigmatism merit (w16=14000) and 24 deg spot terms (w24=0.05).
+    Cleaned copy carrying only the sections `rayweave psf` consumes
+    (glass_catalog / configs / chief); 3 fields (0/16/24 deg), reference
+    surface 8, best-focus default. Expected Strehl profile 0.99/0.62/0.59 with
+    MTF50 ~104/~70/~51 c/mm (0 deg > 16 deg > 24 deg). Input of
+    psf-mtf-demo.bash.
+
 glass_catalog:
     entries:
         - type: model

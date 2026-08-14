@@ -28,6 +28,24 @@
 # the per-field chief rays so `trace | plot` draws them (and colors the
 # bundles) directly from this file; `chief`/`vignette` recompute and overwrite
 # it, so it only affects the direct trace plot.
+
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    Vignette demo input: the OPTIMIZED 6-element 50 mm f/2.8 double-Gauss
+    (from doublegauss-result.yaml) with every auto_aperture surface
+    deliberately inflated to 36 mm so the "before" state reads as wasteful
+    glass. `rayweave vignette` shrinks each auto_aperture surface to its
+    surviving-beam envelope (2x extent + margin), settles per-field vignetting,
+    and applies the min_glass_path (>= 0.5 mm) edge-thickness constraint.
+    Surface 7 (fixed stop D=17.5) and the image plane are fixed. No
+    chief.stop_surface: pupils come from the chief-ray crossings (dynamic
+    pupil). The `rays` section carries hand-written marginal rays (12.5 mm
+    bundles) so the initial diagram draws every field at the same width. Input
+    of vignette-demo.bash.
+
 glass_catalog:
     entries:
         - {type: model, name: SK18, nd: 1.63854, vd: 55.42}

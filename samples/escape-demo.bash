@@ -87,6 +87,7 @@ if [ "$CLEAN" = true ]; then
   rm -f "$OUTDIR"/escape-demo-doublegauss-min*.yaml
   rm -f "$OUTDIR"/escape-demo-doublegauss-init.png "$OUTDIR"/escape-demo-doublegauss-best.png "$OUTDIR"/escape-demo-doublegauss-min1.png
   rm -f "$OUTDIR"/escape-demo-element-powers.png "$OUTDIR"/escape-demo-doublegauss-element-powers.png
+  rm -f "$OUTDIR"/escape-demo-element-powers.dat "$OUTDIR"/escape-demo-doublegauss-element-powers.dat
   rm -f "$OUTDIR"/escape-powers-*.dat "$OUTDIR"/escape-powers-*.png
   echo "  Removed: triplet and double-Gauss escape outputs"
   exit 0

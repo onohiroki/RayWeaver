@@ -1,3 +1,16 @@
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    6-element symmetric double-Gauss starting point for a 35mm-format 50 mm
+    f/2.8 standard lens (synthesised by an AI agent via curvature-scale search
+    to hit EFL ~50 mm). Carries an optimization.escape section so the same file
+    drives escape-demo.bash --lens doublegauss, doublegauss-demo.bash, and the
+    --lens doublegauss mode of psf-mtf-demo.bash and wavefront-demo.bash. Merit
+    uses the off-axis spot kinds (spot_rms, spot_rms_t/_s/_worst,
+    spot_rms_weighted, spot_ee_radius) plus lateral_color; no opd_rms.
+
 glass_catalog:
   entries:
   - type: model

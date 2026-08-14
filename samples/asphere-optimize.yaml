@@ -1,3 +1,14 @@
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    Singlet whose first surface is `asphere_polynomial` (the explicit aperture
+    stop, chief.stop_surface: 1). DLS optimises the conic and a4/a6 asphere
+    coefficients (asphere variables) in addition to curvatures. Input of
+    asphere-optimize-demo.bash, which compares a spherical-only optimisation
+    against one that also varies the asphere.
+
 glass_catalog:
   entries:
     - {type: model, name: N-BK7, nd: 1.5168, vd: 64.17}
