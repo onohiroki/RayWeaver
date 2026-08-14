@@ -23,6 +23,20 @@ func singletSystem() (types.System, *glass.Catalog) {
 	return types.System{Surfaces: surfaces}, gc
 }
 
+// vignettedSingletSystem is a singlet whose rear surface has a small clear
+// aperture, so fan rays scanned beyond the beam's physical extent are
+// vignetted (aperture_stop) and must be dropped from the fan.
+func vignettedSingletSystem() (types.System, *glass.Catalog) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 8.0},
+	}
+	surface.Precompute(surfaces)
+	return types.System{Surfaces: surfaces}, gc
+}
+
 func TestGenerateGridPointsPolar(t *testing.T) {
 	pts := GenerateGridPoints(7, 10.0, types.GridPolar)
 	if len(pts) == 0 {
@@ -376,6 +390,48 @@ func TestComputeRayFanDefaultBothPlanes(t *testing.T) {
 	fan := computeRayFan(engine, sys, dls.BuildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, 0.0, []float64{0, 90}, 8)
 	if len(fan.Meridional) == 0 || len(fan.Sagittal) == 0 {
 		t.Error("default config must produce both meridional and sagittal for all fields")
+	}
+}
+
+func TestComputeRayFanDropsVignettedRays(t *testing.T) {
+	sys, gc := vignettedSingletSystem()
+	engine := ray.NewEngine(gc, nil)
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+	origin := types.Vec3{X: 0, Y: 0, Z: -100}
+	dir := types.Vec3{X: 0, Y: 0, Z: 1}
+
+	// The fan scans ±apertureRadius (10 mm) but the rear surface's clear
+	// aperture is only 8 mm: outer samples are vignetted and must be dropped.
+	fan := computeRayFan(engine, sys, dls.BuildPath(sys.Surfaces), origin, dir, 2, pol, 0.00058756, 10.0, -100.0, []float64{0, 90}, 16)
+	if fan == nil {
+		t.Fatal("computeRayFan returned nil")
+	}
+	if len(fan.Meridional) == 0 {
+		t.Fatal("expected some meridional fan points to survive")
+	}
+	if len(fan.Meridional) >= 16 || len(fan.Sagittal) >= 16 {
+		t.Errorf("vignetted fan rays were not dropped: meridional=%d, sagittal=%d (want < 16)",
+			len(fan.Meridional), len(fan.Sagittal))
+	}
+	// Every surviving point must have traced cleanly through the system.
+	for _, fp := range fan.Meridional {
+		if len(fp.Path) < 2 {
+			t.Errorf("meridional fan point has no traced path (surfaces=%d)", len(fp.Path))
+		}
+		for _, sr := range fp.Path {
+			if sr.ErrorCode != "" {
+				t.Errorf("vignetted meridional fan point kept with error %q at surface %d (py=%v)",
+					sr.ErrorCode, sr.SurfaceID, fp.PupilY)
+			}
+		}
+	}
+	for _, fp := range fan.Sagittal {
+		for _, sr := range fp.Path {
+			if sr.ErrorCode != "" {
+				t.Errorf("vignetted sagittal fan point kept with error %q at surface %d (px=%v)",
+					sr.ErrorCode, sr.SurfaceID, fp.PupilX)
+			}
+		}
 	}
 }
 

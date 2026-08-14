@@ -1776,6 +1776,12 @@ func computeRayFan(
 		if tr.Error != "" {
 			return types.FanPoint{}, false
 		}
+		for _, sr := range tr.Surfaces {
+			switch sr.ErrorCode {
+			case string(ray.ErrApertureStop), string(ray.ErrMissedSurface), string(ray.ErrTIR):
+				return types.FanPoint{}, false
+			}
+		}
 		fp := types.FanPoint{
 			PupilX: px,
 			PupilY: py,

@@ -113,6 +113,14 @@ distance from the reference surface to where the lateral offset along the scan
 axis crosses zero. The full per-surface path of every fan ray is retained, so
 the fan output can be re-traced or drawn.
 
+**Vignetted fan rays are dropped.** Fan rays are traced leniently (aperture
+clipping / missed surfaces / total internal reflection are recorded as per-surface
+`error_code` values rather than a trace-level error), so a fan point whose path
+carries `aperture_stop`, `missed_surface`, or `total_internal_reflection` is
+excluded from the fan — a vignetted ray has no meaningful transverse aberration.
+The fan thus reflects the true clear-aperture pupil; off-axis fields with
+vignetting report fewer points than the requested `num_rays`.
+
 ## 8. Clear aperture (beam footprint)
 
 `--clear-aperture` re-traces the grid rays (a denser grid with
