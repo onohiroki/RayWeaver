@@ -1,7 +1,8 @@
 # PSF / OTF / MTF demo input — US2645157 triplet refined with the 16° 
 # wavefront_astigmatism merit (see escape-demo.yaml; the DLS re-optimisation of
-# the escape best with the 16° astigmatism term lifts the 16° Strehl to ~0.15
-# and the 24° to ~0.91 while keeping 0° near-diffraction-limited).
+# the escape best with the 16° astigmatism term at w16=14000 and the 24°
+# spot terms at w24=0.05 yields 0°/16°/24° Strehl ~0.99/~0.62/~0.59 — the 0°>
+# 16°>24° profile used by the demo table, meeting 0.9/0.6/0.5).
 # Cleaned copy: only the sections the `psf` subcommand consumes (glass_catalog,
 # configs, chief); the optimization/escape_result history lives in the original
 # escape-demo-result.yaml (untracked). Three fields (0/16/24 deg), reference
@@ -49,11 +50,12 @@ configs:
       surfaces:
         - id: 1
           type: sphere
-          curvature: 0.09486950787255127
+          curvature: 0.09341997031986016
           conic: 0
           thickness: 1.524
           material:
             key: SK18
+          diameter: 9.743125216956289
           auto_aperture: true
         - id: 2
           type: sphere
@@ -61,14 +63,16 @@ configs:
           conic: 0
           thickness: 2.3368
           material: AIR
+          diameter: 9.480197075618014
           auto_aperture: true
         - id: 3
           type: sphere
-          curvature: -0.07648637935587489
+          curvature: -0.07749141534421253
           conic: 0
           thickness: 0.508
           material:
             key: SF12
+          diameter: 5.199332339708295
           auto_aperture: true
         - id: 4
           type: sphere
@@ -76,6 +80,7 @@ configs:
           conic: 0
           thickness: 1.4986
           material: AIR
+          diameter: 4.481962830742521
           auto_aperture: true
         - id: 5
           type: sphere
@@ -85,18 +90,20 @@ configs:
           diameter: 3.7825297358
         - id: 6
           type: sphere
-          curvature: 0.018369075780735853
+          curvature: 0.02300805346608626
           conic: 0
           thickness: 1.524
           material:
             key: SK18
+          diameter: 3.3706523126634833
           auto_aperture: true
         - id: 7
           type: sphere
-          curvature: -0.09945478431511169
+          curvature: -0.09769148146620998
           conic: 0
           thickness: 21.36695183553
           material: AIR
+          diameter: 4.1831974215913545
           auto_aperture: true
         - id: 8
           type: sphere

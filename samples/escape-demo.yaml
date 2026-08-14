@@ -177,7 +177,7 @@ configs:
         - kind: wavefront_astigmatism
           field: 1
           wavelength: 0.0004861
-          weight: 2000.0
+          weight: 14000.0
           target: 0
         - kind: spot_rms
           field: 1
@@ -198,7 +198,7 @@ configs:
         - kind: wavefront_astigmatism
           field: 1
           wavelength: 0.0005876
-          weight: 2000.0
+          weight: 14000.0
           target: 0
         - kind: spot_rms
           field: 1
@@ -219,44 +219,44 @@ configs:
         - kind: wavefront_astigmatism
           field: 1
           wavelength: 0.0006563
-          weight: 2000.0
+          weight: 14000.0
           target: 0
         - kind: spot_rms_worst
           field: 2
           wavelength: 0.0004861
-          weight: 1.0
+          weight: 0.05
         - kind: spot_rms_weighted
           field: 2
           wavelength: 0.0004861
-          weight: 1.0
+          weight: 0.05
         - kind: spot_ee_radius
           field: 2
           wavelength: 0.0004861
-          weight: 1.0
+          weight: 0.05
           fraction: 0.8
         - kind: spot_rms_worst
           field: 2
           wavelength: 0.0005876
-          weight: 1.0
+          weight: 0.05
         - kind: spot_rms_weighted
           field: 2
           wavelength: 0.0005876
-          weight: 1.0
+          weight: 0.05
         - kind: spot_ee_radius
           field: 2
           wavelength: 0.0005876
-          weight: 1.0
+          weight: 0.05
           fraction: 0.8
         - kind: spot_rms_worst
           field: 2
           wavelength: 0.0006563
-          weight: 1.0
+          weight: 0.05
         - kind: spot_rms_weighted
           field: 2
           wavelength: 0.0006563
-          weight: 1.0
+          weight: 0.05
         - kind: spot_ee_radius
           field: 2
           wavelength: 0.0006563
-          weight: 1.0
+          weight: 0.05
           fraction: 0.8
