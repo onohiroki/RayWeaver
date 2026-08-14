@@ -56,6 +56,7 @@ type ConfigInput struct {
 	Fields      []types.FieldItem
 	Wavelengths []types.WavelengthItem
 	MeritTerms  []types.MeritTerm
+	MeritModes  []types.MeritMode
 	Constraints []types.ConstraintOperand
 }
 
@@ -89,6 +90,7 @@ type MeritTerm struct {
 	Weight      float64
 	Target      float64
 	Fraction    float64
+	SurfaceSet  []int
 }
 
 type Result struct {
@@ -127,6 +129,9 @@ type config struct {
 	fields      []types.FieldItem
 	wavelengths []types.WavelengthItem
 	meritTerms  []meritTerm
+	// meritModes holds the config's named merit-mode term lists (from
+	// configs[].merit_modes). Nil when the config uses its fixed merit.
+	meritModes  map[string][]meritTerm
 	constraints []types.ConstraintOperand
 }
 
@@ -144,6 +149,9 @@ type meritTerm struct {
 	wavWeight      float64
 	weight         float64
 	target         float64
+	// surfaceSet identifies the glass surfaces a kind operates on
+	// (glass_role uses surfaceSet[0] as the element's glass surface).
+	surfaceSet []int
 	// fieldDirX/fieldDirY is the field's image-plane azimuth unit vector,
 	// used by the tangential/sagittal spot kinds (spot_rms_t / _s / _worst).
 	// Defaults to the Y axis (0, 1).
@@ -151,6 +159,228 @@ type meritTerm struct {
 	fieldDirY float64
 	// fraction is the encircled-energy fraction for spot_ee_radius (default 0.8).
 	fraction float64
+}
+
+// meritSchedule is the compiled optimization.merit_schedule: a smooth blend of
+// named merit modes whose weights follow a scalar state metric.
+type meritSchedule struct {
+	metric        string // merit_ratio | iteration | glass_role
+	curve         string // linear | sigmoid | step
+	anchorFrom    float64
+	anchorTo      float64
+	glassSurfaces []int
+	modes         []scheduleMode
+}
+
+type scheduleMode struct {
+	name       string
+	weightFrom float64
+	weightTo   float64
+}
+
+// glassVDForSurface returns the Abbe number of the material on the surface with
+// the given ID, resolved through the (possibly in-flight) catalog for keyed
+// materials and read inline for model glasses. Returns 0 for air/unknown.
+func glassVDForSurface(surfaces []types.Surface, gc *glass.Catalog, id int) float64 {
+	for i := range surfaces {
+		if surfaces[i].ID != id {
+			continue
+		}
+		m := surfaces[i].Material
+		if m.HasModel() && !m.HasKey() {
+			return m.VD
+		}
+		if m.HasKey() {
+			if g, ok := gc.Lookup(m.Key); ok {
+				return g.VD
+			}
+		}
+		return 0
+	}
+	return 0
+}
+
+// SetMeritSchedule installs the conditional merit blend. It computes the
+// initial per-mode weights at the initial variable state so the DLS "before"
+// merit and the first iteration's base-point residuals share the same blend.
+// A nil schedule keeps the fixed per-config merit.
+func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
+	if s == nil {
+		return
+	}
+	ms := &meritSchedule{
+		metric:        s.Metric,
+		curve:         s.Curve,
+		anchorFrom:    s.AnchorFrom,
+		anchorTo:      s.AnchorTo,
+		glassSurfaces: s.GlassSurfaces,
+	}
+	if ms.metric == "" {
+		ms.metric = "merit_ratio"
+	}
+	if ms.curve == "" {
+		ms.curve = "linear"
+	}
+	o.modeWeights = make(map[string]float64, len(s.Modes))
+	for _, m := range s.Modes {
+		ms.modes = append(ms.modes, scheduleMode{name: m.Name, weightFrom: m.WeightFrom, weightTo: m.WeightTo})
+		o.modeWeights[m.Name] = 0
+	}
+	o.meritSchedule = ms
+
+	x0 := o.InitialState()
+	// The merit_ratio metric is 1.0 at the initial state by definition (the
+	// initialMerit guard below); the other metrics evaluate directly.
+	o.setModeWeightsAt(o.scheduleMetric(x0, 0))
+	o.initialMerit = o.EvaluateMerit(x0)
+}
+
+// UpdateMeritWeights implements dls.MeritScheduleUpdater: recompute the mode
+// weights from the state metric at the current x. Called once per DLS iteration
+// at the current x, so the weights stay frozen within one iteration and the
+// Jacobian matches the merit actually minimised.
+func (o *Optimizer) UpdateMeritWeights(x []float64, iter int) {
+	if o.meritSchedule == nil {
+		return
+	}
+	prev := dominantMode(o.modeWeights)
+	cur := o.setModeWeightsAt(o.scheduleMetric(x, iter))
+	if cur != prev {
+		o.modeChanges++
+	}
+	if o.logger != nil {
+		if ml, ok := o.logger.(dls.ModeLogger); ok {
+			ml.LogModeWeights(iter, copyWeights(o.modeWeights))
+		}
+	}
+}
+
+// setModeWeightsAt evaluates the weight curve at the metric value s and stores
+// the per-mode weights. It returns the resulting dominant mode without any
+// side effects (change counting / logging happen in the callers).
+func (o *Optimizer) setModeWeightsAt(s float64) string {
+	t := 0.5
+	span := o.meritSchedule.anchorTo - o.meritSchedule.anchorFrom
+	if math.Abs(span) > 1e-15 {
+		t = (s - o.meritSchedule.anchorFrom) / span
+		if t < 0 {
+			t = 0
+		}
+		if t > 1 {
+			t = 1
+		}
+	}
+	for _, sm := range o.meritSchedule.modes {
+		f := scheduleCurve(o.meritSchedule.curve, t)
+		o.modeWeights[sm.name] = sm.weightFrom + (sm.weightTo-sm.weightFrom)*f
+	}
+	return dominantMode(o.modeWeights)
+}
+
+// scheduleMetric evaluates the state metric s(x) driving the blend.
+func (o *Optimizer) scheduleMetric(x []float64, iter int) float64 {
+	switch o.meritSchedule.metric {
+	case "iteration":
+		return float64(iter)
+	case "glass_role":
+		configSurfaces, tempGC := o.applyVariables(x)
+		gc := effectiveGC(o.gc, tempGC)
+		total := 0.0
+		for ci := range o.configs {
+			surfaces := configSurfaces[o.configs[ci].id]
+			for _, id := range o.meritSchedule.glassSurfaces {
+				total += math.Abs(glassRoleForSurface(surfaces, gc, id))
+			}
+		}
+		return total
+	default: // merit_ratio
+		if o.initialMerit == 0 {
+			return 1.0
+		}
+		return o.EvaluateMerit(x) / o.initialMerit
+	}
+}
+
+// scheduleCurve maps the normalised metric t ∈ [0,1] to a blend fraction.
+func scheduleCurve(curve string, t float64) float64 {
+	switch curve {
+	case "sigmoid":
+		return 1.0 / (1.0 + math.Exp(-10.0*(t-0.5)))
+	case "step":
+		if t < 0.5 {
+			return 0
+		}
+		return 1
+	default: // linear
+		return t
+	}
+}
+
+// dominantMode returns the mode name with the largest weight (ties keep the
+// first in map iteration order; stable enough for change counting).
+func dominantMode(weights map[string]float64) string {
+	best := ""
+	bestW := math.Inf(-1)
+	for name, w := range weights {
+		if w > bestW {
+			best, bestW = name, w
+		}
+	}
+	return best
+}
+
+func copyWeights(src map[string]float64) map[string]float64 {
+	out := make(map[string]float64, len(src))
+	for k, v := range src {
+		out[k] = v
+	}
+	return out
+}
+
+// MeritScheduleState returns the active (largest-weight) mode, the final
+// per-mode weights, and the number of dominant-mode transitions. The zero value
+// is returned when no schedule is configured.
+func (o *Optimizer) MeritScheduleState() (string, map[string]float64, int) {
+	if o.meritSchedule == nil {
+		return "", nil, 0
+	}
+	return dominantMode(o.modeWeights), copyWeights(o.modeWeights), o.modeChanges
+}
+
+// scheduledTerm is one effective term of a config with the mode weight folded
+// into its scale (1.0 when no schedule is active).
+type scheduledTerm struct {
+	term  *meritTerm
+	scale float64
+	mode  string
+}
+
+// scheduledTerms returns the effective terms of a config. With a schedule, the
+// terms come from the config's merit_modes, each scaled by its (frozen) mode
+// weight; a config without merit_modes keeps its fixed merit terms at scale 1.
+func (o *Optimizer) scheduledTerms(cfg *config) []scheduledTerm {
+	if o.meritSchedule == nil {
+		out := make([]scheduledTerm, len(cfg.meritTerms))
+		for i := range cfg.meritTerms {
+			out[i] = scheduledTerm{term: &cfg.meritTerms[i], scale: 1.0}
+		}
+		return out
+	}
+	var out []scheduledTerm
+	for _, sm := range o.meritSchedule.modes {
+		w := o.modeWeights[sm.name]
+		if w <= 0 {
+			continue
+		}
+		terms, ok := cfg.meritModes[sm.name]
+		if !ok {
+			continue
+		}
+		for i := range terms {
+			out = append(out, scheduledTerm{term: &terms[i], scale: w, mode: sm.name})
+		}
+	}
+	return out
 }
 
 // resolvePupilZ returns the pupil Z used to centre grid traces for a config:
@@ -259,6 +489,13 @@ type Optimizer struct {
 	hullMargin       float64
 	hullWeight       float64
 	hullPairs        []glassPair
+	// Conditional merit blend (optimization.merit_schedule). Nil keeps the
+	// fixed per-config merit. When set, modeWeights holds the frozen per-mode
+	// weights recomputed at the top of every DLS iteration.
+	meritSchedule *meritSchedule
+	modeWeights   map[string]float64
+	initialMerit  float64
+	modeChanges   int
 	// stop, when set, is forwarded into dls.Options.Stop so the solver aborts
 	// mid-solve (returning the best point found so far with Status
 	// "interrupted") once the channel is closed. nil disables interruption.
@@ -304,6 +541,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 			weight:      t.Weight,
 			target:      t.Target,
 			fraction:    t.Fraction,
+			surfaceSet:  append([]int(nil), t.SurfaceSet...),
 		})
 	}
 	variables := make([]Variable, len(cfg.Variables))
@@ -342,6 +580,16 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			fields:      ci.Fields,
 			wavelengths: ci.Wavelengths,
 			constraints: ci.Constraints,
+		}
+		if len(ci.MeritModes) > 0 {
+			c.meritModes = make(map[string][]meritTerm, len(ci.MeritModes))
+			for _, m := range ci.MeritModes {
+				var terms []meritTerm
+				for _, t := range m.Terms {
+					terms = append(terms, buildMeritTermFromTypes(t, ci))
+				}
+				c.meritModes[m.Name] = terms
+			}
 		}
 		for _, t := range ci.MeritTerms {
 			c.meritTerms = append(c.meritTerms, buildMeritTermFromTypes(t, ci))
@@ -399,6 +647,7 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 		weight:      t.Weight,
 		target:      t.Target,
 		fraction:    t.Fraction,
+		surfaceSet:  append([]int(nil), t.SurfaceSet...),
 		fieldDirX:   0,
 		fieldDirY:   1,
 		fieldWeight: 1.0,
@@ -913,20 +1162,20 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 		o.sizeAutoApertures(cfg, surfaces, gc)
 
 		cfgMerit := 0.0
-		for ti := range cfg.meritTerms {
-			term := &cfg.meritTerms[ti]
+		for _, st := range o.scheduledTerms(cfg) {
+			term := st.term
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc)
 				if term.kind == "" || term.kind == dls.MeritSpotRMS {
-					cfgMerit += term.weight * term.fieldWeight * term.wavWeight * val * val
+					cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * val * val
 				} else {
 					diff := val - term.target
-					cfgMerit += term.weight * term.fieldWeight * term.wavWeight * diff * diff
+					cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 				}
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
 				diff := val - term.target
-				cfgMerit += term.weight * term.fieldWeight * term.wavWeight * diff * diff
+				cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
 		}
 		merit += cfg.weight * cfgMerit
@@ -956,27 +1205,30 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 		o.restoreDiameters(cfg, surfaces)
 		o.sizeAutoApertures(cfg, surfaces, gc)
 
-		for ti := range cfg.meritTerms {
-			term := &cfg.meritTerms[ti]
+		for _, st := range o.scheduledTerms(cfg) {
+			term := st.term
 			var contrib float64
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc)
 				if term.kind == "" || term.kind == dls.MeritSpotRMS {
-					contrib = term.weight * term.fieldWeight * term.wavWeight * val * val
+					contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * val * val
 				} else {
 					diff := val - term.target
-					contrib = term.weight * term.fieldWeight * term.wavWeight * diff * diff
+					contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 				}
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
 				diff := val - term.target
-				contrib = term.weight * term.fieldWeight * term.wavWeight * diff * diff
+				contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
 			kind := term.kind
 			if kind == "" {
 				kind = dls.MeritSpotRMS
 			}
 			key := fmt.Sprintf("config:%s %s(f%.1f,%.6f)", cfg.id, kind, o.termFieldAngle(cfg, term, surfaces, gc), term.wavelength)
+			if st.mode != "" {
+				key = fmt.Sprintf("config:%s [%s] %s(f%.1f,%.6f)", cfg.id, st.mode, kind, o.termFieldAngle(cfg, term, surfaces, gc), term.wavelength)
+			}
 			out[key] = contrib
 			objTotal += cfg.weight * contrib
 		}
@@ -997,9 +1249,9 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 		o.restoreDiameters(cfg, surfaces)
 		o.sizeAutoApertures(cfg, surfaces, gc)
 
-		for ti := range cfg.meritTerms {
-			term := &cfg.meritTerms[ti]
-			w := math.Sqrt(cfg.weight * term.weight * term.fieldWeight * term.wavWeight)
+		for _, st := range o.scheduledTerms(cfg) {
+			term := st.term
+			w := math.Sqrt(cfg.weight * st.scale * term.weight * term.fieldWeight * term.wavWeight)
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc)
 				if term.kind == "" || term.kind == dls.MeritSpotRMS {

@@ -109,6 +109,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 			Fields:      fields,
 			Wavelengths: wavelengths,
 			MeritTerms:  meritTerms,
+			MeritModes:  cfg.MeritModes,
 			Constraints: constraints,
 		})
 	}
@@ -166,8 +167,15 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		os.Exit(1)
 	}
 
-	if len(configs[0].MeritTerms) == 0 {
-		errOut("Error: no merit terms defined (add 'optimization.merit' or 'configs[].merit')")
+	hasMerit := false
+	for _, c := range configs {
+		if len(c.MeritTerms) > 0 || len(c.MeritModes) > 0 {
+			hasMerit = true
+			break
+		}
+	}
+	if !hasMerit {
+		errOut("Error: no merit terms defined (add 'optimization.merit', 'configs[].merit' or 'configs[].merit_modes')")
 		os.Exit(1)
 	}
 
@@ -244,6 +252,41 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 
 	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight)
 
+	// Validate the conditional merit schedule and the glass_role kind before
+	// running (bad configuration would otherwise silently contribute nothing).
+	if input.Optimization.MeritSchedule != nil {
+		hasModes := false
+		for _, c := range configs {
+			if len(c.MeritModes) > 0 {
+				hasModes = true
+				break
+			}
+		}
+		if !hasModes {
+			errOut("Error: optimization.merit_schedule requires configs[].merit_modes on at least one active config")
+			os.Exit(1)
+		}
+		if input.Optimization.MeritSchedule.Metric == "glass_role" && len(input.Optimization.MeritSchedule.GlassSurfaces) == 0 {
+			errOut("Error: optimization.merit_schedule metric 'glass_role' requires glass_surfaces")
+			os.Exit(1)
+		}
+	}
+	checkGlassRole := func(terms []types.MeritTerm) {
+		for _, mt := range terms {
+			if mt.Kind == optimize.MeritGlassRole && len(mt.SurfaceSet) == 0 {
+				errOut("Error: glass_role merit term requires surface_set (e.g. [3, 5])")
+				os.Exit(1)
+			}
+		}
+	}
+	for _, c := range configs {
+		checkGlassRole(c.MeritTerms)
+		for _, m := range c.MeritModes {
+			checkGlassRole(m.Terms)
+		}
+	}
+	opt.SetMeritSchedule(input.Optimization.MeritSchedule)
+
 	// Two-stage stop on SIGINT/SIGTERM.
 	//
 	//  1st signal: graceful stop. Closes the mid-solve stop channel so the
@@ -308,6 +351,11 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 
 	finalX := finalXFromStates(result.Variables)
 
+	// Refresh the merit-blend weights at the final point so the reported
+	// active_mode / mode_weights reflect the result, not the last iteration's
+	// frozen state. No-op when no schedule is configured.
+	opt.UpdateMeritWeights(finalX, result.Iterations)
+
 	// Re-apply final variable values to all configs' surfaces and materialise
 	// optimised glasses.
 	configSurfaces, newGlasses := opt.FinalConfigs(finalX)
@@ -362,12 +410,18 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 
 	// Report the final measured value of every active constraint (e.g. the
 	// vignetting factor) so callers can gate on what the optimizer enforced.
-	output.OptResults = &types.OptimizationResult{
+	optResults := &types.OptimizationResult{
 		Status:      result.Status,
 		Iterations:  result.Iterations,
 		Interrupted: interrupted,
 		Constraints: opt.FinalConstraintMeasurements(finalX),
 	}
+	if active, weights, changes := opt.MeritScheduleState(); active != "" {
+		optResults.ActiveMode = active
+		optResults.ModeWeights = weights
+		optResults.ModeChanges = changes
+	}
+	output.OptResults = optResults
 
 	writeYAML(&output)
 }
@@ -473,6 +527,20 @@ func (j *jsonLogger) LogFinal(iter int, status string, merit float64, stepNorm f
 	fmt.Fprintln(j.w, string(data))
 }
 
+func (j *jsonLogger) LogModeWeights(iter int, weights map[string]float64) {
+	entry := modeWeightsLog{
+		Event:   "weights",
+		Iter:    iter,
+		Weights: weights,
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		fmt.Fprintf(j.w, "ERR weights: %v\n", err)
+		return
+	}
+	fmt.Fprintln(j.w, string(data))
+}
+
 type multiLogger struct {
 	loggers []dls.Logger
 }
@@ -489,8 +557,22 @@ func (m *multiLogger) LogFinal(iter int, status string, merit float64, stepNorm 
 	}
 }
 
+func (m *multiLogger) LogModeWeights(iter int, weights map[string]float64) {
+	for _, l := range m.loggers {
+		if ml, ok := l.(dls.ModeLogger); ok {
+			ml.LogModeWeights(iter, weights)
+		}
+	}
+}
+
 type constraintInfo struct {
 	Residual float64 `json:"residual"`
+}
+
+type modeWeightsLog struct {
+	Event   string             `json:"event"`
+	Iter    int                `json:"iter"`
+	Weights map[string]float64 `json:"weights"`
 }
 
 type iterLog struct {

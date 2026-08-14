@@ -23,6 +23,7 @@ const (
 	MeritDistortionPct     = "distortion_pct"
 	MeritLateralColor      = "lateral_color"
 	MeritLongitudinalColor = "longitudinal_color"
+	MeritGlassRole         = "glass_role"
 	MeritSeidelSpherical   = "seidel_spherical"
 	MeritSeidelComa        = "seidel_coma"
 	MeritSeidelAstigmatism = "seidel_astigmatism"
@@ -151,6 +152,11 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 		return evaluateLateralColor(term.fieldAngle, term.wavelength, term.wavelength2, surfaces, gc)
 	case MeritLongitudinalColor:
 		return evaluateLongitudinalColor(term.wavelength, term.wavelength2, surfaces, gc)
+	case MeritGlassRole:
+		if len(term.surfaceSet) == 0 {
+			return 0
+		}
+		return glassRoleForSurface(surfaces, gc, term.surfaceSet[0])
 	case MeritSeidelSpherical:
 		return evaluateSeidel(term.fieldAngle, term.wavelength, surfaces, gc).Spherical
 	case MeritSeidelComa:
@@ -186,6 +192,7 @@ func EvaluateMeritKind(kind string, term MeritTerm, surfaces []types.Surface, gc
 			fieldDirY:  dy,
 			wavelength: term.Wavelength,
 			fraction:   term.Fraction,
+			surfaceSet: append([]int(nil), term.SurfaceSet...),
 		}
 		return o.evaluateKindTerm(cfg, &mt, surfaces, gc)
 	}
@@ -194,6 +201,7 @@ func EvaluateMeritKind(kind string, term MeritTerm, surfaces []types.Surface, gc
 		fieldAngle:  term.FieldAngle,
 		wavelength:  term.Wavelength,
 		wavelength2: term.Wavelength2,
+		surfaceSet:  append([]int(nil), term.SurfaceSet...),
 	}
 	return evaluateKindValue(kind, &mt, surfaces, gc)
 }
@@ -243,6 +251,30 @@ func evaluateLongitudinalColor(wl1, wl2 float64, surfaces []types.Surface, gc *g
 	pr1 := paraxial.Compute(sys, wl1, gc, 0, nil)
 	pr2 := paraxial.Compute(sys, wl2, gc, 0, nil)
 	return pr2.FocalLength - pr1.FocalLength
+}
+
+// glass_role tuning constants: the target Abbe number of an element of
+// thin-lens power phi at the d-line is vd_center + delta·tanh(gamma·phi), so a
+// positive-power element is steered to the crown (high-vd) end and a
+// negative-power element to the flint (low-vd) end.
+const (
+	meritGlassRoleCenter = 45.0
+	meritGlassRoleDelta  = 16.0
+	meritGlassRoleGamma  = 1.0
+)
+
+func glassRoleTarget(phi float64) float64 {
+	return meritGlassRoleCenter + meritGlassRoleDelta*math.Tanh(meritGlassRoleGamma*phi)
+}
+
+// glassRoleForSurface returns the glass-role residual
+// vd_actual − vd_target for the element containing the surface with the given
+// ID: 0 when the surface is not part of a lens element (air gap, object,
+// image plane).
+func glassRoleForSurface(surfaces []types.Surface, gc *glass.Catalog, id int) float64 {
+	phi := paraxial.ElementPowerForSurface(surfaces, paraxial.DLine, gc, id)
+	vdActual := glassVDForSurface(surfaces, gc, id)
+	return vdActual - glassRoleTarget(phi)
 }
 
 func evaluateSeidel(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) paraxial.SeidelCoefficients {

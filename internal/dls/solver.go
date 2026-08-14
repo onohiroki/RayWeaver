@@ -123,6 +123,9 @@ func Solve(m Model) Result {
 		if pu, ok := m.(PupilUpdater); ok {
 			pu.UpdatePupils(denormalize(xNorm, variables, scales))
 		}
+		if msu, ok := m.(MeritScheduleUpdater); ok {
+			msu.UpdateMeritWeights(denormalize(xNorm, variables, scales), totalIter)
+		}
 		if stopped(opts.Stop) {
 			status = StatusInterrupted
 			break

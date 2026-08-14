@@ -65,3 +65,36 @@ func elementPowerAt(surfaces []types.Surface, nIndex []float64, idx []int) float
 	}
 	return phi
 }
+
+// ElementPowerForSurface returns the thin-lens power of the element whose
+// bounding surfaces include surfaceID, using the same grouping as
+// ElementPowers. It returns 0 when the surface is not part of a lens element
+// (air gap, object, image plane) or is not found.
+func ElementPowerForSurface(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, surfaceID int) float64 {
+	nIndex := resolveIndices(surfaces, wavelength, gc)
+	for i := 0; i < len(surfaces); {
+		if surfaces[i].Reflects() {
+			if surfaces[i].ID == surfaceID {
+				return elementPowerAt(surfaces, nIndex, []int{i})
+			}
+			i++
+			continue
+		}
+		if isAirMaterial(surfaces[i].Material) {
+			i++
+			continue
+		}
+		r2 := i + 1
+		if r2 >= len(surfaces) {
+			if surfaces[i].ID == surfaceID {
+				return elementPowerAt(surfaces, nIndex, []int{i})
+			}
+			break
+		}
+		if surfaces[i].ID == surfaceID || surfaces[r2].ID == surfaceID {
+			return elementPowerAt(surfaces, nIndex, []int{i, r2})
+		}
+		i = r2
+	}
+	return 0
+}

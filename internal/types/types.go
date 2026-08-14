@@ -495,6 +495,44 @@ type MeritFunction struct {
 	Terms []MeritTerm `yaml:"terms"`
 }
 
+// MeritMode is one named term list of a conditional merit schedule. When a
+// config declares merit_modes, the active `optimization.merit_schedule` mode's
+// terms replace the config's fixed `merit`.
+type MeritMode struct {
+	Name  string      `yaml:"name"`
+	Terms []MeritTerm `yaml:"terms"`
+}
+
+// MeritScheduleMode assigns one mode a weight that interpolates between
+// WeightFrom (at metric == anchor_from) and WeightTo (at metric == anchor_to).
+type MeritScheduleMode struct {
+	Name       string  `yaml:"name"`
+	WeightFrom float64 `yaml:"weight_from"`
+	WeightTo   float64 `yaml:"weight_to"`
+}
+
+// MeritScheduleConfig configures the smooth merit blend
+// (`optimization.merit_schedule`). The total merit becomes
+// Σ_configs w_cfg · Σ_modes w_k(s(x)) · M_{cfg,k}(x) where s is a scalar state
+// metric and each mode weight w_k is a monotone curve between the anchors.
+type MeritScheduleConfig struct {
+	// Metric is the state signal driving the blend: merit_ratio (default),
+	// iteration, or glass_role (the |vd_actual − vd_target| residual summed
+	// over GlassSurfaces across all configs).
+	Metric string `yaml:"metric"`
+	// Curve is the interpolation shape between the anchors: linear (default),
+	// sigmoid, or step (a hard mode switch at the midpoint).
+	Curve string `yaml:"curve"`
+	// AnchorFrom/AnchorTo bound the metric range over which the weights ramp
+	// (t = clamp((s − anchor_from)/(anchor_to − anchor_from), 0, 1)).
+	AnchorFrom float64 `yaml:"anchor_from"`
+	AnchorTo   float64 `yaml:"anchor_to"`
+	// GlassSurfaces are the glass surface IDs evaluated for the glass_role
+	// metric (required when Metric is glass_role).
+	GlassSurfaces []int               `yaml:"glass_surfaces,omitempty"`
+	Modes         []MeritScheduleMode `yaml:"modes"`
+}
+
 type Config struct {
 	ID          string              `yaml:"id"`
 	Name        string              `yaml:"name"`
@@ -505,6 +543,7 @@ type Config struct {
 	RayPaths    []RayPath           `yaml:"ray_paths"`
 	Surfaces    []Surface           `yaml:"surfaces"`
 	Merit       *MeritFunction      `yaml:"merit,omitempty"`
+	MeritModes  []MeritMode         `yaml:"merit_modes,omitempty"`
 	Constraints []ConstraintOperand `yaml:"constraints,omitempty"`
 }
 
@@ -617,6 +656,7 @@ type OptimizationConfig struct {
 	Constraints     []ConstraintOperand    `yaml:"constraints,omitempty"`
 	GlassHull       *GlassHullConfig       `yaml:"glass_hull,omitempty"`
 	Escape          *EscapeConfig          `yaml:"escape,omitempty"`
+	MeritSchedule   *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
 }
 
 // EscapeConfig configures the escape-function global optimisation loop
@@ -664,6 +704,11 @@ type OptimizationResult struct {
 	Reason            string                  `yaml:"reason,omitempty"`
 	Interrupted       bool                    `yaml:"interrupted,omitempty"`
 	Constraints       []ConstraintMeasurement `yaml:"constraints,omitempty"`
+	// Merit-schedule state: the mode with the largest final weight and the
+	// final per-mode weights (present only with optimization.merit_schedule).
+	ActiveMode  string             `yaml:"active_mode,omitempty"`
+	ModeWeights map[string]float64 `yaml:"mode_weights,omitempty"`
+	ModeChanges int                `yaml:"mode_changes,omitempty"`
 }
 
 // ConstraintMeasurement records the final measured value and residual of one

@@ -86,6 +86,12 @@ type Logger interface {
 	LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []ConstraintState)
 }
 
+// ModeLogger is an optional Logger capability: report the per-iteration
+// merit-blend weights of a conditional merit schedule.
+type ModeLogger interface {
+	LogModeWeights(iter int, weights map[string]float64)
+}
+
 type Model interface {
 	Variables() []VariableInfo
 	InitialState() []float64
@@ -104,4 +110,15 @@ type Model interface {
 // whatever grid centring they were constructed with.
 type PupilUpdater interface {
 	UpdatePupils(x []float64)
+}
+
+// MeritScheduleUpdater is an optional Model capability: recompute the smooth
+// merit-blend weights at the current variable state before the next Jacobian
+// column sweep. Like PupilUpdater, the solver calls it once per iteration at
+// the current x, so the weights stay frozen within one iteration — the
+// base-point and all finite-difference residual evaluations share the same
+// weights, keeping the Jacobian consistent with the merit actually minimised.
+// Models without a schedule keep the weights they were constructed with.
+type MeritScheduleUpdater interface {
+	UpdateMeritWeights(x []float64, iter int)
 }
