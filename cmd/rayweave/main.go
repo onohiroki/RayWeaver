@@ -1229,9 +1229,6 @@ func runChief(data []byte) {
 		var jobs []gridJob
 		for _, r := range results {
 			for _, gp := range r.GridPoints {
-				if gp.ImageX == nil {
-					continue
-				}
 				jobs = append(jobs, gridJob{origin: gp.Origin, direction: gp.Direction})
 			}
 		}
@@ -1261,6 +1258,7 @@ func runChief(data []byte) {
 						Initial:    types.RayState{Origin: gp.origin, Direction: gp.direction},
 						Path:       path,
 						Jones:      pol,
+						SkipAutoApertureCheck: true,
 					}
 					tr := engine2.TraceRay(ray, surfaces)
 					if tr.Error != "" {
