@@ -90,7 +90,12 @@ func isWavefrontKind(kind string) bool {
 // valid rays) returns 1e6 so the solver is pushed away rather than misled.
 func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	refSurface := cfg.refSurface
-	if refSurface <= 0 {
+	if refSurface <= 0 || refSurface >= surfaces[len(surfaces)-1].ID {
+		// The wavefront reference surface must lie before the image plane: a
+		// chief reference surface set to the image plane (the conventional
+		// last surface) is not a valid wavefront sampling surface. Fall back
+		// to the last optical surface, exactly like the standalone `wavefront`
+		// command's default.
 		refSurface = psf.DefaultReferenceSurface(surfaces)
 	}
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
@@ -99,7 +104,16 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 
 	pab, err := wavefront.FitFieldParaboloid(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, &cfg.pupilZ)
 	if err != nil {
-		return 1e6
+		// Fall back to the dynamic pupil (chief resolves the entrance pupil
+		// itself). The frozen grid (wavefront.FitFieldParaboloid with
+		// frozenPupilZ) does not apply the fixed-surface vignetting cut, so a
+		// strongly off-axis field whose beam clips a fixed aperture ends up
+		// with too few valid rays; the chief-derived grid clips correctly and
+		// matches the standalone `wavefront` command exactly.
+		pab, err = wavefront.FitFieldParaboloid(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, nil)
+		if err != nil {
+			return 1e6
+		}
 	}
 	switch term.kind {
 	case MeritWavefrontDefocus:

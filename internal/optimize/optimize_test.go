@@ -714,3 +714,89 @@ func TestOptimizerWavefrontKinds(t *testing.T) {
 		}
 	}
 }
+
+// TestOptimizerWavefrontRefSurfaceImagePlane verifies the wavefront merit kinds
+// tolerate a chief reference surface set to the image plane (the conventional
+// last surface). A wavefront reference surface must lie before the image plane,
+// so the evaluator falls back to the last optical surface instead of returning
+// the 1e6 penalty; with the term's target equal to that surface's paraboloid
+// value the merit must be ~0.
+func TestOptimizerWavefrontRefSurfaceImagePlane(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	system := types.System{Surfaces: []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 30.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 100.0, Material: types.Material{}, Diameter: 30.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 30.0},
+	}}
+	surface.Precompute(system.Surfaces)
+	const wl = 0.00058756
+
+	wf, err := wavefront.Compute(system, gc, []types.FieldDef{{Angle: 0, Direction: []float64{0, 1}}}, []float64{wl}, wavefront.Options{NumRays: 64, ReferenceSurface: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pab := wf.Fields[0].Paraboloid
+
+	cfg := Config{
+		Surfaces:  system.Surfaces,
+		Variables: []Variable{},
+		MeritTerms: []MeritTerm{{
+			Kind:        MeritWavefrontRMSResidual,
+			FieldAngle:  0.0,
+			FieldWeight: 1.0,
+			Wavelength:  wl,
+			WavWeight:   1.0,
+			Weight:      1.0,
+			Target:      pab.RMSResidual,
+		}},
+		GlassCatalog:   gc,
+		NumRays:        64,
+		RefSurface:     3, // image plane: must fall back to surface 2
+	}
+	opt := NewOptimizer(cfg)
+	merit := opt.EvaluateMerit(opt.getInitialState())
+	if merit > 1e-10 {
+		t.Errorf("merit with image-plane ref surface and target = surface-2 value = %v, want ~0", merit)
+	}
+}
+
+// TestOptimizerWavefrontTermOffAxis verifies a wavefront merit term evaluates a
+// finite value for an off-axis field when the pupil is frozen (the in-DLS
+// path): the frozen grid must not clip the off-axis beam against a fixed
+// aperture.
+func TestOptimizerWavefrontTermOffAxis(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	system := types.System{Surfaces: []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 100.0, Material: types.Material{}, Diameter: 20.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 50.0},
+	}}
+	surface.Precompute(system.Surfaces)
+	const wl = 0.00058756
+
+	cfg := Config{
+		Surfaces:  system.Surfaces,
+		Variables: []Variable{},
+		MeritTerms: []MeritTerm{{
+			Kind:        MeritWavefrontRMSResidual,
+			FieldAngle:  10.0,
+			FieldWeight: 1.0,
+			Wavelength:  wl,
+			WavWeight:   1.0,
+			Weight:      1.0,
+			Target:      0.0,
+		}},
+		GlassCatalog: gc,
+		NumRays:      64,
+		RefSurface:   2,
+	}
+	opt := NewOptimizer(cfg)
+	merit := opt.EvaluateMerit(opt.getInitialState())
+	if merit >= 1e6 || math.IsNaN(merit) || math.IsInf(merit, 0) {
+		t.Errorf("off-axis wavefront merit = %v, want finite (< 1e6)", merit)
+	}
+}
