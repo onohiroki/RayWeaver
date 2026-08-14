@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"runtime"
 	"strconv"
@@ -1216,85 +1215,7 @@ func runChief(data []byte) {
 		engine2 := ray.NewEngine(gc, nil)
 		surface.Precompute(surfaces)
 		path := dls.BuildPath(surfaces)
-
-		surfIDtoIdx := make(map[int]int)
-		for i, s := range surfaces {
-			surfIDtoIdx[s.ID] = i
-		}
-
-		type gridJob struct {
-			origin    types.Vec3
-			direction types.Vec3
-		}
-		var jobs []gridJob
-		for _, r := range results {
-			for _, gp := range r.GridPoints {
-				jobs = append(jobs, gridJob{origin: gp.Origin, direction: gp.Direction})
-			}
-		}
-
-		workers := runtime.GOMAXPROCS(0)
-		if workers > len(jobs) {
-			workers = len(jobs)
-		}
-		if workers < 1 {
-			workers = 1
-		}
-		perWorkerMax := make([][]float64, workers)
-		for w := 0; w < workers; w++ {
-			perWorkerMax[w] = make([]float64, len(surfaces))
-		}
-		var wg sync.WaitGroup
-		jobCh := make(chan int)
-		for w := 0; w < workers; w++ {
-			wg.Add(1)
-			go func(w int) {
-				defer wg.Done()
-				local := perWorkerMax[w]
-				for i := range jobCh {
-					gp := jobs[i]
-					ray := types.Ray{
-						Wavelength: wavelength,
-						Initial:    types.RayState{Origin: gp.origin, Direction: gp.direction},
-						Path:       path,
-						Jones:      pol,
-						SkipAutoApertureCheck: true,
-					}
-					tr := engine2.TraceRay(ray, surfaces)
-					if tr.Error != "" {
-						continue
-					}
-					for _, sr := range tr.Surfaces {
-						idx, ok := surfIDtoIdx[sr.SurfaceID]
-						if !ok {
-							continue
-						}
-						ay := math.Abs(sr.Position.Y)
-						ax := math.Abs(sr.Position.X)
-						if ay > local[idx] {
-							local[idx] = ay
-						}
-						if ax > local[idx] {
-							local[idx] = ax
-						}
-					}
-				}
-			}(w)
-		}
-		for i := range jobs {
-			jobCh <- i
-		}
-		close(jobCh)
-		wg.Wait()
-
-		perSurfaceMaxY := make([]float64, len(surfaces))
-		for w := 0; w < workers; w++ {
-			for idx, e := range perWorkerMax[w] {
-				if e > perSurfaceMaxY[idx] {
-					perSurfaceMaxY[idx] = e
-				}
-			}
-		}
+		envelope := chief.BeamEnvelope(results, engine2, surfaces, path, wavelength, pol)
 
 		refID := input.Chief.ReferenceSurface
 		stopID := input.Chief.StopSurface
@@ -1302,8 +1223,8 @@ func runChief(data []byte) {
 			if surfaces[i].ID == refID || (stopID > 0 && surfaces[i].ID == stopID) || !surfaces[i].AutoAperture {
 				continue
 			}
-			if perSurfaceMaxY[i] > 0 {
-				surfaces[i].Diameter = perSurfaceMaxY[i]*2 + 2**clearApertureMarginMM
+			if e := envelope[surfaces[i].ID]; e > 0 {
+				surfaces[i].Diameter = e*2 + 2**clearApertureMarginMM
 			}
 		}
 	}

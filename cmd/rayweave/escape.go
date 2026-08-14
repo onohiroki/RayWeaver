@@ -141,6 +141,10 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	if apertureMargin < 1.0 {
 		apertureMargin = 1.0
 	}
+	apertureMarginMM := input.Optimization.ApertureMarginMM
+	if apertureMarginMM <= 0 {
+		apertureMarginMM = 0.2
+	}
 
 	stopSurface := 0
 	if input.Chief != nil {
@@ -153,22 +157,23 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	}
 
 	cfg := optimize.Config{
-		Surfaces:       surfaces,
-		Variables:      variables,
-		MeritTerms:     meritTerms,
-		Fields:         fields,
-		Constraints:    constraints,
-		GlassCatalog:   gc,
-		StopSurface:    stopSurface,
-		RefSurface:     chiefRefSurface(input),
-		PupilZ:         computePupilZ(input, surfaces, gc),
-		MaxIter:        input.Optimization.MaxIter,
-		Tol:            input.Optimization.Tol,
-		Epsilon:        input.Optimization.Epsilon,
-		NumRays:        input.Optimization.NumRays,
-		ApertureMargin: apertureMargin,
-		MuConMax:       input.Optimization.MuConMax,
-		Workers:        workers,
+		Surfaces:         surfaces,
+		Variables:        variables,
+		MeritTerms:       meritTerms,
+		Fields:           fields,
+		Constraints:      constraints,
+		GlassCatalog:     gc,
+		StopSurface:      stopSurface,
+		RefSurface:       chiefRefSurface(input),
+		PupilZ:           computePupilZ(input, surfaces, gc),
+		MaxIter:          input.Optimization.MaxIter,
+		Tol:              input.Optimization.Tol,
+		Epsilon:          input.Optimization.Epsilon,
+		NumRays:          input.Optimization.NumRays,
+		ApertureMargin:   apertureMargin,
+		ApertureMarginMM: apertureMarginMM,
+		MuConMax:         input.Optimization.MuConMax,
+		Workers:          workers,
 	}
 	if input.Optimization.GlassHull != nil && input.Optimization.GlassHull.Enabled {
 		cfg.Hull = glass.NewDefaultConvexHull()
@@ -366,6 +371,10 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	if apertureMargin < 1.0 {
 		apertureMargin = 1.0
 	}
+	apertureMarginMM := input.Optimization.ApertureMarginMM
+	if apertureMarginMM <= 0 {
+		apertureMarginMM = 0.2
+	}
 	muConMax := input.Optimization.MuConMax
 
 	jacobianWorkers := input.Optimization.JacobianWorkers
@@ -389,7 +398,9 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	factory := func() dls.Model {
 		configsCopy := make([]optimize.ConfigInput, len(configs))
 		copy(configsCopy, configs)
-		return optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, nil, hull, hullMargin, hullWeight)
+		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, nil, hull, hullMargin, hullWeight)
+		opt.SetApertureMarginMM(apertureMarginMM)
+		return opt
 	}
 
 	var onRecord escape.RecordHandler

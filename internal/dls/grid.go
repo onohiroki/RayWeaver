@@ -13,18 +13,21 @@ import (
 
 func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int) ([]IPoint, map[int]float64) {
 	skipGlassPath := fieldAngle == 0
-	return traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, workers)
+	return traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, workers, types.GridPolar)
 }
 
 // TraceFieldGridExtents traces a pupil grid with aperture and glass-path
 // checks disabled, returning the true geometric max radial ray extent on each
-// surface, independent of any surface aperture clipping.
+// surface, independent of any surface aperture clipping. The grid is a dense
+// hex pattern so off-axis beam edges (which the polar rings under-sample) are
+// resolved; the returned extents therefore match the chief --clear-aperture
+// beam envelope.
 func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int) map[int]float64 {
-	_, perSurfMax := traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers)
+	_, perSurfMax := traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers, types.GridHex)
 	return perSurfMax
 }
 
-func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int) ([]IPoint, map[int]float64) {
+func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int, gridType types.GridType) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
@@ -49,7 +52,7 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	}
 
 	zStart := -100.0
-	grid := generatePupilGrid(numRays, apertureRadius, rotationOffset)
+	grid := generatePupilGrid(numRays, apertureRadius, rotationOffset, gridType)
 
 	pupilOffsetX, pupilOffsetY := 0.0, 0.0
 	gcpt := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
@@ -130,8 +133,36 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	return points, perSurfMax
 }
 
-func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float64) []pupilPoint {
+func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float64, gridType types.GridType) []pupilPoint {
 	var pts []pupilPoint
+	if gridType == types.GridHex {
+		// Dense hex pattern covering the full disk (rim included), so off-axis
+		// beam edges are resolved. Copied from chief.GenerateGridPoints.
+		n := int(math.Sqrt(float64(numRays))) + 1
+		if n < 2 {
+			n = 2
+		}
+		dy := apertureRadius * 2 / float64(n)
+		dx := dy * math.Sqrt(3) / 2
+		for i := 0; i < n; i++ {
+			y := -apertureRadius + (float64(i)+0.5)*dy
+			xOff := 0.0
+			if i%2 == 1 {
+				xOff = dx / 2
+			}
+			nx := int(float64(n) * apertureRadius / (dx * float64(n) / 2))
+			if nx < 1 {
+				nx = 1
+			}
+			for j := 0; j < nx; j++ {
+				x := -apertureRadius + (float64(j)+0.5)*dx + xOff
+				if x*x+y*y <= apertureRadius*apertureRadius {
+					pts = append(pts, pupilPoint{X: x, Y: y, area: 1})
+				}
+			}
+		}
+		return pts
+	}
 	n := int(math.Sqrt(float64(numRays)))
 	if n < 2 {
 		n = 2

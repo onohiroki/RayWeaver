@@ -4,9 +4,11 @@ import (
 	"math"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
+	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/wavefront"
@@ -751,9 +753,9 @@ func TestOptimizerWavefrontRefSurfaceImagePlane(t *testing.T) {
 			Weight:      1.0,
 			Target:      pab.RMSResidual,
 		}},
-		GlassCatalog:   gc,
-		NumRays:        64,
-		RefSurface:     3, // image plane: must fall back to surface 2
+		GlassCatalog: gc,
+		NumRays:      64,
+		RefSurface:   3, // image plane: must fall back to surface 2
 	}
 	opt := NewOptimizer(cfg)
 	merit := opt.EvaluateMerit(opt.getInitialState())
@@ -798,5 +800,86 @@ func TestOptimizerWavefrontTermOffAxis(t *testing.T) {
 	merit := opt.EvaluateMerit(opt.getInitialState())
 	if merit >= 1e6 || math.IsNaN(merit) || math.IsInf(merit, 0) {
 		t.Errorf("off-axis wavefront merit = %v, want finite (< 1e6)", merit)
+	}
+}
+
+// optimizedTripletSurfaces returns the demo's new-merit optimum of the
+// US2645157 triplet (us2645157-degraded.yaml after DLS): off-axis fields whose
+// beam envelope exceeds what a coarse polar grid measures, so the old
+// FinalApertures sizing (undersized, no clearance) left the lens vignetting the
+// beam.
+func optimizedTripletSurfaces() []types.Surface {
+	return []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.09292859657818629, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 10.0, AutoAperture: true},
+		{ID: 2, Type: types.Sphere, Curvature: -0.004177, Thickness: 2.3368, Material: types.Material{}, Diameter: 10.0, AutoAperture: true},
+		{ID: 3, Type: types.Sphere, Curvature: -0.079717, Thickness: 0.508, Material: types.Material{Key: "SF12"}, Diameter: 6.0, AutoAperture: true},
+		{ID: 4, Type: types.Sphere, Curvature: 0.09441, Thickness: 1.4986, Material: types.Material{}, Diameter: 6.0, AutoAperture: true},
+		{ID: 5, Type: types.Sphere, Curvature: 0, Thickness: 1.016, Material: types.Material{}, Diameter: 3.7825297358},
+		{ID: 6, Type: types.Sphere, Curvature: 0.019599, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 6.0, AutoAperture: true},
+		{ID: 7, Type: types.Sphere, Curvature: -0.103709, Thickness: 21.36695183553, Material: types.Material{}, Diameter: 6.0, AutoAperture: true},
+		{ID: 8, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}},
+	}
+}
+
+// beamEnvelope measures the true per-surface beam extent with a dense chief
+// hex grid (the same measurement chief --clear-aperture uses).
+func beamEnvelope(t *testing.T, gc *glass.Catalog, surfaces []types.Surface) map[int]float64 {
+	t.Helper()
+	fields := []types.FieldDef{
+		{Angle: 0.0, Direction: []float64{0, 1}},
+		{Angle: 16.0, Direction: []float64{0, 1}},
+		{Angle: 24.0, Direction: []float64{0, 1}},
+	}
+	pol := types.NewCircularJones(true)
+	res := chief.DetermineChiefRaysGrid(
+		types.System{Surfaces: surfaces, StopSurface: 0},
+		fields, 8, 512, gc, pol,
+		types.DefaultWavelength, false, types.GridHex, nil, nil, nil,
+	)
+	engine := ray.NewEngine(gc, nil)
+	path := dls.BuildPath(surfaces)
+	return chief.BeamEnvelope(res, engine, surfaces, path, types.DefaultWavelength, pol)
+}
+
+// TestFinalAperturesCoverBeam regresses the undersized auto_aperture diameters
+// in the optimize output: FinalApertures must measure the true beam envelope
+// (dynamic-pupil hex grid, auto-aperture checks skipped) and add the clearance,
+// so the output lens never vignettes the off-axis beam. The old sizing used a
+// coarse polar grid that under-measured the 24° envelope and applied no
+// margin, leaving the front surface smaller than the beam.
+func TestFinalAperturesCoverBeam(t *testing.T) {
+	gc := tripletGC()
+	surfaces := optimizedTripletSurfaces()
+	surface.Precompute(surfaces)
+
+	env := beamEnvelope(t, gc, surfaces)
+	if env[1] < 4.0 {
+		t.Fatalf("expected the optimized front-surface beam envelope > 4.0 mm, got %.3f (test setup)", env[1])
+	}
+
+	cfg := Config{
+		Surfaces:       surfaces,
+		Fields:         []types.FieldItem{{ID: 0, AngleDeg: 0}, {ID: 1, AngleDeg: 16}, {ID: 2, AngleDeg: 24}},
+		RefSurface:     8,
+		NumRays:        64,
+		GlassCatalog:   gc,
+		ApertureMargin: 1.0,
+	}
+	for _, fa := range []float64{0, 16, 24} {
+		cfg.MeritTerms = append(cfg.MeritTerms, MeritTerm{Kind: "spot_rms", FieldAngle: fa, FieldWeight: 1, Wavelength: types.DefaultWavelength, WavWeight: 1, Weight: 1})
+	}
+	opt := NewOptimizer(cfg)
+	opt.UpdatePupils(nil)
+	aps := opt.FinalApertures(nil)
+
+	for _, s := range surfaces {
+		if !s.AutoAperture {
+			continue
+		}
+		got := aps["config1"][s.ID]
+		want := 2 * env[s.ID]
+		if got < want {
+			t.Errorf("auto_aperture surf%d diameter = %.3f, want >= %.3f (covers the true beam envelope)", s.ID, got, want)
+		}
 	}
 }

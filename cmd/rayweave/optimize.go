@@ -209,6 +209,11 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		errOut("Warning: aperture_margin %.3f < 1.0 is not recommended (pupil grid smaller than the aperture stalls DLS); clamping to 1.0", apertureMargin)
 		apertureMargin = 1.0
 	}
+	// Physical clearance added to each auto_aperture final diameter (mm).
+	apertureMarginMM := input.Optimization.ApertureMarginMM
+	if apertureMarginMM <= 0 {
+		apertureMarginMM = 0.2
+	}
 
 	var logger dls.Logger
 	logWriters := []struct {
@@ -251,6 +256,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	}
 
 	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight)
+	opt.SetApertureMarginMM(apertureMarginMM)
 
 	// Validate the conditional merit schedule and the glass_role kind before
 	// running (bad configuration would otherwise silently contribute nothing).

@@ -640,23 +640,24 @@ type GlassHullConfig struct {
 }
 
 type OptimizationConfig struct {
-	Method          string                 `yaml:"method"`
-	Aggregate       string                 `yaml:"aggregate,omitempty"`
-	Mu              float64                `yaml:"mu,omitempty"`
-	MaxIter         int                    `yaml:"max_iter,omitempty"`
-	Tol             float64                `yaml:"tol,omitempty"`
-	Epsilon         float64                `yaml:"epsilon,omitempty"`
-	NumRays         int                    `yaml:"num_rays,omitempty"`
-	MuConMax        float64                `yaml:"mu_con_max,omitempty"`
-	ApertureMargin  float64                `yaml:"aperture_margin,omitempty"`
-	JacobianWorkers int                    `yaml:"jacobian_workers,omitempty"`
-	Variables       []OptimizationVariable `yaml:"variables,omitempty"`
-	SharedVariables []SharedVariable       `yaml:"shared_variables,omitempty"`
-	LocalVariables  []LocalVariableDef     `yaml:"local_variables,omitempty"`
-	Constraints     []ConstraintOperand    `yaml:"constraints,omitempty"`
-	GlassHull       *GlassHullConfig       `yaml:"glass_hull,omitempty"`
-	Escape          *EscapeConfig          `yaml:"escape,omitempty"`
-	MeritSchedule   *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
+	Method           string                 `yaml:"method"`
+	Aggregate        string                 `yaml:"aggregate,omitempty"`
+	Mu               float64                `yaml:"mu,omitempty"`
+	MaxIter          int                    `yaml:"max_iter,omitempty"`
+	Tol              float64                `yaml:"tol,omitempty"`
+	Epsilon          float64                `yaml:"epsilon,omitempty"`
+	NumRays          int                    `yaml:"num_rays,omitempty"`
+	MuConMax         float64                `yaml:"mu_con_max,omitempty"`
+	ApertureMargin   float64                `yaml:"aperture_margin,omitempty"`
+	ApertureMarginMM float64                `yaml:"aperture_margin_mm,omitempty"`
+	JacobianWorkers  int                    `yaml:"jacobian_workers,omitempty"`
+	Variables        []OptimizationVariable `yaml:"variables,omitempty"`
+	SharedVariables  []SharedVariable       `yaml:"shared_variables,omitempty"`
+	LocalVariables   []LocalVariableDef     `yaml:"local_variables,omitempty"`
+	Constraints      []ConstraintOperand    `yaml:"constraints,omitempty"`
+	GlassHull        *GlassHullConfig       `yaml:"glass_hull,omitempty"`
+	Escape           *EscapeConfig          `yaml:"escape,omitempty"`
+	MeritSchedule    *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
 }
 
 // EscapeConfig configures the escape-function global optimisation loop

@@ -322,6 +322,96 @@ configs:
 	}
 }
 
+// TestClearApertureUndersizedInput regresses the stale-diameter self-clipping
+// bug: when the input auto_aperture diameters are smaller than the true beam,
+// --clear-aperture must still size to the full beam footprint (auto-aperture
+// checks are skipped during the measurement) rather than inherit the
+// truncation. The front surface must grow well beyond the 1.0 mm input and the
+// sized lens must pass the on-axis beam untruncated.
+func TestClearApertureUndersizedInput(t *testing.T) {
+	yamlData := `glass_catalog:
+  entries:
+    - {type: model, name: SK18, nd: 1.63854, vd: 55.42}
+    - {type: model, name: SF12, nd: 1.64831, vd: 33.84}
+chief:
+  fields:
+    - {angle: 0.0, direction: [0, 1]}
+    - {angle: 23.0, direction: [0, 1]}
+  reference_surface: 8
+  num_rays: 256
+  grid_type: hex
+  dump_map: false
+configs:
+  - id: cfg1
+    active: true
+    surfaces:
+      - {id: 1, type: sphere, radius: 10.2871491742, thickness: 1.524, material: SK18, diameter: 1.0, auto_aperture: true}
+      - {id: 2, type: sphere, radius: -239.3967954752, thickness: 2.3368, material: AIR, diameter: 1.0, auto_aperture: true}
+      - {id: 3, type: sphere, radius: -12.826987173, thickness: 0.508, material: SF12, diameter: 1.0, auto_aperture: true}
+      - {id: 4, type: sphere, radius: 10.5917184406, thickness: 1.4986, material: AIR, diameter: 1.0, auto_aperture: true}
+      - {id: 5, type: sphere, radius: 0, thickness: 1.016, material: AIR, diameter: 3.7825297358}
+      - {id: 6, type: sphere, radius: 61.84562942, thickness: 1.524, material: SK18, diameter: 1.0, auto_aperture: true}
+      - {id: 7, type: sphere, radius: -10.0074859032, thickness: 21.36695183553, material: AIR, diameter: 1.0, auto_aperture: true}
+      - {id: 8, type: sphere, radius: 0, thickness: 0, material: AIR}
+`
+	out := runChiefWithArgs(t, []string{"--clear-aperture", "--clear-aperture-rays", "1024"}, []byte(yamlData))
+
+	var res struct {
+		Configs []types.Config `yaml:"configs"`
+	}
+	if err := yaml.Unmarshal(out, &res); err != nil {
+		t.Fatalf("yaml.Unmarshal clear-aperture output: %v", err)
+	}
+	surfs := res.Configs[0].Surfaces
+	// The undersized input must NOT limit the sizing: the front surface grows
+	// to cover the real beam (the on-axis marginal is ~1.8 mm at surface 1),
+	// far beyond the 1.0 mm input semi-diameter.
+	if d := surfaceDiameterOf(surfs, 1); d < 3.0 {
+		t.Errorf("front auto_aperture diameter = %v, want >= 3.0 (undersized input truncated the beam footprint)", d)
+	}
+	if s5 := surfaceDiameterOf(surfs, 5); math.Abs(s5-3.7825297358) > 1e-6 {
+		t.Errorf("fixed aperture (s5) diameter = %v, want 3.7825297358 (auto_aperture: false surfaces are never resized)", s5)
+	}
+	// With the sized diameters the full beam must pass: the on-axis field
+	// untruncated, the off-axis field at most vignetted by the fixed aperture.
+	trace := runChiefWithArgs(t, nil, out)
+	var tr struct {
+		ChiefRays []struct {
+			SpotStats *struct {
+				TotalRays  int `yaml:"total_rays"`
+				TracedRays int `yaml:"traced_rays"`
+			} `yaml:"spot_stats"`
+		} `yaml:"chief_rays"`
+	}
+	if err := yaml.Unmarshal(trace, &tr); err != nil {
+		t.Fatalf("yaml.Unmarshal trace output: %v", err)
+	}
+	if len(tr.ChiefRays) != 2 {
+		t.Fatalf("expected 2 fields, got %d", len(tr.ChiefRays))
+	}
+	if cr := tr.ChiefRays[0]; cr.SpotStats == nil || cr.SpotStats.TracedRays != cr.SpotStats.TotalRays {
+		t.Errorf("on-axis field traced %d/%d rays: undersized input must not clip the on-axis beam", func() int {
+			if cr.SpotStats == nil {
+				return -1
+			}
+			return cr.SpotStats.TracedRays
+		}(), func() int {
+			if cr.SpotStats == nil {
+				return -1
+			}
+			return cr.SpotStats.TotalRays
+		}())
+	}
+	if cr := tr.ChiefRays[1]; cr.SpotStats == nil || cr.SpotStats.TracedRays < 150 {
+		t.Errorf("off-axis field traced %d rays (<150): beam too heavily clipped after sizing", func() int {
+			if cr.SpotStats == nil {
+				return -1
+			}
+			return cr.SpotStats.TracedRays
+		}())
+	}
+}
+
 // TestLoadCatalogsFiltersUnreferencedAGF verifies that --glass-dir registers
 // into the emitted glass_catalog only the glasses referenced by
 // configs[].surfaces.material.key, while the runtime catalog still keeps every

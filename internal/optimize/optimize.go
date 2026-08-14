@@ -20,28 +20,29 @@ import (
 // over the unified Optimizer: the configuration becomes config "config1" and
 // the variables become local variables of that config.
 type Config struct {
-	Surfaces       []types.Surface
-	Variables      []Variable
-	MeritTerms     []MeritTerm
-	Fields         []types.FieldItem
-	Constraints    []types.ConstraintOperand
-	GlassCatalog   *glass.Catalog
-	CoatingCatalog interface{}
-	StopSurface    int
-	RefSurface     int
-	PupilZ         float64
-	MaxIter        int
-	Mu             float64
-	Tol            float64
-	Epsilon        float64
-	NumRays        int
-	ApertureMargin float64
-	MuConMax       float64
-	Workers        int
-	Logger         dls.Logger
-	Hull           *glass.ConvexHull
-	HullMargin     float64
-	HullWeight     float64
+	Surfaces         []types.Surface
+	Variables        []Variable
+	MeritTerms       []MeritTerm
+	Fields           []types.FieldItem
+	Constraints      []types.ConstraintOperand
+	GlassCatalog     *glass.Catalog
+	CoatingCatalog   interface{}
+	StopSurface      int
+	RefSurface       int
+	PupilZ           float64
+	MaxIter          int
+	Mu               float64
+	Tol              float64
+	Epsilon          float64
+	NumRays          int
+	ApertureMargin   float64
+	ApertureMarginMM float64
+	MuConMax         float64
+	Workers          int
+	Logger           dls.Logger
+	Hull             *glass.ConvexHull
+	HullMargin       float64
+	HullWeight       float64
 }
 
 // ConfigInput describes one configuration (zoom position) of a
@@ -124,6 +125,10 @@ type config struct {
 	stopSurface int
 	refSurface  int
 	pupilZ      float64
+	// pupilZs holds the per-field dynamic entrance pupil Z keyed by field
+	// angle (degrees), refreshed by UpdatePupils. Grids for off-axis fields
+	// must be centred on their own pupil, not the field-0 one.
+	pupilZs     map[float64]float64
 	fieldDefs   []types.FieldDef
 	surfaces    []types.Surface
 	fields      []types.FieldItem
@@ -460,10 +465,18 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 			cfg.fieldDefs, cfg.refSurface, o.numRays, gc, pol,
 			types.DefaultWavelength, false, types.GridPolar, nil, nil, nil,
 		)
-		for _, r := range results {
-			if r.EntrancePupil != nil {
+		for i, r := range results {
+			if r.EntrancePupil == nil {
+				continue
+			}
+			if cfg.pupilZs == nil {
+				cfg.pupilZs = make(map[float64]float64)
+			}
+			if i < len(cfg.fieldDefs) {
+				cfg.pupilZs[cfg.fieldDefs[i].Angle] = r.EntrancePupil.Center.Z
+			}
+			if i == 0 {
 				cfg.pupilZ = r.EntrancePupil.Center.Z
-				break
 			}
 		}
 	}
@@ -481,6 +494,7 @@ type Optimizer struct {
 	epsilon          float64
 	numRays          int
 	apertureMargin   float64
+	apertureMarginMM float64
 	muConMax         float64
 	workers          int
 	gridRotation     float64
@@ -508,6 +522,15 @@ type Optimizer struct {
 // search) and return its best-so-far state instead of a converged result.
 func (o *Optimizer) SetStop(stop <-chan struct{}) {
 	o.stop = stop
+}
+
+// SetApertureMarginMM sets the physical clearance (mm) added to each
+// auto_aperture final diameter (matching chief --clear-aperture-margin-mm).
+// Values <= 0 keep the default 0.2 mm.
+func (o *Optimizer) SetApertureMarginMM(mm float64) {
+	if mm > 0 {
+		o.apertureMarginMM = mm
+	}
 }
 
 // NewOptimizer builds a single-configuration Optimizer (backward-compatible
@@ -556,11 +579,13 @@ func NewOptimizer(cfg Config) *Optimizer {
 			Config:    "config1",
 		}
 	}
-	return newOptimizer(
+	opt := newOptimizer(
 		[]config{c}, variables, cfg.GlassCatalog,
 		cfg.MaxIter, cfg.Mu, cfg.Tol, cfg.Epsilon, cfg.ApertureMargin, cfg.NumRays,
 		cfg.MuConMax, cfg.Workers, cfg.Logger, cfg.Hull, cfg.HullMargin, cfg.HullWeight,
 	)
+	opt.SetApertureMarginMM(cfg.ApertureMarginMM)
+	return opt
 }
 
 // NewMultiOptimizer builds a unified Optimizer over one or more configs,
@@ -768,6 +793,7 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 		epsilon:          epsilon,
 		numRays:          numRays,
 		apertureMargin:   apertureMargin,
+		apertureMarginMM: 0.2,
 		muConMax:         muConMax,
 		workers:          workers,
 		logger:           logger,
@@ -1132,7 +1158,13 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 			continue
 		}
 		angle := o.termFieldAngle(cfg, term, surfaces, gc)
-		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
+		pupilZ := cfg.pupilZ
+		if cfg.pupilZs != nil {
+			if z, ok := cfg.pupilZs[angle]; ok {
+				pupilZ = z
+			}
+		}
+		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.extentRays(), o.gridRotation, o.gridWorkers())
 		for id, e := range perSurf {
 			if e > extents[id] {
 				extents[id] = e
@@ -1143,10 +1175,31 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 	for id, e := range extents {
 		for i := range surfaces {
 			if surfaces[i].ID == id && surfaces[i].AutoAperture {
-				surfaces[i].Diameter = 2 * e
+				surfaces[i].Diameter = 2 * (e + o.apertureMarginMM)
 			}
 		}
 	}
+}
+
+// extentRays returns the ray count for the beam-extent measurement in
+// sizeAutoApertures. The extent grid must resolve the beam edge well enough
+// that the sized auto_aperture diameters cover the true bundle (a coarse grid
+// under-measures off-axis extents and the resulting lens vignettes the beam).
+func (o *Optimizer) extentRays() int {
+	if o.numRays >= 256 {
+		return o.numRays
+	}
+	return 256
+}
+
+// finalExtentRays returns the ray count for the one-time FinalApertures beam
+// measurement, matching the chief --clear-aperture grid density so the raw
+// optimize output covers the same beam envelope the demo pipeline re-sizes to.
+func (o *Optimizer) finalExtentRays() int {
+	if o.numRays >= 512 {
+		return o.numRays
+	}
+	return 512
 }
 
 func (o *Optimizer) EvaluateMerit(x []float64) float64 {
@@ -1424,7 +1477,7 @@ func (o *Optimizer) FinalApertures(x []float64) map[string]map[int]float64 {
 		surfaces := configSurfaces[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, effectiveGC(o.gc, tempGC))
+		o.finalAutoApertures(cfg, surfaces, effectiveGC(o.gc, tempGC))
 
 		cfgResult := make(map[int]float64)
 		for i := range surfaces {
@@ -1435,6 +1488,36 @@ func (o *Optimizer) FinalApertures(x []float64) map[string]map[int]float64 {
 		result[cfg.id] = cfgResult
 	}
 	return result
+}
+
+// finalAutoApertures sizes the auto_aperture surfaces of cfg from the same
+// dynamic-pupil hex grid as chief --clear-aperture, so the output lens covers
+// the true beam envelope (fixed apertures included) plus the configured
+// clearance. It runs once per config; the cheaper sizeAutoApertures is used
+// during merit evaluation where exact extents are not required.
+func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog) {
+	if cfg.refSurface <= 0 || len(cfg.fieldDefs) == 0 {
+		o.sizeAutoApertures(cfg, surfaces, gc)
+		return
+	}
+	pol := types.NewCircularJones(true)
+	results := chief.DetermineChiefRaysGrid(
+		types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
+		cfg.fieldDefs, cfg.refSurface, o.finalExtentRays(), gc, pol,
+		types.DefaultWavelength, false, types.GridHex, nil, nil, nil,
+	)
+	engine := ray.NewEngine(gc, nil)
+	surface.Precompute(surfaces)
+	path := dls.BuildPath(surfaces)
+	env := chief.BeamEnvelope(results, engine, surfaces, path, types.DefaultWavelength, pol)
+	for i := range surfaces {
+		if !surfaces[i].AutoAperture {
+			continue
+		}
+		if e := env[surfaces[i].ID]; e > 0 {
+			surfaces[i].Diameter = 2 * (e + o.apertureMarginMM)
+		}
+	}
 }
 
 // FinalConfigs returns the surfaces of every config after applying x, with
