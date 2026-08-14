@@ -10,23 +10,24 @@ set -euo pipefail
 # result compared with the plain spot_rms-only merit.
 #
 # Steps
-#   1. optimize old  : DLS with the spot_rms-only merit (degraded start)
-#                      -> optimize-demo-old.yaml
-#   2. optimize new  : DLS with the off-axis spot merit kinds
-#                      -> optimize-demo-new.yaml
+#   1. optimize spot_rms : DLS with the spot_rms-only merit (degraded start)
+#                          -> optimize-demo-spotrms.yaml
+#   2. optimize off-axis : DLS with the off-axis spot merit kinds
+#                          -> optimize-demo-offaxis.yaml
 #   3. chief         : re-evaluate the RMS spot radius per field, before /
-#                      old / new, and write optimize-demo-result.txt
-#   4. breakdown     : per-kind final values of the new merit, extracted from
-#                      the optimize --log breakdown event
+#                      spot_rms / off-axis, and write optimize-demo-result.txt
+#   4. breakdown     : per-kind final values of the off-axis merit, extracted
+#                      from the optimize --log breakdown event
 #
 # How to read the result
-#   - RMS before/old/new is the geometric RMS spot radius (mm) per field,
-#     measured by `chief` on the degraded start, the old-merit optimum and the
-#     new-merit optimum (identical pupil-grid sampling, so apples-to-apples).
-#   - The new merit replaces spot_rms on the 16° field with spot_rms_t/s/worst
-#     and adds spot_rms_worst/weighted/ee_radius on the 24° field, so the
-#     off-axis fields are corrected against coma/astigmatism and energy
-#     concentration, not just the rotationally-symmetric RMS.
+#   - RMS before/spot_rms/off-axis is the geometric RMS spot radius (mm) per
+#     field, measured by `chief` on the degraded start, the spot_rms-only
+#     optimum and the off-axis optimum (identical pupil-grid sampling, so
+#     apples-to-apples).
+#   - The off-axis merit replaces spot_rms on the 16° field with
+#     spot_rms_t/s/worst and adds spot_rms_worst/weighted/ee_radius on the
+#     24° field, so the off-axis fields are corrected against coma/astigmatism
+#     and energy concentration, not just the rotationally-symmetric RMS.
 #   - Pass gate: on-axis (f0) RMS < 0.3 mm after optimisation.
 # =============================================================================
 
@@ -35,13 +36,13 @@ set -euo pipefail
 # from and all outputs are written to this directory.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-NEW_YAML="$SCRIPT_DIR/us2645157-degraded.yaml"
-OLD_YAML="$SCRIPT_DIR/us2645157-degraded-spotrms.yaml"
+OFFAX_YAML="$SCRIPT_DIR/us2645157-degraded.yaml"
+SPOTRMS_YAML="$SCRIPT_DIR/us2645157-degraded-spotrms.yaml"
 OUTDIR="$SCRIPT_DIR"
-OPT_OLD="$OUTDIR/optimize-demo-old.yaml"
-OPT_NEW="$OUTDIR/optimize-demo-new.yaml"
-LOG_OLD="$OUTDIR/optimize-demo-old.log"
-LOG_NEW="$OUTDIR/optimize-demo-new.log"
+OPT_SPOTRMS="$OUTDIR/optimize-demo-spotrms.yaml"
+OPT_OFFAX="$OUTDIR/optimize-demo-offaxis.yaml"
+LOG_SPOTRMS="$OUTDIR/optimize-demo-spotrms.log"
+LOG_OFFAX="$OUTDIR/optimize-demo-offaxis.log"
 RESULT_FILE="$OUTDIR/optimize-demo-result.txt"
 
 # CLI options
@@ -56,11 +57,13 @@ done
 # Clean-only mode: remove generated files and exit
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
-  rm -f "$OPT_OLD" "$OPT_NEW" "$LOG_OLD" "$LOG_NEW" "$RESULT_FILE"
-  rm -f "$OUTDIR/optimize-demo-init.png" "$OUTDIR/optimize-demo-old.png" "$OUTDIR/optimize-demo-new.png"
-  # legacy artifact names from the pre-comparison demo
+  rm -f "$OPT_SPOTRMS" "$OPT_OFFAX" "$LOG_SPOTRMS" "$LOG_OFFAX" "$RESULT_FILE"
+  rm -f "$OUTDIR/optimize-demo-init.png" "$OUTDIR/optimize-demo-offaxis.png"
+  # legacy artifact names from the pre-rename demo (old/new)
+  rm -f "$OUTDIR/optimize-demo-old.yaml" "$OUTDIR/optimize-demo-old.log" "$OUTDIR/optimize-demo-old.png"
+  rm -f "$OUTDIR/optimize-demo-new.yaml" "$OUTDIR/optimize-demo-new.log" "$OUTDIR/optimize-demo-new.png"
   rm -f "$OUTDIR/optimize-demo-result.yaml" "$OUTDIR/optimize-demo-opt.png"
-  echo "  Removed: PNGs, old/new YAML+logs, $RESULT_FILE"
+  echo "  Removed: PNGs, spotrms/offaxis YAML+logs, $RESULT_FILE"
   exit 0
 fi
 
@@ -84,21 +87,21 @@ append_interpretation() {
 cat >> "$RESULT_FILE" <<'EOF'
 
 === How to interpret this result ===
-- "RMS before / old / new" is the geometric RMS spot radius (mm) of the
-  chief-ray pupil grid: before optimisation, after the spot_rms-only merit
+- "RMS before / spot_rms / off-axis" is the geometric RMS spot radius (mm) of
+  the chief-ray pupil grid: before optimisation, after the spot_rms-only merit
   (us2645157-degraded-spotrms.yaml) and after the off-axis-merit
   (us2645157-degraded.yaml). Same pupil-grid sampling for both optima.
 - f0/f1/f2 = 0/16/24 deg fields. The 16° field is corrected against
   tangential/sagittal (spot_rms_t/s) and its worst axis (spot_rms_worst); the
   24° field adds energy-concentration terms (spot_rms_weighted, spot_ee_radius).
-- "old->new" is (old - new)/old: a positive percentage is an off-axis
-  improvement from the new merit. The ✓ marks an improvement over the degraded
-  start. Note that trading merit weight toward the off-axis fields can
-  slightly worsen the on-axis field (here f0 0.0019 -> 0.0029 mm, still two
-  orders of magnitude below the 0.3 mm gate); tune the term weights if you
-  need to hold f0 tighter.
-- The "new-kind final values" section is the per-term breakdown of the new
-  merit at the optimum (from optimize --log): value = sqrt(contribution /
+- "rms->off" is (spot_rms - off-axis)/spot_rms: a positive percentage is an
+  off-axis improvement from the off-axis merit. The ✓ marks an improvement
+  over the degraded start. Note that trading merit weight toward the off-axis
+  fields can slightly worsen the on-axis field (here f0 0.0019 -> 0.0029 mm,
+  still two orders of magnitude below the 0.3 mm gate); tune the term weights
+  if you need to hold f0 tighter.
+- The "off-axis-kind final values" section is the per-term breakdown of the
+  off-axis merit at the optimum (from optimize --log): value = sqrt(contribution /
   (weight * fieldWeight * wavWeight)), target 0.
 - Pass gate: on-axis (f0) RMS < 0.3 mm after optimisation.
 - If "Optimization failed" appears, DLS did not converge; try more
@@ -107,40 +110,33 @@ EOF
 }
 trap append_interpretation EXIT
 
-echo "=== Optimize demo: degraded US2645157 triplet, old vs new merit ==="
+echo "=== Optimize demo: degraded US2645157 triplet, spot_rms-only vs off-axis merit ==="
 echo
 
 echo "--- Initial state (degraded curvatures) ---"
 echo "=== DLS optimisation (spot_rms-only merit) ==="
-$RAYWEAVE optimize --verbose --log "$LOG_OLD" < "$OLD_YAML" > "$OPT_OLD"
+$RAYWEAVE optimize --verbose --log "$LOG_SPOTRMS" < "$SPOTRMS_YAML" > "$OPT_SPOTRMS"
 echo
 echo "=== DLS optimisation (off-axis spot merit kinds) ==="
-$RAYWEAVE optimize --verbose --log "$LOG_NEW" < "$NEW_YAML" > "$OPT_NEW"
+$RAYWEAVE optimize --verbose --log "$LOG_OFFAX" < "$OFFAX_YAML" > "$OPT_OFFAX"
 echo
 
 echo "--- PNG diagrams ---"
 echo "=== Initial diagram ==="
-$RAYWEAVE chief --clear-aperture --ray-fan < "$NEW_YAML" | $RAYWEAVE chief --marginal-rays \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$OFFAX_YAML" | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/optimize-demo-init.png" >/dev/null
 echo "Written: $OUTDIR/optimize-demo-init.png"
 echo
 
-echo "=== Optimized diagram (old merit) ==="
-$RAYWEAVE chief --clear-aperture --ray-fan < "$OPT_OLD" | $RAYWEAVE chief --marginal-rays \
+echo "=== Optimized diagram (off-axis merit) ==="
+$RAYWEAVE chief --clear-aperture --ray-fan < "$OPT_OFFAX" | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
-  | $RAYWEAVE plot -o "$OUTDIR/optimize-demo-old.png" >/dev/null
-echo "Written: $OUTDIR/optimize-demo-old.png"
+  | $RAYWEAVE plot -o "$OUTDIR/optimize-demo-offaxis.png" >/dev/null
+echo "Written: $OUTDIR/optimize-demo-offaxis.png"
 echo
 
-echo "=== Optimized diagram (new merit) ==="
-$RAYWEAVE chief --clear-aperture --ray-fan < "$OPT_NEW" | $RAYWEAVE chief --marginal-rays \
-  | $RAYWEAVE trace \
-  | $RAYWEAVE plot -o "$OUTDIR/optimize-demo-new.png" >/dev/null
-echo "Written: $OUTDIR/optimize-demo-new.png"
-echo
-
-# ── Spot RMS comparison (chief-measured, same sampling for old/new) ──
+# ── Spot RMS comparison (chief-measured, same sampling for both optima) ──
 rms_field() {
   local yaml_file=$1 fi=$2
   $RAYWEAVE chief < "$yaml_file" 2>/dev/null \
@@ -148,30 +144,30 @@ rms_field() {
 }
 {
   echo "=== Spot RMS Comparison (chief measurement, mm) ==="
-  printf "  %-8s %6s  %10s  %10s  %10s  %10s\n" "Phase" "Field" "before" "old" "new" "old->new"
+  printf "  %-8s %6s  %10s  %10s  %10s  %10s\n" "Phase" "Field" "before" "spot_rms" "off-axis" "rms->off"
   printf "  %-8s %6s  %10s  %10s  %10s  %10s\n" "-----" "-----" "--------" "--------" "--------" "---------"
   for fi in 0 1 2; do
-    rms_before=$(rms_field "$NEW_YAML" "$fi")
-    rms_old=$(rms_field "$OPT_OLD" "$fi")
-    rms_new=$(rms_field "$OPT_NEW" "$fi")
+    rms_before=$(rms_field "$OFFAX_YAML" "$fi")
+    rms_spotrms=$(rms_field "$OPT_SPOTRMS" "$fi")
+    rms_offax=$(rms_field "$OPT_OFFAX" "$fi")
     delta=""
-    if [ "$rms_old" != "-1" ] && [ "$rms_new" != "-1" ]; then
-      delta=$(printf "%.1f%%" "$(echo "scale=3; ($rms_old-$rms_new)/$rms_old*100" | bc 2>/dev/null || echo 0)")
+    if [ "$rms_spotrms" != "-1" ] && [ "$rms_offax" != "-1" ]; then
+      delta=$(printf "%.1f%%" "$(echo "scale=3; ($rms_spotrms-$rms_offax)/$rms_spotrms*100" | bc 2>/dev/null || echo 0)")
     fi
     mark=""
-    if [ "$rms_before" != "-1" ] && [ "$rms_new" != "-1" ]; then
-      if $RAYWEAVE query --gate "a < b" --set a="$rms_new" --set b="$rms_before" < /dev/null > /dev/null; then
+    if [ "$rms_before" != "-1" ] && [ "$rms_offax" != "-1" ]; then
+      if $RAYWEAVE query --gate "a < b" --set a="$rms_offax" --set b="$rms_before" < /dev/null > /dev/null; then
         mark="   ✓"
       else
         mark="   ✗"
       fi
     fi
-    printf "  %-8s %6s  %10.4f  %10.4f  %10.4f  %10s%s\n" "optimize" "f$fi" "$rms_before" "$rms_old" "$rms_new" "$delta" "$mark"
+    printf "  %-8s %6s  %10.4f  %10.4f  %10.4f  %10s%s\n" "optimize" "f$fi" "$rms_before" "$rms_spotrms" "$rms_offax" "$delta" "$mark"
   done
   echo
 } | tee "$RESULT_FILE"
 
-# ── New-metric breakdown of the new merit's optimum ──
+# ── Off-axis-metric breakdown of the off-axis merit's optimum ──
 # contribution = weight * fieldWeight * wavWeight * (value - target)^2 (target 0),
 # so value = sqrt(contribution / (weight*fieldWeight*wavWeight)).
 # fieldWeight: f0/f1 = 1.0, f2 = 0.5 ; wavWeight = 1.0 ; term weights from YAML.
@@ -181,7 +177,7 @@ breakdown_value() {
   pat=$(printf "%s(f%.1f,%.6f)" "$kind" "$angle" "$wl")
   line=$($RAYWEAVE query --jsonl --where 'event=="breakdown"' \
       --each 'terms:key,value' --printf '%s=%.6e' \
-      < "$LOG_NEW" 2>/dev/null | grep -F "$pat" || true)
+      < "$LOG_OFFAX" 2>/dev/null | grep -F "$pat" || true)
   if [ -z "$line" ]; then
     echo "n/a"
     return
@@ -199,7 +195,7 @@ breakdown_value() {
   echo "scale=8; sqrt($contrib / $wprod)" | bc -l 2>/dev/null || echo "n/a"
 }
 {
-  echo "=== New-merit final values (value at the new optimum, mm) ==="
+  echo "=== Off-axis-merit final values (value at the off-axis optimum, mm) ==="
   echo "  (from the optimize --log breakdown; value = sqrt(contrib/(w*fw*wlw)), target 0)"
   printf "  %-20s %6s  %12s  %12s  %12s\n" "kind" "field" "0.4861um" "0.5876um" "0.6563um"
   printf "  %-20s %6s  %12s  %12s  %12s\n" "----" "-----" "-------" "-------" "-------"
@@ -216,7 +212,7 @@ breakdown_value() {
 # ── On-axis RMS threshold check ──
 THRESHOLD=0.3
 printf "  (threshold = $THRESHOLD mm — on-axis RMS must be below this)\n"
-rms_onaxis=$(rms_field "$OPT_NEW" 0)
+  rms_onaxis=$(rms_field "$OPT_OFFAX" 0)
 if [ "$rms_onaxis" != "-1" ] && $RAYWEAVE query --gate "rms >= $THRESHOLD" --set rms="$rms_onaxis" < /dev/null > /dev/null; then
   msg="  >>> Optimization failed: on-axis RMS = $(printf '%.4f' "$rms_onaxis") mm >= $THRESHOLD mm"
   echo "$msg" | tee -a "$RESULT_FILE"
