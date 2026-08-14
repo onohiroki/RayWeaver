@@ -2,7 +2,7 @@
 # triplet after the escape-function global optimiser, see escape-demo.bash).
 # Cleaned copy: only the sections the `psf` subcommand consumes (glass_catalog,
 # configs, chief); the optimization/escape_result history lives in the original
-# escape-demo-result.yaml (untracked). Center field (0 deg) only, reference
+# escape-demo-result.yaml (untracked). Three fields (0/16/24 deg), reference
 # surface 8. MTF is reported up to psf.mtf_config.max_frequency (200 c/mm) —
 # the demo script's --max-freq CLI flag overrides this, so the cap stays
 # effective even when the run uses a different lens YAML.
@@ -27,6 +27,12 @@ configs:
         - id: 0
           angle_deg: 0
           weight: 1
+        - id: 1
+          angle_deg: 16
+          weight: 1
+        - id: 2
+          angle_deg: 24
+          weight: 0.5
       wavelengths:
         - id: 0
           value: 0.0004861
@@ -41,7 +47,7 @@ configs:
       surfaces:
         - id: 1
           type: sphere
-          curvature: 0.09812809155147201
+          curvature: 0.09698153007081993
           conic: 0
           thickness: 1.524
           material:
@@ -56,7 +62,7 @@ configs:
           auto_aperture: true
         - id: 3
           type: sphere
-          curvature: -0.07535859913673881
+          curvature: -0.0777641155662992
           conic: 0
           thickness: 0.508
           material:
@@ -77,7 +83,7 @@ configs:
           diameter: 3.7825297358
         - id: 6
           type: sphere
-          curvature: 0.016357695586724123
+          curvature: 0.017951674464199745
           conic: 0
           thickness: 1.524
           material:
@@ -85,7 +91,7 @@ configs:
           auto_aperture: true
         - id: 7
           type: sphere
-          curvature: -0.09614478504368834
+          curvature: -0.09825204751521123
           conic: 0
           thickness: 21.36695183553
           material: AIR
@@ -98,6 +104,14 @@ configs:
 chief:
     fields:
         - angle: 0
+          direction:
+            - 0
+            - 1
+        - angle: 16
+          direction:
+            - 0
+            - 1
+        - angle: 24
           direction:
             - 0
             - 1

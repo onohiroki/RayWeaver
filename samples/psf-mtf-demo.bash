@@ -17,14 +17,15 @@ set -euo pipefail
 #   3. draws one radial-profile overlay PNG (all fields through their peak),
 #   4. draws one MTF-overlay PNG (sagittal & tangential curves per field).
 #
-# The default lens is the escape-optimised US2645157 triplet restricted to the
-# center field (0 deg) for a clean single-field Airy-core / MTF walkthrough
-# (see samples/psf-mtf-demo.yaml). The 16°/24° fields now trace correctly too
-# (Strehl ~0.11 / ~0.86 at best focus, thanks to the wavefront-plane launch),
-# but the demo keeps the single-field YAML so the charts are easy to read. Any
-# other lens YAML with a `chief` section can be substituted with --lens; the MTF
-# frequency cap keeps working via the --max-freq CLI flag (default 200 c/mm)
-# even if that YAML carries no `psf:` section, because --max-freq overrides
+# The default lens is the escape-optimised US2645157 triplet with three fields
+# (0/16/24 deg) so the center and the peripheral fields are evaluated together
+# (see samples/psf-mtf-demo.yaml). The 16°/24° fields are aberrated — a
+# fixed-plane PSF would be far out of focus and force the image grid to grow
+# enormously — so best-focus is the default (as for doublegauss); pass
+# --no-best-focus to evaluate on the fixed reference surface. Any other lens
+# YAML with a `chief` section can be substituted with --lens; the MTF frequency
+# cap keeps working via the --max-freq CLI flag (default 200 c/mm) even if that
+# YAML carries no `psf:` section, because --max-freq overrides
 # psf.mtf_config.max_frequency.
 #
 # Input polarization is RCP+LCP (the polarization-averaged / unpolarised PSF).
@@ -42,6 +43,7 @@ set -euo pipefail
 #   --best-focus  evaluate each field at its best-focus image plane (removes
 #                 field-curvature defocus; also avoids the image-grid auto-
 #                 enlargement that a defocused fixed-plane PSF triggers).
+#                 Default for both triplet and doublegauss.
 #   --no-best-focus  force fixed-plane evaluation (default for --lens triplet).
 #
 # How to read the output
@@ -49,9 +51,10 @@ set -euo pipefail
 #     symmetric FWHM, and an MTF that stays high out to ~200 cycles/mm before
 #     dropping through the 0.5/0.3/0.1 cut-off frequencies. Thresholds that
 #     fall beyond the --max-freq chart cap are printed as '-' in the table.
-#   - The MTF overlay makes the sagittal/tangential difference visible at a
-#     glance; the radial overlay shows the 0° ring structure (first dark ring
-#     at ~0.61·λ/NA).
+#   - The 16°/24° fields are the off-axis, more aberrated ones; their Strehl /
+#     FWHM / MTF are lower than the center field. The MTF overlay makes the
+#     sagittal/tangential difference visible at a glance; the radial overlay
+#     shows each field's profile through its peak.
 #   - With --lens doublegauss the 4 fields (0/10/16/23 deg) are all aberrated
 #     to varying degrees; the same table and charts adapt to their count.
 # =============================================================================
@@ -113,7 +116,13 @@ case "$LENS" in
   triplet)
     YAML="$SCRIPT_DIR/psf-mtf-demo.yaml"
     STEM="psf-mtf-demo"
-    LENS_NAME="escape-optimised US2645157 triplet (center field)"
+    LENS_NAME="escape-optimised US2645157 triplet (0/16/24 deg)"
+    # The off-axis fields are aberrated: a fixed-plane PSF is meaningless and
+    # its large spot auto-enlarges the image grid. Default to best-focus so the
+    # demo is fast and meaningful; --no-best-focus overrides.
+    if [[ "$BEST_FOCUS" == "auto" ]]; then
+      BEST_FOCUS="true"
+    fi
     ;;
   doublegauss)
     YAML="$SCRIPT_DIR/doublegauss-init.yaml"
