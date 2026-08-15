@@ -29,11 +29,11 @@ set -euo pipefail
 #                --fno 5.6). Requires yq.
 #
 # The demo runs one case — the full-aperture lens — and ONLY when a stop is
-# requested (--epd/--fno) also runs a stopped-down variant, then draws a single
-# side-by-side OPD-overlap chart (left = full aperture, right = stopped-down).
-# Each column gets its OWN y-range (the per-case OPD min/max): aligning scales
-# across the same EPD is meaningful, but two different EPDs should each be read
-# on their own scale. With no stop the chart is a plain single-column plot.
+# requested (--epd/--fno) also runs a stopped-down variant. EVERY case draws
+# its own side-by-side OPD-overlap chart: left = all-spherical (before), right
+# = right after the top-ranked initial asphere is inserted (residual OPD).
+# Each column gets its OWN y-range (the per-case OPD min/max): the residual
+# column is much smaller, so the two scales are each read separately.
 #
 # How to read the result
 #   - The ranking score weights how well a rotationally-symmetric asphere
@@ -43,11 +43,15 @@ set -euo pipefail
 #     short DLS achieved with the asphere coefficients as the only variables.
 #   - The final comparison table prints RMS before/after per field; a '✓'
 #     means the aspherized surface shrank the spot, '✗' a regression.
-#   - The OPD-overlap chart shows each candidate surface's per-field mean OPD
-#     vs footprint radius; with a stop, the full and stopped-down cases are
-#     drawn side by side, each column on its own y-range (plus a dashed OPD=0
-#     reference per column). Fields whose curves overlap share OPD the asphere
-#     corrects together; fields that diverge conflict.
+#   - The OPD-overlap chart shows, per candidate surface, each field's mean OPD
+#     vs footprint radius SIDE BY SIDE: left = the all-spherical lens (before),
+#     right = the same lens right after the top-ranked initial asphere is
+#     inserted (residual OPD). Each column gets its OWN y-range (the per-case
+#     OPD min/max): the residual column is much smaller, so the two scales are
+#     read separately (plus a dashed OPD=0 reference per column). Fields whose
+#     curves overlap share OPD the asphere corrects together; fields that
+#     diverge conflict. The aspherized surface's row collapses towards 0 in the
+#     right column; the other surfaces keep their field-varying OPD.
 #
 # The gate (one improvement, no field regressing more than 1%) is applied to
 # EVERY case; any failed case makes the demo exit non-zero.
@@ -142,6 +146,8 @@ if [ "$CLEAN" = true ]; then
   rm -f "$OUTDIR"/asphere-demo-opd*.dat "$OUTDIR"/asphere-demo-*-opd*.dat
   rm -f "$OUTDIR"/asphere-demo-opd*.gnu "$OUTDIR"/asphere-demo-*-opd*.gnu
   rm -f "$OUTDIR"/asphere-demo-opd-overlap*.png "$OUTDIR"/asphere-demo-*-opd-overlap*.png
+  rm -f "$OUTDIR"/asphere-demo-applied-initial*.yaml "$OUTDIR"/asphere-demo-*-applied-initial*.yaml
+  rm -f "$OUTDIR"/asphere-demo-rank-after-initial*.yaml "$OUTDIR"/asphere-demo-*-rank-after-initial*.yaml
   rm -f "$OUTDIR"/asphere-demo-before*.png "$OUTDIR"/asphere-demo-*-before*.png
   rm -f "$OUTDIR"/asphere-demo-after*.png "$OUTDIR"/asphere-demo-*-after*.png
   rm -f "$OUTDIR"/asphere-demo-init-half*.yaml "$OUTDIR"/asphere-demo-init-epd*.yaml "$OUTDIR"/asphere-demo-init-fno*.yaml
@@ -159,6 +165,13 @@ if [[ -z "${RAYWEAVE:-}" ]]; then
     echo "error: rayweave binary not found; set RAYWEAVE or put rayweave on PATH" >&2
     exit 1
   fi
+fi
+
+# Locate yq (needed to build the "initial asphere inserted" system that feeds
+# the before/after OPD chart). Optional: without it that chart is skipped.
+YQ_BIN="${YQ:-$(command -v yq || true)}"
+if [[ -z "$YQ_BIN" && -x /opt/homebrew/bin/yq ]]; then
+  YQ_BIN=/opt/homebrew/bin/yq
 fi
 
 # fit prints a numeric field as %8.4f, or a dash when the query returned -1
@@ -181,6 +194,12 @@ append_notes() {
   over the inserted surface's a4..a12 only (all other surfaces frozen).
 - A '✓' means the added asphere shrank the spot for that field; '✗' a
   regression. The demo applies the top-ranked (highest-scoring) surface.
+- The OPD-overlap chart is the same data BEFORE vs right AFTER the initial
+  asphere (the calibrated initial coefficients, no DLS yet): per candidate
+  surface, each field's mean OPD vs footprint radius. Left column = the
+  all-spherical lens, right column = the residual after the initial asphere is
+  inserted. Each column is on its OWN y-range (the residual is much smaller),
+  so read the two scales separately; the dashed line is OPD=0.
 EOF
 }
 
@@ -299,15 +318,54 @@ plot_opd_overlap() {
   echo "Written: $out"
 }
 
+# ── Build the "initial asphere inserted" system for the before/after OPD chart ──
+# Writes a copy of `from` with the FIRST fitted candidate surface (the one the
+# demo will aspherize; unfit rankings like the image plane are skipped) turned
+# into an asphere_polynomial carrying the initial coefficients:
+# calibrated_coefficients when the measured-response calibration ran, else
+# scaled_coefficients (the sag_scale-scaled set). These are the coefficients
+# right after insertion, BEFORE any DLS refinement. Returns 1 (no file written)
+# when no ranking has initial coefficients.
+build_applied_initial() {
+  local rank="$1" from="$2" out="$3"
+  local nrank ri sid a4 src v val coeffs
+  nrank=$("$RAYWEAVE" query --len asphere_candidate_result.rankings < "$rank" 2>/dev/null || echo 0)
+  for ((ri = 0; ri < nrank; ri++)); do
+    sid=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].surface_id" < "$rank")
+    a4=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].calibrated_coefficients.A4" < "$rank")
+    src="calibrated_coefficients"
+    if [[ -z "$a4" || "$a4" = "-1" ]]; then
+      src="scaled_coefficients"
+      a4=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].scaled_coefficients.A4" < "$rank")
+    fi
+    if [[ -z "$a4" || "$a4" = "-1" ]]; then continue; fi
+    break
+  done
+  if [[ -z "$a4" || "$a4" = "-1" || -z "$sid" || "$sid" = "-1" ]]; then
+    return 1
+  fi
+
+  coeffs=""
+  for v in A4 A6 A8 A10 A12; do
+    val=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].$src.$v" < "$rank")
+    if [[ -z "$val" || "$val" = "-1" ]]; then val=0; fi
+    coeffs="${coeffs}${coeffs:+,}${val}"
+  done
+
+  "$YQ_BIN" e ".configs[0].surfaces[] |= (select(.id == $sid) | .type = \"asphere_polynomial\" | .conic = 0 | .coefficients = [$coeffs])" "$from" > "$out"
+}
+
 # ── One full demo case ──
-# Runs steps 1–5 (ranking → validation → apply → spot RMS → PNG + gate) for a
-# single input system. Every artifact carries the given tag
-# (asphere-demo<TAG>-{rank,validated,applied,result,spot,...}). A per-field
-# spot CSV is written alongside the table for the cross-case comparison.
-# The OPD-overlap chart is drawn once, after all cases, by plot_opd_overlap.
+# Runs steps 1–6 (ranking → before/after OPD chart → validation → apply → spot
+# RMS → PNG + gate) for a single input system. Every artifact carries the given
+# tag (asphere-demo<TAG>-{rank,validated,applied,applied-initial,
+# rank-after-initial,result,spot,...}). A per-field spot CSV is written
+# alongside the table for the cross-case comparison.
 run_case() {
   local from="$1" tag="$2" label="$3"
   local applied="$OUTDIR/asphere-demo${tag}-applied.yaml"
+  local applied_init="$OUTDIR/asphere-demo${tag}-applied-initial.yaml"
+  local rank_after="$OUTDIR/asphere-demo${tag}-rank-after-initial.yaml"
   local result="$OUTDIR/asphere-demo${tag}-result.txt"
   local rank="$OUTDIR/asphere-demo${tag}-rank.yaml"
   local validated="$OUTDIR/asphere-demo${tag}-validated.yaml"
@@ -330,6 +388,23 @@ run_case() {
       printf "  %-6s %10s %10s\n" "$sid" "$(fit "$score")" "$(fit "$sens")"
     done
   } | tee -a "$result"
+  echo
+
+  # ── Step 1b: before/after OPD chart (initial asphere inserted) ──
+  # Re-runs the analysis on the top-ranked initial asphere and draws the
+  # side-by-side OPD-overlap chart: left = all-spherical (before), right =
+  # residual right after the initial asphere is inserted (per-column y-ranges).
+  if [[ -z "$YQ_BIN" ]]; then
+    echo "  (before/after OPD chart skipped: yq not available)"
+  elif build_applied_initial "$rank" "$from" "$applied_init"; then
+    echo "Written: $applied_init"
+    "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" < "$applied_init" > "$rank_after" 2>/dev/null
+    plot_opd_overlap "$OUTDIR/asphere-demo${tag}-opd-overlap.png" \
+      "$rank" "$OUTDIR/asphere-demo${tag}-opd-before" "all-spherical (before)" \
+      "$rank_after" "$OUTDIR/asphere-demo${tag}-opd-after" "initial asphere (after)"
+  else
+    echo "  (before/after OPD chart skipped: top candidate has no initial coefficients)"
+  fi
   echo
 
   # ── Step 2: validation ──
@@ -427,11 +502,7 @@ if [[ -n "$STOP_MODE" ]]; then
   #   fno  — EFL / N          (N = EFL/EPD, F-number)
   # FULL_DIAM and EFL come from a paraxial pass on the full-aperture system.
   # Requires yq.
-  local_yq="${YQ:-$(command -v yq || true)}"
-  if [[ -z "$local_yq" && -x /opt/homebrew/bin/yq ]]; then
-    local_yq=/opt/homebrew/bin/yq
-  fi
-  if [[ -z "$local_yq" ]]; then
+  if [[ -z "$YQ_BIN" ]]; then
     echo "error: --epd/--fno requires yq (set YQ or put yq on PATH)" >&2
     exit 1
   fi
@@ -452,20 +523,13 @@ if [[ -n "$STOP_MODE" ]]; then
 
   variant="$OUTDIR/asphere-demo-init${STOP_TAG}.yaml"
   if [ ! -f "$variant" ]; then
-    "$local_yq" e ".configs[0].surfaces[] |= (select(.id == 7) | .diameter = $stop_diam)" "$BASE_INIT" > "$variant"
+    "$YQ_BIN" e ".configs[0].surfaces[] |= (select(.id == 7) | .diameter = $stop_diam)" "$BASE_INIT" > "$variant"
   fi
   echo "=== Stopped-down case (input: $variant, $STOP_LABEL) ==="
   run_case "$variant" "$STOP_TAG" "$STOP_LABEL"
 
-  # ── Step 7: single side-by-side OPD-overlap chart ──
-  echo "--- Step 7: side-by-side OPD-overlap chart (full vs $STOP_LABEL, per-case y-ranges) ---"
-  plot_opd_overlap "$OUTDIR/asphere-demo-opd-overlap.png" \
-    "$OUTDIR/asphere-demo-rank.yaml" "$OUTDIR/asphere-demo-opd" "full aperture" \
-    "$OUTDIR/asphere-demo${STOP_TAG}-rank.yaml" "$OUTDIR/asphere-demo${STOP_TAG}-opd" "$STOP_LABEL"
-  echo
-
-  # ── Step 8: full vs stopped-down comparison ──
-  echo "--- Step 8: full-aperture vs $STOP_LABEL spot-RMS comparison ---"
+  # ── Step 7: full vs stopped-down comparison ──
+  echo "--- Step 7: full-aperture vs $STOP_LABEL spot-RMS comparison ---"
   {
     printf "  %-6s %14s %14s %14s %14s\n" "field" "full.before" "full.after" "stop.before" "stop.after"
     printf "  %-6s %14s %14s %14s %14s\n" "-----" "----------" "---------" "----------" "---------"
@@ -478,12 +542,6 @@ if [[ -n "$STOP_MODE" ]]; then
       printf "  %-6s %14.4f %14.4f %14.4f %14.4f\n" "f$fi" "$db" "$da" "$eb" "$ea"
     done
   } | tee -a "$RESULT_DEFAULT"
-  echo
-else
-  # ── Step 7: single-column OPD-overlap chart (full aperture only) ──
-  echo "--- Step 7: OPD-overlap chart (full aperture) ---"
-  plot_opd_overlap "$OUTDIR/asphere-demo-opd-overlap.png" \
-    "$OUTDIR/asphere-demo-rank.yaml" "$OUTDIR/asphere-demo-opd" "full aperture"
   echo
 fi
 
