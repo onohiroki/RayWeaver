@@ -346,6 +346,7 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 					Kind:        kind,
 					FieldAngle:  fieldAngle,
 					FieldDir:    fieldDir,
+					FieldIndex:  mt.Field,
 					FieldWeight: fieldWeight,
 					Wavelength:  mt.Wavelength,
 					Wavelength2: mt.Wavelength2,

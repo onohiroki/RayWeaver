@@ -92,6 +92,10 @@ type MeritTerm struct {
 	FieldAngle  float64
 	FieldDir    []float64
 	FieldWeight float64
+	// FieldIndex is the term's field index in the config's field list
+	// (-1 = unset). The wavefront kinds use it to carry the field's declared
+	// vignetting into the pupil-grid clip.
+	FieldIndex  int
 	Wavelength  float64
 	Wavelength2 float64
 	WavWeight   float64
@@ -169,6 +173,10 @@ type meritTerm struct {
 	// Defaults to the Y axis (0, 1).
 	fieldDirX float64
 	fieldDirY float64
+	// fieldIndex is the index of the term's field in the config's field list
+	// (-1 = unset). The wavefront kinds use it to carry the field's declared
+	// vignetting (and direction) into the pupil-grid clip.
+	fieldIndex int
 	// fraction is the encircled-energy fraction for spot_ee_radius (default 0.8).
 	fraction float64
 }
@@ -585,6 +593,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 			fieldAngle:  t.FieldAngle,
 			fieldDirX:   dx,
 			fieldDirY:   dy,
+			fieldIndex:  t.FieldIndex,
 			fieldWeight: t.FieldWeight,
 			wavelength:  t.Wavelength,
 			wavelength2: t.Wavelength2,
@@ -696,6 +705,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 	mt := meritTerm{
 		kind:        t.Kind,
+		fieldIndex:  -1,
 		wavelength:  t.Wavelength,
 		wavelength2: t.Wavelength2,
 		weight:      t.Weight,
@@ -707,8 +717,9 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 		fieldWeight: 1.0,
 		wavWeight:   1.0,
 	}
-	for _, f := range ci.Fields {
+	for i, f := range ci.Fields {
 		if f.ID == t.Field {
+			mt.fieldIndex = i
 			if f.AngleDeg != 0 || f.ImageHeight == 0 {
 				mt.fieldAngle = f.AngleDeg
 			} else {
@@ -1235,25 +1246,50 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 // fields (rather than only the extreme field) keeps the lens large enough for
 // the widest bundle. Callers must restore the initial diameters first. The
 // per-(field, wavelength) extent grids are cached in cache when non-nil.
+//
+// Every config field is measured, not only the fields that happen to carry a
+// grid merit term: a merit that drives off-axis fields purely through wavefront
+// terms (e.g. wavefront_astigmatism / wavefront_sphere_rms on the corner) would
+// otherwise undersize the apertures to the on-axis beam and clip the off-axis
+// wavefront grid, collapsing the corner fit.
 func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) {
 	extents := make(map[int]float64)
-	for ti := range cfg.meritTerms {
-		term := &cfg.meritTerms[ti]
-		if !isGridKind(term.kind) {
-			continue
+
+	// The extents are geometric (aperture-clipping skipped), so one
+	// representative wavelength per field is enough for sizing.
+	wl := types.DefaultWavelength
+	if len(cfg.wavelengths) > 0 {
+		wl = cfg.wavelengths[0].Value
+	}
+
+	// Measure every field's beam. Fall back to the grid merit term angles when
+	// the config has no explicit field list.
+	angles := make(map[float64]bool)
+	for fi := range cfg.fields {
+		angles[o.fieldSizingAngle(cfg, &cfg.fields[fi], surfaces, gc, wl)] = true
+	}
+	if len(angles) == 0 {
+		for ti := range cfg.meritTerms {
+			term := &cfg.meritTerms[ti]
+			if !isGridKind(term.kind) {
+				continue
+			}
+			angles[o.termFieldAngle(cfg, term, surfaces, gc)] = true
 		}
-		angle := o.termFieldAngle(cfg, term, surfaces, gc)
-		key := gridKey{configID: cfg.id, fieldAngle: angle, wavelength: term.wavelength}
+	}
+
+	for angle := range angles {
+		key := gridKey{configID: cfg.id, fieldAngle: angle, wavelength: wl}
 		var perSurf map[int]float64
 		if cache != nil {
 			if m, ok := cache.extents[key]; ok {
 				perSurf = m
 			} else {
-				perSurf = o.fieldExtents(cfg, surfaces, gc, term, angle)
+				perSurf = o.fieldExtents(cfg, surfaces, gc, &meritTerm{wavelength: wl}, angle)
 				cache.extents[key] = perSurf
 			}
 		} else {
-			perSurf = o.fieldExtents(cfg, surfaces, gc, term, angle)
+			perSurf = o.fieldExtents(cfg, surfaces, gc, &meritTerm{wavelength: wl}, angle)
 		}
 		for id, e := range perSurf {
 			if e > extents[id] {
@@ -1269,6 +1305,16 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 			}
 		}
 	}
+}
+
+// fieldSizingAngle returns the beam angle used by sizeAutoApertures for a field
+// item: angle fields directly, image-height fields converted through the current
+// surfaces.
+func (o *Optimizer) fieldSizingAngle(cfg *config, f *types.FieldItem, surfaces []types.Surface, gc *glass.Catalog, wl float64) float64 {
+	if f.AngleDeg != 0 || f.ImageHeight == 0 {
+		return f.AngleDeg
+	}
+	return o.imageHeightToFieldAngle(cfg, surfaces, f.ImageHeight, wl, gc)
 }
 
 // fieldExtents traces the per-surface max radial ray extent for one grid merit

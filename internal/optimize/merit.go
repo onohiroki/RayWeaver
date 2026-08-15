@@ -116,6 +116,18 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 	}
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
 	fd := types.FieldDef{Angle: angle, Direction: []float64{0, 1}}
+	// Carry the term's field declared vignetting (and direction) into the
+	// pupil-grid clip, matching the standalone `wavefront` command. Without it
+	// a heavily vignetted off-axis corner samples the full pupil and the fit
+	// collapses (< 6 valid rays). A negative fieldIndex (unset) keeps the
+	// legacy no-clip behaviour.
+	if term.fieldIndex >= 0 && cfg != nil && term.fieldIndex < len(cfg.fields) {
+		f := &cfg.fields[term.fieldIndex]
+		fd.Vignetting = f.Vignetting
+		if dx, dy, ok := fieldDir(f.Direction); ok {
+			fd.Direction = []float64{dx, dy}
+		}
+	}
 	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
 
 	// fit evaluates the term's quantity on the given (frozen or dynamic)

@@ -824,6 +824,127 @@ func TestUpdatePupils(t *testing.T) {
 	}
 }
 
+// TestSizeAutoAperturesCoversAllFields verifies that sizeAutoApertures measures
+// the beam of every config field, not just the fields that happen to carry a
+// grid merit term. A merit that drives the corner only through wavefront terms
+// (e.g. wavefront_sphere_rms) must still size the auto_aperture surfaces to
+// cover the corner beam; otherwise the corner's wavefront grid clips and the
+// fit collapses to the degenerate penalty.
+func TestSizeAutoAperturesCoversAllFields(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	surfs := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 10.0, AutoAperture: true},
+		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 50.0, Material: types.Material{}, Diameter: 10.0, AutoAperture: true},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 10.0, AutoAperture: true},
+	}
+	surface.Precompute(surfs)
+	fields := []types.FieldItem{
+		{ID: 0, AngleDeg: 0, Weight: 1},
+		{ID: 1, AngleDeg: 14.3, Weight: 1},
+	}
+	cfg := Config{
+		Surfaces:     surfs,
+		Variables:    []Variable{},
+		Fields:       fields,
+		MeritTerms:   []MeritTerm{{Kind: MeritWavefrontSphereRMS, FieldAngle: 14.3, FieldIndex: 1, FieldWeight: 1, Wavelength: 0.00058756, WavWeight: 1, Weight: 1}},
+		GlassCatalog: gc,
+		NumRays:      64,
+	}
+	opt := NewOptimizer(cfg)
+	ccfg := opt.primaryConfig()
+	resized := make([]types.Surface, len(surfs))
+	copy(resized, surfs)
+	opt.restoreDiameters(ccfg, resized)
+	opt.sizeAutoApertures(ccfg, resized, gc, nil)
+
+	// The corner (14.3°) beam extent at each surface must be covered by the
+	// sized diameter. Measure it directly with the beam-aware extent grid.
+	cornerExtents := dls.TraceFieldGridExtents(gc, resized, 0, 0, 14.3, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 1)
+	for i := range resized {
+		if !resized[i].AutoAperture {
+			continue
+		}
+		need := cornerExtents[resized[i].ID]
+		have := resized[i].Diameter / 2
+		if need > 0 && have < need {
+			t.Errorf("surface %d diameter/2 = %v, corner beam needs %v (corner not measured by sizeAutoApertures)", resized[i].ID, have, need)
+		}
+	}
+
+	// The corner wavefront fit must run (real value, not the 0.001 penalty).
+	term := &ccfg.meritTerms[0]
+	val := opt.evaluateWavefrontTerm(ccfg, term, resized, gc)
+	if val == 0.001 {
+		t.Fatalf("corner wavefront fit collapsed to the degenerate penalty after sizing")
+	}
+	if val >= 1e6 || math.IsInf(val, 0) {
+		t.Fatalf("corner wavefront fit returned degenerate value %v", val)
+	}
+}
+
+// TestWavefrontTermFieldVignetting verifies that wavefront merit terms carry
+// the field index and that evaluateWavefrontTerm applies the field's declared
+// vignetting to the pupil-grid clip. A field whose vignetting clips the whole
+// pupil must return the bounded degenerate penalty; the same design without
+// the clip must return a real value.
+func TestWavefrontTermFieldVignetting(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	surfs := singletSurfaces()
+	surface.Precompute(surfs)
+	fields := []types.FieldItem{
+		{ID: 0, AngleDeg: 0, Weight: 1},
+	}
+
+	// Without declared vignetting the fit runs and returns a real value.
+	cfg := Config{
+		Surfaces:     surfs,
+		Variables:    []Variable{},
+		Fields:       fields,
+		MeritTerms:   []MeritTerm{{Kind: MeritWavefrontAstigmatism, FieldAngle: 0, FieldIndex: 0, FieldWeight: 1, Wavelength: 0.00058756, WavWeight: 1, Weight: 1}},
+		GlassCatalog: gc,
+		NumRays:      64,
+	}
+	opt := NewOptimizer(cfg)
+	ccfg := opt.primaryConfig()
+	if ccfg.meritTerms[0].fieldIndex != 0 {
+		t.Fatalf("NewOptimizer fieldIndex = %d, want 0", ccfg.meritTerms[0].fieldIndex)
+	}
+	real := opt.evaluateWavefrontTerm(ccfg, &ccfg.meritTerms[0], surfs, gc)
+	if real >= 1.0 {
+		t.Fatalf("wavefront term without vignetting = %v, want a real value (< 1)", real)
+	}
+
+	// A field whose vignetting clips the entire pupil (compression 1 => zero
+	// ellipse semi-axes) must collapse the fit to the bounded penalty.
+	clip := types.VignettingDef{CompressionX: 1.0, CompressionY: 1.0}
+	cfgV := Config{
+		Surfaces:     surfs,
+		Variables:    []Variable{},
+		Fields:       []types.FieldItem{{ID: 0, AngleDeg: 0, Weight: 1, Vignetting: &clip}},
+		MeritTerms:   []MeritTerm{{Kind: MeritWavefrontAstigmatism, FieldAngle: 0, FieldIndex: 0, FieldWeight: 1, Wavelength: 0.00058756, WavWeight: 1, Weight: 1}},
+		GlassCatalog: gc,
+		NumRays:      64,
+	}
+	optV := NewOptimizer(cfgV)
+	ccfgV := optV.primaryConfig()
+	penalty := optV.evaluateWavefrontTerm(ccfgV, &ccfgV.meritTerms[0], surfs, gc)
+	if penalty != 0.001 {
+		t.Fatalf("wavefront term with full-clip vignetting = %v, want the degenerate penalty 0.001", penalty)
+	}
+
+	// buildMeritTermFromTypes (multi-config path) must also carry the field
+	// index from types.MeritTerm.Field.
+	ci := ConfigInput{ID: "c", Fields: fields}
+	mt := buildMeritTermFromTypes(types.MeritTerm{Kind: MeritWavefrontAstigmatism, Field: 0, Wavelength: 0.00058756}, ci)
+	if mt.fieldIndex != 0 {
+		t.Fatalf("buildMeritTermFromTypes fieldIndex = %d, want 0", mt.fieldIndex)
+	}
+}
+
 // TestOptimizerWavefrontKinds verifies the wavefront paraboloid merit kinds
 // evaluate the same coefficients the standalone wavefront analysis fits: with
 // each term's target equal to the wavefront.Compute paraboloid value of the
