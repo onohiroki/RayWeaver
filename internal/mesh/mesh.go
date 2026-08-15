@@ -1,6 +1,9 @@
 package mesh
 
-import "math"
+import (
+	"math"
+	"sort"
+)
 
 // Point is a 2D point used for the reference-surface triangulation.
 type Point struct {
@@ -119,10 +122,24 @@ func Triangulate(points []Point) []Triangle {
 			}
 			counts[[2]int{u, v}]++
 		}
+		// Collect the boundary edges and sort them so the triangulation is
+		// reproducible: Go map iteration order is randomized, and for
+		// (near-)cocircular points the cavity rebuild would otherwise pick a
+		// different (equally valid) triangulation on every run, feeding
+		// different area weights into the wavefront/PSF fits.
+		boundary := make([][2]int, 0, len(cavity))
 		for e, c := range counts {
-			if c != 1 {
-				continue
+			if c == 1 {
+				boundary = append(boundary, e)
 			}
+		}
+		sort.Slice(boundary, func(a, b int) bool {
+			if boundary[a][0] != boundary[b][0] {
+				return boundary[a][0] < boundary[b][0]
+			}
+			return boundary[a][1] < boundary[b][1]
+		})
+		for _, e := range boundary {
 			// New triangle (u, v, i) kept counter-clockwise.
 			if orient(vertex(e[0]), vertex(e[1]), p) < 0 {
 				tris = append(tris, Triangle{e[1], e[0], i})

@@ -157,12 +157,17 @@ func TraceWavefront(system types.System, engine *ray.Engine, fg *PupilGrid,
 	// The parallel trace appends samples in completion order; sort by the
 	// intrinsic entrance-pupil launch coordinates so the Huygens summation
 	// order (and therefore the floating-point result) is independent of the
-	// worker count and of chief's internal grid completion order.
+	// worker count and of chief's internal grid completion order. The index
+	// tiebreaker keeps the order deterministic even when two samples share the
+	// same launch coordinates (Go's sort.Slice is not stable).
 	sort.Slice(samples, func(a, b int) bool {
 		if samples[a].launchX != samples[b].launchX {
 			return samples[a].launchX < samples[b].launchX
 		}
-		return samples[a].launchY < samples[b].launchY
+		if samples[a].launchY != samples[b].launchY {
+			return samples[a].launchY < samples[b].launchY
+		}
+		return a < b
 	})
 
 	// Area weights via Delaunay triangulation of the reference-surface hits.

@@ -88,3 +88,34 @@ func TestTriangulateCollinear(t *testing.T) {
 		}
 	}
 }
+
+func TestTriangulateDeterministic(t *testing.T) {
+	// The Bowyer-Watson rebuild must not depend on Go map iteration order
+	// (randomized), so repeated runs must return the identical triangle list.
+	// A polar grid with a centre point gives cocircular / near-cocircular
+	// point sets that would previously pick an arbitrary triangulation per run.
+	var pts []Point
+	pts = append(pts, Point{0, 0})
+	for i := 0; i < 8; i++ {
+		a := 2 * math.Pi * float64(i) / 8
+		pts = append(pts, Point{0.5 * math.Cos(a), 0.5 * math.Sin(a)})
+	}
+	for i := 0; i < 12; i++ {
+		a := 2 * math.Pi * float64(i) / 12
+		pts = append(pts, Point{1.0 * math.Cos(a), 1.0 * math.Sin(a)})
+	}
+	first := Triangulate(pts)
+	for run := 0; run < 20; run++ {
+		next := Triangulate(pts)
+		if len(next) != len(first) {
+			t.Fatalf("run %d: triangle count %d != first %d", run, len(next), len(first))
+		}
+		for i := range first {
+			if next[i] != first[i] {
+				t.Errorf("run %d: triangle %d = %v, want %v", run, i, next[i], first[i])
+				break
+			}
+		}
+	}
+}
+
