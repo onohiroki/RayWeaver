@@ -84,15 +84,22 @@ func buildFanPaths(chiefRays []types.ChiefRayResult, maxFanRays int, colors []an
 	return out
 }
 
-// sampleFanPoints uniformly samples up to max points from the fan.
+// sampleFanPoints uniformly samples up to max points from the fan. The
+// selection is edge-inclusive and symmetric: both the first and the last fan
+// ray are always kept, so a decimated fan still spans the full aperture (a
+// floor(i*N/max) scan would drop the upper-edge rays and clip the fan
+// asymmetrically).
 func sampleFanPoints(points []types.FanPoint, max int) []types.FanPoint {
 	if max <= 0 || len(points) <= max {
 		return points
 	}
-	step := float64(len(points)) / float64(max)
 	out := make([]types.FanPoint, 0, max)
+	if max == 1 {
+		return points[:1]
+	}
+	step := float64(len(points)-1) / float64(max-1)
 	for i := 0; i < max; i++ {
-		idx := int(float64(i) * step)
+		idx := int(math.Round(float64(i) * step))
 		if idx >= len(points) {
 			idx = len(points) - 1
 		}
