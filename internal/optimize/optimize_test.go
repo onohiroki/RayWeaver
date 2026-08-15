@@ -860,6 +860,12 @@ func TestOptimizerWavefrontKinds(t *testing.T) {
 		MeritWavefrontX:           pab.X,
 		MeritWavefrontY:           pab.Y,
 		MeritWavefrontConstant:    pab.Constant,
+		// The sphere kinds read the reference-sphere residual (piston+tilt+
+		// defocus removed, astigmatism retained) — the wavefront Statistics.RMS
+		// / PV, the exact quantity psf reports as rms_opd and the Strehl
+		// determinant.
+		MeritWavefrontSphereRMS: wf.Fields[0].Statistics.RMS,
+		MeritWavefrontSpherePV:  wf.Fields[0].Statistics.PV,
 	}
 
 	for kind, target := range targets {

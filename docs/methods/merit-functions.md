@@ -36,6 +36,7 @@ small). Weighting lets the designer balance fields, wavelengths and configs
 | `longitudinal_color` | longitudinal colour |
 | `seidel_spherical` / `seidel_coma` / `seidel_astigmatism` / `seidel_distortion` | third-order Seidel coefficients |
 | `wavefront_defocus` / `wavefront_astigmatism` / `wavefront_tilt` / `wavefront_rms_residual` | derived low-order paraboloid-fit magnitudes |
+| `wavefront_sphere_rms` / `wavefront_sphere_pv` | reference-sphere residual RMS / PV (piston+tilt+defocus removed, astigmatism retained — the psf `rms_opd` / Strehl determinant) |
 | `wavefront_x2` / `wavefront_y2` / `wavefront_xy` / `wavefront_x` / `wavefront_y` / `wavefront_constant` | raw paraboloid-fit coefficients |
 
 ### spot_rms
@@ -111,6 +112,17 @@ Setting `target` on such a term drives the corresponding low-order aberration to
 zero (or any value): e.g. `wavefront_astigmatism` with `target: 0` forces
 astigmatism-free design, while `wavefront_rms_residual` minimises the residual
 aberration. The values match `wavefront_result.fields[].paraboloid`.
+
+**Reference-sphere kinds.** `wavefront_sphere_rms` and `wavefront_sphere_pv`
+fit the best-fit reference sphere `S(x,y) = a + b·x + c·y + d·(x²+y²)` to the
+same best-focus OPD and return its residual RMS / PV. The reference sphere
+removes piston + tilt + defocus only, so **astigmatism stays in the residual** —
+this is the standard wavefront-aberration definition and the exact quantity
+`psf --best-focus` reports as `rms_opd`/`pv_opd` and `wavefront_result.fields[].
+statistics.rms`/`pv`, from which the Strehl is computed. A `wavefront_sphere_rms`
+term with `target: 0` therefore drives the psf-reported Strehl directly (and
+balances astigmatism against high-order residual in a single term), unlike the
+paraboloid kinds which drive the low-order coefficients separately.
 
 The entrance-pupil grid follows `optimization.num_rays` and
 `optimization.aperture_margin`, and — like every grid term — is centred on the

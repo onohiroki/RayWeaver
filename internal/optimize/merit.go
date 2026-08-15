@@ -42,6 +42,8 @@ const (
 	MeritWavefrontAstigmatism = "wavefront_astigmatism"
 	MeritWavefrontTilt        = "wavefront_tilt"
 	MeritWavefrontRMSResidual = "wavefront_rms_residual"
+	MeritWavefrontSphereRMS   = "wavefront_sphere_rms"
+	MeritWavefrontSpherePV    = "wavefront_sphere_pv"
 	MeritWavefrontX2          = "wavefront_x2"
 	MeritWavefrontY2          = "wavefront_y2"
 	MeritWavefrontXY          = "wavefront_xy"
@@ -77,24 +79,31 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 	}
 }
 
-// isWavefrontKind reports whether the merit kind reads one coefficient of the
-// wavefront paraboloid fit.
+// isWavefrontKind reports whether the merit kind is evaluated via a wavefront
+// fit on the reference surface (paraboloid coefficients, or the reference-sphere
+// residual RMS/PV that drives the psf Strehl).
 func isWavefrontKind(kind string) bool {
 	switch kind {
 	case MeritWavefrontDefocus, MeritWavefrontAstigmatism, MeritWavefrontTilt,
-		MeritWavefrontRMSResidual, MeritWavefrontX2, MeritWavefrontY2,
-		MeritWavefrontXY, MeritWavefrontX, MeritWavefrontY, MeritWavefrontConstant:
+		MeritWavefrontRMSResidual, MeritWavefrontSphereRMS, MeritWavefrontSpherePV,
+		MeritWavefrontX2, MeritWavefrontY2, MeritWavefrontXY, MeritWavefrontX,
+		MeritWavefrontY, MeritWavefrontConstant:
 		return true
 	}
 	return false
 }
 
-// evaluateWavefrontTerm fits the wavefront paraboloid on the reference surface
-// for the term's (field, wavelength) and returns the requested coefficient.
-// The entrance-pupil grid is centred on the config's frozen per-iteration pupil
-// (dls.pupilZ) so the DLS base point and its Jacobian perturbations share one
-// pupil, keeping the derivative consistent. A degenerate fit (no grid, too few
-// valid rays) returns 1e6 so the solver is pushed away rather than misled.
+// evaluateWavefrontTerm fits the wavefront on the reference surface for the
+// term's (field, wavelength) and returns the requested quantity: one paraboloid
+// coefficient (wavefront_defocus/astigmatism/tilt/rms_residual/x2/y2/xy/x/y/
+// constant), or the reference-sphere residual RMS/PV
+// (wavefront_sphere_rms/pv — piston+tilt+defocus removed, astigmatism
+// retained, the exact quantity psf reports as rms_opd and the direct Strehl
+// determinant). The entrance-pupil grid is centred on the config's frozen
+// per-iteration pupil (dls.pupilZ) so the DLS base point and its Jacobian
+// perturbations share one pupil, keeping the derivative consistent. A
+// degenerate fit (no grid, too few valid rays) returns the bounded degenerate
+// penalty so the solver is pushed away rather than misled.
 func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	refSurface := cfg.refSurface
 	if refSurface <= 0 || refSurface >= surfaces[len(surfaces)-1].ID {
@@ -109,15 +118,37 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 	fd := types.FieldDef{Angle: angle, Direction: []float64{0, 1}}
 	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
 
-	pab, err := wavefront.FitFieldParaboloid(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, &cfg.pupilZ)
+	// fit evaluates the term's quantity on the given (frozen or dynamic)
+	// pupil. The closure keeps the frozen→dynamic fallback and the bounded
+	// degenerate penalty shared by both the paraboloid and sphere kinds.
+	fit := func(frozenPupilZ *float64) (float64, error) {
+		switch term.kind {
+		case MeritWavefrontSphereRMS, MeritWavefrontSpherePV:
+			rms, pv, err := wavefront.FitFieldSphereRMS(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ)
+			if err != nil {
+				return 0, err
+			}
+			if term.kind == MeritWavefrontSpherePV {
+				return pv, nil
+			}
+			return rms, nil
+		default:
+			pab, err := wavefront.FitFieldParaboloid(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ)
+			if err != nil {
+				return 0, err
+			}
+			return wavefrontCoeff(term.kind, pab), nil
+		}
+	}
+
+	val, err := fit(&cfg.pupilZ)
 	if err != nil {
 		// Fall back to the dynamic pupil (chief resolves the entrance pupil
-		// itself). The frozen grid (wavefront.FitFieldParaboloid with
-		// frozenPupilZ) does not apply the fixed-surface vignetting cut, so a
-		// strongly off-axis field whose beam clips a fixed aperture ends up
-		// with too few valid rays; the chief-derived grid clips correctly and
-		// matches the standalone `wavefront` command exactly.
-		pab, err = wavefront.FitFieldParaboloid(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, nil)
+		// itself). The frozen grid does not apply the fixed-surface vignetting
+		// cut, so a strongly off-axis field whose beam clips a fixed aperture
+		// ends up with too few valid rays; the chief-derived grid clips
+		// correctly and matches the standalone `wavefront` command exactly.
+		val, err = fit(nil)
 		if err != nil {
 			// A wavefront fit that fails even with the dynamic pupil (e.g. a
 			// strongly off-axis field whose beam is fully clipped) returns the
@@ -127,7 +158,13 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 			return o.wavefrontDegenerate
 		}
 	}
-	switch term.kind {
+	return val
+}
+
+// wavefrontCoeff returns the paraboloid coefficient a wavefront merit kind
+// reads from a fitted paraboloid.
+func wavefrontCoeff(kind string, pab wavefront.Paraboloid) float64 {
+	switch kind {
 	case MeritWavefrontDefocus:
 		return pab.Defocus
 	case MeritWavefrontAstigmatism:

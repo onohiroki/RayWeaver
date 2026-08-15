@@ -150,6 +150,8 @@ A `CONF` operand selects which config's merit terms are active for each rule.
 | `wavefront_astigmatism` | paraboloid astigmatism `√(((a-b)/2)² + (c/2)²)` |
 | `wavefront_tilt` | paraboloid tilt `√(d²+e²)` |
 | `wavefront_rms_residual` | RMS of OPD minus the paraboloid (high-order residual) |
+| `wavefront_sphere_rms` | **reference-sphere residual RMS** — piston + tilt + defocus removed, **astigmatism retained**; the exact quantity `psf --best-focus` reports as `rms_opd` and the direct Strehl determinant |
+| `wavefront_sphere_pv` | reference-sphere residual PV (same model as `wavefront_sphere_rms`) |
 | `wavefront_x2` / `wavefront_y2` / `wavefront_xy` / `wavefront_x` / `wavefront_y` / `wavefront_constant` | the raw paraboloid fit coefficients `a…f` |
 
 The wavefront kinds fit the least-squares quadratic
@@ -157,7 +159,14 @@ The wavefront kinds fit the least-squares quadratic
 reference surface (default: the last optical surface; override via
 `chief.reference_surface`). The OPD is referenced to the best-focus point
 (geometric spot-RMS minimization), exactly like the `wavefront` command, so the
-coefficient values match `wavefront_result.fields[].paraboloid`. The pupil grid
+coefficient values match `wavefront_result.fields[].paraboloid`. The
+`wavefront_sphere_rms`/`_pv` kinds instead evaluate the best-fit reference
+sphere `S(x,y) = a + b·x + c·y + d·(x²+y²)` (piston/tilt/defocus only), so
+astigmatism stays in the residual — matching `wavefront_result.fields[].
+statistics.rms`/`pv` and `psf_results[].rms_opd`/`pv_opd`. This is the
+quantity the Strehl is computed from, so a `wavefront_sphere_rms` term (with
+`target: 0`) drives the psf-reported Strehl directly, whereas the paraboloid
+kinds drive the low-order coefficients separately. The pupil grid
 follows `optimization.num_rays` and `optimization.aperture_margin`, and — like
 every grid term — is centred on the config's per-iteration frozen pupil, so the
 DLS Jacobian stays consistent. A degenerate fit returns merit `1e6`.
