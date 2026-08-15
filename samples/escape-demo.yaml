@@ -7,6 +7,13 @@ metadata:
     Escape-function global optimisation of a degraded US2645157 triplet:
     3 fields (0/16/24 deg), d/F/C wavelengths, 4 curvature variables
     (s1/s3/s6/s7), DLS max_iter 200 with 4 escape cycles / 3 workers.
+    The merit is the off-axis spot set (spot_rms / spot_rms_t / _s / _worst,
+    spot_ee_radius) with NO wavefront term: the escape then robustly finds the
+    well-corrected basin (0/16/24 deg Strehl ~0.99/~0.11/~0.77 — the 24° outer
+    field is already >= 0.5). escape-demo.bash refines that best with a
+    wavefront_astigmatism merit (w16=14000, 24° spot terms w=0.11, 512-ray
+    grid) so every field reaches Strehl >= 0.5 (~0.99/~0.67/~0.56), and then
+    verifies the profile with `rayweave psf --best-focus`.
     Feed to `rayweave escape` to get escape_result.minima[]; the bash script
     wraps it with --verbose + JSONL progress.
 
@@ -186,11 +193,6 @@ configs:
           field: 1
           wavelength: 0.0004861
           weight: 1.0
-        - kind: wavefront_astigmatism
-          field: 1
-          wavelength: 0.0004861
-          weight: 14000.0
-          target: 0
         - kind: spot_rms
           field: 1
           wavelength: 0.0005876
@@ -207,11 +209,6 @@ configs:
           field: 1
           wavelength: 0.0005876
           weight: 1.0
-        - kind: wavefront_astigmatism
-          field: 1
-          wavelength: 0.0005876
-          weight: 14000.0
-          target: 0
         - kind: spot_rms
           field: 1
           wavelength: 0.0006563
@@ -228,47 +225,42 @@ configs:
           field: 1
           wavelength: 0.0006563
           weight: 1.0
-        - kind: wavefront_astigmatism
-          field: 1
-          wavelength: 0.0006563
-          weight: 14000.0
-          target: 0
         - kind: spot_rms_worst
           field: 2
           wavelength: 0.0004861
-          weight: 0.05
+          weight: 0.3
         - kind: spot_rms_weighted
           field: 2
           wavelength: 0.0004861
-          weight: 0.05
+          weight: 0.2
         - kind: spot_ee_radius
           field: 2
           wavelength: 0.0004861
-          weight: 0.05
+          weight: 0.2
           fraction: 0.8
         - kind: spot_rms_worst
           field: 2
           wavelength: 0.0005876
-          weight: 0.05
+          weight: 0.3
         - kind: spot_rms_weighted
           field: 2
           wavelength: 0.0005876
-          weight: 0.05
+          weight: 0.2
         - kind: spot_ee_radius
           field: 2
           wavelength: 0.0005876
-          weight: 0.05
+          weight: 0.2
           fraction: 0.8
         - kind: spot_rms_worst
           field: 2
           wavelength: 0.0006563
-          weight: 0.05
+          weight: 0.3
         - kind: spot_rms_weighted
           field: 2
           wavelength: 0.0006563
-          weight: 0.05
+          weight: 0.2
         - kind: spot_ee_radius
           field: 2
           wavelength: 0.0006563
-          weight: 0.05
+          weight: 0.2
           fraction: 0.8

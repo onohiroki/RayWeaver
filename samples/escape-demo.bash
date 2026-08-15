@@ -16,14 +16,22 @@ set -euo pipefail
 #
 # Steps
 #   1. escape                  : global search -> <prefix>result.yaml
-#   2. doublegauss --save/--log: every discovered minimum written to a clean
+#   2. DLS refinement          : the escape best is refined with a
+#                                wavefront_astigmatism merit that lifts the
+#                                16° middle field to Strehl >= 0.5 while the
+#                                24° spot anchor keeps the outer field healthy
+#                                (w24=0.11, 512-ray grid) -> <prefix>refined.yaml
+#   3. PSF verification        : per-field Strehl at best focus (RCP+LCP, d
+#                                line) -> table; the demo gates on every field
+#                                reaching >= 0.5
+#   4. doublegauss --save/--log: every discovered minimum written to a clean
 #                                <prefix>min1.yaml, <prefix>min2.yaml, ... as
 #                                it is found (interrupt/kill safe), progress
 #                                streamed to <prefix>progress.jsonl
 #      triplet                 : escape extract --index N pulls one full
 #                                local-minimum system out
-#   3. plot                    : diagrams of the initial and best systems
-#   4. element-powers chart    : a PNG showing every local minimum's
+#   5. plot                    : diagrams of the initial and refined systems
+#   6. element-powers chart    : a PNG showing every local minimum's
 #                                element_powers offset from a merit baseline
 #
 # How to read the result
@@ -82,10 +90,12 @@ if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
   rm -f "$OUTDIR"/escape-demo-result.yaml "$OUTDIR"/escape-demo-result.txt
   rm -f "$OUTDIR"/escape-demo-init.png "$OUTDIR"/escape-demo-best.png "$OUTDIR"/escape-demo-min1.png "$OUTDIR"/escape-demo-min1.yaml
+  rm -f "$OUTDIR"/escape-demo-best.yaml "$OUTDIR"/escape-demo-refine-in.yaml "$OUTDIR"/escape-demo-refined.yaml "$OUTDIR"/escape-demo-psf.yaml
   rm -f "$OUTDIR"/escape-demo-doublegauss-result.yaml "$OUTDIR"/escape-demo-doublegauss-result.txt
   rm -f "$OUTDIR"/escape-demo-doublegauss-progress.jsonl
   rm -f "$OUTDIR"/escape-demo-doublegauss-min*.yaml
   rm -f "$OUTDIR"/escape-demo-doublegauss-init.png "$OUTDIR"/escape-demo-doublegauss-best.png "$OUTDIR"/escape-demo-doublegauss-min1.png
+  rm -f "$OUTDIR"/escape-demo-doublegauss-best.yaml "$OUTDIR"/escape-demo-doublegauss-refine-in.yaml "$OUTDIR"/escape-demo-doublegauss-refined.yaml "$OUTDIR"/escape-demo-doublegauss-psf.yaml
   rm -f "$OUTDIR"/escape-demo-element-powers.png "$OUTDIR"/escape-demo-doublegauss-element-powers.png
   rm -f "$OUTDIR"/escape-demo-element-powers.dat "$OUTDIR"/escape-demo-doublegauss-element-powers.dat
   rm -f "$OUTDIR"/escape-powers-*.dat "$OUTDIR"/escape-powers-*.png
@@ -121,6 +131,10 @@ cat >> "$RESULT_FILE" <<EOF
 - \`element_powers\` (per minimum, per config) is the thin-lens power of each
   lens element at the d-line — a fingerprint for comparing the minima against
   each other.
+- The escape best is refined with a wavefront_astigmatism merit
+  (${PREFIX}refined.yaml) so every field reaches a best-focus Strehl >= 0.5;
+  the per-field numbers and the pass/fail gate are printed in the PSF
+  verification table above.
 - If the best merit is only marginally better than a plain local DLS run,
   the merit landscape is effectively single-modal and escape is unnecessary.
 EOF
@@ -233,6 +247,185 @@ echo "--- Local minima summary ---"
 } | tee "$RESULT_FILE"
 echo
 
+echo "--- DLS refinement of the escape best (wavefront-astigmatism merit) ---"
+# The escape's spot merit robustly finds the well-corrected landscape (the 24°
+# outer field is already >= 0.5), but leaves the 16° middle field weak. A short
+# DLS refinement with a wavefront_astigmatism merit lifts the middle field to
+# Strehl >= 0.5 while the 24° spot anchor (w=0.11) keeps the outer field
+# healthy. The result is the demo's final lens.
+BEST_IDX=$($RAYWEAVE query -r escape_result.best_index < "$RESULT")
+$RAYWEAVE escape extract --index "$BEST_IDX" < "$RESULT" > "$OUTDIR/${PREFIX}best.yaml"
+awk '/^      merit:/{exit} {print}' "$OUTDIR/${PREFIX}best.yaml" > "$OUTDIR/${PREFIX}refine-in.yaml"
+case "$LENS" in
+  triplet)
+    cat >> "$OUTDIR/${PREFIX}refine-in.yaml" <<'MERIT'
+      merit:
+        type: weighted_sum
+        terms:
+            - kind: spot_rms
+              field: 0
+              wavelength: 0.0004861
+              weight: 2.0
+            - kind: spot_rms
+              field: 0
+              wavelength: 0.0005876
+              weight: 2.0
+            - kind: spot_rms
+              field: 0
+              wavelength: 0.0006563
+              weight: 2.0
+            - kind: spot_rms
+              field: 1
+              wavelength: 0.0004861
+              weight: 1.0
+            - kind: spot_rms_t
+              field: 1
+              wavelength: 0.0004861
+              weight: 0.5
+            - kind: spot_rms_s
+              field: 1
+              wavelength: 0.0004861
+              weight: 0.5
+            - kind: spot_rms_worst
+              field: 1
+              wavelength: 0.0004861
+              weight: 1.0
+            - kind: wavefront_astigmatism
+              field: 1
+              wavelength: 0.0004861
+              weight: 14000.0
+              target: 0
+            - kind: spot_rms
+              field: 1
+              wavelength: 0.0005876
+              weight: 1.0
+            - kind: spot_rms_t
+              field: 1
+              wavelength: 0.0005876
+              weight: 0.5
+            - kind: spot_rms_s
+              field: 1
+              wavelength: 0.0005876
+              weight: 0.5
+            - kind: spot_rms_worst
+              field: 1
+              wavelength: 0.0005876
+              weight: 1.0
+            - kind: wavefront_astigmatism
+              field: 1
+              wavelength: 0.0005876
+              weight: 14000.0
+              target: 0
+            - kind: spot_rms
+              field: 1
+              wavelength: 0.0006563
+              weight: 1.0
+            - kind: spot_rms_t
+              field: 1
+              wavelength: 0.0006563
+              weight: 0.5
+            - kind: spot_rms_s
+              field: 1
+              wavelength: 0.0006563
+              weight: 0.5
+            - kind: spot_rms_worst
+              field: 1
+              wavelength: 0.0006563
+              weight: 1.0
+            - kind: wavefront_astigmatism
+              field: 1
+              wavelength: 0.0006563
+              weight: 14000.0
+              target: 0
+            - kind: spot_rms_worst
+              field: 2
+              wavelength: 0.0004861
+              weight: 0.11
+            - kind: spot_rms_weighted
+              field: 2
+              wavelength: 0.0004861
+              weight: 0.11
+            - kind: spot_ee_radius
+              field: 2
+              wavelength: 0.0004861
+              weight: 0.11
+              fraction: 0.8
+            - kind: spot_rms_worst
+              field: 2
+              wavelength: 0.0005876
+              weight: 0.11
+            - kind: spot_rms_weighted
+              field: 2
+              wavelength: 0.0005876
+              weight: 0.11
+            - kind: spot_ee_radius
+              field: 2
+              wavelength: 0.0005876
+              weight: 0.11
+              fraction: 0.8
+            - kind: spot_rms_worst
+              field: 2
+              wavelength: 0.0006563
+              weight: 0.11
+            - kind: spot_rms_weighted
+              field: 2
+              wavelength: 0.0006563
+              weight: 0.11
+            - kind: spot_ee_radius
+              field: 2
+              wavelength: 0.0006563
+              weight: 0.11
+              fraction: 0.8
+MERIT
+    ;;
+  doublegauss)
+    cat >> "$OUTDIR/${PREFIX}refine-in.yaml" <<'MERIT'
+      merit:
+        type: weighted_sum
+        terms:
+            - kind: spot_rms
+              field: 0
+              wavelength: 0.0005876
+              weight: 3.0
+            - kind: spot_rms_worst
+              field: 1
+              wavelength: 0.0005876
+              weight: 1.0
+            - kind: spot_rms_worst
+              field: 2
+              wavelength: 0.0005876
+              weight: 1.0
+            - kind: spot_rms_worst
+              field: 3
+              wavelength: 0.0005876
+              weight: 0.5
+MERIT
+    ;;
+esac
+awk '/^chief:/{p=1} p' "$OUTDIR/${PREFIX}best.yaml" >> "$OUTDIR/${PREFIX}refine-in.yaml"
+$RAYWEAVE optimize < "$OUTDIR/${PREFIX}refine-in.yaml" > "$OUTDIR/${PREFIX}refined.yaml"
+echo "Written: $OUTDIR/${PREFIX}refined.yaml"
+echo
+
+echo "--- PSF verification (all fields Strehl >= 0.5) ---"
+$RAYWEAVE psf --polarization RCP+LCP --wavelengths 0.0005876 --best-focus \
+  < "$OUTDIR/${PREFIX}refined.yaml" > "$OUTDIR/${PREFIX}psf.yaml"
+NF=$($RAYWEAVE query --len psf_results < "$OUTDIR/${PREFIX}psf.yaml")
+GATE_OK=true
+for ((i = 0; i < NF; i++)); do
+  ang=$($RAYWEAVE query -r "psf_results[$i].field_angle" < "$OUTDIR/${PREFIX}psf.yaml")
+  s=$($RAYWEAVE query -r "psf_results[$i].strehl_ratio" < "$OUTDIR/${PREFIX}psf.yaml")
+  ok=$(awk -v x="$s" 'BEGIN { if (x + 0 >= 0.5) print "OK"; else print "BELOW 0.5" }')
+  [ "$ok" = "OK" ] || GATE_OK=false
+  printf "  %s deg: Strehl %.4f  %s\n" "$ang" "$s" "$ok"
+done
+if [ "$GATE_OK" = true ]; then
+  echo "  => All fields reach Strehl >= 0.5."
+else
+  echo "  => Some fields are below Strehl 0.5 (the refinement merit needs retuning)."
+fi
+echo
+
 echo "--- PNG diagrams ---"
 echo "=== Initial diagram ==="
 $RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" | $RAYWEAVE trace \
@@ -240,7 +433,7 @@ $RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" | $RAYWEAVE trace \
 echo "Written: $OUTDIR/${PREFIX}init.png"
 
 echo "=== Best-solution diagram ==="
-$RAYWEAVE chief --clear-aperture --ray-fan < "$RESULT" | $RAYWEAVE trace \
+$RAYWEAVE chief --clear-aperture --ray-fan < "$OUTDIR/${PREFIX}refined.yaml" | $RAYWEAVE trace \
   | $RAYWEAVE plot -o "$OUTDIR/${PREFIX}best.png" >/dev/null
 echo "Written: $OUTDIR/${PREFIX}best.png"
 
@@ -252,7 +445,13 @@ if [[ -n "$SAVE_BASE" ]]; then
   echo "  Every discovered minimum was written as a clean lens file:"
   ls -1 "$OUTDIR"/${PREFIX}min[0-9]*.yaml 2>/dev/null | sed 's#.*/##' | sed 's/^/    /' || true
 else
-  echo "=== Extracting local minimum 1 ==="
-  $RAYWEAVE escape extract --index 1 < "$RESULT" > "$OUTDIR/${PREFIX}min1.yaml"
-  echo "Written: $OUTDIR/${PREFIX}min1.yaml"
+  echo "=== Extracting a local minimum ==="
+  NMIN=$($RAYWEAVE query --len escape_result.minima < "$RESULT" 2>/dev/null || echo 0)
+  if [[ "${NMIN:-0}" -ge 2 ]]; then
+    IDX=1
+  else
+    IDX=0
+  fi
+  $RAYWEAVE escape extract --index "$IDX" < "$RESULT" > "$OUTDIR/${PREFIX}min1.yaml"
+  echo "Written: $OUTDIR/${PREFIX}min1.yaml (minimum $IDX)"
 fi
