@@ -43,6 +43,13 @@ type Config struct {
 	Hull             *glass.ConvexHull
 	HullMargin       float64
 	HullWeight       float64
+	// Bounded penalties for merit terms that cannot be evaluated (a pupil
+	// grid with no valid rays, or a failed wavefront fit). Defaults:
+	// spot 0.1, opd 0.01, wavefront 0.001 (mm). The legacy 1e6 sentinel
+	// would contribute weight·1e12 to the merit and stall the DLS line search.
+	SpotDegenerate      float64
+	OPDDegenerate       float64
+	WavefrontDegenerate float64
 }
 
 // ConfigInput describes one configuration (zoom position) of a
@@ -503,6 +510,11 @@ type Optimizer struct {
 	hullMargin       float64
 	hullWeight       float64
 	hullPairs        []glassPair
+	// Bounded penalties for merit terms that cannot be evaluated. Defaults:
+	// spot 0.1, opd 0.01, wavefront 0.001 (mm).
+	spotDegenerate      float64
+	opdDegenerate       float64
+	wavefrontDegenerate float64
 	// Conditional merit blend (optimization.merit_schedule). Nil keeps the
 	// fixed per-config merit. When set, modeWeights holds the frozen per-mode
 	// weights recomputed at the top of every DLS iteration.
@@ -530,6 +542,22 @@ func (o *Optimizer) SetStop(stop <-chan struct{}) {
 func (o *Optimizer) SetApertureMarginMM(mm float64) {
 	if mm > 0 {
 		o.apertureMarginMM = mm
+	}
+}
+
+// SetDegenerate overrides the bounded penalties for merit terms that cannot
+// be evaluated (pupil grid with no valid rays, or a failed wavefront fit).
+// Non-positive values keep the built-in defaults (spot 0.1, opd 0.01,
+// wavefront 0.001 mm). See the DegenerateConfig YAML section.
+func (o *Optimizer) SetDegenerate(spot, opd, wavefront float64) {
+	if spot > 0 {
+		o.spotDegenerate = spot
+	}
+	if opd > 0 {
+		o.opdDegenerate = opd
+	}
+	if wavefront > 0 {
+		o.wavefrontDegenerate = wavefront
 	}
 }
 
@@ -585,6 +613,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		cfg.MuConMax, cfg.Workers, cfg.Logger, cfg.Hull, cfg.HullMargin, cfg.HullWeight,
 	)
 	opt.SetApertureMarginMM(cfg.ApertureMarginMM)
+	opt.SetDegenerate(cfg.SpotDegenerate, cfg.OPDDegenerate, cfg.WavefrontDegenerate)
 	return opt
 }
 
@@ -801,6 +830,9 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 		hullMargin:       hullMargin,
 		hullWeight:       hullWeight,
 		hullPairs:        hullPairs,
+		spotDegenerate:      0.1,
+		opdDegenerate:       0.01,
+		wavefrontDegenerate: 0.001,
 	}
 }
 
@@ -1037,12 +1069,58 @@ func (o *Optimizer) constraintFieldAngle(cfg *config, c types.ConstraintOperand,
 	return 0
 }
 
+// gridKey identifies a unique pupil-grid trace within a single merit
+// evaluation. Within one evaluation the surfaces, frozen pupil, grid geometry
+// and per-field angle are constant, so every grid merit term sharing a
+// (field angle, wavelength) traces the identical grid.
+type gridKey struct {
+	configID   string
+	fieldAngle float64
+	wavelength float64
+}
+
+// evalGridCache is a per-evaluation cache of pupil-grid traces. The DLS solver
+// calls ComputeResiduals concurrently for one goroutine per Jacobian column,
+// so the cache must be created fresh inside each evaluation call (never stored
+// on the Optimizer) to stay race-free; the cached traces are pure functions of
+// the evaluation's surfaces and frozen pupil.
+type evalGridCache struct {
+	spots   map[gridKey][]dls.IPoint
+	extents map[gridKey]map[int]float64
+}
+
+func newEvalGridCache() *evalGridCache {
+	return &evalGridCache{
+		spots:   make(map[gridKey][]dls.IPoint),
+		extents: make(map[gridKey]map[int]float64),
+	}
+}
+
+// gridForTerm returns the cached (or freshly traced) pupil grid for a grid
+// merit term. A nil cache disables caching (single-shot evaluation paths such
+// as the public EvaluateMeritKind wrapper).
+func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
+	angle := o.termFieldAngle(cfg, term, surfaces, gc)
+	trace := func() []dls.IPoint {
+		points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
+		return points
+	}
+	if cache == nil {
+		return trace()
+	}
+	key := gridKey{configID: cfg.id, fieldAngle: angle, wavelength: term.wavelength}
+	if pts, ok := cache.spots[key]; ok {
+		return pts
+	}
+	pts := trace()
+	cache.spots[key] = pts
+	return pts
+}
+
 // traceFieldGrid traces the pupil grid for a merit term and returns the spot
 // points.
 func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
-	angle := o.termFieldAngle(cfg, term, surfaces, gc)
-	points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
-	return points
+	return o.gridForTerm(nil, gc, surfaces, cfg, term)
 }
 
 // isGridKind reports whether the merit kind is evaluated from the pupil-grid
@@ -1060,29 +1138,35 @@ func isGridKind(kind string) bool {
 // evaluateGridKind traces the pupil grid for a grid merit term and returns the
 // term's value (the metric itself). spot_rms is the legacy metric; the new
 // kinds use the flux-weighted spot statistics. The term's target is applied by
-// the caller.
-func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
-	points := o.traceFieldGrid(gc, surfaces, cfg, term)
+// the caller. A grid with no valid rays returns the bounded degenerate penalty
+// (o.spotDegenerate) instead of the legacy 1e6 sentinel, so a fully clipped
+// off-axis beam pushes the solver without exploding the merit.
+func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) float64 {
+	points := o.gridForTerm(cache, gc, surfaces, cfg, term)
+	var val float64
 	switch term.kind {
 	case dls.MeritSpotRMST:
-		rmsT, _ := dls.ComputeSpotAxisRMS(points, term.fieldDirX, term.fieldDirY)
-		return rmsT
+		val, _ = dls.ComputeSpotAxisRMS(points, term.fieldDirX, term.fieldDirY)
 	case dls.MeritSpotRMSS:
-		_, rmsS := dls.ComputeSpotAxisRMS(points, term.fieldDirX, term.fieldDirY)
-		return rmsS
+		_, val = dls.ComputeSpotAxisRMS(points, term.fieldDirX, term.fieldDirY)
 	case dls.MeritSpotRMSWorst:
 		rmsT, rmsS := dls.ComputeSpotAxisRMS(points, term.fieldDirX, term.fieldDirY)
 		if rmsT > rmsS {
-			return rmsT
+			val = rmsT
+		} else {
+			val = rmsS
 		}
-		return rmsS
 	case dls.MeritSpotWeighted:
-		return dls.ComputeSpotWeightedRMS(points)
+		val = dls.ComputeSpotWeightedRMS(points)
 	case dls.MeritSpotEERadius:
-		return dls.ComputeSpotEERadius(points, term.fraction)
+		val = dls.ComputeSpotEERadius(points, term.fraction)
 	default:
-		return dls.ComputeSpotRMS(points)
+		val = dls.ComputeSpotRMS(points)
 	}
+	if val >= 1e6 {
+		return o.spotDegenerate
+	}
+	return val
 }
 
 // gridWorkers returns the number of goroutines for grid-ray parallelism. The
@@ -1149,8 +1233,9 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 // (ignoring aperture clipping) and sizes every AutoAperture surface so its
 // diameter covers the union envelope of all fields' marginal rays. Using all
 // fields (rather than only the extreme field) keeps the lens large enough for
-// the widest bundle. Callers must restore the initial diameters first.
-func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog) {
+// the widest bundle. Callers must restore the initial diameters first. The
+// per-(field, wavelength) extent grids are cached in cache when non-nil.
+func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) {
 	extents := make(map[int]float64)
 	for ti := range cfg.meritTerms {
 		term := &cfg.meritTerms[ti]
@@ -1158,13 +1243,18 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 			continue
 		}
 		angle := o.termFieldAngle(cfg, term, surfaces, gc)
-		pupilZ := cfg.pupilZ
-		if cfg.pupilZs != nil {
-			if z, ok := cfg.pupilZs[angle]; ok {
-				pupilZ = z
+		key := gridKey{configID: cfg.id, fieldAngle: angle, wavelength: term.wavelength}
+		var perSurf map[int]float64
+		if cache != nil {
+			if m, ok := cache.extents[key]; ok {
+				perSurf = m
+			} else {
+				perSurf = o.fieldExtents(cfg, surfaces, gc, term, angle)
+				cache.extents[key] = perSurf
 			}
+		} else {
+			perSurf = o.fieldExtents(cfg, surfaces, gc, term, angle)
 		}
-		perSurf := dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.extentRays(), o.gridRotation, o.gridWorkers())
 		for id, e := range perSurf {
 			if e > extents[id] {
 				extents[id] = e
@@ -1179,6 +1269,18 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 			}
 		}
 	}
+}
+
+// fieldExtents traces the per-surface max radial ray extent for one grid merit
+// term, centred on the per-field entrance pupil when one is resolved.
+func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glass.Catalog, term *meritTerm, angle float64) map[int]float64 {
+	pupilZ := cfg.pupilZ
+	if cfg.pupilZs != nil {
+		if z, ok := cfg.pupilZs[angle]; ok {
+			pupilZ = z
+		}
+	}
+	return dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.extentRays(), o.gridRotation, o.gridWorkers())
 }
 
 // extentRays returns the ray count for the beam-extent measurement in
@@ -1207,18 +1309,19 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 	gc := effectiveGC(o.gc, tempGC)
 
 	merit := 0.0
+	cache := newEvalGridCache()
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surfaces := configSurfaces[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc)
+		o.sizeAutoApertures(cfg, surfaces, gc, cache)
 
 		cfgMerit := 0.0
 		for _, st := range o.scheduledTerms(cfg) {
 			term := st.term
 			if isGridKind(term.kind) {
-				val := o.evaluateGridKind(cfg, term, surfaces, gc)
+				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache)
 				if term.kind == "" || term.kind == dls.MeritSpotRMS {
 					cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * val * val
 				} else {
@@ -1226,7 +1329,7 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 					cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 				}
 			} else {
-				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
+				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache)
 				diff := val - term.target
 				cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
@@ -1251,18 +1354,19 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 
 	out := make(map[string]float64)
 	objTotal := 0.0
+	cache := newEvalGridCache()
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surfaces := configSurfaces[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc)
+		o.sizeAutoApertures(cfg, surfaces, gc, cache)
 
 		for _, st := range o.scheduledTerms(cfg) {
 			term := st.term
 			var contrib float64
 			if isGridKind(term.kind) {
-				val := o.evaluateGridKind(cfg, term, surfaces, gc)
+				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache)
 				if term.kind == "" || term.kind == dls.MeritSpotRMS {
 					contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * val * val
 				} else {
@@ -1270,7 +1374,7 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 					contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 				}
 			} else {
-				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
+				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache)
 				diff := val - term.target
 				contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
@@ -1295,25 +1399,26 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 	gc := effectiveGC(o.gc, tempGC)
 
 	var allR []float64
+	cache := newEvalGridCache()
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surfaces := configSurfaces[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc)
+		o.sizeAutoApertures(cfg, surfaces, gc, cache)
 
 		for _, st := range o.scheduledTerms(cfg) {
 			term := st.term
 			w := math.Sqrt(cfg.weight * st.scale * term.weight * term.fieldWeight * term.wavWeight)
 			if isGridKind(term.kind) {
-				val := o.evaluateGridKind(cfg, term, surfaces, gc)
+				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache)
 				if term.kind == "" || term.kind == dls.MeritSpotRMS {
 					allR = append(allR, w*val)
 				} else {
 					allR = append(allR, w*(val-term.target))
 				}
 			} else {
-				val := o.evaluateKindTerm(cfg, term, surfaces, gc)
+				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache)
 				allR = append(allR, w*(val-term.target))
 			}
 		}
@@ -1337,7 +1442,7 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 		surfaces := configSurfaces[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil)
 
 		for _, c := range cfg.constraints {
 			if !c.Active {
@@ -1379,7 +1484,7 @@ func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []Constr
 		surfaces := configSurfaces[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil)
 
 		for _, c := range cfg.constraints {
 			if !c.Active {
@@ -1422,7 +1527,7 @@ func (o *Optimizer) FinalConstraintMeasurements(x []float64) []types.ConstraintM
 		surfaces := configSurfaces[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil)
 
 		for _, c := range cfg.constraints {
 			if !c.Active {
@@ -1497,7 +1602,7 @@ func (o *Optimizer) FinalApertures(x []float64) map[string]map[int]float64 {
 // during merit evaluation where exact extents are not required.
 func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog) {
 	if cfg.refSurface <= 0 || len(cfg.fieldDefs) == 0 {
-		o.sizeAutoApertures(cfg, surfaces, gc)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil)
 		return
 	}
 	pol := types.NewCircularJones(true)

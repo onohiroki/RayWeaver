@@ -150,7 +150,7 @@ func TestOptimizerOffAxisGridKinds(t *testing.T) {
 			fieldDirY:  1,
 			wavelength: term.Wavelength,
 			fraction:   term.Fraction,
-		}, opt.primaryConfig().surfaces, gc)
+		}, opt.primaryConfig().surfaces, gc, nil)
 		if term.Kind == MeritSpotEERadius && val >= 1e6 {
 			t.Errorf("%s evaluated to the 1e6 degenerate penalty: %v", term.Kind, val)
 		}
@@ -162,6 +162,176 @@ func TestOptimizerOffAxisGridKinds(t *testing.T) {
 		if m > 1e-8 {
 			t.Errorf("%s with target = value: merit = %v, want ~0 (ti=%d)", term.Kind, m, ti)
 		}
+	}
+}
+
+// TestOptimizerGridCache verifies that grid merit terms sharing a
+// (field angle, wavelength) reuse one pupil-grid trace per evaluation: after
+// tracing two grid terms of the same field/wavelength through a shared cache,
+// the cache holds a single entry and both terms observe the identical trace;
+// a different wavelength yields a distinct entry.
+func TestOptimizerGridCache(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	surfaces := singletSurfaces()
+	surface.Precompute(surfaces)
+
+	cfg := Config{
+		Surfaces:  surfaces,
+		Variables: []Variable{},
+		MeritTerms: []MeritTerm{
+			{Kind: MeritSpotRMST, FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0},
+			{Kind: MeritSpotRMSS, FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0},
+			{Kind: MeritSpotRMSWorst, FieldAngle: 16.0, FieldDir: []float64{0, 1}, FieldWeight: 1.0, Wavelength: 0.0006563, WavWeight: 1.0, Weight: 1.0},
+		},
+		GlassCatalog: gc,
+		NumRays:      32,
+	}
+
+	opt := NewOptimizer(cfg)
+	ccfg := opt.primaryConfig()
+	cache := newEvalGridCache()
+
+	mk := func(kind string, wl float64) *meritTerm {
+		return &meritTerm{kind: kind, fieldAngle: 16.0, fieldDirX: 0, fieldDirY: 1, wavelength: wl, fraction: 0.8}
+	}
+
+	// Two terms of the same (field, wavelength) must share one cached trace.
+	p1 := opt.gridForTerm(cache, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMST, 0.00058756))
+	p2 := opt.gridForTerm(cache, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMSS, 0.00058756))
+	if len(cache.spots) != 1 {
+		t.Fatalf("grid cache holds %d entries after tracing one (field,wl) twice, want 1", len(cache.spots))
+	}
+	if len(p1) == 0 {
+		t.Fatalf("grid trace returned no points")
+	}
+	if &p1[0] != &p2[0] {
+		t.Errorf("two grid terms of the same (field,wl) returned distinct traces (cache miss)")
+	}
+
+	// A different wavelength must produce a distinct cache entry.
+	p3 := opt.gridForTerm(cache, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMSWorst, 0.0006563))
+	if len(cache.spots) != 2 {
+		t.Fatalf("grid cache holds %d entries after adding a second wavelength, want 2", len(cache.spots))
+	}
+	if &p1[0] == &p3[0] {
+		t.Errorf("different wavelengths returned the same trace (cache key collision)")
+	}
+
+	// A nil cache must not panic and must return fresh traces.
+	p4 := opt.gridForTerm(nil, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMST, 0.00058756))
+	if len(p4) == 0 {
+		t.Fatalf("nil-cache grid trace returned no points")
+	}
+
+	// EvaluateMerit / ComputeResiduals results are unaffected by the cache
+	// (determinism): two evaluations must agree exactly.
+	x := opt.getInitialState()
+	m1 := opt.EvaluateMerit(x)
+	m2 := opt.EvaluateMerit(x)
+	if m1 != m2 {
+		t.Errorf("EvaluateMerit not deterministic across cached evaluations: %v vs %v", m1, m2)
+	}
+	r1 := opt.ComputeResiduals(x)
+	r2 := opt.ComputeResiduals(x)
+	if len(r1) != len(r2) {
+		t.Fatalf("ComputeResiduals lengths differ: %d vs %d", len(r1), len(r2))
+	}
+	for i := range r1 {
+		if r1[i] != r2[i] {
+			t.Errorf("ComputeResiduals[%d] not deterministic: %v vs %v", i, r1[i], r2[i])
+		}
+	}
+}
+
+// TestOptimizerDegeneratePenalty verifies that merit terms which cannot be
+// evaluated (a pupil grid with no valid rays, or a failed wavefront fit)
+// return the bounded degenerate penalty instead of the legacy 1e6 sentinel,
+// so the DLS line search is not stalled by a weight·1e12 contribution. It also
+// checks the Config override wiring.
+func TestOptimizerDegeneratePenalty(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	// An extreme field angle (89°) against a plane makes every grid ray miss
+	// the system, so the spot kinds hit the degenerate (no valid rays) path.
+	wide := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0.0, Thickness: 50.0, Material: types.Material{}, Diameter: 50.0},
+	}
+	surface.Precompute(wide)
+
+	cfg := Config{
+		Surfaces:     wide,
+		Variables:    []Variable{},
+		MeritTerms:   []MeritTerm{{FieldAngle: 89.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
+		GlassCatalog: gc,
+		NumRays:      32,
+	}
+	opt := NewOptimizer(cfg)
+	ccfg := opt.primaryConfig()
+
+	// Default penalty values.
+	if opt.spotDegenerate != 0.1 || opt.opdDegenerate != 0.01 || opt.wavefrontDegenerate != 0.001 {
+		t.Fatalf("default degenerate penalties = %v/%v/%v, want 0.1/0.01/0.001",
+			opt.spotDegenerate, opt.opdDegenerate, opt.wavefrontDegenerate)
+	}
+
+	// A grid kind on a fully clipped pupil must return the bounded spot
+	// penalty, never the 1e6 sentinel.
+	term := &meritTerm{kind: "", fieldAngle: 89.0, fieldDirX: 0, fieldDirY: 1, wavelength: 0.00058756}
+	val := opt.evaluateGridKind(ccfg, term, ccfg.surfaces, gc, nil)
+	if val != 0.1 {
+		t.Fatalf("degenerate spot kind = %v, want bounded penalty 0.1", val)
+	}
+	if val >= 1e6 {
+		t.Fatalf("degenerate spot kind leaked the 1e6 sentinel: %v", val)
+	}
+
+	// opd_rms on the same clipped pupil must return the bounded opd penalty.
+	opd := opt.evaluateKindTerm(ccfg, &meritTerm{kind: MeritOPDRMS, fieldAngle: 89.0, wavelength: 0.00058756}, ccfg.surfaces, gc, nil)
+	if opd != 0.01 {
+		t.Fatalf("degenerate opd_rms = %v, want bounded penalty 0.01", opd)
+	}
+
+	// A config-level override must win over the default.
+	cfg2 := cfg
+	cfg2.SpotDegenerate = 0.5
+	cfg2.OPDDegenerate = 0.05
+	cfg2.WavefrontDegenerate = 0.005
+	opt2 := NewOptimizer(cfg2)
+	if opt2.spotDegenerate != 0.5 || opt2.opdDegenerate != 0.05 || opt2.wavefrontDegenerate != 0.005 {
+		t.Fatalf("degenerate overrides not applied: %v/%v/%v",
+			opt2.spotDegenerate, opt2.opdDegenerate, opt2.wavefrontDegenerate)
+	}
+	val2 := opt2.evaluateGridKind(opt2.primaryConfig(), term, opt2.primaryConfig().surfaces, gc, nil)
+	if val2 != 0.5 {
+		t.Fatalf("degenerate spot kind with override = %v, want 0.5", val2)
+	}
+
+	// The bounded penalty must keep the total merit finite and small (the
+	// legacy sentinel would make it ~1e12).
+	merit := opt.EvaluateMerit([]float64{})
+	if merit >= 1.0 {
+		t.Fatalf("merit with a degenerate term = %v, want bounded (< 1)", merit)
+	}
+
+	// A wavefront fit that cannot run (89° field: too few valid rays even
+	// with the dynamic-pupil fallback) must return the bounded wavefront
+	// penalty, never the 1e6 sentinel.
+	wf := opt.evaluateWavefrontTerm(ccfg, &meritTerm{kind: MeritWavefrontAstigmatism, fieldAngle: 89.0, wavelength: 0.00058756}, ccfg.surfaces, gc)
+	if wf != 0.001 {
+		t.Fatalf("degenerate wavefront = %v, want bounded penalty 0.001", wf)
+	}
+	if wf >= 1e6 {
+		t.Fatalf("degenerate wavefront leaked the 1e6 sentinel: %v", wf)
+	}
+	cfgW := cfg
+	cfgW.MeritTerms = []MeritTerm{{Kind: MeritWavefrontAstigmatism, FieldAngle: 89.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 14000.0}}
+	optW := NewOptimizer(cfgW)
+	if m := optW.EvaluateMerit([]float64{}); m >= 1.0 {
+		t.Fatalf("merit with a degenerate wavefront term = %v, want bounded (< 1)", m)
 	}
 }
 

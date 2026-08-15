@@ -658,6 +658,18 @@ type OptimizationConfig struct {
 	GlassHull        *GlassHullConfig       `yaml:"glass_hull,omitempty"`
 	Escape           *EscapeConfig          `yaml:"escape,omitempty"`
 	MeritSchedule    *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
+	Degenerate       *DegenerateConfig      `yaml:"degenerate,omitempty"`
+}
+
+// DegenerateConfig configures the bounded penalty applied when a merit term
+// cannot be evaluated (a pupil grid with no valid rays, or a wavefront fit
+// that fails). Without it the legacy 1e6 sentinel feeds weight·1e12 into the
+// merit and stalls the DLS line search. Values are in the metric's units (mm);
+// each is clamped to the given default when unset.
+type DegenerateConfig struct {
+	SpotValue      float64 `yaml:"spot_value,omitempty"`
+	OPDValue       float64 `yaml:"opd_value,omitempty"`
+	WavefrontValue float64 `yaml:"wavefront_value,omitempty"`
 }
 
 // EscapeConfig configures the escape-function global optimisation loop

@@ -175,6 +175,11 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		MuConMax:         input.Optimization.MuConMax,
 		Workers:          workers,
 	}
+	if dg := input.Optimization.Degenerate; dg != nil {
+		cfg.SpotDegenerate = dg.SpotValue
+		cfg.OPDDegenerate = dg.OPDValue
+		cfg.WavefrontDegenerate = dg.WavefrontValue
+	}
 	if input.Optimization.GlassHull != nil && input.Optimization.GlassHull.Enabled {
 		cfg.Hull = glass.NewDefaultConvexHull()
 		cfg.HullMargin = input.Optimization.GlassHull.Margin
@@ -400,6 +405,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		copy(configsCopy, configs)
 		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, nil, hull, hullMargin, hullWeight)
 		opt.SetApertureMarginMM(apertureMarginMM)
+		applyDegenerate(opt, input.Optimization.Degenerate)
 		return opt
 	}
 

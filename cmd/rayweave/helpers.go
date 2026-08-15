@@ -360,3 +360,13 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 
 	return terms
 }
+
+// applyDegenerate copies the optimization.degenerate penalties (spot/opd/
+// wavefront) onto an optimizer. Non-positive values keep the built-in defaults
+// (spot 0.1, opd 0.01, wavefront 0.001 mm).
+func applyDegenerate(opt *optimize.Optimizer, dg *types.DegenerateConfig) {
+	if dg == nil {
+		return
+	}
+	opt.SetDegenerate(dg.SpotValue, dg.OPDValue, dg.WavefrontValue)
+}

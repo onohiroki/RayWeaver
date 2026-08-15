@@ -51,18 +51,24 @@ const (
 )
 
 // evaluateKindTerm evaluates a non-spot merit term for the given config,
-// returning 0 for unknown kinds.
-func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
+// returning 0 for unknown kinds. The per-evaluation grid cache is shared with
+// the grid merit kinds so opd_rms and the spot kinds reuse one pupil trace per
+// (field, wavelength); a nil cache disables caching.
+func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) float64 {
 	switch term.kind {
 	case MeritOPDRMS:
-		points := o.traceFieldGrid(gc, surfaces, cfg, term)
+		points := o.gridForTerm(cache, gc, surfaces, cfg, term)
 		if len(points) == 0 {
-			return 1e6
+			return o.opdDegenerate
 		}
-		return ComputeOPDRMS(points)
+		val := ComputeOPDRMS(points)
+		if val >= 1e6 {
+			return o.opdDegenerate
+		}
+		return val
 	default:
 		if isGridKind(term.kind) {
-			return o.evaluateGridKind(cfg, term, surfaces, gc)
+			return o.evaluateGridKind(cfg, term, surfaces, gc, cache)
 		}
 		if isWavefrontKind(term.kind) {
 			return o.evaluateWavefrontTerm(cfg, term, surfaces, gc)
@@ -113,7 +119,12 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 		// matches the standalone `wavefront` command exactly.
 		pab, err = wavefront.FitFieldParaboloid(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, nil)
 		if err != nil {
-			return 1e6
+			// A wavefront fit that fails even with the dynamic pupil (e.g. a
+			// strongly off-axis field whose beam is fully clipped) returns the
+			// bounded degenerate penalty instead of the legacy 1e6 sentinel,
+			// so the DLS line search is not stalled by a weight·1e12 merit
+			// contribution.
+			return o.wavefrontDegenerate
 		}
 	}
 	switch term.kind {
@@ -194,7 +205,7 @@ func EvaluateMeritKind(kind string, term MeritTerm, surfaces []types.Surface, gc
 			fraction:   term.Fraction,
 			surfaceSet: append([]int(nil), term.SurfaceSet...),
 		}
-		return o.evaluateKindTerm(cfg, &mt, surfaces, gc)
+		return o.evaluateKindTerm(cfg, &mt, surfaces, gc, nil)
 	}
 	mt := meritTerm{
 		kind:        kind,

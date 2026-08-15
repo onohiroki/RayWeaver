@@ -257,6 +257,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 
 	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight)
 	opt.SetApertureMarginMM(apertureMarginMM)
+	applyDegenerate(opt, input.Optimization.Degenerate)
 
 	// Validate the conditional merit schedule and the glass_role kind before
 	// running (bad configuration would otherwise silently contribute nothing).

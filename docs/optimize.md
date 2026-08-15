@@ -301,6 +301,29 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   the first signal interrupts the running DLS within one iteration and writes
   the best point found so far to stdout; the second force-quits (exit 1).
 
+### Degenerate merit terms (`optimization.degenerate`)
+
+A merit term that cannot be evaluated — a pupil grid with no valid rays
+(a fully clipped off-axis beam), or a wavefront fit that fails even after the
+dynamic-pupil fallback — returns a **bounded penalty** instead of the legacy
+1e6 sentinel (which fed `weight·1e12` into the merit and stalled the DLS line
+search). The penalties are configured per metric category:
+
+```yaml
+optimization:
+  degenerate:
+    spot_value: 0.1          # mm; spot_rms / spot_rms_t/s/worst / weighted / ee_radius
+    opd_value: 1.0e-2        # mm; opd_rms
+    wavefront_value: 1.0e-3  # mm; wavefront_* paraboloid kinds
+```
+
+All values default when unset (0.1 / 0.01 / 0.001 mm). Non-positive values keep
+the built-in default. The contribution is `weight·value²` (e.g. a
+`wavefront_astigmatism` term at weight 14000 contributes at most
+`14000·(1e-3)² = 1.4e-2`), so a degenerate off-axis field pushes the solver
+towards a region where the term can be evaluated without exploding the merit.
+Successful terms are unaffected, so existing merit values are unchanged.
+
 ## Method
 
 The damped least-squares algorithm, Jacobian construction, constraint handling
