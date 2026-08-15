@@ -40,6 +40,9 @@ func TestConfigFromYAMLDefaults(t *testing.T) {
 	if !cfg.PreserveVertexCurvature || !cfg.IncludeConic || !cfg.RemoveTilt {
 		t.Fatalf("unexpected bool defaults: %+v", cfg)
 	}
+	if !cfg.CalibrateScale {
+		t.Fatalf("unexpected calibrate_scale default: %+v", cfg)
+	}
 
 	// Explicit overrides.
 	tf, ff := true, false
@@ -50,6 +53,8 @@ func TestConfigFromYAMLDefaults(t *testing.T) {
 		CellRings:               12,
 		CandidateSurfaces:       []int{2, 4},
 		ScoreWeights:            types.AsphereScoreWeights{Conflict: 0.2},
+		CalibrateScale:          &ff,
+		ScaleProbes:             []float64{0.1, 0.5},
 	}
 	cfg = ConfigFromYAML(fromYAML)
 	if cfg.IncludeConic || !cfg.PreserveVertexCurvature || !cfg.RemoveDefocus {
@@ -57,6 +62,12 @@ func TestConfigFromYAMLDefaults(t *testing.T) {
 	}
 	if cfg.CellRings != 12 || len(cfg.CandidateSurfaces) != 2 || cfg.ScoreWeights.Conflict != 0.2 {
 		t.Fatalf("scalar overrides not applied: %+v", cfg)
+	}
+	if cfg.CalibrateScale {
+		t.Fatalf("calibrate_scale: false not applied: %+v", cfg)
+	}
+	if len(cfg.ScaleProbes) != 2 || cfg.ScaleProbes[1] != 0.5 {
+		t.Fatalf("scale_probes not applied: %+v", cfg.ScaleProbes)
 	}
 }
 

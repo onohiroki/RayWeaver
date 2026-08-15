@@ -83,11 +83,18 @@ func ScoreSurface(cells []types.AsphereCellStat, surf types.Surface, n1, n2 floa
 	}
 
 	// Sensitivity H: the traced relative merit improvement of the scaled
-	// asphere when Phase 3 measured it; otherwise the analytic index-contrast
-	// proxy scaled by the fraction of OPD energy the asphere can address.
+	// asphere when Phase 3 measured it (the calibrated improvement when
+	// calibration ran), otherwise the analytic index-contrast proxy scaled by
+	// the fraction of OPD energy the asphere can address. The measured value is
+	// floored at 0 so an overshooting probe (a scale that makes the merit
+	// worse) can never feed a negative penalty into the score and demote a
+	// genuinely aspherizable surface below an unfit one.
 	sens := 0.0
 	if opts.HasMeasuredH {
 		sens = opts.MeasuredH
+		if sens < 0 {
+			sens = 0
+		}
 	} else if opts.MaxContrast > 0 {
 		contrast := math.Abs(n2 - n1)
 		sens = (contrast / opts.MaxContrast) * score.Coverage

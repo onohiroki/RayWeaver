@@ -239,6 +239,60 @@ values are what `--validate` embeds and what the measured sensitivity evaluates;
 the raw `coefficients` are the least-squares estimate, the scaled ones the safe
 starting point.
 
+### 7.6 Scale calibration from the measured response
+
+The OPD→sag conversion (§7.2) is a fast normal-incidence approximation, so the
+**absolute magnitude** of the fitted coefficients is not trustworthy: on a
+double-Gauss the ray-traced response to a unit sag was ~15× the linear
+`(n2−n1)` model, and a probe scale of 0.5 overshot so badly that the measured
+merit *worsened* by 67% — flipping the ranking's sensitivity term H negative
+and demoting the genuinely aspherizable surface below an un-aspherizable one.
+A fixed `sag_scale` cannot be "right" for every surface and every system.
+
+Instead, when `sensitivity_samples > 0`, the embedded scale is derived **per
+surface from the measured ray-trace response** (`calibrate_scale: true`,
+default). The calibration reuses data the sensitivity pass already computes, so
+it costs one extra merit trace per candidate:
+
+1. **Local data.** The pass has `M(0) = base`, `M(α) = asphere` (merit with the
+   probe-scaled asphere applied), and the per-coefficient derivatives
+   `∂M/∂c_j` at the probe. The directional derivative along the fitted
+   coefficients is `D = Σ_j ∂M/∂c_j · c_j`.
+2. **Quadratic model.** Fit `M(β) ≈ base + a·β + b·β²` through `M(α)` and
+   `M′(α) = D`:
+   ```
+   Δ = asphere − base
+   b = (D·α − Δ) / α²
+   a = D − 2·b·α
+   β* = −a / (2·b)        (interior minimum only when b > 0)
+   ```
+   The proposal `β*` is clamped to `[α/4, 2α] ∩ [0.05, 1.0]`. When no interior
+   minimum exists (`b ≤ 0` or `β* ≤ 0`) the shrink `α/4` is proposed.
+3. **Verify.** The proposal (or each `scale_probes` entry) is re-traced once;
+   the scale with the lowest finite merit wins, with the probe α as the
+   fallback. The pick-min property guarantees calibration never does worse
+   than the fixed-α behaviour.
+4. **Output.** The chosen scale is `sensitivity.calibrated_scale`, its verified
+   merit `calibrated_merit`, and `calibrated_coefficients = coefficients ×
+   calibrated_scale` is the embedded set (`--validate` seeds from it). The
+   ranking's sensitivity term uses `calibrated_improvement = 1 −
+   calibrated_merit/base`, floored at 0; the raw measured improvement is also
+   floored at 0 in the score as a backstop so an oversized probe can never feed
+   a negative penalty into the ranking.
+
+Worked example (surface 8, `asphere-demo-init.yaml`, real measured data):
+
+| probe α | base | M(α) | D | β* (clamped) | verified M(β*) | result |
+|---|---|---|---|---|---|---|
+| 0.05 | 0.0304 | 0.0227 | −0.076 | 0.074 | ≈0.021 | marginal gain (2α clamp limits reach) |
+| **0.2** | 0.0304 | 0.0087 | +0.0072 | **0.19** | ≈0.0087 | at the true optimum |
+| 0.5 | 0.0304 | 0.0508 | +0.073 | 0.125 | ≈0.014 | improvement recovers +0.54 (was −0.67) |
+
+The quadratic is a *proposal generator* only — the verify trace decides, so a
+poor local model can never hurt (worst case it falls back to the probe).
+`scale_probes` replaces the quadratic with an explicit scan for cases where the
+probe sits far from the optimum.
+
 ## 8. Measured sensitivity (Phase 3)
 
 The ranking's sensitivity term can be **measured rather than assumed**. When

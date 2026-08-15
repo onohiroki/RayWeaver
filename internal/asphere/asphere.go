@@ -35,6 +35,13 @@ type Config struct {
 	TopK                    int
 	MinRaysPerCell          int
 	ScoreWeights            types.AsphereScoreWeights
+	// CalibrateScale replaces the fixed SagScale per surface with a scale
+	// derived from the measured ray-trace response (base/asphere merit and
+	// d_merit_d_coef) when the sensitivity pass runs. ScaleProbes, when
+	// non-empty, overrides the quadratic estimate with an explicit list of
+	// scales to trace and verify.
+	CalibrateScale bool
+	ScaleProbes    []float64
 }
 
 // DefaultConfig returns the default analysis configuration.
@@ -56,6 +63,7 @@ func DefaultConfig() Config {
 		RemoveDefocus:           false,
 		TopK:                    3,
 		MinRaysPerCell:          3,
+		CalibrateScale:          true,
 		ScoreWeights: types.AsphereScoreWeights{
 			Common:        0.35,
 			Unique:        0.15,
@@ -124,6 +132,12 @@ func ConfigFromYAML(c *types.AsphereCandidateConfig) Config {
 	}
 	if c.MinRaysPerCell > 0 {
 		cfg.MinRaysPerCell = c.MinRaysPerCell
+	}
+	if c.CalibrateScale != nil {
+		cfg.CalibrateScale = *c.CalibrateScale
+	}
+	if len(c.ScaleProbes) > 0 {
+		cfg.ScaleProbes = c.ScaleProbes
 	}
 	if w := c.ScoreWeights; w != (types.AsphereScoreWeights{}) {
 		if w.Common != 0 {
@@ -211,8 +225,15 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 			// gets improvement ≈ 0 and is correctly demoted instead of falling
 			// back to the analytic proxy.
 			sens := Sensitivity(surfaces, fields, wavelengths, cfg.SensitivitySamples, gc, pupilZs, s.ID, scaled, cfg, base)
+			if cfg.CalibrateScale {
+				sens = calibrateSensitivity(surfaces, fields, wavelengths, cfg, gc, pupilZs, s.ID, coeffs, base, sens)
+			}
 			if !math.IsNaN(sens.Improvement) {
-				measuredH[s.ID] = sens.Improvement
+				h := sens.Improvement
+				if sens.CalibratedScale > 0 {
+					h = sens.CalibratedImprovement
+				}
+				measuredH[s.ID] = h
 			}
 			if !math.IsNaN(sens.BaseMerit) && !math.IsNaN(sens.AsphereMerit) {
 				sensitivity[s.ID] = sens
@@ -253,9 +274,14 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 		result.Warnings = append(result.Warnings, warns...)
 
 		// Attach the measured sensitivity matrix (merits + per-coefficient
-		// derivatives) computed in the Phase-3 pass.
+		// derivatives) computed in the Phase-3 pass, and the calibration's
+		// embedded coefficients when it produced a scale (else the fixed
+		// sag_scale-scaled set remains the embedded one).
 		if sens, ok := sensitivity[rs.SurfaceID]; ok {
 			rs.Sensitivity = &sens
+			if cfg.CalibrateScale && sens.CalibratedScale > 0 {
+				rs.CalibratedCoefficients = ScaleCoefficients(coeffs, sens.CalibratedScale)
+			}
 		}
 		if coeffs != (types.AsphereCoeffs{}) {
 			fitted++

@@ -23,6 +23,8 @@ func runAsphere(data []byte) {
 	sensitivitySamples := fs.Int("sensitivity-samples", -1, "sensitivity trace radial samples (default 9; 0 = disable, use analytic proxy)")
 	topK := fs.Int("top-k", 0, "number of top-ranked surfaces to fit (default 3)")
 	sagScale := fs.Float64("sag-scale", 0, "initial sag scale alpha (default 0.2)")
+	calibrateScale := fs.Bool("calibrate-scale", false, "derive each candidate's embedded asphere scale from the measured ray-trace response (default: on; disable with --calibrate-scale=false)")
+	scaleProbes := fs.String("scale-probes", "", "comma-separated scales to verify instead of the quadratic estimate (e.g. 0.1,0.25,0.5,1.0)")
 	validate := fs.Bool("validate", false, "run a short DLS per fitted surface to verify the asphere improves the merit")
 	apply := fs.Bool("apply", false, "insert the top-ranked DLS-validated asphere onto its surface (implies --validate) and output the modified system")
 	dlsIter := fs.Int("dls-iter", 20, "DLS iterations per validated surface (with --validate)")
@@ -63,6 +65,12 @@ func runAsphere(data []byte) {
 	}
 	if *sagScale != 0 {
 		cfg.SagScale = *sagScale
+	}
+	if flagWasSet(fs, "calibrate-scale") {
+		cfg.CalibrateScale = *calibrateScale
+	}
+	if *scaleProbes != "" {
+		cfg.ScaleProbes = parseFloatList(*scaleProbes, "scale probe")
 	}
 
 	// Principle 3: echo the flag-won analysis values back into the output's
@@ -144,7 +152,8 @@ func runAsphere(data []byte) {
 func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.FlagSet) {
 	if !(flagWasSet(fs, "rings") || flagWasSet(fs, "angles") ||
 		flagWasSet(fs, "pupil-samples") || flagWasSet(fs, "sensitivity-samples") ||
-		flagWasSet(fs, "top-k") || flagWasSet(fs, "sag-scale")) {
+		flagWasSet(fs, "top-k") || flagWasSet(fs, "sag-scale") ||
+		flagWasSet(fs, "calibrate-scale") || flagWasSet(fs, "scale-probes")) {
 		return
 	}
 	if input.Asphere == nil {
@@ -168,6 +177,13 @@ func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.Fla
 	}
 	if flagWasSet(fs, "sag-scale") {
 		input.Asphere.SagScale = cfg.SagScale
+	}
+	if flagWasSet(fs, "calibrate-scale") {
+		v := cfg.CalibrateScale
+		input.Asphere.CalibrateScale = &v
+	}
+	if flagWasSet(fs, "scale-probes") {
+		input.Asphere.ScaleProbes = cfg.ScaleProbes
 	}
 }
 

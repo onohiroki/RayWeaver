@@ -11,10 +11,11 @@ import (
 )
 
 // validateAspheres runs a short DLS solve for each fitted top-K asphere in
-// isolation: the scaled coefficients are inserted onto the candidate surface
-// and the asphere coefficients (a4..a12) become the only variables, so the
-// merit improvement is a faithful, cheap check that the suggested asphere is a
-// real correction rather than an artefact of the OPD-to-sag approximation.
+// isolation: the embedded coefficients (calibrated when calibration ran, else
+// the sag_scale-scaled set) are inserted onto the candidate surface and the
+// asphere coefficients (a4..a12) become the only variables, so the merit
+// improvement is a faithful, cheap check that the suggested asphere is a real
+// correction rather than an artefact of the OPD-to-sag approximation.
 // It returns a map from surface ID to the validation result.
 func validateAspheres(surfaces []types.Surface, rankings []types.AsphereSurfaceScore, gc *glass.Catalog, topK, dlsIter, numRays int, stopSurface, refSurface int, pupilZ float64, fields []types.FieldItem, wavelengths []float64, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget) map[int]*types.AsphereValidation {
 	if dlsIter <= 0 {
@@ -25,10 +26,11 @@ func validateAspheres(surfaces []types.Surface, rankings []types.AsphereSurfaceS
 		if i >= topK {
 			break
 		}
-		if rs.ScaledCoefficients == (types.AsphereCoeffs{}) {
+		emb := embeddedCoefficients(rs)
+		if emb == (types.AsphereCoeffs{}) {
 			continue
 		}
-		v := validateOneAsphere(surfaces, rs, gc, dlsIter, numRays, stopSurface, refSurface, pupilZ, fields, wavelengths, pol, gridType, passThrough)
+		v := validateOneAsphere(surfaces, rs, emb, gc, dlsIter, numRays, stopSurface, refSurface, pupilZ, fields, wavelengths, pol, gridType, passThrough)
 		if v != nil {
 			out[rs.SurfaceID] = v
 		}
@@ -36,10 +38,20 @@ func validateAspheres(surfaces []types.Surface, rankings []types.AsphereSurfaceS
 	return out
 }
 
-// validateOneAsphere inserts one surface's scaled asphere and runs a short
+// embeddedCoefficients returns the coefficients to embed and DLS-validate for a
+// ranking: the calibration's calibrated_coefficients when present, else the
+// fixed sag_scale-scaled set (the pre-calibration behaviour).
+func embeddedCoefficients(rs types.AsphereSurfaceScore) types.AsphereCoeffs {
+	if rs.CalibratedCoefficients != (types.AsphereCoeffs{}) {
+		return rs.CalibratedCoefficients
+	}
+	return rs.ScaledCoefficients
+}
+
+// validateOneAsphere inserts one surface's embedded asphere and runs a short
 // DLS over only its asphere coefficients.
-func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, gc *glass.Catalog, dlsIter, numRays int, stopSurface, refSurface int, pupilZ float64, fields []types.FieldItem, wavelengths []float64, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget) *types.AsphereValidation {
-	withAsphere := insertAsphere(surfaces, rs.SurfaceID, rs.ScaledCoefficients)
+func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, coeffs types.AsphereCoeffs, gc *glass.Catalog, dlsIter, numRays int, stopSurface, refSurface int, pupilZ float64, fields []types.FieldItem, wavelengths []float64, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget) *types.AsphereValidation {
+	withAsphere := insertAsphere(surfaces, rs.SurfaceID, coeffs)
 
 	// Recompute the dynamic pupil against the asphered system so the initial
 	// grid centring hits the new surface (the Optimizer's UpdatePupils only
@@ -73,7 +85,7 @@ func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, 
 
 	cfg := optimize.Config{
 		Surfaces:       withAsphere,
-		Variables:      buildAsphereValidateVariables(rs.SurfaceID, rs.ScaledCoefficients),
+		Variables:      buildAsphereValidateVariables(rs.SurfaceID, coeffs),
 		MeritTerms:     meritTerms,
 		Fields:         fields,
 		GlassCatalog:   gc,

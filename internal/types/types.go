@@ -863,6 +863,14 @@ type AsphereCandidateConfig struct {
 	Apply             *bool `yaml:"apply,omitempty"`
 	ValidationDLSIter int   `yaml:"validation_dls_iter,omitempty"`
 	ValidationNumRays int   `yaml:"validation_num_rays,omitempty"`
+	// CalibrateScale replaces the fixed sag_scale per surface with a scale
+	// derived from the measured ray-trace response (base/asphere merit and
+	// d_merit_d_coef) when sensitivity_samples > 0 (--calibrate-scale; on by
+	// default, disable with --calibrate-scale=false or calibrate_scale: false).
+	// ScaleProbes overrides the quadratic estimate with an explicit list of
+	// scales to trace and verify (--scale-probes "0.1,0.25,0.5,1.0").
+	CalibrateScale *bool     `yaml:"calibrate_scale,omitempty"`
+	ScaleProbes    []float64 `yaml:"scale_probes,omitempty"`
 }
 
 // AsphereScoreWeights are the weights of the composite surface score
@@ -911,6 +919,15 @@ type AsphereSensitivityMatrix struct {
 	AsphereMerit float64   `yaml:"asphere_merit"`            // weighted RMS OPD with the fitted asphere applied
 	Improvement  float64   `yaml:"improvement"`              // relative merit reduction (1 - asphere/base)
 	DMeritDCoef  []float64 `yaml:"d_merit_d_coef,omitempty"` // per-coefficient ∂Merit/∂c_j
+	// CalibratedScale is the embedded scale chosen by the measured-response
+	// calibration (asphere.CalibrateScale): a quadratic estimate of the
+	// merit-minimizing scale, clamped and verified by one re-trace (or an
+	// explicit scale_probes scan). 0 when calibration is disabled or skipped.
+	// CalibratedMerit / CalibratedImprovement are the verified merit at that
+	// scale and its relative reduction (1 - calibrated/base, floored at 0).
+	CalibratedScale       float64 `yaml:"calibrated_scale,omitempty"`
+	CalibratedMerit       float64 `yaml:"calibrated_merit,omitempty"`
+	CalibratedImprovement float64 `yaml:"calibrated_improvement,omitempty"`
 }
 
 // AsphereSurfaceScore is one candidate surface's ranking breakdown and fitted
@@ -927,6 +944,7 @@ type AsphereSurfaceScore struct {
 	SensitivityPenalty   float64                   `yaml:"sensitivity_penalty"`
 	Coefficients         AsphereCoeffs             `yaml:"coefficients,omitempty"`
 	ScaledCoefficients   AsphereCoeffs             `yaml:"scaled_coefficients,omitempty"`
+	CalibratedCoefficients AsphereCoeffs           `yaml:"calibrated_coefficients,omitempty"`
 	Sensitivity          *AsphereSensitivityMatrix `yaml:"sensitivity,omitempty"`
 	Validation           *AsphereValidation        `yaml:"validation,omitempty"`
 	Warnings             []string                  `yaml:"warnings,omitempty"`

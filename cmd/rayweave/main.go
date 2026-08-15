@@ -656,6 +656,10 @@ Options:
   --sensitivity-samples N sensitivity trace radial samples (default 9; 0 = analytic proxy)
   --top-k N               number of top-ranked surfaces to fit (default 3)
   --sag-scale α           initial sag scale (default 0.2; try 0.05..0.5)
+  --calibrate-scale       derive each candidate's embedded scale from the measured
+                          ray-trace response (on by default; --calibrate-scale=false)
+  --scale-probes LIST     verify these scales instead of the quadratic estimate
+                          (e.g. "0.1,0.25,0.5,1.0")
   --validate              run a short DLS per fitted surface to verify the asphere improves the merit
   --apply                 insert the top-ranked DLS-validated asphere onto its surface and
                           output the modified system (implies --validate). Pipeline friendly:
@@ -675,6 +679,8 @@ with the asphere_candidate: section:
     include_conic: true
     preserve_vertex_curvature: true
     sag_scale: 0.2              # safe starting scale (try 0.05..0.5)
+    calibrate_scale: true       # per-surface scale from the measured response
+    scale_probes: []            # explicit scales to verify ([] = quadratic)
     cell_rings: 8
     cell_angles: 16
     pupil_samples_radial: 21
@@ -698,7 +704,8 @@ remove_piston is accepted but has no effect. max_sag / max_slope_deg /
 max_curvature_variation are accepted for forward-compatibility but unused.
 
 Output: YAML with an asphere_candidate_result: section (rankings with
-coefficients, scaled_coefficients, sensitivity and, with --validate, a
+coefficients, scaled_coefficients, calibrated_coefficients, sensitivity with
+the calibrated_scale/merit/improvement, and, with --validate, a
 validation block per fitted surface reporting the before/after short-DLS
 merit and the DLS-solved coefficients, plus opd_profiles: each candidate
 surface's per-field mean OPD across the footprint radius for the

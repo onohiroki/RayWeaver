@@ -26,6 +26,8 @@ It reads standard system YAML, writes pipeline-compatible YAML with an
 | `--sensitivity-samples N` | pupil grid radial samples for the measured sensitivity pass (default 9; `0` disables the measured pass and falls back to the analytic index-contrast proxy) |
 | `--top-k N` | number of top-ranked surfaces to fit (default 3) |
 | `--sag-scale α` | scalar applied to the fitted coefficients for safe insertion (default 0.2; try 0.05..0.5) |
+| `--calibrate-scale` | derive each candidate's embedded asphere scale from the measured ray-trace response instead of the fixed `sag_scale` (on by default; disable with `--calibrate-scale=false` / `calibrate_scale: false`) |
+| `--scale-probes L` | comma-separated scales to verify instead of the quadratic estimate (e.g. `0.1,0.25,0.5,1.0`) |
 | `--validate` | run a short DLS per fitted surface to verify the asphere improves the merit |
 | `--apply` | insert the top-ranked DLS-validated asphere onto its surface and output the modified system (implies `--validate`) |
 | `--dls-iter N` | DLS iterations per validated surface (default 20, with `--validate`) |
@@ -66,7 +68,10 @@ asphere_candidate:
   include_conic: true                # fit a conic on the polynomial residual
   preserve_vertex_curvature: true    # true: r² term reported as a warning;
                                      # false: reported as a curvature change
-  sag_scale: 0.2                     # scalar on embedded coefficients
+  sag_scale: 0.2                     # probe scale (scalar on embedded coefficients)
+  calibrate_scale: true              # per-surface embedded scale from the measured
+                                     # ray-trace response (default; see below)
+  scale_probes: []                   # explicit scales to verify ([] = quadratic estimate)
   cell_rings: 8                      # polar cell rings
   cell_angles: 16                    # polar cell angular sectors
   pupil_samples_radial: 21           # pupil grid radial samples
@@ -119,11 +124,17 @@ asphere_candidate_result:
       scaled_coefficients:
         A4: -2.222115574475388e-06
         # ...
+      calibrated_coefficients:
+        A4: -2.168328e-06
+        # ...
       sensitivity:
         base_merit: 0.03531941389044646
         asphere_merit: 0.011002327906172131
         improvement: 0.6884906431262114
         d_merit_d_coef: [-1133.28, -48128.41, -2.55e+06, 1.67e+08, 4.09e+08]
+        calibrated_scale: 0.184
+        calibrated_merit: 0.010874
+        calibrated_improvement: 0.692
       warnings:
         - "removed defocus r² term (2·a2=0.00138725); not part of the asphere coefficients"
       # only with --validate:
@@ -159,14 +170,46 @@ Meaning of the ranking fields (see the method document for the exact formulas):
 | `manufacturing_penalty` | base curvature magnitude and beam radius penalty (0..1) |
 | `sensitivity_penalty` | the sensitivity term H (measured improvement, or the analytic proxy) |
 | `coefficients` | fitted initial coefficients (conic + A4..A12) |
-| `scaled_coefficients` | coefficients × `sag_scale` for safe embedding |
-| `sensitivity` | measured merit data: `base_merit`, `asphere_merit`, relative `improvement`, and `d_merit_d_coef` (per-coefficient ∂Merit/∂c_j, A4..A12) |
+| `scaled_coefficients` | coefficients × `sag_scale` for safe embedding (the probe) |
+| `calibrated_coefficients` | the embedded set recommended by the measured-response calibration (see below); falls back to `scaled_coefficients` when calibration is disabled |
+| `sensitivity` | measured merit data: `base_merit`, `asphere_merit`, relative `improvement`, and `d_merit_d_coef` (per-coefficient ∂Merit/∂c_j, A4..A12); with calibration also `calibrated_scale`, `calibrated_merit`, `calibrated_improvement` |
 | `warnings` | analysis notes, e.g. a removed r² defocus term, bounded coefficient, or a skipped fit |
 
 `opd_profiles` holds the graph data behind the OPD-overlap comparison: per
 candidate surface, per field, the weight-mean OPD vs footprint ring radius. A
 closely overlapping set of field profiles means the fields share a wavefront
 error the asphere can correct.
+
+## Scale calibration
+
+The fitted `coefficients` are an OPD-to-sag estimate whose **absolute
+magnitude** is approximate (`dz ≈ −O/(n2−n1)`, normal incidence). A fixed
+`sag_scale` damps it for safe embedding, but the "right" scale differs per
+surface, and an oversized probe can overshoot (the measured OPD merit then
+worsens). By default (`calibrate_scale: true`, requires `sensitivity_samples > 0`)
+the embedded scale is derived **per surface from the measured ray-trace
+response** instead of the fixed α:
+
+1. The sensitivity pass already traces the merit `M(0)=base` (no asphere),
+   `M(α)=asphere` at the probe scale α = `sag_scale`, and the per-coefficient
+   derivatives `∂M/∂c_j`. The directional derivative along the fitted
+   coefficients `D = Σ_j ∂M/∂c_j·c_j` is the local slope of the merit w.r.t.
+   the scale.
+2. `M(β)` is modelled by a quadratic through those three local data points and
+   the minimizer `β*` proposed, clamped to `[α/4, 2α] ∩ [0.05, 1.0]`.
+3. The proposal is **verified** by one extra merit trace; the scale with the
+   lowest traced merit wins, with the probe α as the fallback (pick-min
+   property: calibration never does worse than the fixed-α behaviour).
+4. The chosen scale becomes `calibrated_scale`; `calibrated_coefficients` =
+   `coefficients × calibrated_scale` is what `--validate` seeds and what the
+   ranking's sensitivity term uses (`calibrated_improvement`, floored at 0 so
+   an overshooting probe can never demote a genuinely aspherizable surface).
+
+`--scale-probes` replaces the quadratic estimate with an explicit list of
+scales to trace and verify (each is still checked against the probe). See
+[asphere-candidates.md](methods/asphere-candidates.md) §7.6 for the algorithm
+and a worked example. The OPD profiles (`opd_profiles`) are measured ray-trace
+data and are unaffected by calibration.
 
 ## Pipelines
 

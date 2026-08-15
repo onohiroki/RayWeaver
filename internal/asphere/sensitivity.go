@@ -116,3 +116,96 @@ func applyCoeffStep(c *types.AsphereCoeffs, j int, step float64) {
 		c.A12 += step
 	}
 }
+
+// CalibrateScale estimates the embedded scale for the fitted coefficients from
+// the measured sensitivity. The traced OPD merit M(β) with the coefficients
+// scaled by β is modelled by a quadratic through the two measured points
+// M(0)=base and M(probe)=asphere plus the directional derivative
+// D = Σ_j ∂M/∂c_j·c_j along the fitted-coefficient direction (from
+// d_merit_d_coef):
+//
+//	b = (D·probe − Δ)/probe²,  a = D − 2·b·probe,  β* = −a/(2·b)   (Δ = asphere − base)
+//
+// The proposal β* is clamped to [probe/4, 2·probe] ∩ [0.05, 1.0]. When no
+// interior minimum exists (b ≤ 0 or β* ≤ 0) it proposes the shrink probe/4.
+// The caller must verify the proposal by re-tracing M(β*) and fall back to the
+// probe when it is not an improvement (the pick-min property guarantees
+// calibration never does worse than the current behaviour). Returns ok=false
+// when calibration is impossible (non-positive or non-finite base/probe).
+func CalibrateScale(coeffs types.AsphereCoeffs, base, asphere float64, deriv []float64, probe float64) (beta float64, ok bool) {
+	if probe <= 0 || base <= 0 || !isFinite(base) || !isFinite(asphere) {
+		return 0, false
+	}
+	terms := CoefficientSet(coeffs)
+	var d float64
+	for j := range terms {
+		if j < len(deriv) {
+			d += deriv[j] * terms[j]
+		}
+	}
+	delta := asphere - base
+	b := (d*probe - delta) / (probe * probe)
+	if b > 1e-15 {
+		a := d - 2*b*probe
+		beta := -a / (2 * b)
+		if beta > 0 {
+			return clampCalibratedScale(beta, probe), true
+		}
+	}
+	// No interior minimum: the local model cannot locate a beneficial scale,
+	// so propose a shrink and let the verify trace decide.
+	return clampCalibratedScale(probe/4, probe), true
+}
+
+func clampCalibratedScale(beta, probe float64) float64 {
+	lo := math.Max(probe/4, 0.05)
+	hi := math.Min(2*probe, 1.0)
+	return math.Max(lo, math.Min(hi, beta))
+}
+
+func isFinite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
+// calibrateSensitivity fills a sensitivity matrix's calibrated fields: it
+// proposes one or more embedded scales (the quadratic CalibrateScale estimate,
+// or the explicit scale_probes list), verifies each with a re-trace, and keeps
+// the scale with the lowest finite merit — the probe scale stays the fallback
+// when nothing verifies better (pick-min property). The calibrated improvement
+// is the verified relative merit reduction, floored at 0 so an overshooting
+// probe can never feed a negative sensitivity term into the ranking.
+func calibrateSensitivity(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Config, gc *glass.Catalog, pupilZs []float64, surfaceID int, coeffs types.AsphereCoeffs, base float64, sens types.AsphereSensitivityMatrix) types.AsphereSensitivityMatrix {
+	var cands []float64
+	if len(cfg.ScaleProbes) > 0 {
+		cands = append(cands, cfg.ScaleProbes...)
+	} else if beta, ok := CalibrateScale(coeffs, base, sens.AsphereMerit, sens.DMeritDCoef, cfg.SagScale); ok {
+		cands = append(cands, beta)
+	} else {
+		return sens
+	}
+
+	bestScale := cfg.SagScale
+	bestMerit := sens.AsphereMerit
+	for _, beta := range cands {
+		if beta <= 0 || beta > 1 {
+			continue
+		}
+		m := traceAsphereMerit(surfaces, fields, wavelengths, cfg.SensitivitySamples, gc, pupilZs, surfaceID, ScaleCoefficients(coeffs, beta), cfg)
+		if !isFinite(m) {
+			continue
+		}
+		if m < bestMerit {
+			bestScale, bestMerit = beta, m
+		}
+	}
+
+	sens.CalibratedScale = bestScale
+	sens.CalibratedMerit = bestMerit
+	sens.CalibratedImprovement = 0
+	if base > 0 {
+		if imp := 1 - bestMerit/base; imp > 0 {
+			sens.CalibratedImprovement = imp
+		}
+	}
+	return sens
+}
