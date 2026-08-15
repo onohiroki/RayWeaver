@@ -18,9 +18,10 @@ set -euo pipefail
 #   1. escape                  : global search -> <prefix>result.yaml
 #   2. DLS refinement          : the escape best is refined with a
 #                                wavefront_astigmatism merit that lifts the
-#                                16° middle field to Strehl >= 0.5 while the
-#                                24° spot anchor keeps the outer field healthy
-#                                (w24=0.11, 512-ray grid) -> <prefix>refined.yaml
+#                                16° middle field to Strehl >= 0.5 while a
+#                                24° wavefront_astigmatism term (w24=6500)
+#                                plus the 24° spot anchor (w24=0.11) keep the
+#                                outer field healthy -> <prefix>refined.yaml
 #   3. PSF verification        : per-field Strehl at best focus (RCP+LCP, d
 #                                line) -> table; the demo gates on every field
 #                                reaching >= 0.5
@@ -251,8 +252,9 @@ echo "--- DLS refinement of the escape best (wavefront-astigmatism merit) ---"
 # The escape's spot merit robustly finds the well-corrected landscape (the 24°
 # outer field is already >= 0.5), but leaves the 16° middle field weak. A short
 # DLS refinement with a wavefront_astigmatism merit lifts the middle field to
-# Strehl >= 0.5 while the 24° spot anchor (w=0.11) keeps the outer field
-# healthy. The result is the demo's final lens.
+# Strehl >= 0.5; a second 24° wavefront_astigmatism term (w=6500) plus the 24°
+# spot anchor (w=0.11) keeps the outer field healthy. The result is the demo's
+# final lens.
 BEST_IDX=$($RAYWEAVE query -r escape_result.best_index < "$RESULT")
 $RAYWEAVE escape extract --index "$BEST_IDX" < "$RESULT" > "$OUTDIR/${PREFIX}best.yaml"
 awk '/^      merit:/{exit} {print}' "$OUTDIR/${PREFIX}best.yaml" > "$OUTDIR/${PREFIX}refine-in.yaml"
@@ -336,6 +338,21 @@ case "$LENS" in
               field: 1
               wavelength: 0.0006563
               weight: 14000.0
+              target: 0
+            - kind: wavefront_astigmatism
+              field: 2
+              wavelength: 0.0004861
+              weight: 6500.0
+              target: 0
+            - kind: wavefront_astigmatism
+              field: 2
+              wavelength: 0.0005876
+              weight: 6500.0
+              target: 0
+            - kind: wavefront_astigmatism
+              field: 2
+              wavelength: 0.0006563
+              weight: 6500.0
               target: 0
             - kind: spot_rms_worst
               field: 2

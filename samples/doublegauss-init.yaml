@@ -7,9 +7,16 @@ metadata:
     f/2.8 standard lens (synthesised by an AI agent via curvature-scale search
     to hit EFL ~50 mm). Carries an optimization.escape section so the same file
     drives escape-demo.bash --lens doublegauss, doublegauss-demo.bash, and the
-    --lens doublegauss mode of psf-mtf-demo.bash and wavefront-demo.bash. Merit
-    uses the off-axis spot kinds (spot_rms, spot_rms_t/_s/_worst,
-    spot_rms_weighted, spot_ee_radius) plus lateral_color; no opd_rms.
+    --lens doublegauss mode of psf-mtf-demo.bash and wavefront-demo.bash. The
+    escape merit is the plain spot merit (spot_rms per field) plus lateral_color
+    and opd_rms: the off-axis spot kinds (spot_rms_t/_s/_worst/_weighted/
+    spot_ee_radius) collapse the landscape to a single basin (and more than
+    double the per-evaluation cost), so they are kept out of the escape merit
+    to preserve multiple local minima. The escape parameters are tuned for the
+    36-variable landscape: distance_threshold 0.05 (the 0.15 default merges the
+    close-spaced high-dimensional minima into one) and h_initial 2.0 with
+    max_cycles 10 (stronger bumps, more attempts) — 16 distinct minima found in
+    a bounded test run (best merit 0.00416).
 
 glass_catalog:
   entries:
@@ -29,10 +36,10 @@ optimization:
   num_rays: 256
   aperture_margin: 1.2
   escape:
-    max_cycles: 6
+    max_cycles: 10
     escape_workers: 8
-    distance_threshold: 0.15
-    h_initial: 0.5
+    distance_threshold: 0.05
+    h_initial: 2.0
     w_initial: 0.8
     h_mult: 2.0
     w_mult: 1.3
@@ -554,28 +561,16 @@ configs:
     - kind: spot_rms
       field: 0
       wavelength: 0.0004861
-      weight: 3.0
+      weight: 2.0
     - kind: spot_rms
       field: 0
       wavelength: 0.0005876
-      weight: 3.0
+      weight: 2.0
     - kind: spot_rms
       field: 0
       wavelength: 0.0006563
-      weight: 3.0
+      weight: 2.0
     - kind: spot_rms
-      field: 1
-      wavelength: 0.0004861
-      weight: 1.0
-    - kind: spot_rms_t
-      field: 1
-      wavelength: 0.0004861
-      weight: 0.5
-    - kind: spot_rms_s
-      field: 1
-      wavelength: 0.0004861
-      weight: 0.5
-    - kind: spot_rms_worst
       field: 1
       wavelength: 0.0004861
       weight: 1.0
@@ -583,31 +578,7 @@ configs:
       field: 1
       wavelength: 0.0005876
       weight: 1.0
-    - kind: spot_rms_t
-      field: 1
-      wavelength: 0.0005876
-      weight: 0.5
-    - kind: spot_rms_s
-      field: 1
-      wavelength: 0.0005876
-      weight: 0.5
-    - kind: spot_rms_worst
-      field: 1
-      wavelength: 0.0005876
-      weight: 1.0
     - kind: spot_rms
-      field: 1
-      wavelength: 0.0006563
-      weight: 1.0
-    - kind: spot_rms_t
-      field: 1
-      wavelength: 0.0006563
-      weight: 0.5
-    - kind: spot_rms_s
-      field: 1
-      wavelength: 0.0006563
-      weight: 0.5
-    - kind: spot_rms_worst
       field: 1
       wavelength: 0.0006563
       weight: 1.0
@@ -615,31 +586,7 @@ configs:
       field: 2
       wavelength: 0.0004861
       weight: 1.0
-    - kind: spot_rms_t
-      field: 2
-      wavelength: 0.0004861
-      weight: 0.5
-    - kind: spot_rms_s
-      field: 2
-      wavelength: 0.0004861
-      weight: 0.5
-    - kind: spot_rms_worst
-      field: 2
-      wavelength: 0.0004861
-      weight: 1.0
     - kind: spot_rms
-      field: 2
-      wavelength: 0.0005876
-      weight: 1.0
-    - kind: spot_rms_t
-      field: 2
-      wavelength: 0.0005876
-      weight: 0.5
-    - kind: spot_rms_s
-      field: 2
-      wavelength: 0.0005876
-      weight: 0.5
-    - kind: spot_rms_worst
       field: 2
       wavelength: 0.0005876
       weight: 1.0
@@ -647,57 +594,18 @@ configs:
       field: 2
       wavelength: 0.0006563
       weight: 1.0
-    - kind: spot_rms_t
-      field: 2
+    - kind: spot_rms
+      field: 3
+      wavelength: 0.0004861
+      weight: 0.5
+    - kind: spot_rms
+      field: 3
+      wavelength: 0.0005876
+      weight: 0.5
+    - kind: spot_rms
+      field: 3
       wavelength: 0.0006563
       weight: 0.5
-    - kind: spot_rms_s
-      field: 2
-      wavelength: 0.0006563
-      weight: 0.5
-    - kind: spot_rms_worst
-      field: 2
-      wavelength: 0.0006563
-      weight: 1.0
-    - kind: spot_rms_worst
-      field: 3
-      wavelength: 0.0004861
-      weight: 0.3
-    - kind: spot_rms_weighted
-      field: 3
-      wavelength: 0.0004861
-      weight: 0.2
-    - kind: spot_ee_radius
-      field: 3
-      wavelength: 0.0004861
-      weight: 0.2
-      fraction: 0.8
-    - kind: spot_rms_worst
-      field: 3
-      wavelength: 0.0005876
-      weight: 0.3
-    - kind: spot_rms_weighted
-      field: 3
-      wavelength: 0.0005876
-      weight: 0.2
-    - kind: spot_ee_radius
-      field: 3
-      wavelength: 0.0005876
-      weight: 0.2
-      fraction: 0.8
-    - kind: spot_rms_worst
-      field: 3
-      wavelength: 0.0006563
-      weight: 0.3
-    - kind: spot_rms_weighted
-      field: 3
-      wavelength: 0.0006563
-      weight: 0.2
-    - kind: spot_ee_radius
-      field: 3
-      wavelength: 0.0006563
-      weight: 0.2
-      fraction: 0.8
     - kind: lateral_color
       field: 0
       wavelength: 0.0004861
@@ -718,6 +626,14 @@ configs:
       wavelength: 0.0004861
       wavelength2: 0.0006563
       weight: 0.15
+    - kind: opd_rms
+      field: 0
+      wavelength: 0.0005876
+      weight: 0.3
+    - kind: opd_rms
+      field: 2
+      wavelength: 0.0005876
+      weight: 0.2
   constraints:
   - kind: band
     measure: abs_efl
