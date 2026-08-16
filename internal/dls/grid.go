@@ -5,6 +5,7 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
+	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -31,20 +32,7 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
-	thetaRad := raymath.DegToRad(fieldAngle)
-	sinT := math.Sin(thetaRad)
-	cosT := math.Cos(thetaRad)
-
-	dx, dy := 0.0, 1.0
-	if len(fieldDir) >= 2 {
-		norm := math.Hypot(fieldDir[0], fieldDir[1])
-		if norm > 0 {
-			dx = fieldDir[0] / norm
-			dy = fieldDir[1] / norm
-		}
-	}
-
-	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
+	rayDir := raymath.DirectionFromField(fieldAngle, fieldDir)
 
 	apertureRadius := ApertureRadiusForGrid(surfaces, stopSurface, wavelength, gc, apertureMargin)
 	if apertureRadius <= 0 {
@@ -52,134 +40,58 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	}
 
 	zStart := -100.0
-	grid := generatePupilGrid(numRays, apertureRadius, rotationOffset, gridType)
-
-	pupilOffsetX, pupilOffsetY := 0.0, 0.0
-	gcpt := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
-	pupilOffsetX, pupilOffsetY = gcpt.X, gcpt.Y
-	for i := range grid {
-		grid[i].X += pupilOffsetX
-		grid[i].Y += pupilOffsetY
-	}
-
-	points := make([]IPoint, len(grid))
-	perRayMax := make([]map[int]float64, len(grid))
+	cx, cy := pupil.GridCentre(rayDir, pupilZ, zStart)
 
 	// Parallel angle-field bundle: the OPL must carry no launch-geometry tilt.
-	// The wavefront-plane launch projects each origin along rayDir onto the
-	// wavefront through the grid centre; moving the origin along the ray leaves
-	// the ray line (and every surface intersection) unchanged, so the OPL
-	// correction is exactly (wavefrontC - origin)·dir. Here the origin stays at
-	// zStart and that tilt is subtracted from the recorded OPL directly: this
-	// keeps the ray positions (and therefore spot_rms / aperture extents)
-	// bit-identical to the unprojected trace, so the DLS merit and Jacobian are
-	// not perturbed by ~1e-15 floating-point noise from a moved origin, while
-	// opd_rms still gets the corrected OPL.
-	wavefrontC := types.Vec3{X: pupilOffsetX, Y: pupilOffsetY, Z: zStart}
+	// pupil.OPLScalar keeps the origins on the zStart plane and subtracts the
+	// tilt from the recorded OPL, so the ray positions (and therefore
+	// spot_rms / aperture extents) are bit-identical to the unprojected trace
+	// while opd_rms still gets the corrected OPL.
+	samples := pupil.Launch(pupil.LaunchSpec{
+		NumRays:           numRays,
+		GridType:          gridType,
+		RotationOffset:    rotationOffset,
+		ApertureRadius:    apertureRadius,
+		RayDir:            rayDir,
+		CentreX:           cx,
+		CentreY:           cy,
+		ZStart:            zStart,
+		OPLMode:           pupil.OPLScalar,
+		SkipApertureCheck: skipApertureCheck,
+		SkipGlassPath:     skipGlassPathCheck,
+	})
+	pupil.Trace(engine, p, surfaces, samples, wavelength, types.NewCircularJones(true), workers)
 
-	trace := func(i int) {
-		pt := grid[i]
-		origin := types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}
-		r := types.Ray{
-			Wavelength:         wavelength,
-			Initial:            types.RayState{Origin: origin, Direction: rayDir},
-			Path:               p,
-			Jones:              types.NewCircularJones(true),
-			SkipGlassPathCheck: skipGlassPathCheck,
-			SkipApertureCheck:  skipApertureCheck,
-		}
-
-		result := engine.TraceRay(r, surfaces)
-		if result.Error != "" {
+	points := make([]IPoint, len(samples))
+	perSurfMax := make(map[int]float64)
+	for i, s := range samples {
+		if !s.OK || len(s.Surfaces) == 0 {
 			points[i] = IPoint{OK: false}
-			return
+			continue
 		}
-
-		local := make(map[int]float64, len(result.Surfaces))
-		for _, sr := range result.Surfaces {
+		last := s.Surfaces[len(s.Surfaces)-1]
+		points[i] = IPoint{
+			X:         last.Position.X,
+			Y:         last.Position.Y,
+			OPL:       s.OPL,
+			OK:        true,
+			Area:      s.Area,
+			Intensity: s.Intensity,
+		}
+		for _, sr := range s.Surfaces {
 			ax := math.Abs(sr.Position.X)
 			ay := math.Abs(sr.Position.Y)
 			e := ax
 			if ay > e {
 				e = ay
 			}
-			if e > local[sr.SurfaceID] {
-				local[sr.SurfaceID] = e
-			}
-		}
-		perRayMax[i] = local
-
-		if len(result.Surfaces) > 0 {
-			last := result.Surfaces[len(result.Surfaces)-1]
-			opl := result.OPLTotal - wavefrontC.Subtract(origin).Dot(rayDir)
-			intensity := (result.IntensityS + result.IntensityP) / 2
-			points[i] = IPoint{X: last.Position.X, Y: last.Position.Y, OPL: opl, OK: true, Area: pt.area, Intensity: intensity}
-		} else {
-			points[i] = IPoint{OK: false}
-		}
-	}
-
-	parallelColumns(len(grid), workers, trace, nil)
-
-	perSurfMax := make(map[int]float64)
-	for _, local := range perRayMax {
-		for id, e := range local {
-			if e > perSurfMax[id] {
-				perSurfMax[id] = e
+			if e > perSurfMax[sr.SurfaceID] {
+				perSurfMax[sr.SurfaceID] = e
 			}
 		}
 	}
 
 	return points, perSurfMax
-}
-
-func generatePupilGrid(numRays int, apertureRadius float64, rotationOffset float64, gridType types.GridType) []pupilPoint {
-	var pts []pupilPoint
-	if gridType == types.GridHex {
-		// Dense hex pattern covering the full disk (rim included), so off-axis
-		// beam edges are resolved. Copied from chief.GenerateGridPoints.
-		n := int(math.Sqrt(float64(numRays))) + 1
-		if n < 2 {
-			n = 2
-		}
-		dy := apertureRadius * 2 / float64(n)
-		dx := dy * math.Sqrt(3) / 2
-		for i := 0; i < n; i++ {
-			y := -apertureRadius + (float64(i)+0.5)*dy
-			xOff := 0.0
-			if i%2 == 1 {
-				xOff = dx / 2
-			}
-			nx := int(float64(n) * apertureRadius / (dx * float64(n) / 2))
-			if nx < 1 {
-				nx = 1
-			}
-			for j := 0; j < nx; j++ {
-				x := -apertureRadius + (float64(j)+0.5)*dx + xOff
-				if x*x+y*y <= apertureRadius*apertureRadius {
-					pts = append(pts, pupilPoint{X: x, Y: y, area: 1})
-				}
-			}
-		}
-		return pts
-	}
-	n := int(math.Sqrt(float64(numRays)))
-	if n < 2 {
-		n = 2
-	}
-	for i := 0; i < n; i++ {
-		for j := 0; j < n; j++ {
-			r := (float64(i) + 0.5) / float64(n) * apertureRadius
-			theta := 2*math.Pi*(float64(j)+0.5)/float64(n) + rotationOffset
-			area := r / apertureRadius
-			pts = append(pts, pupilPoint{
-				X:    r * math.Cos(theta),
-				Y:    r * math.Sin(theta),
-				area: area,
-			})
-		}
-	}
-	return pts
 }
 
 // ApertureRadiusForGrid returns the entrance-pupil radius used for grid

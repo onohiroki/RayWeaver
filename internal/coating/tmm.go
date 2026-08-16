@@ -27,14 +27,28 @@ func (c *Catalog) Lookup(name string) (*types.CoatingEntry, bool) {
 	return entry, ok
 }
 
-func (c *Catalog) ResolveLayers(entry *types.CoatingEntry, gc *glass.Catalog, wavelength float64) {
-	for i := range entry.Layers {
-		layer := &entry.Layers[i]
+// ResolveLayers fills each layer's N from its referenced glass when it does
+// not already carry an inline index. A layer with an explicit N keeps it, and
+// an empty material is left untouched. A material that cannot be resolved
+// falls back to 1.5 so a missing catalogue entry cannot produce a zero index.
+func ResolveLayers(layers []types.CoatingLayer, gc *glass.Catalog, wavelength float64) {
+	for i := range layers {
+		layer := &layers[i]
+		if layer.N > 0 || layer.Material == "" {
+			continue
+		}
 		n, err := gc.RefractiveIndex(types.ParseMaterial(layer.Material), wavelength)
 		if err != nil {
 			n = 1.5
 		}
 		layer.N = n
+	}
+}
+
+// ResolveAll resolves every entry of the catalog in place.
+func (c *Catalog) ResolveAll(gc *glass.Catalog, wavelength float64) {
+	for name := range c.ByName {
+		ResolveLayers(c.ByName[name].Layers, gc, wavelength)
 	}
 }
 

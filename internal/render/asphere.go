@@ -35,15 +35,6 @@ func globalSag(surf types.Surface, y float64) float64 {
 	return p.Z - surf.PhysicalZ
 }
 
-func surfaceFrameFlip(surf types.Surface, h float64) bool {
-	ls := sagFuncForSurface(surf)(h)
-	gs := globalSag(surf, h)
-	if ls == 0 {
-		return false
-	}
-	return (gs > 0) != (ls > 0)
-}
-
 func surfaceDownPath(surf types.Surface, h, zOffset float64) string {
 	sag := globalSag(surf, h)
 	if h <= 0 {

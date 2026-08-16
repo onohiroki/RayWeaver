@@ -44,6 +44,22 @@ func SolveLinear(a [][]float64, b []float64) bool {
 	return true
 }
 
+// SolveLinearCopy solves a·x = b without mutating the inputs, returning the
+// solution in a fresh slice. It reports false when the matrix is singular.
+func SolveLinearCopy(a [][]float64, b []float64) ([]float64, bool) {
+	n := len(b)
+	m := make([][]float64, n)
+	rhs := make([]float64, n)
+	for i := 0; i < n; i++ {
+		m[i] = append([]float64(nil), a[i]...)
+		rhs[i] = b[i]
+	}
+	if !SolveLinear(m, rhs) {
+		return nil, false
+	}
+	return rhs, true
+}
+
 func sanitize(v float64) float64 {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0

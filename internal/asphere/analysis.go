@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -164,48 +165,12 @@ func solveWeightedLS(rows [][]float64, b []float64, hits []RayHit) ([]float64, b
 }
 
 // solveLinear solves the square system Ax = b by Gaussian elimination with
-// partial pivoting.
+// partial pivoting, without mutating the inputs.
 func solveLinear(a [][]float64, b []float64) ([]float64, bool) {
-	n := len(a)
-	if n == 0 {
+	if len(a) == 0 {
 		return nil, false
 	}
-	// augmented
-	aug := make([][]float64, n)
-	for i := 0; i < n; i++ {
-		aug[i] = make([]float64, n+1)
-		copy(aug[i], a[i])
-		aug[i][n] = b[i]
-	}
-	for col := 0; col < n; col++ {
-		pivot := col
-		maxv := math.Abs(aug[col][col])
-		for r := col + 1; r < n; r++ {
-			if v := math.Abs(aug[r][col]); v > maxv {
-				maxv = v
-				pivot = r
-			}
-		}
-		if maxv < 1e-300 {
-			return nil, false
-		}
-		aug[col], aug[pivot] = aug[pivot], aug[col]
-		for r := col + 1; r < n; r++ {
-			f := aug[r][col] / aug[col][col]
-			for c := col; c <= n; c++ {
-				aug[r][c] -= f * aug[col][c]
-			}
-		}
-	}
-	x := make([]float64, n)
-	for r := n - 1; r >= 0; r-- {
-		s := aug[r][n]
-		for c := r + 1; c < n; c++ {
-			s -= aug[r][c] * x[c]
-		}
-		x[r] = s / aug[r][r]
-	}
-	return x, true
+	return raymath.SolveLinearCopy(a, b)
 }
 
 // solveRidge solves the weighted least-squares problem with Tikhonov ridge

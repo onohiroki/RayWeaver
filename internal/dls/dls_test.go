@@ -74,21 +74,6 @@ func TestSolveLinearSystem(t *testing.T) {
 	}
 }
 
-func TestProjectOntoBox(t *testing.T) {
-	variables := []VariableInfo{
-		{Min: 0.0, Max: 1.0},
-		{Min: -5.0, Max: 5.0},
-	}
-	x := []float64{-1.0, 10.0}
-	projectOntoBox(x, variables)
-	if x[0] != 0.0 {
-		t.Errorf("x[0] = %v, want 0.0 (clamped to min)", x[0])
-	}
-	if x[1] != 5.0 {
-		t.Errorf("x[1] = %v, want 5.0 (clamped to max)", x[1])
-	}
-}
-
 func TestSanitize(t *testing.T) {
 	if sanitize(math.NaN()) != 0 {
 		t.Error("sanitize(NaN) should be 0")

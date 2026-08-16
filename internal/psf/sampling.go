@@ -116,19 +116,6 @@ func AiryRadius(wavelength, na float64) float64 {
 	return 0.61 * wavelength / na
 }
 
-// ChiefImagePoint intersects the chief ray with the flat image plane.
-func ChiefImagePoint(chiefDir, chiefOrigin types.Vec3, planeZ float64) types.Vec3 {
-	if math.Abs(chiefDir.Z) < 1e-9 {
-		return chiefOrigin
-	}
-	t := (planeZ - chiefOrigin.Z) / chiefDir.Z
-	return types.Vec3{
-		X: chiefOrigin.X + chiefDir.X*t,
-		Y: chiefOrigin.Y + chiefDir.Y*t,
-		Z: planeZ,
-	}
-}
-
 // DefaultImageGrid returns a square image-plane grid spec centred on (cx, cy)
 // sized to cover both the diffraction core and the geometric spot. When
 // halfWidth is > 0 it overrides the auto-sized half-extent. The pixel count

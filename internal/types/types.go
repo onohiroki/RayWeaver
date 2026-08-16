@@ -83,11 +83,9 @@ func NewLinearJones(angleDeg float64) JonesVector {
 type Scope string
 
 const (
-	// ScopeSurface is the default: the step applies to the surface itself and
-	// the beam frame returns after it (CODE V DAR semantics).
-	ScopeSurface Scope = ""
-	// ScopeFrame applies the step only to the beam frame, leaving the surface
-	// untouched (a coordinate-break / COORDBRK semantics).
+	// ScopeSurface is the default (empty) scope: the step applies to the
+	// surface itself and the beam frame returns after it (CODE V DAR
+	// semantics).
 	ScopeFrame Scope = "frame"
 	// ScopeBoth applies the step to both the surface and the beam frame (the
 	// CODE V BEN semantics, e.g. a fold mirror stepping the frame after it).
@@ -699,16 +697,6 @@ type EscapeConfig struct {
 	InitialPerturb               float64            `yaml:"initial_perturb,omitempty"`
 }
 
-type MeritTermResult struct {
-	Kind       string  `yaml:"kind"`
-	Field      int     `yaml:"field"`
-	Wavelength float64 `yaml:"wavelength"`
-	SurfaceSet []int   `yaml:"surface_set"`
-	Weight     float64 `yaml:"weight"`
-	Before     float64 `yaml:"before"`
-	After      float64 `yaml:"after"`
-}
-
 type MeritBeforeAfter struct {
 	Before      float64 `yaml:"before"`
 	After       float64 `yaml:"after"`
@@ -717,13 +705,11 @@ type MeritBeforeAfter struct {
 }
 
 type OptimizationResult struct {
-	TotalMerit        *MeritBeforeAfter       `yaml:"total_merit"`
-	ConstraintPenalty *MeritBeforeAfter       `yaml:"constraint_penalty,omitempty"`
-	Status            string                  `yaml:"status"`
-	Iterations        int                     `yaml:"iterations"`
-	Reason            string                  `yaml:"reason,omitempty"`
-	Interrupted       bool                    `yaml:"interrupted,omitempty"`
-	Constraints       []ConstraintMeasurement `yaml:"constraints,omitempty"`
+	Status      string                  `yaml:"status"`
+	Iterations  int                     `yaml:"iterations"`
+	Reason      string                  `yaml:"reason,omitempty"`
+	Interrupted bool                    `yaml:"interrupted,omitempty"`
+	Constraints []ConstraintMeasurement `yaml:"constraints,omitempty"`
 	// Merit-schedule state: the mode with the largest final weight and the
 	// final per-mode weights (present only with optimization.merit_schedule).
 	ActiveMode  string             `yaml:"active_mode,omitempty"`
@@ -807,11 +793,6 @@ type EscapeVarState struct {
 	Surf   int     `yaml:"surf,omitempty"`
 	Param  string  `yaml:"param"`
 	After  float64 `yaml:"after"`
-}
-
-type Provenance struct {
-	OptimizedFrom    string `yaml:"optimized_from,omitempty"`
-	OptimizerVersion string `yaml:"optimizer_version,omitempty"`
 }
 
 // RayweaverTool is the canonical marker written in every pipeline document's
@@ -1514,7 +1495,6 @@ type Output struct {
 	AsphereResult    *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
 	PsfResults       []PSFResult             `yaml:"psf_results,omitempty"`
 	WavefrontResults *WavefrontResult        `yaml:"wavefront_result,omitempty"`
-	Provenance       *Provenance             `yaml:"provenance,omitempty"`
 	Stop             *StopInfo               `yaml:"stop,omitempty"`
 }
 

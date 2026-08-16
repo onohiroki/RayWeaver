@@ -48,24 +48,14 @@ func runAsphere(data []byte) {
 	}
 
 	cfg := asphere.ConfigFromYAML(input.Asphere)
-	if *rings > 0 {
-		cfg.CellRings = *rings
-	}
-	if *angles > 0 {
-		cfg.CellAngles = *angles
-	}
-	if *pupilSamples > 0 {
-		cfg.PupilSamplesRadial = *pupilSamples
-	}
+	cfg.CellRings = intOrYAML(*rings, cfg.CellRings)
+	cfg.CellAngles = intOrYAML(*angles, cfg.CellAngles)
+	cfg.PupilSamplesRadial = intOrYAML(*pupilSamples, cfg.PupilSamplesRadial)
 	if *sensitivitySamples >= 0 {
 		cfg.SensitivitySamples = *sensitivitySamples
 	}
-	if *topK > 0 {
-		cfg.TopK = *topK
-	}
-	if *sagScale != 0 {
-		cfg.SagScale = *sagScale
-	}
+	cfg.TopK = intOrYAML(*topK, cfg.TopK)
+	cfg.SagScale = floatOrYAML(*sagScale, cfg.SagScale)
 	if flagWasSet(fs, "calibrate-scale") {
 		cfg.CalibrateScale = *calibrateScale
 	}
@@ -150,10 +140,8 @@ func runAsphere(data []byte) {
 // output's asphere_candidate: section (principle 3 of the CLI/YAML rule).
 // Only flags actually given are written back; untouched YAML stays as-is.
 func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.FlagSet) {
-	if !(flagWasSet(fs, "rings") || flagWasSet(fs, "angles") ||
-		flagWasSet(fs, "pupil-samples") || flagWasSet(fs, "sensitivity-samples") ||
-		flagWasSet(fs, "top-k") || flagWasSet(fs, "sag-scale") ||
-		flagWasSet(fs, "calibrate-scale") || flagWasSet(fs, "scale-probes")) {
+	if !anyFlagSet(fs, "rings", "angles", "pupil-samples", "sensitivity-samples",
+		"top-k", "sag-scale", "calibrate-scale", "scale-probes") {
 		return
 	}
 	if input.Asphere == nil {
@@ -210,8 +198,7 @@ func resolveAsphereValidation(input *types.Input, validateFlag, applyFlag bool, 
 // output's asphere_candidate: section (principle 3). Only flags actually
 // given are written back.
 func writeBackAsphereValidation(input *types.Input, validate, apply bool, dlsIter, numRays int, fs *flag.FlagSet) {
-	if !(flagWasSet(fs, "validate") || flagWasSet(fs, "apply") ||
-		flagWasSet(fs, "dls-iter") || flagWasSet(fs, "num-rays")) {
+	if !anyFlagSet(fs, "validate", "apply", "dls-iter", "num-rays") {
 		return
 	}
 	if input.Asphere == nil {

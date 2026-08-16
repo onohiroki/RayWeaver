@@ -31,7 +31,7 @@ func Normal(s types.Surface, p types.Vec3) types.Vec3 {
 		return raymath.AsphereNormal(p, SagFunc(s))
 	default:
 		if s.Radius() == 0 {
-			return types.Vec3{0, 0, 1}
+			return types.Vec3{Z: 1}
 		}
 		return raymath.SphereNormal(p, s.Radius())
 	}

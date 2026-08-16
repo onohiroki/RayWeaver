@@ -1,12 +1,11 @@
 package asphere
 
 import (
-	"math"
 	"runtime"
-	"sync"
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -49,16 +48,15 @@ type FieldFootprintData struct {
 	RayHits    []RayHit
 }
 
-type pupilPoint struct {
-	X, Y float64
-}
-
 // GenerateFootprints traces a polar pupil grid for each (field, wavelength)
 // and returns per-ray image OPL plus per-surface intersection data. The grid
 // radius and centring follow the same conventions as the chief/optimize grid
 // traces (dls.ApertureRadiusForGrid plus a per-field pupil offset), so the
 // beam fills the entrance pupil for every field. pupilZs gives each field's
-// entrance-pupil Z (the aperture position) used to centre its grid.
+// entrance-pupil Z (the aperture position) used to centre its grid. It uses
+// the pupil package's wavefront-plane launch (OPLLaunch): the projected origin
+// carries no launch-geometry tilt, and the recorded OPL is the raw OPLTotal
+// (OPLDelta is zero for the projected launch).
 func GenerateFootprints(surfaces []types.Surface, fields []Field, wavelengths []float64, pupilSamples int, gc *glass.Catalog, pupilZs []float64) []FieldFootprintData {
 	if len(wavelengths) == 0 {
 		wavelengths = []float64{types.DefaultWavelength}
@@ -85,42 +83,37 @@ func GenerateFootprints(surfaces []types.Surface, fields []Field, wavelengths []
 				continue
 			}
 
-			grid := polarGrid(pupilSamples, radius)
-			offsetX, offsetY := gridOffset(f, pupilZ, zStart)
-			for i := range grid {
-				grid[i].X += offsetX
-				grid[i].Y += offsetY
-			}
-			wavefrontC := types.Vec3{X: offsetX, Y: offsetY, Z: zStart}
+			offsetX, offsetY := pupil.GridCentre(dir, pupilZ, zStart)
+			samples := pupil.Launch(pupil.LaunchSpec{
+				NumRays:        pupilSamples * pupilSamples,
+				GridType:       types.GridPolar,
+				ApertureRadius: radius,
+				RayDir:         dir,
+				CentreX:        offsetX,
+				CentreY:        offsetY,
+				ZStart:         zStart,
+				OPLMode:        pupil.OPLLaunch,
+			})
+			pupil.Trace(engine, path, surfaces, samples, wl, types.NewCircularJones(true), runtime.GOMAXPROCS(0))
 
-			fd.RayHits = make([]RayHit, len(grid))
-			parallelFor(len(grid), func(i int) {
-				pt := grid[i]
-				origin := raymath.ProjectOntoWavefront(
-					types.Vec3{X: pt.X, Y: pt.Y, Z: zStart}, wavefrontC, dir)
-				r := types.Ray{
-					Wavelength: wl,
-					Initial:    types.RayState{Origin: origin, Direction: dir},
-					Path:       path,
-					Jones:      types.NewCircularJones(true),
-				}
-				res := engine.TraceRay(r, surfaces)
-				hit := RayHit{Weight: f.Weight, PupilX: pt.X, PupilY: pt.Y}
-				if res.Error != "" || len(res.Surfaces) == 0 {
+			fd.RayHits = make([]RayHit, len(samples))
+			for i, s := range samples {
+				hit := RayHit{Weight: f.Weight, PupilX: s.PupilX, PupilY: s.PupilY}
+				if !s.OK || len(s.Surfaces) == 0 {
 					fd.RayHits[i] = hit
-					return
+					continue
 				}
-				hit.OPL = res.OPLTotal
+				hit.OPL = s.OPL
 				hit.OK = true
-				hit.Hits = make(map[int]SurfaceHit, len(res.Surfaces))
-				for _, sr := range res.Surfaces {
+				hit.Hits = make(map[int]SurfaceHit, len(s.Surfaces))
+				for _, sr := range s.Surfaces {
 					if sr.SurfaceID <= 0 {
 						continue
 					}
 					hit.Hits[sr.SurfaceID] = SurfaceHit{Position: sr.Position, Direction: sr.Direction}
 				}
 				fd.RayHits[i] = hit
-			})
+			}
 
 			out = append(out, fd)
 		}
@@ -131,71 +124,5 @@ func GenerateFootprints(surfaces []types.Surface, fields []Field, wavelengths []
 // rayDirection returns the object-space ray direction for a field: an angle in
 // the XY plane, rotated by the field azimuth Direction.
 func rayDirection(f Field) types.Vec3 {
-	rad := raymath.DegToRad(f.Angle)
-	sinT := math.Sin(rad)
-	cosT := math.Cos(rad)
-	dx, dy := 0.0, 1.0
-	if len(f.Direction) >= 2 {
-		norm := math.Hypot(f.Direction[0], f.Direction[1])
-		if norm > 0 {
-			dx = f.Direction[0] / norm
-			dy = f.Direction[1] / norm
-		}
-	}
-	return types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
-}
-
-// gridOffset shifts the pupil grid so the field's chief ray crosses the
-// optical axis at the entrance-pupil plane z=pupilZ, mirroring the chief/optimize
-// grid centring. Vector-based (no tanθ), degrading to the wavefront plane
-// through the pupil at grazing incidence.
-func gridOffset(f Field, pupilZ float64, zStart float64) (float64, float64) {
-	dir := rayDirection(f)
-	gcpt := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, dir, zStart)
-	return gcpt.X, gcpt.Y
-}
-
-// polarGrid generates a polar pupil grid: `samples` rings, linearly spaced in
-// radius, each with `samples` angular sectors.
-func polarGrid(samples int, radius float64) []pupilPoint {
-	var pts []pupilPoint
-	n := samples
-	if n < 2 {
-		n = 2
-	}
-	for i := 0; i < n; i++ {
-		r := (float64(i) + 0.5) / float64(n) * radius
-		for j := 0; j < n; j++ {
-			theta := 2 * math.Pi * (float64(j) + 0.5) / float64(n)
-			pts = append(pts, pupilPoint{X: r * math.Cos(theta), Y: r * math.Sin(theta)})
-		}
-	}
-	return pts
-}
-
-// parallelFor runs work over [0, n) with GOMAXPROCS workers.
-func parallelFor(n int, work func(i int)) {
-	if n <= 0 {
-		return
-	}
-	workers := runtime.GOMAXPROCS(0)
-	if workers > n {
-		workers = n
-	}
-	ch := make(chan int)
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range ch {
-				work(i)
-			}
-		}()
-	}
-	for i := 0; i < n; i++ {
-		ch <- i
-	}
-	close(ch)
-	wg.Wait()
+	return raymath.DirectionFromField(f.Angle, f.Direction)
 }

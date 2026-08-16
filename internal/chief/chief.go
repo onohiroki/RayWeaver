@@ -7,6 +7,7 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -26,19 +27,6 @@ type Result struct {
 	RayFan         *types.RayFan
 	PerSurfaceMaxY []float64
 	Wavelengths    []types.WavelengthStats
-}
-
-func DetermineChiefRays(
-	system types.System,
-	fields []types.FieldDef,
-	refSurfaceID int,
-	numRays int,
-	gc *glass.Catalog,
-	pol types.JonesVector,
-	wavelength float64,
-	dumpMap bool,
-) []Result {
-	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, types.GridPolar, nil, nil, nil)
 }
 
 func DetermineChiefRaysGrid(
@@ -193,15 +181,8 @@ func traceFields(
 ) []Result {
 	var results []Result
 
-	for fi, fd := range fields {
-		dx, dy := 0.0, 1.0
-		if len(fd.Direction) >= 2 {
-			norm := math.Hypot(fd.Direction[0], fd.Direction[1])
-			if norm > 0 {
-				dx = fd.Direction[0] / norm
-				dy = fd.Direction[1] / norm
-			}
-		}
+for fi, fd := range fields {
+		dx, dy := raymath.FieldAzimuth(fd.Direction)
 
 		path := dls.BuildPath(system.Surfaces)
 		if len(fd.Path) > 0 {
@@ -473,21 +454,6 @@ func surfaceZRange(surfaces []types.Surface) (lo, hi, track float64) {
 }
 
 // --- angle-based (infinite conjugate) ---
-
-func computeChiefRayAngle(
-	system types.System,
-	engine *ray.Engine,
-	thetaRad, dx, dy float64,
-	refSurfaceID int,
-	numRays int,
-	apertureRadius float64,
-	pol types.JonesVector,
-	wavelength float64,
-	dumpMap bool,
-	pupilZ float64,
-) Result {
-	return computeChiefRayAngleGrid(system, engine, dls.BuildPath(system.Surfaces), thetaRad, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar, pupilZ, nil)
-}
 
 func computeChiefRayAngleGrid(
 	system types.System,
@@ -1031,20 +997,6 @@ func computeChiefRayHeightGridWithPassThrough(
 
 // --- height-based (finite conjugate) ---
 
-func computeChiefRayHeight(
-	system types.System,
-	engine *ray.Engine,
-	height, dx, dy, objectZ float64,
-	refSurfaceID int,
-	numRays int,
-	apertureRadius float64,
-	pol types.JonesVector,
-	wavelength float64,
-	dumpMap bool,
-) Result {
-	return computeChiefRayHeightGrid(system, engine, dls.BuildPath(system.Surfaces), height, dx, dy, objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, types.GridPolar, nil)
-}
-
 func computeChiefRayHeightGrid(
 	system types.System,
 	engine *ray.Engine,
@@ -1367,73 +1319,12 @@ func searchDirectionForTarget(
 // generateGridPoints returns a list of pupil (px, py) sample coordinates
 // for the given grid type and aperture radius.
 func GenerateGridPoints(numRays int, apertureRadius float64, gridType types.GridType) []struct{ X, Y float64 } {
-	var pts []struct{ X, Y float64 }
-
-	switch gridType {
-	case types.GridSquare:
-		n := int(math.Sqrt(float64(numRays)))
-		if n < 2 {
-			n = 2
-		}
-		for i := 0; i < n; i++ {
-			for j := 0; j < n; j++ {
-				x := (float64(i)+0.5)/float64(n)*2 - 1
-				y := (float64(j)+0.5)/float64(n)*2 - 1
-				if x*x+y*y <= 1 {
-					pts = append(pts, struct{ X, Y float64 }{
-						X: x * apertureRadius,
-						Y: y * apertureRadius,
-					})
-				}
-			}
-		}
-
-	case types.GridHex:
-		n := int(math.Sqrt(float64(numRays))) + 1
-		if n < 2 {
-			n = 2
-		}
-		dy := apertureRadius * 2 / float64(n)
-		dx := dy * math.Sqrt(3) / 2
-		for i := 0; i < n; i++ {
-			y := -apertureRadius + (float64(i)+0.5)*dy
-			xOff := 0.0
-			if i%2 == 1 {
-				xOff = dx / 2
-			}
-			nx := int(float64(n) * apertureRadius / (dx * float64(n) / 2))
-			if nx < 1 {
-				nx = 1
-			}
-			for j := 0; j < nx; j++ {
-				x := -apertureRadius + (float64(j)+0.5)*dx + xOff
-				if x*x+y*y <= apertureRadius*apertureRadius {
-					pts = append(pts, struct{ X, Y float64 }{
-						X: x,
-						Y: y,
-					})
-				}
-			}
-		}
-
-	default: // GridPolar
-		n := int(math.Sqrt(float64(numRays)))
-		if n < 2 {
-			n = 2
-		}
-		for i := 0; i < n; i++ {
-			for j := 0; j < n; j++ {
-				r := (float64(i) + 0.5) / float64(n) * apertureRadius
-				theta := 2 * math.Pi * (float64(j) + 0.5) / float64(n)
-				pts = append(pts, struct{ X, Y float64 }{
-					X: r * math.Cos(theta),
-					Y: r * math.Sin(theta),
-				})
-			}
-		}
+	pts := raymath.PupilGrid(numRays, apertureRadius, gridType, 0)
+	out := make([]struct{ X, Y float64 }, len(pts))
+	for i, p := range pts {
+		out[i] = struct{ X, Y float64 }{X: p.X, Y: p.Y}
 	}
-
-	return pts
+	return out
 }
 
 // tracePupilGrid distributes numRays samples in the given grid pattern
@@ -1462,92 +1353,73 @@ func tracePupilGrid(
 
 	isHeightBased := rayOrigin.Z != 0 || rayOrigin.X != 0 || rayOrigin.Y != 0
 
-	// For a parallel angle-field bundle the wavefront is perpendicular to
-	// rayDir. Projecting each launch origin onto the wavefront plane through
-	// the grid centre removes the launch-geometry OPL tilt (the linear ramp
-	// that otherwise contaminates off-axis OPD and shifts the Huygens PSF
-	// peak). The projection is along rayDir so the ray line is unchanged.
-	wavefrontC := types.Vec3{X: pupilCenterX, Y: pupilCenterY, Z: zStart}
+	// The pupil package's Launch builds the ray launch states and applies the
+	// vignetting clip. The OPLLaunch mode projects each parallel angle-field
+	// origin onto the wavefront plane through the grid centre: the projection
+	// is along rayDir so the ray line (and every surface intersection) is
+	// unchanged, while the launch-geometry OPL tilt is removed. Height-based
+	// (finite-conjugate) fields launch from the object point instead.
+	var samples []pupil.Sample
+	if isHeightBased {
+		samples = pupil.Launch(pupil.LaunchSpec{
+			NumRays:        numRays,
+			GridType:       gridType,
+			RotationOffset: 0,
+			ApertureRadius: apertureRadius,
+			RayDir:         rayDir,
+			CentreX:        pupilCenterX,
+			CentreY:        pupilCenterY,
+			ZStart:         zStart,
+			OPLMode:        pupil.OPLLaunch,
+			Vig:            vig,
+			HeightOrigin:   &rayOrigin,
+		})
+	} else {
+		samples = pupil.Launch(pupil.LaunchSpec{
+			NumRays:        numRays,
+			GridType:       gridType,
+			RotationOffset: 0,
+			ApertureRadius: apertureRadius,
+			RayDir:         rayDir,
+			CentreX:        pupilCenterX,
+			CentreY:        pupilCenterY,
+			ZStart:         zStart,
+			OPLMode:        pupil.OPLLaunch,
+			Vig:            vig,
+		})
+	}
+	pupil.Trace(engine, path, system.Surfaces, samples, wavelength, pol, 0)
 
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, runtime.NumCPU())
+	for _, s := range samples {
+		px := pupilCenterX + s.PupilX
+		py := pupilCenterY + s.PupilY
 
-	samples := GenerateGridPoints(numRays, apertureRadius, gridType)
-	for i := range samples {
-		// Clip to the vignetted entrance-pupil ellipse: the transverse sample
-		// offset relative to the grid centre is preserved along the ray line to
-		// the entrance-pupil plane, so the mask applies to the offset directly.
-		if !vig.Contains(samples[i].X, samples[i].Y, apertureRadius) {
+		if !s.OK {
+			grid = append(grid, types.GridPoint{
+				PupilX: px, PupilY: py,
+				ImageX: nil, ImageY: nil, Intensity: 0,
+				ErrorCode: s.ErrorCode,
+				Origin:    s.Origin, Direction: s.Dir,
+			})
 			continue
 		}
-		px := pupilCenterX + samples[i].X
-		py := pupilCenterY + samples[i].Y
+		for _, sr := range s.Surfaces {
+			if sr.SurfaceID == refSurfaceID {
+				weight := (sr.IntensityS + sr.IntensityP) / 2.0
 
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(px, py float64) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			var rDir types.Vec3
-			var rOrg types.Vec3
-			if isHeightBased {
-				rOrg = rayOrigin
-				rDir = types.Vec3{
-					X: px - rayOrigin.X,
-					Y: py - rayOrigin.Y,
-					Z: zStart - rayOrigin.Z,
-				}.Normalize()
-			} else {
-				rOrg = raymath.ProjectOntoWavefront(
-					types.Vec3{X: px, Y: py, Z: zStart}, wavefrontC, rayDir)
-				rDir = rayDir
-			}
-
-			ray := types.Ray{
-				Wavelength: wavelength,
-				Initial:    types.RayState{Origin: rOrg, Direction: rDir},
-				Path:       path,
-				Jones:      pol,
-			}
-
-			traceResult := engine.TraceRay(ray, system.Surfaces)
-			if traceResult.Error != "" {
-				mu.Lock()
+				totalWeight += weight
+				weightedX += sr.Position.X * weight
+				weightedY += sr.Position.Y * weight
+				ix, iy := sr.Position.X, sr.Position.Y
 				grid = append(grid, types.GridPoint{
 					PupilX: px, PupilY: py,
-					ImageX: nil, ImageY: nil, Intensity: 0,
-					ErrorCode: traceResult.ErrorCode,
-					Origin:    rOrg, Direction: rDir,
+					ImageX: &ix, ImageY: &iy, Intensity: weight,
+					OPL:    s.OPL,
+					Origin: s.Origin, Direction: s.Dir,
 				})
-				mu.Unlock()
-				return
 			}
-
-			for _, sr := range traceResult.Surfaces {
-				if sr.SurfaceID == refSurfaceID {
-					weight := (sr.IntensityS + sr.IntensityP) / 2.0
-
-					mu.Lock()
-					totalWeight += weight
-					weightedX += sr.Position.X * weight
-					weightedY += sr.Position.Y * weight
-					ix, iy := sr.Position.X, sr.Position.Y
-					grid = append(grid, types.GridPoint{
-						PupilX: px, PupilY: py,
-						ImageX: &ix, ImageY: &iy, Intensity: weight,
-						OPL:    traceResult.OPLTotal,
-						Origin: rOrg, Direction: rDir,
-					})
-					mu.Unlock()
-				}
-			}
-		}(px, py)
+		}
 	}
-
-	wg.Wait()
-	close(sem)
 
 	if totalWeight > 0 {
 		cx = weightedX / totalWeight

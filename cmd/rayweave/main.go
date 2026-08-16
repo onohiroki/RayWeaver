@@ -1053,6 +1053,10 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 		for _, e := range input.CoatingCatalog.Entries {
 			cc.Add(e)
 		}
+		// Resolve material-name layer references against the glass catalog so
+		// ray tracing and the tmm command use the real index, never the 1.5
+		// computePol fallback.
+		cc.ResolveAll(gc, types.DefaultWavelength)
 	}
 
 	return gc, cc
@@ -1614,14 +1618,7 @@ func runTMM(data []byte) {
 		for _, g := range input.GlassCatalog.Entries {
 			gc.Add(g)
 		}
-		for i := range input.Layers {
-			if input.Layers[i].N == 0 && input.Layers[i].Material != "" {
-				n, err := gc.RefractiveIndex(types.ParseMaterial(input.Layers[i].Material), input.Lambda)
-				if err == nil {
-					input.Layers[i].N = n
-				}
-			}
-		}
+		coating.ResolveLayers(input.Layers, gc, input.Lambda)
 	}
 
 	thetaRad := raymath.DegToRad(input.ThetaDeg)

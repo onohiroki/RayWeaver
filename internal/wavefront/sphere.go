@@ -60,31 +60,8 @@ func FitSphereShift(samples []psf.WavefrontSample, planeZ float64) (Sphere, erro
 // spotAtShift propagates the samples to the image plane at z = planeZ + delta
 // and returns the intensity-weighted centroid and RMS spot radius about it.
 func spotAtShift(samples []psf.WavefrontSample, planeZ, delta float64) (types.Vec3, float64) {
-	var sw, wx, wy float64
-	for _, s := range samples {
-		if math.Abs(s.Direction.Z) < 1e-9 {
-			continue
-		}
-		t := (planeZ + delta - s.Position.Z) / s.Direction.Z
-		wx += (s.Position.X + s.Direction.X*t) * s.Intensity
-		wy += (s.Position.Y + s.Direction.Y*t) * s.Intensity
-		sw += s.Intensity
-	}
-	if sw <= 0 {
-		return types.Vec3{}, 0
-	}
-	cx, cy := wx/sw, wy/sw
-	var ss float64
-	for _, s := range samples {
-		if math.Abs(s.Direction.Z) < 1e-9 {
-			continue
-		}
-		t := (planeZ + delta - s.Position.Z) / s.Direction.Z
-		x := s.Position.X + s.Direction.X*t - cx
-		y := s.Position.Y + s.Direction.Y*t - cy
-		ss += (x*x + y*y) * s.Intensity
-	}
-	return types.Vec3{X: cx, Y: cy, Z: planeZ + delta}, math.Sqrt(ss / sw)
+	cx, cy, rms := psf.ImagePlaneSpot(samples, planeZ+delta)
+	return types.Vec3{X: cx, Y: cy, Z: planeZ + delta}, rms
 }
 
 // lineDist returns |P - (F0 + δ·dir)|.

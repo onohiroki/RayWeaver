@@ -48,11 +48,7 @@ func traceForward(surfaces []types.Surface, nIndex []float64, y0, u0 float64) ([
 
 		vertices = append(vertices, rayState{Z: physZ[i], Y: y, U: u})
 
-		if i+1 < len(surfaces) {
-			y += surfaces[i].Thickness * u
-		} else {
-			y += surfaces[i].Thickness * u
-		}
+		y += surfaces[i].Thickness * u
 	}
 	final := rayState{Z: surfaces[len(surfaces)-1].PhysicalZ, Y: y, U: u}
 	return vertices, final
@@ -107,11 +103,7 @@ func tracePupilForward(surfaces []types.Surface, nIndex []float64, startIdx int,
 			u = (nBefore*u - y*phi) / nAfter
 		}
 
-		if i+1 < len(surfaces) {
-			y += surfaces[i].Thickness * u
-		} else {
-			y += surfaces[i].Thickness * u
-		}
+		y += surfaces[i].Thickness * u
 	}
 	return rayState{Y: y, U: u}
 }

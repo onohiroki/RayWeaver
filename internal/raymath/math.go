@@ -24,8 +24,104 @@ func RadToDeg(rad float64) float64 {
 // DirectionFromAngle returns a normalized direction in the XY plane at the
 // given field angle (degrees), pointing toward +Z.
 func DirectionFromAngle(angleDeg float64) types.Vec3 {
+	return DirectionFromField(angleDeg, nil)
+}
+
+// FieldAzimuth returns the normalized in-plane (dx, dy) azimuth for a field
+// direction, defaulting to +Y when the direction is absent or degenerate.
+func FieldAzimuth(direction []float64) (dx, dy float64) {
+	dx, dy = 0.0, 1.0
+	if len(direction) >= 2 {
+		norm := math.Hypot(direction[0], direction[1])
+		if norm > 0 {
+			dx = direction[0] / norm
+			dy = direction[1] / norm
+		}
+	}
+	return dx, dy
+}
+
+// DirectionFromField returns the object-space ray direction for an angle
+// field: (sinθ·dx, sinθ·dy, cosθ) normalized. The in-plane azimuth direction
+// is resolved by FieldAzimuth.
+func DirectionFromField(angleDeg float64, direction []float64) types.Vec3 {
 	rad := DegToRad(angleDeg)
-	return types.Vec3{X: 0, Y: math.Sin(rad), Z: math.Cos(rad)}.Normalize()
+	sinT := math.Sin(rad)
+	cosT := math.Cos(rad)
+	dx, dy := FieldAzimuth(direction)
+	return types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
+}
+
+// GridPoint is a pupil sample coordinate plus its pupil-cell area weight (the
+// fraction of the entrance-pupil flux the ray represents).
+type GridPoint struct {
+	X, Y float64
+	Area float64
+}
+
+// PupilGrid distributes sample coordinates within the disk of apertureRadius.
+// Supported patterns: GridSquare (uniform n×n, rim-trimmed), GridHex (dense
+// hex covering the full disk rim, as used by the clear-aperture/beam-envelope
+// measurements) and GridPolar (n rings × n sectors, linearly spaced in radius,
+// rotated by rotationOffset). Square/hex samples carry area 1; polar samples
+// carry the rotational weight r/apertureRadius so area-weighted sums recover
+// the disk area.
+func PupilGrid(numRays int, apertureRadius float64, gridType types.GridType, rotationOffset float64) []GridPoint {
+	numRays = int(math.Sqrt(float64(numRays)))
+	if numRays < 2 {
+		numRays = 2
+	}
+
+	switch gridType {
+	case types.GridSquare:
+		var out []GridPoint
+		for i := 0; i < numRays; i++ {
+			for j := 0; j < numRays; j++ {
+				x := (float64(i)+0.5)/float64(numRays)*2 - 1
+				y := (float64(j)+0.5)/float64(numRays)*2 - 1
+				if x*x+y*y <= 1 {
+					out = append(out, GridPoint{X: x * apertureRadius, Y: y * apertureRadius, Area: 1})
+				}
+			}
+		}
+		return out
+
+	case types.GridHex:
+		n := numRays + 1
+		dy := apertureRadius * 2 / float64(n)
+		dx := dy * math.Sqrt(3) / 2
+		var out []GridPoint
+		for i := 0; i < n; i++ {
+			y := -apertureRadius + (float64(i)+0.5)*dy
+			xOff := 0.0
+			if i%2 == 1 {
+				xOff = dx / 2
+			}
+			nx := int(float64(n) * apertureRadius / (dx * float64(n) / 2))
+			if nx < 1 {
+				nx = 1
+			}
+			for j := 0; j < nx; j++ {
+				x := -apertureRadius + (float64(j)+0.5)*dx + xOff
+				if x*x+y*y <= apertureRadius*apertureRadius {
+					out = append(out, GridPoint{X: x, Y: y, Area: 1})
+				}
+			}
+		}
+		return out
+
+	default: // GridPolar
+		var out []GridPoint
+		for i := 0; i < numRays; i++ {
+			r := (float64(i) + 0.5) / float64(numRays) * apertureRadius
+			area := r / apertureRadius
+			for j := 0; j < numRays; j++ {
+				theta := 2*math.Pi*(float64(j)+0.5)/float64(numRays) + rotationOffset
+				out = append(out, GridPoint{X: r * math.Cos(theta), Y: r * math.Sin(theta), Area: area})
+			}
+		}
+		return out
+	}
 }
 
 // ProjectOntoWavefront projects the launch point p onto the wavefront plane
@@ -178,7 +274,7 @@ func IntersectSphereBoth(origin, dir types.Vec3, radius float64) (t1, t2 float64
 
 func SphereNormal(p types.Vec3, radius float64) types.Vec3 {
 	if radius == 0 {
-		return types.Vec3{0, 0, 1}
+		return types.Vec3{Z: 1}
 	}
 	center := types.Vec3{X: 0, Y: 0, Z: radius}
 	n := p.Subtract(center)
@@ -208,8 +304,18 @@ func PolynomialAsphereSag(h, radius, conic float64, coefficients []float64) floa
 	return sag2nd + sagAsphere
 }
 
+// ZernikeAsphereSag evaluates the sag of an asphere whose departure from the
+// base sphere is expressed by the first Zernike coefficients (piston, defocus
+// and primary spherical, coefficient slots 0..2). Higher coefficient slots are
+// not honoured and must not be set on a surface using this type. A zero or
+// negative normRadius makes the Zernike terms ill-defined, so the base sphere
+// is returned unchanged.
 func ZernikeAsphereSag(h, radius, conic float64, coefficients []float64, normRadius float64) float64 {
 	sag2nd := PolynomialAsphereSag(h, radius, conic, nil)
+
+	if normRadius <= 0 {
+		return sag2nd
+	}
 
 	rho := h / normRadius
 	rho2 := rho * rho
@@ -337,7 +443,7 @@ func AsphereNormal(p types.Vec3, sagFunc func(float64) float64) types.Vec3 {
 	dzdh := (sagFunc(h+eps) - sagFunc(h-eps)) / (2 * eps)
 
 	if h == 0 {
-		return types.Vec3{0, 0, 1}
+		return types.Vec3{Z: 1}
 	}
 
 	return types.Vec3{

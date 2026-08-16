@@ -3,7 +3,6 @@ package optimize
 import (
 	"fmt"
 	"math"
-	"os"
 	"runtime"
 
 	"github.com/hiroki/rayweaver/internal/chief"
@@ -1108,8 +1107,7 @@ func newEvalGridCache() *evalGridCache {
 }
 
 // gridForTerm returns the cached (or freshly traced) pupil grid for a grid
-// merit term. A nil cache disables caching (single-shot evaluation paths such
-// as the public EvaluateMeritKind wrapper).
+// merit term. A nil cache disables caching.
 func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
 	trace := func() []dls.IPoint {
@@ -1326,28 +1324,19 @@ func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glas
 			pupilZ = z
 		}
 	}
-	return dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.extentRays(), o.gridRotation, o.gridWorkers())
+	return dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.extentRays(256), o.gridRotation, o.gridWorkers())
 }
 
-// extentRays returns the ray count for the beam-extent measurement in
-// sizeAutoApertures. The extent grid must resolve the beam edge well enough
-// that the sized auto_aperture diameters cover the true bundle (a coarse grid
-// under-measures off-axis extents and the resulting lens vignettes the beam).
-func (o *Optimizer) extentRays() int {
-	if o.numRays >= 256 {
+// extentRays returns the ray count for a beam-extent measurement. The extent
+// grid must resolve the beam edge well enough that the sized auto_aperture
+// diameters cover the true bundle (a coarse grid under-measures off-axis
+// extents and the resulting lens vignettes the beam). floor raises a low
+// numRays grid to the requested minimum density.
+func (o *Optimizer) extentRays(floor int) int {
+	if o.numRays >= floor {
 		return o.numRays
 	}
-	return 256
-}
-
-// finalExtentRays returns the ray count for the one-time FinalApertures beam
-// measurement, matching the chief --clear-aperture grid density so the raw
-// optimize output covers the same beam envelope the demo pipeline re-sizes to.
-func (o *Optimizer) finalExtentRays() int {
-	if o.numRays >= 512 {
-		return o.numRays
-	}
-	return 512
+	return floor
 }
 
 func (o *Optimizer) EvaluateMerit(x []float64) float64 {
@@ -1654,7 +1643,7 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 	pol := types.NewCircularJones(true)
 	results := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
-		cfg.fieldDefs, cfg.refSurface, o.finalExtentRays(), gc, pol,
+		cfg.fieldDefs, cfg.refSurface, o.extentRays(512), gc, pol,
 		types.DefaultWavelength, false, types.GridHex, nil, nil, nil,
 	)
 	engine := ray.NewEngine(gc, nil)
@@ -1952,8 +1941,4 @@ func surfaceIndex(surfaces []types.Surface, id int) int {
 
 func cfgSurfKey(configID string, surfID int) string {
 	return configID + ":" + fmt.Sprint(surfID)
-}
-
-func Debugf(format string, args ...interface{}) {
-	fmt.Fprintf(os.Stderr, format, args...)
 }

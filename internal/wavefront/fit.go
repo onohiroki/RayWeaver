@@ -2,13 +2,12 @@ package wavefront
 
 import (
 	"fmt"
-	"math"
 	"runtime"
 
-	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/psf"
+	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -108,41 +107,34 @@ func frozenPupilGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 		return nil, fmt.Errorf("no entrance-pupil radius for the wavefront grid")
 	}
 
-	thetaRad := raymath.DegToRad(fd.Angle)
-	sinT := math.Sin(thetaRad)
-	cosT := math.Cos(thetaRad)
-
-	dx, dy := 0.0, 1.0
-	if len(fd.Direction) >= 2 {
-		norm := math.Hypot(fd.Direction[0], fd.Direction[1])
-		if norm > 0 {
-			dx = fd.Direction[0] / norm
-			dy = fd.Direction[1] / norm
-		}
-	}
-	rayDir := types.Vec3{X: sinT * dx, Y: sinT * dy, Z: cosT}.Normalize()
+	rayDir := raymath.DirectionFromField(fd.Angle, fd.Direction)
 
 	zStart := -100.0
-	gcpt := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
-	pupilOffsetX, pupilOffsetY := gcpt.X, gcpt.Y
+	pupilOffsetX, pupilOffsetY := pupil.GridCentre(rayDir, pupilZ, zStart)
 
-	samples := chief.GenerateGridPoints(numRays, apertureRadius, types.GridPolar)
-	grid := make([]types.GridPoint, 0, len(samples))
-	wavefrontC := types.Vec3{X: pupilOffsetX, Y: pupilOffsetY, Z: zStart}
-	for _, p := range samples {
-		// Clip to the field's vignetted entrance-pupil ellipse (the sample
-		// offsets are relative to the grid centre at the pupil plane).
-		if !fd.Vignetting.IsZero() && !fd.Vignetting.Contains(p.X, p.Y, apertureRadius) {
-			continue
+	var vig *types.VignettingDef
+	if fd.Vignetting != nil && !fd.Vignetting.IsZero() {
+		vig = fd.Vignetting
+	}
+	samples := pupil.Launch(pupil.LaunchSpec{
+		NumRays:        numRays,
+		GridType:       types.GridPolar,
+		ApertureRadius: apertureRadius,
+		RayDir:         rayDir,
+		CentreX:        pupilOffsetX,
+		CentreY:        pupilOffsetY,
+		ZStart:         zStart,
+		OPLMode:        pupil.OPLLaunch,
+		Vig:            vig,
+	})
+	grid := make([]types.GridPoint, len(samples))
+	for i, s := range samples {
+		grid[i] = types.GridPoint{
+			PupilX:    s.PupilX,
+			PupilY:    s.PupilY,
+			Origin:    s.Origin,
+			Direction: s.Dir,
 		}
-		grid = append(grid, types.GridPoint{
-			PupilX: p.X,
-			PupilY: p.Y,
-			Origin: raymath.ProjectOntoWavefront(
-				types.Vec3{X: p.X + pupilOffsetX, Y: p.Y + pupilOffsetY, Z: zStart},
-				wavefrontC, rayDir),
-			Direction: rayDir,
-		})
 	}
 
 	return &psf.PupilGrid{

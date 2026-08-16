@@ -138,10 +138,11 @@ func fitConic(xs, ys, ws []float64, surf types.Surface) float64 {
 		return c * r * r / (1 + math.Sqrt(disc))
 	}
 
-	// Baseline error at k = 0 (pure sphere).
+	// Baseline error at k = 0 (pure sphere): the conic adds zConic−zBase over
+	// the base sphere, so the k=0 residual is just −ys.
 	errAtZero := 0.0
 	for j := range xs {
-		d := (zBase(xs[j]) - zBase(xs[j])) - ys[j]
+		d := -ys[j]
 		errAtZero += ws[j] * d * d
 	}
 

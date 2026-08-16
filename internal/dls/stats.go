@@ -18,13 +18,6 @@ type IPoint struct {
 	Intensity float64
 }
 
-type pupilPoint struct {
-	X, Y float64
-	// area is the pupil-cell area weight (∝ r/R), the fraction of the
-	// entrance-pupil flux the ray represents, set by generatePupilGrid.
-	area float64
-}
-
 func Centroid(points []IPoint) (cx, cy float64, count int) {
 	for _, p := range points {
 		if !p.OK {

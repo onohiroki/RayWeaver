@@ -19,18 +19,6 @@ type element struct {
 	r2Cemented bool
 }
 
-func buildLensBodies(surfaces []types.Surface, zPos []float64, globalMaxH float64) []string {
-	elems := findElements(surfaces, globalMaxH)
-	var out []string
-	for _, e := range elems {
-		p := buildElemPath(e, zPos[e.r1Idx], zPos[e.r2Idx])
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
 func computeZPositions(surfaces []types.Surface) []float64 {
 	precomputed := false
 	for _, s := range surfaces {
@@ -309,22 +297,6 @@ func edgeToPath(pts []vec2) string {
 		b.WriteByte(' ')
 	}
 	return b.String()
-}
-
-func buildAirLines(surfaces []types.Surface, zPos []float64) []string {
-	var out []string
-	for i := 0; i < len(surfaces); i++ {
-		if surfaces[i].Diameter <= 0 {
-			continue
-		}
-		mat := surfaces[i].Material
-		if mat.IsAir() || mat.Key == "1" {
-			h := surfaces[i].Diameter / 2
-			x := zPos[i] + globalSag(surfaces[i], h)
-			out = append(out, fmt.Sprintf("M %.6f,%.6f L %.6f,%.6f", x, h, x, -h))
-		}
-	}
-	return out
 }
 
 // buildStopLines returns the aperture-stop marker as SVG path commands: short

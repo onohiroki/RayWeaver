@@ -50,8 +50,7 @@ func runVignette(data []byte) {
 	}
 	// Principle 3: echo the flag-won values back into the output section
 	// (only for flags actually set; unset flags never inject defaults).
-	if flagWasSet(fs, "iterations") || flagWasSet(fs, "min-glass-path") ||
-		flagWasSet(fs, "margin-mm") || flagWasSet(fs, "wl") {
+	if anyFlagSet(fs, "iterations", "min-glass-path", "margin-mm", "wl") {
 		if input.Vignette == nil {
 			input.Vignette = &types.VignetteConfig{}
 		}

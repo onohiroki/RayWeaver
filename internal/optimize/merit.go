@@ -235,37 +235,6 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 // loop (e.g. external tools evaluating a single term). OPD_RMS and the
 // wavefront paraboloid kinds require an Optimizer to trace the grid and return
 // 0 when o is nil.
-func EvaluateMeritKind(kind string, term MeritTerm, surfaces []types.Surface, gc *glass.Catalog, o *Optimizer) float64 {
-	if kind == MeritOPDRMS || isWavefrontKind(kind) || isGridKind(kind) {
-		if o == nil {
-			return 0
-		}
-		cfg := o.primaryConfig()
-		dx, dy := 0.0, 1.0
-		if len(term.FieldDir) >= 2 {
-			dx, dy = normalizeDir(term.FieldDir)
-		}
-		mt := meritTerm{
-			kind:       kind,
-			fieldAngle: term.FieldAngle,
-			fieldDirX:  dx,
-			fieldDirY:  dy,
-			wavelength: term.Wavelength,
-			fraction:   term.Fraction,
-			surfaceSet: append([]int(nil), term.SurfaceSet...),
-		}
-		return o.evaluateKindTerm(cfg, &mt, surfaces, gc, nil)
-	}
-	mt := meritTerm{
-		kind:        kind,
-		fieldAngle:  term.FieldAngle,
-		wavelength:  term.Wavelength,
-		wavelength2: term.Wavelength2,
-		surfaceSet:  append([]int(nil), term.SurfaceSet...),
-	}
-	return evaluateKindValue(kind, &mt, surfaces, gc)
-}
-
 func evaluateDistortionPct(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength

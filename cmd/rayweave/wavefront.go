@@ -95,52 +95,17 @@ func runWavefront(data []byte) {
 		polLabels = []string{string(types.PolRCP)}
 	}
 
-	refSurfaceID := 0
-	if *refSurface > 0 {
-		refSurfaceID = *refSurface
-	} else if input.Wavefront != nil && input.Wavefront.ReferenceSurface > 0 {
-		refSurfaceID = input.Wavefront.ReferenceSurface
-	}
-
-	numRaysVal := 0
-	if *numRays > 0 {
-		numRaysVal = *numRays
-	} else if input.Wavefront != nil && input.Wavefront.NumRays > 0 {
-		numRaysVal = input.Wavefront.NumRays
-	}
-
-	workers := 0
-	if *wfWorkers > 0 {
-		workers = *wfWorkers
-	} else if input.Wavefront != nil && input.Wavefront.Workers > 0 {
-		workers = input.Wavefront.Workers
-	}
-
-	zOrder := 0
-	if *zernikeOrder > 0 {
-		zOrder = *zernikeOrder
-	} else if input.Wavefront != nil && input.Wavefront.ZernikeMaxOrder > 0 {
-		zOrder = input.Wavefront.ZernikeMaxOrder
-	}
-
-	mapGridVal := 0
-	if *mapGrid > 0 {
-		mapGridVal = *mapGrid
-	} else if input.Wavefront != nil && input.Wavefront.MapGrid > 0 {
-		mapGridVal = input.Wavefront.MapGrid
-	}
+	refSurfaceID := intOrYAML(*refSurface, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.ReferenceSurface }))
+	numRaysVal := intOrYAML(*numRays, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.NumRays }))
+	workers := intOrYAML(*wfWorkers, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.Workers }))
+	zOrder := intOrYAML(*zernikeOrder, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.ZernikeMaxOrder }))
+	mapGridVal := intOrYAML(*mapGrid, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.MapGrid }))
 
 	opts := wavefront.Options{
-		ReferenceSurface: refSurfaceID,
 		NumRays:          numRaysVal,
 		Workers:          workers,
 		ZernikeMaxOrder:  zOrder,
 		Polarizations:    polLabels,
-	}
-	if input.Wavefront != nil {
-		if opts.NumRays <= 0 {
-			opts.NumRays = input.Wavefront.NumRays
-		}
 	}
 	opts.BestFocus = resolveBestFocus(input, fs, *bestFocus, *focusWeight, *focusWeights, len(fields))
 

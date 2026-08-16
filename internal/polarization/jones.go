@@ -8,14 +8,6 @@ import (
 // s/p basis of a ray.
 type JonesMatrix [2][2]complex128
 
-// IdentityJones returns the identity 2x2 matrix.
-func IdentityJones() JonesMatrix {
-	return JonesMatrix{
-		{1, 0},
-		{0, 1},
-	}
-}
-
 // DiagonalJones returns diag(a, b).
 func DiagonalJones(a, b complex128) JonesMatrix {
 	return JonesMatrix{

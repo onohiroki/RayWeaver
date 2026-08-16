@@ -135,18 +135,10 @@ func runPSF(data []byte) {
 		SpectralEntries:  spectralEntries,
 	}
 	if input.PSF != nil {
-		if opts.ReferenceSurface <= 0 {
-			opts.ReferenceSurface = input.PSF.ReferenceSurface
-		}
-		if opts.GridSize <= 0 {
-			opts.GridSize = input.PSF.GridSize
-		}
-		if opts.HalfWidth <= 0 {
-			opts.HalfWidth = input.PSF.HalfWidth
-		}
-		if opts.NumRays <= 0 {
-			opts.NumRays = input.PSF.NumRays
-		}
+		opts.ReferenceSurface = intOrYAML(*refSurface, input.PSF.ReferenceSurface)
+		opts.GridSize = intOrYAML(*gridSize, input.PSF.GridSize)
+		opts.HalfWidth = floatOrYAML(*halfWidth, input.PSF.HalfWidth)
+		opts.NumRays = intOrYAML(*numRays, input.PSF.NumRays)
 		if opts.Workers <= 0 {
 			opts.Workers = input.PSF.Workers
 		}

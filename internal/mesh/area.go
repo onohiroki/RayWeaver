@@ -1,8 +1,6 @@
 package mesh
 
 import (
-	"math"
-
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -29,25 +27,4 @@ func VertexAreas(points []types.Vec3, tris []Triangle) []float64 {
 		areas[t.C] += a
 	}
 	return areas
-}
-
-// TotalArea returns the summed vertex area weight. For a closed mesh this
-// equals the mesh area.
-func TotalArea(areas []float64) float64 {
-	var s float64
-	for _, a := range areas {
-		s += a
-	}
-	return s
-}
-
-// CircumcircleSafe checks the extremal area is finite and positive, guarding
-// against a degenerate triangulation feeding the Huygens integral.
-func CircumcircleSafe(areas []float64) bool {
-	for _, a := range areas {
-		if math.IsNaN(a) || math.IsInf(a, 0) || a < 0 {
-			return false
-		}
-	}
-	return true
 }

@@ -398,7 +398,9 @@ func parseZemaxHeader(hdr *zemaxHeader, keyword string, args []string) {
 			case 1:
 				f.ImageHeight = parseFloat(args[2])
 			case 2:
-				f.AngleDeg = parseFloat(args[2])
+				// Legacy FIELD image-height type; matches the modern
+				// FTYP 2/3 -> ImageHeight mapping in buildZemaxFields.
+				f.ImageHeight = parseFloat(args[2])
 			}
 			result.Fields = append(result.Fields, f)
 		} else if len(args) >= 1 {

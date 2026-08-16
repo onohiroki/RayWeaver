@@ -337,14 +337,7 @@ func fwhmAxis(g *FieldGrid, half float64, horizontal bool) float64 {
 	}
 	width := 0.0
 	for _, sign := range []int{1, -1} {
-		var prev, prevCoord float64
-		if horizontal {
-			prev = g.Intensity[pj*g.Spec.NX+pi]
-			prevCoord = g.Spec.X0 + (float64(pi)+0.5)*g.Spec.DX
-		} else {
-			prev = g.Intensity[pj*g.Spec.NX+pi]
-			prevCoord = g.Spec.Y0 + (float64(pj)+0.5)*g.Spec.DY
-		}
+		prev := g.Intensity[pj*g.Spec.NX+pi]
 		step := 0.0
 		for n := 1; ; n++ {
 			i, j := pi+sign*n, pj
@@ -361,13 +354,7 @@ func fwhmAxis(g *FieldGrid, half float64, horizontal bool) float64 {
 			}
 			// Crossed the half-maximum between prev and v. Linear interp.
 			t := (half - v) / (prev - v)
-			if horizontal {
-				step = math.Abs(prevCoord - (g.Spec.X0 + (float64(pi)+0.5)*g.Spec.DX + float64(sign)*float64(n)*d))
-				step = float64(n)-t
-			} else {
-				step = float64(n) - t
-			}
-			step *= d
+			step = (float64(n) - t) * d
 			break
 		}
 		width += step

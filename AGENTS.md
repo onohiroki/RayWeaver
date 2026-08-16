@@ -114,7 +114,6 @@ Exemptions (documented, not YAML-specifiable):
 - `optimization.escape.max_seconds` is a soft wall-clock budget shared by all escape workers. The deadline is set once in `ParallelEscape` and checked in `Cycle.Run` between DLS solves (zero deadline = unlimited). Running DLS always finishes; `Result.TimedOut`/`EscapeResult.timed_out` flag early stops.
 - Escape functions act in the normalised variable space (each variable scaled by Min..Max); fixed vars (Min==Max) are excluded from the escape distance. `escape` disables the DLS internal stall perturbation via `Options.DisableStallEscape`.
 - `optimization.escape.fingerprint_distance_threshold` (default 0 = off) adds a **structural** criterion to the "new minimum" test: a converged point is a repeat only when it is close in variable space **and** close in the design fingerprint (the per-element RMS thin-lens power difference, `paraxial.ElementPowers` — multi-config runs concatenate every config). Numerically-close but structurally-different solutions are therefore recorded as distinct minima; an element-count mismatch is always distinct. The threshold is an absolute power scale (system-dependent); see `docs/escape.md`.
-- `internal/rayio/` is dead code — never imported. `perllens/` is legacy Perl.
 - Z = optical axis (positive right). All units in mm (coating thicknesses in nm, converted internally).
 
 ## Fold model

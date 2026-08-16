@@ -28,6 +28,56 @@ func flagWasSet(fs *flag.FlagSet, name string) bool {
 	return set
 }
 
+// anyFlagSet reports whether at least one of the named flags was explicitly
+// given on the command line. It collapses the multi-flag write-back guards
+// ("only flags actually set are echoed into the output").
+func anyFlagSet(fs *flag.FlagSet, names ...string) bool {
+	for _, n := range names {
+		if flagWasSet(fs, n) {
+			return true
+		}
+	}
+	return false
+}
+
+// intOrYAML resolves an int setting under the CLI/YAML precedence rule: the
+// CLI value when non-zero (per the convention that every flag default is the
+// zero value, "unset"), else the YAML value. An unset flag therefore never
+// overrides YAML; an explicit zero flag is treated as unset, matching the
+// `x > 0`/`x <= 0` guards every zero-default subcommand uses. Settings whose
+// flag carries a meaningful non-zero default (e.g. vignette's 0.5 mm glass
+// path) and sentinel-default flags (e.g. asphere --sensitivity-samples=-1)
+// keep their flagWasSet-based handling.
+func intOrYAML(cliVal, yamlVal int) int {
+	if cliVal != 0 {
+		return cliVal
+	}
+	return yamlVal
+}
+
+// floatOrYAML is intOrYAML for float64 settings.
+func floatOrYAML(cliVal, yamlVal float64) float64 {
+	if cliVal != 0 {
+		return cliVal
+	}
+	return yamlVal
+}
+
+// wavefrontSetting returns the field the input's wavefront: section carries
+// for the given key, or 0 when the section is absent or the value is
+// non-positive. Non-positive YAML settings are treated as unset, matching the
+// `c.X > 0` guards of the flag-or-YAML resolution blocks it replaces.
+func wavefrontSetting(input types.Input, get func(*types.WavefrontConfig) int) int {
+	if input.Wavefront == nil {
+		return 0
+	}
+	v := get(input.Wavefront)
+	if v > 0 {
+		return v
+	}
+	return 0
+}
+
 // writeBackGlassDir records the --glass-dir CLI value into the output YAML's
 // glass_catalog.directory (principle 3 of the CLI/YAML rule). It is a no-op
 // when the flag was not given, so an unset flag leaves the YAML untouched.

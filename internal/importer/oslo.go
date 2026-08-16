@@ -506,17 +506,6 @@ func parseOsloSurfName(s string) int {
 	return n
 }
 
-func parseOsloASTNumber(s string) int {
-	u := strings.ToUpper(strings.TrimSpace(s))
-	u = strings.TrimLeft(u, "AST")
-	u = strings.TrimSpace(u)
-	n, err := strconv.Atoi(u)
-	if err != nil {
-		return 1
-	}
-	return n
-}
-
 func parseOsloKV(s *osloSurface, tokens []string) {
 	if len(tokens) < 2 {
 		return

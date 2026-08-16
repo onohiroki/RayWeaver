@@ -144,11 +144,6 @@ func fillWhite(img *image.RGBA) {
 	}
 }
 
-func rasterFill(ras *vector.Rasterizer, img *image.RGBA, fn func(*vector.Rasterizer)) {
-	ras.Reset(canvasW, canvasH)
-	fn(ras)
-}
-
 func strokeLine(ras *vector.Rasterizer, z0, y0, z1, y1, width, scale, midZ float64) {
 	px0, py0 := worldPt(z0, y0, midZ, scale)
 	px1, py1 := worldPt(z1, y1, midZ, scale)
