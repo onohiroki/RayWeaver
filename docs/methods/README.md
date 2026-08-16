@@ -8,6 +8,7 @@ instead.
 | Document | Method |
 |---|---|
 | [ray-tracing.md](ray-tracing.md) | sequential ray tracing: surface intersection, Snell's law, Fresnel coefficients, aspheres, folds, ghost rays |
+| [pupil-grids.md](pupil-grids.md) | entrance-pupil grid generation and grid-ray tracing: Launch/Trace, wavefront-plane launch, OPL normalization, vignetting clip |
 | [chief-rays-and-spot.md](chief-rays-and-spot.md) | pupil grids, centroid chief ray, spot statistics, ray fans, clear aperture |
 | [paraxial.md](paraxial.md) | first-order ray trace, cardinal points, entrance/exit pupils, f/# |
 | [merit-functions.md](merit-functions.md) | merit terms (spot RMS, distortion, colour, Seidel, OPD RMS), weights |

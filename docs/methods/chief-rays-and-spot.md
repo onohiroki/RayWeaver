@@ -6,13 +6,21 @@ apertures and — via the optimizer — the merit function.
 
 ## 1. Aperture and entrance pupil
 
-The aperture stop is the explicit `chief.stop_surface` if given, otherwise the
-surface with the smallest fixed (non-auto) diameter. The **entrance pupil
-radius** for sampling is the stop radius when a stop is known, else the minimum
-aperture radius over all surfaces. When two or more fields are traced, the
-entrance pupil centre is inferred from the intersection of the chief rays
-(`inferStopPosition`): the two chief rays' initial directions and origins are
-used to find their common intersection point.
+There is no implicit aperture stop: the stop is used only when
+`chief.stop_surface` is set explicitly. With a stop, the **entrance-pupil
+radius** for sampling is the **paraxial entrance-pupil radius** (the stop's
+image), so the F-number is preserved and image-side fixed surfaces that
+comfortably exceed the local beam do not shrink the pupil. Without a stop the
+pupil is **dynamic**: each field's entrance-pupil Z is the in-lens crossing of
+that field's chief ray with field 0's chief ray (the aperture position), and
+`chief` iterates this (≤ 3 passes) until the pupil settles. The grid radius is
+then the **beam-aware fixed-aperture cap** (`fixedApertureAtPupil`): every
+`auto_aperture: false` surface's aperture is projected back to the aperture
+position along the paraxial marginal ray, so a surface only caps when its clear
+aperture is smaller than the beam there (image-side surfaces like a field
+flattener do not shrink the entrance pupil). The entrance-pupil centre is the
+per-field dynamic-pupil crossing; the exit pupil is the image-side
+outgoing-segment crossing (omitted when ill-conditioned).
 
 ## 2. Field definitions
 
@@ -30,13 +38,19 @@ A field is one of:
 ## 3. Pupil grids
 
 The pupil is sampled with `num_rays` points in one of three patterns
-(`GenerateGridPoints`):
+(`raymath.PupilGrid`, wrapped by the shared `internal/pupil` package):
 
 | Grid | Layout |
 |---|---|
 | `polar` (default) | √n radial rings × √n azimuthal angles, `rᵢ = (i+0.5)/n · R` |
 | `square` | √n × √n cells, kept if `x² + y² ≤ 1` |
 | `hex` | hexagonally packed rows inside the aperture |
+
+`pupil.Launch` builds the per-ray launch states (including the field's
+vignetting clip) and `pupil.Trace` runs the rays; both are shared by `chief`,
+the optimizer (`dls`), `wavefront` and `asphere`. (`GenerateGridPoints` still
+generates the pupil for the ray-fan and marginal-ray scans, which are
+one-dimensional and trace their own rays.)
 
 For angle fields the grid is centred on the **pupil centre**, the point on the
 start plane `z = z_start` whose ray (parallel to the field direction) crosses
@@ -47,9 +61,11 @@ entrance-pupil centre `C = (0,0,z_stop)` as
 ratios, so it stays finite up to 90° incidence (at grazing angles the grid
 falls back to the wavefront plane through the pupil centre). Rays are launched
 from the **wavefront plane** perpendicular to the ray direction through the grid
-centre (`raymath.ProjectOntoWavefront`), so their OPL is referenced to a common
+centre (`pupil.OPLLaunch`; the projection itself is
+`raymath.ProjectOntoWavefront`), so their OPL is referenced to a common
 wavefront and carries no launch-geometry tilt. For finite conjugate fields the
-grid is centred on the object-projected pupil.
+grid is centred on the object-projected pupil and the rays launch from the
+object point (`pupil.HeightOrigin`).
 
 Each pupil point becomes a ray. Rays are traced in parallel; rays that miss or
 are vignetted are recorded with a nil image and `error_code`, so vignetting is
@@ -138,6 +154,8 @@ only, chief rays omitted from the output).
 
 ## Parallelism
 
-Grid rays are traced concurrently (a semaphore-limited worker pool); the
-centroid accumulation is protected by a mutex, so results are deterministic
-for any concurrency.
+Grid rays are traced concurrently by `pupil.Trace`'s semaphore-limited worker
+pool, writing each result back into its grid-ordered sample slot. The spot
+centroid is then accumulated sequentially over the returned samples, so the
+results are deterministic for any worker count and independent of trace
+completion order.
