@@ -20,6 +20,7 @@ type Params struct {
 	HMult   float64
 	WMult   float64
 	Dt      float64
+	DtFp    float64   // fingerprint-distance threshold: a candidate is a repeat only when it is close in variables AND close in the design fingerprint (<= 0 disables the fingerprint criterion)
 	Weights []float64 // optional per-variable weight (nil or 0 -> 1.0)
 	Active  []int     // indices of variables where Min != Max (excluded from distance)
 	Scales  []float64 // Max - Min for each variable (normalisation scale)
@@ -41,6 +42,7 @@ func DefaultParams() Params {
 		HMult:           2.0,
 		WMult:           1.3,
 		Dt:              0.1,
+		DtFp:            0,
 		EscapeIterFrac:  1.0 / 3.0,
 		WSpan:           2.0,
 		StallWindowFrac: 0.2,
@@ -52,12 +54,14 @@ func DefaultParams() Params {
 
 // Point is one recorded local minimum together with the escape parameters
 // (H, W) currently associated with it. These grow when DLS keeps returning to
-// the same minimum.
+// the same minimum. Fingerprint is the optional design descriptor (e.g. the
+// thin-lens element powers) used as an additional "distinct minimum" criterion.
 type Point struct {
-	X     []float64
-	Merit float64
-	H     float64
-	W     float64
+	X           []float64
+	Merit       float64
+	H           float64
+	W           float64
+	Fingerprint []float64
 }
 
 // Phase selects the current phase of the escape cycle for the Wrapper's

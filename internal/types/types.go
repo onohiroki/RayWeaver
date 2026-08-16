@@ -675,21 +675,28 @@ type DegenerateConfig struct {
 // EscapeConfig configures the escape-function global optimisation loop
 // (Ishiki-Ono style local-minimum escape for DLS).
 type EscapeConfig struct {
-	MaxCycles         int                `yaml:"max_cycles,omitempty"`
-	EscapeWorkers     int                `yaml:"escape_workers,omitempty"`
-	MaxSeconds        float64            `yaml:"max_seconds,omitempty"`
-	DistanceThreshold float64            `yaml:"distance_threshold,omitempty"`
-	HInitial          float64            `yaml:"h_initial,omitempty"`
-	WInitial          float64            `yaml:"w_initial,omitempty"`
-	HMult             float64            `yaml:"h_mult,omitempty"`
-	WMult             float64            `yaml:"w_mult,omitempty"`
-	VariableWeights   map[string]float64 `yaml:"variable_weights,omitempty"`
-	EscapeIterFrac    float64            `yaml:"escape_iter_frac,omitempty"`
-	WSpan             float64            `yaml:"w_span,omitempty"`
-	StallWindowFrac   float64            `yaml:"stall_window_frac,omitempty"`
-	StallRelTol       float64            `yaml:"stall_rel_tol,omitempty"`
-	StallEarlyStop    *bool              `yaml:"stall_early_stop,omitempty"`
-	InitialPerturb    float64            `yaml:"initial_perturb,omitempty"`
+	MaxCycles         int     `yaml:"max_cycles,omitempty"`
+	EscapeWorkers     int     `yaml:"escape_workers,omitempty"`
+	MaxSeconds        float64 `yaml:"max_seconds,omitempty"`
+	DistanceThreshold float64 `yaml:"distance_threshold,omitempty"`
+	// FingerprintDistanceThreshold is the design-fingerprint (element-power)
+	// distance below which two candidates close in variable space are still the
+	// same local minimum. A candidate is a repeat only when it is close in
+	// variable space AND close in fingerprint space, so numerically-close but
+	// structurally-different solutions are recorded as distinct minima. 0
+	// disables the fingerprint criterion (variable distance only).
+	FingerprintDistanceThreshold float64            `yaml:"fingerprint_distance_threshold,omitempty"`
+	HInitial                     float64            `yaml:"h_initial,omitempty"`
+	WInitial                     float64            `yaml:"w_initial,omitempty"`
+	HMult                        float64            `yaml:"h_mult,omitempty"`
+	WMult                        float64            `yaml:"w_mult,omitempty"`
+	VariableWeights              map[string]float64 `yaml:"variable_weights,omitempty"`
+	EscapeIterFrac               float64            `yaml:"escape_iter_frac,omitempty"`
+	WSpan                        float64            `yaml:"w_span,omitempty"`
+	StallWindowFrac              float64            `yaml:"stall_window_frac,omitempty"`
+	StallRelTol                  float64            `yaml:"stall_rel_tol,omitempty"`
+	StallEarlyStop               *bool              `yaml:"stall_early_stop,omitempty"`
+	InitialPerturb               float64            `yaml:"initial_perturb,omitempty"`
 }
 
 type MeritTermResult struct {
@@ -752,21 +759,24 @@ type EscapeResult struct {
 
 // EscapeParamsInfo records the escape parameter values actually used.
 type EscapeParamsInfo struct {
-	HInitial          float64            `yaml:"h_initial"`
-	WInitial          float64            `yaml:"w_initial"`
-	HMult             float64            `yaml:"h_mult"`
-	WMult             float64            `yaml:"w_mult"`
-	DistanceThreshold float64            `yaml:"distance_threshold"`
-	MaxCycles         int                `yaml:"max_cycles"`
-	EscapeWorkers     int                `yaml:"escape_workers,omitempty"`
-	MaxSeconds        float64            `yaml:"max_seconds,omitempty"`
-	VariableWeights   map[string]float64 `yaml:"variable_weights,omitempty"`
-	EscapeIterFrac    float64            `yaml:"escape_iter_frac,omitempty"`
-	WSpan             float64            `yaml:"w_span,omitempty"`
-	StallWindowFrac   float64            `yaml:"stall_window_frac,omitempty"`
-	StallRelTol       float64            `yaml:"stall_rel_tol,omitempty"`
-	StallEarlyStop    *bool              `yaml:"stall_early_stop,omitempty"`
-	InitialPerturb    float64            `yaml:"initial_perturb,omitempty"`
+	HInitial          float64 `yaml:"h_initial"`
+	WInitial          float64 `yaml:"w_initial"`
+	HMult             float64 `yaml:"h_mult"`
+	WMult             float64 `yaml:"w_mult"`
+	DistanceThreshold float64 `yaml:"distance_threshold"`
+	// FingerprintDistanceThreshold is the design-fingerprint distance used for
+	// the distinct-minimum criterion (0 = fingerprint criterion disabled).
+	FingerprintDistanceThreshold float64            `yaml:"fingerprint_distance_threshold,omitempty"`
+	MaxCycles                    int                `yaml:"max_cycles"`
+	EscapeWorkers                int                `yaml:"escape_workers,omitempty"`
+	MaxSeconds                   float64            `yaml:"max_seconds,omitempty"`
+	VariableWeights              map[string]float64 `yaml:"variable_weights,omitempty"`
+	EscapeIterFrac               float64            `yaml:"escape_iter_frac,omitempty"`
+	WSpan                        float64            `yaml:"w_span,omitempty"`
+	StallWindowFrac              float64            `yaml:"stall_window_frac,omitempty"`
+	StallRelTol                  float64            `yaml:"stall_rel_tol,omitempty"`
+	StallEarlyStop               *bool              `yaml:"stall_early_stop,omitempty"`
+	InitialPerturb               float64            `yaml:"initial_perturb,omitempty"`
 }
 
 // ConfigFeatures is one config's feature set for a local minimum — a compact
@@ -933,21 +943,21 @@ type AsphereSensitivityMatrix struct {
 // AsphereSurfaceScore is one candidate surface's ranking breakdown and fitted
 // coefficients.
 type AsphereSurfaceScore struct {
-	SurfaceID            int                       `yaml:"surface_id"`
-	Score                float64                   `yaml:"score"`
-	Coverage             float64                   `yaml:"coverage"`
-	CommonEnergy         float64                   `yaml:"common_energy"`
-	Conflict             float64                   `yaml:"conflict"`
-	UniqueEnergy         float64                   `yaml:"unique_energy"`
-	FitQuality           float64                   `yaml:"fit_quality"`
-	ManufacturingPenalty float64                   `yaml:"manufacturing_penalty"`
-	SensitivityPenalty   float64                   `yaml:"sensitivity_penalty"`
-	Coefficients         AsphereCoeffs             `yaml:"coefficients,omitempty"`
-	ScaledCoefficients   AsphereCoeffs             `yaml:"scaled_coefficients,omitempty"`
-	CalibratedCoefficients AsphereCoeffs           `yaml:"calibrated_coefficients,omitempty"`
-	Sensitivity          *AsphereSensitivityMatrix `yaml:"sensitivity,omitempty"`
-	Validation           *AsphereValidation        `yaml:"validation,omitempty"`
-	Warnings             []string                  `yaml:"warnings,omitempty"`
+	SurfaceID              int                       `yaml:"surface_id"`
+	Score                  float64                   `yaml:"score"`
+	Coverage               float64                   `yaml:"coverage"`
+	CommonEnergy           float64                   `yaml:"common_energy"`
+	Conflict               float64                   `yaml:"conflict"`
+	UniqueEnergy           float64                   `yaml:"unique_energy"`
+	FitQuality             float64                   `yaml:"fit_quality"`
+	ManufacturingPenalty   float64                   `yaml:"manufacturing_penalty"`
+	SensitivityPenalty     float64                   `yaml:"sensitivity_penalty"`
+	Coefficients           AsphereCoeffs             `yaml:"coefficients,omitempty"`
+	ScaledCoefficients     AsphereCoeffs             `yaml:"scaled_coefficients,omitempty"`
+	CalibratedCoefficients AsphereCoeffs             `yaml:"calibrated_coefficients,omitempty"`
+	Sensitivity            *AsphereSensitivityMatrix `yaml:"sensitivity,omitempty"`
+	Validation             *AsphereValidation        `yaml:"validation,omitempty"`
+	Warnings               []string                  `yaml:"warnings,omitempty"`
 }
 
 // AsphereOPDField is one field's mean OPD profile across a surface's polar

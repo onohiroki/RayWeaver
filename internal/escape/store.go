@@ -18,16 +18,28 @@ type RecordHandler func(idx int, p Point, isNew bool, version int)
 // keeps returning to it, and its stored X/Merit is replaced by a better point
 // found later.
 type Store struct {
-	mu       sync.RWMutex
-	points   []Point
-	versions []int
-	params   Params
-	onRecord RecordHandler
+	mu          sync.RWMutex
+	points      []Point
+	versions    []int
+	params      Params
+	fingerprint func(x []float64) []float64 // optional design descriptor; nil disables the fingerprint criterion
+	onRecord    RecordHandler
 }
 
 // NewStore creates an empty store.
 func NewStore(params Params) *Store {
 	return &Store{params: params}
+}
+
+// SetFingerprint registers the design-fingerprint function used by IsNew to
+// distinguish structurally different solutions (nil disables it). The function
+// maps a variable vector to a compact design descriptor such as the element
+// powers; two points are the same minimum only when they are close in both
+// variable space and fingerprint space.
+func (s *Store) SetFingerprint(fn func(x []float64) []float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fingerprint = fn
 }
 
 // Distance returns the normalised distance between x and a recorded point
@@ -70,12 +82,58 @@ func (s *Store) FindNearest(x []float64) (float64, int) {
 	return bestD, bestIdx
 }
 
+// FingerprintDistance returns the normalised (per-element mean-square) distance
+// between x's fingerprint and a recorded point's fingerprint, in the raw
+// fingerprint units. When the fingerprint criterion is disabled, or a stored
+// point has no fingerprint, it returns 0 (never forces a new minimum). A
+// mismatch in the number of elements (structural topology change) is treated as
+// maximally far apart (+Inf), since the two designs cannot share a descriptor
+// layout.
+func (s *Store) FingerprintDistance(x []float64, p Point) float64 {
+	if s.fingerprint == nil || s.params.DtFp <= 0 || len(p.Fingerprint) == 0 {
+		return 0
+	}
+	fx := s.fingerprint(x)
+	if len(fx) != len(p.Fingerprint) {
+		return math.Inf(1)
+	}
+	n := len(fx)
+	if n == 0 {
+		return 0
+	}
+	sum := 0.0
+	for i := 0; i < n; i++ {
+		d := fx[i] - p.Fingerprint[i]
+		sum += d * d
+	}
+	return math.Sqrt(sum / float64(n))
+}
+
+// sameAs reports whether x is close enough to the recorded point p to be
+// treated as the same local minimum: close in variable space AND (when the
+// fingerprint criterion is enabled) close in fingerprint space. A point that is
+// numerically close but structurally different is therefore a distinct minimum.
+func (s *Store) sameAs(x []float64, p Point) bool {
+	if s.Distance(x, p) >= s.params.Dt {
+		return false
+	}
+	if s.fingerprint != nil && s.params.DtFp > 0 {
+		if s.FingerprintDistance(x, p) >= s.params.DtFp {
+			return false
+		}
+	}
+	return true
+}
+
 // Add appends a new point and returns its index. The caller is responsible
-// for checking distance against Dt beforehand (see IsNew). The onRecord
-// handler fires with isNew=true and version=0.
+// for checking distance against Dt (and the fingerprint criterion) beforehand
+// (see IsNew). The onRecord handler fires with isNew=true and version=0.
 func (s *Store) Add(p Point) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.fingerprint != nil {
+		p.Fingerprint = s.fingerprint(p.X)
+	}
 	p.H = s.params.H
 	p.W = s.params.W
 	s.points = append(s.points, p)
@@ -89,9 +147,10 @@ func (s *Store) Add(p Point) int {
 
 // Replace updates the point at idx in place when p.Merit is better than the
 // stored merit. H and W (escape strength) are kept from the previous version;
-// X and Merit take the improved values. Returns the final stored point and
-// whether a replacement happened. The onRecord handler fires with isNew=false
-// and the new version count only when a replacement actually occurs.
+// X, Merit and Fingerprint take the improved values. Returns the final stored
+// point and whether a replacement happened. The onRecord handler fires with
+// isNew=false and the new version count only when a replacement actually
+// occurs.
 func (s *Store) Replace(idx int, p Point) (Point, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -104,6 +163,9 @@ func (s *Store) Replace(idx int, p Point) (Point, bool) {
 	}
 	cur.X = p.X
 	cur.Merit = p.Merit
+	if s.fingerprint != nil {
+		cur.Fingerprint = s.fingerprint(p.X)
+	}
 	s.versions[idx]++
 	if s.onRecord != nil {
 		s.onRecord(idx, *cur, false, s.versions[idx])
@@ -129,12 +191,14 @@ func (s *Store) SetOnRecord(h RecordHandler) {
 }
 
 // IsNew reports whether x is far enough from every recorded point to be
-// treated as a distinct local minimum.
+// treated as a distinct local minimum: far in variable space, or — when the
+// fingerprint criterion is enabled — structurally different (far in
+// fingerprint space) even if numerically close.
 func (s *Store) IsNew(x []float64) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for i := range s.points {
-		if s.Distance(x, s.points[i]) < s.params.Dt {
+		if s.sameAs(x, s.points[i]) {
 			return false
 		}
 	}

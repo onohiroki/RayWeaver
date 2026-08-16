@@ -31,6 +31,13 @@ type RunOptions struct {
 	Progress *Progress
 	// OnRecord is called when a minimum is recorded or improved (nil disables).
 	OnRecord RecordHandler
+	// Fingerprint maps a variable vector to a compact design descriptor (e.g.
+	// the thin-lens element powers). When set together with the
+	// fingerprint_distance_threshold escape parameter, IsNew treats a candidate
+	// as a repeat only when it is close in variable space AND close in
+	// fingerprint space, so numerically-close but structurally-different
+	// solutions are recorded as distinct minima. nil disables the criterion.
+	Fingerprint func(x []float64) []float64
 	// Context cancels the search: workers stop at the next cycle boundary
 	// once the current DLS run finishes (nil = run to completion).
 	Context context.Context
@@ -62,6 +69,9 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 	}
 	if cfg.DistanceThreshold != 0 {
 		p.Dt = cfg.DistanceThreshold
+	}
+	if cfg.FingerprintDistanceThreshold > 0 {
+		p.DtFp = cfg.FingerprintDistanceThreshold
 	}
 	for _, m := range []struct {
 		src float64
@@ -140,6 +150,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 	progress.Event("start", start)
 
 	store := NewStore(params)
+	store.SetFingerprint(opts.Fingerprint)
 	store.SetOnRecord(opts.OnRecord)
 	var wg sync.WaitGroup
 	totalEscapes := 0

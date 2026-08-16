@@ -558,6 +558,137 @@ func TestStoreOnRecord(t *testing.T) {
 	}
 }
 
+// fingerprintParams returns escape params for the fingerprint store tests: the
+// two-well variable scale is 4 (x in [-2,2]) and the fingerprint distance
+// threshold is 0.5.
+func fingerprintParams() Params {
+	cfg := types.EscapeConfig{
+		HInitial:                     0.05,
+		WInitial:                     0.5,
+		HMult:                        2.0,
+		WMult:                        1.3,
+		DistanceThreshold:            0.1,
+		FingerprintDistanceThreshold: 0.5,
+	}
+	return BuildParams(cfg, twoWell{}.Variables())
+}
+
+// TestStoreFingerprintCriterion verifies that IsNew treats a candidate as the
+// same minimum only when it is close in variable space AND close in the design
+// fingerprint: numerically-close but structurally-different points are distinct.
+func TestStoreFingerprintCriterion(t *testing.T) {
+	params := fingerprintParams()
+	s := NewStore(params)
+	// Step-function fingerprint: floor(x*20) changes at 0.05 increments, so a
+	// variable-close candidate can still differ in fingerprint.
+	s.SetFingerprint(func(x []float64) []float64 { return []float64{math.Floor(x[0] * 20)} })
+
+	s.Add(Point{X: []float64{0.5}, Merit: 0})
+
+	// Close in variables and close in fingerprint -> same minimum.
+	if s.IsNew([]float64{0.52}) {
+		t.Fatal("0.52 is variable- and fingerprint-close to 0.5; must be a repeat")
+	}
+	// Close in variables (varDist 0.02 < Dt) but fingerprint-different
+	// (floor(0.58*20)=11 vs floor(0.5*20)=10) -> distinct minimum.
+	if !s.IsNew([]float64{0.58}) {
+		t.Fatal("0.58 is variable-close but fingerprint-different; must be new")
+	}
+	// Far in variables -> distinct regardless of the fingerprint.
+	if !s.IsNew([]float64{1.5}) {
+		t.Fatal("1.5 is variable-far; must be new")
+	}
+
+	// Add must store the fingerprint for the recorded point.
+	if got := s.All()[0].Fingerprint; len(got) != 1 || got[0] != 10 {
+		t.Fatalf("stored fingerprint = %v, want [10]", got)
+	}
+
+	// Replace must recompute the fingerprint from the improved X.
+	s.Replace(0, Point{X: []float64{0.58}, Merit: -1})
+	if got := s.All()[0].Fingerprint; len(got) != 1 || got[0] != 11 {
+		t.Fatalf("replaced fingerprint = %v, want [11]", got)
+	}
+}
+
+// TestStoreFingerprintDisabled verifies that a zero fingerprint threshold keeps
+// the original variable-distance-only behaviour: fingerprint differences are
+// ignored and a variable-close candidate is a repeat even when structurally
+// different.
+func TestStoreFingerprintDisabled(t *testing.T) {
+	params := testParams() // DtFp = 0 -> criterion disabled
+	s := NewStore(params)
+	s.SetFingerprint(func(x []float64) []float64 { return []float64{math.Floor(x[0] * 20)} })
+
+	s.Add(Point{X: []float64{0.5}, Merit: 0})
+	if s.IsNew([]float64{0.58}) {
+		t.Fatal("with the fingerprint criterion disabled, a variable-close candidate must be a repeat")
+	}
+}
+
+// TestStoreFingerprintNoFunction verifies that a nil fingerprint function keeps
+// the original variable-distance-only behaviour even when DtFp is set.
+func TestStoreFingerprintNoFunction(t *testing.T) {
+	s := NewStore(fingerprintParams()) // DtFp set, but no SetFingerprint call
+	s.Add(Point{X: []float64{0.5}, Merit: 0})
+	if s.IsNew([]float64{0.58}) {
+		t.Fatal("without a fingerprint function, a variable-close candidate must be a repeat")
+	}
+}
+
+// TestStoreFingerprintElementCountMismatch verifies that candidates whose
+// fingerprint has a different number of elements (structural topology change)
+// are always treated as distinct.
+func TestStoreFingerprintElementCountMismatch(t *testing.T) {
+	s := NewStore(fingerprintParams())
+	s.SetFingerprint(func(x []float64) []float64 {
+		if x[0] > 0.6 {
+			return []float64{1, 2} // two-element design
+		}
+		return []float64{1} // one-element design
+	})
+	s.Add(Point{X: []float64{0.5}, Merit: 0})
+	if !s.IsNew([]float64{0.62}) {
+		t.Fatal("an element-count mismatch in the fingerprint must be treated as a distinct design")
+	}
+}
+
+// TestBuildParamsFingerprintThreshold verifies that BuildParams applies the
+// fingerprint distance threshold from the config.
+func TestBuildParamsFingerprintThreshold(t *testing.T) {
+	cfg := types.EscapeConfig{FingerprintDistanceThreshold: 0.02}
+	p := BuildParams(cfg, twoWell{}.Variables())
+	if p.DtFp != 0.02 {
+		t.Fatalf("DtFp = %v, want 0.02", p.DtFp)
+	}
+}
+
+// TestParallelEscapeRecordsFingerprints verifies that the fingerprint function
+// passed through RunOptions is applied to every recorded minimum.
+func TestParallelEscapeRecordsFingerprints(t *testing.T) {
+	cfg := types.EscapeConfig{
+		MaxCycles:                    8,
+		EscapeWorkers:                2,
+		DistanceThreshold:            0.1,
+		FingerprintDistanceThreshold: 0.5,
+		HInitial:                     0.5,
+		WInitial:                     0.5,
+		HMult:                        2.0,
+		WMult:                        1.0,
+	}
+	fp := func(x []float64) []float64 { return []float64{math.Floor(x[0] * 20)} }
+	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{Fingerprint: fp})
+
+	if len(res.Minima) < 2 {
+		t.Fatalf("expected >=2 minima, got %d", len(res.Minima))
+	}
+	for _, p := range res.Minima {
+		if len(p.Fingerprint) != 1 {
+			t.Fatalf("minimum fingerprint = %v, want 1 element", p.Fingerprint)
+		}
+	}
+}
+
 func TestProgressEventsCarryTimeAndElapsed(t *testing.T) {
 	var buf bytes.Buffer
 	p := NewProgress()

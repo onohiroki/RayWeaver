@@ -210,11 +210,21 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		onRecord = saver.record
 	}
 
+	// Design fingerprint for the distinct-minimum criterion: the thin-lens
+	// element powers at a variable vector. When fingerprint_distance_threshold
+	// is set, two candidates close in variable space are still distinct minima
+	// when their element-power fingerprints differ.
+	fingerprint := func(x []float64) []float64 {
+		surf, _ := applyEscapeX(surfaces, variables, x, gc)
+		return paraxial.ElementPowers(surf, paraxial.DLine, gc)
+	}
+
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
-		Progress: progress,
-		OnRecord: onRecord,
-		Context:  ctx,
-		HardStop: hardStop,
+		Progress:    progress,
+		OnRecord:    onRecord,
+		Fingerprint: fingerprint,
+		Context:     ctx,
+		HardStop:    hardStop,
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,
@@ -418,11 +428,30 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		onRecord = saver.record
 	}
 
+	// Pristine template of each config's surfaces, used to materialise every
+	// minimum (and the fingerprint) independently of the best-solution write.
+	template := make([]types.Config, len(input.Configs))
+	copy(template, input.Configs)
+
+	// Design fingerprint across every config: concatenated thin-lens element
+	// powers at a variable vector.
+	fingerprint := func(x []float64) []float64 {
+		m := applyEscapeMulti(template, input.Optimization, x)
+		var fp []float64
+		for _, cfg := range template {
+			if s, ok := m[cfg.ID]; ok {
+				fp = append(fp, paraxial.ElementPowers(s, paraxial.DLine, gc)...)
+			}
+		}
+		return fp
+	}
+
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
-		Progress: progress,
-		OnRecord: onRecord,
-		Context:  ctx,
-		HardStop: hardStop,
+		Progress:    progress,
+		OnRecord:    onRecord,
+		Fingerprint: fingerprint,
+		Context:     ctx,
+		HardStop:    hardStop,
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,
@@ -436,11 +465,6 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	if saver != nil && saver.err != nil {
 		errOut("escape: error saving minima: %v", saver.err)
 	}
-
-	// Pristine template of each config's surfaces, used to materialise every
-	// minimum independently of the best-solution write below.
-	template := make([]types.Config, len(input.Configs))
-	copy(template, input.Configs)
 
 	var saveStem, saveExt string
 	if saveBase != "" {
@@ -497,20 +521,21 @@ func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum) *type
 		BestIndex: res.BestIdx,
 		BestMerit: res.BestMerit,
 		Params: types.EscapeParamsInfo{
-			HInitial:          res.Params.H,
-			WInitial:          res.Params.W,
-			HMult:             res.Params.HMult,
-			WMult:             res.Params.WMult,
-			DistanceThreshold: res.Params.Dt,
-			MaxCycles:         res.Cycles,
-			EscapeWorkers:     res.Workers,
-			MaxSeconds:        res.MaxSeconds,
-			EscapeIterFrac:    res.Params.EscapeIterFrac,
-			WSpan:             res.Params.WSpan,
-			StallWindowFrac:   res.Params.StallWindowFrac,
-			StallRelTol:       res.Params.StallRelTol,
-			StallEarlyStop:    boolPtr(res.Params.StallEarlyStop),
-			InitialPerturb:    res.Params.InitialPerturb,
+			HInitial:                     res.Params.H,
+			WInitial:                     res.Params.W,
+			HMult:                        res.Params.HMult,
+			WMult:                        res.Params.WMult,
+			DistanceThreshold:            res.Params.Dt,
+			FingerprintDistanceThreshold: res.Params.DtFp,
+			MaxCycles:                    res.Cycles,
+			EscapeWorkers:                res.Workers,
+			MaxSeconds:                   res.MaxSeconds,
+			EscapeIterFrac:               res.Params.EscapeIterFrac,
+			WSpan:                        res.Params.WSpan,
+			StallWindowFrac:              res.Params.StallWindowFrac,
+			StallRelTol:                  res.Params.StallRelTol,
+			StallEarlyStop:               boolPtr(res.Params.StallEarlyStop),
+			InitialPerturb:               res.Params.InitialPerturb,
 		},
 		TimedOut:    res.TimedOut,
 		Interrupted: res.Interrupted,

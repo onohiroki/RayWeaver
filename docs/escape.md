@@ -43,6 +43,7 @@ optimization:
     escape_workers: 4       # top-level parallel goroutines (default 4)
     max_seconds: 0          # soft wall-clock budget (seconds, shared; 0 = unlimited)
     distance_threshold: 0.1 # normalised distance to call a point "new"
+    fingerprint_distance_threshold: 0  # design-fingerprint distance for "new" (0 = off)
     h_initial: 0.1          # escape bump height
     w_initial: 0.5          # escape bump width
     h_mult: 2.0             # strengthen factor when a minimum repeats
@@ -72,6 +73,31 @@ the nearest minimum's bump is strengthened (`h ×= h_mult`) and widened
 (`w ×= w_mult`). When such a repeat arrives with a **better** merit, the stored
 X and merit of that minimum are replaced (the better data is kept; the escape
 strength from the strengthen step is retained).
+
+### Design fingerprint (`fingerprint_distance_threshold`)
+
+The "new minimum" test can additionally require a **structural** difference, not
+just a numerical one. When `fingerprint_distance_threshold > 0`, the command
+maps each candidate to a design fingerprint — the thin-lens element powers
+(`paraxial.ElementPowers`, the same values reported per minimum as
+`features[].element_powers`; multi-config runs concatenate every config) — and
+a converged point is a **repeat** only when it is close in variable space
+*and* close in fingerprint space:
+
+```
+repeat ⇔ distance(x, p) < distance_threshold
+         AND fingerprint_distance(x, p) < fingerprint_distance_threshold
+```
+
+The fingerprint distance is the per-element RMS power difference
+`sqrt(mean(Δp²))` in `1/mm`, so a solution that is numerically close but has a
+different element-power distribution (e.g. a different crown/flint split) is
+recorded as a **distinct** minimum instead of strengthening the old one. A
+mismatch in the number of elements (structural topology change) is always
+treated as distinct. The threshold is an absolute power scale and therefore
+system-dependent (a 50 mm lens has powers ~0.02, a 100 mm lens ~0.01); start
+near the observed inter-minimum power spread and tune per system. `0` (the
+default) keeps the original variable-distance-only behaviour.
 
 The DLS solve inside each worker parallelises its Jacobian across
 `jacobian_workers`. Under the `escape` command an unset `jacobian_workers`
