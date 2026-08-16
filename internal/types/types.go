@@ -984,19 +984,19 @@ type AsphereValidation struct {
 }
 
 type Input struct {
+	Metadata       *Metadata               `yaml:"metadata,omitempty"`
 	GlassCatalog   *GlassCatalog           `yaml:"glass_catalog,omitempty"`
 	CoatingCatalog *CoatingCatalog         `yaml:"coating_catalog,omitempty"`
-	Metadata       *Metadata               `yaml:"metadata,omitempty"`
+	Configs        []Config                `yaml:"configs,omitempty"`
+	Vignette       *VignetteConfig         `yaml:"vignette,omitempty"`
 	System         System                  `yaml:"-"`
 	Optimization   *OptimizationConfig     `yaml:"optimization,omitempty"`
-	Configs        []Config                `yaml:"configs,omitempty"`
 	Chief          *ChiefInput             `yaml:"chief,omitempty"`
 	Rays           *RayInput               `yaml:"rays,omitempty"`
 	Paraxial       *ParaxialInput          `yaml:"paraxial,omitempty"`
 	Asphere        *AsphereCandidateConfig `yaml:"asphere_candidate,omitempty"`
 	PSF            *PSFConfig              `yaml:"psf,omitempty"`
 	Wavefront      *WavefrontConfig        `yaml:"wavefront,omitempty"`
-	Vignette       *VignetteConfig         `yaml:"vignette,omitempty"`
 	Scale          *ScaleConfig            `yaml:"scale,omitempty"`
 }
 
