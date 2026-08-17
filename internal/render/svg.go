@@ -23,6 +23,10 @@ type Config struct {
 	ScaleOverride  float64
 	RightMarginPct float64
 	MaxFanRays     int
+	// FanInvalid controls the display of fan rays whose path carries an error
+	// code (FanInvalidHide = skip, FanInvalidShow = full path,
+	// FanInvalidClip = up to the erroring surface).
+	FanInvalid FanInvalidMode
 	// StopSurfaceID is the aperture-stop surface ID; when > 0 the renderer
 	// draws the stop aperture marker at that surface.
 	StopSurfaceID int
@@ -37,7 +41,7 @@ const (
 func LensSVG(cfg Config) string {
 	zPos := computeZPositions(cfg.Surfaces)
 	maxSurfZ := maxSurfaceZ(cfg.Surfaces)
-	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays)
+	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays, cfg.FanInvalid)
 
 	// Compute display Z span: if object plane is far, cap the
 	// object-side extent to min(lensLength, backFocalLength).

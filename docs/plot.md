@@ -18,6 +18,9 @@ rayweave plot [-o file.svg|.png] [flags] < input.yaml
 | `--ray-width 0.1` | ray-path stroke width |
 | `--scale 0` | SVG/PNG scale factor (0 = auto) |
 | `--right-margin 20` | right-side margin beyond the image plane (% of lens length) |
+| `--fan-rays 11` | max fan rays drawn per field in the lens diagram (0 = hide fan rays) |
+| `--show-invalid-ray-fan` | draw fan rays whose path carries an error code in full (default: hide them) |
+| `--clip-invalid-ray-fan` | draw fan rays only up to the first surface that errored |
 
 ## Input
 
@@ -43,6 +46,16 @@ cat result.yaml | rayweave plot --config tele -o tele.png
 - Ray colours follow the field angle (low = blue, high = red).
 - Aspheric surfaces are drawn from the sag function (see the asphere rendering
   in `internal/render`).
+
+## Invalid fan rays
+
+A fan ray whose path records an error code on any surface (e.g. `aperture_stop`,
+`missed_surface`, `total_internal_reflection`, `glass_path_too_short`,
+`glass_path_too_long`) is considered invalid. By default such fan rays are not
+drawn at all; pass `--show-invalid-ray-fan` to draw them in full (the previous
+behaviour) or `--clip-invalid-ray-fan` to stop the path at the first erroring
+surface. The two flags are mutually exclusive. These options only affect fan
+rays; traced `results[]`, marginal and chief rays are drawn as always.
 
 ## Examples
 

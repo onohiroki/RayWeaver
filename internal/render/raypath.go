@@ -20,7 +20,21 @@ type angleColorEntry struct {
 	color string
 }
 
-func buildRayPaths(results []types.RayResult, chiefRays []types.ChiefRayResult, maxFanRays int) []rayRenderData {
+// fanInvalidMode controls how fan rays whose path carries a non-empty
+// SurfaceResult.ErrorCode (aperture stop, missed/total-reflection surfaces,
+// glass-path violations, ...) are displayed in the lens diagram.
+// FanInvalidHide (default) skips those fan rays entirely, FanInvalidShow
+// draws their full path, and FanInvalidClip truncates them at the first
+// erroring surface.
+type FanInvalidMode int
+
+const (
+	FanInvalidHide FanInvalidMode = iota
+	FanInvalidShow
+	FanInvalidClip
+)
+
+func buildRayPaths(results []types.RayResult, chiefRays []types.ChiefRayResult, maxFanRays int, fanInvalid FanInvalidMode) []rayRenderData {
 	var out []rayRenderData
 
 	colors := buildAngleColorMap(chiefRays)
@@ -42,7 +56,7 @@ func buildRayPaths(results []types.RayResult, chiefRays []types.ChiefRayResult, 
 		})
 	}
 
-	out = append(out, buildFanPaths(chiefRays, maxFanRays, colors)...)
+	out = append(out, buildFanPaths(chiefRays, maxFanRays, colors, fanInvalid)...)
 
 	return out
 }
@@ -50,7 +64,7 @@ func buildRayPaths(results []types.RayResult, chiefRays []types.ChiefRayResult, 
 // buildFanPaths collects decimated meridional and rotated fan-ray paths for
 // the lens diagram. Sagittal fan rays (XZ plane) are skipped because they
 // project onto the optical axis in the YZ view.
-func buildFanPaths(chiefRays []types.ChiefRayResult, maxFanRays int, colors []angleColorEntry) []rayRenderData {
+func buildFanPaths(chiefRays []types.ChiefRayResult, maxFanRays int, colors []angleColorEntry, fanInvalid FanInvalidMode) []rayRenderData {
 	var out []rayRenderData
 	if maxFanRays <= 0 {
 		return out
@@ -62,10 +76,7 @@ func buildFanPaths(chiefRays []types.ChiefRayResult, maxFanRays int, colors []an
 		col := fieldAngleColor(cr.FieldAngle, colors)
 		addFan := func(points []types.FanPoint) {
 			for _, fp := range sampleFanPoints(points, maxFanRays) {
-				if len(fp.Path) < 2 {
-					continue
-				}
-				path := buildRayPath(fp.Path)
+				path := fanPath(fp, fanInvalid)
 				if path == "" {
 					continue
 				}
@@ -82,6 +93,38 @@ func buildFanPaths(chiefRays []types.ChiefRayResult, maxFanRays int, colors []an
 		}
 	}
 	return out
+}
+
+// fanPath applies the fanInvalidMode to one sampled fan point and returns its
+// SVG path ("" = not drawn). fanInvalidHide drops a fan ray as soon as any
+// surface carries an error code; fanInvalidClip keeps the path up to and
+// including the first erroring surface (falling short of two points the ray
+// cannot be drawn); fanInvalidShow draws the full path unchanged.
+func fanPath(fp types.FanPoint, fanInvalid FanInvalidMode) string {
+	if fanInvalid == FanInvalidShow {
+		return buildRayPath(fp.Path)
+	}
+	clipTo := len(fp.Path)
+	invalid := false
+	for i := range fp.Path {
+		if fp.Path[i].ErrorCode == "" {
+			continue
+		}
+		invalid = true
+		if clipTo > i+1 {
+			clipTo = i + 1
+		}
+	}
+	if invalid {
+		if fanInvalid == FanInvalidHide {
+			return ""
+		}
+		if clipTo < 2 {
+			return ""
+		}
+		return buildRayPath(fp.Path[:clipTo])
+	}
+	return buildRayPath(fp.Path)
 }
 
 // sampleFanPoints uniformly samples up to max points from the fan. The

@@ -17,6 +17,7 @@ func runPlot(data []byte) {
 	var outPath string
 	var lensWidth, rayWidth, scaleOverride, rightMarginPct float64
 	var fanRays int
+	var showInvalidFan, clipInvalidFan bool
 	var configFlag, glassDir string
 	args := os.Args[2:] // skip "plot"
 	fs := flag.NewFlagSet("plot", flag.ExitOnError)
@@ -27,9 +28,16 @@ func runPlot(data []byte) {
 	fs.Float64Var(&scaleOverride, "scale", 0, "SVG scale factor (0 = auto)")
 	fs.Float64Var(&rightMarginPct, "right-margin", 20, "right-side margin beyond image plane (% of lens length, default 20)")
 	fs.IntVar(&fanRays, "fan-rays", 11, "max fan rays drawn per field in the lens diagram (0 = hide fan rays)")
+	fs.BoolVar(&showInvalidFan, "show-invalid-ray-fan", false, "draw fan rays whose path carries an error code in full (default: hide them)")
+	fs.BoolVar(&clipInvalidFan, "clip-invalid-ray-fan", false, "draw fan rays only up to the first surface that errored")
 	fs.StringVar(&configFlag, "config", "", "select config by id (multi-config mode)")
 	fs.StringVar(&glassDir, "glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(args)
+
+	if showInvalidFan && clipInvalidFan {
+		errOut("Error: --show-invalid-ray-fan and --clip-invalid-ray-fan are mutually exclusive")
+		os.Exit(1)
+	}
 
 	if glassDir != "" {
 		agfGlasses, err := glass.LoadAGFDir(glassDir)
@@ -80,6 +88,14 @@ func runPlot(data []byte) {
 		RightMarginPct: rightMarginPct,
 		MaxFanRays:     fanRays,
 		StopSurfaceID:  output.Chief.StopSurface,
+	}
+	switch {
+	case clipInvalidFan:
+		cfg.FanInvalid = render.FanInvalidClip
+	case showInvalidFan:
+		cfg.FanInvalid = render.FanInvalidShow
+	default:
+		cfg.FanInvalid = render.FanInvalidHide
 	}
 
 	if outPath != "" && strings.HasSuffix(strings.ToLower(outPath), ".png") {
