@@ -828,43 +828,57 @@ func searchBackwardTangent(
 		return math.Atan2(math.Abs(emDir.Y), math.Abs(emDir.Z)), true
 	}
 
-	if targetAngle < 1e-12 {
+	mag := math.Abs(targetAngle)
+	if mag < 1e-12 {
 		return 0, true
 	}
 
+	// angleFn returns the magnitude of the emergent angle, but the chief ray's
+	// forward field angle carries the opposite sign: the forward ray is -emDir
+	// and the front optics are reflection-free (backwardFrontSetup), so u > 0
+	// makes the backward ray emerge with emDir.Y > 0 and the forward ray with a
+	// negative field angle. Search u on the side whose forward field angle has
+	// the target's sign.
+	searchDir := -1.0
+	if targetAngle < 0 {
+		searchDir = 1.0
+	}
+
 	// u = 0 is the on-axis backward ray, which must emerge on-axis.
-	if a, ok := angleFn(0); !ok || a >= targetAngle {
+	if a, ok := angleFn(0); !ok || a >= mag {
 		return 0, ok
 	}
 
+	// Sweep w = |u| outward (angleFn is monotonic in |u| for the centered,
+	// reflection-free front) and bisect once the angle reaches the target.
 	lo := 0.0
 	step := 0.002
-	for u := step; u <= 10.0; {
-		ang, ok := angleFn(u)
+	for w := step; w <= 10.0; {
+		ang, ok := angleFn(searchDir * w)
 		if ok {
-			if ang >= targetAngle {
-				hi := u
+			if ang >= mag {
+				hi := w
 				for iter := 0; iter < 60; iter++ {
 					mid := (lo + hi) / 2
-					mang, mok := angleFn(mid)
+					mang, mok := angleFn(searchDir * mid)
 					if !mok {
 						hi = mid
 						continue
 					}
-					if math.Abs(mang-targetAngle) < 1e-9 {
-						return mid, true
+					if math.Abs(mang-mag) < 1e-9 {
+						return searchDir * mid, true
 					}
-					if mang < targetAngle {
+					if mang < mag {
 						lo = mid
 					} else {
 						hi = mid
 					}
 				}
-				return (lo + hi) / 2, true
+				return searchDir * (lo + hi) / 2, true
 			}
-			lo = u
+			lo = w
 		}
-		u += step
+		w += step
 		step *= 1.5
 	}
 	return 0, false
@@ -1830,18 +1844,24 @@ func searchAngleForImageHeight(
 		return imageHeightForAngle(system, engine, angleDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType, pupilZ)
 	}
 
-	// Bracket search: start with 0–15° and expand as needed.
-	// targetY is a positive magnitude, while the traced image heights are signed
-	// (a positive lens forms an inverted image, so they are negative). Compare
-	// absolute values so the sign of the image height never defeats the bracket.
+	// Bracket search: start with 0–15° and expand as needed. The target may be
+	// signed (negative image heights are valid fields); the traced image heights
+	// carry the field sign (angle θ lands at +height for direction dy>0), so the
+	// bracket and bisection compare magnitudes and the sign of targetY is applied
+	// to the recovered angle.
 	mag := math.Abs
+	sgn := 1.0
+	if targetY < 0 {
+		sgn = -1.0
+	}
+	targetMag := mag(targetY)
 	loDeg, hiDeg := 0.0, 15.0
 	yLo, okLo := heightFn(loDeg)
 	yHi, okHi := heightFn(hiDeg)
 	aLo, aHi := mag(yLo), mag(yHi)
 
 	for iter := 0; iter < 25; iter++ {
-		if okLo && okHi && aLo <= targetY && targetY <= aHi {
+		if okLo && okHi && aLo <= targetMag && targetMag <= aHi {
 			break
 		}
 		if hiDeg > 70 {
@@ -1849,7 +1869,7 @@ func searchAngleForImageHeight(
 			yHi, okHi = heightFn(hiDeg)
 			aHi = mag(yHi)
 		}
-		if !okLo || aLo > targetY {
+		if !okLo || aLo > targetMag {
 			loDeg -= 3.0
 			if loDeg < -80 {
 				return 0
@@ -1863,7 +1883,7 @@ func searchAngleForImageHeight(
 			}
 			yHi, okHi = heightFn(hiDeg)
 			aHi = mag(yHi)
-		} else if aHi < targetY {
+		} else if aHi < targetMag {
 			hiDeg += 3.0
 			if hiDeg > 80 {
 				return 0
@@ -1875,7 +1895,7 @@ func searchAngleForImageHeight(
 		}
 	}
 
-	if !okLo || !okHi || aLo > targetY || aHi < targetY {
+	if !okLo || !okHi || aLo > targetMag || aHi < targetMag {
 		return 0
 	}
 
@@ -1891,10 +1911,10 @@ func searchAngleForImageHeight(
 			continue
 		}
 		aMid := mag(yMid)
-		if math.Abs(aMid-targetY) < 1e-12 {
-			return midDeg
+		if math.Abs(aMid-targetMag) < 1e-12 {
+			return sgn * midDeg
 		}
-		if aMid < targetY {
+		if aMid < targetMag {
 			loDeg = midDeg
 		} else {
 			hiDeg = midDeg
@@ -1903,7 +1923,7 @@ func searchAngleForImageHeight(
 			break
 		}
 	}
-	return (loDeg + hiDeg) / 2
+	return sgn * (loDeg + hiDeg) / 2
 }
 
 // imageHeightForAnglePT returns the Y position at the reference surface for a

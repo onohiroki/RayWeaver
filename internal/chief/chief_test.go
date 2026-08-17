@@ -635,3 +635,210 @@ func countTraced(pts []types.GridPoint) int {
 	}
 	return n
 }
+
+// passThroughTripletSystem is a weak three-surface singlet (R≈333 on both
+// lens surfaces) whose plane surface 3 is the reference surface and surface 2
+// the stop. The weakness keeps the through-stop backward construction reachable
+// up to ~20° field angle, so the pass-through tests exercise the backward path
+// rather than its forward fallback.
+func passThroughTripletSystem() (types.System, *glass.Catalog) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.003, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 100.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.003, Thickness: 80.0, Material: types.Material{}, Diameter: 100.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 40.0},
+	}
+	surface.Precompute(surfaces)
+	return types.System{Surfaces: surfaces}, gc
+}
+
+// TestSearchBackwardTangentSigned verifies the signed handling of negative
+// field angles in the through-stop backward search. The forward chief ray is
+// the negated backward-emergent direction, so u carries the opposite sign of
+// the emergent forward field angle: a positive target must be found with
+// negative u and a negative target with positive u, and the resulting emergent
+// forward angle must equal the (signed) target. Mirror-symmetric targets must
+// give mirror-symmetric |u|.
+func TestSearchBackwardTangentSigned(t *testing.T) {
+	sys, gc := passThroughTripletSystem()
+	e := ray.NewEngine(gc, nil)
+	const wl = 0.00058756
+
+	stopCenter, frontSeq, ok := backwardFrontSetup(sys.Surfaces, 2, types.Vec3{})
+	if !ok {
+		t.Fatal("backwardFrontSetup failed for the test system")
+	}
+
+	forwardAngle := func(u float64, isX bool) (float64, bool) {
+		dir := types.Vec3{X: 0, Y: 0, Z: -1}
+		if isX {
+			dir.X = u
+		} else {
+			dir.Y = u
+		}
+		_, emDir, ok := e.TraceBackward(sys.Surfaces, frontSeq, stopCenter, dir, wl)
+		if !ok {
+			return 0, false
+		}
+		if isX {
+			return raymath.RadToDeg(math.Atan2(-emDir.X, math.Abs(emDir.Z))), true
+		}
+		return raymath.RadToDeg(math.Atan2(-emDir.Y, math.Abs(emDir.Z))), true
+	}
+
+	cases := []struct {
+		isX bool
+		deg float64
+	}{
+		{false, 10}, {false, -10}, {false, 20}, {false, -20},
+		{true, 10}, {true, -10},
+		{false, 0}, {false, -1e-15},
+	}
+	for _, tc := range cases {
+		u, ok := searchBackwardTangent(e, sys.Surfaces, frontSeq, stopCenter,
+			raymath.DegToRad(tc.deg), tc.isX, wl)
+		if !ok {
+			t.Errorf("isX=%v deg=%v: searchBackwardTangent failed", tc.isX, tc.deg)
+			continue
+		}
+		if math.Abs(tc.deg) < 1e-12 {
+			if u != 0 {
+				t.Errorf("isX=%v deg=%v: u = %v, want 0", tc.isX, tc.deg, u)
+			}
+			continue
+		}
+		if (u > 0) == (tc.deg > 0) {
+			t.Errorf("isX=%v deg=%v: u = %v, want the sign opposite to the target", tc.isX, tc.deg, u)
+		}
+		got, ok := forwardAngle(u, tc.isX)
+		if !ok {
+			t.Errorf("isX=%v deg=%v: forward trace of u=%v failed", tc.isX, tc.deg, u)
+			continue
+		}
+		if math.Abs(got-tc.deg) > 1e-6 {
+			t.Errorf("isX=%v deg=%v: emergent forward angle = %v, want %v", tc.isX, tc.deg, got, tc.deg)
+		}
+	}
+
+	uPos, _ := searchBackwardTangent(e, sys.Surfaces, frontSeq, stopCenter, raymath.DegToRad(10), false, wl)
+	uNeg, _ := searchBackwardTangent(e, sys.Surfaces, frontSeq, stopCenter, raymath.DegToRad(-10), false, wl)
+	if math.Abs(uPos+uNeg) > 1e-6 {
+		t.Errorf("u(+10)=%v u(-10)=%v, want mirror (±same |u|)", uPos, uNeg)
+	}
+}
+
+// TestDetermineChiefRaysGridNegativeAnglePassThrough verifies that negative
+// field angles with pass_through are not collapsed to the on-axis ray: the
+// +10° and -10° chief rays must be mirror images with the correct signed
+// object-space direction and each must close through the stop centre.
+func TestDetermineChiefRaysGridNegativeAnglePassThrough(t *testing.T) {
+	sys, gc := passThroughTripletSystem()
+	e := ray.NewEngine(gc, nil)
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+	pt := &types.PassThroughTarget{Surface: 2, Coordinate: types.Vec3{}}
+
+	fields := []types.FieldDef{
+		{Angle: 10, Direction: []float64{0, 1}},
+		{Angle: -10, Direction: []float64{0, 1}},
+	}
+	results := DetermineChiefRaysGrid(sys, fields, 3, 64, gc, pol, 0.00058756,
+		false, types.GridPolar, pt, nil, nil)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	want := []float64{math.Sin(raymath.DegToRad(10)), -math.Sin(raymath.DegToRad(10))}
+	for i, cr := range []types.Ray{results[0].ChiefRay, results[1].ChiefRay} {
+		if math.Abs(cr.Initial.Direction.Y-want[i]) > 1e-6 {
+			t.Errorf("field_angle=%v: dirY = %v, want %v", results[i].FieldAngle, cr.Initial.Direction.Y, want[i])
+		}
+		if cr.Initial.Direction.Y == 0 {
+			t.Errorf("field_angle=%v: chief ray collapsed to on-axis", results[i].FieldAngle)
+		}
+		tr := e.TraceRay(cr, sys.Surfaces)
+		if tr.Error != "" {
+			t.Errorf("field_angle=%v: chief ray failed: %v", results[i].FieldAngle, tr.Error)
+			continue
+		}
+		var stopHit *types.SurfaceResult
+		for j := range tr.Surfaces {
+			if tr.Surfaces[j].SurfaceID == 2 {
+				stopHit = &tr.Surfaces[j]
+			}
+		}
+		if stopHit == nil {
+			t.Errorf("field_angle=%v: no stop hit", results[i].FieldAngle)
+			continue
+		}
+		if dist := math.Hypot(stopHit.Position.X, stopHit.Position.Y); dist > 1e-3 {
+			t.Errorf("field_angle=%v: stop miss %v mm", results[i].FieldAngle, dist)
+		}
+	}
+
+	// The two fields must land on mirror-symmetric sides of the reference plane.
+	if results[0].SpotStats == nil || results[1].SpotStats == nil {
+		t.Fatal("missing spot stats")
+	}
+	y0, y1 := results[0].SpotStats.Centroid.Y, results[1].SpotStats.Centroid.Y
+	if y0*y1 >= 0 {
+		t.Errorf("spot centroid Y = %v/%v, want opposite signs", y0, y1)
+	}
+	if math.Abs(y0+y1) > 1e-6 {
+		t.Errorf("spot centroid Y = %v/%v, want mirror", y0, y1)
+	}
+}
+
+// TestDetermineChiefRaysGridNegativeImageHeight verifies that a negative
+// image_height is not collapsed to the on-axis ray: the recovered field angles
+// must carry the sign of the requested height and the chief rays must be mirror
+// images closing through the stop centre.
+func TestDetermineChiefRaysGridNegativeImageHeight(t *testing.T) {
+	sys, gc := passThroughTripletSystem()
+	e := ray.NewEngine(gc, nil)
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+	pt := &types.PassThroughTarget{Surface: 2, Coordinate: types.Vec3{}}
+
+	fields := []types.FieldDef{
+		{ImageHeight: 5, Direction: []float64{0, 1}},
+		{ImageHeight: -5, Direction: []float64{0, 1}},
+	}
+	results := DetermineChiefRaysGrid(sys, fields, 3, 64, gc, pol, 0.00058756,
+		false, types.GridPolar, pt, nil, nil)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	a0, a1 := results[0].FieldAngle, results[1].FieldAngle
+	if a0 <= 0 || a1 >= 0 {
+		t.Errorf("field angles = %v/%v, want opposite signs for +5/-5 image heights", a0, a1)
+	}
+	if math.Abs(a0+a1) > 0.5 {
+		t.Errorf("field angles = %v/%v, want mirror magnitudes", a0, a1)
+	}
+	if math.Abs(results[0].ChiefRay.Initial.Direction.Y+results[1].ChiefRay.Initial.Direction.Y) > 1e-6 {
+		t.Errorf("chief ray dirY = %v/%v, want mirror",
+			results[0].ChiefRay.Initial.Direction.Y, results[1].ChiefRay.Initial.Direction.Y)
+	}
+	for i, cr := range []types.Ray{results[0].ChiefRay, results[1].ChiefRay} {
+		tr := e.TraceRay(cr, sys.Surfaces)
+		if tr.Error != "" {
+			t.Errorf("field %v: chief ray failed: %v", results[i].FieldAngle, tr.Error)
+			continue
+		}
+		var ref *types.SurfaceResult
+		for j := range tr.Surfaces {
+			if tr.Surfaces[j].SurfaceID == 3 {
+				ref = &tr.Surfaces[j]
+			}
+		}
+		if ref == nil {
+			t.Errorf("field %v: no reference-surface hit", results[i].FieldAngle)
+			continue
+		}
+		wantY := []float64{5, -5}[i]
+		if math.Abs(ref.Position.Y-wantY) > 0.05 {
+			t.Errorf("field %v: chief ray Y at reference = %v, want %v", results[i].FieldAngle, ref.Position.Y, wantY)
+		}
+	}
+}
