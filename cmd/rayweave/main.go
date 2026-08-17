@@ -968,9 +968,9 @@ Subcommands:
   asphere    Rank surfaces for asphere introduction, estimate initial coefficients
   psf        Point-spread function via direct vector Huygens integration
   wavefront  Wavefront analysis (paraboloid, best-fit sphere, Fringe Zernike, best focus)
-  import     Import ZEMAX/OSLO/CODE V lens files
+  import     Import system from ZEMAX ZMX / CODE V SEQ / OSLO LEN
   export     Export system to ZEMAX ZMX / CODE V SEQ / OSLO LEN
-  query      Read-only YAML/JSONL selector (replace python3/PyYAML in demos)
+  query      Read-only YAML/JSONL selector
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
   for detailed options and YAML structure.
