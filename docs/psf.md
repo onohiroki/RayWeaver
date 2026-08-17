@@ -10,8 +10,8 @@ integral** — no FFT. The numerical method is described in
 ```
 rayweave psf [--ref-surface N] [--psf-grid 64] [--psf-width W]
              [--num-rays 400] [--fields I1,I2,...] [--wavelengths W1,...]
-             [--polarization S] [--best-focus] [--max-freq N]
-             [--yaml FILE] [--csv FILE] < system.yaml
+             [--polarization S] [--best-focus] [--converge-check BOOL]
+             [--converge-tol T] [--max-freq N] [--yaml FILE] [--csv FILE] < system.yaml
 ```
 
 It reads standard system YAML (a `chief` section is required for the fields),

@@ -321,7 +321,7 @@ func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opt
 	}
 	ps.GridType = opts.GridType
 	// Convergence labelling defaults to ON for this command, so always reflect
-	// the effective state (enables turning it off via --converge-check=false).
+	// the effective state (enables turning it off via --converge-check false).
 	ps.ConvergeCheck = &opts.ConvergeCheck
 	if opts.ConvergeTol > 0 {
 		ps.ConvergeTol = opts.ConvergeTol
