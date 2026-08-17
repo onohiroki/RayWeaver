@@ -26,7 +26,7 @@ It reads standard system YAML, writes pipeline-compatible YAML with an
 | `--sensitivity-samples N` | pupil grid radial samples for the measured sensitivity pass (default 9; `0` disables the measured pass and falls back to the analytic index-contrast proxy) |
 | `--top-k N` | number of top-ranked surfaces to fit (default 3) |
 | `--sag-scale α` | scalar applied to the fitted coefficients for safe insertion (default 0.2; try 0.05..0.5) |
-| `--calibrate-scale` | derive each candidate's embedded asphere scale from the measured ray-trace response instead of the fixed `sag_scale` (on by default; disable with `--calibrate-scale=false` / `calibrate_scale: false`) |
+| `--calibrate-scale BOOL` | derive each candidate's embedded asphere scale from the measured ray-trace response instead of the fixed `sag_scale` (on by default; disable with `--calibrate-scale false` / `calibrate_scale: false`) |
 | `--scale-probes L` | comma-separated scales to verify instead of the quadratic estimate (e.g. `0.1,0.25,0.5,1.0`) |
 | `--validate` | run a short DLS per fitted surface to verify the asphere improves the merit |
 | `--apply` | insert the top-ranked DLS-validated asphere onto its surface and output the modified system (implies `--validate`) |

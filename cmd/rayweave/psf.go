@@ -46,7 +46,7 @@ func runPSF(data []byte) {
 	yamlOut := fs.String("yaml", "", "write full structured PSF data to FILE (index-suffixed per result)")
 	csvOut := fs.String("csv", "", "write gnuplot x,y,intensity map to FILE (index-suffixed per result)")
 	bestFocus := fs.Bool("best-focus", false, "evaluate each field at its best-focus image plane (removes field-curvature defocus)")
-	convergeCheck := fs.Bool("converge-check", false, "label sampling convergence by re-evaluating each result at a higher ray count (default: on)")
+	fs.String("converge-check", "", "label sampling convergence by re-evaluating each result at a higher ray count (default: on; true|false)")
 	convergeTol := fs.Float64("converge-tol", 0, "relative Strehl change threshold for convergence (default 0.10)")
 	fs.Parse(os.Args[2:])
 
@@ -157,14 +157,19 @@ func runPSF(data []byte) {
 		opts.BestFocus = true
 	}
 	// Sampling-convergence labelling. The command default is ON; an explicit
-	// --converge-check=false disables it (CLI wins). `psf.converge_check: false`
+	// --converge-check false disables it (CLI wins). `psf.converge_check: false`
 	// in the input YAML also disables it; a YAML-absence keeps the default ON.
+	cc, ccSet, err := boolFlag(fs, "converge-check")
+	if err != nil {
+		errOut("Error: %s", err)
+		os.Exit(1)
+	}
 	opts.ConvergeCheck = true
-	if input.PSF != nil && !flagWasSet(fs, "converge-check") && input.PSF.ConvergeCheck != nil {
+	if input.PSF != nil && !ccSet && input.PSF.ConvergeCheck != nil {
 		opts.ConvergeCheck = *input.PSF.ConvergeCheck
 	}
-	if flagWasSet(fs, "converge-check") {
-		opts.ConvergeCheck = *convergeCheck
+	if ccSet {
+		opts.ConvergeCheck = cc
 	}
 	if *convergeTol > 0 {
 		opts.ConvergeTol = *convergeTol

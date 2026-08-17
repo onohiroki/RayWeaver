@@ -47,7 +47,7 @@ single flat exit pupil would break down.
 | `--psf-workers N` | parallel workers for the Huygens integral and wavefront tracing (default: GOMAXPROCS) |
 | `--max-freq N` | MTF frequency cap in cycles/mm (default: `psf.mtf_config.max_frequency`, else the Nyquist) |
 | `--best-focus` | evaluate each field at its **best-focus image plane**: the plane shift minimizing the geometric spot RMS is applied per field before the Huygens integral, removing field-curvature defocus |
-| `--converge-check` | label sampling convergence by re-evaluating each result at a higher ray count (**on by default**; use `--converge-check=false` to disable) |
+| `--converge-check BOOL` | label sampling convergence by re-evaluating each result at a higher ray count (**on by default**; use `--converge-check false` to disable) |
 | `--converge-tol T` | relative Strehl change threshold for convergence (default 0.10) |
 | `--yaml FILE` | write full structured data to FILE, one index-suffixed file per result (`FILE_0.yaml`, `FILE_1.yaml`, …) |
 | `--csv FILE` | write a gnuplot `x,y,intensity` pm3d map to FILE, one index-suffixed file per result |

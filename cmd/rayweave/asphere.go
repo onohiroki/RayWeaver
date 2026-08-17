@@ -23,7 +23,7 @@ func runAsphere(data []byte) {
 	sensitivitySamples := fs.Int("sensitivity-samples", -1, "sensitivity trace radial samples (default 9; 0 = disable, use analytic proxy)")
 	topK := fs.Int("top-k", 0, "number of top-ranked surfaces to fit (default 3)")
 	sagScale := fs.Float64("sag-scale", 0, "initial sag scale alpha (default 0.2)")
-	calibrateScale := fs.Bool("calibrate-scale", false, "derive each candidate's embedded asphere scale from the measured ray-trace response (default: on; disable with --calibrate-scale=false)")
+	fs.String("calibrate-scale", "", "derive each candidate's embedded asphere scale from the measured ray-trace response (default: on; true|false)")
 	scaleProbes := fs.String("scale-probes", "", "comma-separated scales to verify instead of the quadratic estimate (e.g. 0.1,0.25,0.5,1.0)")
 	validate := fs.Bool("validate", false, "run a short DLS per fitted surface to verify the asphere improves the merit")
 	apply := fs.Bool("apply", false, "insert the top-ranked DLS-validated asphere onto its surface (implies --validate) and output the modified system")
@@ -56,8 +56,11 @@ func runAsphere(data []byte) {
 	}
 	cfg.TopK = intOrYAML(*topK, cfg.TopK)
 	cfg.SagScale = floatOrYAML(*sagScale, cfg.SagScale)
-	if flagWasSet(fs, "calibrate-scale") {
-		cfg.CalibrateScale = *calibrateScale
+	if cs, csSet, err := boolFlag(fs, "calibrate-scale"); err != nil {
+		errOut("Error: %s", err)
+		os.Exit(1)
+	} else if csSet {
+		cfg.CalibrateScale = cs
 	}
 	if *scaleProbes != "" {
 		cfg.ScaleProbes = parseFloatList(*scaleProbes, "scale probe")

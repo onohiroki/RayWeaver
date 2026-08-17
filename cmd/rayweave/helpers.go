@@ -2,8 +2,10 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +40,25 @@ func anyFlagSet(fs *flag.FlagSet, names ...string) bool {
 		}
 	}
 	return false
+}
+
+// boolFlag parses a value-taking boolean flag introduced as a string flag.
+// A Go bool flag cannot consume a following "true"/"false" argument (a bare
+// `--name false` silently ignores "false"), so settings that need to be
+// forced off from the CLI are declared as strings and resolved here. Valid
+// values follow strconv.ParseBool ("true"/"false"/"1"/"0"/"t"/"f", any case).
+// set reports whether the flag was explicitly given; err is non-nil for an
+// explicitly given value that is not a boolean.
+func boolFlag(fs *flag.FlagSet, name string) (v bool, set bool, err error) {
+	if !flagWasSet(fs, name) {
+		return false, false, nil
+	}
+	s := fs.Lookup(name).Value.String()
+	v, perr := strconv.ParseBool(s)
+	if perr != nil {
+		return false, true, fmt.Errorf("--%s expects a boolean (true/false), got %q", name, s)
+	}
+	return v, true, nil
 }
 
 // intOrYAML resolves an int setting under the CLI/YAML precedence rule: the

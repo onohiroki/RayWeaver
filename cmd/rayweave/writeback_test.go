@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"io"
 	"math"
@@ -255,18 +256,48 @@ func TestChiefWavelengthWriteBack(t *testing.T) {
 	}
 }
 
-// TestTraceLenientWriteBack verifies --lenient is echoed into rays.lenient and
-// the YAML value is honoured when the flag is unset.
+// TestBoolFlagHelper verifies boolFlag parses value-taking boolean flags: the
+// value is taken from "=v" or the following argument, the bare "no value" bool
+// form is gone, and an explicit non-boolean value is rejected.
+func TestBoolFlagHelper(t *testing.T) {
+	parse := func(args ...string) (v bool, set bool, err error) {
+		fs := flag.NewFlagSet("t", flag.ContinueOnError)
+		fs.String("converge-check", "", "")
+		fs.Parse(args)
+		return boolFlag(fs, "converge-check")
+	}
+	if v, set, err := parse("--converge-check", "true"); err != nil || !set || !v {
+		t.Errorf("true: v=%v set=%v err=%v", v, set, err)
+	}
+	if v, set, err := parse("--converge-check", "false"); err != nil || !set || v {
+		t.Errorf("false: v=%v set=%v err=%v", v, set, err)
+	}
+	if v, set, err := parse("--converge-check=false"); err != nil || !set || v {
+		t.Errorf("=false: v=%v set=%v err=%v", v, set, err)
+	}
+	if _, set, err := parse(); err != nil || set {
+		t.Errorf("unset: set=%v err=%v", set, err)
+	}
+	if _, _, err := parse("--converge-check", "banana"); err == nil {
+		t.Error("banana: expected error")
+	}
+	if _, _, err := parse("--converge-check", "--verbose"); err == nil {
+		t.Error("flag-as-value: expected error")
+	}
+}
+
+// TestTraceLenientWriteBack verifies --lenient true/false is echoed into
+// rays.lenient and the YAML value is honoured when the flag is unset.
 func TestTraceLenientWriteBack(t *testing.T) {
-	// Flag set: written back true.
-	out := runCommand(t, []string{"rayweave", "trace", "--lenient"},
+	// Flag set true: written back true.
+	out := runCommand(t, []string{"rayweave", "trace", "--lenient", "true"},
 		func() { runTrace([]byte(traceInput(false))) })
 	var res types.Input
 	if err := yaml.Unmarshal(out, &res); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
 	if res.Rays == nil || !res.Rays.Lenient {
-		t.Errorf("rays.lenient = false, want true (--lenient)")
+		t.Errorf("rays.lenient = false, want true (--lenient true)")
 	}
 	res = types.Input{}
 
@@ -289,6 +320,17 @@ func TestTraceLenientWriteBack(t *testing.T) {
 	}
 	if res.Rays == nil || res.Rays.Lenient {
 		t.Errorf("rays.lenient = true, want false (not injected)")
+	}
+	res = types.Input{}
+
+	// --lenient false wins over the YAML lenient: true and writes back false.
+	out = runCommand(t, []string{"rayweave", "trace", "--lenient", "false"},
+		func() { runTrace([]byte(traceInput(true))) })
+	if err := yaml.Unmarshal(out, &res); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if res.Rays == nil || res.Rays.Lenient {
+		t.Errorf("rays.lenient = true, want false (--lenient false overrides YAML)")
 	}
 }
 

@@ -14,7 +14,7 @@ rayweave trace [--config ID] [--glass-dir DIR] [--verbose] < system.yaml
 |---|---|
 | `--config ID` | select a config by id (multi-config mode); defaults to `configs[0]` |
 | `--glass-dir DIR` | AGF glass catalog directory (for resolving material names) |
-| `--lenient` | trace leniently: skip aperture/glass-path checks and continue past missed surfaces and TIR (equivalent to `rays.lenient: true`; written back into the output) |
+| `--lenient BOOL` | trace leniently (`true`/`false`): skip aperture/glass-path checks and continue past missed surfaces and TIR (default: `rays.lenient` from the input YAML, else `false`; written back into the output) |
 | `--verbose` | print per-ray trace info to stderr (JSONL) |
 
 ## Input YAML — `rays` section
@@ -22,7 +22,7 @@ rayweave trace [--config ID] [--glass-dir DIR] [--verbose] < system.yaml
 ```yaml
 rays:
   polarization: [1, 0, 0, 1]      # Jones vector [ReEx, ImEx, ReEy, ImEy]
-  lenient: false                  # lenient tracing (--lenient overrides)
+  lenient: false                  # lenient tracing (--lenient true/false overrides)
   rays:
     - id: "my_ray"
       wavelength: 0.00058756      # mm

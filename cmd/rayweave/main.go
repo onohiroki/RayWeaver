@@ -248,11 +248,11 @@ Output: YAML with results[] array.  Each result contains
 
 Options:
   --config ID          select config by id (multi-config mode)
-  --lenient            trace rays leniently: skip aperture and glass-path
+  --lenient BOOL       trace rays leniently: skip aperture and glass-path
                           checks, and continue past missed surfaces and TIR
                           instead of stopping. Missed/TIR surfaces are recorded
                           per-surface with their interaction set to MISSED/REFLECT.
-                          (equivalent to rays.lenient: true in the input YAML;
+                          (default: rays.lenient from the input YAML, else false;
                           the effective value is written back into the output)
   --verbose            print per-ray trace errors as JSONL to stderr
 
@@ -656,8 +656,9 @@ Options:
   --sensitivity-samples N sensitivity trace radial samples (default 9; 0 = analytic proxy)
   --top-k N               number of top-ranked surfaces to fit (default 3)
   --sag-scale α           initial sag scale (default 0.2; try 0.05..0.5)
-  --calibrate-scale       derive each candidate's embedded scale from the measured
-                          ray-trace response (on by default; --calibrate-scale=false)
+  --calibrate-scale BOOL  derive each candidate's embedded scale from the measured
+                          ray-trace response (on by default; --calibrate-scale false
+                          falls back to the fixed sag_scale)
   --scale-probes LIST     verify these scales instead of the quadratic estimate
                           (e.g. "0.1,0.25,0.5,1.0")
   --validate              run a short DLS per fitted surface to verify the asphere improves the merit
@@ -746,6 +747,9 @@ Options:
                         (the spot-RMS-minimizing shift, as in wavefront), so a
                         field-curved system's defocus-dominated fixed-plane
                         Strehl is replaced by the wavefront-quality number
+  --converge-check BOOL  label sampling convergence by re-evaluating each result
+                        at a higher ray count (on by default; --converge-check
+                        false skips the 1.5x re-evaluation)
   --yaml FILE         write full structured data (intensity, Ex/Ey/Ez,
                         encircled energy, wavefront OPD) to FILE, one
                         index-suffixed file per result
@@ -1418,7 +1422,7 @@ func runTrace(data []byte) {
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	traceVerbose := fs.Bool("verbose", false, "print per-ray trace info to stderr")
-	traceLenient := fs.Bool("lenient", false, "trace rays leniently: skip aperture/glass-path checks, continue past missed surfaces and TIR")
+	fs.String("lenient", "", "trace rays leniently: true|false (default: rays.lenient from the input YAML, else false)")
 	fs.Parse(args)
 
 	input := parseYAML[types.Input](data)
@@ -1447,12 +1451,16 @@ func runTrace(data []byte) {
 	if input.Rays != nil {
 		pol = input.Rays.Polarization
 	}
-	// Lenient tracing: --lenient (flag) wins over rays.lenient (YAML).
-	lenient := *traceLenient
-	if !flagWasSet(fs, "lenient") && input.Rays != nil && input.Rays.Lenient {
+	// Lenient tracing: --lenient true|false (flag) wins over rays.lenient (YAML).
+	lenient, lenientSet, err := boolFlag(fs, "lenient")
+	if err != nil {
+		errOut("Error: %s", err)
+		os.Exit(1)
+	}
+	if !lenientSet && input.Rays != nil && input.Rays.Lenient {
 		lenient = input.Rays.Lenient
 	}
-	if flagWasSet(fs, "lenient") {
+	if lenientSet {
 		// Principle 3: echo the effective value back into the output section.
 		if input.Rays == nil {
 			input.Rays = &types.RayInput{Polarization: pol}
