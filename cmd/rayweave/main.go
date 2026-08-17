@@ -312,6 +312,22 @@ Options:
   --ray-width 1.5      ray path stroke width in pixels
   --scale 0            SVG/PNG scale factor (0 = auto)
   --right-margin 20    right-side margin beyond image plane (% of lens length)
+  --fan-rays 11        max fan rays drawn per field in the lens diagram
+                         (0 = hide fan rays)
+  --show-invalid-ray-fan  boolean toggle, no value argument (default false):
+                         draw fan rays whose path carries an error code in
+                         full instead of the default hiding
+  --clip-invalid-ray-fan  boolean toggle, no value argument (default false):
+                         draw error-coded fan rays only up to the first
+                         surface that errored
+  --glass-dir DIR      AGF glass catalog directory
+
+Invalid fan rays: a fan ray whose path records an error code on any surface
+  (aperture_stop, missed_surface, total_internal_reflection, glass-path
+  violations) is hidden by default. --show-invalid-ray-fan keeps the full
+  path; --clip-invalid-ray-fan stops it at the first erroring surface. The
+  two flags are mutually exclusive, are enabled by giving them alone (--flag)
+  or disabled with --flag=false, and only affect fan rays.
 
 Input: YAML with system surfaces + optional results[] and chief_rays[].
 Pipe after "rayweave trace" for ray paths:

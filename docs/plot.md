@@ -19,8 +19,9 @@ rayweave plot [-o file.svg|.png] [flags] < input.yaml
 | `--scale 0` | SVG/PNG scale factor (0 = auto) |
 | `--right-margin 20` | right-side margin beyond the image plane (% of lens length) |
 | `--fan-rays 11` | max fan rays drawn per field in the lens diagram (0 = hide fan rays) |
-| `--show-invalid-ray-fan` | draw fan rays whose path carries an error code in full (default: hide them) |
-| `--clip-invalid-ray-fan` | draw fan rays only up to the first surface that errored |
+| `--show-invalid-ray-fan` | boolean toggle, no value argument (default `false` = off): draw fan rays whose path carries an error code in full instead of the default hiding |
+| `--clip-invalid-ray-fan` | boolean toggle, no value argument (default `false` = off): draw error-coded fan rays only up to the first surface that errored |
+| `--glass-dir DIR` | AGF glass catalog directory (resolves material colours; written back into `glass_catalog.directory`) |
 
 ## Input
 
@@ -54,7 +55,9 @@ A fan ray whose path records an error code on any surface (e.g. `aperture_stop`,
 `glass_path_too_long`) is considered invalid. By default such fan rays are not
 drawn at all; pass `--show-invalid-ray-fan` to draw them in full (the previous
 behaviour) or `--clip-invalid-ray-fan` to stop the path at the first erroring
-surface. The two flags are mutually exclusive. These options only affect fan
+surface. Both are boolean toggles (default `false`): enabled by giving them
+alone, disabled with `--show-invalid-ray-fan=false` / `--clip-invalid-ray-fan=false`.
+The two flags are mutually exclusive. These options only affect fan
 rays; traced `results[]`, marginal and chief rays are drawn as always.
 
 ## Examples

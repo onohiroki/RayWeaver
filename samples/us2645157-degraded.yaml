@@ -10,21 +10,24 @@ metadata:
 
 glass_catalog:
   entries:
-    - name: "SK18"
-      nd: 1.63854
-      vd: 55.42
-    - name: "SF12"
-      nd: 1.64831
-      vd: 33.84
+  - name: "SK18"
+    nd: 1.63854
+    vd: 55.42
+  - name: "SF12"
+    nd: 1.64831
+    vd: 33.84
 
 chief:
+  stop_surface: 4
+  pass_through:
+    surface: 4
   fields:
-    - angle: 0.0
-      direction: [0, 1]
-    - angle: 16.0
-      direction: [0, 1]
-    - angle: 24.0
-      direction: [0, 1]
+  - angle: 0.0
+    direction: [ 0, 1 ]
+  - angle: 16.0
+    direction: [ 0, 1 ]
+  - angle: 24.0
+    direction: [ 0, 1 ]
   reference_surface: 8
   num_rays: 512
   grid_type: hex
@@ -33,204 +36,204 @@ chief:
 optimization:
   method: dls
   variables:
-    - name: s1_curvature
-      target:
-        type: surface
-        id: 1
-        param: curvature
-      min: 0.02
-      max: 0.3
-      active: true
-    - name: s3_curvature
-      target:
-        type: surface
-        id: 3
-        param: curvature
-      min: -0.3
-      max: -0.01
-      active: true
-    - name: s6_curvature
-      target:
-        type: surface
-        id: 6
-        param: curvature
-      min: 0.005
-      max: 0.5
-      active: true
-    - name: s7_curvature
-      target:
-        type: surface
-        id: 7
-        param: curvature
-      min: -0.3
-      max: -0.01
-      active: true
+  - name: s1_curvature
+    target:
+      type: surface
+      id: 1
+      param: curvature
+    min: 0.02
+    max: 0.3
+    active: true
+  - name: s3_curvature
+    target:
+      type: surface
+      id: 3
+      param: curvature
+    min: -0.3
+    max: -0.01
+    active: true
+  - name: s6_curvature
+    target:
+      type: surface
+      id: 6
+      param: curvature
+    min: 0.005
+    max: 0.5
+    active: true
+  - name: s7_curvature
+    target:
+      type: surface
+      id: 7
+      param: curvature
+    min: -0.3
+    max: -0.01
+    active: true
 
 configs:
+- id: 0
+  name: degraded_start
+  active: true
+  fields:
   - id: 0
-    name: degraded_start
-    active: true
-    fields:
-      - id: 0
-        angle_deg: 0.0
-        weight: 1.0
-      - id: 1
-        angle_deg: 16.0
-        weight: 1.0
-      - id: 2
-        angle_deg: 24.0
-        weight: 0.5
-    wavelengths:
-      - id: 0
-        value: 0.0004861
-        weight: 1.0
-      - id: 1
-        value: 0.0005876
-        weight: 1.0
-      - id: 2
-        value: 0.0006563
-        weight: 1.0
-    surfaces:
-      - id: 1
-        type: "sphere"
-        curvature: 0.12
-        thickness: 1.524
-        material: {key: SK18}
-        diameter: 10.0
-        auto_aperture: true
-      - id: 2
-        type: "sphere"
-        radius: -239.3967954752
-        thickness: 2.3368
-        material: AIR
-        diameter: 10.0
-        auto_aperture: true
-      - id: 3
-        type: "sphere"
-        curvature: -0.05
-        thickness: 0.508
-        material: {key: SF12}
-        diameter: 6.0
-        auto_aperture: true
-      - id: 4
-        type: "sphere"
-        radius: 10.5917184406
-        thickness: 1.4986
-        material: AIR
-        diameter: 6.0
-        auto_aperture: true
-      - id: 5
-        type: "sphere"
-        radius: 0.0
-        thickness: 1.016
-        material: AIR
-        diameter: 3.7825297358
-      - id: 6
-        type: "sphere"
-        curvature: 0.025
-        thickness: 1.524
-        material: {key: SK18}
-        diameter: 6.0
-        auto_aperture: true
-      - id: 7
-        type: "sphere"
-        curvature: -0.15
-        thickness: 21.36695183553
-        material: AIR
-        diameter: 6.0
-        auto_aperture: true
-      - id: 8
-        type: "sphere"
-        radius: 0.0
-        thickness: 0.0
-        material: AIR
-    merit:
-      type: weighted_sum
-      terms:
-        - kind: spot_rms
-          field: 0
-          wavelength: 0.0004861
-          weight: 1.0
-        - kind: spot_rms
-          field: 0
-          wavelength: 0.0005876
-          weight: 1.0
-        - kind: spot_rms
-          field: 0
-          wavelength: 0.0006563
-          weight: 1.0
-        - kind: spot_rms_t
-          field: 1
-          wavelength: 0.0004861
-          weight: 0.5
-        - kind: spot_rms_s
-          field: 1
-          wavelength: 0.0004861
-          weight: 0.5
-        - kind: spot_rms_worst
-          field: 1
-          wavelength: 0.0004861
-          weight: 1.0
-        - kind: spot_rms_t
-          field: 1
-          wavelength: 0.0005876
-          weight: 0.5
-        - kind: spot_rms_s
-          field: 1
-          wavelength: 0.0005876
-          weight: 0.5
-        - kind: spot_rms_worst
-          field: 1
-          wavelength: 0.0005876
-          weight: 1.0
-        - kind: spot_rms_t
-          field: 1
-          wavelength: 0.0006563
-          weight: 0.5
-        - kind: spot_rms_s
-          field: 1
-          wavelength: 0.0006563
-          weight: 0.5
-        - kind: spot_rms_worst
-          field: 1
-          wavelength: 0.0006563
-          weight: 1.0
-        - kind: spot_rms_worst
-          field: 2
-          wavelength: 0.0004861
-          weight: 0.5
-        - kind: spot_rms_weighted
-          field: 2
-          wavelength: 0.0004861
-          weight: 0.3
-        - kind: spot_ee_radius
-          field: 2
-          wavelength: 0.0004861
-          weight: 0.3
-          fraction: 0.8
-        - kind: spot_rms_worst
-          field: 2
-          wavelength: 0.0005876
-          weight: 0.5
-        - kind: spot_rms_weighted
-          field: 2
-          wavelength: 0.0005876
-          weight: 0.3
-        - kind: spot_ee_radius
-          field: 2
-          wavelength: 0.0005876
-          weight: 0.3
-          fraction: 0.8
-        - kind: spot_rms_worst
-          field: 2
-          wavelength: 0.0006563
-          weight: 0.5
-        - kind: spot_rms_weighted
-          field: 2
-          wavelength: 0.0006563
-          weight: 0.3
-        - kind: spot_ee_radius
-          field: 2
-          wavelength: 0.0006563
-          weight: 0.3
-          fraction: 0.8
+    angle_deg: 0.0
+    weight: 1.0
+  - id: 1
+    angle_deg: 16.0
+    weight: 1.0
+  - id: 2
+    angle_deg: 24.0
+    weight: 0.5
+  wavelengths:
+  - id: 0
+    value: 0.0004861
+    weight: 1.0
+  - id: 1
+    value: 0.0005876
+    weight: 1.0
+  - id: 2
+    value: 0.0006563
+    weight: 1.0
+  surfaces:
+  - id: 1
+    type: "sphere"
+    curvature: 0.12
+    thickness: 1.524
+    material: { key: SK18 }
+    diameter: 10.0
+    auto_aperture: true
+  - id: 2
+    type: "sphere"
+    radius: -239.3967954752
+    thickness: 2.3368
+    material: AIR
+    diameter: 10.0
+    auto_aperture: true
+  - id: 3
+    type: "sphere"
+    curvature: -0.05
+    thickness: 0.508
+    material: { key: SF12 }
+    diameter: 6.0
+    auto_aperture: true
+  - id: 4
+    type: "sphere"
+    radius: 10.5917184406
+    thickness: 1.4986
+    material: AIR
+    diameter: 6.0
+    auto_aperture: true
+  - id: 5
+    type: "sphere"
+    radius: 0.0
+    thickness: 1.016
+    material: AIR
+    diameter: 3.7825297358
+  - id: 6
+    type: "sphere"
+    curvature: 0.025
+    thickness: 1.524
+    material: { key: SK18 }
+    diameter: 6.0
+    auto_aperture: true
+  - id: 7
+    type: "sphere"
+    curvature: -0.15
+    thickness: 21.36695183553
+    material: AIR
+    diameter: 6.0
+    auto_aperture: true
+  - id: 8
+    type: "sphere"
+    radius: 0.0
+    thickness: 0.0
+    material: AIR
+  merit:
+    type: weighted_sum
+    terms:
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0004861
+      weight: 1.0
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0006563
+      weight: 1.0
+    - kind: spot_rms_t
+      field: 1
+      wavelength: 0.0004861
+      weight: 0.5
+    - kind: spot_rms_s
+      field: 1
+      wavelength: 0.0004861
+      weight: 0.5
+    - kind: spot_rms_worst
+      field: 1
+      wavelength: 0.0004861
+      weight: 1.0
+    - kind: spot_rms_t
+      field: 1
+      wavelength: 0.0005876
+      weight: 0.5
+    - kind: spot_rms_s
+      field: 1
+      wavelength: 0.0005876
+      weight: 0.5
+    - kind: spot_rms_worst
+      field: 1
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms_t
+      field: 1
+      wavelength: 0.0006563
+      weight: 0.5
+    - kind: spot_rms_s
+      field: 1
+      wavelength: 0.0006563
+      weight: 0.5
+    - kind: spot_rms_worst
+      field: 1
+      wavelength: 0.0006563
+      weight: 1.0
+    - kind: spot_rms_worst
+      field: 2
+      wavelength: 0.0004861
+      weight: 0.5
+    - kind: spot_rms_weighted
+      field: 2
+      wavelength: 0.0004861
+      weight: 0.3
+    - kind: spot_ee_radius
+      field: 2
+      wavelength: 0.0004861
+      weight: 0.3
+      fraction: 0.8
+    - kind: spot_rms_worst
+      field: 2
+      wavelength: 0.0005876
+      weight: 0.5
+    - kind: spot_rms_weighted
+      field: 2
+      wavelength: 0.0005876
+      weight: 0.3
+    - kind: spot_ee_radius
+      field: 2
+      wavelength: 0.0005876
+      weight: 0.3
+      fraction: 0.8
+    - kind: spot_rms_worst
+      field: 2
+      wavelength: 0.0006563
+      weight: 0.5
+    - kind: spot_rms_weighted
+      field: 2
+      wavelength: 0.0006563
+      weight: 0.3
+    - kind: spot_ee_radius
+      field: 2
+      wavelength: 0.0006563
+      weight: 0.3
+      fraction: 0.8

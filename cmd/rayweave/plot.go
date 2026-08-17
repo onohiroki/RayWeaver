@@ -28,8 +28,11 @@ func runPlot(data []byte) {
 	fs.Float64Var(&scaleOverride, "scale", 0, "SVG scale factor (0 = auto)")
 	fs.Float64Var(&rightMarginPct, "right-margin", 20, "right-side margin beyond image plane (% of lens length, default 20)")
 	fs.IntVar(&fanRays, "fan-rays", 11, "max fan rays drawn per field in the lens diagram (0 = hide fan rays)")
-	fs.BoolVar(&showInvalidFan, "show-invalid-ray-fan", false, "draw fan rays whose path carries an error code in full (default: hide them)")
-	fs.BoolVar(&clipInvalidFan, "clip-invalid-ray-fan", false, "draw fan rays only up to the first surface that errored")
+	// Boolean toggles, no value argument: give the flag alone (= true) or as
+	// --flag=false. Default is off for both; the default display hides fan rays
+	// whose path carries an error code.
+	fs.BoolVar(&showInvalidFan, "show-invalid-ray-fan", false, "draw fan rays that carry an error code in full (boolean, default false = off: they are hidden)")
+	fs.BoolVar(&clipInvalidFan, "clip-invalid-ray-fan", false, "draw error-coded fan rays only up to the first erroring surface (boolean, default false = off; mutually exclusive with --show-invalid-ray-fan)")
 	fs.StringVar(&configFlag, "config", "", "select config by id (multi-config mode)")
 	fs.StringVar(&glassDir, "glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(args)

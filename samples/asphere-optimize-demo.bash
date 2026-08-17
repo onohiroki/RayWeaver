@@ -6,8 +6,9 @@ set -euo pipefail
 #
 # Purpose: compare a spherical-only optimisation with one that also varies the
 # asphere coefficients (conic, a4, a6) of the front surface of a singlet. The
-# front (aspheric) surface is the explicit aperture stop (chief.stop_surface:
-# 1), so the pupil sits at the first surface.
+# front (aspheric) surface is the explicit aperture stop (chief.stop_surface: 1)
+# and the chief ray of every field passes through its centre
+# (chief.pass_through.surface: 1), so the pupil sits at the first surface.
 #
 # Steps
 #   1. Stage 1 (spherical): optimize curvatures only (asphere vars excluded
@@ -79,7 +80,8 @@ cat >> "$RESULT_FILE" <<'EOF'
 - Two optimisation stages on a singlet with an aspheric front surface:
   spherical-opt varies only curvatures; asphere-opt also varies conic/a4/a6.
   The front (aspheric) surface is the explicit aperture stop
-  (chief.stop_surface: 1), so the pupil sits at the first surface.
+  (chief.stop_surface: 1) and the chief ray passes through its centre
+  (chief.pass_through.surface: 1), so the pupil sits at the first surface.
 - Coef table: the asphere coefficients stay 0 in the spherical stage (they
   are not variables) and pick up small non-zero values in the asphere stage;
   the "delta (asp-before)" column is the asphere-opt value minus the initial

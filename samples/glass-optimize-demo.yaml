@@ -11,12 +11,12 @@ metadata:
 
 glass_catalog:
   entries:
-    - name: "SK18"
-      nd: 1.63854
-      vd: 55.42
-    - name: "SF12"
-      nd: 1.64831
-      vd: 33.84
+  - name: "SK18"
+    nd: 1.63854
+    vd: 55.42
+  - name: "SF12"
+    nd: 1.64831
+    vd: 33.84
 
 # The real US2645157 Cooke triplet, but the negative-power element (S3) carries
 # a crown (SK18 values) and the positive-power element (S6) a flint (SF12
@@ -24,18 +24,21 @@ glass_catalog:
 # glasses (no catalogue key) so the glass variables touch only their own
 # surfaces.
 chief:
+  stop_surface: 4
+  pass_through:
+    surface: 4
   fields:
-    - angle: 0.0
-      direction: [0, 1]
-    - angle: 16.0
-      direction: [0, 1]
-    - angle: 24.0
-      direction: [0, 1]
+  - angle: 0.0
+    direction: [ 0, 1 ]
+  - angle: 16.0
+    direction: [ 0, 1 ]
+  - angle: 24.0
+    direction: [ 0, 1 ]
   reference_surface: 8
   num_rays: 512
   grid_type: hex
   dump_map: true
-  wavelengths: [0.0004358, 0.0004861, 0.0005876, 0.0006563]
+  wavelengths: [ 0.0004358, 0.0004861, 0.0005876, 0.0006563 ]
 
 optimization:
   method: dls
@@ -55,209 +58,209 @@ optimization:
     anchor_from: 1.0
     anchor_to: 0.05
     modes:
-      - name: color_first
-        weight_from: 1.0
-        weight_to: 0.0
-      - name: full
-        weight_from: 0.0
-        weight_to: 1.0
+    - name: color_first
+      weight_from: 1.0
+      weight_to: 0.0
+    - name: full
+      weight_from: 0.0
+      weight_to: 1.0
   variables:
-    - name: s3_nd
-      target:
-        type: surface
-        id: 3
-        param: nd
-      min: 1.4
-      max: 1.9
-      active: true
-    - name: s3_vd
-      target:
-        type: surface
-        id: 3
-        param: vd
-      min: 20.0
-      max: 80.0
-      active: true
-    - name: s6_nd
-      target:
-        type: surface
-        id: 6
-        param: nd
-      min: 1.4
-      max: 1.9
-      active: true
-    - name: s6_vd
-      target:
-        type: surface
-        id: 6
-        param: vd
-      min: 20.0
-      max: 80.0
-      active: true
+  - name: s3_nd
+    target:
+      type: surface
+      id: 3
+      param: nd
+    min: 1.4
+    max: 1.9
+    active: true
+  - name: s3_vd
+    target:
+      type: surface
+      id: 3
+      param: vd
+    min: 20.0
+    max: 80.0
+    active: true
+  - name: s6_nd
+    target:
+      type: surface
+      id: 6
+      param: nd
+    min: 1.4
+    max: 1.9
+    active: true
+  - name: s6_vd
+    target:
+      type: surface
+      id: 6
+      param: vd
+    min: 20.0
+    max: 80.0
+    active: true
 
 configs:
+- id: 0
+  name: nominal
+  active: true
+  fields:
   - id: 0
-    name: nominal
-    active: true
-    fields:
-      - id: 0
-        angle_deg: 0.0
-        weight: 1.0
-      - id: 1
-        angle_deg: 16.0
-        weight: 1.0
-      - id: 2
-        angle_deg: 24.0
-        weight: 0.5
-    wavelengths:
-      - id: 0
-        value: 0.0004358
-        weight: 1.0
-      - id: 1
-        value: 0.0004861
-        weight: 1.0
-      - id: 2
-        value: 0.0005876
-        weight: 1.0
-      - id: 3
-        value: 0.0006563
-        weight: 1.0
-    surfaces:
-      - id: 1
-        type: "sphere"
-        radius: 10.2871491742
-        thickness: 1.524
-        material: {key: SK18}
-        diameter: 10.0
-      - id: 2
-        type: "sphere"
-        radius: -239.3967954752
-        thickness: 2.3368
-        material: AIR
-        diameter: 10.0
-      - id: 3
-        type: "sphere"
-        radius: -12.8269871730
-        thickness: 0.508
-        material: {nd: 1.63854, vd: 55.42}   # crown on the negative element (swapped)
-        diameter: 6.0
-      - id: 4
-        type: "sphere"
-        radius: 10.5917184406
-        thickness: 1.4986
-        material: AIR
-        diameter: 6.0
-      - id: 5
-        type: "sphere"
-        radius: 0.0
-        thickness: 1.016
-        material: AIR
-        diameter: 3.7825297358
-      - id: 6
-        type: "sphere"
-        radius: 61.8456294200
-        thickness: 1.524
-        material: {nd: 1.64831, vd: 33.84}   # flint on the positive element (swapped)
-        diameter: 6.0
-      - id: 7
-        type: "sphere"
-        radius: -10.0074859032
-        thickness: 21.36695183553
-        material: AIR
-        diameter: 6.0
-      - id: 8
-        type: "sphere"
-        radius: 0.0
-        thickness: 0.0
-        material: AIR
-    merit_modes:
-      - name: color_first
-        terms:
-          - kind: lateral_color
-            field: 0
-            wavelength: 0.0004358
-            wavelength2: 0.0006563
-            weight: 1.0
-          - kind: lateral_color
-            field: 1
-            wavelength: 0.0004358
-            wavelength2: 0.0006563
-            weight: 1.0
-          - kind: lateral_color
-            field: 2
-            wavelength: 0.0004358
-            wavelength2: 0.0006563
-            weight: 0.5
-          - kind: longitudinal_color
-            wavelength: 0.0004358
-            wavelength2: 0.0006563
-            weight: 1.0
-      - name: full
-        terms:
-          - kind: spot_rms
-            field: 0
-            wavelength: 0.0004358
-            weight: 1.0
-          - kind: spot_rms
-            field: 0
-            wavelength: 0.0004861
-            weight: 1.0
-          - kind: spot_rms
-            field: 0
-            wavelength: 0.0005876
-            weight: 1.0
-          - kind: spot_rms
-            field: 0
-            wavelength: 0.0006563
-            weight: 1.0
-          - kind: spot_rms
-            field: 1
-            wavelength: 0.0004358
-            weight: 1.0
-          - kind: spot_rms
-            field: 1
-            wavelength: 0.0004861
-            weight: 1.0
-          - kind: spot_rms
-            field: 1
-            wavelength: 0.0005876
-            weight: 1.0
-          - kind: spot_rms
-            field: 1
-            wavelength: 0.0006563
-            weight: 1.0
-          - kind: spot_rms
-            field: 2
-            wavelength: 0.0004358
-            weight: 0.5
-          - kind: spot_rms
-            field: 2
-            wavelength: 0.0004861
-            weight: 0.5
-          - kind: spot_rms
-            field: 2
-            wavelength: 0.0005876
-            weight: 0.5
-          - kind: spot_rms
-            field: 2
-            wavelength: 0.0006563
-            weight: 0.5
-          - kind: lateral_color
-            field: 0
-            wavelength: 0.0004358
-            wavelength2: 0.0006563
-            weight: 1.0
-          - kind: lateral_color
-            field: 1
-            wavelength: 0.0004358
-            wavelength2: 0.0006563
-            weight: 1.0
-          - kind: lateral_color
-            field: 2
-            wavelength: 0.0004358
-            wavelength2: 0.0006563
-            weight: 0.5
-          - kind: longitudinal_color
-            wavelength: 0.0004358
-            wavelength2: 0.0006563
-            weight: 1.0
+    angle_deg: 0.0
+    weight: 1.0
+  - id: 1
+    angle_deg: 16.0
+    weight: 1.0
+  - id: 2
+    angle_deg: 24.0
+    weight: 0.5
+  wavelengths:
+  - id: 0
+    value: 0.0004358
+    weight: 1.0
+  - id: 1
+    value: 0.0004861
+    weight: 1.0
+  - id: 2
+    value: 0.0005876
+    weight: 1.0
+  - id: 3
+    value: 0.0006563
+    weight: 1.0
+  surfaces:
+  - id: 1
+    type: "sphere"
+    radius: 10.2871491742
+    thickness: 1.524
+    material: { key: SK18 }
+    diameter: 10.0
+  - id: 2
+    type: "sphere"
+    radius: -239.3967954752
+    thickness: 2.3368
+    material: AIR
+    diameter: 10.0
+  - id: 3
+    type: "sphere"
+    radius: -12.826987173
+    thickness: 0.508
+    material: { nd: 1.63854, vd: 55.42 } # crown on the negative element (swapped)
+    diameter: 6.0
+  - id: 4
+    type: "sphere"
+    radius: 10.5917184406
+    thickness: 1.4986
+    material: AIR
+    diameter: 6.0
+  - id: 5
+    type: "sphere"
+    radius: 0.0
+    thickness: 1.016
+    material: AIR
+    diameter: 3.7825297358
+  - id: 6
+    type: "sphere"
+    radius: 61.8456294200
+    thickness: 1.524
+    material: { nd: 1.64831, vd: 33.84 } # flint on the positive element (swapped)
+    diameter: 6.0
+  - id: 7
+    type: "sphere"
+    radius: -10.0074859032
+    thickness: 21.36695183553
+    material: AIR
+    diameter: 6.0
+  - id: 8
+    type: "sphere"
+    radius: 0.0
+    thickness: 0.0
+    material: AIR
+  merit_modes:
+  - name: color_first
+    terms:
+    - kind: lateral_color
+      field: 0
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 1.0
+    - kind: lateral_color
+      field: 1
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 1.0
+    - kind: lateral_color
+      field: 2
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 0.5
+    - kind: longitudinal_color
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 1.0
+  - name: full
+    terms:
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0004358
+      weight: 1.0
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0004861
+      weight: 1.0
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0006563
+      weight: 1.0
+    - kind: spot_rms
+      field: 1
+      wavelength: 0.0004358
+      weight: 1.0
+    - kind: spot_rms
+      field: 1
+      wavelength: 0.0004861
+      weight: 1.0
+    - kind: spot_rms
+      field: 1
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms
+      field: 1
+      wavelength: 0.0006563
+      weight: 1.0
+    - kind: spot_rms
+      field: 2
+      wavelength: 0.0004358
+      weight: 0.5
+    - kind: spot_rms
+      field: 2
+      wavelength: 0.0004861
+      weight: 0.5
+    - kind: spot_rms
+      field: 2
+      wavelength: 0.0005876
+      weight: 0.5
+    - kind: spot_rms
+      field: 2
+      wavelength: 0.0006563
+      weight: 0.5
+    - kind: lateral_color
+      field: 0
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 1.0
+    - kind: lateral_color
+      field: 1
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 1.0
+    - kind: lateral_color
+      field: 2
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 0.5
+    - kind: longitudinal_color
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 1.0
