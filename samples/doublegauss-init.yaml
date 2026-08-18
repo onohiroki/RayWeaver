@@ -18,6 +18,14 @@ metadata:
     default merges the close-spaced high-dimensional minima into one) and
     h_initial 2.0 with max_cycles 10 (stronger bumps, more attempts) — 20
     distinct minima found in a bounded test run (best merit 0.0188).
+    The six glass surfaces carry inline model glasses (no catalogue key), so
+    each element's nd/vd is an independent variable — the glass can move (and
+    flip crown/flint roles) during the escape, unlike keyed references which
+    collapse to a shared per-key override. The glass variables span
+    nd 1.4-2.0 / vd 20-80 to allow role reversal, and the escape merit adds six
+    low-weight glass_role terms (surface_set per element) steering each element
+    toward its chromatic-role target while the spot/colour/opd terms keep the
+    imagery healthy.
 
 glass_catalog:
   entries:
@@ -341,96 +349,96 @@ optimization:
       type: surface
       id: 3
       param: nd
-    min: 1.55
-    max: 1.75
+    min: 1.4
+    max: 2.0
     active: true
   - name: s3_sf12_vd
     target:
       type: surface
       id: 3
       param: vd
-    min: 28
-    max: 45
+    min: 20
+    max: 80
     active: true
   - name: s10_sf12_nd
     target:
       type: surface
       id: 10
       param: nd
-    min: 1.55
-    max: 1.75
+    min: 1.4
+    max: 2.0
     active: true
   - name: s10_sf12_vd
     target:
       type: surface
       id: 10
       param: vd
-    min: 28
-    max: 45
+    min: 20
+    max: 80
     active: true
   - name: s1_sk18_nd
     target:
       type: surface
       id: 1
       param: nd
-    min: 1.55
-    max: 1.75
+    min: 1.4
+    max: 2.0
     active: true
   - name: s1_sk18_vd
     target:
       type: surface
       id: 1
       param: vd
-    min: 45
-    max: 65
+    min: 20
+    max: 80
     active: true
   - name: s5_sk18_nd
     target:
       type: surface
       id: 5
       param: nd
-    min: 1.55
-    max: 1.75
+    min: 1.4
+    max: 2.0
     active: true
   - name: s5_sk18_vd
     target:
       type: surface
       id: 5
       param: vd
-    min: 45
-    max: 65
+    min: 20
+    max: 80
     active: true
   - name: s8_sk18_nd
     target:
       type: surface
       id: 8
       param: nd
-    min: 1.55
-    max: 1.75
+    min: 1.4
+    max: 2.0
     active: true
   - name: s8_sk18_vd
     target:
       type: surface
       id: 8
       param: vd
-    min: 45
-    max: 65
+    min: 20
+    max: 80
     active: true
   - name: s12_sk18_nd
     target:
       type: surface
       id: 12
       param: nd
-    min: 1.55
-    max: 1.75
+    min: 1.4
+    max: 2.0
     active: true
   - name: s12_sk18_vd
     target:
       type: surface
       id: 12
       param: vd
-    min: 45
-    max: 65
+    min: 20
+    max: 80
     active: true
 configs:
 - id: config0
@@ -464,7 +472,7 @@ configs:
     type: sphere
     radius: 60.606061
     thickness: 3.5
-    material: {key: SK18}
+    material: {nd: 1.63854, vd: 55.42}
     diameter: 36.0
     auto_aperture: true
   - id: 2
@@ -478,7 +486,7 @@ configs:
     type: sphere
     radius: 121.212121
     thickness: 1.2
-    material: {key: SF12}
+    material: {nd: 1.64831, vd: 33.84}
     diameter: 28.0
     auto_aperture: true
   - id: 4
@@ -492,7 +500,7 @@ configs:
     type: sphere
     radius: 54.545455
     thickness: 2.5
-    material: {key: SK18}
+    material: {nd: 1.63854, vd: 55.42}
     diameter: 26.0
     auto_aperture: true
   - id: 6
@@ -512,7 +520,7 @@ configs:
     type: sphere
     radius: -181.818182
     thickness: 2.5
-    material: {key: SK18}
+    material: {nd: 1.63854, vd: 55.42}
     diameter: 26.0
     auto_aperture: true
   - id: 9
@@ -526,7 +534,7 @@ configs:
     type: sphere
     radius: -45.454545
     thickness: 1.2
-    material: {key: SF12}
+    material: {nd: 1.64831, vd: 33.84}
     diameter: 28.0
     auto_aperture: true
   - id: 11
@@ -540,7 +548,7 @@ configs:
     type: sphere
     radius: 454.545455
     thickness: 3.5
-    material: {key: SK18}
+    material: {nd: 1.63854, vd: 55.42}
     diameter: 36.0
     auto_aperture: true
   - id: 13
@@ -559,6 +567,24 @@ configs:
   merit:
     type: weighted_sum
     terms:
+    - kind: glass_role
+      surface_set: [1]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [3]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [5]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [8]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [10]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [12]
+      weight: 0.01
     - kind: spot_rms
       field: 0
       wavelength: 0.0004861

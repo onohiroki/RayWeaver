@@ -46,6 +46,7 @@ Augmented YAML with a `paraxial_result:` section:
 | `first_principal_point` | mm from first surface |
 | `second_principal_focus` | BFL in mm from last surface |
 | `second_principal_point` | mm from last surface |
+| `element_roles` | per-lens-element glass-role classification (`surface_ids`, `phi`, `y`, `w`, `role`, `vd_target`, `nd_target`) — the same judgement the optimizer's `glass_role` merit kind uses |
 
 ## Examples
 
@@ -55,6 +56,10 @@ rayweave chief < lens.yaml | rayweave paraxial
 
 # Read one quantity with query
 rayweave paraxial < lens.yaml | rayweave query -r paraxial_result.focal_length
+
+# Read the glass-role classification per element
+rayweave paraxial < lens.yaml | rayweave query -r paraxial_result.element_roles[1].role
+rayweave paraxial < lens.yaml | rayweave query --each 'paraxial_result.element_roles[]:surface_ids,role,vd_target'
 ```
 
 ## Method

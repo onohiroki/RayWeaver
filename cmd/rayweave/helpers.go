@@ -425,6 +425,7 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 					Weight:      mt.Weight,
 					Target:      mt.Target,
 					Fraction:    mt.Fraction,
+					SurfaceSet:  mt.SurfaceSet,
 				})
 			}
 		}

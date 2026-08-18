@@ -1100,6 +1100,21 @@ type ParaxialResult struct {
 	SecondNodalPoint         float64 `yaml:"second_nodal_point,omitempty"`
 	SecondPrincipalFocus     float64 `yaml:"second_principal_focus,omitempty"`
 	SecondPrincipalPoint     float64 `yaml:"second_principal_point,omitempty"`
+	ElementRoles             []ElementRole `yaml:"element_roles,omitempty"`
+}
+
+// ElementRole is the YAML-serializable mirror of the paraxial glass-role
+// classification of one lens element (paraxial.GlassRoles). The types package
+// cannot import paraxial (import cycle), so paraxial.Compute maps its internal
+// role records onto this struct.
+type ElementRole struct {
+	SurfaceIDs []int   `yaml:"surface_ids,omitempty"`
+	Phi        float64 `yaml:"phi"`
+	Y          float64 `yaml:"y"`
+	W          float64 `yaml:"w"`
+	Role       string  `yaml:"role"` // dominant | compensating | neutral
+	VTarget    float64 `yaml:"vd_target"`
+	NDTarget   float64 `yaml:"nd_target"`
 }
 
 type ParaxialInput struct {

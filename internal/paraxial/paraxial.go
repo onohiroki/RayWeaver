@@ -265,6 +265,21 @@ func Compute(
 	r.ObjectSpaceIndex = nObj
 	r.ImageSpaceIndex = nImg
 
+	// Glass-role classification of every lens element (paraxial.GlassRoles).
+	// Computed here, before the early returns of the marginal-ray trace, so the
+	// element_roles output is always populated.
+	for _, er := range GlassRoles(surfaces, gc) {
+		r.ElementRoles = append(r.ElementRoles, types.ElementRole{
+			SurfaceIDs: er.SurfaceIDs,
+			Phi:        er.Phi,
+			Y:          er.Y,
+			W:          er.W,
+			Role:       er.Role,
+			VTarget:    er.VTarget,
+			NDTarget:   er.NDTarget,
+		})
+	}
+
 	// --- Forward marginal ray trace (infinite conjugate) ---
 	fwdVerts, _ := traceForward(surfaces, nIndex, 1.0, 0.0)
 	if len(fwdVerts) == 0 {

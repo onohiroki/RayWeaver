@@ -34,6 +34,10 @@ set -euo pipefail
 #   5. plot                    : diagrams of the initial and refined systems
 #   6. element-powers chart    : a PNG showing every local minimum's
 #                                element_powers offset from a merit baseline
+#   The double-Gauss init uses inline model glasses (nd/vd per element) so the
+#   escape optimises each element's glass independently; the minima summary
+#   prints the per-element vd (a '.' marks a crown/flint role flip across 45)
+#   and a gate checks that the glass actually changed between minima.
 #
 # How to read the result
 #   - Best merit is the lowest DLS merit among the discovered minima.
@@ -138,6 +142,14 @@ cat >> "$RESULT_FILE" <<EOF
   verification table above.
 - If the best merit is only marginally better than a plain local DLS run,
   the merit landscape is effectively single-modal and escape is unnecessary.
+- The double-Gauss glass surfaces are inline model glasses: each element's
+  nd/vd is an independent escape variable (with wide 1.4-2.0 / 20-80 ranges),
+  so different local minima can carry different glasses — the per-minimum
+  vd[1 3 5 8 10 12] column in the minima summary shows the crown/flint
+  arrangement of every solution, and a '.' marks a vd that flipped across the
+  45 boundary relative to the SK18/SF12 start. The escape merit adds six
+  low-weight glass_role terms steering each element toward its chromatic-role
+  target on top of the spot/colour/opd merit.
 EOF
 if [[ -n "$SAVE_BASE" ]]; then
 cat >> "$RESULT_FILE" <<EOF
@@ -232,21 +244,60 @@ echo "--- Local minima summary ---"
   BEST_IDX=$($RAYWEAVE query -r escape_result.best_index < "$RESULT")
   BEST_MERIT=$($RAYWEAVE query --printf '%.6e' escape_result.best_merit < "$RESULT")
   echo "  Best index: $BEST_IDX  Best merit: $BEST_MERIT"
+  # Glass surfaces of the double-Gauss (inline model glasses): the first
+  # surface of each element carries its nd/vd. Shown as vd per element so the
+  # crown/flint arrangement (and any role flips vs the nominal SK18/SF12 start)
+  # is visible; a '.' marks a vd that crossed the 45 crown/flint boundary.
+  # The variable names follow the doublegauss-init.yaml convention s<N>_<g>_vd.
+  GLASS_VARS="s1_sk18_vd s3_sf12_vd s5_sk18_vd s8_sk18_vd s10_sf12_vd s12_sk18_vd"
   $RAYWEAVE query --each 'escape_result.minima[]:index,merit' --printf '%d %.6e' < "$RESULT" \
     | while read -r idx merit; do
         mark=" "
         [ "$idx" = "$BEST_IDX" ] && mark="*"
         powers=$($RAYWEAVE query --each "escape_result.minima[$idx].features[0].element_powers[]" \
           --printf '%.4g' < "$RESULT" | paste -sd ',' -)
+        glass=""
+        for vn in $GLASS_VARS; do
+          vd=$($RAYWEAVE query -r "escape_result.minima[$idx].variables[name=\"$vn\"].after" < "$RESULT")
+          if [[ -n "$vd" && "$vd" != "-1" ]]; then
+            fl=" "
+            $RAYWEAVE query --gate "v < 45" --set v="$vd" < /dev/null > /dev/null 2>&1 && fl="."
+            glass="$glass $vd$fl"
+          fi
+        done
         if [[ -n "$SAVE_BASE" ]]; then
           file=$(basename "$($RAYWEAVE query -r "escape_result.minima[$idx].file" < "$RESULT")")
-          printf "  %s[%s] merit=%s  file=%s  element_powers=%s\n" "$mark" "$idx" "$merit" "$file" "$powers"
+          printf "  %s[%s] merit=%s  file=%s  element_powers=%s  vd[1 3 5 8 10 12]=%s\n" "$mark" "$idx" "$merit" "$file" "$powers" "$glass"
         else
-          printf "  %s[%s] merit=%s  element_powers=%s\n" "$mark" "$idx" "$merit" "$powers"
+          printf "  %s[%s] merit=%s  element_powers=%s  vd[1 3 5 8 10 12]=%s\n" "$mark" "$idx" "$merit" "$powers" "$glass"
         fi
       done
 } | tee "$RESULT_FILE"
 echo
+
+# Glass-role gate (double-Gauss only): with inline model glasses the escape
+# can change each element's glass independently, so different local minima
+# should carry different glasses. Check that at least two minima differ in the
+# vd of a glass surface (the crown/flint arrangement moves between solutions).
+if [ "$LENS" = "doublegauss" ]; then
+  echo "--- Glass-change gate (glass optimized per element) ---"
+  NMIN=$($RAYWEAVE query --len escape_result.minima < "$RESULT")
+  GATE_GLASS_OK=false
+  if [ "${NMIN:-0}" -ge 2 ]; then
+    VD0=$($RAYWEAVE query -r 'escape_result.minima[0].variables[name="s3_sf12_vd"].after' < "$RESULT")
+    VD1=$($RAYWEAVE query -r 'escape_result.minima[1].variables[name="s3_sf12_vd"].after' < "$RESULT")
+    if [[ -n "$VD0" && -n "$VD1" && "$VD0" != "$VD1" ]]; then
+      GATE_GLASS_OK=true
+      echo "  S3 vd differs between minima: $VD0 vs $VD1"
+    fi
+  fi
+  if [ "$GATE_GLASS_OK" = true ]; then
+    echo "  => The escape changed the glass between minima (per-element nd/vd)."
+  else
+    echo "  => No glass change detected between the first two minima (merit may need retuning)."
+  fi
+  echo
+fi
 
 echo "--- DLS refinement of the escape best (wavefront-astigmatism merit) ---"
 # The escape's spot merit robustly finds the well-corrected landscape (the 24°

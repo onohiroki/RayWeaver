@@ -29,6 +29,32 @@ func TestComputeSingletEFL(t *testing.T) {
 	}
 }
 
+// TestComputeElementRoles verifies that Compute populates the element_roles
+// classification (mapped from GlassRoles) with the Cooke-triplet grouping and
+// a flint-side middle element.
+func TestComputeElementRoles(t *testing.T) {	gc := cookeGC()
+	s := cookeTripletSurfaces()
+	surface.Precompute(s)
+
+	result := Compute(types.System{Surfaces: s}, 0.00058756, gc, 0, nil)
+	if len(result.ElementRoles) != 3 {
+		t.Fatalf("expected 3 element roles, got %d", len(result.ElementRoles))
+	}
+	ids := result.ElementRoles[1].SurfaceIDs
+	if len(ids) != 2 || ids[0] != 3 || ids[1] != 4 {
+		t.Errorf("middle element surface_ids = %v, want [3 4]", ids)
+	}
+	if result.ElementRoles[1].VTarget >= 45 {
+		t.Errorf("middle vd_target = %v, want flint-side (< 45)", result.ElementRoles[1].VTarget)
+	}
+	if result.ElementRoles[1].VTarget >= result.ElementRoles[0].VTarget {
+		t.Errorf("middle vd_target %v not below front %v", result.ElementRoles[1].VTarget, result.ElementRoles[0].VTarget)
+	}
+	if result.ElementRoles[0].SurfaceIDs[0] != 1 {
+		t.Errorf("front element surface_ids = %v, want first surface 1", result.ElementRoles[0].SurfaceIDs)
+	}
+}
+
 func TestComputeWithObjectHeight(t *testing.T) {
 	sys, gc := singletSystem()
 	result := Compute(sys, 0.00058756, gc, 10.0, nil)
