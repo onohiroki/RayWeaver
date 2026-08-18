@@ -20,12 +20,12 @@ import (
 // runEscape runs the escape-function global optimisation and writes the best
 // solution (pipeline-compatible) plus all discovered local minima in the
 // escape_result section. When verbose is true, progress events (local minima,
-// escape-parameter changes) are reported to stderr as JSONL; --log FILE writes
-// the same stream to a file. When saveBase is non-empty, each discovered
-// minimum is written to saveBase0.yaml, saveBase1.yaml, ... (see
-// escapeFileSaver). SIGINT/SIGTERM stops the search in three escalating stages
-// (graceful cycle boundary → mid-DLS interrupt → force quit), each producing
-// interrupted: true and exit 0 except the last.
+// escape-parameter changes) are reported to stderr as compact abbreviated
+// JSONL; --log FILE writes the full JSONL stream to a file. When saveBase is
+// non-empty, each discovered minimum is written to saveBase0.yaml,
+// saveBase1.yaml, ... (see escapeFileSaver). SIGINT/SIGTERM stops the search
+// in three escalating stages (graceful cycle boundary → mid-DLS interrupt →
+// force quit), each producing interrupted: true and exit 0 except the last.
 func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string) {
 	input := parseYAML[types.Input](data)
 	if input.Optimization == nil {
@@ -43,7 +43,7 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	progress := escape.NewProgress()
 	var logFiles []*os.File
 	if verbose {
-		progress.AddWriter(os.Stderr)
+		progress.AddCompactWriter(os.Stderr)
 	}
 	if logFile != "" {
 		f, err := os.Create(logFile)

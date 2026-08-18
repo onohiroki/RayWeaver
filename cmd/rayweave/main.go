@@ -96,7 +96,7 @@ func main() {
 			escapeExtractIndex = parseEscapeExtractFlags(args[2:])
 		} else {
 			fs := flag.NewFlagSet("escape", flag.ContinueOnError)
-			fs.BoolVar(&optEscapeVerbose, "verbose", false, "print escape progress (local minima, parameter changes) to stderr (JSONL)")
+			fs.BoolVar(&optEscapeVerbose, "verbose", false, "print escape progress (local minima, parameter changes) to stderr as compact JSONL")
 			fs.StringVar(&optEscapeGlassDir, "glass-dir", "", "AGF glass catalog directory")
 			fs.StringVar(&optEscapeLogFile, "log", "", "write escape progress to file (JSONL)")
 			fs.StringVar(&optEscapeSaveFile, "save", "", "save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...")
@@ -477,10 +477,11 @@ the merit function around that minimum, pushing the next DLS run out of the
 valley to discover other local minima.
 
 Options:
-  --verbose        print escape progress to stderr as JSONL (local minima
-                   found, escape-parameter changes, per-cycle DLS status);
-                   every event carries a wall-clock time and elapsed seconds
-  --log FILE       write the same JSONL progress stream to FILE
+  --verbose        print escape progress to stderr as compact JSONL (abbreviated
+                   values: fixed key order, floats as 6-digit exponent, wall
+                   clock as HH:MM:SS, status omitted)
+  --log FILE       write the full JSONL progress stream to FILE (same fields,
+                   keys ordered as the compact form)
   --save FILE      save each discovered local minimum to FILE0.yaml, FILE1.yaml,
                    ... (discovery order). When a minimum is improved, the
                    current FILE N.yaml is renamed to FILE N.<version>.yaml and

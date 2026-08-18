@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -715,6 +717,91 @@ func TestProgressEventsCarryTimeAndElapsed(t *testing.T) {
 	}
 	if ev.Workers != 1 {
 		t.Fatalf("workers = %d, want 1", ev.Workers)
+	}
+}
+
+func TestProgressCompactAndFullStreams(t *testing.T) {
+	var full, compact bytes.Buffer
+	p := NewProgress()
+	p.AddWriter(&full)
+	p.AddCompactWriter(&compact)
+	p.Event("cycle", map[string]any{
+		"cycle":      7,
+		"worker":     0,
+		"phase":      "escape_dls",
+		"status":     "accepted",
+		"dls_status": "converged",
+		"merit":      1.1168667646339256,
+	})
+
+	var fullEv struct {
+		Event     string  `json:"event"`
+		Time      string  `json:"time"`
+		Elapsed   float64 `json:"elapsed"`
+		Cycle     int     `json:"cycle"`
+		Status    string  `json:"status"`
+		DLSStatus string  `json:"dls_status"`
+		Merit     float64 `json:"merit"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(full.Bytes()), &fullEv); err != nil {
+		t.Fatalf("full json.Unmarshal: %v", err)
+	}
+	if fullEv.Status != "accepted" {
+		t.Fatalf("full status = %q, want accepted (status retained in --log)", fullEv.Status)
+	}
+	if fullEv.Merit != 1.1168667646339256 {
+		t.Fatalf("full merit = %v, want full precision", fullEv.Merit)
+	}
+	if fullEv.Elapsed < 0 {
+		t.Fatalf("full elapsed = %v, want >= 0", fullEv.Elapsed)
+	}
+
+	var compactEv struct {
+		Event      string  `json:"event"`
+		T          string  `json:"t"`
+		ElapsedMin int64   `json:"elapsed_min"`
+		Cycle      int     `json:"cycle"`
+		Merit      float64 `json:"merit"`
+		Status     string  `json:"status"`
+		Time       string  `json:"time"`
+		Elapsed    float64 `json:"elapsed"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(compact.Bytes()), &compactEv); err != nil {
+		t.Fatalf("compact json.Unmarshal: %v", err)
+	}
+	if !regexp.MustCompile(`^\d{2}:\d{2}:\d{2}$`).MatchString(compactEv.T) {
+		t.Fatalf("compact t = %q, want HH:MM:SS", compactEv.T)
+	}
+	if compactEv.Time != "" {
+		t.Fatalf("compact must rename time to t, got time=%q", compactEv.Time)
+	}
+	if compactEv.Elapsed != 0 {
+		t.Fatalf("compact must rename elapsed to elapsed_min, got elapsed=%v", compactEv.Elapsed)
+	}
+	if compactEv.ElapsedMin < 0 {
+		t.Fatalf("compact elapsed_min = %d, want >= 0", compactEv.ElapsedMin)
+	}
+	if compactEv.Status != "" {
+		t.Fatalf("compact must drop status, got %q", compactEv.Status)
+	}
+
+	got := string(bytes.TrimSpace(compact.Bytes()))
+	if !strings.Contains(got, `"merit":1.11687e+00`) {
+		t.Fatalf("compact merit not 6-sig-fig exponent: %s", got)
+	}
+	// Keys follow the fixed order: cycle, elapsed_min, t, merit, worker, event,
+	// dls_status, phase.
+	wantOrder := []string{`"cycle":`, `"elapsed_min":`, `"t":`, `"merit":`, `"worker":`, `"event":`, `"dls_status":`, `"phase":`}
+	last := -1
+	for _, k := range wantOrder {
+		i := strings.Index(got, k)
+		if i < 0 {
+			t.Fatalf("compact line missing %s: %s", k, got)
+		}
+		if i <= last {
+			t.Fatalf("compact key order violated (%s after %s): %s", k, wantOrder[last], got)
+		}
+		last = i
 	}
 }
 
