@@ -101,9 +101,9 @@ func inEventKeyOrder(k string) bool {
 // marshalEventLine serialises an event map to a single JSON object whose keys
 // follow eventKeyOrder. In compact mode that fixed order is the whole output
 // (every other key — status, signal, timed_out, interrupted — is dropped),
-// elapsed becomes whole minutes under e_min, the wall clock becomes HH:MM:SS
-// under t, and floats use 6-significant-figure exponent notation. In full mode
-// the original keys and values are kept (elapsed seconds, RFC3339 time,
+// elapsed becomes "HH:MM" under e, the wall clock becomes HH:MM:SS under t,
+// and floats use 6-significant-figure exponent notation. In full mode the
+// original keys and values are kept (elapsed seconds, RFC3339 time,
 // full-precision floats) and the remaining keys follow in alphabetical order.
 func marshalEventLine(m map[string]any, compact bool) string {
 	var b bytes.Buffer
@@ -127,7 +127,7 @@ func marshalEventLine(m map[string]any, compact bool) string {
 		if compact {
 			switch k {
 			case "elapsed":
-				writeKV("e_min", int64(v.(float64)/60))
+				writeKV("e", elapsedHMM(v.(float64)))
 				continue
 			case "time":
 				writeKV("t", v.(time.Time).Format("15:04:05"))
@@ -166,4 +166,11 @@ func valueJSON(v any, compact bool) []byte {
 		return []byte("null")
 	}
 	return data
+}
+
+// elapsedHMM formats seconds since run start as elapsed "HH:MM" (whole minutes
+// and hours, so 10414.57 s becomes "02:53").
+func elapsedHMM(sec float64) string {
+	m := int64(sec / 60)
+	return fmt.Sprintf("%02d:%02d", m/60, m%60)
 }

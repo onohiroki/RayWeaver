@@ -479,8 +479,8 @@ valley to discover other local minima.
 Options:
   --verbose        print escape progress to stderr as compact JSONL (abbreviated
                    values: fixed key order, floats as 6-digit exponent, wall
-                   clock as HH:MM:SS, status/signal/timed_out/interrupted
-                   omitted)
+                   clock as HH:MM:SS, elapsed as HH:MM,
+                   status/signal/timed_out/interrupted omitted)
   --log FILE       write the full JSONL progress stream to FILE (same fields,
                    keys ordered as the compact form)
   --save FILE      save each discovered local minimum to FILE0.yaml, FILE1.yaml,

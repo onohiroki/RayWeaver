@@ -759,7 +759,7 @@ func TestProgressCompactAndFullStreams(t *testing.T) {
 	var compactEv struct {
 		Event   string  `json:"event"`
 		T       string  `json:"t"`
-		EMin    int64   `json:"e_min"`
+		E       string  `json:"e"`
 		Cycle   int     `json:"cycle"`
 		Merit   float64 `json:"merit"`
 		Status  string  `json:"status"`
@@ -772,14 +772,14 @@ func TestProgressCompactAndFullStreams(t *testing.T) {
 	if !regexp.MustCompile(`^\d{2}:\d{2}:\d{2}$`).MatchString(compactEv.T) {
 		t.Fatalf("compact t = %q, want HH:MM:SS", compactEv.T)
 	}
+	if !regexp.MustCompile(`^\d+:\d{2}$`).MatchString(compactEv.E) {
+		t.Fatalf("compact e = %q, want HH:MM", compactEv.E)
+	}
 	if compactEv.Time != "" {
 		t.Fatalf("compact must rename time to t, got time=%q", compactEv.Time)
 	}
 	if compactEv.Elapsed != 0 {
-		t.Fatalf("compact must rename elapsed to e_min, got elapsed=%v", compactEv.Elapsed)
-	}
-	if compactEv.EMin < 0 {
-		t.Fatalf("compact e_min = %d, want >= 0", compactEv.EMin)
+		t.Fatalf("compact must rename elapsed to e, got elapsed=%v", compactEv.Elapsed)
 	}
 	if compactEv.Status != "" {
 		t.Fatalf("compact must drop status, got %q", compactEv.Status)
@@ -789,9 +789,9 @@ func TestProgressCompactAndFullStreams(t *testing.T) {
 	if !strings.Contains(got, `"merit":1.11687e+00`) {
 		t.Fatalf("compact merit not 6-sig-fig exponent: %s", got)
 	}
-	// Keys follow the fixed order: cycle, e_min, t, event, merit, worker,
+	// Keys follow the fixed order: cycle, e, t, event, merit, worker,
 	// dls_status, phase.
-	wantOrder := []string{`"cycle":`, `"e_min":`, `"t":`, `"event":`, `"merit":`, `"worker":`, `"dls_status":`, `"phase":`}
+	wantOrder := []string{`"cycle":`, `"e":`, `"t":`, `"event":`, `"merit":`, `"worker":`, `"dls_status":`, `"phase":`}
 	last := -1
 	for _, k := range wantOrder {
 		i := strings.Index(got, k)
