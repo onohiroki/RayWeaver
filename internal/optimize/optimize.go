@@ -9,6 +9,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -219,6 +220,28 @@ func glassVDForSurface(surfaces []types.Surface, gc *glass.Catalog, id int) floa
 	return 0
 }
 
+// glassNDForSurface returns the refractive index of the material on the surface
+// with the given ID, resolved like glassVDForSurface. Returns 0 for
+// air/unknown.
+func glassNDForSurface(surfaces []types.Surface, gc *glass.Catalog, id int) float64 {
+	for i := range surfaces {
+		if surfaces[i].ID != id {
+			continue
+		}
+		m := surfaces[i].Material
+		if m.HasModel() && !m.HasKey() {
+			return m.ND
+		}
+		if m.HasKey() {
+			if g, ok := gc.Lookup(m.Key); ok {
+				return g.ND
+			}
+		}
+		return 0
+	}
+	return 0
+}
+
 // SetMeritSchedule installs the conditional merit blend. It computes the
 // initial per-mode weights at the initial variable state so the DLS "before"
 // merit and the first iteration's base-point residuals share the same blend.
@@ -306,9 +329,10 @@ func (o *Optimizer) scheduleMetric(x []float64, iter int) float64 {
 		gc := effectiveGC(o.gc, tempGC)
 		total := 0.0
 		for ci := range o.configs {
-			surfaces := configSurfaces[o.configs[ci].id]
+			cfg := &o.configs[ci]
+			surfaces := configSurfaces[cfg.id]
 			for _, id := range o.meritSchedule.glassSurfaces {
-				total += math.Abs(glassRoleForSurface(surfaces, gc, id))
+				total += math.Abs(glassRoleForSurface(surfaces, gc, id, o.roleTargets[cfg.id]))
 			}
 		}
 		return total
@@ -466,6 +490,7 @@ func fieldDir(dir []float64) (float64, float64, bool) {
 func (o *Optimizer) UpdatePupils(x []float64) {
 	configSurfaces, tempGC := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
+	o.updateGlassRoles(configSurfaces, gc)
 	pol := types.NewCircularJones(true)
 
 	for ci := range o.configs {
@@ -496,6 +521,31 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 	}
 }
 
+// updateGlassRoles recomputes each config's per-surface glass-role
+// classification (paraxial.GlassRoles) at the current variable state and
+// freezes it for the rest of the DLS iteration. Called at the top of
+// UpdatePupils, so the role assignment follows the lens (element powers and
+// marginal-ray heights move with the variables) while staying constant within
+// one iteration — keeping the base-point and Jacobian glass_role residuals
+// consistent.
+func (o *Optimizer) updateGlassRoles(configSurfaces map[string][]types.Surface, gc *glass.Catalog) {
+	if o.roleTargets == nil {
+		o.roleTargets = make(map[string]map[int]paraxial.ElementRole)
+	}
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+		roles := paraxial.GlassRoles(surfaces, gc)
+		frozen := make(map[int]paraxial.ElementRole, len(roles))
+		for _, r := range roles {
+			for _, id := range r.SurfaceIDs {
+				frozen[id] = r
+			}
+		}
+		o.roleTargets[cfg.id] = frozen
+	}
+}
+
 type Optimizer struct {
 	configs          []config
 	variables        []Variable
@@ -517,6 +567,11 @@ type Optimizer struct {
 	hullMargin       float64
 	hullWeight       float64
 	hullPairs        []glassPair
+	// roleTargets holds the per-config, per-surface glass-role classification
+	// (paraxial.ElementRole) frozen at the top of each DLS iteration by
+	// updateGlassRoles, so the base-point and Jacobian residuals share one role
+	// assignment — the same frozen-per-iteration convention as the pupil.
+	roleTargets map[string]map[int]paraxial.ElementRole
 	// Bounded penalties for merit terms that cannot be evaluated. Defaults:
 	// spot 0.1, opd 0.01, wavefront 0.001 (mm).
 	spotDegenerate      float64
@@ -821,25 +876,25 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 	hullPairs := buildHullPairs(variablesCopy)
 
 	return &Optimizer{
-		configs:          configs,
-		variables:        variablesCopy,
-		gc:               gc,
-		glassOverrides:   glassOverrides,
-		initialDiameters: initialDiameters,
-		maxIter:          maxIter,
-		mu:               mu,
-		tol:              tol,
-		epsilon:          epsilon,
-		numRays:          numRays,
-		apertureMargin:   apertureMargin,
-		apertureMarginMM: 0.2,
-		muConMax:         muConMax,
-		workers:          workers,
-		logger:           logger,
-		hull:             hull,
-		hullMargin:       hullMargin,
-		hullWeight:       hullWeight,
-		hullPairs:        hullPairs,
+		configs:             configs,
+		variables:           variablesCopy,
+		gc:                  gc,
+		glassOverrides:      glassOverrides,
+		initialDiameters:    initialDiameters,
+		maxIter:             maxIter,
+		mu:                  mu,
+		tol:                 tol,
+		epsilon:             epsilon,
+		numRays:             numRays,
+		apertureMargin:      apertureMargin,
+		apertureMarginMM:    0.2,
+		muConMax:            muConMax,
+		workers:             workers,
+		logger:              logger,
+		hull:                hull,
+		hullMargin:          hullMargin,
+		hullWeight:          hullWeight,
+		hullPairs:           hullPairs,
 		spotDegenerate:      0.1,
 		opdDegenerate:       0.01,
 		wavefrontDegenerate: 0.001,

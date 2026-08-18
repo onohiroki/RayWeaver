@@ -15,18 +15,16 @@ func isAirMaterial(m types.Material) bool {
 	return m.IsAir() || m.Key == "1"
 }
 
-// ElementPowers returns the thin-lens power of every lens element in system
-// order: the sum of the surface powers of the surfaces bounding each element
-// (for a refractive element in air this reduces to (n-1)(c1-c2); a mirror is a
-// single-surface element with power -2n/R). Air gaps are skipped. The result
-// is empty when the system has no elements.
-func ElementPowers(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) []float64 {
-	nIndex := resolveIndices(surfaces, wavelength, gc)
-
-	var powers []float64
+// elementGroups returns the surface-index groups of every lens element in
+// system order, sharing the grouping of ElementPowers: a refractive element is
+// two consecutive non-air surfaces (a cemented doublet counts as a single
+// element), a mirror is a single surface. A trailing lone glass surface (no
+// exit surface) is dropped.
+func elementGroups(surfaces []types.Surface) [][]int {
+	var groups [][]int
 	for i := 0; i < len(surfaces); {
 		if surfaces[i].Reflects() {
-			powers = append(powers, elementPowerAt(surfaces, nIndex, []int{i}))
+			groups = append(groups, []int{i})
 			i++
 			continue
 		}
@@ -38,8 +36,23 @@ func ElementPowers(surfaces []types.Surface, wavelength float64, gc *glass.Catal
 		if r2 >= len(surfaces) {
 			break
 		}
-		powers = append(powers, elementPowerAt(surfaces, nIndex, []int{i, r2}))
+		groups = append(groups, []int{i, r2})
 		i = r2
+	}
+	return groups
+}
+
+// ElementPowers returns the thin-lens power of every lens element in system
+// order: the sum of the surface powers of the surfaces bounding each element
+// (for a refractive element in air this reduces to (n-1)(c1-c2); a mirror is a
+// single-surface element with power -2n/R). Air gaps are skipped. The result
+// is empty when the system has no elements.
+func ElementPowers(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) []float64 {
+	nIndex := resolveIndices(surfaces, wavelength, gc)
+
+	var powers []float64
+	for _, g := range elementGroups(surfaces) {
+		powers = append(powers, elementPowerAt(surfaces, nIndex, g))
 	}
 	return powers
 }
@@ -72,29 +85,12 @@ func elementPowerAt(surfaces []types.Surface, nIndex []float64, idx []int) float
 // (air gap, object, image plane) or is not found.
 func ElementPowerForSurface(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, surfaceID int) float64 {
 	nIndex := resolveIndices(surfaces, wavelength, gc)
-	for i := 0; i < len(surfaces); {
-		if surfaces[i].Reflects() {
-			if surfaces[i].ID == surfaceID {
-				return elementPowerAt(surfaces, nIndex, []int{i})
+	for _, g := range elementGroups(surfaces) {
+		for _, idx := range g {
+			if surfaces[idx].ID == surfaceID {
+				return elementPowerAt(surfaces, nIndex, g)
 			}
-			i++
-			continue
 		}
-		if isAirMaterial(surfaces[i].Material) {
-			i++
-			continue
-		}
-		r2 := i + 1
-		if r2 >= len(surfaces) {
-			if surfaces[i].ID == surfaceID {
-				return elementPowerAt(surfaces, nIndex, []int{i})
-			}
-			break
-		}
-		if surfaces[i].ID == surfaceID || surfaces[r2].ID == surfaceID {
-			return elementPowerAt(surfaces, nIndex, []int{i, r2})
-		}
-		i = r2
 	}
 	return 0
 }

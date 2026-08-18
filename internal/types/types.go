@@ -515,7 +515,7 @@ type MeritScheduleMode struct {
 // metric and each mode weight w_k is a monotone curve between the anchors.
 type MeritScheduleConfig struct {
 	// Metric is the state signal driving the blend: merit_ratio (default),
-	// iteration, or glass_role (the |vd_actual − vd_target| residual summed
+	// iteration, or glass_role (the glass-role residual magnitude summed
 	// over GlassSurfaces across all configs).
 	Metric string `yaml:"metric"`
 	// Curve is the interpolation shape between the anchors: linear (default),

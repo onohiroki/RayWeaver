@@ -144,7 +144,7 @@ A `CONF` operand selects which config's merit terms are active for each rule.
 | `distortion_pct` | percent distortion (chief-ray vs paraxial height) |
 | `lateral_color` | lateral colour (chief-ray height difference between two wavelengths) |
 | `longitudinal_color` | longitudinal colour (EFL difference between two wavelengths) |
-| `glass_role` | Abbe number vs the element-power role target (`surface_set[0]`, see below) |
+| `glass_role` | vd/nd vs the element's chromatic-role target (`surface_set[0]`, see below) |
 | `seidel_spherical` / `seidel_coma` / `seidel_astigmatism` / `seidel_distortion` | the corresponding third-order Seidel coefficient |
 | `wavefront_defocus` | paraboloid defocus `(a+b)/2` of the fitted wavefront OPD |
 | `wavefront_astigmatism` | paraboloid astigmatism `√(((a-b)/2)² + (c/2)²)` |
@@ -185,12 +185,19 @@ RMS, and the encircled-energy radius respectively. All five contribute
 remains consistent. These kinds are the reference implementation of the
 area-weighted spot statistics also reported by `chief`/`vignette`.
 
-`glass_role` steers an element's Abbe number toward the role its power requires
-(negative power → flint, positive power → crown) via
-`vd_target = 45 + 16·tanh(φ)` and contributes `(vd_actual − vd_target)²`. The
-element is the one whose bounding surfaces include `surface_set[0]` (see
-`docs/methods/merit-functions.md`, §2). It is the directed gradient that
-recovers a swapped flint/crown arrangement even when the imagery is not yet
+`glass_role` steers an element's glass toward the vd/nd its chromatic role
+needs, judged by its y²-weighted power `w = φ·y²` against the opposite-sign
+neighbours (`internal/paraxial`, the same element grouping as `asphere`): the
+element with the larger `|w|` is the couple's crown (`vd* = 60`), the smaller
+the flint (`vd* = 60·|w|/W_opp`, clamped 20…60), with a neutral 45 for
+near-stop / partner-less elements. The role is sign-free, so it also expresses
+the positive flint and the negative crown; `nd*` follows the normal glass line
+plus a +0.04 boost for positive-power elements. The term contributes
+`(vd_actual − vd*)² + K²·(nd_actual − nd*)²` as one signed residual (K = 60),
+and the role classification is frozen each DLS iteration in `UpdatePupils` (see
+`docs/methods/merit-functions.md`, §2 — including the worked Cooke-triplet
+example showing the stop-suppressed middle flint). It is the directed gradient
+that recovers a swapped flint/crown arrangement even when the imagery is not yet
 converged.
 
 ### Conditional merit schedule (`optimization.merit_schedule`)

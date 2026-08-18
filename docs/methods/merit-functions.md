@@ -187,24 +187,113 @@ longitudinal_color = EFL(λ₂) − EFL(λ₁)
 
 ### glass_role
 
-Pushes the Abbe number of a lens element's glass toward the role its element
-power requires, so a negative-power element becomes a flint (low vd) and a
-positive-power element a crown (high vd). The element is identified by
-`surface_set[0]` (the ID of one of its bounding glass surfaces). Its thin-lens
-power φ is computed at the d-line (`paraxial.ElementPowers`, the same grouping
-the `asphere` command uses) and mapped to a target Abbe number:
+Pushes a lens element's glass toward the vd **and** nd its chromatic role in
+the system requires. The role is **not** decided by the sign of the element's
+power alone but by its chromatic weight relative to the neighbouring elements —
+the marginal-ray-height-weighted power `w = φ·y²` (the Seidel axial-colour
+weight), with φ the d-line thin-lens power and y the paraxial marginal-ray
+height (`paraxial.MarginalRayHeights`). The element is identified by
+`surface_set[0]` (the ID of one of its bounding glass surfaces), using the same
+`paraxial.ElementPowers` grouping (a cemented doublet is one element, a mirror
+a single surface).
+
+**Classification.** `paraxial.GlassRoles` computes one `ElementRole` per element
+in system order: a refractive element is two consecutive non-air surfaces (a
+cemented doublet counts as one element, its power and marginal height shared),
+a mirror a single surface; a trailing lone glass surface (no exit surface) is
+dropped, exactly like `paraxial.ElementPowers`. The classification proceeds as:
 
 ```
-vd_target = vd_center + Δ·tanh(γ·φ)
-residual  = vd_actual − vd_target
+for each element e with chromatic weight w_e = φ_e·y_e²:
+    W_opp   = Σ |w| over adjacent elements of the opposite sign of w_e
+              (0 when there is no such partner)
+    role    = "neutral"       if |w_e| ≈ 0 (|w_e| < 0.05·(|w_e|+W_opp))
+                                or W_opp == 0            → vd* = 45
+              "dominant"      if |w_e| > W_opp           → vd* = 60
+              "compensating"  otherwise                  → vd* =
+                                clamp(60·|w_e|/W_opp, 20, 60)
 ```
 
-with fixed defaults `vd_center = 45`, `Δ = 16` (targets span 29…61) and
-`γ = 1.0`. `vd_actual` is the element's Abbe number — the `surface_set[0]`
-material, resolved through the in-flight glass catalog when keyed, read inline
-for model glasses. A positive-power element (φ > 0) is steered to the crown end
-of the range, a negative-power one to the flint end. `surface_set[0]` is
-required; the term contributes 0 when absent.
+An element may have several opposite-sign neighbours (a Cooke-triplet middle
+element pairs with both outer elements) — `W_opp` then sums them, so the
+compensating target follows the *couple* achromatism `w_c/V_c + w_f/V_f = 0`,
+i.e. `V_f = V_c·|w_f|/|w_c|`, rather than a fixed band. The "dominant" member
+is the couple's **crown** (power-bearer, target `vd* = 60`), the
+"compensating" member its **flint** (chromatic corrector, target scaled by the
+actual power balance). Because the rule is sign-free, a positive-power element
+can be steered to a **positive flint** (a weak positive next to a strong
+negative partner — the double-Gauss rear group) and a negative-power element to
+a **negative crown** (a negative relay/Barlow group whose negative member
+dominates); both are unrepresentable under the old sign-based
+`45 + 16·tanh(φ)` rule.
+
+**nd target.** Keeps the glass on a real trajectory:
+
+```
+nd* = clamp(nd_line(vd*) + boost, 1.4, 2.0)
+nd_line(vd) = 1.635 − 0.0025·(vd − 50)     ("normal glass line")
+boost        = +0.04                       for w_e > 0 (positive-power elements)
+```
+
+The boost steers a high-nd crown (which flattens the Petzval sum and reduces the
+surface bending). Physical reality of the (nd, vd) point is additionally
+enforced by the `optimization.glass_hull` penalty.
+
+**Combined residual.** The term contributes a single **signed magnitude**
+residual that maps the vd and nd deviations into one least-squares value:
+
+```
+residual = sign(dv + dn) · √(dv² + dn²),   with
+dv = vd_actual − vd*                       (Abbe-number units)
+dn = K·(nd_actual − nd*),  K = 60          (nd error scaled to Abbe-number span)
+```
+
+Since `residual² = (vd_actual − vd*)² + K²·(nd_actual − nd*)²` exactly, the
+least-squares identity `Σ residual² == merit` holds and the term is a valid
+weighted penalty on both glass parameters at once. The sign (of `dv + dn`,
+i.e. the net deviation) is what makes the finite-difference Jacobian point in a
+consistent direction — near the optimum the magnitude residual is a valid
+parameterisation of `½·∇q` with `q = dv² + dn²`, so `Jᵀr ∝ ∇merit` up to the
+solver's step scale. With a bare signed vd-only residual, an element on target
+for vd but far off for nd would contribute ~0; the combined residual keeps the
+nd error visible.
+
+`vd_actual`/`nd_actual` are the `surface_set[0]` material resolved through the
+in-flight glass catalog when keyed, inline for model glasses (`surface_set[0]`
+is required; the term contributes 0 when absent).
+
+**Frozen per iteration.** The role classification depends on the current powers
+and marginal heights (both move with the nd variables), so `Optimizer.
+UpdatePupils` recomputes it at the top of every DLS iteration and freezes the
+per-config, per-surface `ElementRole` map (`Optimizer.roleTargets`) for the
+base-point and Jacobian residual evaluations — the same frozen-per-iteration
+convention as the dynamic pupil, keeping the derivative consistent. The
+`glass_role` schedule metric (§5) reads the same frozen map, so the blend weight
+and the residuals always agree within one iteration. Evaluations outside the
+solver (a nil frozen map) fall back to a fresh classification of the current
+surfaces.
+
+**Worked example (US2645157 Cooke triplet).** Marginal-ray heights at the stop
+suppress the middle element's bare power, so the classification inverts the
+naive sign-based assignment:
+
+| element | surfaces | φ | y | w = φ·y² | W_opp | role | vd* | nd* |
+|---|---|---|---|---|---|---|---|---|
+| front | 1,2 | +0.0647 | 1.000 | +0.0647 | 0.0700 | compensating | 55.5 | 1.661 |
+| middle | 3,4 | −0.1117 | 0.791 | −0.0700 | 0.1174 | compensating | 35.8 | 1.671 |
+| rear | 6,7 | +0.0741 | 0.843 | +0.0526 | 0.0700 | compensating | 45.1 | 1.687 |
+
+The middle element has the largest bare `|φ|` yet — because it sits near the
+stop where `y` is small — its chromatic weight `|w| = 0.0700` is *below* the
+combined `W_opp = 0.0647 + 0.0526 = 0.1174` of its two positive neighbours, so
+it is the couple's **flint** with the lowest vd target (35.8), exactly the real
+SF12 flint of the design. Both outer elements are compensating too (their
+single opposite-sign partner, the middle element, outweighs each of them),
+giving vd targets 55.5 and 45.1 — the crown-side SK18 pair. The nd targets
+land on the normal-glass line (middle, no boost: `1.635 + 0.0025·14.2 =
+1.671`) and line+boost for the positive elements. This is the "frequency
+dependent" case the old `tanh(φ)` rule got wrong: it read only `sign(φ)` and
+forced the middle element crown-side (vd → 60) even though it is the flint.
 
 **Weight calibration.** The residual is in Abbe-number units, so `residual²` is
 of order a few hundred for a swapped element, versus ~1e-2 for the colour terms
@@ -268,7 +357,7 @@ merit uses.
 |---|---|
 | `merit_ratio` (default) | `EvaluateMerit(x) / initialMerit` |
 | `iteration` | the DLS iteration number |
-| `glass_role` | Σ over `glass_surfaces` of `|vd_actual − vd_target|` (the glass-role residual of §2, aggregated over every config) |
+| `glass_role` | Σ over `glass_surfaces` of the glass-role residual magnitude (the §2 term, aggregated over every config) |
 
 ### Weight curve
 

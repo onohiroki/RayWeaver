@@ -75,7 +75,11 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		if isWavefrontKind(term.kind) {
 			return o.evaluateWavefrontTerm(cfg, term, surfaces, gc)
 		}
-		return evaluateKindValue(term.kind, term, surfaces, gc)
+		// glass_role reads the per-iteration frozen role targets (computed in
+		// UpdatePupils) when available so the DLS base-point and Jacobian
+		// residuals share one role assignment; a nil frozen map falls back to
+		// a fresh classification of the current surfaces.
+		return evaluateKindValue(term.kind, term, surfaces, gc, o.roleTargets[cfg.id])
 	}
 }
 
@@ -201,7 +205,7 @@ func wavefrontCoeff(kind string, pab wavefront.Paraboloid) float64 {
 	return 0
 }
 
-func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
+func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, frozen map[int]paraxial.ElementRole) float64 {
 	if gc == nil {
 		gc = glass.NewCatalog()
 	}
@@ -216,7 +220,7 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 		if len(term.surfaceSet) == 0 {
 			return 0
 		}
-		return glassRoleForSurface(surfaces, gc, term.surfaceSet[0])
+		return glassRoleForSurface(surfaces, gc, term.surfaceSet[0], frozen)
 	case MeritSeidelSpherical:
 		return evaluateSeidel(term.fieldAngle, term.wavelength, surfaces, gc).Spherical
 	case MeritSeidelComa:
@@ -282,28 +286,41 @@ func evaluateLongitudinalColor(wl1, wl2 float64, surfaces []types.Surface, gc *g
 	return pr2.FocalLength - pr1.FocalLength
 }
 
-// glass_role tuning constants: the target Abbe number of an element of
-// thin-lens power phi at the d-line is vd_center + delta·tanh(gamma·phi), so a
-// positive-power element is steered to the crown (high-vd) end and a
-// negative-power element to the flint (low-vd) end.
-const (
-	meritGlassRoleCenter = 45.0
-	meritGlassRoleDelta  = 16.0
-	meritGlassRoleGamma  = 1.0
-)
+// glass_role tuning constants: the combined vd/nd residual maps an Abbe-number
+// error and a refractive-index error into one value. glassRoleNDResidualScale
+// converts an nd error (span ~0.6) into Abbe-number-like units (span ~60).
+const glassRoleNDResidualScale = 60.0
 
-func glassRoleTarget(phi float64) float64 {
-	return meritGlassRoleCenter + meritGlassRoleDelta*math.Tanh(meritGlassRoleGamma*phi)
-}
-
-// glassRoleForSurface returns the glass-role residual
-// vd_actual − vd_target for the element containing the surface with the given
-// ID: 0 when the surface is not part of a lens element (air gap, object,
-// image plane).
-func glassRoleForSurface(surfaces []types.Surface, gc *glass.Catalog, id int) float64 {
-	phi := paraxial.ElementPowerForSurface(surfaces, paraxial.DLine, gc, id)
+// glassRoleForSurface returns the glass-role residual for the element
+// containing the surface with the given ID: 0 when the surface is not part of
+// a lens element (air gap, object, image plane). The residual is the combined
+// signed magnitude of the vd and nd deviations from the role-derived targets,
+// sign = sign(vd_actual − vd_target + K·(nd_actual − nd_target)), so
+// residual² = (vd_actual − vd_target)² + K²·(nd_actual − nd_target)² — a valid
+// least-squares term that keeps the Σresidual² == merit identity. The target
+// comes from the frozen per-iteration role classification when provided,
+// else from a fresh classification of the current surfaces.
+func glassRoleForSurface(surfaces []types.Surface, gc *glass.Catalog, id int, frozen map[int]paraxial.ElementRole) float64 {
+	var role paraxial.ElementRole
+	ok := false
+	if frozen != nil {
+		role, ok = frozen[id]
+	}
+	if !ok {
+		role, ok = paraxial.ElementRoleForSurface(surfaces, gc, id)
+	}
+	if !ok {
+		return 0
+	}
 	vdActual := glassVDForSurface(surfaces, gc, id)
-	return vdActual - glassRoleTarget(phi)
+	ndActual := glassNDForSurface(surfaces, gc, id)
+	dv := vdActual - role.VTarget
+	dn := (ndActual - role.NDTarget) * glassRoleNDResidualScale
+	mag := math.Sqrt(dv*dv + dn*dn)
+	if mag == 0 || dv+dn >= 0 {
+		return mag
+	}
+	return -mag
 }
 
 func evaluateSeidel(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) paraxial.SeidelCoefficients {

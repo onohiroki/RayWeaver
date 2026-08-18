@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -30,49 +32,179 @@ func tripletModesSurfaces(swap bool) []types.Surface {
 	}
 }
 
-func TestGlassRoleTargetPolarity(t *testing.T) {
-	if got := glassRoleTarget(0.1); got <= 45.0 {
-		t.Errorf("glassRoleTarget(+0.1) = %v, want > 45 (positive power → crown)", got)
+// TestGlassRoleClassification verifies the role-based classification invariants
+// on the US2645157 Cooke triplet: the negative middle element's |phi| is the
+// largest of the three, yet its y²-weighted chromatic weight makes it the
+// couple's flint (lowest vd target, compensating) while the two positive outer
+// elements sit crown-side of it. This is the behaviour the old sign-based
+// vd = 45 + 16·tanh(phi) rule could not express.
+func TestGlassRoleClassification(t *testing.T) {
+	gc := tripletGC()
+	s := tripletModesSurfaces(false)
+	surface.Precompute(s)
+	roles := paraxial.GlassRoles(s, gc)
+	if len(roles) != 3 {
+		t.Fatalf("expected 3 elements, got %d", len(roles))
 	}
-	if got := glassRoleTarget(-0.1); got >= 45.0 {
-		t.Errorf("glassRoleTarget(-0.1) = %v, want < 45 (negative power → flint)", got)
+	// Element order: [1 2] front positive, [3 4] middle negative, [6 7] rear
+	// positive.
+	if roles[0].W <= 0 || roles[2].W <= 0 || roles[1].W >= 0 {
+		t.Errorf("chromatic-weight signs wrong: front=%v middle=%v rear=%v", roles[0].W, roles[1].W, roles[2].W)
 	}
-	if got := glassRoleTarget(0); got != 45.0 {
-		t.Errorf("glassRoleTarget(0) = %v, want 45", got)
+	if roles[1].Phi >= 0 {
+		t.Errorf("middle element phi = %v, want < 0", roles[1].Phi)
+	}
+	// The middle (negative) element is the flint: strictly the lowest vd
+	// target, below the neutral centre.
+	if roles[1].VTarget >= 45 {
+		t.Errorf("middle element vd target %v, want < 45 (flint)", roles[1].VTarget)
+	}
+	for _, r := range roles {
+		if r.VTarget < 20 || r.VTarget > 90 {
+			t.Errorf("vd target %v outside the glass range", r.VTarget)
+		}
+		if r.NDTarget < 1.4 || r.NDTarget > 2.0 {
+			t.Errorf("nd target %v outside the glass range", r.NDTarget)
+		}
+	}
+	if roles[1].VTarget >= roles[0].VTarget || roles[1].VTarget >= roles[2].VTarget {
+		t.Errorf("middle vd target %v not below the outer elements' (%v, %v)",
+			roles[1].VTarget, roles[0].VTarget, roles[2].VTarget)
 	}
 }
 
-// TestGlassRoleForSurface verifies the glass-role residual detects a swapped
-// flint/crown arrangement: on the correct triplet the flint's vd sits below its
-// (flint) target and the crown's above its (crown) target; after the swap the
-// signs reverse for the negative-power element.
+// TestGlassRoleForSurface verifies the combined vd+nd glass-role residual
+// detects a swapped flint/crown arrangement: on the correct triplet SF12 sits
+// close to its flint target (small |residual|), and after the swap the
+// negative-power element carries the crown and is pushed hard toward the flint
+// side (positive residual → vd down), while the rear element's flint is pushed
+// toward the crown side (negative residual → vd up). The residual keeps the
+// least-squares form |r|² = (vd_actual − vd*)² + K²·(nd_actual − nd*)².
 func TestGlassRoleForSurface(t *testing.T) {
 	gc := tripletGC()
-	for _, tc := range []struct {
-		name string
-		id   int
-		want float64 // expected sign of vd_actual − vd_target
-	}{
-		{"correct S3 (SF12 flint on negative power)", 3, -1},
-		{"correct S6 (SK18 crown on positive power)", 6, 1},
-	} {
-		s := tripletModesSurfaces(false)
-		surface.Precompute(s)
-		res := glassRoleForSurface(s, gc, tc.id)
-		if tc.want > 0 && res <= 0 {
-			t.Errorf("%s: residual = %v, want > 0", tc.name, res)
-		}
-		if tc.want < 0 && res >= 0 {
-			t.Errorf("%s: residual = %v, want < 0", tc.name, res)
-		}
+	correct := tripletModesSurfaces(false)
+	surface.Precompute(correct)
+	res3 := glassRoleForSurface(correct, gc, 3, nil)
+	res6 := glassRoleForSurface(correct, gc, 6, nil)
+	corrRole3, _ := paraxial.ElementRoleForSurface(correct, gc, 3)
+	corrRole6, _ := paraxial.ElementRoleForSurface(correct, gc, 6)
+	t.Logf("correct: role3=%s vd*=%.2f res3=%+.3f | role6=%s vd*=%.2f res6=%+.3f",
+		corrRole3.Role, corrRole3.VTarget, res3, corrRole6.Role, corrRole6.VTarget, res6)
+	if corrRole3.VTarget >= 45 {
+		t.Errorf("middle element (negative power) vd target %v, want < 45 (flint)", corrRole3.VTarget)
 	}
 
-	s := tripletModesSurfaces(true)
+	swapped := tripletModesSurfaces(true)
+	surface.Precompute(swapped)
+	res3s := glassRoleForSurface(swapped, gc, 3, nil)
+	res6s := glassRoleForSurface(swapped, gc, 6, nil)
+	role3s, _ := paraxial.ElementRoleForSurface(swapped, gc, 3)
+	t.Logf("swapped: role3=%s vd*=%.2f res3=%+.3f", role3s.Role, role3s.VTarget, res3s)
+
+	// The swapped negative element (now SK18 crown, vd 55) must be pushed down
+	// toward its flint target and the swapped positive element (now SF12 flint,
+	// vd 34) up toward the crown-side target.
+	if res3s <= 0 {
+		t.Errorf("swapped S3 (SK18 crown on negative power): residual = %v, want > 0", res3s)
+	}
+	if res6s >= 0 {
+		t.Errorf("swapped S6 (SF12 flint on positive power): residual = %v, want < 0", res6s)
+	}
+	// The composite residual is the signed magnitude of the vd/nd deviations on
+	// the same (swapped) classification:
+	// |r|² == (vd_actual − vd*)² + K²·(nd_actual − nd*)².
+	vd3 := glassVDForSurface(swapped, gc, 3)
+	nd3 := glassNDForSurface(swapped, gc, 3)
+	want := math.Sqrt((vd3-role3s.VTarget)*(vd3-role3s.VTarget) +
+		(nd3-role3s.NDTarget)*(nd3-role3s.NDTarget)*glassRoleNDResidualScale*glassRoleNDResidualScale)
+	if math.Abs(math.Abs(res3s)-want) > 1e-9 {
+		t.Errorf("swapped S3 combined residual magnitude %v != √(vd² + K²·nd²) = %v", math.Abs(res3s), want)
+	}
+}
+
+// positiveFlintCouple returns a two-element couple where the negative element
+// dominates the chromatic weight: a positive element [1 2] (phi ≈ +0.004)
+// followed by a strong negative element [3 4] (phi ≈ −0.05) at comparable
+// marginal heights. The positive element's chromatic weight is a small but
+// non-negligible fraction of the negative's (well above the neutral threshold,
+// far below the dominance threshold), so the role algorithm steers it to a
+// flint (low vd, clamped at the glass-map floor) and the strong negative to a
+// crown (high vd) — the opposite of the naive sign-based assignment.
+func positiveFlintCouple() []types.Surface {
+	return []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.05, Thickness: 2.0, Material: types.Material{ND: 1.5, VD: 60}},
+		{ID: 2, Type: types.Sphere, Curvature: 0.042, Thickness: 5.0, Material: types.Material{}},
+		{ID: 3, Type: types.Sphere, Curvature: -0.04, Thickness: 2.0, Material: types.Material{ND: 1.7, VD: 30}},
+		{ID: 4, Type: types.Sphere, Curvature: 0.0314, Thickness: 50.0, Material: types.Material{}},
+		{ID: 5, Type: types.Sphere, Curvature: 0.0, Thickness: 0.0, Material: types.Material{}},
+	}
+}
+
+// TestGlassRoleDLSRecoversPositiveFlint is the acceptance test for the
+// sign-free role rule: from a naive "positive power → crown / negative power →
+// flint" start on a couple whose negative element dominates the chromatic
+// weight, a DLS run with glass-only variables and a glass_role merit flips the
+// arrangement to the physically correct positive flint / negative crown.
+func TestGlassRoleDLSRecoversPositiveFlint(t *testing.T) {
+	gc := glass.NewCatalog()
+	s := positiveFlintCouple()
 	surface.Precompute(s)
-	// The swapped negative-power element now carries the crown (vd above the
-	// flint target): the residual must be positive, flagging the wrong role.
-	if res := glassRoleForSurface(s, gc, 3); res <= 0 {
-		t.Errorf("swapped S3 (SK18 crown on negative power): residual = %v, want > 0", res)
+
+	// Sanity-check the initial classification is the inverted one.
+	rolePos, _ := paraxial.ElementRoleForSurface(s, gc, 1)
+	roleNeg, _ := paraxial.ElementRoleForSurface(s, gc, 3)
+	if rolePos.VTarget >= roleNeg.VTarget {
+		t.Fatalf("test setup: positive vd* %v not below negative vd* %v (roles not inverted)",
+			rolePos.VTarget, roleNeg.VTarget)
+	}
+
+	cfg := ConfigInput{
+		ID:       "cfg1",
+		Weight:   1.0,
+		Surfaces: s,
+		Fields: []types.FieldItem{
+			{ID: 0, AngleDeg: 0.0, Weight: 1.0},
+		},
+		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+		MeritTerms: []types.MeritTerm{
+			{Kind: "glass_role", SurfaceSet: []int{1}, Weight: 1e-3},
+			{Kind: "glass_role", SurfaceSet: []int{3}, Weight: 1e-3},
+		},
+	}
+	localVars := []types.LocalVariableDef{
+		{Name: "s1_nd", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "nd"}, Min: 1.4, Max: 1.9, Active: true},
+		{Name: "s1_vd", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "vd"}, Min: 20.0, Max: 80.0, Active: true},
+		{Name: "s3_nd", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "nd"}, Min: 1.4, Max: 1.9, Active: true},
+		{Name: "s3_vd", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "vd"}, Min: 20.0, Max: 80.0, Active: true},
+	}
+
+	opt := NewMultiOptimizer([]ConfigInput{cfg}, nil, localVars, gc, 100, 0.01, 1e-6, 1e-4, 1.0, 16, 0, 0, nil, nil, 0, 0)
+	res := opt.Optimize()
+
+	x := make([]float64, len(res.Variables))
+	for i, vs := range res.Variables {
+		x[i] = vs.After
+	}
+	configSurfaces, tempGC := opt.applyVariables(x)
+	effGC := effectiveGC(gc, tempGC)
+	aft := configSurfaces["cfg1"]
+	vd1 := glassVDForSurface(aft, effGC, 1)
+	vd3 := glassVDForSurface(aft, effGC, 3)
+
+	if res.AfterMerit >= res.BeforeMerit {
+		t.Errorf("AfterMerit %v not < BeforeMerit %v", res.AfterMerit, res.BeforeMerit)
+	}
+	t.Logf("status=%s iters=%d S1(vd)=%.3f S3(vd)=%.3f", res.Status, res.Iterations, vd1, vd3)
+	// The positive element must have become the flint (low vd) and the negative
+	// element the crown (high vd) of the couple.
+	if vd1 >= 45.0 {
+		t.Errorf("S1 (positive power) vd after = %v, want < 45 (positive flint)", vd1)
+	}
+	if vd3 <= 45.0 {
+		t.Errorf("S3 (negative power) vd after = %v, want > 45 (negative crown)", vd3)
+	}
+	if vd1 >= vd3 {
+		t.Errorf("S1 vd %v not below S3 vd %v", vd1, vd3)
 	}
 }
 
