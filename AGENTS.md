@@ -165,6 +165,8 @@ A surface `material` is a structured type, one of:
 
 **Optimization**: a glass `nd`/`vd` variable targets the surface's material. Inline models are updated in place (key stays empty); keyed references are optimised through an in-flight catalogue override (the base catalog is never mutated) and `MaterializeGlassEntries`/`FinalConfigs` rewrite every surface sharing that key to the optimised **inline** model glass (`{nd, vd}`, key removed). No new glass entry is appended to `glass_catalog`.
 
+**Real-glass convex hull is ON by default**: every `optimize`/`escape` run constrains `nd`/`vd` glass variables to the default real-glass convex hull (`glass.NewDefaultConvexHull`, `resolveGlassHull` in `cmd/rayweave/optimize.go`) unless the YAML explicitly sets `optimization.glass_hull.enabled: false`. A nil section or an `enabled: true` section uses the default hull (custom `margin`/`weight` honored). The hull only adds a penalty for actual `nd`/`vd` variables, so curvature-only optimisations are unaffected. This keeps glass variables on real glass (e.g. a pure chromatic merit cannot push `nd`/`vd` to the variable-range corners) — handy with `--glass-color --power-solve`, where the element powers are pinned while the glasses must stay physical.
+
 ## 日本語の扱い
 
 UTF-8 BOM なし．句読点は「，」「．」．コミットメッセージとソースコードコメントは英語．ドキュメントは英語で，必要なら日本語版も作る．リポジトリ直下の Markdown は `README.md` だけ管理（他は git add しない）．

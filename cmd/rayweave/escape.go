@@ -180,10 +180,8 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		cfg.OPDDegenerate = dg.OPDValue
 		cfg.WavefrontDegenerate = dg.WavefrontValue
 	}
-	if input.Optimization.GlassHull != nil && input.Optimization.GlassHull.Enabled {
-		cfg.Hull = glass.NewDefaultConvexHull()
-		cfg.HullMargin = input.Optimization.GlassHull.Margin
-		cfg.HullWeight = input.Optimization.GlassHull.Weight
+	cfg.HullMargin, cfg.HullWeight = resolveGlassHull(input.Optimization.GlassHull, &cfg.Hull)
+	if cfg.Hull != nil {
 		if cfg.HullMargin <= 0 {
 			cfg.HullMargin = 0.02
 		}
@@ -398,17 +396,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	}
 
 	var hull *glass.ConvexHull
-	hullMargin := 0.02
-	hullWeight := 1.0
-	if input.Optimization.GlassHull != nil && input.Optimization.GlassHull.Enabled {
-		hull = glass.NewDefaultConvexHull()
-		if input.Optimization.GlassHull.Margin > 0 {
-			hullMargin = input.Optimization.GlassHull.Margin
-		}
-		if input.Optimization.GlassHull.Weight > 0 {
-			hullWeight = input.Optimization.GlassHull.Weight
-		}
-	}
+	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull)
 
 	factory := func() dls.Model {
 		configsCopy := make([]optimize.ConfigInput, len(configs))

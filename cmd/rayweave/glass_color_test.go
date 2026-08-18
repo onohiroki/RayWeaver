@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -163,6 +164,41 @@ func mustParseInput(t *testing.T, yamlData string) types.Input {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	return in
+}
+
+// TestResolveGlassHullDefaultOn verifies the convex-hull is enabled by default
+// (real-glass region), honoring an explicit disabled config, and carrying the
+// custom margin/weight when enabled.
+func TestResolveGlassHullDefaultOn(t *testing.T) {
+	var hull *glass.ConvexHull
+	m, w := resolveGlassHull(nil, &hull)
+	if hull == nil {
+		t.Fatal("default-on: hull should be set when glass_hull is absent")
+	}
+	if m != 0.02 || w != 1.0 {
+		t.Errorf("default margin/weight = %v/%v, want 0.02/1.0", m, w)
+	}
+
+	// Explicitly disabled -> no hull.
+	var h2 *glass.ConvexHull
+	m2, w2 := resolveGlassHull(&types.GlassHullConfig{Enabled: false}, &h2)
+	if h2 != nil {
+		t.Error("explicitly disabled glass_hull should yield no hull")
+	}
+	if m2 != 0 || w2 != 0 {
+		t.Errorf("disabled margin/weight = %v/%v, want 0/0", m2, w2)
+	}
+
+	// Enabled with custom values is honored.
+	cfgCustom := &types.GlassHullConfig{Enabled: true, Margin: 0.05, Weight: 2.0}
+	var h3 *glass.ConvexHull
+	m3, w3 := resolveGlassHull(cfgCustom, &h3)
+	if h3 == nil {
+		t.Error("enabled glass_hull should yield a hull")
+	}
+	if m3 != 0.05 || w3 != 2.0 {
+		t.Errorf("custom margin/weight = %v/%v, want 0.05/2.0", m3, w3)
+	}
 }
 
 func abs(f float64) float64 {

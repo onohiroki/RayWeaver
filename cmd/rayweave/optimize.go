@@ -258,17 +258,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	}
 
 	var hull *glass.ConvexHull
-	hullMargin := 0.02
-	hullWeight := 1.0
-	if input.Optimization.GlassHull != nil && input.Optimization.GlassHull.Enabled {
-		hull = glass.NewDefaultConvexHull()
-		if input.Optimization.GlassHull.Margin > 0 {
-			hullMargin = input.Optimization.GlassHull.Margin
-		}
-		if input.Optimization.GlassHull.Weight > 0 {
-			hullWeight = input.Optimization.GlassHull.Weight
-		}
-	}
+	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull)
 
 	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight)
 	opt.SetApertureMarginMM(apertureMarginMM)
@@ -449,6 +439,31 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	output.OptResults = optResults
 
 	writeYAML(&output)
+}
+
+// resolveGlassHull resolves the glass convex-hull constraint under the
+// "default on" rule: the real-glass convex hull is applied unless the user sets
+// optimization.glass_hull.enabled: false explicitly. A nil or enabled config
+// yields the default hull (out is set), with margin/weight falling back to
+// their defaults when unset; an explicit disabled config yields no hull (out
+// stays nil). The hull only constrains nd/vd glass variables (hullPairs), so a
+// run without glass variables is unaffected even with the hull active.
+func resolveGlassHull(cfg *types.GlassHullConfig, out **glass.ConvexHull) (margin, weight float64) {
+	if cfg != nil && !cfg.Enabled {
+		return 0, 0
+	}
+	*out = glass.NewDefaultConvexHull()
+	margin = 0.02
+	weight = 1.0
+	if cfg != nil {
+		if cfg.Margin > 0 {
+			margin = cfg.Margin
+		}
+		if cfg.Weight > 0 {
+			weight = cfg.Weight
+		}
+	}
+	return margin, weight
 }
 
 // firstConfigSurfaces returns the surfaces of the first config (used when no
