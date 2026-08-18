@@ -1,6 +1,8 @@
 package paraxial
 
 import (
+	"math"
+
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -93,4 +95,104 @@ func ElementPowerForSurface(surfaces []types.Surface, wavelength float64, gc *gl
 		}
 	}
 	return 0
+}
+
+// ElementPowerCurvature returns the thin-lens power of the element containing
+// surfaceID computed directly from the surface curvatures, with no dependence
+// on the Precompute-derived ParaxialRadius. It matches ElementPowerForSurface
+// once Precompute has refreshed ParaxialRadius, and matches the power the
+// power-preserving solve (SolveElementPower) preserves. Use it when the
+// surfaces have not been through Precompute (e.g. a target snapshot taken at
+// Optimizer construction).
+func ElementPowerCurvature(surfaces []types.Surface, gc *glass.Catalog, surfaceID int) float64 {
+	nIndex := resolveIndices(surfaces, DLine, gc)
+	for _, g := range elementGroups(surfaces) {
+		found := false
+		for _, j := range g {
+			if surfaces[j].ID == surfaceID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		phi := 0.0
+		for _, j := range g {
+			nBefore := 1.0
+			if j > 0 {
+				nBefore = nIndex[j-1]
+			}
+			nAfter := nIndex[j]
+			if surfaces[j].Reflects() {
+				nAfter = -nBefore
+			}
+			phi += (nAfter - nBefore) * surfaces[j].Curvature
+		}
+		return phi
+	}
+	return 0
+}
+
+// SolveElementPower adjusts the curvature of the surface whose ID is
+// solveSurfaceID so that the thin-lens power of the element containing it
+// equals targetPhi. The solve is exact for the paraxial model: the element
+// power is the sum of the surface powers, and only the solve surface's
+// curvature is free, so
+//
+//	targetPhi = K + (nAfter - nBefore) * c_solve
+//
+// where K is the sum over the element's other surfaces. The solve surface's
+// Curvature is written in place; the caller must run surface.Precompute to
+// refresh ParaxialRadius from the new curvature. It returns false when the
+// surface is not part of a refractive lens element, or the solve coefficient
+// (index contrast on the solve surface) is zero (e.g. a mirror). Mirrors are
+// skipped: their power is not driven by a dispersion.
+func SolveElementPower(surfaces []types.Surface, gc *glass.Catalog, solveSurfaceID int, targetPhi float64) bool {
+	nIndex := resolveIndices(surfaces, DLine, gc)
+	for _, g := range elementGroups(surfaces) {
+		solveIdx := -1
+		for _, j := range g {
+			if surfaces[j].ID == solveSurfaceID {
+				solveIdx = j
+				break
+			}
+		}
+		if solveIdx < 0 {
+			continue
+		}
+		if surfaces[solveIdx].Reflects() {
+			return false
+		}
+		// Sum the power of the element's other surfaces, using the current
+		// curvature directly (ParaxialRadius may be stale when a curvature
+		// variable was just applied).
+		K := 0.0
+		for _, j := range g {
+			if j == solveIdx {
+				continue
+			}
+			nBefore := 1.0
+			if j > 0 {
+				nBefore = nIndex[j-1]
+			}
+			nAfter := nIndex[j]
+			if surfaces[j].Reflects() {
+				nAfter = -nBefore
+			}
+			K += (nAfter - nBefore) * surfaces[j].Curvature
+		}
+		nBefore := 1.0
+		if solveIdx > 0 {
+			nBefore = nIndex[solveIdx-1]
+		}
+		nAfter := nIndex[solveIdx]
+		coeff := nAfter - nBefore
+		if math.Abs(coeff) < 1e-12 {
+			return false
+		}
+		surfaces[solveIdx].Curvature = (targetPhi - K) / coeff
+		return true
+	}
+	return false
 }

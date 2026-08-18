@@ -50,6 +50,10 @@ type Config struct {
 	SpotDegenerate      float64
 	OPDDegenerate       float64
 	WavefrontDegenerate float64
+	// PowerSolveSurfaces are the surface IDs whose curvature is recomputed so
+	// each containing element's thin-lens power stays at its initial value
+	// (optimization.power_solve.surfaces). Empty disables the solve.
+	PowerSolveSurfaces []int
 }
 
 // ConfigInput describes one configuration (zoom position) of a
@@ -127,6 +131,13 @@ type glassPair struct {
 	ndIndex int
 	vdIndex int
 	name    string
+}
+
+// powerSolveEntry binds a solve surface to the thin-lens power it must
+// preserve during optimisation.
+type powerSolveEntry struct {
+	solveID   int
+	targetPhi float64
 }
 
 // config is the internal per-configuration state of the unified Optimizer.
@@ -588,6 +599,12 @@ type Optimizer struct {
 	// mid-solve (returning the best point found so far with Status
 	// "interrupted") once the channel is closed. nil disables interruption.
 	stop <-chan struct{}
+	// powerSolve holds the per-config power-preserving solve entries: for each
+	// listed solve surface, the target thin-lens power (snapshotted from the
+	// config's initial surfaces). applyPowerSolve reconciles those curvatures
+	// after every variable application so the element powers stay constant
+	// (optimization.power_solve).
+	powerSolve map[string][]powerSolveEntry
 }
 
 // SetStop wires the mid-solve stop channel into the DLS options returned by
@@ -621,6 +638,48 @@ func (o *Optimizer) SetDegenerate(spot, opd, wavefront float64) {
 	if wavefront > 0 {
 		o.wavefrontDegenerate = wavefront
 	}
+}
+
+// SetPowerSolve enables the power-preserving hard solve for the given solve
+// surface IDs (optimization.power_solve.surfaces). For each listed surface the
+// thin-lens power of the element containing it is snapshotted from the config's
+// initial surfaces as the target, and applyPowerSolve recomputes that surface's
+// curvature after every variable application so the power stays fixed. Surfaces
+// not part of a refractive lens element are silently skipped. An empty list is
+// a no-op. The snapshot is per-config so a multi-config zoom pins each config's
+// own element powers.
+func (o *Optimizer) SetPowerSolve(solveSurfaces []int) {
+	if len(solveSurfaces) == 0 {
+		return
+	}
+	m := make(map[string][]powerSolveEntry, len(o.configs))
+	// The targets come from a curvature-based element-power snapshot (the
+	// initial surfaces have not been Precomputed), matching the power the solve
+	// preserves.
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		for _, id := range solveSurfaces {
+			phi, ok := powerTargetForSurface(cfg.surfaces, o.gc, id)
+			if !ok {
+				continue
+			}
+			m[cfg.id] = append(m[cfg.id], powerSolveEntry{solveID: id, targetPhi: phi})
+		}
+	}
+	o.powerSolve = m
+}
+
+// powerTargetForSurface returns the current thin-lens power (curvature-based)
+// of the refractive element containing surface id (for use as a power-preserve
+// target), with a boolean reporting whether the surface belongs to a solvable
+// element. Mirrors report not-ok so they are never pinned.
+func powerTargetForSurface(surfaces []types.Surface, gc *glass.Catalog, id int) (float64, bool) {
+	for _, s := range surfaces {
+		if s.ID == id && s.Reflects() {
+			return 0, false
+		}
+	}
+	return paraxial.ElementPowerCurvature(surfaces, gc, id), true
 }
 
 // NewOptimizer builds a single-configuration Optimizer (backward-compatible
@@ -677,6 +736,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 	)
 	opt.SetApertureMarginMM(cfg.ApertureMarginMM)
 	opt.SetDegenerate(cfg.SpotDegenerate, cfg.OPDDegenerate, cfg.WavefrontDegenerate)
+	opt.SetPowerSolve(cfg.PowerSolveSurfaces)
 	return opt
 }
 
@@ -1093,12 +1153,38 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 		}
 	}
 
+	// Apply the power-preserving solve after the variables and in-flight glass
+	// overrides are in place but before Precompute, so the solved curvature
+	// feeds both ParaxialRadius (Precompute) and every downstream consumer.
+	// The solve keeps each pinned element's thin-lens power at its initial
+	// value, so the pure glass chromatic optimisation cannot drift the layout.
+	o.applyPowerSolve(configSurfaces, effectiveGC(o.gc, tempGC))
+
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surface.Precompute(configSurfaces[cfg.id])
 	}
 
 	return configSurfaces, tempGC
+}
+
+// applyPowerSolve reconciles every pinned solve surface's curvature so the
+// thin-lens power of its element equals the snapshotted target. It is called
+// from applyVariables (pure), so the DLS base-point and Jacobian residuals
+// share one consistent power-preserving layout.
+func (o *Optimizer) applyPowerSolve(configSurfaces map[string][]types.Surface, gc *glass.Catalog) {
+	if len(o.powerSolve) == 0 {
+		return
+	}
+	for cid, entries := range o.powerSolve {
+		surfaces, ok := configSurfaces[cid]
+		if !ok {
+			continue
+		}
+		for _, e := range entries {
+			paraxial.SolveElementPower(surfaces, gc, e.solveID, e.targetPhi)
+		}
+	}
 }
 
 // restoreDiameters resets auto_aperture surfaces to their initial diameters

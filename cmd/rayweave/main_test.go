@@ -179,7 +179,7 @@ configs:
 			if err != nil {
 				t.Fatalf("yaml.Marshal: %v", err)
 			}
-			runOptimize(outYAML, false, "", "", "")
+			runOptimize(outYAML, false, "", "", "", false, "", false)
 		}()
 		io.Copy(&out, r)
 		r.Close()

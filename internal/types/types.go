@@ -657,6 +657,26 @@ type OptimizationConfig struct {
 	Escape           *EscapeConfig          `yaml:"escape,omitempty"`
 	MeritSchedule    *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
 	Degenerate       *DegenerateConfig      `yaml:"degenerate,omitempty"`
+	PowerSolve       *PowerSolveConfig      `yaml:"power_solve,omitempty"`
+}
+
+// PowerSolveConfig configures the power-preserving hard solve: the curvatures
+// of the listed surfaces become dependent variables whose values are
+// recomputed after every variable application so the thin-lens power of the
+// element containing each surface stays equal to the initial (snapshot) power.
+// This isolates glass-swap chromatic optimisation (LCA/TCA) from layout/power
+// drift: the paraxial element powers — and therefore the nominal focal lengths
+// — are held constant while only the dispersions (nd/vd) are free.
+type PowerSolveConfig struct {
+	// Enabled turns the power-preserving solve on. Surfaces default to empty
+	// (no solve); even when Enabled the solve only touches listed surfaces, so
+	// a user can enable it and enumerate exactly which elements to pin.
+	Enabled bool `yaml:"enabled,omitempty"`
+	// Surfaces are the surface IDs whose curvature is recomputed to preserve
+	// the containing element's thin-lens power. Each must be a surface of a
+	// refractive lens element (an air-separated singlet / the outer surface of
+	// a cemented group); mirrors are skipped.
+	Surfaces []int `yaml:"surfaces,omitempty"`
 }
 
 // DegenerateConfig configures the bounded penalty applied when a merit term

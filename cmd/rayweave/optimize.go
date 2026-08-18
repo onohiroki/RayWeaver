@@ -23,13 +23,20 @@ const (
 	defaultNumRays = 64
 )
 
-func runOptimize(data []byte, verbose bool, logFile string, glassDir string, excludeParams string) {
+func runOptimize(data []byte, verbose bool, logFile string, glassDir string, excludeParams string, powerSolve bool, powerSolveSurfaces string, glassColor bool) {
 	input := parseYAML[types.Input](data)
 
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
 		os.Exit(1)
 	}
+
+	// Resolve the power-preserving solve under the CLI/YAML precedence rule: a
+	// CLI surface list wins, else --power-solve turns the YAML list on, else the
+	// YAML power_solve section is used as-is. The effective config is echoed
+	// into the output (write-back).
+	psu := effectivePowerSolve(input, powerSolve, powerSolveSurfaces)
+	input.Optimization.PowerSolve = psu
 
 	excluded := map[string]bool{}
 	for _, p := range strings.Split(excludeParams, ",") {
@@ -53,6 +60,14 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 
 	gc, _ := loadCatalogs(&input, glassDir)
 	writeBackGlassDir(&input, glassDir)
+
+	// --glass-color auto-generates a glass-only chromatic optimisation: nd/vd
+	// variables for every refractive element and a per-config merit of only
+	// longitudinal_color + lateral_color. It composes with power_solve so the
+	// user can pin the layout while the glasses are the only free variables.
+	if glassColor {
+		applyGlassColor(&input, gc)
+	}
 
 	// Build the per-config optimisation inputs (shared/local variables are
 	// read below; the unified Optimizer drives all configs together).
@@ -257,6 +272,9 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 
 	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight)
 	opt.SetApertureMarginMM(apertureMarginMM)
+	if input.Optimization.PowerSolve != nil && input.Optimization.PowerSolve.Enabled {
+		opt.SetPowerSolve(input.Optimization.PowerSolve.Surfaces)
+	}
 	applyDegenerate(opt, input.Optimization.Degenerate)
 
 	// Validate the conditional merit schedule and the glass_role kind before

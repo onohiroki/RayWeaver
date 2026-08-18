@@ -1,0 +1,117 @@
+metadata:
+  tool: RayWeaver
+  url: https://github.com/onohiroki/RayWeaver
+  schema_version: 1
+  notes: |
+    The real US2645157 Cooke triplet with the flint/crown glasses SWAPPED
+    (negative element S3 carries a crown, positive element S6 carries a flint)
+    — the classic swap that shows strong axial + lateral chromatic aberration.
+    This file deliberately declares NO optimization variables or merit terms:
+    the `glass-color-demo.bash` script drives it with `--glass-color
+    --power-solve`, which auto-generates the nd/vd glass variables, a merit of
+    only longitudinal_color + lateral_color, and pins the element powers via
+    the power-preserving hard solve.
+
+glass_catalog:
+  entries:
+  - name: "SK18"
+    nd: 1.63854
+    vd: 55.42
+  - name: "SF12"
+    nd: 1.64831
+    vd: 33.84
+
+chief:
+  stop_surface: 4
+  fields:
+  - angle: 0.0
+    direction: [ 0, 1 ]
+  - angle: 16.0
+    direction: [ 0, 1 ]
+  - angle: 24.0
+    direction: [ 0, 1 ]
+  reference_surface: 8
+  num_rays: 256
+  wavelengths: [ 0.0004358, 0.0005876, 0.0006563 ]
+
+optimization:
+  method: dls
+  max_iter: 40
+  mu: 0.01
+  tol: 1e-4
+  epsilon: 1e-4
+  num_rays: 64
+  aperture_margin: 1.0
+
+configs:
+- id: 0
+  name: nominal
+  active: true
+  fields:
+  - id: 0
+    angle_deg: 0.0
+    weight: 1.0
+  - id: 1
+    angle_deg: 16.0
+    weight: 1.0
+  - id: 2
+    angle_deg: 24.0
+    weight: 0.5
+  wavelengths:
+  - id: 0
+    value: 0.0004358
+    weight: 1.0
+  - id: 1
+    value: 0.0005876
+    weight: 1.0
+  - id: 2
+    value: 0.0006563
+    weight: 1.0
+  surfaces:
+  - id: 1
+    type: "sphere"
+    radius: 10.2871491742
+    thickness: 1.524
+    material: { key: SK18 }
+    diameter: 10.0
+  - id: 2
+    type: "sphere"
+    radius: -239.3967954752
+    thickness: 2.3368
+    material: AIR
+    diameter: 10.0
+  - id: 3
+    type: "sphere"
+    radius: -12.826987173
+    thickness: 0.508
+    material: { nd: 1.63854, vd: 55.42 } # crown on the negative element (swapped)
+    diameter: 6.0
+  - id: 4
+    type: "sphere"
+    radius: 10.5917184406
+    thickness: 1.4986
+    material: AIR
+    diameter: 6.0
+  - id: 5
+    type: "sphere"
+    radius: 0.0
+    thickness: 1.016
+    material: AIR
+    diameter: 3.7825297358
+  - id: 6
+    type: "sphere"
+    radius: 61.8456294200
+    thickness: 1.524
+    material: { nd: 1.64831, vd: 33.84 } # flint on the positive element (swapped)
+    diameter: 6.0
+  - id: 7
+    type: "sphere"
+    radius: -10.0074859032
+    thickness: 21.36695183553
+    material: AIR
+    diameter: 6.0
+  - id: 8
+    type: "sphere"
+    radius: 0.0
+    thickness: 0.0
+    material: AIR

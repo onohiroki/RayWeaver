@@ -71,6 +71,9 @@ func main() {
 	optLogFile := ""
 	optGlassDir := ""
 	optExcludeParams := ""
+	optPowerSolve := false
+	optPowerSolveSurfaces := ""
+	optGlassColor := false
 	subcommand := args[0]
 	currentCmd = subcommand
 	if subcommand == "optimize" {
@@ -79,6 +82,9 @@ func main() {
 		fs.StringVar(&optLogFile, "log", "", "write per-iteration progress to file (JSONL)")
 		fs.StringVar(&optGlassDir, "glass-dir", "", "AGF glass catalog directory")
 		fs.StringVar(&optExcludeParams, "exclude-param", "", "comma-separated target param names to drop from the optimization variables (e.g. conic,a4,a6)")
+		fs.BoolVar(&optPowerSolve, "power-solve", false, "preserve each listed element's thin-lens power (hard solve) while only the glass dispersions are free (implies --glass-color)")
+		fs.StringVar(&optPowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs whose curvature is recomputed to hold the containing element's thin-lens power at its initial value (with --power-solve)")
+		fs.BoolVar(&optGlassColor, "glass-color", false, "glass-only chromatic optimisation: auto-generate nd/vd variables for every refractive element and a merit of only longitudinal_color + lateral_color, optionally with power-solve")
 		fs.Parse(args[1:])
 		args = append([]string{"optimize"}, fs.Args()...)
 	}
@@ -129,7 +135,7 @@ func main() {
 	case "vignette":
 		runVignette(data)
 	case "optimize":
-		runOptimize(data, optVerbose, optLogFile, optGlassDir, optExcludeParams)
+		runOptimize(data, optVerbose, optLogFile, optGlassDir, optExcludeParams, optPowerSolve, optPowerSolveSurfaces, optGlassColor)
 	case "escape":
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
