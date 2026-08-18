@@ -419,7 +419,10 @@ MERIT
 MERIT
     ;;
 esac
-awk '/^chief:/{p=1} p' "$OUTDIR/${PREFIX}best.yaml" >> "$OUTDIR/${PREFIX}refine-in.yaml"
+# Resume the extracted input from the first top-level section after config0's
+# merit block (order-independent: the extract emits configs before optimization,
+# so splicing from 'chief:' would drop the optimization section optimize needs).
+awk 'BEGIN{f=0} /^      merit:/{f=1; next} f==1 && /^[^ ]/{f=2} f==2{print}' "$OUTDIR/${PREFIX}best.yaml" >> "$OUTDIR/${PREFIX}refine-in.yaml"
 $RAYWEAVE optimize < "$OUTDIR/${PREFIX}refine-in.yaml" > "$OUTDIR/${PREFIX}refined.yaml"
 echo "Written: $OUTDIR/${PREFIX}refined.yaml"
 echo
