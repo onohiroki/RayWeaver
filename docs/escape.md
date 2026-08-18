@@ -16,8 +16,8 @@ rayweave escape extract --index N < escape-output.yaml
 | Flag | Description |
 |---|---|
 | `--glass-dir DIR` | AGF glass catalog directory |
-| `--verbose` | print escape progress to stderr as **compact** JSONL (abbreviated: keys follow the fixed order `cycle`, `elapsed_min`, `t`, `merit`, `worker`, `event`, `index`, `kind`, `dls_status`, `phase`; floats are 6-significant-figure exponent notation, `elapsed_min` is whole minutes since run start, `t` is `HH:MM:SS`, `status` and other fields are omitted) |
-| `--log FILE` | write the **full** JSONL progress stream to `FILE` (same fields as before — full-precision floats, RFC3339 `time`, `elapsed` seconds, `status` included — with keys in the same fixed order followed by the remaining keys alphabetically) |
+| `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e_min`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `escaped`, `recorded`, `best_merit`, `cycles`, `escapes`, `minima`; floats are 6-significant-figure exponent notation, `e_min` is whole minutes since run start, `t` is `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves) |
+| `--log FILE` | write the **full** JSONL progress stream to `FILE` (same fields as before — full-precision floats, RFC3339 `time`, `elapsed` seconds, `status`/`signal`/`timed_out`/`interrupted` included — with keys in the same fixed order followed by the remaining keys alphabetically) |
 | `--save FILE` | save every discovered local minimum to `FILE0.yaml`, `FILE1.yaml`, … (see [Saving minima](#saving-minima)) |
 | `--index N` | (with `escape extract`) local minimum index to extract |
 

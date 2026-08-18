@@ -87,7 +87,7 @@ func (p *Progress) Event(name string, fields map[string]any) {
 
 // eventKeyOrder is the fixed key presentation order shared by the full and
 // compact streams.
-var eventKeyOrder = []string{"cycle", "elapsed", "time", "merit", "worker", "event", "index", "kind", "dls_status", "phase"}
+var eventKeyOrder = []string{"cycle", "elapsed", "time", "event", "merit", "worker", "index", "kind", "dls_status", "phase", "distance_threshold", "h", "h_mult", "w", "w_mult", "max_cycles", "max_seconds", "workers", "escaped", "recorded", "best_merit", "cycles", "escapes", "minima"}
 
 func inEventKeyOrder(k string) bool {
 	for _, kk := range eventKeyOrder {
@@ -100,11 +100,11 @@ func inEventKeyOrder(k string) bool {
 
 // marshalEventLine serialises an event map to a single JSON object whose keys
 // follow eventKeyOrder. In compact mode that fixed order is the whole output
-// (every other key, including status, is dropped), elapsed becomes whole
-// minutes under elapsed_min, the wall clock becomes HH:MM:SS under t, and
-// floats use 6-significant-figure exponent notation. In full mode the original
-// keys and values are kept (elapsed seconds, RFC3339 time, full-precision
-// floats) and the remaining keys follow in alphabetical order.
+// (every other key — status, signal, timed_out, interrupted — is dropped),
+// elapsed becomes whole minutes under e_min, the wall clock becomes HH:MM:SS
+// under t, and floats use 6-significant-figure exponent notation. In full mode
+// the original keys and values are kept (elapsed seconds, RFC3339 time,
+// full-precision floats) and the remaining keys follow in alphabetical order.
 func marshalEventLine(m map[string]any, compact bool) string {
 	var b bytes.Buffer
 	b.WriteByte('{')
@@ -127,7 +127,7 @@ func marshalEventLine(m map[string]any, compact bool) string {
 		if compact {
 			switch k {
 			case "elapsed":
-				writeKV("elapsed_min", int64(v.(float64)/60))
+				writeKV("e_min", int64(v.(float64)/60))
 				continue
 			case "time":
 				writeKV("t", v.(time.Time).Format("15:04:05"))

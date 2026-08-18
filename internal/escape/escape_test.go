@@ -757,14 +757,14 @@ func TestProgressCompactAndFullStreams(t *testing.T) {
 	}
 
 	var compactEv struct {
-		Event      string  `json:"event"`
-		T          string  `json:"t"`
-		ElapsedMin int64   `json:"elapsed_min"`
-		Cycle      int     `json:"cycle"`
-		Merit      float64 `json:"merit"`
-		Status     string  `json:"status"`
-		Time       string  `json:"time"`
-		Elapsed    float64 `json:"elapsed"`
+		Event   string  `json:"event"`
+		T       string  `json:"t"`
+		EMin    int64   `json:"e_min"`
+		Cycle   int     `json:"cycle"`
+		Merit   float64 `json:"merit"`
+		Status  string  `json:"status"`
+		Time    string  `json:"time"`
+		Elapsed float64 `json:"elapsed"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(compact.Bytes()), &compactEv); err != nil {
 		t.Fatalf("compact json.Unmarshal: %v", err)
@@ -776,10 +776,10 @@ func TestProgressCompactAndFullStreams(t *testing.T) {
 		t.Fatalf("compact must rename time to t, got time=%q", compactEv.Time)
 	}
 	if compactEv.Elapsed != 0 {
-		t.Fatalf("compact must rename elapsed to elapsed_min, got elapsed=%v", compactEv.Elapsed)
+		t.Fatalf("compact must rename elapsed to e_min, got elapsed=%v", compactEv.Elapsed)
 	}
-	if compactEv.ElapsedMin < 0 {
-		t.Fatalf("compact elapsed_min = %d, want >= 0", compactEv.ElapsedMin)
+	if compactEv.EMin < 0 {
+		t.Fatalf("compact e_min = %d, want >= 0", compactEv.EMin)
 	}
 	if compactEv.Status != "" {
 		t.Fatalf("compact must drop status, got %q", compactEv.Status)
@@ -789,9 +789,9 @@ func TestProgressCompactAndFullStreams(t *testing.T) {
 	if !strings.Contains(got, `"merit":1.11687e+00`) {
 		t.Fatalf("compact merit not 6-sig-fig exponent: %s", got)
 	}
-	// Keys follow the fixed order: cycle, elapsed_min, t, merit, worker, event,
+	// Keys follow the fixed order: cycle, e_min, t, event, merit, worker,
 	// dls_status, phase.
-	wantOrder := []string{`"cycle":`, `"elapsed_min":`, `"t":`, `"merit":`, `"worker":`, `"event":`, `"dls_status":`, `"phase":`}
+	wantOrder := []string{`"cycle":`, `"e_min":`, `"t":`, `"event":`, `"merit":`, `"worker":`, `"dls_status":`, `"phase":`}
 	last := -1
 	for _, k := range wantOrder {
 		i := strings.Index(got, k)
@@ -802,6 +802,88 @@ func TestProgressCompactAndFullStreams(t *testing.T) {
 			t.Fatalf("compact key order violated (%s after %s): %s", k, wantOrder[last], got)
 		}
 		last = i
+	}
+}
+
+func TestProgressCompactAllEvents(t *testing.T) {
+	var full, compact bytes.Buffer
+	p := NewProgress()
+	p.AddWriter(&full)
+	p.AddCompactWriter(&compact)
+
+	emit := func(name string, fields map[string]any) {
+		full.Reset()
+		compact.Reset()
+		p.Event(name, fields)
+	}
+
+	// params: the escape-parameter keys are shown with exponent floats.
+	emit("params", map[string]any{
+		"h": 0.1, "w": 0.5, "h_mult": 2.0, "w_mult": 1.3, "distance_threshold": 0.1,
+	})
+	got := string(bytes.TrimSpace(compact.Bytes()))
+	for _, want := range []string{
+		`"event":"params"`, `"h":1.00000e-01`, `"w":5.00000e-01`,
+		`"h_mult":2.00000e+00`, `"w_mult":1.30000e+00`, `"distance_threshold":1.00000e-01`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("params compact missing %s: %s", want, got)
+		}
+	}
+
+	// start: workers/max_cycles/max_seconds.
+	emit("start", map[string]any{"workers": 4, "max_cycles": 10, "max_seconds": 3600.0})
+	got = string(bytes.TrimSpace(compact.Bytes()))
+	for _, want := range []string{`"event":"start"`, `"workers":4`, `"max_cycles":10`, `"max_seconds":3.60000e+03`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("start compact missing %s: %s", want, got)
+		}
+	}
+
+	// worker_done: escaped/recorded shown, timed_out/interrupted hidden in the
+	// compact stream but retained in the full one.
+	emit("worker_done", map[string]any{"worker": 3, "escaped": 5, "recorded": 3, "timed_out": false, "interrupted": false})
+	got = string(bytes.TrimSpace(compact.Bytes()))
+	if !strings.Contains(got, `"escaped":5`) || !strings.Contains(got, `"recorded":3`) {
+		t.Fatalf("worker_done compact missing escaped/recorded: %s", got)
+	}
+	if strings.Contains(got, "timed_out") || strings.Contains(got, `"interrupted"`) {
+		t.Fatalf("worker_done compact must hide timed_out/interrupted: %s", got)
+	}
+	if !strings.Contains(full.String(), `"timed_out":false`) || !strings.Contains(full.String(), `"interrupted":false`) {
+		t.Fatalf("worker_done full must keep timed_out/interrupted: %s", full.String())
+	}
+
+	// done: aggregates shown, timed_out/interrupted hidden.
+	emit("done", map[string]any{"workers": 4, "cycles": 8, "escapes": 18, "minima": 5, "best_merit": 0.3551473063945567, "timed_out": false, "interrupted": false})
+	got = string(bytes.TrimSpace(compact.Bytes()))
+	for _, want := range []string{`"event":"done"`, `"workers":4`, `"best_merit":3.55147e-01`, `"cycles":8`, `"escapes":18`, `"minima":5`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("done compact missing %s: %s", want, got)
+		}
+	}
+	if strings.Contains(got, "timed_out") || strings.Contains(got, `"interrupted"`) {
+		t.Fatalf("done compact must hide timed_out/interrupted: %s", got)
+	}
+	if !strings.Contains(full.String(), `"timed_out":false`) || !strings.Contains(full.String(), `"interrupted":false`) {
+		t.Fatalf("done full must keep timed_out/interrupted: %s", full.String())
+	}
+
+	// timeout: max_cycles shown.
+	emit("timeout", map[string]any{"worker": 3, "cycle": 6, "max_cycles": 10})
+	got = string(bytes.TrimSpace(compact.Bytes()))
+	if !strings.Contains(got, `"event":"timeout"`) || !strings.Contains(got, `"max_cycles":10`) {
+		t.Fatalf("timeout compact missing keys: %s", got)
+	}
+
+	// interrupt: signal hidden in compact, kept in full.
+	emit("interrupt", map[string]any{"signal": "interrupt"})
+	got = string(bytes.TrimSpace(compact.Bytes()))
+	if strings.Contains(got, "signal") {
+		t.Fatalf("interrupt compact must hide signal: %s", got)
+	}
+	if !strings.Contains(full.String(), `"signal":"interrupt"`) {
+		t.Fatalf("interrupt full must keep signal: %s", full.String())
 	}
 }
 
