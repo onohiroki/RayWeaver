@@ -487,6 +487,13 @@ esac
 # merit block (order-independent: the extract emits configs before optimization,
 # so splicing from 'chief:' would drop the optimization section optimize needs).
 awk 'BEGIN{f=0} /^      merit:/{f=1; next} f==1 && /^[^ ]/{f=2} f==2{print}' "$OUTDIR/${PREFIX}best.yaml" >> "$OUTDIR/${PREFIX}refine-in.yaml"
+# The refinement is a full-layout precision pass over the escape best: it must
+# be free to re-bend and re-curve every surface, so it must NOT inherit the
+# power_solve section (which would lock the element powers and prevent the
+# spot/wavefront correction). Strip the optimization.power_solve block.
+awk '{ if ($0 ~ /^    power_solve:/) { skip=1 } else if (skip && $0 !~ /^        / && $0 !~ /^$/) { skip=0 } if (!skip) print }' \
+  "$OUTDIR/${PREFIX}refine-in.yaml" > "$OUTDIR/${PREFIX}refine-in.yaml.tmp" && \
+  mv "$OUTDIR/${PREFIX}refine-in.yaml.tmp" "$OUTDIR/${PREFIX}refine-in.yaml"
 $RAYWEAVE optimize < "$OUTDIR/${PREFIX}refine-in.yaml" > "$OUTDIR/${PREFIX}refined.yaml"
 echo "Written: $OUTDIR/${PREFIX}refined.yaml"
 echo
