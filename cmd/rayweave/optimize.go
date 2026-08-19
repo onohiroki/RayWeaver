@@ -20,7 +20,7 @@ const (
 	defaultMu      = 1.0
 	defaultTol     = 1e-6
 	defaultEpsilon = 1e-6
-	defaultNumRays = 64
+	defaultNumRays = 128
 )
 
 func runOptimize(data []byte, verbose bool, logFile string, glassDir string, excludeParams string, powerSolve bool, powerSolveSurfaces string, glassColor bool) {
