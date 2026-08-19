@@ -96,6 +96,9 @@ func main() {
 	optEscapeVerbose := false
 	optEscapeLogFile := ""
 	optEscapeSaveFile := ""
+	optEscapePowerSolve := false
+	optEscapePowerSolveSurfaces := ""
+	optEscapeGlassColor := false
 	if subcommand == "escape" {
 		if len(args) >= 2 && args[1] == "extract" {
 			escapeExtractMode = true
@@ -106,6 +109,9 @@ func main() {
 			fs.StringVar(&optEscapeGlassDir, "glass-dir", "", "AGF glass catalog directory")
 			fs.StringVar(&optEscapeLogFile, "log", "", "write escape progress to file (JSONL)")
 			fs.StringVar(&optEscapeSaveFile, "save", "", "save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...")
+			fs.BoolVar(&optEscapePowerSolve, "power-solve", false, "insert the power-preserving glass phase between each escape and clean DLS (holds element powers fixed while the glasses are rebalanced)")
+			fs.StringVar(&optEscapePowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs whose curvature is recomputed to hold the containing element's thin-lens power (with --power-solve; also enables the glass phase)")
+			fs.BoolVar(&optEscapeGlassColor, "glass-color", false, "with the glass phase, reverse the merit to colour-only axial/lateral chromatic aberration for the glass solve")
 			fs.Parse(args[1:])
 		}
 	}
@@ -140,7 +146,7 @@ func main() {
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
 		} else {
-			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile)
+			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassColor)
 		}
 	case "import":
 		runImport(data)

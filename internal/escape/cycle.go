@@ -217,10 +217,54 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			"merit":      c.wrapper.innerMerit(escapedX),
 		})
 
+		// Step 1.5 (optional): power-preserving glass phase. Lock every variable
+		// except the glass dispersions (via the inner glassPhaseable), switch to
+		// the colour-only merit, and hold the element powers fixed, so the glass
+		// is rebalanced while the layout stays put. This runs between the escape
+		// (layout exploration) and the clean DLS (full refinement). The result
+		// feeds the clean DLS start; the clean solution is what the store
+		// records, so the escape distance/store stay in the full variable-space
+		// dimension regardless of the phase's reduced active set.
+		cleanStart := escapedX
+		if c.wrapper.GlassPhaseEnabled() {
+			c.wrapper.SetEscapes(nil)
+			c.wrapper.SetStartX(escapedX)
+			c.wrapper.SetPhase(PhaseGlassSolve)
+			c.wrapper.SetStop(c.hardStop)
+			glassRes := dls.Solve(c.wrapper)
+			glassX := extractX(glassRes)
+			if glassRes.Status == dls.StatusInterrupted {
+				c.recordInterrupted(glassRes, cyc, "glass_dls")
+				c.stopped = true
+				break
+			}
+			if c.acceptable(glassRes.Status, glassX) {
+				cleanStart = glassX
+				c.progress.Event("cycle", map[string]any{
+					"cycle":      cyc,
+					"worker":     c.workerID,
+					"phase":      "glass_dls",
+					"status":     "accepted",
+					"dls_status": glassRes.Status,
+					"merit":      c.wrapper.innerMerit(glassX),
+				})
+			} else {
+				c.progress.Event("cycle", map[string]any{
+					"cycle":      cyc,
+					"worker":     c.workerID,
+					"phase":      "glass_dls",
+					"status":     "rejected",
+					"dls_status": glassRes.Status,
+				})
+			}
+		}
+
 		// Step 2: clean DLS. Remove escapes and converge to the true minimum.
 		c.wrapper.SetEscapes(nil)
-		c.wrapper.SetStartX(escapedX)
-		c.wrapper.SetPhase(PhaseClean)
+		cleanStartCopy := make([]float64, len(cleanStart))
+		copy(cleanStartCopy, cleanStart)
+		c.wrapper.SetStartX(cleanStartCopy)
+		c.wrapper.SetPhase(PhaseClean) // leaves the glass phase (restores the variables)
 		c.wrapper.SetStop(c.hardStop)
 		cleanRes := dls.Solve(c.wrapper)
 		trueX := extractX(cleanRes)
@@ -241,7 +285,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			if failures >= c.maxFail {
 				break
 			}
-			currentX = c.perturb(escapedX, cyc, restartAmp)
+			currentX = c.perturb(cleanStart, cyc, restartAmp)
 			continue
 		}
 		c.progress.Event("cycle", map[string]any{

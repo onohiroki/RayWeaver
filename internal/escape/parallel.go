@@ -47,6 +47,12 @@ type RunOptions struct {
 	// running solve). A second interrupt signal typically closes this after
 	// Context was already cancelled by the first.
 	HardStop <-chan struct{}
+	// GlassPhase enables the power-preserving glass phase between the escape
+	// and clean DLS of every cycle: the inner model locks every variable except
+	// the glass dispersions, switches to the colour-only merit, and holds the
+	// element powers fixed. The inner model must implement the glassPhaseable
+	// capability (the Optimizer does when power_solve is configured).
+	GlassPhase bool
 }
 
 // BuildParams derives the escape parameters from the YAML config and the
@@ -171,6 +177,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 				workerParams.W = workerParams.W * (1 + float64(seed)/float64(numWorkers-1)*(wSpan-1))
 			}
 			wrapper := NewWrapper(inner, workerParams)
+			wrapper.SetGlassPhase(opts.GlassPhase)
 			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop)
 
 			x0 := inner.InitialState()

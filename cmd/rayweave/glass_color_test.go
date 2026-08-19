@@ -207,3 +207,43 @@ func abs(f float64) float64 {
 	}
 	return f
 }
+
+// TestBuildGlassPhaseContext verifies the escape glass-phase context is derived
+// from the resolved optimization.power_solve section: enabled, the solve
+// surfaces, and a colour-only (longitudinal + lateral) glass merit per active
+// config.
+func TestBuildGlassPhaseContext(t *testing.T) {
+	in := mustParseInput(t, glassColorTripletYAML)
+	in.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}}
+	ctx := buildGlassPhaseContext(&in)
+
+	if !ctx.enabled {
+		t.Fatal("context not enabled")
+	}
+	if len(ctx.surfaces) != 3 || ctx.surfaces[0] != 2 || ctx.surfaces[2] != 7 {
+		t.Errorf("surfaces = %v, want [2 4 7]", ctx.surfaces)
+	}
+	// A colour-only merit should be present for the active config.
+	terms := ctx.merit["0"]
+	if len(terms) == 0 {
+		t.Fatal("no glass merit for config 0")
+	}
+	var hasL, hasT bool
+	for _, tm := range terms {
+		if tm.Kind == "longitudinal_color" {
+			hasL = true
+		}
+		if tm.Kind == "lateral_color" {
+			hasT = true
+		}
+	}
+	if !hasL || !hasT {
+		t.Errorf("glass merit missing chromatic terms: lca=%v tca=%v", hasL, hasT)
+	}
+
+	// Disabled power_solve -> context disabled.
+	in2 := mustParseInput(t, glassColorTripletYAML)
+	if ctx2 := buildGlassPhaseContext(&in2); ctx2.enabled {
+		t.Error("context should be disabled when power_solve is absent")
+	}
+}

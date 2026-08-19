@@ -19,11 +19,16 @@ rayweave escape extract --index N < escape-output.yaml
 | `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `escaped`, `recorded`, `best_merit`, `cycles`, `escapes`, `minima`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves) |
 | `--log FILE` | write the **full** JSONL progress stream to `FILE` (same fields as before — full-precision floats, RFC3339 `time`, `elapsed` seconds, `status`/`signal`/`timed_out`/`interrupted` included — with keys in the same fixed order followed by the remaining keys alphabetically) |
 | `--save FILE` | save every discovered local minimum to `FILE0.yaml`, `FILE1.yaml`, … (see [Saving minima](#saving-minima)) |
+| `--power-solve` | insert the power-preserving glass phase between each escape and clean DLS: locks every variable except the glass dispersions, routes the merit to a colour-only objective, and holds the element powers fixed |
+| `--power-solve-surfaces A,B,…` | surface IDs whose curvature is recomputed to hold the containing element's thin-lens power (with `--power-solve`) |
+| `--glass-color` | with the glass phase, reverse the merit to colour-only axial/lateral chromatic aberration |
 | `--index N` | (with `escape extract`) local minimum index to extract |
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`
 (CLI/YAML rule); `--save` records the per-minimum files in
-`escape_result.minima[].file`; `--verbose` / `--log` are run-stream flags.
+`escape_result.minima[].file`; `--verbose` / `--log` are run-stream flags;
+`--power-solve` / `--power-solve-surfaces` / `--glass-color` echo the effective
+`power_solve` config into the output.
 
 Sub-commands:
 
@@ -123,6 +128,41 @@ workers drift toward different basins. `initial_perturb` (default 0.05, in the
 normalised variable space) seeds the paralllel workers at slightly different
 start points. With the default `initial_perturb` all workers converge toward the
 same basin, so this is usually the first knob to raise.
+
+### Power-preserving glass phase
+
+Between the escape DLS (layout exploration) and the clean DLS (full refinement)
+each cycle can run a dedicated **power-preserving glass phase**, enabled by
+listing the solve surfaces in `optimization.power_solve` (or `--power-solve` +
+`--power-solve-surfaces`):
+
+```yaml
+optimization:
+  power_solve:
+    enabled: true
+    surfaces: [2, 4, 6, 9, 11, 13]  # dependent back surface of each element
+```
+
+During the `glass_dls` phase the Optimizer (via its optional `glassPhaseable`
+capability, kept decoupled from the escape package) locks **every variable
+except the glass dispersions (nd/vd)** to its current value — DLS keeps a
+`Min == Max` variable fixed — routes the merit to a **colour-only** objective
+(`longitudinal_color` + `lateral_color`, auto-built per active config, with a
+per off-axis-field `lateral_color` term), and enables the **power-preserving
+solve** so each element's thin-lens power (and therefore the nominal focal
+length) stays constant while only the glasses move. This decouples the glass
+gradient from the layout: a glass change no longer drifts focus, so the axial
+and lateral chromatic aberration are corrected by the glass balance itself,
+leaving the escape and clean phases to handle the layout against the full merit.
+
+Because the variable-space **dimension is unchanged** — the non-glass variables
+are locked, not removed — the escape `store`, distance calculation and next-cycle
+start point continue to operate in the full variable space; only the *active*
+set shrinks during the phase. `ExitGlassPhase` restores every bound before the
+clean DLS, which starts from the glass-phase result and re-uses it as its own
+start. Each cycle emits a `glass_dls` cycle event (accepted/rejected) with the
+colour merit. Combine with the real-glass convex hull (on by default) so the
+glasses stay physical while they are rebalanced.
 
 ### Exploration depth vs. breadth
 

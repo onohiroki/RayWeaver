@@ -26,7 +26,7 @@ import (
 // saveBase1.yaml, ... (see escapeFileSaver). SIGINT/SIGTERM stops the search
 // in three escalating stages (graceful cycle boundary → mid-DLS interrupt →
 // force quit), each producing interrupted: true and exit 0 except the last.
-func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string) {
+func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassColor bool) {
 	input := parseYAML[types.Input](data)
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
@@ -37,8 +37,24 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 		os.Exit(1)
 	}
 
+	// Resolve the power-preserving glass phase under the CLI/YAML rule (CLI
+	// wins), mirroring optimize. --glass-color additionally auto-generates the
+	// nd/vd variables and the colour-only config merit (used when the escape
+	// does not declare its own glass variables).
+	psu := effectivePowerSolve(input, powerSolve, powerSolveSurfaces)
+	input.Optimization.PowerSolve = psu
+
 	gc, _ := loadCatalogs(&input, glassDir)
 	writeBackGlassDir(&input, glassDir)
+	if glassColor {
+		applyGlassColor(&input, gc)
+	}
+
+	// Build the per-config colour-only glass merit used during the dedicated
+	// glass phase (axial + lateral chromatic aberration), independent of the
+	// --glass-color flag so the double-Gauss declares its own full merit while
+	// still getting a colour-only glass phase.
+	gctx := buildGlassPhaseContext(&input)
 
 	progress := escape.NewProgress()
 	var logFiles []*os.File
@@ -100,13 +116,60 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, progress, saveBase, ctx, hardStop)
+		runEscapeMulti(input, gc, progress, saveBase, ctx, hardStop, gctx)
 		return
 	}
-	runEscapeSingle(input, gc, progress, saveBase, ctx, hardStop)
+	runEscapeSingle(input, gc, progress, saveBase, ctx, hardStop, gctx)
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context, hardStop <-chan struct{}) {
+// glassPhaseCtx carries the power-preserving glass-phase configuration through
+// the escape run: whether it is enabled, the solve-surface IDs, and the
+// per-config colour-only glass merit terms used during the glass phase.
+type glassPhaseCtx struct {
+	enabled  bool
+	surfaces []int
+	merit    map[string][]types.MeritTerm
+}
+
+// buildGlassPhaseContext derives the glass-phase context from the resolved
+// optimization.power_solve section: enabled when the solve is on and surfaces
+// are listed, with a colour-only (axial + lateral chromatic) merit built per
+// active config.
+func buildGlassPhaseContext(input *types.Input) glassPhaseCtx {
+	ctx := glassPhaseCtx{merit: map[string][]types.MeritTerm{}}
+	if input.Optimization == nil || input.Optimization.PowerSolve == nil || !input.Optimization.PowerSolve.Enabled {
+		return ctx
+	}
+	ctx.enabled = true
+	ctx.surfaces = append([]int(nil), input.Optimization.PowerSolve.Surfaces...)
+	for _, cfg := range input.Configs {
+		if !cfg.Active {
+			continue
+		}
+		wl1, wl2 := colorEndpoints(cfg.Wavelengths, 0.0004358, 0.0006563)
+		terms := []types.MeritTerm{
+			{Kind: optimize.MeritLongitudinalColor, Wavelength: wl1, Wavelength2: wl2, Weight: 1.0},
+		}
+		fields := cfg.Fields
+		if len(fields) == 0 && input.Chief != nil {
+			for fi, f := range input.Chief.Fields {
+				fields = append(fields, types.FieldItem{ID: fi, AngleDeg: f.Angle, Weight: 1.0})
+			}
+		}
+		for _, f := range fields {
+			if f.AngleDeg == 0 {
+				continue
+			}
+			terms = append(terms, types.MeritTerm{
+				Kind: optimize.MeritLateralColor, Field: f.ID, Wavelength: wl1, Wavelength2: wl2, Weight: 1.0,
+			})
+		}
+		ctx.merit[cfg.ID] = terms
+	}
+	return ctx
+}
+
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -174,6 +237,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		ApertureMarginMM: apertureMarginMM,
 		MuConMax:         input.Optimization.MuConMax,
 		Workers:          workers,
+		PowerSolveSurfaces: gctx.surfaces,
 	}
 	if dg := input.Optimization.Degenerate; dg != nil {
 		cfg.SpotDegenerate = dg.SpotValue
@@ -196,7 +260,18 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		cfgCopy := cfg
 		cfgCopy.Variables = append([]optimize.Variable{}, cfg.Variables...)
 		cfgCopy.Surfaces = append([]types.Surface{}, cfg.Surfaces...)
-		return optimize.NewOptimizer(cfgCopy)
+		opt := optimize.NewOptimizer(cfgCopy)
+		// Start with the power-preserving solve off; the cycle's dedicated
+		// glass phase (EnterGlassPhase) toggles it on per solve and restores it
+		// after, so the escape/clean phases keep full curvature freedom.
+		opt.SetPowerSolveEnabled(false)
+		if gctx.enabled {
+			// NewOptimizer registers the single config under id "config1".
+			for _, terms := range gctx.merit {
+				opt.SetGlassMerit("config1", terms)
+			}
+		}
+		return opt
 	}
 
 	var onRecord escape.RecordHandler
@@ -223,6 +298,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		Fingerprint: fingerprint,
 		Context:     ctx,
 		HardStop:    hardStop,
+		GlassPhase:  gctx.enabled,
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,
@@ -298,7 +374,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	writeEscapeOutput(input, escResult)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context, hardStop <-chan struct{}) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -404,6 +480,15 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, nil, hull, hullMargin, hullWeight)
 		opt.SetApertureMarginMM(apertureMarginMM)
 		applyDegenerate(opt, input.Optimization.Degenerate)
+		if gctx.enabled {
+			opt.SetPowerSolve(gctx.surfaces)
+			// Start with the power-preserving solve off; the cycle's glass phase
+			// toggles it on per solve.
+			opt.SetPowerSolveEnabled(false)
+			for cfgID, terms := range gctx.merit {
+				opt.SetGlassMerit(cfgID, terms)
+			}
+		}
 		return opt
 	}
 
@@ -440,6 +525,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		Fingerprint: fingerprint,
 		Context:     ctx,
 		HardStop:    hardStop,
+		GlassPhase:  gctx.enabled,
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,

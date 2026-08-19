@@ -949,3 +949,53 @@ func TestWrapperOptionsDisableStallEarlyStop(t *testing.T) {
 		t.Fatal("StallEarlyStop=false should keep stalled stop disabled")
 	}
 }
+
+// glassPhaseMock is a dls.Model that also implements glassPhaseable and records
+// whether the glass phase has been entered/exited.
+type glassPhaseMock struct {
+	entered bool
+}
+
+func (m *glassPhaseMock) Variables() []dls.VariableInfo {
+	return []dls.VariableInfo{{Name: "x", Param: "x", Min: -1, Max: 1}}
+}
+func (m *glassPhaseMock) InitialState() []float64 { return []float64{0} }
+func (m *glassPhaseMock) Options() dls.Options {
+	return dls.Options{MaxIter: 20, Mu: 1.0, Tol: 1e-8, Epsilon: 1e-7}
+}
+func (m *glassPhaseMock) EvaluateMerit(x []float64) float64 { return x[0] * x[0] }
+func (m *glassPhaseMock) ComputeResiduals(x []float64) []float64 {
+	return []float64{x[0]}
+}
+func (m *glassPhaseMock) ComputeConstraints(x []float64) []float64 { return nil }
+func (m *glassPhaseMock) EnterGlassPhase(x []float64)               { m.entered = true }
+func (m *glassPhaseMock) ExitGlassPhase()                           { m.entered = false }
+
+func TestWrapperGlassPhaseToggles(t *testing.T) {
+	inner := &glassPhaseMock{}
+	params := testParams()
+	w := NewWrapper(inner, params)
+
+	// Glass phase disabled: SetPhase(PhaseGlassSolve) must not enter.
+	w.SetGlassPhase(false)
+	w.SetPhase(PhaseGlassSolve)
+	if inner.entered {
+		t.Fatal("inner entered glass phase while GlassPhase disabled")
+	}
+	if !w.GlassPhaseEnabled() {
+		// false expected: GlassPhase disabled
+		w.SetGlassPhase(true)
+	}
+
+	// Glass phase enabled: entering PhaseGlassSolve calls EnterGlassPhase;
+	// moving to PhaseClean calls ExitGlassPhase.
+	w.SetStartX([]float64{0.25})
+	w.SetPhase(PhaseGlassSolve)
+	if inner.entered != true {
+		t.Fatal("inner not entered on PhaseGlassSolve")
+	}
+	w.SetPhase(PhaseClean)
+	if inner.entered {
+		t.Fatal("inner not exited on leaving PhaseGlassSolve")
+	}
+}

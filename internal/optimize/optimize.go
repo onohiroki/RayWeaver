@@ -409,10 +409,21 @@ type scheduledTerm struct {
 	mode  string
 }
 
-// scheduledTerms returns the effective terms of a config. With a schedule, the
-// terms come from the config's merit_modes, each scaled by its (frozen) mode
-// weight; a config without merit_modes keeps its fixed merit terms at scale 1.
+// scheduledTerms returns the effective terms of a config. During the glass
+// phase (glassMeritActive) it returns the installed colour-only glass merit
+// terms at scale 1.0, so both EvaluateMerit and ComputeResiduals switch to the
+// chromatic objective exactly. Otherwise, with a schedule, the terms come from
+// the config's merit_modes, each scaled by its (frozen) mode weight; a config
+// without merit_modes keeps its fixed merit terms at scale 1.
 func (o *Optimizer) scheduledTerms(cfg *config) []scheduledTerm {
+	if o.glassMeritActive {
+		terms := o.glassMerit[cfg.id]
+		out := make([]scheduledTerm, len(terms))
+		for i := range terms {
+			out[i] = scheduledTerm{term: &terms[i], scale: 1.0, mode: "glass"}
+		}
+		return out
+	}
 	if o.meritSchedule == nil {
 		out := make([]scheduledTerm, len(cfg.meritTerms))
 		for i := range cfg.meritTerms {
@@ -605,6 +616,141 @@ type Optimizer struct {
 	// after every variable application so the element powers stay constant
 	// (optimization.power_solve).
 	powerSolve map[string][]powerSolveEntry
+	// powerSolveEnabled gates applyPowerSolve. It is normally true once set;
+	// the escape glass phase toggles it so the power-preserving solve applies
+	// only during the dedicated glass phase while the escape/clean phases run
+	// with full curvature freedom.
+	powerSolveEnabled bool
+	// glassMerit holds the per-config merit terms used during the glass phase
+	// (colour-only LCA/TCA). glassMeritActive routes scheduledTerms to them.
+	glassMerit      map[string][]meritTerm
+	glassMeritActive bool
+	// pinnedVars remembers the original Min/Max of variables locked by
+	// EnterGlassPhase, so ExitGlassPhase can restore them exactly.
+	pinnedMin []float64
+	pinnedMax []float64
+}
+
+// SetPowerSolveEnabled toggles the power-preserving hard solve. The escape
+// glass phase enables it so the element powers stay constant while only the
+// glass dispersions are free; the other escape phases disable it to keep the
+// full curvature freedom. A false value leaves the (empty) powerSolve map in
+// place so EnterGlassPhase can re-enable it.
+func (o *Optimizer) SetPowerSolveEnabled(enabled bool) {
+	o.powerSolveEnabled = enabled
+}
+
+// SetGlassMerit installs the per-config merit terms used during the glass
+// phase (colour-only axial/lateral chromatic aberration). It is inactive until
+// EnterGlassPhase activates it. Passing empty terms (or nil) removes the
+// installed glass merit for the config.
+func (o *Optimizer) SetGlassMerit(configID string, terms []types.MeritTerm) {
+	if o.glassMerit == nil {
+		o.glassMerit = make(map[string][]meritTerm)
+	}
+	if len(terms) == 0 {
+		delete(o.glassMerit, configID)
+		return
+	}
+	mt := make([]meritTerm, 0, len(terms))
+	for _, t := range terms {
+		tm := meritTerm{
+			kind:        t.Kind,
+			fieldDirX:   0,
+			fieldDirY:   1,
+			fieldIndex:  -1,
+			wavelength:  t.Wavelength,
+			wavelength2: t.Wavelength2,
+			weight:      t.Weight,
+			target:      t.Target,
+			fraction:    t.Fraction,
+			fieldWeight: 1.0,
+			wavWeight:   1.0,
+		}
+		// Resolve the term's field angle from the config's fields (angle or
+		// image height), matching buildMeritTermFromTypes.
+		if c := findConfigByID(o.configs, configID); c != nil {
+			for i, f := range c.fields {
+				if f.ID == t.Field {
+					tm.fieldIndex = i
+					if f.AngleDeg != 0 || f.ImageHeight == 0 {
+						tm.fieldAngle = f.AngleDeg
+					} else {
+						tm.useImageHeight = true
+						tm.imageHeight = f.ImageHeight
+					}
+					if f.Weight > 0 {
+						tm.fieldWeight = f.Weight
+					}
+					break
+				}
+			}
+		}
+		mt = append(mt, tm)
+	}
+	o.glassMerit[configID] = mt
+}
+
+// EnterGlassPhase starts the glass phase: it enables the power-preserving
+// solve, locks every variable except the glass dispersions (nd/vd) to its
+// current value x (so only the glasses move), and routes the merit to the
+// installed glass (colour-only) terms. x is the physical variable vector at
+// the start of the phase (the escape-DLS result). The variable dimension is
+// unchanged, so the escape store/distance semantics stay intact.
+func (o *Optimizer) EnterGlassPhase(x []float64) {
+	o.powerSolveEnabled = true
+	o.lockNonGlassVariables(x)
+	o.glassMeritActive = true
+}
+
+// ExitGlassPhase ends the glass phase: it disables the power-preserving solve,
+// restores every variable's original Min/Max (full curvature freedom), and
+// restores the ordinary merit. Called before the clean DLS.
+func (o *Optimizer) ExitGlassPhase() {
+	o.powerSolveEnabled = false
+	o.unlockVariables()
+	o.glassMeritActive = false
+}
+
+// lockNonGlassVariables pins every variable not in the glass-free set (nd/vd)
+// to its current value x[i] by setting Min==Max, remembering the originals for
+// ExitGlassPhase. DLS keeps a Min==Max variable at its fixed value (solver
+// clamps the scale to 1.0).
+func (o *Optimizer) lockNonGlassVariables(x []float64) {
+	o.pinnedMin = make([]float64, len(o.variables))
+	o.pinnedMax = make([]float64, len(o.variables))
+	for i := range o.variables {
+		o.pinnedMin[i] = o.variables[i].Min
+		o.pinnedMax[i] = o.variables[i].Max
+		v := &o.variables[i]
+		if isGlassParam(v.Param) {
+			continue
+		}
+		val := x[i]
+		v.Min = val
+		v.Max = val
+	}
+}
+
+func (o *Optimizer) unlockVariables() {
+	if o.pinnedMin == nil {
+		return
+	}
+	for i := range o.variables {
+		if o.pinnedMin[i] == o.pinnedMax[i] && isGlassParam(o.variables[i].Param) {
+			continue
+		}
+		o.variables[i].Min = o.pinnedMin[i]
+		o.variables[i].Max = o.pinnedMax[i]
+	}
+	o.pinnedMin = nil
+	o.pinnedMax = nil
+}
+
+// isGlassParam reports whether a variable parameter belongs to the glass-free
+// set that stays active during the glass phase.
+func isGlassParam(param string) bool {
+	return param == "nd" || param == "vd"
 }
 
 // SetStop wires the mid-solve stop channel into the DLS options returned by
@@ -667,6 +813,9 @@ func (o *Optimizer) SetPowerSolve(solveSurfaces []int) {
 		}
 	}
 	o.powerSolve = m
+	// The solve is active for a plain optimize run; the escape glass phase
+	// toggles it (SetPowerSolveEnabled) so it applies only during that phase.
+	o.powerSolveEnabled = true
 }
 
 // powerTargetForSurface returns the current thin-lens power (curvature-based)
@@ -1171,8 +1320,13 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 // applyPowerSolve reconciles every pinned solve surface's curvature so the
 // thin-lens power of its element equals the snapshotted target. It is called
 // from applyVariables (pure), so the DLS base-point and Jacobian residuals
-// share one consistent power-preserving layout.
+// share one consistent power-preserving layout. It only runs while the
+// power-preserving solve is enabled (powerSolveEnabled), so the escape
+// glass phase can enable it selectively.
 func (o *Optimizer) applyPowerSolve(configSurfaces map[string][]types.Surface, gc *glass.Catalog) {
+	if !o.powerSolveEnabled {
+		return
+	}
 	if len(o.powerSolve) == 0 {
 		return
 	}

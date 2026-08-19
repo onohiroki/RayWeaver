@@ -26,6 +26,7 @@ type Params struct {
 	Scales  []float64 // Max - Min for each variable (normalisation scale)
 	// Execution tuning (wiring of the DLS options; not part of the bump).
 	EscapeIterFrac  float64 // escape-phase MaxIter as a fraction of the full budget (0 = 1/3)
+	GlassIterFrac   float64 // glass-phase MaxIter as a fraction of the full budget (0 = 1/3)
 	WSpan           float64 // worker W scaling span: W*(1 + i/(N-1)*(WSpan-1)); 0 = 2
 	StallWindowFrac float64 // stalled-early-stop window as a fraction of MaxIter (0 = 0.2)
 	StallRelTol     float64 // stalled-early-stop relative merit threshold (0 = 1e-4)
@@ -44,6 +45,7 @@ func DefaultParams() Params {
 		Dt:              0.1,
 		DtFp:            0,
 		EscapeIterFrac:  1.0 / 3.0,
+		GlassIterFrac:   1.0 / 3.0,
 		WSpan:           2.0,
 		StallWindowFrac: 0.2,
 		StallRelTol:     1e-4,
@@ -71,19 +73,32 @@ type Phase int
 const (
 	PhaseEscape Phase = iota
 	PhaseClean
+	PhaseGlassSolve
 )
+
+// glassPhaseable is the optional capability an inner dls.Model may implement
+// to enter/exit the power-preserving glass phase: lock every variable except
+// the glass dispersions, route the merit to the colour-only glass terms, and
+// toggle the power-preserving solve. The escape package stays decoupled from
+// the concrete Optimizer (it only depends on this interface).
+type glassPhaseable interface {
+	EnterGlassPhase(x []float64)
+	ExitGlassPhase()
+}
 
 // Wrapper implements dls.Model by delegating to an inner model and adding a
 // smooth escape residual for every recorded local minimum. Passing a nil or
 // empty escape list makes the wrapper behave exactly like the inner model
 // (used for the clean re-optimisation step of the cycle).
 type Wrapper struct {
-	inner   dls.Model
-	escapes []Point
-	params  Params
-	startX  []float64
-	phase   Phase
-	stop    <-chan struct{}
+	inner         dls.Model
+	escapes       []Point
+	params        Params
+	startX        []float64
+	phase         Phase
+	stop          <-chan struct{}
+	glassPhase    bool // insert the power-preserving glass phase between escape and clean DLS
+	inGlassPhase  bool // the inner model is currently in the glass phase
 }
 
 // NewWrapper wraps an inner dls.Model with escape-function support.
@@ -177,12 +192,48 @@ func (w *Wrapper) Options() dls.Options {
 			opts.MaxIter = max(50, int(float64(opts.MaxIter)*w.params.EscapeIterFrac))
 		}
 	}
+	if w.phase == PhaseGlassSolve && w.params.GlassIterFrac > 0 {
+		if opts.MaxIter > 3 {
+			opts.MaxIter = max(50, int(float64(opts.MaxIter)*w.params.GlassIterFrac))
+		}
+	}
+	// The power-preserving glass phase is a plain DLS (no escape bumps).
+	opts.DisableStallEscape = true
 	return opts
 }
 
 // SetPhase selects the escape-cycle phase so Options() can adapt MaxIter.
+// When the glass phase is enabled, entering PhaseGlassSolve pushes the inner
+// model into its glass phase (locking non-glass variables to the current
+// x/startX and switching to the colour merit); leaving it (escape/clean)
+// restores the inner model. The inner model only participates if it implements
+// the glassPhaseable capability.
 func (w *Wrapper) SetPhase(p Phase) {
+	if w.glassPhase && w.phase == PhaseGlassSolve && p != PhaseGlassSolve && w.inGlassPhase {
+		if gp, ok := w.inner.(glassPhaseable); ok {
+			gp.ExitGlassPhase()
+		}
+		w.inGlassPhase = false
+	}
+	if w.glassPhase && p == PhaseGlassSolve && !w.inGlassPhase {
+		if gp, ok := w.inner.(glassPhaseable); ok {
+			gp.EnterGlassPhase(w.startX)
+		}
+		w.inGlassPhase = true
+	}
 	w.phase = p
+}
+
+// SetGlassPhase enables or disables the power-preserving glass phase between
+// the escape and clean DLS of each cycle. The inner model must implement
+// glassPhaseable for the phase to take effect.
+func (w *Wrapper) SetGlassPhase(enabled bool) {
+	w.glassPhase = enabled
+}
+
+// GlassPhaseEnabled reports whether the glass phase is enabled on this wrapper.
+func (w *Wrapper) GlassPhaseEnabled() bool {
+	return w.glassPhase
 }
 
 // EvaluateMerit returns the inner merit plus all escape terms.
