@@ -38,6 +38,11 @@ set -euo pipefail
 #   escape optimises each element's glass independently; the minima summary
 #   prints the per-element vd (a '.' marks a crown/flint role flip across 45)
 #   and a gate checks that the glass actually changed between minima.
+#   The double-Gauss input also carries an optimization.power_solve section, so
+#   every escape cycle gains a dedicated power-preserving glass phase: the
+#   non-glass variables are locked and the element thin-lens powers held fixed
+#   while a colour-only merit rebalances the glasses (see the glass-phase note
+#   in the output).
 #
 # How to read the result
 #   - Best merit is the lowest DLS merit among the discovered minima.
@@ -280,6 +285,14 @@ echo
 # should carry different glasses. Check that at least two minima differ in the
 # vd of a glass surface (the crown/flint arrangement moves between solutions).
 if [ "$LENS" = "doublegauss" ]; then
+  echo "--- Power-preserving glass phase (double-Gauss) ---"
+  echo "  Each cycle added a glass_dls phase: it locked every variable except the"
+  echo "  glass dispersions, reversed the merit to a colour-only (LCA/TCA) objective,"
+  echo "  and held the element thin-lens powers fixed so only the glasses rebalanced."
+  if [[ -n "$LOG_FILE" && -f "$LOG_FILE" ]]; then
+    GPHASES=$(grep -c '"phase":"glass_dls"' "$LOG_FILE" || true)
+    echo "  glass_dls phases run: ${GPHASES:-0}"
+  fi
   echo "--- Glass-change gate (glass optimized per element) ---"
   NMIN=$($RAYWEAVE query --len escape_result.minima < "$RESULT")
   GATE_GLASS_OK=false

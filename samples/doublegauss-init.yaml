@@ -26,6 +26,14 @@ metadata:
     low-weight glass_role terms (surface_set per element) steering each element
     toward its chromatic-role target while the spot/colour/opd terms keep the
     imagery healthy.
+    The power_solve section adds a dedicated power-preserving glass phase to
+    each escape cycle (between the escape and clean DLS): every variable except
+    the glass dispersions is locked, the merit is reversed to a colour-only
+    axial/lateral objective, and the element thin-lens powers stay constant
+    while only nd/vd move — so the glass balance corrects the chromatic error
+    without drifting the layout. The surfaces list the dependent back surface
+    of each element (2, 4, 6, 9, 11, 13); their curvatures are recomputed to
+    hold power.
 
 glass_catalog:
   entries:
@@ -44,6 +52,9 @@ optimization:
   epsilon: 1.0e-06
   num_rays: 256
   aperture_margin: 1.2
+  power_solve:
+    enabled: true
+    surfaces: [2, 4, 6, 9, 11, 13]
   escape:
     max_cycles: 10
     escape_workers: 8
