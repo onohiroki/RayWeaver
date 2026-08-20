@@ -1086,6 +1086,11 @@ type ChiefRayResult struct {
 	SpotStats     *SpotStats        `yaml:"spot_stats,omitempty"`
 	RayFan        *RayFan           `yaml:"ray_fan,omitempty"`
 	Wavelengths   []WavelengthStats `yaml:"wavelengths,omitempty"`
+	// PupilProbe reports that the low-angle probe supplied the dynamic-pupil
+	// aperture position (stop-free systems); PupilProbeZ is the aperture Z it
+	// found. Both are informational only.
+	PupilProbe  bool    `yaml:"pupil_probe,omitempty"`
+	PupilProbeZ float64 `yaml:"pupil_probe_z,omitempty"`
 }
 
 type Pupil struct {

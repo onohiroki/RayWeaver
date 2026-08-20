@@ -27,6 +27,13 @@ type Result struct {
 	RayFan         *types.RayFan
 	PerSurfaceMaxY []float64
 	Wavelengths    []types.WavelengthStats
+	// ProbeZ is the aperture Z found by the low-angle (≈1°) probe: the Z where
+	// the probe's centroid chief ray crosses the optical axis. 0 when the probe
+	// did not run or failed.
+	ProbeZ float64
+	// ProbeOK reports whether the probe supplied an aperture position (seeding
+	// a single-field pupil and backing crossing failures).
+	ProbeOK bool
 }
 
 func DetermineChiefRaysGrid(
@@ -56,6 +63,17 @@ const maxPupilIterations = 3
 
 // pupilTolMM is the convergence threshold for the dynamic pupil Z.
 const pupilTolMM = 0.05
+
+// probeAngleDeg is the low-angle probe field angle used to estimate the
+// aperture position for stop-free (dynamic-pupil) systems. At ≈1° the
+// aberrations are negligible, so the probe's centroid chief ray is a stable,
+// field-set-independent proxy for the physical chief ray.
+const probeAngleDeg = 1.0
+
+// probeRadiusFactor scales the probe grid radius relative to the grid
+// aperture radius. The probe launches a 2×-radius grid so its centroid stays
+// unbiased even when the seed pupil Z is far from the physical aperture.
+const probeRadiusFactor = 2.0
 
 func determineChiefRays(
 	system types.System,
@@ -87,12 +105,36 @@ func determineChiefRays(
 	pupilZs := seedPupilZs(system, fields)
 	dynamic := system.StopSurface <= 0
 
+	// Low-angle probe: for stop-free systems a ≈1° grid estimates the aperture
+	// position as the Z where its centroid chief ray crosses the optical axis.
+	// The probe seeds a single-field pupil and backs the dynamic-pupil fixed
+	// point when a chief-ray crossing is ill-conditioned; the per-field crossing
+	// updates remain the primary path, so each field keeps its own entrance
+	// pupil. Skipped for
+	// finite-conjugate-only field sets and when pass_through pins a coordinate.
+	var probeZ float64
+	probeOK := false
+	if dynamic && passThrough == nil && hasInfiniteConjugateField(fields) {
+		probeZ, probeOK = probePupilZ(system, engine, refSurfaceID, numRays,
+			apertureRadius, pol, wavelength, gridType, pupilZs[0])
+		if probeOK && len(fields) == 1 {
+			// For a single field there is no crossing to perturb, so the grid
+			// aims at the probe's aperture position (the entrance pupil). For
+			// multiple fields the probe only backs crossing failures: the
+			// per-field crossing updates must stay the primary path, since
+			// overriding the seed would move their converged fixed point (and
+			// with it the beam-envelope sizing) in a stale/undersized aperture
+			// state.
+			pupilZs[0] = probeZ
+		}
+	}
+
 	var results []Result
 	if dynamic {
 		for iter := 0; iter < maxPupilIterations; iter++ {
 			results = traceFields(system, engine, fields, refSurfaceID, numRays, apertureRadius,
 				pol, wavelength, dumpMap, gridType, passThrough, fanCfg, pupilZs)
-			next := recomputeEntrancePupils(results, pupilZs, engine, system.Surfaces)
+			next := recomputeEntrancePupils(results, pupilZs, engine, system.Surfaces, probeZ, probeOK)
 			changed := false
 			for i := range pupilZs {
 				if math.Abs(next[i]-pupilZs[i]) > pupilTolMM {
@@ -109,7 +151,12 @@ func determineChiefRays(
 			pol, wavelength, dumpMap, gridType, passThrough, fanCfg, pupilZs)
 	}
 
-	setPupils(results, engine, system.Surfaces, pupilZs, apertureRadius)
+	setPupils(results, engine, system.Surfaces, pupilZs, apertureRadius, probeZ, probeOK)
+
+	for i := range results {
+		results[i].ProbeZ = probeZ
+		results[i].ProbeOK = probeOK
+	}
 
 	// Multi-wavelength spot stats
 	if len(wavelengths) > 0 {
@@ -160,6 +207,135 @@ func seedPupilZs(system types.System, fields []types.FieldDef) []float64 {
 		zs[i] = seed
 	}
 	return zs
+}
+
+// hasInfiniteConjugateField reports whether any field uses an angle (or image
+// height, which chief solves via an angle) definition. Only infinite-conjugate
+// systems have a well-defined low-angle probe; a field set that is entirely
+// finite-conjugate (height + object_z) leaves it off. On-axis fields are angle
+// based, so an angle field of 0° still counts.
+func hasInfiniteConjugateField(fields []types.FieldDef) bool {
+	for _, f := range fields {
+		if math.Abs(f.Height) > 1e-12 {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// axisCrossingZ returns the Z where the ray polyline crosses the optical axis
+// (the X=Y=0 line) within the given Z window, via the closest point of each
+// segment to the axis. The crossing is accepted only when a segment comes
+// within 2 mm of the axis (an aberrated or displaced chief ray that never nears
+// the axis has no well-defined aperture crossing). Returns the cleanest
+// (closest) crossing, or ok=false when none qualifies.
+func axisCrossingZ(pts []types.Vec3, zLo, zHi float64) (float64, bool) {
+	axisP0 := types.Vec3{Z: zLo}
+	axisDir := types.Vec3{Z: zHi - zLo}
+	bestZ := 0.0
+	bestDist := math.Inf(1)
+	for a := 0; a+1 < len(pts); a++ {
+		z, ok := lineCrossingZ(pts[a], pts[a+1].Subtract(pts[a]), axisP0, axisDir)
+		if !ok {
+			continue
+		}
+		if z < zLo-1 || z > zHi+1 {
+			continue
+		}
+		// Distance between the closest points on the segment and the axis.
+		wa := pts[a].Subtract(axisP0)
+		da := pts[a+1].Subtract(pts[a])
+		db := axisDir
+		aa := da.Dot(da)
+		bb := da.Dot(db)
+		cc := db.Dot(db)
+		ee := da.Dot(wa)
+		ff := db.Dot(wa)
+		den := aa*cc - bb*bb
+		if math.Abs(den) < 1e-18 {
+			continue
+		}
+		s := (bb*ff - cc*ee) / den
+		t := (aa*ff - bb*ee) / den
+		pa := pts[a].Add(da.Scale(s))
+		pb := axisP0.Add(db.Scale(t))
+		dist := pa.Subtract(pb).Length()
+		if dist < bestDist {
+			bestDist = dist
+			bestZ = z
+		}
+	}
+	if math.IsInf(bestDist, 1) || bestDist > 2.0 {
+		return 0, false
+	}
+	return bestZ, true
+}
+
+// probePupilZ traces a low-angle (≈1°) pupil grid centred on the seed pupil Z
+// and returns the Z where the probe's centroid chief ray crosses the optical
+// axis — a stable, field-set-independent estimate of the aperture position for
+// stop-free systems. The grid uses a 2×-radius aperture so the centroid stays
+// unbiased even when the seed Z is far from the physical aperture. Returns
+// ok=false when the probe grid has no survivors or the crossing is not reliable.
+func probePupilZ(
+	system types.System,
+	engine *ray.Engine,
+	refSurfaceID int,
+	numRays int,
+	apertureRadius float64,
+	pol types.JonesVector,
+	wavelength float64,
+	gridType types.GridType,
+	seedZ float64,
+) (float64, bool) {
+	thetaRad := raymath.DegToRad(probeAngleDeg)
+	sinT := math.Sin(thetaRad)
+	cosT := math.Cos(thetaRad)
+	rayDir := types.Vec3{X: 0, Y: sinT, Z: cosT}.Normalize()
+	zStart := -100.0
+
+	// Grid centre: the point on the launch plane whose ray (direction rayDir)
+	// passes through the seed aperture centre (0,0,seedZ). The 1° ray in the
+	// meridional plane needs no X offset (rayDir.X = 0).
+	gc := raymath.WavefrontGridCenter(types.Vec3{Z: seedZ}, rayDir, zStart)
+	probeR := probeRadiusFactor * apertureRadius
+
+	path := dls.BuildPath(system.Surfaces)
+	_, cy, grid := tracePupilGrid(system, engine, path, numRays, probeR,
+		gc.X, gc.Y, zStart, rayDir, types.Vec3{},
+		refSurfaceID, pol, wavelength, false, gridType, nil)
+	survivors := 0
+	for _, gp := range grid {
+		if gp.ImageX != nil {
+			survivors++
+		}
+	}
+	if survivors == 0 {
+		return 0, false
+	}
+
+	// The centroid chief ray: the ray from the launch plane that passes through
+	// the spot centroid on the reference surface (same construction as the
+	// normal chief ray, but for the probe field).
+	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, refSurfaceID, cy,
+		path, wavelength, pol, engine, system.Surfaces, seedZ, false,
+		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
+	origin := types.Vec3{X: 0, Y: originY, Z: zStart}
+	chiefRay := types.Ray{
+		Wavelength: wavelength,
+		Initial:    types.RayState{Origin: origin, Direction: rayDir},
+		Path:       path,
+		Jones:      pol,
+		Lenient:    true,
+	}
+	pts := fullChiefPath(engine, chiefRay, system.Surfaces)
+	if len(pts) == 0 {
+		return 0, false
+	}
+	zLo, zHi, _ := surfaceZRange(system.Surfaces)
+	z, ok := axisCrossingZ(pts, zLo, zHi)
+	return z, ok
 }
 
 // traceFields traces one grid per field, each centred on its own entrance pupil
@@ -342,8 +518,10 @@ func inLensCrossingZ(p0, p1 []types.Vec3, zLo, zHi float64) (float64, bool) {
 // recomputeEntrancePupils updates each off-axis field's pupil Z from the
 // in-lens crossing of its chief-ray polyline with field 0's — the physical
 // aperture position where the chief rays intersect. The on-axis field's pupil
-// (field 0) stays as the reference seed.
-func recomputeEntrancePupils(results []Result, cur []float64, engine *ray.Engine, surfaces []types.Surface) []float64 {
+// (field 0) stays as the reference seed. When a crossing is ill-conditioned
+// (no clean in-lens intersection) the low-angle probe's aperture Z supplies the
+// fallback, so the pupil never stays pinned to a stale seed.
+func recomputeEntrancePupils(results []Result, cur []float64, engine *ray.Engine, surfaces []types.Surface, probeZ float64, probeOK bool) []float64 {
 	next := make([]float64, len(cur))
 	copy(next, cur)
 	if len(results) < 2 {
@@ -355,6 +533,8 @@ func recomputeEntrancePupils(results []Result, cur []float64, engine *ray.Engine
 		pathI := fullChiefPath(engine, results[i].ChiefRay, surfaces)
 		if z, ok := inLensCrossingZ(path0, pathI, zLo, zHi); ok {
 			next[i] = z
+		} else if probeOK {
+			next[i] = probeZ
 		}
 	}
 	return next
@@ -362,12 +542,14 @@ func recomputeEntrancePupils(results []Result, cur []float64, engine *ray.Engine
 
 // setPupils records the per-field entrance and exit pupils. The entrance pupil
 // is the in-lens chief-ray crossing (the aperture position where each field's
-// chief ray crosses field 0's); field 0's is the mean of the off-axis fields.
+// chief ray crosses field 0's); field 0's is the mean of the off-axis fields, or
+// the low-angle probe's aperture Z when there are no off-axis fields (the probe
+// only runs for stop-free systems, so field 0's is never left unset there).
 // The exit pupil is the image-space crossing of the outgoing segments, accepted
 // only within a plausible window (the outgoing rays are nearly parallel on the
 // image side, so the crossing is ill-conditioned for strongly aberrated designs
 // and is then omitted).
-func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, pupilZs []float64, apertureRadius float64) {
+func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, pupilZs []float64, apertureRadius float64, probeZ float64, probeOK bool) {
 	n := len(results)
 	if n == 0 {
 		return
@@ -391,6 +573,12 @@ func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, p
 	if entCnt > 0 && results[0].EntrancePupil != nil {
 		z := entMean / float64(entCnt)
 		results[0].EntrancePupil.Center = chiefAtZ(results[0].ChiefRay, z)
+		results[0].EntrancePupil.Radius = apertureRadius
+	} else if n == 1 && probeOK && results[0].EntrancePupil != nil {
+		// Single-field dynamic pupil: the probe supplies the aperture position.
+		// Previously the entrance-pupil centre was left unset for a lone field,
+		// which centred downstream grids at the origin instead of the aperture.
+		results[0].EntrancePupil.Center = chiefAtZ(results[0].ChiefRay, probeZ)
 		results[0].EntrancePupil.Radius = apertureRadius
 	}
 

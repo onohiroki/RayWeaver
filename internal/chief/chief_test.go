@@ -842,3 +842,154 @@ func TestDetermineChiefRaysGridNegativeImageHeight(t *testing.T) {
 		}
 	}
 }
+
+// TestProbeAxisCrossing verifies the low-angle probe finds the aperture as the
+// Z where its centroid chief ray crosses the optical axis, and that a lone
+// field driven through the same geometry reports the same aperture on its
+// entrance pupil (integration consistency with the run's own seed).
+func TestProbeAxisCrossing(t *testing.T) {
+	sys, gc := singletSystem()
+	pol := types.NewCircularJones(true)
+	const wl = 0.00058756
+	engine := ray.NewEngine(gc, nil)
+	apertureRadius := dls.ApertureRadiusForGrid(sys.Surfaces, 0, wl, gc, 1.0)
+	if apertureRadius <= 0 {
+		t.Fatal("no aperture radius for singlet")
+	}
+	// Use the same seed the dynamic pipeline uses so the probe result and the
+	// integrated single-field run agree.
+	seedZ := seedPupilZs(sys, []types.FieldDef{{Angle: 1.0, Direction: []float64{0, 1}}})[0]
+	probeZ, ok := probePupilZ(sys, engine, 2, 64, apertureRadius, pol, wl, types.GridPolar, seedZ)
+	if !ok {
+		t.Fatal("probePupilZ failed for singlet")
+	}
+	zLo, zHi, _ := surfaceZRange(sys.Surfaces)
+	if probeZ < zLo-1 || probeZ > zHi+1 {
+		t.Fatalf("probeZ = %v, want within the lens window [%v,%v]", probeZ, zLo, zHi)
+	}
+
+	// Integration: a lone 1° field drives the grid through the same axis
+	// crossing, so its entrance-pupil Z must match the probe's within tolerance.
+	one := DetermineChiefRaysGrid(sys, []types.FieldDef{{Angle: 1.0, Direction: []float64{0, 1}}}, 2, 64, gc, pol, wl, false, types.GridPolar, nil, nil, nil)
+	if len(one) != 1 || one[0].EntrancePupil == nil {
+		t.Fatal("1° field produced no result / entrance pupil")
+	}
+	if math.Abs(one[0].EntrancePupil.Center.Z-probeZ) > 1.0 {
+		t.Errorf("1° field entrance-pupil Z = %v, probe Z = %v (differ by %v)", one[0].EntrancePupil.Center.Z, probeZ, math.Abs(one[0].EntrancePupil.Center.Z-probeZ))
+	}
+}
+
+// TestSingleFieldEntrancePupilFromProbe verifies that a stop-free single
+// field now reports a non-zero entrance-pupil centre (supplied by the probe),
+// which downstream grids previously lost (they were centred at the origin).
+func TestSingleFieldEntrancePupilFromProbe(t *testing.T) {
+	sys, gc := singletSystem()
+	pol := types.NewCircularJones(true)
+	results := DetermineChiefRaysGrid(sys, []types.FieldDef{{Angle: 0.0, Direction: []float64{0, 1}}}, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if !results[0].ProbeOK {
+		t.Fatal("expected the probe to run for a stop-free single field")
+	}
+	if results[0].EntrancePupil == nil {
+		t.Fatal("no entrance pupil")
+	}
+	// The probe must place the on-axis field's entrance pupil at a finite,
+	// in-lens Z (previously left as the zero value).
+	if math.Abs(results[0].EntrancePupil.Center.Z) < 1e-6 {
+		t.Errorf("single-field entrance-pupil centre Z = %v, want != 0 (probe-supplied)", results[0].EntrancePupil.Center.Z)
+	}
+}
+
+// TestCrossingFallbackProbe verifies that an off-axis field whose chief-ray
+// crossing is ill-conditioned falls back to the probe aperture Z rather than
+// staying pinned to a stale seed.
+func TestCrossingFallbackProbe(t *testing.T) {
+	sys, gc := singletSystem()
+	pol := types.NewCircularJones(true)
+	// Two results with identical, parallel (non-crossing) chief rays, so the
+	// in-lens crossing fails and the probe aperture must take over.
+	results := make([]Result, 2)
+	for i := range results {
+		results[i] = Result{ChiefRay: types.Ray{
+			Wavelength: 0.00058756,
+			Initial:    types.RayState{Origin: types.Vec3{X: 0, Y: float64(i) * 100, Z: -100}, Direction: types.Vec3{Z: 1}},
+			Path:       []int{0, 1, 2},
+			Jones:      pol,
+		}}
+	}
+	engine := ray.NewEngine(gc, nil)
+	cur := []float64{99.0, 99.0} // stale seeds
+	const probeZ = 12.0
+	next := recomputeEntrancePupils(results, cur, engine, sys.Surfaces, probeZ, true)
+	if math.Abs(next[1]-probeZ) > 1e-9 {
+		t.Errorf("fallback: next[1] = %v, want probeZ %v", next[1], probeZ)
+	}
+	// Without a probe the stale seed is kept.
+	nextNoProbe := recomputeEntrancePupils(results, cur, engine, sys.Surfaces, 0, false)
+	if math.Abs(nextNoProbe[1]-cur[1]) > 1e-9 {
+		t.Errorf("no-probe: next[1] = %v, want stale seed %v", nextNoProbe[1], cur[1])
+	}
+}
+
+// TestPerFieldPupilIndependence verifies the probe is only a fallback: when an
+// off-axis field has a clean in-lens crossing, the crossing value is kept (the
+// probe is not used), so each field keeps its own entrance pupil.
+func TestPerFieldPupilIndependence(t *testing.T) {
+	sys, gc := singletSystem()
+	pol := types.NewCircularJones(true)
+	engine := ray.NewEngine(gc, nil)
+	zLo, zHi, _ := surfaceZRange(sys.Surfaces)
+	const probeZ = -0.917 // a deliberately different fallback Z
+
+	// Two chief rays aimed to converge inside the lens give a clean crossing.
+	mk := func(y0, zStart float64) types.Ray {
+		dir := types.Vec3{X: 0, Y: -y0, Z: zStart}.Normalize()
+		return types.Ray{Wavelength: 0.00058756, Initial: types.RayState{Origin: types.Vec3{Y: y0, Z: -100}, Direction: dir}, Path: []int{0, 1, 2}, Jones: pol, Lenient: true}
+	}
+	results := []Result{{ChiefRay: mk(2.0, 103.0)}, {ChiefRay: mk(-2.0, 103.0)}}
+	// Sanity: the two chief-ray crossings are clean and distinct per field.
+	p0 := fullChiefPath(engine, results[0].ChiefRay, sys.Surfaces)
+	p1 := fullChiefPath(engine, results[1].ChiefRay, sys.Surfaces)
+	cross, ok := inLensCrossingZ(p0, p1, zLo, zHi)
+	if !ok {
+		t.Fatal("test rays do not cross cleanly inside the lens")
+	}
+
+	next := recomputeEntrancePupils(results, []float64{probeZ, probeZ}, engine, sys.Surfaces, probeZ, true)
+	// The crossing must win over the probe: next[1] is the (distinct) crossing.
+	if math.Abs(next[1]-cross) > 1e-6 {
+		t.Errorf("off-axis pupil = %v, want its crossing %v (probe %v must not override a clean crossing)", next[1], cross, probeZ)
+	}
+	if math.Abs(next[1]-probeZ) < 1e-6 {
+		t.Errorf("off-axis pupil collapsed to the probe Z %v", probeZ)
+	}
+}
+
+func TestProbeSkippedForFiniteConjugateAndPassThrough(t *testing.T) {
+	sys, gc := singletSystem()
+	pol := types.NewCircularJones(true)
+	const wl = 0.00058756
+
+	finite := DetermineChiefRaysGrid(sys, []types.FieldDef{{
+		Height: 1.0, ObjectZ: -100.0, Direction: []float64{0, 1},
+	}}, 2, 64, gc, pol, wl, false, types.GridPolar, nil, nil, nil)
+	if len(finite) != 1 {
+		t.Fatalf("finite-conjugate run returned %d results, want 1", len(finite))
+	}
+	if finite[0].ProbeOK {
+		t.Error("finite-conjugate-only field unexpectedly ran the angle probe")
+	}
+
+	passThrough := &types.PassThroughTarget{Surface: 1, Coordinate: types.Vec3{}}
+	constrained := DetermineChiefRaysGrid(sys, []types.FieldDef{{
+		Angle: 0.0, Direction: []float64{0, 1},
+	}}, 2, 64, gc, pol, wl, false, types.GridPolar, passThrough, nil, nil)
+	if len(constrained) != 1 {
+		t.Fatalf("pass-through run returned %d results, want 1", len(constrained))
+	}
+	if constrained[0].ProbeOK {
+		t.Error("pass-through run unexpectedly ran the angle probe")
+	}
+}

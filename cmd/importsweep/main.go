@@ -448,6 +448,8 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 			ImageHeight:   r.ImageHeight,
 			EntrancePupil: r.EntrancePupil,
 			SpotStats:     r.SpotStats,
+			PupilProbe:    r.ProbeOK,
+			PupilProbeZ:   r.ProbeZ,
 		}
 		chiefCRs = append(chiefCRs, cr)
 		if r.SpotStats != nil {

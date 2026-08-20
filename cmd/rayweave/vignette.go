@@ -137,6 +137,8 @@ func runVignette(data []byte) {
 			EntrancePupil: r.EntrancePupil,
 			ExitPupil:     r.ExitPupil,
 			SpotStats:     r.SpotStats,
+			PupilProbe:    r.ProbeOK,
+			PupilProbeZ:   r.ProbeZ,
 		}
 		if input.Chief.DumpMap && len(r.GridPoints) > 0 {
 			cr.GridPoints = r.GridPoints

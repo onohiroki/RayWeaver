@@ -78,6 +78,8 @@ Augmented YAML with a `chief_rays[]` section, one entry per field:
   intensity, OPL, and the origin/direction for re-tracing
 - `ray_fan` (with `--ray-fan`) — meridional / sagittal / rotated fans
 - `wavelengths` (when the config defines wavelengths) — per-wavelength stats
+- `pupil_probe` / `pupil_probe_z` — for a stop-free (dynamic-pupil) system,
+  whether the low-angle probe supplied the aperture position and at which Z
 
 The top-level `rays` section carries only the extras needed for tracing
 (marginal rays with `--marginal-rays`) plus the polarization, so the chief-ray

@@ -1286,6 +1286,8 @@ func runChief(data []byte) {
 			SpotStats:     r.SpotStats,
 			RayFan:        r.RayFan,
 			Wavelengths:   r.Wavelengths,
+			PupilProbe:    r.ProbeOK,
+			PupilProbeZ:   r.ProbeZ,
 		}
 		if dumpMap && len(r.GridPoints) > 0 {
 			cr.GridPoints = r.GridPoints

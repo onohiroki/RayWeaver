@@ -22,6 +22,28 @@ flattener do not shrink the entrance pupil). The entrance-pupil centre is the
 per-field dynamic-pupil crossing; the exit pupil is the image-side
 outgoing-segment crossing (omitted when ill-conditioned).
 
+### Low-angle probe
+
+For a stop-free system (and when the field set has an infinite-conjugate field
+and no `pass_through` is pinned), `chief` also runs a **low-angle probe**: a
+≈1° pupil grid (2×-radius aperture, so the centroid stays unbiased even when
+the seed aperture Z is far from the physical one) whose centroid chief ray is
+traced and its crossing with the **optical axis** taken as a stable,
+field-set-independent estimate of the aperture Z. The probe is used only as a
+*seed/fallback*, never as the primary pupil:
+
+- **Single field** — the field's grid (and its reported `entrance_pupil`
+  centre) aims at the probe aperture, since there is no second field to cross
+  against. Previously a lone field left its entrance-pupil centre unset, which
+  centred downstream grids at the origin.
+- **Multiple fields** — the per-field crossing updates remain the primary path
+  (each field keeps its own entrance pupil); the probe only backs a field whose
+  crossing is ill-conditioned (no clean in-lens intersection), so a field's
+  pupil never stays pinned to a stale seed.
+
+The probe is reported per result as `pupil_probe` / `pupil_probe_z`. It is not
+computed for finite-conjugate-only field sets or when `pass_through` is set.
+
 ## 2. Field definitions
 
 A field is one of:

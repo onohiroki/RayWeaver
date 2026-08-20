@@ -273,6 +273,8 @@ func runImport(data []byte) {
 				ImageHeight:   r.ImageHeight,
 				EntrancePupil: r.EntrancePupil,
 				SpotStats:     r.SpotStats,
+				PupilProbe:    r.ProbeOK,
+				PupilProbeZ:   r.ProbeZ,
 			}
 			if len(r.GridPoints) > 0 {
 				cr.GridPoints = r.GridPoints
