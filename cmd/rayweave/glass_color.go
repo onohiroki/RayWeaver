@@ -42,6 +42,36 @@ func effectivePowerSolve(input types.Input, flagPowerSolve bool, flagSurfaces st
 	return nil
 }
 
+// hasGlassVariable reports whether any active optimization variable targets a
+// glass dispersion (nd/vd), across every variable container (single-config
+// optimization.variables, and multi-config shared/local variables). The
+// power-preserving glass phase only has degrees of freedom to move when such a
+// variable exists; without one the phase would lock every variable and run a
+// no-op DLS, so escape skips it entirely.
+func hasGlassVariable(input *types.Input) bool {
+	for _, v := range input.Optimization.Variables {
+		if v.Active && (v.Target.Param == "nd" || v.Target.Param == "vd") {
+			return true
+		}
+	}
+	for _, v := range input.Optimization.LocalVariables {
+		if v.Active && (v.Target.Param == "nd" || v.Target.Param == "vd") {
+			return true
+		}
+	}
+	for _, s := range input.Optimization.SharedVariables {
+		if !s.Active {
+			continue
+		}
+		for _, b := range s.Bindings {
+			if b.Param == "nd" || b.Param == "vd" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // applyGlassColor auto-generates a glass-only chromatic optimisation inside
 // input: nd/vd variables for every refractive lens element and a per-config
 // merit of only longitudinal_color + lateral_color. It is the convenience layer

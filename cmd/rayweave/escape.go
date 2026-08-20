@@ -140,6 +140,13 @@ func buildGlassPhaseContext(input *types.Input) glassPhaseCtx {
 	if input.Optimization == nil || input.Optimization.PowerSolve == nil || !input.Optimization.PowerSolve.Enabled {
 		return ctx
 	}
+	// The glass phase only moves nd/vd variables (everything else is pinned).
+	// When no glass variable is declared (and --glass-color did not auto-generate
+	// one), the phase has nothing to optimise: skip it instead of running a
+	// no-op DLS. Global determination: one glass variable anywhere enables it.
+	if !hasGlassVariable(input) {
+		return ctx
+	}
 	ctx.enabled = true
 	ctx.surfaces = append([]int(nil), input.Optimization.PowerSolve.Surfaces...)
 	for _, cfg := range input.Configs {

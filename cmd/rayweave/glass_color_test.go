@@ -213,8 +213,13 @@ func abs(f float64) float64 {
 // surfaces, and a colour-only (longitudinal + lateral) glass merit per active
 // config.
 func TestBuildGlassPhaseContext(t *testing.T) {
+	// Enabled when power_solve is on, surfaces are listed, and at least one
+	// nd/vd glass variable is declared (global determination).
 	in := mustParseInput(t, glassColorTripletYAML)
 	in.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}}
+	in.Optimization.Variables = append(in.Optimization.Variables, types.OptimizationVariable{
+		Name: "s1_nd", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "nd"}, Min: 1.4, Max: 2.0, Active: true,
+	})
 	ctx := buildGlassPhaseContext(&in)
 
 	if !ctx.enabled {
@@ -239,6 +244,33 @@ func TestBuildGlassPhaseContext(t *testing.T) {
 	}
 	if !hasL || !hasT {
 		t.Errorf("glass merit missing chromatic terms: lca=%v tca=%v", hasL, hasT)
+	}
+
+	// Skipped when power_solve is on but no nd/vd variable is declared.
+	in3 := mustParseInput(t, glassColorTripletYAML)
+	in3.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}}
+	if ctx3 := buildGlassPhaseContext(&in3); ctx3.enabled {
+		t.Error("context should be skipped when no glass variable is declared")
+	}
+
+	// Enabled via a local (multi-config) vd variable.
+	in4 := mustParseInput(t, glassColorTripletYAML)
+	in4.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}}
+	in4.Optimization.LocalVariables = []types.LocalVariableDef{
+		{Name: "s3_vd", Config: "0", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "vd"}, Min: 20, Max: 80, Active: true},
+	}
+	if ctx4 := buildGlassPhaseContext(&in4); !ctx4.enabled {
+		t.Error("context should be enabled with a local vd variable")
+	}
+
+	// Enabled via a shared nd variable binding.
+	in5 := mustParseInput(t, glassColorTripletYAML)
+	in5.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}}
+	in5.Optimization.SharedVariables = []types.SharedVariable{
+		{Name: "sh_nd", Min: 1.4, Max: 2.0, Active: true, Bindings: []types.SharedVariableBinding{{Config: "0", ID: 1, Param: "nd"}}},
+	}
+	if ctx5 := buildGlassPhaseContext(&in5); !ctx5.enabled {
+		t.Error("context should be enabled with a shared nd binding")
 	}
 
 	// Disabled power_solve -> context disabled.
