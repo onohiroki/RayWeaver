@@ -9,6 +9,7 @@ import (
 )
 
 type element struct {
+	Index      int
 	r1Idx      int
 	r2Idx      int
 	r1Surf     types.Surface
@@ -64,6 +65,7 @@ func isGlassSurface(s types.Surface) bool {
 
 func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 	var elems []element
+	elemIdx := 0
 	for i := 0; i < len(surfaces); {
 		if !isGlassSurface(surfaces[i]) {
 			i++
@@ -75,6 +77,7 @@ func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 			break
 		}
 		elems = append(elems, element{
+			Index:      elemIdx,
 			r1Idx:      r1,
 			r2Idx:      r2,
 			r1Surf:     surfaces[r1],
@@ -84,6 +87,7 @@ func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 			r1Cemented: r1 > 0 && isGlassSurface(surfaces[r1-1]),
 			r2Cemented: r2 < len(surfaces) && isGlassSurface(surfaces[r2]),
 		})
+		elemIdx++
 		i = r2
 	}
 	return elems

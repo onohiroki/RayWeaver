@@ -2,8 +2,11 @@ package main
 
 import (
 	"flag"
+	"image/color"
 	"os"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/render"
@@ -19,6 +22,7 @@ func runPlot(data []byte) {
 	var fanRays int
 	var showInvalidFan, clipInvalidFan bool
 	var configFlag, glassDir string
+	var elementColorFlags, asphereColorFlags []string
 	args := os.Args[2:] // skip "plot"
 	fs := flag.NewFlagSet("plot", flag.ExitOnError)
 	fs.StringVar(&outPath, "o", "", "output file path (.svg or .png; default: stdout = SVG)")
@@ -28,18 +32,53 @@ func runPlot(data []byte) {
 	fs.Float64Var(&scaleOverride, "scale", 0, "SVG scale factor (0 = auto)")
 	fs.Float64Var(&rightMarginPct, "right-margin", 20, "right-side margin beyond image plane (% of lens length, default 20)")
 	fs.IntVar(&fanRays, "fan-rays", 11, "max fan rays drawn per field in the lens diagram (0 = hide fan rays)")
-	// Boolean toggles, no value argument: give the flag alone (= true) or as
-	// --flag=false. Default is off for both; the default display hides fan rays
-	// whose path carries an error code.
-	fs.BoolVar(&showInvalidFan, "show-invalid-ray-fan", false, "draw fan rays that carry an error code in full (boolean, default false = off: they are hidden)")
-	fs.BoolVar(&clipInvalidFan, "clip-invalid-ray-fan", false, "draw error-coded fan rays only up to the first erroring surface (boolean, default false = off; mutually exclusive with --show-invalid-ray-fan)")
 	fs.StringVar(&configFlag, "config", "", "select config by id (multi-config mode)")
 	fs.StringVar(&glassDir, "glass-dir", "", "AGF glass catalog directory")
+	fs.Func("element-color", "element fill colors: \"0=#ff0000,2=#00ff00\" (repeatable)", func(s string) error {
+		elementColorFlags = append(elementColorFlags, s)
+		return nil
+	})
+	fs.Func("asphere-color", "asphere colors: \"#ff0000\" or \"3=#ff0000,7=#0000ff\" (repeatable)", func(s string) error {
+		asphereColorFlags = append(asphereColorFlags, s)
+		return nil
+	})
+	fs.BoolVar(&showInvalidFan, "show-invalid-ray-fan", false, "draw fan rays that carry an error code in full (boolean, default false = off: they are hidden)")
+	fs.BoolVar(&clipInvalidFan, "clip-invalid-ray-fan", false, "draw error-coded fan rays only up to the first erroring surface (boolean, default false = off; mutually exclusive with --show-invalid-ray-fan)")
 	fs.Parse(args)
 
 	if showInvalidFan && clipInvalidFan {
 		errOut("Error: --show-invalid-ray-fan and --clip-invalid-ray-fan are mutually exclusive")
 		os.Exit(1)
+	}
+
+	// Parse element colors
+	elementColors := make(map[int]string)
+	for _, flagVal := range elementColorFlags {
+		m, err := render.ParseColorMap(flagVal)
+		if err != nil {
+			errOut("Error parsing --element-color: %v", err)
+			os.Exit(1)
+		}
+		for k, v := range m {
+			elementColors[k] = render.ColorToHex(v)
+		}
+	}
+
+	// Parse asphere colors
+	var asphereColorAll string
+	asphereColors := make(map[int]string)
+	for _, flagVal := range asphereColorFlags {
+		all, byID, err := render.ParseAsphereColorMap(flagVal)
+		if err != nil {
+			errOut("Error parsing --asphere-color: %v", err)
+			os.Exit(1)
+		}
+		if all != (color.NRGBA{}) {
+			asphereColorAll = render.ColorToHex(all)
+		}
+		for k, v := range byID {
+			asphereColors[k] = render.ColorToHex(v)
+		}
 	}
 
 	if glassDir != "" {
@@ -81,16 +120,19 @@ func runPlot(data []byte) {
 	glassMap := buildGlassMap(output, surfaces)
 
 	cfg := render.Config{
-		Surfaces:       surfaces,
-		Results:        output.Results,
-		ChiefRays:      output.ChiefRays,
-		GlassMap:       glassMap,
-		LensWidth:      lensWidth,
-		RayWidth:       rayWidth,
-		ScaleOverride:  scaleOverride,
-		RightMarginPct: rightMarginPct,
-		MaxFanRays:     fanRays,
-		StopSurfaceID:  output.Chief.StopSurface,
+		Surfaces:         surfaces,
+		Results:          output.Results,
+		ChiefRays:        output.ChiefRays,
+		GlassMap:         glassMap,
+		LensWidth:        lensWidth,
+		RayWidth:         rayWidth,
+		ScaleOverride:    scaleOverride,
+		RightMarginPct:   rightMarginPct,
+		MaxFanRays:       fanRays,
+		StopSurfaceID:    output.Chief.StopSurface,
+		ElementColors:    elementColors,
+		AsphereColors:    asphereColors,
+		AsphereColorAll:  asphereColorAll,
 	}
 	switch {
 	case clipInvalidFan:
@@ -99,6 +141,22 @@ func runPlot(data []byte) {
 		cfg.FanInvalid = render.FanInvalidShow
 	default:
 		cfg.FanInvalid = render.FanInvalidHide
+	}
+
+	// Write back effective values to output YAML
+	if len(elementColors) > 0 || len(asphereColors) > 0 || asphereColorAll != "" {
+		if output.Plot == nil {
+			output.Plot = &types.PlotConfig{}
+		}
+		output.Plot.ElementColors = elementColors
+		output.Plot.AsphereColors = asphereColors
+		output.Plot.AsphereColorAll = asphereColorAll
+	}
+
+	outYAML, err := yamlMarshal(output)
+	if err != nil {
+		errOut("Error marshaling output YAML: %v", err)
+		os.Exit(1)
 	}
 
 	if outPath != "" && strings.HasSuffix(strings.ToLower(outPath), ".png") {
@@ -111,7 +169,7 @@ func runPlot(data []byte) {
 			errOut("Error writing PNG: %v", err)
 			os.Exit(1)
 		}
-		os.Stdout.Write(data)
+		os.Stdout.Write(outYAML)
 		return
 	}
 
@@ -122,7 +180,7 @@ func runPlot(data []byte) {
 			errOut("Error writing SVG: %v", err)
 			os.Exit(1)
 		}
-		os.Stdout.Write(data)
+		os.Stdout.Write(outYAML)
 	} else {
 		os.Stdout.Write([]byte(svg))
 	}
@@ -162,4 +220,8 @@ func buildGlassMap(output types.Output, surfaces []types.Surface) map[string]ren
 		m[key] = render.GlassInfo{ND: nd, VD: vd}
 	}
 	return m
+}
+
+func yamlMarshal(v interface{}) ([]byte, error) {
+	return yaml.Marshal(v)
 }

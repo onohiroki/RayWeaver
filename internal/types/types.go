@@ -857,6 +857,7 @@ type AsphereCandidateConfig struct {
 	MaxCurvatureVariation   float64             `yaml:"max_curvature_variation,omitempty"`
 	CellRings               int                 `yaml:"cell_rings,omitempty"`
 	CellAngles              int                 `yaml:"cell_angles,omitempty"`
+	TBins                   int                 `yaml:"t_bins,omitempty"`
 	PupilSamplesRadial      int                 `yaml:"pupil_samples_radial,omitempty"`
 	SensitivitySamples      *int                `yaml:"sensitivity_samples,omitempty"`
 	RemovePiston            *bool               `yaml:"remove_piston,omitempty"`
@@ -895,6 +896,7 @@ type AsphereScoreWeights struct {
 	Conflict      float64 `yaml:"conflict,omitempty"`
 	Manufacturing float64 `yaml:"manufacturing,omitempty"`
 	Unstable      float64 `yaml:"unstable,omitempty"`
+	Asym          float64 `yaml:"asym,omitempty"`
 }
 
 // AsphereCellStat is one polar cell's aggregated statistics over the fields
@@ -953,6 +955,10 @@ type AsphereSurfaceScore struct {
 	FitQuality             float64                   `yaml:"fit_quality"`
 	ManufacturingPenalty   float64                   `yaml:"manufacturing_penalty"`
 	SensitivityPenalty     float64                   `yaml:"sensitivity_penalty"`
+	AsymResidual           float64                   `yaml:"asym_residual"`
+	FieldConsistency       float64                   `yaml:"field_consistency"`
+	AstigY0R2              float64                   `yaml:"astig_y0_r2,omitempty"`
+	DefocusY0R2            float64                   `yaml:"defocus_y0_r2,omitempty"`
 	Coefficients           AsphereCoeffs             `yaml:"coefficients,omitempty"`
 	ScaledCoefficients     AsphereCoeffs             `yaml:"scaled_coefficients,omitempty"`
 	CalibratedCoefficients AsphereCoeffs             `yaml:"calibrated_coefficients,omitempty"`
@@ -970,6 +976,9 @@ type AsphereOPDField struct {
 	FieldID    int       `yaml:"field_id"`
 	RingRadius []float64 `yaml:"ring_radius,omitempty"` // mean |r| per ring (mm)
 	OPD        []float64 `yaml:"opd,omitempty"`         // mean OPD per ring (mm)
+	TRadius    []float64 `yaml:"t_radius,omitempty"`    // mean tangential coordinate per bin (mm)
+	OPDPlus    []float64 `yaml:"opd_plus,omitempty"`    // +s half-mean OPD per t bin (mm)
+	OPDMinus   []float64 `yaml:"opd_minus,omitempty"`   // -s half-mean OPD per t bin (mm)
 }
 
 // AsphereOPDProfile is the per-field OPD overlap data for one candidate
@@ -1009,6 +1018,7 @@ type Input struct {
 	CoatingCatalog *CoatingCatalog         `yaml:"coating_catalog,omitempty"`
 	Configs        []Config                `yaml:"configs,omitempty"`
 	Vignette       *VignetteConfig         `yaml:"vignette,omitempty"`
+	Plot           *PlotConfig             `yaml:"plot,omitempty"`
 	System         System                  `yaml:"-"`
 	Optimization   *OptimizationConfig     `yaml:"optimization,omitempty"`
 	Chief          *ChiefInput             `yaml:"chief,omitempty"`
@@ -1099,32 +1109,32 @@ type Pupil struct {
 }
 
 type ParaxialResult struct {
-	ObjectSpaceIndex         float64 `yaml:"object_space_index"`
-	ImageSpaceIndex          float64 `yaml:"image_space_index"`
-	EntrancePupilDiameter    float64 `yaml:"entrance_pupil_diameter,omitempty"`
-	ObjectConeAngle          float64 `yaml:"object_cone_angle,omitempty"`
-	ObjectSpaceFNumber       float64 `yaml:"object_space_f_number,omitempty"`
-	ObjectSpaceNA            float64 `yaml:"object_space_na,omitempty"`
-	InfConjImageSpaceFNumber float64 `yaml:"inf_conj_image_space_f_number,omitempty"`
-	InfConjImageSpaceNA      float64 `yaml:"inf_conj_image_space_na,omitempty"`
-	ImageSpaceFNumber        float64 `yaml:"image_space_f_number,omitempty"`
-	ImageSpaceNA             float64 `yaml:"image_space_na,omitempty"`
-	EntrancePupilLocation    float64 `yaml:"entrance_pupil_location,omitempty"`
-	FocalLength              float64 `yaml:"focal_length,omitempty"`
-	Magnification            float64 `yaml:"magnification,omitempty"`
-	Minification             float64 `yaml:"minification,omitempty"`
-	ExitPupilLocation        float64 `yaml:"exit_pupil_location,omitempty"`
-	ExitPupilDiameter        float64 `yaml:"exit_pupil_diameter,omitempty"`
-	HalfAngleOfView          float64 `yaml:"half_angle_of_view,omitempty"`
-	TotalTrack               float64 `yaml:"total_track"`
-	FirstFocalLength         float64 `yaml:"first_focal_length,omitempty"`
-	FirstNodalPoint          float64 `yaml:"first_nodal_point,omitempty"`
-	FirstPrincipalFocus      float64 `yaml:"first_principal_focus,omitempty"`
-	FirstPrincipalPoint      float64 `yaml:"first_principal_point,omitempty"`
-	SecondFocalLength        float64 `yaml:"second_focal_length,omitempty"`
-	SecondNodalPoint         float64 `yaml:"second_nodal_point,omitempty"`
-	SecondPrincipalFocus     float64 `yaml:"second_principal_focus,omitempty"`
-	SecondPrincipalPoint     float64 `yaml:"second_principal_point,omitempty"`
+	ObjectSpaceIndex         float64       `yaml:"object_space_index"`
+	ImageSpaceIndex          float64       `yaml:"image_space_index"`
+	EntrancePupilDiameter    float64       `yaml:"entrance_pupil_diameter,omitempty"`
+	ObjectConeAngle          float64       `yaml:"object_cone_angle,omitempty"`
+	ObjectSpaceFNumber       float64       `yaml:"object_space_f_number,omitempty"`
+	ObjectSpaceNA            float64       `yaml:"object_space_na,omitempty"`
+	InfConjImageSpaceFNumber float64       `yaml:"inf_conj_image_space_f_number,omitempty"`
+	InfConjImageSpaceNA      float64       `yaml:"inf_conj_image_space_na,omitempty"`
+	ImageSpaceFNumber        float64       `yaml:"image_space_f_number,omitempty"`
+	ImageSpaceNA             float64       `yaml:"image_space_na,omitempty"`
+	EntrancePupilLocation    float64       `yaml:"entrance_pupil_location,omitempty"`
+	FocalLength              float64       `yaml:"focal_length,omitempty"`
+	Magnification            float64       `yaml:"magnification,omitempty"`
+	Minification             float64       `yaml:"minification,omitempty"`
+	ExitPupilLocation        float64       `yaml:"exit_pupil_location,omitempty"`
+	ExitPupilDiameter        float64       `yaml:"exit_pupil_diameter,omitempty"`
+	HalfAngleOfView          float64       `yaml:"half_angle_of_view,omitempty"`
+	TotalTrack               float64       `yaml:"total_track"`
+	FirstFocalLength         float64       `yaml:"first_focal_length,omitempty"`
+	FirstNodalPoint          float64       `yaml:"first_nodal_point,omitempty"`
+	FirstPrincipalFocus      float64       `yaml:"first_principal_focus,omitempty"`
+	FirstPrincipalPoint      float64       `yaml:"first_principal_point,omitempty"`
+	SecondFocalLength        float64       `yaml:"second_focal_length,omitempty"`
+	SecondNodalPoint         float64       `yaml:"second_nodal_point,omitempty"`
+	SecondPrincipalFocus     float64       `yaml:"second_principal_focus,omitempty"`
+	SecondPrincipalPoint     float64       `yaml:"second_principal_point,omitempty"`
 	ElementRoles             []ElementRole `yaml:"element_roles,omitempty"`
 }
 
@@ -1167,6 +1177,15 @@ type VignetteConfig struct {
 	MinGlassPath float64 `yaml:"min_glass_path,omitempty"`
 	MarginMM     float64 `yaml:"margin_mm,omitempty"`
 	Wavelength   float64 `yaml:"wavelength,omitempty"`
+}
+
+// PlotConfig configures the `plot` subcommand (the `plot:` YAML section).
+// All fields are optional; flags on the command line override them
+// and the effective values are written back into the output section.
+type PlotConfig struct {
+	ElementColors   map[int]string `yaml:"element_colors,omitempty"`
+	AsphereColors   map[int]string `yaml:"asphere_colors,omitempty"`
+	AsphereColorAll string         `yaml:"asphere_color_all,omitempty"`
 }
 
 // VignettingField reports the per-field vignetting result for the `vignette`

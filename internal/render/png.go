@@ -89,10 +89,43 @@ func LensPNG(cfg Config) ([]byte, error) {
 	}
 
 	// Mirror surfaces (drawn as curved lines above the rays)
-	mirrorCol := color.NRGBA{130, 130, 130, 153}
-	for _, p := range buildMirrorPaths(cfg.Surfaces, zPos) {
+	for i := 0; i < len(cfg.Surfaces); i++ {
+		s := cfg.Surfaces[i]
+		if !s.Reflects() || s.Diameter <= 0 {
+			continue
+		}
+		h := s.Diameter / 2
+		var path strings.Builder
+		path.WriteString("M ")
+		path.WriteString(f64str(zPos[i] + globalSag(s, h)))
+		path.WriteByte(',')
+		path.WriteString(f64str(h))
+		n := 20
+		for j := 1; j <= n; j++ {
+			t := float64(j) / float64(n)
+			y := h - 2*h*t
+			path.WriteString(" L ")
+			path.WriteString(f64str(zPos[i] + globalSag(s, y)))
+			path.WriteByte(',')
+			path.WriteString(f64str(y))
+		}
+
+		mirrorCol := color.NRGBA{130, 130, 130, 153}
+		if s.Type == types.AspherePolynomial || s.Type == types.AsphereZernike {
+			if c, ok := cfg.AsphereColors[s.ID]; ok {
+				if parsed, err := ParseColor(c); err == nil {
+					mirrorCol = parsed
+					mirrorCol.A = 153
+				}
+			} else if cfg.AsphereColorAll != "" {
+				if parsed, err := ParseColor(cfg.AsphereColorAll); err == nil {
+					mirrorCol = parsed
+					mirrorCol.A = 153
+				}
+			}
+		}
 		ras.Reset(canvasW, canvasH)
-		drawSagPathFromSVG(ras, p, scale, midZ)
+		drawSagPathFromSVG(ras, path.String(), scale, midZ)
 		ras.Draw(img, img.Bounds(), image.NewUniform(mirrorCol), image.Point{})
 	}
 
@@ -106,11 +139,45 @@ func LensPNG(cfg Config) ([]byte, error) {
 	for _, e := range findElements(cfg.Surfaces, globalH) {
 		mat := e.r1Surf.Material
 		var fill color.NRGBA
-		if gi, ok := cfg.GlassMap[mat.String()]; ok {
+
+		if c, ok := cfg.ElementColors[e.Index]; ok {
+			if parsed, err := ParseColor(c); err == nil {
+				fill = parsed
+				fill.A = 191
+			} else {
+				fill = color.NRGBA{180, 180, 180, 191}
+			}
+		} else if gi, ok := cfg.GlassMap[mat.String()]; ok {
 			fill = glassFill(gi.ND, gi.VD, 191)
 		} else {
 			fill = color.NRGBA{180, 180, 180, 191}
 		}
+
+		r1Asphere := e.r1Surf.Type == types.AspherePolynomial || e.r1Surf.Type == types.AsphereZernike
+		r2Asphere := e.r2Surf.Type == types.AspherePolynomial || e.r2Surf.Type == types.AsphereZernike
+		if (r1Asphere || r2Asphere) && cfg.AsphereColorAll != "" {
+			if parsed, err := ParseColor(cfg.AsphereColorAll); err == nil {
+				fill = parsed
+				fill.A = 191
+			}
+		}
+		if r1Asphere {
+			if c, ok := cfg.AsphereColors[e.r1Surf.ID]; ok {
+				if parsed, err := ParseColor(c); err == nil {
+					fill = parsed
+					fill.A = 191
+				}
+			}
+		}
+		if r2Asphere {
+			if c, ok := cfg.AsphereColors[e.r2Surf.ID]; ok {
+				if parsed, err := ParseColor(c); err == nil {
+					fill = parsed
+					fill.A = 191
+				}
+			}
+		}
+
 		drawElemFill(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, fill)
 		drawElemOutline(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, lw, outlineCol)
 	}

@@ -14,22 +14,20 @@ type GlassInfo struct {
 }
 
 type Config struct {
-	Surfaces       []types.Surface
-	Results        []types.RayResult
-	ChiefRays      []types.ChiefRayResult
-	GlassMap       map[string]GlassInfo
-	LensWidth      float64
-	RayWidth       float64
-	ScaleOverride  float64
-	RightMarginPct float64
-	MaxFanRays     int
-	// FanInvalid controls the display of fan rays whose path carries an error
-	// code (FanInvalidHide = skip, FanInvalidShow = full path,
-	// FanInvalidClip = up to the erroring surface).
-	FanInvalid FanInvalidMode
-	// StopSurfaceID is the aperture-stop surface ID; when > 0 the renderer
-	// draws the stop aperture marker at that surface.
-	StopSurfaceID int
+	Surfaces         []types.Surface
+	Results          []types.RayResult
+	ChiefRays        []types.ChiefRayResult
+	GlassMap         map[string]GlassInfo
+	LensWidth        float64
+	RayWidth         float64
+	ScaleOverride    float64
+	RightMarginPct   float64
+	MaxFanRays       int
+	FanInvalid       FanInvalidMode
+	StopSurfaceID    int
+	ElementColors    map[int]string
+	AsphereColors    map[int]string
+	AsphereColorAll  string
 }
 
 const (
@@ -129,8 +127,36 @@ func LensSVG(cfg Config) string {
 	}
 
 	// Mirror surfaces (drawn as curved lines above the rays)
-	for _, p := range buildMirrorPaths(cfg.Surfaces, zPos) {
-		b.WriteString(fmt.Sprintf(`<path class="air-line" d="%s"/>`, p))
+	for i := 0; i < len(cfg.Surfaces); i++ {
+		s := cfg.Surfaces[i]
+		if !s.Reflects() || s.Diameter <= 0 {
+			continue
+		}
+		h := s.Diameter / 2
+		var path strings.Builder
+		path.WriteString("M ")
+		path.WriteString(f64str(zPos[i] + globalSag(s, h)))
+		path.WriteByte(',')
+		path.WriteString(f64str(h))
+		n := 20
+		for j := 1; j <= n; j++ {
+			t := float64(j) / float64(n)
+			y := h - 2*h*t
+			path.WriteString(" L ")
+			path.WriteString(f64str(zPos[i] + globalSag(s, y)))
+			path.WriteByte(',')
+			path.WriteString(f64str(y))
+		}
+
+		stroke := "rgb(130,130,130)"
+		if (s.Type == types.AspherePolynomial || s.Type == types.AsphereZernike) {
+			if c, ok := cfg.AsphereColors[s.ID]; ok {
+				stroke = c
+			} else if cfg.AsphereColorAll != "" {
+				stroke = cfg.AsphereColorAll
+			}
+		}
+		b.WriteString(fmt.Sprintf(`<path class="air-line" d="%s" stroke="%s"/>`, path.String(), stroke))
 	}
 
 	// Lens bodies (colored by glass type, drawn on top of rays)
@@ -138,11 +164,31 @@ func LensSVG(cfg Config) string {
 	for _, e := range findElements(cfg.Surfaces, globalH) {
 		mat := e.r1Surf.Material
 		var fill string
-		if gi, ok := cfg.GlassMap[mat.String()]; ok {
+
+		if c, ok := cfg.ElementColors[e.Index]; ok {
+			fill = c
+		} else if gi, ok := cfg.GlassMap[mat.String()]; ok {
 			fill = GlassSVGFill(gi.ND, gi.VD)
 		} else {
 			fill = "rgb(180,180,180)"
 		}
+
+		r1Asphere := e.r1Surf.Type == types.AspherePolynomial || e.r1Surf.Type == types.AsphereZernike
+		r2Asphere := e.r2Surf.Type == types.AspherePolynomial || e.r2Surf.Type == types.AsphereZernike
+		if (r1Asphere || r2Asphere) && cfg.AsphereColorAll != "" {
+			fill = cfg.AsphereColorAll
+		}
+		if r1Asphere {
+			if c, ok := cfg.AsphereColors[e.r1Surf.ID]; ok {
+				fill = c
+			}
+		}
+		if r2Asphere {
+			if c, ok := cfg.AsphereColors[e.r2Surf.ID]; ok {
+				fill = c
+			}
+		}
+
 		path := buildElemPath(e, zPos[e.r1Idx], zPos[e.r2Idx])
 		if path != "" {
 			b.WriteString(fmt.Sprintf(`<path class="lens-body" d="%s" fill="%s"/>`, path, fill))
