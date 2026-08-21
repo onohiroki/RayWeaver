@@ -329,11 +329,112 @@ func BuildOPDProfiles(footprints []FieldFootprintData, surfaceIDs []int, rings i
 	for _, sid := range surfaceIDs {
 		profile := types.AsphereOPDProfile{SurfaceID: sid}
 		buildSurfaceOPDProfile(&profile, footprints, rings)
+		buildBeamOPDProfile(&profile, footprints, rings)
 		if len(profile.Fields) > 0 {
 			out = append(out, profile)
 		}
 	}
 	return out
+}
+
+// buildBeamOPDProfile emits the field-local profile used by the demo: raw
+// preprocessed OPD versus tangential position, split into +s and -s half beams.
+// Footprints carry one entry per (field, wavelength); their hits are pooled per
+// field and binned once on a shared tangential grid (weight-mean over
+// wavelengths), so each field emits ONE sweep whose t values increase
+// monotonically — downstream gnuplot curves stay connected without wrap-around
+// segments between per-wavelength runs.
+func buildBeamOPDProfile(profile *types.AsphereOPDProfile, footprints []FieldFootprintData, bins int) {
+	if bins < 1 {
+		bins = 1
+	}
+	type sample struct {
+		t, opd, w float64
+		plus      bool
+	}
+	type fieldAcc struct {
+		fieldID   int
+		direction []float64
+		hits      []RayHit
+	}
+	byField := make(map[int]*fieldAcc)
+	var order []*fieldAcc // first-seen field order, preserved in the output
+	for _, fd := range footprints {
+		fa := byField[fd.FieldID]
+		if fa == nil {
+			fa = &fieldAcc{fieldID: fd.FieldID, direction: fd.Direction}
+			byField[fd.FieldID] = fa
+			order = append(order, fa)
+		}
+		fa.hits = append(fa.hits, fd.RayHits...)
+	}
+	type agg struct {
+		wp, wm, sp, sm float64
+		np, nm         int
+	}
+	for _, fa := range order {
+		cx, cy, tx, ty := fieldFootprintFrame(FieldFootprintData{
+			FieldID:   fa.fieldID,
+			Direction: fa.direction,
+			RayHits:   fa.hits,
+		}, profile.SurfaceID)
+		var samples []sample
+		tMin, tMax := math.Inf(1), math.Inf(-1)
+		for _, h := range fa.hits {
+			if !h.OK {
+				continue
+			}
+			sh, ok := h.Hits[profile.SurfaceID]
+			if !ok {
+				continue
+			}
+			px, py := sh.Position.X-cx, sh.Position.Y-cy
+			t := px*tx + py*ty
+			if t < tMin {
+				tMin = t
+			}
+			if t > tMax {
+				tMax = t
+			}
+			samples = append(samples, sample{t: t, opd: h.OPD, w: effWeight(h), plus: px*(-ty)+py*tx >= 0})
+		}
+		sort.Slice(samples, func(i, j int) bool { return samples[i].t < samples[j].t })
+		if len(samples) == 0 || !(tMax > tMin) {
+			continue
+		}
+		aggs := make([]agg, bins)
+		for _, s := range samples {
+			bi := int((s.t - tMin) / (tMax - tMin) * float64(bins))
+			if bi >= bins {
+				bi = bins - 1
+			}
+			if bi < 0 {
+				bi = 0
+			}
+			if s.plus {
+				aggs[bi].wp += s.w
+				aggs[bi].sp += s.w * s.opd
+				aggs[bi].np++
+			} else {
+				aggs[bi].wm += s.w
+				aggs[bi].sm += s.w * s.opd
+				aggs[bi].nm++
+			}
+		}
+		field := types.AsphereOPDField{FieldID: fa.fieldID}
+		for bi, a := range aggs {
+			if a.np < 1 || a.nm < 1 || a.wp <= 0 || a.wm <= 0 {
+				continue
+			}
+			t := tMin + (float64(bi)+0.5)/float64(bins)*(tMax-tMin)
+			field.TRadius = append(field.TRadius, t)
+			field.OPDPlus = append(field.OPDPlus, a.sp/a.wp)
+			field.OPDMinus = append(field.OPDMinus, a.sm/a.wm)
+		}
+		if len(field.TRadius) > 0 {
+			profile.Fields = append(profile.Fields, field)
+		}
+	}
 }
 
 // buildSurfaceOPDProfile fills profile for one surface from the footprint
@@ -343,9 +444,9 @@ func buildSurfaceOPDProfile(profile *types.AsphereOPDProfile, footprints []Field
 		rings = 1
 	}
 	type ringAgg struct {
-		rSum  float64
-		wSum  float64
-		opdW  float64 // sum of weight*OPD
+		rSum float64
+		wSum float64
+		opdW float64 // sum of weight*OPD
 	}
 	// maxR over all valid hits on this surface.
 	maxR := 0.0
