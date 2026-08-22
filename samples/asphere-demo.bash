@@ -153,6 +153,9 @@ if [ "$CLEAN" = true ]; then
   rm -f "$OUTDIR"/asphere-demo-focus-gain*.png "$OUTDIR"/asphere-demo-*-focus-gain*.png
   rm -f "$OUTDIR"/asphere-demo-focus-gain*.dat "$OUTDIR"/asphere-demo-*-focus-gain*.dat
   rm -f "$OUTDIR"/asphere-demo-focus-gain*.gnu "$OUTDIR"/asphere-demo-*-focus-gain*.gnu
+  rm -f "$OUTDIR"/asphere-demo-focus-footprint*.png "$OUTDIR"/asphere-demo-*-focus-footprint*.png
+  rm -f "$OUTDIR"/asphere-demo-focus-footprint*.dat "$OUTDIR"/asphere-demo-*-focus-footprint*.dat
+  rm -f "$OUTDIR"/asphere-demo-focus-footprint*.gnu "$OUTDIR"/asphere-demo-*-focus-footprint*.gnu
   rm -f "$OUTDIR"/asphere-demo-wf-before*.yaml "$OUTDIR"/asphere-demo-*-wf-before*.yaml
   rm -f "$OUTDIR"/asphere-demo-wf-after*.yaml  "$OUTDIR"/asphere-demo-*-wf-after*.yaml
   rm -f "$OUTDIR"/asphere-demo-applied-initial*.yaml "$OUTDIR"/asphere-demo-*-applied-initial*.yaml
@@ -703,6 +706,104 @@ plot_focus_gain() {
   echo "Written: $out"
 }
 
+# ── Focus footprint scatter (per candidate surface) ────────────
+# For every candidate surface, plots the surface-hit footprint of each
+# traced fan ray, colour-coded by the local focus residual Δz_loc.
+# Two panels per surface: base (all-spherical) and trial (initial asphere).
+# Requires gnuplot and focus channel data (--diagnostics focus).
+#   out  = output PNG path
+#   rank = asphere ranking YAML (asphere_candidate_result)
+#   label = title suffix
+plot_focus_footprint() {
+  local out="$1" rank="$2" label="$3"
+  local gnuplot="${GNUPLOT:-$(command -v gnuplot || true)}"
+  if [[ -z "$gnuplot" && -x /opt/homebrew/bin/gnuplot ]]; then gnuplot=/opt/homebrew/bin/gnuplot; fi
+  if [[ -z "$gnuplot" ]]; then
+    echo "  (focus footprint chart skipped: gnuplot not available)"
+    return 0
+  fi
+
+  local nsurf
+  nsurf=$("$RAYWEAVE" query --len asphere_candidate_result.surfaces < "$rank" 2>/dev/null || echo 0)
+  if [[ -z "$nsurf" || "$nsurf" -eq 0 ]]; then
+    echo "  (focus footprint chart skipped: no focus data)"
+    return 0
+  fi
+
+  # Check if any surface has samples.
+  local has_samples=false
+  for ((si=0; si<nsurf; si++)); do
+    local n
+    n=$("$RAYWEAVE" query --len "asphere_candidate_result.surfaces[$si].samples" < "$rank" 2>/dev/null || echo 0)
+    if [[ -n "$n" && "$n" -gt 0 ]]; then has_samples=true; break; fi
+  done
+  if ! $has_samples; then
+    echo "  (focus footprint chart skipped: no samples data)"
+    return 0
+  fi
+
+  local base="$out"
+  local gs="$base.gnu"
+  local panels=0
+  local datfiles=""
+
+  for ((si=0; si<nsurf; si++)); do
+    local n
+    n=$("$RAYWEAVE" query --len "asphere_candidate_result.surfaces[$si].samples" < "$rank" 2>/dev/null || echo 0)
+    [[ -z "$n" || "$n" -eq 0 ]] && continue
+
+    local sid
+    sid=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].surface_id" < "$rank" 2>/dev/null || echo "?")
+
+    # Bulk-extract all samples as tab-separated lines using yq.
+    local dat_t="$base.$si.t.dat" dat_s="$base.$si.s.dat"
+    : > "$dat_t" : > "$dat_s"
+    "$YQ_BIN" e -o=tsv ".asphere_candidate_result.surfaces[$si].samples[] | [.hit_x_mm, .hit_y_mm, .delta_z_mm, .field_id, .fan_kind] | @tsv" "$rank" 2>/dev/null | \
+    while IFS=$'\t' read -r hx hy dz fid fk; do
+      [[ -z "$hx" || "$hx" == "null" ]] && continue
+      if [[ "$fk" == "tangential" ]]; then
+        printf "%s %s %s %s\n" "$hx" "$hy" "${dz:-0}" "${fid:-0}" >> "$dat_t"
+      else
+        printf "%s %s %s %s\n" "$hx" "$hy" "${dz:-0}" "${fid:-0}" >> "$dat_s"
+      fi
+    done
+
+    datfiles="$datfiles $dat_t $dat_s"
+    panels=$((panels + 1))
+  done
+
+  if [[ "$panels" -eq 0 ]]; then
+    echo "  (focus footprint chart skipped: no valid samples)"
+    return 0
+  fi
+
+  {
+    echo "set terminal pngcairo size $((panels * 500)),500"
+    echo "set output \"$out\""
+    echo "set multiplot layout 1,$panels rowsfirst title \"Focus footprint — hit position coloured by Δz_loc — $label\" font \",11\""
+    echo "set size ratio -1"
+    echo "set xlabel \"hit X (mm)\""
+    echo "set ylabel \"hit Y (mm)\""
+    echo "set grid"
+    echo "set key off"
+    echo "set palette defined (-0.1 \"#2166ac\", 0 \"#f7f7f7\", 0.1 \"#b2182b\")"
+    echo "set cbrange [-0.1:0.1]"
+
+    for ((si=0; si<nsurf; si++)); do
+      local dat_t="$base.$si.t.dat" dat_s="$base.$si.s.dat"
+      [[ ! -f "$dat_t" && ! -f "$dat_s" ]] && continue
+      local sid
+      sid=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].surface_id" < "$rank" 2>/dev/null || echo "?")
+      echo "set title sprintf(\"surface $sid\")"
+      echo "plot \"$dat_t\" using 1:2:3 with points pt 7 ps 0.6 palette title \"T fan\", \\"
+      echo "     \"$dat_s\" using 1:2:3 with points pt 5 ps 0.6 palette title \"S fan\""
+    done
+    echo "unset multiplot"
+  } > "$gs"
+  GNUTERM=pngcairo "$gnuplot" "$gs" 2>/dev/null
+  echo "Written: $out"
+}
+
 # ── Build the "initial asphere inserted" system for the before/after OPD chart ──
 # Writes a copy of `from` with the FIRST fitted candidate surface (the one the
 # demo will aspherize; unfit rankings like the image plane are skipped) turned
@@ -804,6 +905,8 @@ run_case() {
     plot_focus_radial_fit "$OUTDIR/asphere-demo${tag}-focus-radial.png" \
       "$rank" "$label" "$from"
     plot_focus_gain "$OUTDIR/asphere-demo${tag}-focus-gain.png" \
+      "$rank" "$label"
+    plot_focus_footprint "$OUTDIR/asphere-demo${tag}-focus-footprint.png" \
       "$rank" "$label"
     echo
   fi

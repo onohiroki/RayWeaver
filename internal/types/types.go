@@ -1050,6 +1050,7 @@ type AsphereFieldFocus struct {
 // AsphereFocusSample is one ray's local focus residual on a candidate surface
 // for the focus footprint map.
 type AsphereFocusSample struct {
+	FieldID  int     `yaml:"field_id"`
 	PupilX   float64 `yaml:"pupil_x"`
 	PupilY   float64 `yaml:"pupil_y"`
 	HitX     float64 `yaml:"hit_x_mm"`

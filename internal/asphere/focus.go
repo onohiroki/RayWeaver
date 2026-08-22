@@ -34,6 +34,7 @@ func DefaultFocusConfig() FocusConfig {
 type FocusFanResult struct {
 	BestZ        float64
 	RMSLineWidth float64
+	Samples      []types.AsphereFocusSample
 }
 
 // FieldFocusResult holds the T/S focus results for one (field, wavelength).
@@ -202,6 +203,116 @@ func fanLineWidth(samples []pupil.Sample, chiefDir, fanDir types.Vec3, zPlane fl
 	return math.Sqrt(ss / wsum)
 }
 
+// buildFocusSamples extracts per-ray local focus residuals from traced fan
+// samples. For each successfully traced ray it records the surface hit
+// coordinates (last surface in the path), the normalised pupil coordinate,
+// and the local focus residual Δz_loc = z_closest_approach − bestZ.
+func buildFocusSamples(samples []pupil.Sample, surfaces []types.Surface,
+	chiefDir, fanDir types.Vec3, bestZ float64, fieldID int, fanKind string) []types.AsphereFocusSample {
+
+	if len(samples) == 0 {
+		return nil
+	}
+	// Chief ray (centre of fan).
+	chiefIdx := len(samples) / 2
+	if chiefIdx >= len(samples) {
+		chiefIdx = 0
+	}
+	chief := samples[chiefIdx]
+
+	var out []types.AsphereFocusSample
+	for _, s := range samples {
+		if !s.OK {
+			continue
+		}
+		if len(s.Surfaces) == 0 {
+			continue
+		}
+		// Last surface hit.
+		last := s.Surfaces[len(s.Surfaces)-1]
+		hitX := last.Position.X
+		hitY := last.Position.Y
+
+		// Local focus: z-coordinate of closest approach to chief ray.
+		// Parameterise the ray as P(t) = Origin + t*Dir and find t that
+		// minimises |P(t) − Chief(t')|².  For the longitudinal component
+		// we project onto the chief direction.
+		deltaZ := localFocusResidual(s, chief, chiefDir, bestZ)
+
+		// Radial distance in the fan plane.
+		rMM := math.Hypot(s.PupilX, s.PupilY)
+
+		out = append(out, types.AsphereFocusSample{
+			FieldID:  fieldID,
+			PupilX:   s.PupilX,
+			PupilY:   s.PupilY,
+			HitX:     hitX,
+			HitY:     hitY,
+			FanKind:  fanKind,
+			RMM:      rMM,
+			DeltaZ:   deltaZ,
+			Residual: closestDistanceToChief(s, chief),
+		})
+	}
+	return out
+}
+
+// localFocusResidual computes the longitudinal focus residual of a ray
+// relative to the chief ray.  It finds the z-coordinate of closest approach
+// of the ray to the chief ray and subtracts bestZ.
+func localFocusResidual(ray, chief pupil.Sample, chiefDir types.Vec3, bestZ float64) float64 {
+	if ray.Dir.Z == 0 || chief.Dir.Z == 0 {
+		return 0
+	}
+	// Intersect both rays with a z-plane at bestZ.
+	tRay := (bestZ - ray.Origin.Z) / ray.Dir.Z
+	tChief := (bestZ - chief.Origin.Z) / chief.Dir.Z
+	if tRay < 0 || tChief < 0 {
+		return 0
+	}
+	rayPt := types.Vec3{
+		X: ray.Origin.X + tRay*ray.Dir.X,
+		Y: ray.Origin.Y + tRay*ray.Dir.Y,
+		Z: bestZ,
+	}
+	chiefPt := types.Vec3{
+		X: chief.Origin.X + tChief*chief.Dir.X,
+		Y: chief.Origin.Y + tChief*chief.Dir.Y,
+		Z: bestZ,
+	}
+	// Project the transverse deviation onto the chief direction to get the
+	// longitudinal component.
+	dx := rayPt.X - chiefPt.X
+	dy := rayPt.Y - chiefPt.Y
+	dz := rayPt.Z - chiefPt.Z
+	dot := dx*chiefDir.X + dy*chiefDir.Y + dz*chiefDir.Z
+	return dot
+}
+
+// closestDistanceToChief returns the minimum distance between a ray and the
+// chief ray.  A large value indicates the ray is far from the chief and its
+// local focus interpretation is less reliable (e.g. strong coma).
+func closestDistanceToChief(ray, chief pupil.Sample) float64 {
+	if ray.Dir.Z == 0 || chief.Dir.Z == 0 {
+		return math.Inf(1)
+	}
+	// Find closest approach in a z-slice at the chief ray's origin z.
+	zSlice := chief.Origin.Z
+	tRay := (zSlice - ray.Origin.Z) / ray.Dir.Z
+	if tRay < 0 {
+		tRay = 0
+	}
+	rayPt := types.Vec3{
+		X: ray.Origin.X + tRay*ray.Dir.X,
+		Y: ray.Origin.Y + tRay*ray.Dir.Y,
+		Z: zSlice,
+	}
+	chiefPt := chief.Origin
+	dx := rayPt.X - chiefPt.X
+	dy := rayPt.Y - chiefPt.Y
+	return math.Hypot(dx, dy)
+}
+
 // minimize1D finds the minimizer of f over [lo, hi] by golden-section search.
 func minimize1DFocus(f func(float64) float64, lo, hi float64) (bestX, bestF float64) {
 	const resphi = 2 - 1.618033988749895
@@ -272,14 +383,22 @@ func ComputeFieldFocus(surfaces []types.Surface, fields []Field, wavelengths []f
 			dir := rayDirection(f)
 			fanDir := types.Vec3{X: tx, Y: ty, Z: 0}
 			bestZ, rms := findBestFocus(tSamples, dir, fanDir, refImageZ)
-			ffr.Tangential = FocusFanResult{BestZ: bestZ, RMSLineWidth: rms}
+			ffr.Tangential = FocusFanResult{
+				BestZ:        bestZ,
+				RMSLineWidth: rms,
+				Samples:      buildFocusSamples(tSamples, surfaces, dir, fanDir, bestZ, f.ID, "tangential"),
+			}
 		}
 		if cfg.Sagittal {
 			traceFanRays(sSamples, surfaces, wl, gc)
 			dir := rayDirection(f)
 			fanDir := types.Vec3{X: sx, Y: sy, Z: 0}
 			bestZ, rms := findBestFocus(sSamples, dir, fanDir, refImageZ)
-			ffr.Sagittal = FocusFanResult{BestZ: bestZ, RMSLineWidth: rms}
+			ffr.Sagittal = FocusFanResult{
+				BestZ:        bestZ,
+				RMSLineWidth: rms,
+				Samples:      buildFocusSamples(sSamples, surfaces, dir, fanDir, bestZ, f.ID, "sagittal"),
+			}
 		}
 
 			result.PerField = append(result.PerField, ffr)

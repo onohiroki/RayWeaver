@@ -391,6 +391,8 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 			// Field focus per-field data
 			trialFocus := trialFocusMap[rs.SurfaceID]
 			surfOut.FieldFocus = buildFieldFocusOutput(baseFocus, trialFocus)
+			// Collect per-ray focus samples from all fields and both T/S fans.
+			surfOut.Samples = collectFocusSamples(baseFocus, trialFocus)
 			result.Surfaces = append(result.Surfaces, surfOut)
 		}
 	}
@@ -743,4 +745,21 @@ func buildFieldFocusOutput(baseFocus FocusResult, trialFocus FocusResult) []type
 		out = append(out, entry)
 	}
 	return out
+}
+
+// collectFocusSamples gathers all per-ray focus samples from the base and
+// trial focus results across all fields and both T/S fans.
+func collectFocusSamples(baseFocus, trialFocus FocusResult) []types.AsphereFocusSample {
+	var all []types.AsphereFocusSample
+	collect := func(f FocusResult) {
+		for _, ff := range f.PerField {
+			all = append(all, ff.Tangential.Samples...)
+			all = append(all, ff.Sagittal.Samples...)
+		}
+	}
+	collect(baseFocus)
+	if len(trialFocus.PerField) > 0 {
+		collect(trialFocus)
+	}
+	return all
 }
