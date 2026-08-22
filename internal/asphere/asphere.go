@@ -27,6 +27,7 @@ type Config struct {
 	MaxCurvatureVariation   float64
 	CellRings               int
 	CellAngles              int
+	TBins                   int
 	PupilSamplesRadial      int
 	SensitivitySamples      int
 	RemovePiston            bool
@@ -56,6 +57,7 @@ func DefaultConfig() Config {
 		MaxCurvatureVariation:   2.0,
 		CellRings:               8,
 		CellAngles:              16,
+		TBins:                   8,
 		PupilSamplesRadial:      21,
 		SensitivitySamples:      9,
 		RemovePiston:            true,
@@ -71,6 +73,7 @@ func DefaultConfig() Config {
 			Sensitivity:   0.15,
 			Conflict:      0.10,
 			Manufacturing: 0.05,
+			Asym:          0.10,
 		},
 	}
 }
@@ -111,6 +114,9 @@ func ConfigFromYAML(c *types.AsphereCandidateConfig) Config {
 	}
 	if c.CellAngles > 0 {
 		cfg.CellAngles = c.CellAngles
+	}
+	if c.TBins > 0 {
+		cfg.TBins = c.TBins
 	}
 	if c.PupilSamplesRadial > 0 {
 		cfg.PupilSamplesRadial = c.PupilSamplesRadial
@@ -161,6 +167,9 @@ func ConfigFromYAML(c *types.AsphereCandidateConfig) Config {
 		if w.Unstable != 0 {
 			cfg.ScoreWeights.Unstable = w.Unstable
 		}
+		if w.Asym != 0 {
+			cfg.ScoreWeights.Asym = w.Asym
+		}
 	}
 	return cfg
 }
@@ -197,12 +206,33 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 		primaryWL = wavelengths[0]
 	}
 
-	cellsBySurf := make(map[int][]types.AsphereCellStat, len(candidates))
+	metricsBySurf := make(map[int]SurfaceMetrics, len(candidates))
 	index := make(map[int][2]float64, len(candidates))
 	for _, s := range candidates {
-		cells := BuildCellGrid(footprints, s.ID, cfg.CellRings, cfg.CellAngles)
-		totalWeight := totalWeightOnSurface(footprints, s.ID)
-		cellsBySurf[s.ID] = ComputeCellStats(cells, cfg.MinRaysPerCell, totalWeight)
+		jf := JointRadialFit(footprints, s.ID, maxOrder(cfg.MaxEvenOrder))
+		asym := BeamFrameAsym(footprints, s.ID, jf.Coef, jf.RMax, cfg.TBins, cfg.MinRaysPerCell, jf.Total)
+		conf, uniq := SharedConflictUnique(footprints, s.ID, jf.Coef, jf.RMax, 2.5, jf.Total)
+		portrait := FieldLowOrderPortrait(footprints, s.ID, jf.Coef, jf.RMax, cfg.MinRaysPerCell)
+		cons := 0.0
+		if !math.IsNaN(portrait.AstigR2) && !math.IsNaN(portrait.DefocusR2) {
+			cons = clamp01((clamp01(portrait.AstigR2) + clamp01(portrait.DefocusR2)) / 2)
+		}
+		var meanR, meanW float64
+		for _, fd := range footprints {
+			for _, h := range fd.RayHits {
+				if h.OK {
+					if sh, ok := h.Hits[s.ID]; ok {
+						w := effWeight(h)
+						meanR += w * math.Hypot(sh.Position.X, sh.Position.Y)
+						meanW += w
+					}
+				}
+			}
+		}
+		if meanW > 0 {
+			meanR /= meanW
+		}
+		metricsBySurf[s.ID] = SurfaceMetrics{Joint: jf, Asym: asym, Conflict: conf, Unique: uniq, MeanR: meanR, FieldConsistency: cons, AstigY0R2: portrait.AstigR2, DefocusY0R2: portrait.DefocusR2}
 		index[s.ID] = mediaIndices(surfaces, s.ID, primaryWL, gc)
 	}
 
@@ -219,7 +249,7 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 		base := traceMerit(surfaces, fields, wavelengths, cfg.SensitivitySamples, gc, pupilZs, cfg)
 		for _, s := range candidates {
 			pair := index[s.ID]
-			coeffs, _ := FitAsphereCoeffs(cellsBySurf[s.ID], s, pair[0], pair[1], cfg)
+			coeffs, _ := FitAsphereCoeffsJoint(metricsBySurf[s.ID].Joint, s, pair[0], pair[1], cfg)
 			scaled := ScaleCoefficients(coeffs, cfg.SagScale)
 			// Always measure, even for a zero (unfit) asphere: such a surface
 			// gets improvement ≈ 0 and is correctly demoted instead of falling
@@ -242,7 +272,7 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 	}
 
 	stopZ, hasStop := stopSurfaceZ(surfaces, stopSurface)
-	rankings := RankSurfaces(candidates, cellsBySurf, index, cfg.ScoreWeights, cfg.MaxEvenOrder, stopZ, hasStop, measuredH)
+	rankings := RankSurfaceMetrics(candidates, metricsBySurf, index, cfg.ScoreWeights, cfg.MaxEvenOrder, stopZ, hasStop, measuredH)
 
 	// Per-field OPD overlap profiles for every candidate surface (the graph
 	// data behind the ranking: how each field's wavefront error varies across
@@ -251,7 +281,7 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 	for _, s := range candidates {
 		candIDs = append(candIDs, s.ID)
 	}
-	result.Profiles = BuildOPDProfiles(footprints, candIDs, cfg.CellRings)
+	result.Profiles = BuildOPDProfiles(footprints, candIDs, cfg.TBins)
 
 	// Select the top-K surfaces that actually yield a valid asphere fit.
 	// Surfaces whose fit fails (e.g. degenerate index difference, no
@@ -267,7 +297,11 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 			continue
 		}
 		pair := index[rs.SurfaceID]
-		coeffs, warns := FitAsphereCoeffs(cellsBySurf[rs.SurfaceID], *s, pair[0], pair[1], cfg)
+		coeffs, warns := FitAsphereCoeffsJoint(metricsBySurf[rs.SurfaceID].Joint, *s, pair[0], pair[1], cfg)
+		rs.AsymResidual = metricsBySurf[rs.SurfaceID].Asym
+		rs.FieldConsistency = metricsBySurf[rs.SurfaceID].FieldConsistency
+		rs.AstigY0R2 = metricsBySurf[rs.SurfaceID].AstigY0R2
+		rs.DefocusY0R2 = metricsBySurf[rs.SurfaceID].DefocusY0R2
 		rs.Coefficients = coeffs
 		rs.ScaledCoefficients = ScaleCoefficients(coeffs, cfg.SagScale)
 		rs.Warnings = append(rs.Warnings, warns...)

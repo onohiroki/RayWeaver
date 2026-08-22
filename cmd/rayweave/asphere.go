@@ -19,6 +19,7 @@ func runAsphere(data []byte) {
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	rings := fs.Int("rings", 0, "polar cell radial rings (default 8)")
 	angles := fs.Int("angles", 0, "polar cell angular sectors (default 16)")
+	tBins := fs.Int("t-bins", 0, "beam-frame tangential bins (default 8)")
 	pupilSamples := fs.Int("pupil-samples", 0, "pupil grid radial samples (default 21)")
 	sensitivitySamples := fs.Int("sensitivity-samples", -1, "sensitivity trace radial samples (default 9; 0 = disable, use analytic proxy)")
 	topK := fs.Int("top-k", 0, "number of top-ranked surfaces to fit (default 3)")
@@ -50,6 +51,7 @@ func runAsphere(data []byte) {
 	cfg := asphere.ConfigFromYAML(input.Asphere)
 	cfg.CellRings = intOrYAML(*rings, cfg.CellRings)
 	cfg.CellAngles = intOrYAML(*angles, cfg.CellAngles)
+	cfg.TBins = intOrYAML(*tBins, cfg.TBins)
 	cfg.PupilSamplesRadial = intOrYAML(*pupilSamples, cfg.PupilSamplesRadial)
 	if *sensitivitySamples >= 0 {
 		cfg.SensitivitySamples = *sensitivitySamples
@@ -143,7 +145,7 @@ func runAsphere(data []byte) {
 // output's asphere_candidate: section (principle 3 of the CLI/YAML rule).
 // Only flags actually given are written back; untouched YAML stays as-is.
 func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.FlagSet) {
-	if !anyFlagSet(fs, "rings", "angles", "pupil-samples", "sensitivity-samples",
+	if !anyFlagSet(fs, "rings", "angles", "t-bins", "pupil-samples", "sensitivity-samples",
 		"top-k", "sag-scale", "calibrate-scale", "scale-probes") {
 		return
 	}
@@ -155,6 +157,9 @@ func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.Fla
 	}
 	if flagWasSet(fs, "angles") {
 		input.Asphere.CellAngles = cfg.CellAngles
+	}
+	if flagWasSet(fs, "t-bins") {
+		input.Asphere.TBins = cfg.TBins
 	}
 	if flagWasSet(fs, "pupil-samples") {
 		input.Asphere.PupilSamplesRadial = cfg.PupilSamplesRadial

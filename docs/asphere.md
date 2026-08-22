@@ -72,8 +72,7 @@ asphere_candidate:
   calibrate_scale: true              # per-surface embedded scale from the measured
                                      # ray-trace response (default; see below)
   scale_probes: []                   # explicit scales to verify ([] = quadratic estimate)
-  cell_rings: 8                      # polar cell rings
-  cell_angles: 16                    # polar cell angular sectors
+  t_bins: 8                          # beam-frame tangential bins
   pupil_samples_radial: 21           # pupil grid radial samples
   sensitivity_samples: 9             # 0 = analytic proxy only
   remove_tilt: true                  # remove best-fit tilt plane from per-field OPD
@@ -81,11 +80,12 @@ asphere_candidate:
   top_k: 3                           # surfaces to fit coefficients for
   min_rays_per_cell: 3               # minimum ray hits for a cell to count
   score_weights:                     # composite score weights
-    common: 0.35
-    unique: 0.15
+    common: 0.30
+    unique: 0.10
     fit: 0.20
     sensitivity: 0.15
     conflict: 0.10
+    asym: 0.10
     manufacturing: 0.05
   validate: false                    # enable the short-DLS validation (--validate)
   apply: false                       # insert the top validated asphere (--apply)
@@ -115,7 +115,11 @@ asphere_candidate_result:
       unique_energy: 0
       fit_quality: 0.7373492238882969
       manufacturing_penalty: 0.35553455625429586
-      sensitivity_penalty: 0.6884906431262114
+       sensitivity_penalty: 0.6884906431262114
+       asym_residual: 0.034
+       field_consistency: 0.72
+       astig_y0_r2: 0.81
+       defocus_y0_r2: 0.63
       coefficients:
         A4: -1.1110577872376941e-05
         A6: -1.9934022308602345e-07
@@ -153,8 +157,9 @@ asphere_candidate_result:
       max_r: 14.96131269998368
       fields:
         - field_id: 0
-          ring_radius: [0.83, 2.71, 4.58, 6.46, 8.13]
-          opd: [-0.0085, -0.0109, -0.0112, 0.0023, 0.0406]
+           t_radius: [-1.2, -0.6, 0.0, 0.6, 1.2]
+           opd_plus: [-0.0085, -0.0109, -0.0112, 0.0023, 0.0406]
+           opd_minus: [-0.0079, -0.0101, -0.0108, 0.0028, 0.0398]
   warnings: []
 ```
 
@@ -162,11 +167,14 @@ Meaning of the ranking fields (see the method document for the exact formulas):
 
 | Field | Meaning |
 |---|---|
-| `score` | composite score `w_com·E^common + w_uni·E^unique + w_fit·F + w_sens·H − w_conf·C − w_mfg·M − w_unstable·U` |
+| `score` | composite score with the exact-ray common fit, conflict, and asymmetry terms |
 | `coverage` | fraction of the surface's cell OPD energy that an asphere could address |
 | `common_energy` / `unique_energy` | shared (multi-field) vs single-field OPD energy fractions |
 | `conflict` | weighted inter-field variance in shared cells (0..1) |
-| `fit_quality` | R² of fitting the shared-cell common OPD to a radial asphere basis |
+| `asym_residual` | sagittal-antisymmetric residual energy fraction |
+| `field_consistency` | clamped average of the astigmatism/defocus y₀² consistency R²; reduces the asymmetry penalty |
+| `astig_y0_r2` / `defocus_y0_r2` | field-law consistency diagnostics |
+| `fit_quality` | R² of fitting all raw rays to a radial asphere basis |
 | `manufacturing_penalty` | base curvature magnitude and beam radius penalty (0..1) |
 | `sensitivity_penalty` | the sensitivity term H (measured improvement, or the analytic proxy) |
 | `coefficients` | fitted initial coefficients (conic + A4..A12) |
@@ -175,10 +183,11 @@ Meaning of the ranking fields (see the method document for the exact formulas):
 | `sensitivity` | measured merit data: `base_merit`, `asphere_merit`, relative `improvement`, and `d_merit_d_coef` (per-coefficient ∂Merit/∂c_j, A4..A12); with calibration also `calibrated_scale`, `calibrated_merit`, `calibrated_improvement` |
 | `warnings` | analysis notes, e.g. a removed r² defocus term, bounded coefficient, or a skipped fit |
 
-`opd_profiles` holds the graph data behind the OPD-overlap comparison: per
-candidate surface, per field, the weight-mean OPD vs footprint ring radius. A
-closely overlapping set of field profiles means the fields share a wavefront
-error the asphere can correct.
+`opd_profiles` holds the graph data behind the demo: per candidate surface and
+field, `t_radius` is the beam-frame tangential position and `opd_plus` /
+`opd_minus` are the raw preprocessed OPD means in the +s/-s half beams. Their
+separation exposes sagittal asymmetry; the demo plots both curves before and
+after inserting the initial asphere.
 
 ## Scale calibration
 

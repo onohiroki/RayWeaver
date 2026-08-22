@@ -95,27 +95,27 @@ from the OPD before the fit; `FitAsphereCoeffs` reports the magnitude of that
 removed term as a warning. (The YAML field `remove_piston` is accepted but has
 no effect — piston removal is implicit in the mean reference.)
 
-## 4. Polar footprint cells
+## 4. Exact-ray joint fit
 
-On each candidate surface the ray hits are binned into a polar grid of
-`cell_rings` rings × `cell_angles` sectors, centred on the surface's optical
-axis. The ring grid spans `[0, maxR]`, where `maxR` is the maximum radial
-extent of all hits on that surface.
+On each candidate surface every valid ray hit is used directly. A single
+regularised even radial polynomial in the surface coordinate
+`r = sqrt(x²+y²)` is fitted jointly across all fields and wavelengths. This
+avoids the severe radial/azimuthal bin sparsity that occurs when a decentered
+off-axis footprint is forced into optical-axis-centred cells.
 
-Each cell aggregates over the fields that occupy it:
+The fit reports:
 
 | Statistic | Meaning |
 |---|---|
-| `MeanR` | weighted mean radial coordinate of the cell's hits |
-| `OccupiedFields` | the set of fields with ≥ `min_rays_per_cell` hits in the cell |
-| `CommonOPD` | the weighted mean OPD over the occupied fields (the field-*common* part) |
-| `Conflict` | weighted variance of the per-field means about that common mean (the part the fields *disagree* on) |
-| `UniqueResidual` | for single-field cells, the squared cell mean OPD (no overlap → only one field can be corrected there) |
-| `AzimuthVariance` | weighted variance of OPD across all hits in the cell (rotational asymmetry) |
-| `RadialGradient` | \|Δμ/Δr\| to the next ring at the same sector |
-| `Weight` | cell ray weight normalised by the surface's total ray weight |
+| `CommonEnergy` | L² fraction captured by the common radial polynomial |
+| `FitQuality` | R² of the r⁴+ polynomial after the r² term is separated |
+| `Conflict` | field disagreement in shared centroid/RMS footprint regions |
+| `UniqueEnergy` | residual energy in regions covered by only one field |
+| `AsymResidual` | sagittal-antisymmetric residual energy not representable by z(r) |
+| `FieldConsistency` | y₀² consistency of beam-frame defocus/astigmatism; used to soften the asymmetry penalty |
 
-Cells with fewer than `min_rays_per_cell` hits are dropped.
+The `t_bins` setting controls the tangential bins used by the beam-frame
+asymmetry diagnostic and the exported graph profiles.
 
 ## 5. Composite score
 
@@ -123,12 +123,13 @@ Each candidate surface `s` gets a composite score
 
 ```
 S_s = w_com·E^common + w_uni·E^unique + w_fit·F + w_sens·H
-      − w_conf·C − w_mfg·M − w_unstable·U
+      − w_conf·C − w_asym·A·(1−γ) − w_mfg·M − w_unstable·U
 ```
 
 with the weights from `asphere_candidate.score_weights` (defaults
-`common 0.35, unique 0.15, fit 0.20, sensitivity 0.15, conflict 0.10,
-manufacturing 0.05`).
+`common 0.30, unique 0.10, fit 0.20, sensitivity 0.15, conflict 0.10,
+asym 0.10, manufacturing 0.05`). `A` is the sagittal-asymmetry residual and
+`γ` is the clamped mean of the astigmatism/defocus y₀² consistency R².
 
 The terms:
 
@@ -338,15 +339,15 @@ Each validated surface gains a `validation:` block with `before_merit`,
 
 ## 10. OPD overlap profiles
 
-For every candidate surface, `BuildOPDProfiles` bins the ray hits by field and
-ring and emits the weight-mean OPD per ring (piston removed, tilt/defocus per
-config). Each `opd_profiles[]` entry carries `max_r` (footprint max radius) and
-a per-field `ring_radius` / `opd` pair.
+For every candidate surface, `BuildOPDProfiles` bins each field in its local
+beam frame and emits the weight-mean raw preprocessed OPD per tangential bin,
+split into the +s and -s sagittal half beams. Each `opd_profiles[]` entry
+carries `max_r` and a per-field `t_radius` / `opd_plus` / `opd_minus` triple.
 
-Reading a profile: fields whose curves **overlap** share a wavefront error that
-a rotationally-symmetric asphere can correct jointly; fields that pull apart
-indicate inter-field conflict (the surface's `conflict` term). This is the data
-behind the OPD-overlap chart in `samples/asphere-demo.bash`.
+Reading a profile: separation of the +s and -s curves indicates beam-frame
+non-radial structure. Smooth field-to-field low-order trends are captured by
+`field_consistency`; sign flips and incoherent trends remain penalised. This is
+the data behind the beam-frame chart in `samples/asphere-demo.bash`.
 
 ## 11. What the analysis deliberately does *not* do
 

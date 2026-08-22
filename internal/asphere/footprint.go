@@ -29,11 +29,14 @@ type SurfaceHit struct {
 
 // RayHit is one traced ray's data: the image OPL (optical path length to the
 // image plane), the pupil-plane grid coordinate, and the per-surface
-// intersections along the path.
+// intersections along the path. Area is the ray's pupil-cell area weight
+// (0 when unset by legacy callers; the beam-frame binning and the raw-ray joint
+// fit scale Weight by Area so outer pupil annuli are not over-represented).
 type RayHit struct {
 	OPL    float64
 	OPD    float64 // wavefront error referenced to the field mean (post-preprocessing)
 	Weight float64
+	Area   float64
 	PupilX float64
 	PupilY float64
 	Hits   map[int]SurfaceHit
@@ -45,6 +48,7 @@ type FieldFootprintData struct {
 	FieldID    int
 	Wavelength float64
 	Weight     float64
+	Direction  []float64 // field azimuth [dx, dy] (defines the tangential axis)
 	RayHits    []RayHit
 }
 
@@ -73,7 +77,7 @@ func GenerateFootprints(surfaces []types.Surface, fields []Field, wavelengths []
 			pupilZ = pupilZs[fi]
 		}
 		for _, wl := range wavelengths {
-			fd := FieldFootprintData{FieldID: f.ID, Wavelength: wl, Weight: f.Weight}
+			fd := FieldFootprintData{FieldID: f.ID, Wavelength: wl, Weight: f.Weight, Direction: f.Direction}
 
 			radius := dls.ApertureRadiusForGrid(surfaces, 0, wl, gc, 1.0)
 			if radius <= 0 {
@@ -98,7 +102,7 @@ func GenerateFootprints(surfaces []types.Surface, fields []Field, wavelengths []
 
 			fd.RayHits = make([]RayHit, len(samples))
 			for i, s := range samples {
-				hit := RayHit{Weight: f.Weight, PupilX: s.PupilX, PupilY: s.PupilY}
+				hit := RayHit{Weight: f.Weight, PupilX: s.PupilX, PupilY: s.PupilY, Area: s.Area}
 				if !s.OK || len(s.Surfaces) == 0 {
 					fd.RayHits[i] = hit
 					continue
