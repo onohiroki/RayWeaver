@@ -43,15 +43,10 @@ set -euo pipefail
 #     short DLS achieved with the asphere coefficients as the only variables.
 #   - The final comparison table prints RMS before/after per field; a '✓'
 #     means the aspherized surface shrank the spot, '✗' a regression.
-#   - The OPD-overlap chart shows, per candidate surface, each field's mean OPD
-#     vs footprint radius SIDE BY SIDE: left = the all-spherical lens (before),
-#     right = the same lens right after the top-ranked initial asphere is
-#     inserted (residual OPD). Each column gets its OWN y-range (the per-case
-#     OPD min/max): the residual column is much smaller, so the two scales are
-#     read separately (plus a dashed OPD=0 reference per column). Fields whose
-#     curves overlap share OPD the asphere corrects together; fields that
-#     diverge conflict. The aspherized surface's row collapses towards 0 in the
-#     right column; the other surfaces keep their field-varying OPD.
+#   - The OPD chart shows each field in its local beam frame: tangential
+#     position t on the x-axis and +s/-s sagittal half-beam means as two curves.
+#     Separation of the curves is the non-radial residual; the aspherized
+#     surface's row collapses towards 0 in the right-hand (after) column.
 #
 # The gate (one improvement, no field regressing more than 1%) is applied to
 # EVERY case; any failed case makes the demo exit non-zero.
@@ -146,6 +141,9 @@ if [ "$CLEAN" = true ]; then
   rm -f "$OUTDIR"/asphere-demo-opd*.dat "$OUTDIR"/asphere-demo-*-opd*.dat
   rm -f "$OUTDIR"/asphere-demo-opd*.gnu "$OUTDIR"/asphere-demo-*-opd*.gnu
   rm -f "$OUTDIR"/asphere-demo-opd-overlap*.png "$OUTDIR"/asphere-demo-*-opd-overlap*.png
+  rm -f "$OUTDIR"/asphere-demo-defocus*.png "$OUTDIR"/asphere-demo-*-defocus*.png
+  rm -f "$OUTDIR"/asphere-demo-wf-before*.yaml "$OUTDIR"/asphere-demo-*-wf-before*.yaml
+  rm -f "$OUTDIR"/asphere-demo-wf-after*.yaml  "$OUTDIR"/asphere-demo-*-wf-after*.yaml
   rm -f "$OUTDIR"/asphere-demo-applied-initial*.yaml "$OUTDIR"/asphere-demo-*-applied-initial*.yaml
   rm -f "$OUTDIR"/asphere-demo-rank-after-initial*.yaml "$OUTDIR"/asphere-demo-*-rank-after-initial*.yaml
   rm -f "$OUTDIR"/asphere-demo-before*.png "$OUTDIR"/asphere-demo-*-before*.png
@@ -194,22 +192,20 @@ append_notes() {
   over the inserted surface's a4..a12 only (all other surfaces frozen).
 - A '✓' means the added asphere shrank the spot for that field; '✗' a
   regression. The demo applies the top-ranked (highest-scoring) surface.
-- The OPD-overlap chart is the same data BEFORE vs right AFTER the initial
-  asphere (the calibrated initial coefficients, no DLS yet): per candidate
-  surface, each field's mean OPD vs footprint radius. Left column = the
-  all-spherical lens, right column = the residual after the initial asphere is
-  inserted. Each column is on its OWN y-range (the residual is much smaller),
-  so read the two scales separately; the dashed line is OPD=0.
+- The OPD chart is the same data BEFORE vs right AFTER the initial asphere
+  (the calibrated initial coefficients, no DLS yet): each field has +s and -s
+  half-beam curves versus tangential beam coordinate t. Their separation is
+  the sagittal asymmetry; each column has its own y-range and a zero reference.
 EOF
 }
 
 # ── OPD-overlap chart (per-column y-range, optional side-by-side) ──
-# For every candidate surface, plots each field's mean OPD across its
-# footprint radius (the opd_profiles emitted by the asphere command). When a
+# For every candidate surface, plots each field's beam-frame +s/-s mean OPD
+# across tangential position (the opd_profiles emitted by the asphere command).
+# When a
 # right-hand case is given, left = full aperture and right = stopped-down are
 # drawn side by side; otherwise a single column. Overlapping profiles = shared
-# (common) OPD a rotationally-symmetric asphere can correct; diverging profiles
-# = inter-field conflict. Each COLUMN gets its OWN y-range (the OPD min/max
+# sagittal curves show non-radial residual structure. Each COLUMN gets its OWN y-range (the OPD min/max
 # over that case's surfaces/fields): aligning scales is meaningful within one
 # EPD but two different EPDs are each read on their own scale. Plus a dashed
 # OPD=0 reference per column. Requires gnuplot; silently skipped when absent.
@@ -235,21 +231,21 @@ plot_opd_overlap() {
   fi
 
   # Emit one data file per surface per case; each field is a block of
-  # "r opd" rows separated by a blank line, so gnuplot's `index` selects the
-  # field's curve.
+  # "t opd_plus opd_minus" rows separated by a blank line.
   build_opd_dat() {
     local rank="$1" base="$2"
-    local si fi j nf npoints sid r opd
+    local si fi j nf npoints sid t plus minus
     for ((si=0; si<nsid; si++)); do
       sid=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].surface_id" < "$rank")
       : > "$base.$si.dat"
       nf=$("$RAYWEAVE" query --len "asphere_candidate_result.opd_profiles[$si].fields" < "$rank" 2>/dev/null || echo 0)
       for ((fi=0; fi<nf; fi++)); do
-        npoints=$("$RAYWEAVE" query --len "asphere_candidate_result.opd_profiles[$si].fields[$fi].opd" < "$rank" 2>/dev/null || echo 0)
+        npoints=$("$RAYWEAVE" query --len "asphere_candidate_result.opd_profiles[$si].fields[$fi].t_radius" < "$rank" 2>/dev/null || echo 0)
         for ((j=0; j<npoints; j++)); do
-          r=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].ring_radius[$j]" < "$rank")
-          opd=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].opd[$j]" < "$rank")
-          printf "%s %s\n" "$r" "$opd" >> "$base.$si.dat"
+          t=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].t_radius[$j]" < "$rank")
+          plus=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].opd_plus[$j]" < "$rank")
+          minus=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].opd_minus[$j]" < "$rank")
+          printf "%s %s %s\n" "$t" "$plus" "$minus" >> "$base.$si.dat"
         done
         printf "\n" >> "$base.$si.dat"
       done
@@ -262,7 +258,7 @@ plot_opd_overlap() {
   # so the outer envelope is not clipped. Each column is on its OWN scale.
   opd_range() {
     local base="$1" lo hi pad
-    read -r lo hi < <(awk 'NF==2 { if (min=="" || $2<min) min=$2; if (max=="" || $2>max) max=$2 }
+    read -r lo hi < <(awk 'NF>=3 { for (i=2; i<=3; i++) { if (min=="" || $i<min) min=$i; if (max=="" || $i>max) max=$i } }
                        END { if (min!="") print min, max; else print "", "" }' "$base".*.dat)
     if [[ -n "$lo" && -n "$hi" ]]; then
       pad=$(awk -v lo="$lo" -v hi="$hi" 'BEGIN { p=(hi-lo)*0.05; if (p==0) p=0.05; printf "%.9g", p }')
@@ -294,7 +290,7 @@ plot_opd_overlap() {
     echo "set terminal pngcairo size ${width},$((nsid * 400))"
     echo "set output \"$out\""
     echo "set multiplot layout $nsid,$cols rowsfirst title \"$title\" font \",12\""
-    echo "set xlabel \"footprint radius r (mm)\""
+    echo "set xlabel \"tangential beam position t (mm)\""
     echo "set ylabel \"OPD (mm)\""
     echo "set grid"
     echo "set key outside right"
@@ -304,17 +300,91 @@ plot_opd_overlap() {
       nf_l=$("$RAYWEAVE" query --len "asphere_candidate_result.opd_profiles[$si].fields" < "$rank_left" 2>/dev/null || echo 0)
       if [[ -n "$yrange_l" ]]; then echo "$yrange_l"; fi
       echo "set title sprintf(\"surface ${sid} — $label_left\")"
-      echo "plot for [f=0:$((nf_l-1))] sprintf(\"$base_left.%d.dat\", $si) index f using 1:2 with linespoints pt 7 ps 0.7 title sprintf(\"field %d\", f)"
+      plot_cmd="plot"
+      for ((f=0; f<nf_l; f++)); do
+        plot_cmd+=" sprintf(\"$base_left.%d.dat\", $si) index $f using 1:2 with linespoints pt 7 ps 0.7 title sprintf(\"field %d +s\", $f),"
+        plot_cmd+=" sprintf(\"$base_left.%d.dat\", $si) index $f using 1:3 with linespoints pt 9 ps 0.7 title sprintf(\"field %d -s\", $f),"
+      done
+      echo "${plot_cmd%,}"
       if $dual; then
         nf_r=$("$RAYWEAVE" query --len "asphere_candidate_result.opd_profiles[$si].fields" < "$rank_right" 2>/dev/null || echo 0)
         if [[ -n "$yrange_r" ]]; then echo "$yrange_r"; fi
         echo "set title sprintf(\"surface ${sid} — $label_right\")"
-        echo "plot for [f=0:$((nf_r-1))] sprintf(\"$base_right.%d.dat\", $si) index f using 1:2 with linespoints pt 7 ps 0.7 title sprintf(\"field %d\", f)"
+        plot_cmd="plot"
+        for ((f=0; f<nf_r; f++)); do
+          plot_cmd+=" sprintf(\"$base_right.%d.dat\", $si) index $f using 1:2 with linespoints pt 7 ps 0.7 title sprintf(\"field %d +s\", $f),"
+          plot_cmd+=" sprintf(\"$base_right.%d.dat\", $si) index $f using 1:3 with linespoints pt 9 ps 0.7 title sprintf(\"field %d -s\", $f),"
+        done
+        echo "${plot_cmd%,}"
       fi
     done
     echo "unset multiplot"
   } > "$gs"
   GNUTERM=pngcairo "$gnuplot" "$gs" 2>/dev/null
+  echo "Written: $out"
+}
+
+# ── Field defocus chart ──────────────────────────────────────
+# Plots per-field focus shift (best_fit_sphere.center[2] mm) relative to
+# field 0, for before/after comparison of the initial asphere insertion.
+# Horizontal axis: field angle (deg). Vertical axis: focus shift (mm).
+# One PNG per case (full aperture or stopped-down).
+plot_field_defocus() {
+  local out="$1" wf_before="$2" label_before="$3" wf_after="$4" label_after="$5"
+  local gnuplot="${GNUPLOT:-$(command -v gnuplot || true)}"
+  if [[ -z "$gnuplot" && -x /opt/homebrew/bin/gnuplot ]]; then gnuplot=/opt/homebrew/bin/gnuplot; fi
+  if [[ -z "$gnuplot" ]]; then
+    echo "  (defocus chart skipped: gnuplot not available)"
+    return 0
+  fi
+
+  # Determine number of fields from each YAML
+  local nf_before nf_after
+  nf_before=$("$RAYWEAVE" query --len "wavefront_result.fields" < "$wf_before" 2>/dev/null || echo 0)
+  nf_after=$("$RAYWEAVE" query --len "wavefront_result.fields" < "$wf_after" 2>/dev/null || echo 0)
+  [[ "$nf_before" -eq 0 || "$nf_after" -eq 0 ]] && { echo "  (defocus chart skipped: no fields)"; return 0; }
+
+  # Extract field 0's center as reference
+  local cz0_before cz0_after
+  cz0_before=$("$RAYWEAVE" query -r "wavefront_result.fields[0].best_fit_sphere.center[2]" < "$wf_before" 2>/dev/null)
+  cz0_after=$("$RAYWEAVE" query -r "wavefront_result.fields[0].best_fit_sphere.center[2]" < "$wf_after" 2>/dev/null)
+  [[ -z "$cz0_before" || -z "$cz0_after" ]] && { echo "  (defocus chart skipped: missing center[2])"; return 0; }
+
+  # Write data files: angle (deg), shift_mm (relative to field 0)
+  local dat_before="$out.before.dat" dat_after="$out.after.dat"
+  : > "$dat_before" : > "$dat_after"
+
+  for ((i=0; i<nf_before && i<nf_after; i++)); do
+    local ang_before cz_before ang_after cz_after
+    ang_before=$("$RAYWEAVE" query -r "wavefront_result.fields[$i].field_angle" < "$wf_before" 2>/dev/null)
+    cz_before=$("$RAYWEAVE" query -r "wavefront_result.fields[$i].best_fit_sphere.center[2]" < "$wf_before" 2>/dev/null)
+    ang_after=$("$RAYWEAVE" query -r "wavefront_result.fields[$i].field_angle" < "$wf_after" 2>/dev/null)
+    cz_after=$("$RAYWEAVE" query -r "wavefront_result.fields[$i].best_fit_sphere.center[2]" < "$wf_after" 2>/dev/null)
+    [[ -z "$ang_before" || -z "$cz_before" || -z "$ang_after" || -z "$cz_after" ]] && continue
+    awk -v a="$ang_before" -v c="$cz_before" -v c0="$cz0_before" 'BEGIN { printf "%.6f %.6f\n", a, c - c0 }' >> "$dat_before"
+    awk -v a="$ang_after" -v c="$cz_after" -v c0="$cz0_after" 'BEGIN { printf "%.6f %.6f\n", a, c - c0 }' >> "$dat_after"
+  done
+
+  # If no valid points, skip
+  if ! wc -l "$dat_before" | grep -q '[1-9]'; then
+    echo "  (defocus chart: no valid data points)"
+    rm -f "$dat_before" "$dat_after"
+    return 0
+  fi
+
+  # Generate gnuplot script (default pngcairo lt1=magenta, lt2=green)
+  cat > "$out.gnu" <<EOF
+set terminal pngcairo size 800,500
+set output "$out"
+set xlabel "field angle (deg)"
+set ylabel "focus shift relative to field 0 (mm)"
+set grid
+set key outside right
+set yzeroaxis dt 2 lc rgb "#999999"
+plot "$dat_before" using 1:2 with linespoints pt 7 title "$label_before", \
+     "$dat_after"  using 1:2 with linespoints pt 9 title "$label_after"
+EOF
+  GNUTERM=pngcairo "$gnuplot" "$out.gnu" 2>/dev/null
   echo "Written: $out"
 }
 
@@ -380,12 +450,14 @@ run_case() {
   echo "--- Step 1: candidate ranking (top $TOP_K) ---"
   "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" < "$from" > "$rank"
   {
-    printf "  %-6s %10s %10s\n" "surf" "score" "sens.imprv"
+    printf "  %-6s %10s %10s %10s %10s\n" "surf" "score" "sens.imprv" "asym" "cons"
     for ri in $(seq 0 $((TOP_K - 1))); do
       sid=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].surface_id" < "$rank")
       score=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].score" < "$rank")
       sens=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].sensitivity.improvement" < "$rank" 2>/dev/null || echo "-1")
-      printf "  %-6s %10s %10s\n" "$sid" "$(fit "$score")" "$(fit "$sens")"
+      asym=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].asym_residual" < "$rank" 2>/dev/null || echo "-1")
+      cons=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].field_consistency" < "$rank" 2>/dev/null || echo "-1")
+      printf "  %-6s %10s %10s %10s %10s\n" "$sid" "$(fit "$score")" "$(fit "$sens")" "$(fit "$asym")" "$(fit "$cons")"
     done
   } | tee -a "$result"
   echo
@@ -404,6 +476,19 @@ run_case() {
       "$rank_after" "$OUTDIR/asphere-demo${tag}-opd-after" "initial asphere (after)"
   else
     echo "  (before/after OPD chart skipped: top candidate has no initial coefficients)"
+  fi
+  echo
+
+  # ── Step 1c: field defocus chart (before/after comparison) ───
+  if [[ -n "$YQ_BIN" ]] && build_applied_initial "$rank" "$from" "$applied_init"; then
+    echo "Written: $applied_init"
+    "$RAYWEAVE" chief < "$applied_init" | "$RAYWEAVE" wavefront --wavelengths 0.00058756 --num-rays "$NUM_RAYS" > "$OUTDIR/asphere-demo${tag}-wf-after.yaml" 2>/dev/null
+    "$RAYWEAVE" chief < "$from"         | "$RAYWEAVE" wavefront --wavelengths 0.00058756 --num-rays "$NUM_RAYS" > "$OUTDIR/asphere-demo${tag}-wf-before.yaml" 2>/dev/null
+    plot_field_defocus "$OUTDIR/asphere-demo${tag}-defocus.png" \
+      "$OUTDIR/asphere-demo${tag}-wf-before.yaml" "all-spherical (before)" \
+      "$OUTDIR/asphere-demo${tag}-wf-after.yaml"  "initial asphere (after)"
+  else
+    echo "  (defocus chart skipped: wf generation failed)"
   fi
   echo
 
