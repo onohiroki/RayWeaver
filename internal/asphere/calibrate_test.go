@@ -11,9 +11,9 @@ import (
 // curve M(β) = M0 + c·(β − β0)² evaluated at β = probe, so the calibration
 // must recover β0 exactly.
 func syntheticMerit(M0, c, beta0, probe float64) (base, asphere float64, deriv []float64) {
-	base = M0 + c*beta0*beta0          // M(0)
+	base = M0 + c*beta0*beta0 // M(0)
 	asphere = M0 + c*(probe-beta0)*(probe-beta0)
-	dM := 2 * c * (probe - beta0)      // dM/dβ at probe
+	dM := 2 * c * (probe - beta0) // dM/dβ at probe
 	// Single non-zero coefficient A4 = 1e-4 ⇒ deriv = dM / A4.
 	deriv = []float64{dM / 1e-4, 0, 0, 0, 0}
 	return base, asphere, deriv
@@ -35,9 +35,9 @@ func TestCalibrateScaleRecoversQuadraticMinimum(t *testing.T) {
 // surface 8 (see REPORT.md): the calibration must land near the known optimum.
 func TestCalibrateScaleRealProbeCases(t *testing.T) {
 	coeffs := types.AsphereCoeffs{
-		A4: -1.143785706688277e-05,
-		A6: -2.0584147555186952e-07,
-		A8: -2.9603538070677016e-09,
+		A4:  -1.143785706688277e-05,
+		A6:  -2.0584147555186952e-07,
+		A8:  -2.9603538070677016e-09,
 		A10: -4.1859728912992694e-11,
 	}
 

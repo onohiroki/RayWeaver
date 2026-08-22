@@ -205,10 +205,10 @@ func fanLineWidth(samples []pupil.Sample, chiefDir, fanDir types.Vec3, zPlane fl
 
 // buildFocusSamples extracts per-ray local focus residuals from traced fan
 // samples. For each successfully traced ray it records the surface hit
-// coordinates (last surface in the path), the normalised pupil coordinate,
+// coordinates on surfaceID, the normalised pupil coordinate,
 // and the local focus residual Δz_loc = z_closest_approach − bestZ.
-func buildFocusSamples(samples []pupil.Sample, surfaces []types.Surface,
-	chiefDir, fanDir types.Vec3, bestZ float64, fieldID int, fanKind string) []types.AsphereFocusSample {
+func buildFocusSamples(samples []pupil.Sample,
+	chiefDir, fanDir types.Vec3, bestZ float64, fieldID, surfaceID int, fanKind string, trial bool) []types.AsphereFocusSample {
 
 	if len(samples) == 0 {
 		return nil
@@ -228,10 +228,22 @@ func buildFocusSamples(samples []pupil.Sample, surfaces []types.Surface,
 		if len(s.Surfaces) == 0 {
 			continue
 		}
-		// Last surface hit.
-		last := s.Surfaces[len(s.Surfaces)-1]
-		hitX := last.Position.X
-		hitY := last.Position.Y
+		var hit types.SurfaceResult
+		found := false
+		for _, sr := range s.Surfaces {
+			if sr.SurfaceID == surfaceID && sr.ErrorCode == "" &&
+				!math.IsNaN(sr.Position.X) && !math.IsNaN(sr.Position.Y) &&
+				!math.IsInf(sr.Position.X, 0) && !math.IsInf(sr.Position.Y, 0) {
+				hit = sr
+				found = true
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+		hitX := hit.Position.X
+		hitY := hit.Position.Y
 
 		// Local focus: z-coordinate of closest approach to chief ray.
 		// Parameterise the ray as P(t) = Origin + t*Dir and find t that
@@ -244,6 +256,7 @@ func buildFocusSamples(samples []pupil.Sample, surfaces []types.Surface,
 
 		out = append(out, types.AsphereFocusSample{
 			FieldID:  fieldID,
+			Trial:    trial,
 			PupilX:   s.PupilX,
 			PupilY:   s.PupilY,
 			HitX:     hitX,
@@ -346,21 +359,24 @@ func minimize1DFocus(f func(float64) float64, lo, hi float64) (bestX, bestF floa
 // wavelength) pair and finds the best-focus Z for each fan by minimizing the
 // RMS line width. The search window is centred on refImageZ.
 func ComputeFieldFocus(surfaces []types.Surface, fields []Field, wavelengths []float64,
-	refImageZ float64, cfg FocusConfig, gc *glass.Catalog, pupilZs []float64) FocusResult {
+	refImageZ float64, cfg FocusConfig, gc *glass.Catalog, surfaceID int, pupilZs []float64) FocusResult {
 
 	if len(wavelengths) == 0 {
 		wavelengths = []float64{types.DefaultWavelength}
 	}
 	result := FocusResult{ReferenceImageZ: refImageZ}
 
+	if len(wavelengths) > 1 {
+		wavelengths = wavelengths[:1]
+	}
 	for fi, f := range fields {
 		for _, wl := range wavelengths {
-		ffr := FieldFocusResult{
-			FieldID:         f.ID,
-			Angle:           f.Angle,
-			Wavelength:      wl,
-			ReferenceImageZ: refImageZ,
-		}
+			ffr := FieldFocusResult{
+				FieldID:         f.ID,
+				Angle:           f.Angle,
+				Wavelength:      wl,
+				ReferenceImageZ: refImageZ,
+			}
 
 			radius := dls.ApertureRadiusForGrid(surfaces, 0, wl, gc, 1.0)
 			if radius <= 0 {
@@ -374,37 +390,81 @@ func ComputeFieldFocus(surfaces []types.Surface, fields []Field, wavelengths []f
 				pupilZ = pupilZs[fi]
 			}
 
-		tx, ty := raymath.FieldAzimuth(f.Direction)
-		sx, sy := -ty, tx // sagittal = rotate 90°
+			tx, ty := raymath.FieldAzimuth(f.Direction)
+			sx, sy := -ty, tx // sagittal = rotate 90°
 
-		tSamples, sSamples := launchFans(f, cfg.NumSamples, radius, pupilZ)
-		if cfg.Tangential {
-			traceFanRays(tSamples, surfaces, wl, gc)
-			dir := rayDirection(f)
-			fanDir := types.Vec3{X: tx, Y: ty, Z: 0}
-			bestZ, rms := findBestFocus(tSamples, dir, fanDir, refImageZ)
-			ffr.Tangential = FocusFanResult{
-				BestZ:        bestZ,
-				RMSLineWidth: rms,
-				Samples:      buildFocusSamples(tSamples, surfaces, dir, fanDir, bestZ, f.ID, "tangential"),
+			tSamples, sSamples := launchFans(f, cfg.NumSamples, radius, pupilZ)
+			if cfg.Tangential {
+				traceFanRays(tSamples, surfaces, wl, gc)
+				dir := rayDirection(f)
+				fanDir := types.Vec3{X: tx, Y: ty, Z: 0}
+				bestZ, rms := findBestFocus(tSamples, dir, fanDir, refImageZ)
+				ffr.Tangential = FocusFanResult{
+					BestZ:        bestZ,
+					RMSLineWidth: rms,
+					Samples:      buildFocusSamples(tSamples, dir, fanDir, bestZ, f.ID, surfaceID, "tangential", false),
+				}
 			}
-		}
-		if cfg.Sagittal {
-			traceFanRays(sSamples, surfaces, wl, gc)
-			dir := rayDirection(f)
-			fanDir := types.Vec3{X: sx, Y: sy, Z: 0}
-			bestZ, rms := findBestFocus(sSamples, dir, fanDir, refImageZ)
-			ffr.Sagittal = FocusFanResult{
-				BestZ:        bestZ,
-				RMSLineWidth: rms,
-				Samples:      buildFocusSamples(sSamples, surfaces, dir, fanDir, bestZ, f.ID, "sagittal"),
+			if cfg.Sagittal {
+				traceFanRays(sSamples, surfaces, wl, gc)
+				dir := rayDirection(f)
+				fanDir := types.Vec3{X: sx, Y: sy, Z: 0}
+				bestZ, rms := findBestFocus(sSamples, dir, fanDir, refImageZ)
+				ffr.Sagittal = FocusFanResult{
+					BestZ:        bestZ,
+					RMSLineWidth: rms,
+					Samples:      buildFocusSamples(sSamples, dir, fanDir, bestZ, f.ID, surfaceID, "sagittal", false),
+				}
 			}
-		}
 
 			result.PerField = append(result.PerField, ffr)
 		}
 	}
+	// Keep the per-fan residual shape, but express all samples relative to the
+	// centre field's best focus so the graph has one common vertical reference.
+	centerBestZ, ok := centerFieldBestZ(result.PerField)
+	if ok {
+		for i := range result.PerField {
+			ff := &result.PerField[i]
+			shiftSamples := func(samples []types.AsphereFocusSample, fanBestZ float64) {
+				for j := range samples {
+					samples[j].DeltaZ += fanBestZ - centerBestZ
+				}
+			}
+			shiftSamples(ff.Tangential.Samples, ff.Tangential.BestZ)
+			shiftSamples(ff.Sagittal.Samples, ff.Sagittal.BestZ)
+		}
+	}
 	return result
+}
+
+// centerFieldBestZ returns the mean T/S best focus of the field nearest the
+// optical axis. It ignores unavailable fan results without changing the focus
+// search or the reported per-fan BestZ values.
+func centerFieldBestZ(fields []FieldFocusResult) (float64, bool) {
+	if len(fields) == 0 {
+		return 0, false
+	}
+	center := fields[0]
+	for _, f := range fields[1:] {
+		if math.Abs(f.Angle) < math.Abs(center.Angle) {
+			center = f
+		}
+	}
+	var sum float64
+	var count int
+	if len(center.Tangential.Samples) > 0 {
+		sum += center.Tangential.BestZ
+		count++
+	}
+	if len(center.Sagittal.Samples) > 0 {
+		sum += center.Sagittal.BestZ
+		count++
+	}
+	if count == 0 {
+		return 0, false
+	}
+	return sum / float64(count), true
 }
 
 // findBestFocus searches for the z-plane that minimises the RMS line width of
@@ -426,7 +486,7 @@ func ComputeFieldFocusTrial(surfaces []types.Surface, fields []Field, wavelength
 	surfaceID int, coeffs types.AsphereCoeffs, pupilZs []float64) FocusResult {
 
 	trial := withAsphere(surfaces, surfaceID, coeffs)
-	return ComputeFieldFocus(trial, fields, wavelengths, refImageZ, cfg, gc, pupilZs)
+	return ComputeFieldFocus(trial, fields, wavelengths, refImageZ, cfg, gc, surfaceID, pupilZs)
 }
 
 // FocusGains computes the relative improvement of the trial system over the

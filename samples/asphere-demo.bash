@@ -132,38 +132,12 @@ fi
 
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
-  rm -f "$OUTDIR"/asphere-demo-result*.txt "$OUTDIR"/asphere-demo-*-result*.txt
-  rm -f "$OUTDIR"/asphere-demo-rank*.yaml "$OUTDIR"/asphere-demo-*-rank*.yaml
-  rm -f "$OUTDIR"/asphere-demo-validated*.yaml "$OUTDIR"/asphere-demo-*-validated*.yaml
-  rm -f "$OUTDIR"/asphere-demo-applied*.yaml "$OUTDIR"/asphere-demo-*-applied*.yaml
-  rm -f "$OUTDIR"/asphere-demo-spot*.tbl "$OUTDIR"/asphere-demo-*-spot*.tbl
-  rm -f "$OUTDIR"/asphere-demo-spot*.csv "$OUTDIR"/asphere-demo-*-spot*.csv
-  rm -f "$OUTDIR"/asphere-demo-opd*.dat "$OUTDIR"/asphere-demo-*-opd*.dat
-  rm -f "$OUTDIR"/asphere-demo-opd*.gnu "$OUTDIR"/asphere-demo-*-opd*.gnu
-  rm -f "$OUTDIR"/asphere-demo-opd-overlap*.png "$OUTDIR"/asphere-demo-*-opd-overlap*.png
-  rm -f "$OUTDIR"/asphere-demo-defocus*.png "$OUTDIR"/asphere-demo-*-defocus*.png
-  rm -f "$OUTDIR"/asphere-demo-defocus*.dat "$OUTDIR"/asphere-demo-*-defocus*.dat
-  rm -f "$OUTDIR"/asphere-demo-defocus*.gnu "$OUTDIR"/asphere-demo-*-defocus*.gnu
-  rm -f "$OUTDIR"/asphere-demo-ts-focus*.png "$OUTDIR"/asphere-demo-*-ts-focus*.png
-  rm -f "$OUTDIR"/asphere-demo-ts-focus*.dat "$OUTDIR"/asphere-demo-*-ts-focus*.dat
-  rm -f "$OUTDIR"/asphere-demo-ts-focus*.gnu "$OUTDIR"/asphere-demo-*-ts-focus*.gnu
-  rm -f "$OUTDIR"/asphere-demo-focus-radial*.png "$OUTDIR"/asphere-demo-*-focus-radial*.png
-  rm -f "$OUTDIR"/asphere-demo-focus-radial*.dat "$OUTDIR"/asphere-demo-*-focus-radial*.dat
-  rm -f "$OUTDIR"/asphere-demo-focus-radial*.gnu "$OUTDIR"/asphere-demo-*-focus-radial*.gnu
-  rm -f "$OUTDIR"/asphere-demo-focus-gain*.png "$OUTDIR"/asphere-demo-*-focus-gain*.png
-  rm -f "$OUTDIR"/asphere-demo-focus-gain*.dat "$OUTDIR"/asphere-demo-*-focus-gain*.dat
-  rm -f "$OUTDIR"/asphere-demo-focus-gain*.gnu "$OUTDIR"/asphere-demo-*-focus-gain*.gnu
-  rm -f "$OUTDIR"/asphere-demo-focus-footprint*.png "$OUTDIR"/asphere-demo-*-focus-footprint*.png
-  rm -f "$OUTDIR"/asphere-demo-focus-footprint*.dat "$OUTDIR"/asphere-demo-*-focus-footprint*.dat
-  rm -f "$OUTDIR"/asphere-demo-focus-footprint*.gnu "$OUTDIR"/asphere-demo-*-focus-footprint*.gnu
-  rm -f "$OUTDIR"/asphere-demo-wf-before*.yaml "$OUTDIR"/asphere-demo-*-wf-before*.yaml
-  rm -f "$OUTDIR"/asphere-demo-wf-after*.yaml  "$OUTDIR"/asphere-demo-*-wf-after*.yaml
-  rm -f "$OUTDIR"/asphere-demo-applied-initial*.yaml "$OUTDIR"/asphere-demo-*-applied-initial*.yaml
-  rm -f "$OUTDIR"/asphere-demo-rank-after-initial*.yaml "$OUTDIR"/asphere-demo-*-rank-after-initial*.yaml
-  rm -f "$OUTDIR"/asphere-demo-before*.png "$OUTDIR"/asphere-demo-*-before*.png
-  rm -f "$OUTDIR"/asphere-demo-after*.png "$OUTDIR"/asphere-demo-*-after*.png
-  rm -f "$OUTDIR"/asphere-demo-init-half*.yaml "$OUTDIR"/asphere-demo-init-epd*.yaml "$OUTDIR"/asphere-demo-init-fno*.yaml
-  echo "  Removed: result txts, ranking/validation/apply YAMLs, spot tables, OPD charts/data, PNGs, stop init variants"
+  for artifact in "$OUTDIR"/asphere-demo-*; do
+    [[ -e "$artifact" ]] || continue
+    [[ "$artifact" == "$BASE_INIT" || "$artifact" == "$OUTDIR/asphere-demo.bash" ]] && continue
+    rm -f "$artifact"
+  done
+  echo "  Removed all generated asphere-demo artifacts"
   exit 0
 fi
 
@@ -256,21 +230,20 @@ plot_opd_overlap() {
   fi
 
   # Emit one data file per surface per case; each field is a block of
-  # "t opd_plus opd_minus" rows separated by a blank line.
+  # "radius opd" rows separated by a blank line.
   build_opd_dat() {
     local rank="$1" base="$2"
-    local si fi j nf npoints sid t plus minus
+    local si fi j nf npoints sid radius opd
     for ((si=0; si<nsid; si++)); do
       sid=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].surface_id" < "$rank")
       : > "$base.$si.dat"
       nf=$("$RAYWEAVE" query --len "asphere_candidate_result.opd_profiles[$si].fields" < "$rank" 2>/dev/null || echo 0)
       for ((fi=0; fi<nf; fi++)); do
-        npoints=$("$RAYWEAVE" query --len "asphere_candidate_result.opd_profiles[$si].fields[$fi].t_radius" < "$rank" 2>/dev/null || echo 0)
+        npoints=$("$RAYWEAVE" query --len "asphere_candidate_result.opd_profiles[$si].fields[$fi].ring_radius" < "$rank" 2>/dev/null || echo 0)
         for ((j=0; j<npoints; j++)); do
-          t=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].t_radius[$j]" < "$rank")
-          plus=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].opd_plus[$j]" < "$rank")
-          minus=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].opd_minus[$j]" < "$rank")
-          printf "%s %s %s\n" "$t" "$plus" "$minus" >> "$base.$si.dat"
+          radius=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].ring_radius[$j]" < "$rank")
+          opd=$("$RAYWEAVE" query -r "asphere_candidate_result.opd_profiles[$si].fields[$fi].opd[$j]" < "$rank")
+          printf "%s %s\n" "$radius" "$opd" >> "$base.$si.dat"
         done
         printf "\n" >> "$base.$si.dat"
       done
@@ -283,7 +256,7 @@ plot_opd_overlap() {
   # so the outer envelope is not clipped. Each column is on its OWN scale.
   opd_range() {
     local base="$1" lo hi pad
-    read -r lo hi < <(awk 'NF>=3 { for (i=2; i<=3; i++) { if (min=="" || $i<min) min=$i; if (max=="" || $i>max) max=$i } }
+    read -r lo hi < <(awk 'NF>=2 { if (min=="" || $2<min) min=$2; if (max=="" || $2>max) max=$2 }
                        END { if (min!="") print min, max; else print "", "" }' "$base".*.dat)
     if [[ -n "$lo" && -n "$hi" ]]; then
       pad=$(awk -v lo="$lo" -v hi="$hi" 'BEGIN { p=(hi-lo)*0.05; if (p==0) p=0.05; printf "%.9g", p }')
@@ -315,7 +288,7 @@ plot_opd_overlap() {
     echo "set terminal pngcairo size ${width},$((nsid * 400))"
     echo "set output \"$out\""
     echo "set multiplot layout $nsid,$cols rowsfirst title \"$title\" font \",12\""
-    echo "set xlabel \"tangential beam position t (mm)\""
+    echo "set xlabel \"surface radius (mm)\""
     echo "set ylabel \"OPD (mm)\""
     echo "set grid"
     echo "set key outside right"
@@ -327,8 +300,7 @@ plot_opd_overlap() {
       echo "set title sprintf(\"surface ${sid} — $label_left\")"
       plot_cmd="plot"
       for ((f=0; f<nf_l; f++)); do
-        plot_cmd+=" sprintf(\"$base_left.%d.dat\", $si) index $f using 1:2 with linespoints pt 7 ps 0.7 title sprintf(\"field %d +s\", $f),"
-        plot_cmd+=" sprintf(\"$base_left.%d.dat\", $si) index $f using 1:3 with linespoints pt 9 ps 0.7 title sprintf(\"field %d -s\", $f),"
+        plot_cmd+=" sprintf(\"$base_left.%d.dat\", $si) index $f using 1:2 with linespoints pt 7 ps 0.7 title sprintf(\"field %d\", $f),"
       done
       echo "${plot_cmd%,}"
       if $dual; then
@@ -337,8 +309,7 @@ plot_opd_overlap() {
         echo "set title sprintf(\"surface ${sid} — $label_right\")"
         plot_cmd="plot"
         for ((f=0; f<nf_r; f++)); do
-          plot_cmd+=" sprintf(\"$base_right.%d.dat\", $si) index $f using 1:2 with linespoints pt 7 ps 0.7 title sprintf(\"field %d +s\", $f),"
-          plot_cmd+=" sprintf(\"$base_right.%d.dat\", $si) index $f using 1:3 with linespoints pt 9 ps 0.7 title sprintf(\"field %d -s\", $f),"
+          plot_cmd+=" sprintf(\"$base_right.%d.dat\", $si) index $f using 1:2 with linespoints pt 7 ps 0.7 title sprintf(\"field %d\", $f),"
         done
         echo "${plot_cmd%,}"
       fi
@@ -747,7 +718,17 @@ plot_focus_footprint() {
   local panels=0
   local datfiles=""
 
+  # Sort surfaces by surface ID to ensure vertical ascending order.
+  local pairs=""
   for ((si=0; si<nsurf; si++)); do
+    local sid
+    sid=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].surface_id" < "$rank" 2>/dev/null || echo "0")
+    pairs+="$sid:$si "
+  done
+  local sorted_si_list
+  sorted_si_list=$(echo "$pairs" | tr ' ' '\n' | sort -n -k1,1 -t: | cut -d: -f2)
+
+  for si in $sorted_si_list; do
     local n
     n=$("$RAYWEAVE" query --len "asphere_candidate_result.surfaces[$si].samples" < "$rank" 2>/dev/null || echo 0)
     [[ -z "$n" || "$n" -eq 0 ]] && continue
@@ -758,15 +739,25 @@ plot_focus_footprint() {
     # Bulk-extract all samples as tab-separated lines using yq.
     local dat_t="$base.$si.t.dat" dat_s="$base.$si.s.dat"
     : > "$dat_t" : > "$dat_s"
-    "$YQ_BIN" e -o=tsv ".asphere_candidate_result.surfaces[$si].samples[] | [.hit_x_mm, .hit_y_mm, .delta_z_mm, .field_id, .fan_kind] | @tsv" "$rank" 2>/dev/null | \
-    while IFS=$'\t' read -r hx hy dz fid fk; do
+    "$YQ_BIN" e -o=tsv ".asphere_candidate_result.surfaces[$si].samples[] | [.hit_x_mm, .hit_y_mm, .delta_z_mm, .field_id, .fan_kind, (.trial // false)] | @tsv" "$rank" 2>/dev/null | \
+    while IFS=$'\t' read -r hx hy dz fid fk trial; do
       [[ -z "$hx" || "$hx" == "null" ]] && continue
+      if [[ -n "${prev_fid:-}" && ( "$fid" != "$prev_fid" || "$fk" != "$prev_fk" || "$trial" != "$prev_trial" ) ]]; then
+        if [[ "$prev_fk" == "tangential" ]]; then printf "\n" >> "$dat_t"; else printf "\n" >> "$dat_s"; fi
+      fi
+      prev_fid="$fid"
+      prev_fk="$fk"
+      prev_trial="$trial"
       if [[ "$fk" == "tangential" ]]; then
-        printf "%s %s %s %s\n" "$hx" "$hy" "${dz:-0}" "${fid:-0}" >> "$dat_t"
+        r=$(awk -v x="$hx" -v y="$hy" 'BEGIN { printf "%.9g", sqrt(x*x+y*y) }')
+        printf "%s %s %s\n" "$r" "${dz:-0}" "${fid:-0}" >> "$dat_t"
       else
-        printf "%s %s %s %s\n" "$hx" "$hy" "${dz:-0}" "${fid:-0}" >> "$dat_s"
+        r=$(awk -v x="$hx" -v y="$hy" 'BEGIN { printf "%.9g", sqrt(x*x+y*y) }')
+        printf "%s %s %s\n" "$r" "${dz:-0}" "${fid:-0}" >> "$dat_s"
       fi
     done
+    printf "\n" >> "$dat_t"
+    printf "\n" >> "$dat_s"
 
     datfiles="$datfiles $dat_t $dat_s"
     panels=$((panels + 1))
@@ -778,25 +769,30 @@ plot_focus_footprint() {
   fi
 
   {
-    echo "set terminal pngcairo size $((panels * 500)),500"
+    echo "set terminal pngcairo size 500,$((panels * 500))"
     echo "set output \"$out\""
-    echo "set multiplot layout 1,$panels rowsfirst title \"Focus footprint — hit position coloured by Δz_loc — $label\" font \",11\""
-    echo "set size ratio -1"
-    echo "set xlabel \"hit X (mm)\""
-    echo "set ylabel \"hit Y (mm)\""
+    # Focus footprint graph explanation:
+    # Each row corresponds to one candidate surface in ascending surface-ID order.
+    # X-axis: Surface-local hit radius (mm) calculated as sqrt(hit_x^2 + hit_y^2).
+    # Y-axis: focus shift Δz (mm) relative to the centre-field best focus.
+    # Each field has one colour; T (Tangential) and S (Sagittal) share that
+    # field colour and differ only by point type.
+    echo "set multiplot layout $panels,1 title \"Focus footprint — field-coloured common-reference Δz — $label\" font \",11\""
+    echo "set size ratio 0"
+    echo "set xlabel \"surface radius (mm)\""
+    echo "set ylabel \"ST focus shift (mm)\""
     echo "set grid"
-    echo "set key off"
-    echo "set palette defined (-0.1 \"#2166ac\", 0 \"#f7f7f7\", 0.1 \"#b2182b\")"
-    echo "set cbrange [-0.1:0.1]"
+    echo "set key outside right"
 
-    for ((si=0; si<nsurf; si++)); do
+    for si in $sorted_si_list; do
       local dat_t="$base.$si.t.dat" dat_s="$base.$si.s.dat"
       [[ ! -f "$dat_t" && ! -f "$dat_s" ]] && continue
       local sid
       sid=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].surface_id" < "$rank" 2>/dev/null || echo "?")
       echo "set title sprintf(\"surface $sid\")"
-      echo "plot \"$dat_t\" using 1:2:3 with points pt 7 ps 0.6 palette title \"T fan\", \\"
-      echo "     \"$dat_s\" using 1:2:3 with points pt 5 ps 0.6 palette title \"S fan\""
+      plot_cmd="plot \"$dat_t\" using 1:2:3 with linespoints lc palette pt 7 ps 0.6 title \"T fan\","
+      plot_cmd+=" \"$dat_s\" using 1:2:3 with linespoints lc palette pt 5 ps 0.6 title \"S fan\""
+      echo "$plot_cmd"
     done
     echo "unset multiplot"
   } > "$gs"
@@ -838,7 +834,10 @@ build_applied_initial() {
     coeffs="${coeffs}${coeffs:+,}${val}"
   done
 
-  "$YQ_BIN" e ".configs[0].surfaces[] |= (select(.id == $sid) | .type = \"asphere_polynomial\" | .conic = 0 | .coefficients = [$coeffs])" "$from" > "$out"
+  local expr
+  printf -v expr '.configs[0].surfaces[] |= (select(.id == %s) | .type = "%s" | .conic = 0 | .coefficients = [%s])' \
+    "$sid" "asphere_polynomial" "$coeffs"
+  "$YQ_BIN" e "$expr" "$from" > "$out"
 }
 
 # ── One full demo case ──
@@ -864,8 +863,10 @@ run_case() {
 
   # ── Step 1: candidate ranking ──
   echo "--- Step 1: candidate ranking (top $TOP_K) ---"
+  echo "  [progress] tracing pupil grids and ranking candidate surfaces..."
   "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
     --diagnostics opd,focus < "$from" > "$rank"
+  echo "  [progress] candidate ranking complete"
   {
     printf "  %-6s %10s %10s %10s %10s\n" "surf" "score" "sens.imprv" "asym" "cons"
     for ri in $(seq 0 $((TOP_K - 1))); do
@@ -887,8 +888,10 @@ run_case() {
     echo "  (before/after OPD chart skipped: yq not available)"
   elif build_applied_initial "$rank" "$from" "$applied_init"; then
     echo "Written: $applied_init"
+    echo "  [progress] re-running analysis for the initial-asphere OPD comparison..."
     "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
       --diagnostics opd,focus < "$applied_init" > "$rank_after" 2>/dev/null
+    echo "  [progress] initial-asphere analysis complete"
     plot_opd_overlap "$OUTDIR/asphere-demo${tag}-opd-overlap.png" \
       "$rank" "$OUTDIR/asphere-demo${tag}-opd-before" "all-spherical (before)" \
       "$rank_after" "$OUTDIR/asphere-demo${tag}-opd-after" "initial asphere (after)"
@@ -897,25 +900,23 @@ run_case() {
   fi
   echo
 
-  # ── Step 1b-f: Focus Channel charts (T/S focus, radial fit, gain) ──
+  # ── Step 1b: Focus Channel footprint chart ──
   if [[ -n "$YQ_BIN" ]]; then
-    echo "--- Step 1b-f: Focus Channel charts ---"
-    plot_ts_focus "$OUTDIR/asphere-demo${tag}-ts-focus.png" \
-      "$rank" "$label" "$from"
-    plot_focus_radial_fit "$OUTDIR/asphere-demo${tag}-focus-radial.png" \
-      "$rank" "$label" "$from"
-    plot_focus_gain "$OUTDIR/asphere-demo${tag}-focus-gain.png" \
-      "$rank" "$label"
+    echo "--- Step 1b: Focus Channel footprint chart ---"
+    echo "  [progress] preparing focus-footprint data..."
     plot_focus_footprint "$OUTDIR/asphere-demo${tag}-focus-footprint.png" \
       "$rank" "$label"
+    echo "  [progress] focus-footprint chart complete"
     echo
   fi
 
   # ── Step 1c: field defocus chart (before/after comparison) ───
   if [[ -n "$YQ_BIN" ]] && build_applied_initial "$rank" "$from" "$applied_init"; then
     echo "Written: $applied_init"
+    echo "  [progress] tracing wavefront data for the defocus comparison..."
     "$RAYWEAVE" chief < "$applied_init" | "$RAYWEAVE" wavefront --wavelengths 0.00058756 --num-rays "$NUM_RAYS" > "$OUTDIR/asphere-demo${tag}-wf-after.yaml" 2>/dev/null
     "$RAYWEAVE" chief < "$from"         | "$RAYWEAVE" wavefront --wavelengths 0.00058756 --num-rays "$NUM_RAYS" > "$OUTDIR/asphere-demo${tag}-wf-before.yaml" 2>/dev/null
+    echo "  [progress] defocus wavefront analysis complete"
     plot_field_defocus "$OUTDIR/asphere-demo${tag}-defocus.png" \
       "$OUTDIR/asphere-demo${tag}-wf-before.yaml" "all-spherical (before)" \
       "$OUTDIR/asphere-demo${tag}-wf-after.yaml"  "initial asphere (after)"
@@ -926,9 +927,11 @@ run_case() {
 
   # ── Step 2: validation ──
   echo "--- Step 2: short-DLS validation (spot-RMS merit, $DLS_ITER it + ${NUM_RAYS} rays) ---"
+  echo "  [progress] running short DLS validation (this may take a while)..."
   "$RAYWEAVE" asphere --validate --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
     --dls-iter "$DLS_ITER" --num-rays "$NUM_RAYS" --diagnostics opd,focus \
     < "$from" > "$validated"
+  echo "  [progress] DLS validation complete"
   {
     printf "  %-6s %12s %12s %12s %13s\n" "surf" "before" "after" "imprv" "a4"
     for ri in $(seq 0 $((TOP_K - 1))); do
@@ -991,7 +994,7 @@ run_case() {
     | "$RAYWEAVE" plot -o "$OUTDIR/asphere-demo${tag}-before.png" >/dev/null
   echo "Written: $OUTDIR/asphere-demo${tag}-before.png"
   "$RAYWEAVE" chief --clear-aperture --ray-fan < "$applied" | "$RAYWEAVE" trace \
-    | "$RAYWEAVE" plot -o "$OUTDIR/asphere-demo${tag}-after.png" >/dev/null
+    | "$RAYWEAVE" plot --asphere-color '#ff0000' -o "$OUTDIR/asphere-demo${tag}-after.png" >/dev/null
   echo "Written: $OUTDIR/asphere-demo${tag}-after.png"
 
   # ── Step 6: gate check ──

@@ -287,11 +287,14 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 	result.Profiles = BuildOPDProfiles(footprints, candIDs, cfg.TBins)
 
 	// Phase 3.5: Focus Channel (diagnostic-only, when enabled).
-	var baseFocus FocusResult
+	baseFocusBySurface := map[int]FocusResult{}
 	trialFocusMap := map[int]FocusResult{}
 	if focusCfg != nil {
 		refImageZ := computeRefImageZ(surfaces)
-		baseFocus = ComputeFieldFocus(surfaces, fields, wavelengths, refImageZ, *focusCfg, gc, pupilZs)
+		for _, candidate := range candidates {
+			baseFocusBySurface[candidate.ID] = ComputeFieldFocus(surfaces, fields, wavelengths,
+				refImageZ, *focusCfg, gc, candidate.ID, pupilZs)
+		}
 	}
 
 	// Select the top-K surfaces that actually yield a valid asphere fit.
@@ -330,6 +333,7 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 		}
 
 		// Focus channel: compute trial focus and gains when enabled.
+		baseFocus := baseFocusBySurface[rs.SurfaceID]
 		if focusCfg != nil && len(baseFocus.PerField) > 0 && coeffs != (types.AsphereCoeffs{}) {
 			trialCoeffs := rs.ScaledCoefficients
 			if cfg.CalibrateScale && rs.CalibratedCoefficients != (types.AsphereCoeffs{}) {
@@ -357,15 +361,18 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 	}
 
 	// Build per-surface output when focus diagnostics are enabled.
-	if focusCfg != nil && len(baseFocus.PerField) > 0 {
-		refImageZ := baseFocus.ReferenceImageZ
+	if focusCfg != nil {
 		for _, rs := range rankings {
+			baseFocus, ok := baseFocusBySurface[rs.SurfaceID]
+			if !ok || len(baseFocus.PerField) == 0 {
+				continue
+			}
 			s := findSurface(surfaces, rs.SurfaceID)
 			if s == nil {
 				continue
 			}
 			surfOut := types.AsphereSurfaceOutput{
-				SurfaceID:     rs.SurfaceID,
+				SurfaceID:      rs.SurfaceID,
 				ApertureRadius: surfaceMinRadius(surfaces, rs.SurfaceID),
 			}
 			// Summary
@@ -387,7 +394,7 @@ func Run(surfaces []types.Surface, fields []Field, wavelengths []float64, cfg Co
 				},
 			}
 			// Radial fits for focus channel
-			surfOut.RadialFits = buildFocusRadialFits(baseFocus, refImageZ)
+			surfOut.RadialFits = buildFocusRadialFits(baseFocus, baseFocus.ReferenceImageZ)
 			// Field focus per-field data
 			trialFocus := trialFocusMap[rs.SurfaceID]
 			surfOut.FieldFocus = buildFieldFocusOutput(baseFocus, trialFocus)
@@ -751,15 +758,21 @@ func buildFieldFocusOutput(baseFocus FocusResult, trialFocus FocusResult) []type
 // trial focus results across all fields and both T/S fans.
 func collectFocusSamples(baseFocus, trialFocus FocusResult) []types.AsphereFocusSample {
 	var all []types.AsphereFocusSample
-	collect := func(f FocusResult) {
+	collect := func(f FocusResult, trial bool) {
 		for _, ff := range f.PerField {
-			all = append(all, ff.Tangential.Samples...)
-			all = append(all, ff.Sagittal.Samples...)
+			for _, sample := range ff.Tangential.Samples {
+				sample.Trial = trial
+				all = append(all, sample)
+			}
+			for _, sample := range ff.Sagittal.Samples {
+				sample.Trial = trial
+				all = append(all, sample)
+			}
 		}
 	}
-	collect(baseFocus)
+	collect(baseFocus, false)
 	if len(trialFocus.PerField) > 0 {
-		collect(trialFocus)
+		collect(trialFocus, true)
 	}
 	return all
 }

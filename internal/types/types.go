@@ -1040,17 +1040,19 @@ type AsphereDerivedFocus struct {
 
 // AsphereFieldFocus is the per-field, per-wavelength T/S focus data.
 type AsphereFieldFocus struct {
-	FieldID    int             `yaml:"field_id"`
-	Wavelength float64         `yaml:"wavelength_nm"`
-	Base       AsphereTSFocus  `yaml:"base"`
-	Trial      AsphereTSFocus  `yaml:"trial"`
+	FieldID    int                 `yaml:"field_id"`
+	Wavelength float64             `yaml:"wavelength_nm"`
+	Base       AsphereTSFocus      `yaml:"base"`
+	Trial      AsphereTSFocus      `yaml:"trial"`
 	Derived    AsphereDerivedFocus `yaml:"derived"`
 }
 
 // AsphereFocusSample is one ray's local focus residual on a candidate surface
-// for the focus footprint map.
+// for the focus footprint map. HitX and HitY are the local intersection
+// coordinates on that candidate surface; RMM remains the pupil radius.
 type AsphereFocusSample struct {
 	FieldID  int     `yaml:"field_id"`
+	Trial    bool    `yaml:"trial,omitempty"`
 	PupilX   float64 `yaml:"pupil_x"`
 	PupilY   float64 `yaml:"pupil_y"`
 	HitX     float64 `yaml:"hit_x_mm"`
@@ -1100,12 +1102,12 @@ type AsphereFocusSummary struct {
 // AsphereSurfaceOutput carries the full diagnostic output for one candidate
 // surface, including footprint maps and per-field focus data.
 type AsphereSurfaceOutput struct {
-	SurfaceID     int                  `yaml:"surface_id"`
-	ApertureRadius float64             `yaml:"aperture_radius_mm"`
-	Summary       AsphereSurfaceSummary `yaml:"summary"`
-	RadialFits    []AsphereRadialFit    `yaml:"radial_fits,omitempty"`
-	Samples       []AsphereFocusSample  `yaml:"samples,omitempty"`
-	FieldFocus    []AsphereFieldFocus   `yaml:"field_focus,omitempty"`
+	SurfaceID      int                   `yaml:"surface_id"`
+	ApertureRadius float64               `yaml:"aperture_radius_mm"`
+	Summary        AsphereSurfaceSummary `yaml:"summary"`
+	RadialFits     []AsphereRadialFit    `yaml:"radial_fits,omitempty"`
+	Samples        []AsphereFocusSample  `yaml:"samples,omitempty"`
+	FieldFocus     []AsphereFieldFocus   `yaml:"field_focus,omitempty"`
 }
 
 // AsphereOPDProfile is the per-field OPD overlap data for one candidate
@@ -1119,10 +1121,10 @@ type AsphereOPDProfile struct {
 
 // AsphereCandidateResult is the `asphere` command's ranking output.
 type AsphereCandidateResult struct {
-	Rankings    []AsphereSurfaceScore `yaml:"rankings,omitempty"`
-	Profiles    []AsphereOPDProfile   `yaml:"opd_profiles,omitempty"`
-	Surfaces    []AsphereSurfaceOutput `yaml:"surfaces,omitempty"`
-	Warnings    []string              `yaml:"warnings,omitempty"`
+	Rankings []AsphereSurfaceScore  `yaml:"rankings,omitempty"`
+	Profiles []AsphereOPDProfile    `yaml:"opd_profiles,omitempty"`
+	Surfaces []AsphereSurfaceOutput `yaml:"surfaces,omitempty"`
+	Warnings []string               `yaml:"warnings,omitempty"`
 }
 
 // AsphereValidation is the Phase-4 short-DLS validation of one inserted

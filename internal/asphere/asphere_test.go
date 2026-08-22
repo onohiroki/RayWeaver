@@ -5,8 +5,43 @@ import (
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/types"
 )
+
+func TestBuildFocusSamplesUsesCandidateSurfaceHit(t *testing.T) {
+	samples := []pupil.Sample{
+		{PupilX: -1, Dir: types.Vec3{Z: 1}, OK: true, Surfaces: []types.SurfaceResult{
+			{SurfaceID: 2, Position: types.Vec3{X: 2, Y: 3}},
+			{SurfaceID: 7, Position: types.Vec3{X: 70, Y: 80}},  // Target
+			{SurfaceID: 8, Position: types.Vec3{X: 800, Y: 900}}, // NOT target (must be ignored)
+		}},
+		{PupilX: 0, Dir: types.Vec3{Z: 1}, OK: true, Surfaces: []types.SurfaceResult{
+			{SurfaceID: 2, Position: types.Vec3{X: 20, Y: 30}},
+			{SurfaceID: 7, Position: types.Vec3{X: 700, Y: 800}},
+			{SurfaceID: 8, Position: types.Vec3{X: 8000, Y: 9000}},
+		}},
+		{PupilX: 1, Dir: types.Vec3{Z: 1}, OK: true, Surfaces: []types.SurfaceResult{
+			{SurfaceID: 2, Position: types.Vec3{X: 4, Y: 5}},
+		}},
+	}
+	got := buildFocusSamples(samples, types.Vec3{Z: 1}, types.Vec3{Z: 1}, 1, 3, 7, "T", false)
+	if len(got) != 2 || got[0].HitX != 70 || got[0].HitY != 80 || got[1].HitX != 700 || got[1].HitY != 800 {
+		t.Fatalf("candidate hits = %+v, want only surface 7 coordinates", got)
+	}
+	if got[0].RMM != 1 {
+		t.Fatalf("RMM = %v, want pupil radius 1", got[0].RMM)
+	}
+}
+
+func TestBuildFocusSamplesKeepsTrialAndFanMetadata(t *testing.T) {
+	sample := pupil.Sample{PupilX: 0, PupilY: 2, Dir: types.Vec3{Z: 1}, OK: true,
+		Surfaces: []types.SurfaceResult{{SurfaceID: 4, Position: types.Vec3{X: 9, Y: 10}}}}
+	got := buildFocusSamples([]pupil.Sample{sample}, types.Vec3{Z: 1}, types.Vec3{Z: 1}, 1, 8, 4, "S", true)
+	if len(got) != 1 || !got[0].Trial || got[0].FanKind != "S" || got[0].FieldID != 8 {
+		t.Fatalf("metadata = %+v", got)
+	}
+}
 
 func TestSolveLinear(t *testing.T) {
 	// 2x2: x1 + x2 = 3, x1 - x2 = 1  → x1=2, x2=1
