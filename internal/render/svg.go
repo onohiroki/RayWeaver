@@ -2,6 +2,7 @@ package render
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"strings"
 
@@ -35,6 +36,33 @@ const (
 	canvasH = 780.0
 	margin  = 60.0
 )
+
+// resolveAsphereStroke returns the configured stroke colour for an aspheric
+// surface (per-surface-ID override first, then the all-aspheres fallback) or
+// "" when the surface is not an asphere or no colour applies.
+func (c Config) resolveAsphereStroke(s types.Surface) string {
+	if s.Type != types.AspherePolynomial && s.Type != types.AsphereZernike {
+		return ""
+	}
+	if col, ok := c.AsphereColors[s.ID]; ok {
+		return col
+	}
+	return c.AsphereColorAll
+}
+
+// resolveAsphereStrokeNRGBA mirrors resolveAsphereStroke for the PNG
+// rasterizer: it parses the resolved colour string into an NRGBA value.
+func (c Config) resolveAsphereStrokeNRGBA(s types.Surface) (color.NRGBA, bool) {
+	col := c.resolveAsphereStroke(s)
+	if col == "" {
+		return color.NRGBA{}, false
+	}
+	parsed, err := ParseColor(col)
+	if err != nil {
+		return color.NRGBA{}, false
+	}
+	return parsed, true
+}
 
 func LensSVG(cfg Config) string {
 	zPos := computeZPositions(cfg.Surfaces)
@@ -103,6 +131,7 @@ func LensSVG(cfg Config) string {
 	}
 	b.WriteString("<defs><style>\n")
 	b.WriteString(fmt.Sprintf(".lens-body{stroke:rgb(180,180,180);stroke-width:%f;opacity:0.75}\n", lw/scale))
+	b.WriteString(fmt.Sprintf(".lens-edge{fill:none;stroke-width:%f}\n", lw/scale))
 	b.WriteString(fmt.Sprintf(".air-line{fill:none;stroke:rgb(130,130,130);stroke-width:%f;opacity:0.6}\n", 1.0/scale))
 	b.WriteString(fmt.Sprintf(".ray{fill:none;stroke-width:%f;opacity:0.7}\n", rw/scale))
 	b.WriteString(fmt.Sprintf(".axis{fill:none;stroke:rgb(160,160,160);stroke-width:%f;stroke-dasharray:%f,%f;opacity:0.5}\n", 1.0/scale, 3.0/scale, 3.0/scale))
@@ -149,12 +178,8 @@ func LensSVG(cfg Config) string {
 		}
 
 		stroke := "rgb(130,130,130)"
-		if (s.Type == types.AspherePolynomial || s.Type == types.AsphereZernike) {
-			if c, ok := cfg.AsphereColors[s.ID]; ok {
-				stroke = c
-			} else if cfg.AsphereColorAll != "" {
-				stroke = cfg.AsphereColorAll
-			}
+		if col, ok := cfg.resolveAsphereStrokeNRGBA(s); ok {
+			stroke = ColorToHex(col)
 		}
 		b.WriteString(fmt.Sprintf(`<path class="air-line" d="%s" stroke="%s"/>`, path.String(), stroke))
 	}
@@ -164,7 +189,6 @@ func LensSVG(cfg Config) string {
 	for _, e := range findElements(cfg.Surfaces, globalH) {
 		mat := e.r1Surf.Material
 		var fill string
-
 		if c, ok := cfg.ElementColors[e.Index]; ok {
 			fill = c
 		} else if gi, ok := cfg.GlassMap[mat.String()]; ok {
@@ -173,25 +197,24 @@ func LensSVG(cfg Config) string {
 			fill = "rgb(180,180,180)"
 		}
 
-		r1Asphere := e.r1Surf.Type == types.AspherePolynomial || e.r1Surf.Type == types.AsphereZernike
-		r2Asphere := e.r2Surf.Type == types.AspherePolynomial || e.r2Surf.Type == types.AsphereZernike
-		if (r1Asphere || r2Asphere) && cfg.AsphereColorAll != "" {
-			fill = cfg.AsphereColorAll
-		}
-		if r1Asphere {
-			if c, ok := cfg.AsphereColors[e.r1Surf.ID]; ok {
-				fill = c
-			}
-		}
-		if r2Asphere {
-			if c, ok := cfg.AsphereColors[e.r2Surf.ID]; ok {
-				fill = c
-			}
-		}
-
-		path := buildElemPath(e, zPos[e.r1Idx], zPos[e.r2Idx])
+		z1 := zPos[e.r1Idx]
+		z2 := zPos[e.r2Idx]
+		path := buildElemPath(e, z1, z2)
 		if path != "" {
 			b.WriteString(fmt.Sprintf(`<path class="lens-body" d="%s" fill="%s"/>`, path, fill))
+		}
+
+		// Aspheric surface edges are stroked on top of the body in their own
+		// colour; the element fill keeps its glass / --element-color value.
+		if col := cfg.resolveAsphereStroke(e.r1Surf); col != "" {
+			ee := computeElemEdges(e, z1, z2)
+			b.WriteString(fmt.Sprintf(`<path class="lens-edge" d="%s" stroke="%s"/>`,
+				surfaceProfilePath(e.r1Surf, ee.h1eff, z1), col))
+		}
+		if col := cfg.resolveAsphereStroke(e.r2Surf); col != "" {
+			ee := computeElemEdges(e, z1, z2)
+			b.WriteString(fmt.Sprintf(`<path class="lens-edge" d="%s" stroke="%s"/>`,
+				surfaceProfilePath(e.r2Surf, ee.h2eff, z2), col))
 		}
 	}
 

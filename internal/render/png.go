@@ -111,18 +111,9 @@ func LensPNG(cfg Config) ([]byte, error) {
 		}
 
 		mirrorCol := color.NRGBA{130, 130, 130, 153}
-		if s.Type == types.AspherePolynomial || s.Type == types.AsphereZernike {
-			if c, ok := cfg.AsphereColors[s.ID]; ok {
-				if parsed, err := ParseColor(c); err == nil {
-					mirrorCol = parsed
-					mirrorCol.A = 153
-				}
-			} else if cfg.AsphereColorAll != "" {
-				if parsed, err := ParseColor(cfg.AsphereColorAll); err == nil {
-					mirrorCol = parsed
-					mirrorCol.A = 153
-				}
-			}
+		if parsed, ok := cfg.resolveAsphereStrokeNRGBA(s); ok {
+			mirrorCol = parsed
+			mirrorCol.A = 153
 		}
 		ras.Reset(canvasW, canvasH)
 		drawSagPathFromSVG(ras, path.String(), scale, midZ)
@@ -153,33 +144,23 @@ func LensPNG(cfg Config) ([]byte, error) {
 			fill = color.NRGBA{180, 180, 180, 191}
 		}
 
-		r1Asphere := e.r1Surf.Type == types.AspherePolynomial || e.r1Surf.Type == types.AsphereZernike
-		r2Asphere := e.r2Surf.Type == types.AspherePolynomial || e.r2Surf.Type == types.AsphereZernike
-		if (r1Asphere || r2Asphere) && cfg.AsphereColorAll != "" {
-			if parsed, err := ParseColor(cfg.AsphereColorAll); err == nil {
-				fill = parsed
-				fill.A = 191
-			}
+		// Aspheric surface edges are stroked in their own colour; the
+		// element fill keeps its glass / --element-color value.
+		r1Col, ok := cfg.resolveAsphereStrokeNRGBA(e.r1Surf)
+		if !ok {
+			r1Col = outlineCol
+		} else {
+			r1Col.A = 255
 		}
-		if r1Asphere {
-			if c, ok := cfg.AsphereColors[e.r1Surf.ID]; ok {
-				if parsed, err := ParseColor(c); err == nil {
-					fill = parsed
-					fill.A = 191
-				}
-			}
-		}
-		if r2Asphere {
-			if c, ok := cfg.AsphereColors[e.r2Surf.ID]; ok {
-				if parsed, err := ParseColor(c); err == nil {
-					fill = parsed
-					fill.A = 191
-				}
-			}
+		r2Col, ok := cfg.resolveAsphereStrokeNRGBA(e.r2Surf)
+		if !ok {
+			r2Col = outlineCol
+		} else {
+			r2Col.A = 255
 		}
 
 		drawElemFill(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, fill)
-		drawElemOutline(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, lw, outlineCol)
+		drawElemOutline(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, lw, outlineCol, r1Col, r2Col)
 	}
 
 	// Aperture stop marker (drawn on top of the lenses)
@@ -340,26 +321,35 @@ func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, sc
 	ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
 }
 
-func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ, strokeWidth float64, c color.NRGBA) {
+// drawElemOutline strokes the element's rim. Each curved surface is drawn in
+// its own colour (r1Col / r2Col — the asphere colour when that surface is an
+// asphere, otherwise the shared outline colour), while the top/bottom edge
+// polylines always use the outline colour.
+func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ, strokeWidth float64, c color.NRGBA, r1Col, r2Col color.NRGBA) {
 	if e.h1 <= 0 || e.h2 <= 0 {
 		return
 	}
 	ee := computeElemEdges(e, z1, z2)
 
-	ras.Reset(canvasW, canvasH)
 	// Left curved surface (top → bottom)
+	ras.Reset(canvasW, canvasH)
 	strokeSagPath(ras, e.r1Surf, ee.h1eff, -ee.h1eff, z1, scale, midZ, strokeWidth)
-	// Bottom edge
+	ras.Draw(img, img.Bounds(), image.NewUniform(r1Col), image.Point{})
+
+	// Bottom + top edges
+	ras.Reset(canvasW, canvasH)
 	for i := 0; i < len(ee.bottomPts)-1; i++ {
 		strokeLine(ras, ee.bottomPts[i].X, ee.bottomPts[i].Y, ee.bottomPts[i+1].X, ee.bottomPts[i+1].Y, strokeWidth, scale, midZ)
 	}
-	// Right curved surface (bottom → top)
-	strokeSagPath(ras, e.r2Surf, -ee.h2eff, ee.h2eff, z2, scale, midZ, strokeWidth)
-	// Top edge
 	for i := 0; i < len(ee.topPts)-1; i++ {
 		strokeLine(ras, ee.topPts[i].X, ee.topPts[i].Y, ee.topPts[i+1].X, ee.topPts[i+1].Y, strokeWidth, scale, midZ)
 	}
 	ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
+
+	// Right curved surface (bottom → top)
+	ras.Reset(canvasW, canvasH)
+	strokeSagPath(ras, e.r2Surf, -ee.h2eff, ee.h2eff, z2, scale, midZ, strokeWidth)
+	ras.Draw(img, img.Bounds(), image.NewUniform(r2Col), image.Point{})
 }
 
 func strokeSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset, scale, midZ, width float64) {

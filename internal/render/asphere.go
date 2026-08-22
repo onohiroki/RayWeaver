@@ -96,6 +96,23 @@ func evalSagPointsOffset(surf types.Surface, hMax, zOffset float64) []vec2 {
 	return pts
 }
 
+// surfaceProfilePath returns a stroke-only SVG path along the surface's sag
+// profile, sampled from +hMax down to -hMax (fold-aware via globalSag). It is
+// used to draw an aspheric surface's edge in its own colour on top of the
+// lens body fill.
+func surfaceProfilePath(surf types.Surface, hMax, zOffset float64) string {
+	if hMax <= 0 {
+		return fmt.Sprintf("M %.6f,0", zOffset+globalSag(surf, 0))
+	}
+	n := 20
+	pts := make([]vec2, 2*n+1)
+	for i := 0; i <= 2*n; i++ {
+		h := hMax - 2*hMax*float64(i)/float64(2*n)
+		pts[i] = vec2{X: zOffset + globalSag(surf, h), Y: h}
+	}
+	return catmullRomCurve(pts, "M")
+}
+
 func bezierDownAt(surf types.Surface, h, zOffset float64) string {
 	if h <= 0 {
 		sag := sagFuncForSurface(surf)(0)
