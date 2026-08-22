@@ -116,7 +116,7 @@ func TestRunTripletCalibratesScale(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TopK = 2
 	cfg.SensitivitySamples = 7
-	res := Run(surfaces, fields, nil, cfg, gc, 0, 8)
+	res := Run(surfaces, fields, nil, cfg, gc, 0, 8, nil)
 
 	calibrated := 0
 	for _, r := range res.Rankings {
@@ -151,7 +151,7 @@ func TestRunTripletCalibratesScale(t *testing.T) {
 	cfgOff.TopK = 2
 	cfgOff.SensitivitySamples = 7
 	cfgOff.CalibrateScale = false
-	resOff := Run(surfaces, fields, nil, cfgOff, gc, 0, 8)
+	resOff := Run(surfaces, fields, nil, cfgOff, gc, 0, 8, nil)
 	for _, r := range resOff.Rankings {
 		if s := r.Sensitivity; s != nil && s.CalibratedScale != 0 {
 			t.Fatalf("surface %d: calibration not disabled (%v)", r.SurfaceID, s.CalibratedScale)

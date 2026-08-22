@@ -33,7 +33,7 @@ func TestAsphereValidateReportsImprovement(t *testing.T) {
 
 	cfg := asphere.DefaultConfig()
 	cfg.TopK = 2
-	res := asphere.Run(surfaces, fields, wavelengths, cfg, gc, input.Chief.StopSurface, input.Chief.ReferenceSurface)
+	res := asphere.Run(surfaces, fields, wavelengths, cfg, gc, input.Chief.StopSurface, input.Chief.ReferenceSurface, nil)
 
 	validateFields := asphereFieldsToItems(fields)
 	validations := validateAspheres(surfaces, res.Rankings, gc, cfg.TopK, 10, 32,

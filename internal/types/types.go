@@ -883,6 +883,27 @@ type AsphereCandidateConfig struct {
 	// scales to trace and verify (--scale-probes "0.1,0.25,0.5,1.0").
 	CalibrateScale *bool     `yaml:"calibrate_scale,omitempty"`
 	ScaleProbes    []float64 `yaml:"scale_probes,omitempty"`
+	// Diagnostics controls the verbose per-surface footprint data emitted by
+	// the focus/OPD analysis. Recognized values are "opd" (OPD map, existing
+	// opd_profiles) and "focus" (T/S focus channel). When empty, only the
+	// rankings are emitted (backward compatible); with "focus", the result
+	// carries the per-field T/S focus and the per-ray footprint maps. The
+	// CLI flag is --diagnostics (comma-separated), the YAML field is
+	// diagnostics.
+	Diagnostics []string `yaml:"diagnostics,omitempty"`
+	// FocusSamples is the number of rays per T/S fan for the focus channel
+	// (CLI --focus-samples, YAML focus_samples). 0 means the default (17).
+	FocusSamples int `yaml:"focus_samples,omitempty"`
+	// FocusFans selects which fans to trace for the focus channel. Supported
+	// values are "tangential" and "sagittal" (CLI --focus-fans, YAML
+	// focus_fans). Empty means both.
+	FocusFans []string `yaml:"focus_fans,omitempty"`
+	// RankingProfile selects the ranking emphasis for --apply: "practical"
+	// (default), "wavefront", "field", or "custom". Focus metrics are
+	// diagnostic-only in the first version and do not change the default
+	// practical_score; the profile only switches which column drives
+	// --apply's selection when focus diagnostics are on.
+	RankingProfile string `yaml:"ranking_profile,omitempty"`
 }
 
 // AsphereScoreWeights are the weights of the composite surface score
@@ -965,6 +986,20 @@ type AsphereSurfaceScore struct {
 	Sensitivity            *AsphereSensitivityMatrix `yaml:"sensitivity,omitempty"`
 	Validation             *AsphereValidation        `yaml:"validation,omitempty"`
 	Warnings               []string                  `yaml:"warnings,omitempty"`
+	// Focus channel (diagnostic-only in the first version). Populated when the
+	// focus diagnostics are enabled; they report how a trial rotationally
+	// symmetric asphere on this surface moves the per-field tangential and
+	// sagittal best-focus planes.
+	FocusMeanFitR2     float64 `yaml:"focus_mean_fit_r2,omitempty"`
+	FocusTSFitR2       float64 `yaml:"focus_ts_fit_r2,omitempty"`
+	BaseRMSMeanFocus   float64 `yaml:"base_rms_mean_focus_mm,omitempty"`
+	TrialRMSMeanFocus  float64 `yaml:"trial_rms_mean_focus_mm,omitempty"`
+	BaseRMSTSSplit     float64 `yaml:"base_rms_ts_split_mm,omitempty"`
+	TrialRMSTSSplit    float64 `yaml:"trial_rms_ts_split_mm,omitempty"`
+	FieldCurvatureGain float64 `yaml:"field_curvature_gain,omitempty"`
+	AstigmatismGain    float64 `yaml:"astigmatism_gain,omitempty"`
+	TangentialGain     float64 `yaml:"tangential_gain,omitempty"`
+	SagittalGain       float64 `yaml:"sagittal_gain,omitempty"`
 }
 
 // AsphereOPDField is one field's mean OPD profile across a surface's polar
@@ -981,6 +1016,97 @@ type AsphereOPDField struct {
 	OPDMinus   []float64 `yaml:"opd_minus,omitempty"`   // -s half-mean OPD per t bin (mm)
 }
 
+// AsphereFocusEntry is the best-focus position for one meridian (tangential or
+// sagittal) of a (field, wavelength) pair.
+type AsphereFocusEntry struct {
+	BestZ        float64 `yaml:"best_z_mm"`
+	RMSLineWidth float64 `yaml:"rms_line_width_mm"`
+}
+
+// AsphereTSFocus holds the tangential and sagittal best-focus entries.
+type AsphereTSFocus struct {
+	Tangential AsphereFocusEntry `yaml:"tangential"`
+	Sagittal   AsphereFocusEntry `yaml:"sagittal"`
+}
+
+// AsphereDerivedFocus contains the combined tangential/sagittal quantities for
+// one (field, wavelength).
+type AsphereDerivedFocus struct {
+	MeanFocusBase  float64 `yaml:"mean_focus_base_mm"`
+	MeanFocusTrial float64 `yaml:"mean_focus_trial_mm"`
+	TSSplitBase    float64 `yaml:"ts_split_base_mm"`
+	TSSplitTrial   float64 `yaml:"ts_split_trial_mm"`
+}
+
+// AsphereFieldFocus is the per-field, per-wavelength T/S focus data.
+type AsphereFieldFocus struct {
+	FieldID    int             `yaml:"field_id"`
+	Wavelength float64         `yaml:"wavelength_nm"`
+	Base       AsphereTSFocus  `yaml:"base"`
+	Trial      AsphereTSFocus  `yaml:"trial"`
+	Derived    AsphereDerivedFocus `yaml:"derived"`
+}
+
+// AsphereFocusSample is one ray's local focus residual on a candidate surface
+// for the focus footprint map.
+type AsphereFocusSample struct {
+	PupilX   float64 `yaml:"pupil_x"`
+	PupilY   float64 `yaml:"pupil_y"`
+	HitX     float64 `yaml:"hit_x_mm"`
+	HitY     float64 `yaml:"hit_y_mm"`
+	FanKind  string  `yaml:"fan_kind"`
+	RMM      float64 `yaml:"r_mm"`
+	Residual float64 `yaml:"residual_mm"`
+	DeltaZ   float64 `yaml:"delta_z_mm"`
+}
+
+// AsphereRadialFit is the radial fit result for one target quantity on a
+// candidate surface (wavefront OPD, mean focus, T-S split).
+type AsphereRadialFit struct {
+	Target       string    `yaml:"target"`
+	Basis        []string  `yaml:"basis"`
+	Coefficients []float64 `yaml:"coefficients"`
+	R2           float64   `yaml:"r2"`
+	RMS          float64   `yaml:"rms"`
+}
+
+// AsphereSurfaceSummary is the per-surface summary of both channels.
+type AsphereSurfaceSummary struct {
+	Wavefront AsphereWavefrontSummary `yaml:"wavefront"`
+	Focus     AsphereFocusSummary     `yaml:"focus"`
+}
+
+// AsphereWavefrontSummary is the OPD channel summary for one surface.
+type AsphereWavefrontSummary struct {
+	RadialFitR2  float64 `yaml:"radial_fit_r2"`
+	RadialFitRMS float64 `yaml:"radial_fit_rms_opd_mm"`
+	Conflict     float64 `yaml:"conflict"`
+	Asymmetry    float64 `yaml:"asymmetry"`
+}
+
+// AsphereFocusSummary is the focus channel summary for one surface.
+type AsphereFocusSummary struct {
+	MeanFitR2          float64 `yaml:"mean_fit_r2"`
+	TSFitR2            float64 `yaml:"ts_fit_r2"`
+	BaseRMSMeanFocus   float64 `yaml:"base_rms_mean_focus_mm"`
+	TrialRMSMeanFocus  float64 `yaml:"trial_rms_mean_focus_mm"`
+	BaseRMSTSSplit     float64 `yaml:"base_rms_ts_split_mm"`
+	TrialRMSTSSplit    float64 `yaml:"trial_rms_ts_split_mm"`
+	FieldCurvatureGain float64 `yaml:"field_curvature_gain"`
+	AstigmatismGain    float64 `yaml:"astigmatism_gain"`
+}
+
+// AsphereSurfaceOutput carries the full diagnostic output for one candidate
+// surface, including footprint maps and per-field focus data.
+type AsphereSurfaceOutput struct {
+	SurfaceID     int                  `yaml:"surface_id"`
+	ApertureRadius float64             `yaml:"aperture_radius_mm"`
+	Summary       AsphereSurfaceSummary `yaml:"summary"`
+	RadialFits    []AsphereRadialFit    `yaml:"radial_fits,omitempty"`
+	Samples       []AsphereFocusSample  `yaml:"samples,omitempty"`
+	FieldFocus    []AsphereFieldFocus   `yaml:"field_focus,omitempty"`
+}
+
 // AsphereOPDProfile is the per-field OPD overlap data for one candidate
 // surface: how each field's beam's wavefront error varies across the surface,
 // and how much the fields' profiles overlap (the shared, aspherisable part).
@@ -992,9 +1118,10 @@ type AsphereOPDProfile struct {
 
 // AsphereCandidateResult is the `asphere` command's ranking output.
 type AsphereCandidateResult struct {
-	Rankings []AsphereSurfaceScore `yaml:"rankings,omitempty"`
-	Profiles []AsphereOPDProfile   `yaml:"opd_profiles,omitempty"`
-	Warnings []string              `yaml:"warnings,omitempty"`
+	Rankings    []AsphereSurfaceScore `yaml:"rankings,omitempty"`
+	Profiles    []AsphereOPDProfile   `yaml:"opd_profiles,omitempty"`
+	Surfaces    []AsphereSurfaceOutput `yaml:"surfaces,omitempty"`
+	Warnings    []string              `yaml:"warnings,omitempty"`
 }
 
 // AsphereValidation is the Phase-4 short-DLS validation of one inserted

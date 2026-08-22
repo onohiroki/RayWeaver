@@ -290,7 +290,7 @@ func TestRunTripletRanksAndFits(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TopK = 2
 
-	res := Run(surfaces, fields, nil, cfg, gc, 0, 8)
+	res := Run(surfaces, fields, nil, cfg, gc, 0, 8, nil)
 
 	if len(res.Rankings) != 8 {
 		t.Fatalf("rankings = %d, want 8", len(res.Rankings))
@@ -334,7 +334,7 @@ func TestRunTripletSensitivityMatrix(t *testing.T) {
 	cfg.TopK = 2
 	cfg.SensitivitySamples = 7
 
-	res := Run(surfaces, fields, nil, cfg, gc, 0, 8)
+	res := Run(surfaces, fields, nil, cfg, gc, 0, 8, nil)
 
 	withSens := 0
 	for _, r := range res.Rankings {

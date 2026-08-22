@@ -142,6 +142,17 @@ if [ "$CLEAN" = true ]; then
   rm -f "$OUTDIR"/asphere-demo-opd*.gnu "$OUTDIR"/asphere-demo-*-opd*.gnu
   rm -f "$OUTDIR"/asphere-demo-opd-overlap*.png "$OUTDIR"/asphere-demo-*-opd-overlap*.png
   rm -f "$OUTDIR"/asphere-demo-defocus*.png "$OUTDIR"/asphere-demo-*-defocus*.png
+  rm -f "$OUTDIR"/asphere-demo-defocus*.dat "$OUTDIR"/asphere-demo-*-defocus*.dat
+  rm -f "$OUTDIR"/asphere-demo-defocus*.gnu "$OUTDIR"/asphere-demo-*-defocus*.gnu
+  rm -f "$OUTDIR"/asphere-demo-ts-focus*.png "$OUTDIR"/asphere-demo-*-ts-focus*.png
+  rm -f "$OUTDIR"/asphere-demo-ts-focus*.dat "$OUTDIR"/asphere-demo-*-ts-focus*.dat
+  rm -f "$OUTDIR"/asphere-demo-ts-focus*.gnu "$OUTDIR"/asphere-demo-*-ts-focus*.gnu
+  rm -f "$OUTDIR"/asphere-demo-focus-radial*.png "$OUTDIR"/asphere-demo-*-focus-radial*.png
+  rm -f "$OUTDIR"/asphere-demo-focus-radial*.dat "$OUTDIR"/asphere-demo-*-focus-radial*.dat
+  rm -f "$OUTDIR"/asphere-demo-focus-radial*.gnu "$OUTDIR"/asphere-demo-*-focus-radial*.gnu
+  rm -f "$OUTDIR"/asphere-demo-focus-gain*.png "$OUTDIR"/asphere-demo-*-focus-gain*.png
+  rm -f "$OUTDIR"/asphere-demo-focus-gain*.dat "$OUTDIR"/asphere-demo-*-focus-gain*.dat
+  rm -f "$OUTDIR"/asphere-demo-focus-gain*.gnu "$OUTDIR"/asphere-demo-*-focus-gain*.gnu
   rm -f "$OUTDIR"/asphere-demo-wf-before*.yaml "$OUTDIR"/asphere-demo-*-wf-before*.yaml
   rm -f "$OUTDIR"/asphere-demo-wf-after*.yaml  "$OUTDIR"/asphere-demo-*-wf-after*.yaml
   rm -f "$OUTDIR"/asphere-demo-applied-initial*.yaml "$OUTDIR"/asphere-demo-*-applied-initial*.yaml
@@ -196,6 +207,17 @@ append_notes() {
   (the calibrated initial coefficients, no DLS yet): each field has +s and -s
   half-beam curves versus tangential beam coordinate t. Their separation is
   the sagittal asymmetry; each column has its own y-range and a zero reference.
+- The T/S focus chart shows per-field best-focus Z for tangential (T, solid)
+  and sagittal (S, dashed) fans: blue = all-spherical (base), red = initial
+  asphere (trial). Separation between T and S at a given field = astigmatism.
+  Vertical shift of the red curves toward a common plane = field-curvature
+  correction.
+- The focus radial-fit chart overlays the polynomial fit (r², r⁴, r⁶) of
+  mean focus residual and T-S split versus field angle for each candidate
+  surface.  Steeper curves = larger field-dependent defocus/astigmatism.
+- The focus gain chart summarises how much the asphere corrects field
+  curvature (blue) and astigmatism (red) per candidate surface, from 0 (no
+  improvement) to 1 (perfect correction).
 EOF
 }
 
@@ -388,6 +410,299 @@ EOF
   echo "Written: $out"
 }
 
+# ── T/S focus position chart (per candidate surface) ──────────
+# For every candidate surface in the asphere ranking, plots per-field
+# tangential (T) and sagittal (S) best-focus Z for the all-spherical system
+# (base) and right after the initial asphere is inserted (trial).
+# Requires gnuplot and the focus channel data (--diagnostics focus).
+plot_ts_focus() {
+  local out="$1" rank="$2" label="$3" input_yaml="${4:-}"
+  local gnuplot="${GNUPLOT:-$(command -v gnuplot || true)}"
+  if [[ -z "$gnuplot" && -x /opt/homebrew/bin/gnuplot ]]; then gnuplot=/opt/homebrew/bin/gnuplot; fi
+  if [[ -z "$gnuplot" ]]; then
+    echo "  (T/S focus chart skipped: gnuplot not available)"
+    return 0
+  fi
+
+  local nsurf
+  nsurf=$("$RAYWEAVE" query --len asphere_candidate_result.surfaces < "$rank" 2>/dev/null || echo 0)
+  if [[ -z "$nsurf" || "$nsurf" -eq 0 ]]; then
+    echo "  (T/S focus chart skipped: no focus data)"
+    return 0
+  fi
+
+  # Extract field angles from the input YAML.
+  local angles_str=""
+  if [[ -n "$input_yaml" && -f "$input_yaml" ]]; then
+    angles_str=$("$YQ_BIN" e '.chief.fields[].angle // 0' "$input_yaml" 2>/dev/null | tr '\n' ' ')
+  fi
+  if [[ -z "$angles_str" ]]; then
+    echo "  (T/S focus chart skipped: cannot read field angles)"
+    return 0
+  fi
+  read -ra angles <<< "$angles_str"
+  local nfields=${#angles[@]}
+
+  # Build one data file per surface: angle base_t base_s trial_t trial_s
+  local base="$out"
+  for ((si=0; si<nsurf; si++)); do
+    local dat="$base.$si.dat"
+    local t_vals s_vals tt_vals ts_vals
+    t_vals=$("$YQ_BIN" e ".asphere_candidate_result.surfaces[$si].field_focus[].base.tangential.best_z_mm // \"\"" "$rank" 2>/dev/null | tr '\n' '|')
+    s_vals=$("$YQ_BIN" e ".asphere_candidate_result.surfaces[$si].field_focus[].base.sagittal.best_z_mm // \"\"" "$rank" 2>/dev/null | tr '\n' '|')
+    tt_vals=$("$YQ_BIN" e ".asphere_candidate_result.surfaces[$si].field_focus[].trial.tangential.best_z_mm // \"\"" "$rank" 2>/dev/null | tr '\n' '|')
+    ts_vals=$("$YQ_BIN" e ".asphere_candidate_result.surfaces[$si].field_focus[].trial.sagittal.best_z_mm // \"\"" "$rank" 2>/dev/null | tr '\n' '|')
+
+    IFS='|' read -ra t_arr <<< "$t_vals"
+    IFS='|' read -ra s_arr <<< "$s_vals"
+    IFS='|' read -ra tt_arr <<< "$tt_vals"
+    IFS='|' read -ra ts_arr <<< "$ts_vals"
+
+    : > "$dat"
+    local nvalid=0
+    for ((fi=0; fi<nfields && fi<${#t_arr[@]}; fi++)); do
+      local bt="${t_arr[$fi]}" bs="${s_arr[$fi]}" tt="${tt_arr[$fi]}" ts="${ts_arr[$fi]}"
+      [[ -z "$bt" || -z "$bs" || -z "$tt" || -z "$ts" ]] && continue
+      printf "%s %s %s %s %s\n" "${angles[$fi]}" "$bt" "$bs" "$tt" "$ts" >> "$dat"
+      nvalid=$((nvalid+1))
+    done
+    [[ "$nvalid" -eq 0 ]] && rm -f "$dat"
+  done
+
+  # Check if any data was generated
+  local has_data=false
+  for ((si=0; si<nsurf; si++)); do
+    [[ -f "$base.$si.dat" ]] && has_data=true && break
+  done
+  if ! $has_data; then
+    echo "  (T/S focus chart skipped: no valid focus data)"
+    return 0
+  fi
+
+  # Gnuplot: multiplot with one row per candidate surface
+  local gs="$base.gnu"
+  {
+    echo "set terminal pngcairo size 900,$((nsurf * 380))"
+    echo "set output \"$out\""
+    echo "set multiplot layout $nsurf,1 rowsfirst title \"T/S best-focus Z per candidate surface — $label\" font \",11\""
+    echo "set xlabel \"field angle (deg)\""
+    echo "set ylabel \"best-focus Z (mm)\""
+    echo "set grid"
+    echo "set key outside right"
+    echo "set yzeroaxis dt 2 linecolor rgb \"#999999\""
+    for ((si=0; si<nsurf; si++)); do
+      [[ ! -f "$base.$si.dat" ]] && continue
+      local sid
+      sid=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].surface_id" < "$rank" 2>/dev/null || echo "?")
+      echo "set title sprintf(\"surface $sid\")"
+      echo "plot \"$base.$si.dat\" using 1:2 with linespoints pt 7 ps 0.8 lc rgb \"#1f77b4\" title \"base T\", \\"
+      echo "     \"$base.$si.dat\" using 1:3 with linespoints pt 5 ps 0.8 lc rgb \"#1f77b4\" dt 2 title \"base S\", \\"
+      echo "     \"$base.$si.dat\" using 1:4 with linespoints pt 9 ps 0.8 lc rgb \"#d62728\" title \"trial T\", \\"
+      echo "     \"$base.$si.dat\" using 1:5 with linespoints pt 6 ps 0.8 lc rgb \"#d62728\" dt 2 title \"trial S\""
+    done
+    echo "unset multiplot"
+  } > "$gs"
+  GNUTERM=pngcairo "$gnuplot" "$gs" 2>/dev/null
+  echo "Written: $out"
+}
+
+# ── Focus radial-fit overlay (per candidate surface) ───────────
+# For every candidate surface, overlays the radial polynomial fit (r², r⁴, r⁶)
+# of mean focus and T-S split versus field angle, comparing base (all-spherical)
+# and trial (initial asphere) states.  Two columns per surface: left = mean
+# focus fit, right = T-S split fit.  Requires gnuplot and focus channel data.
+plot_focus_radial_fit() {
+  local out="$1" rank="$2" label="$3" input_yaml="${4:-}"
+  local gnuplot="${GNUPLOT:-$(command -v gnuplot || true)}"
+  if [[ -z "$gnuplot" && -x /opt/homebrew/bin/gnuplot ]]; then gnuplot=/opt/homebrew/bin/gnuplot; fi
+  if [[ -z "$gnuplot" ]]; then
+    echo "  (focus radial-fit chart skipped: gnuplot not available)"
+    return 0
+  fi
+
+  local nsurf
+  nsurf=$("$RAYWEAVE" query --len asphere_candidate_result.surfaces < "$rank" 2>/dev/null || echo 0)
+  if [[ -z "$nsurf" || "$nsurf" -eq 0 ]]; then
+    echo "  (focus radial-fit chart skipped: no focus data)"
+    return 0
+  fi
+
+  # Extract field angles
+  local angles_str=""
+  if [[ -n "$input_yaml" && -f "$input_yaml" ]]; then
+    angles_str=$("$YQ_BIN" e '.chief.fields[].angle // 0' "$input_yaml" 2>/dev/null | tr '\n' ' ')
+  fi
+  if [[ -z "$angles_str" ]]; then
+    echo "  (focus radial-fit chart skipped: cannot read field angles)"
+    return 0
+  fi
+  read -ra angles <<< "$angles_str"
+  local nfields=${#angles[@]}
+
+  local base="$out"
+  local has_data=false
+  for ((si=0; si<nsurf; si++)); do
+    local dat_mean="$base.$si.mean.dat" dat_ts="$base.$si.ts.dat"
+    : > "$dat_mean" : > "$dat_ts"
+
+    # Extract coefficients for focus_mean (base and trial)
+    local c_base_m0 c_base_m1 c_base_m2 c_trial_m0 c_trial_m1 c_trial_m2
+    for target in "focus_mean" "focus_ts"; do
+      local prefix
+      if [[ "$target" == "focus_mean" ]]; then prefix="mean"; else prefix="ts"; fi
+      local dat_file="$base.$si.${prefix}.dat"
+
+      local b0="" b1="" b2="" t0="" t1="" t2=""
+      local nfit
+      nfit=$("$RAYWEAVE" query --len "asphere_candidate_result.surfaces[$si].radial_fits" < "$rank" 2>/dev/null || echo 0)
+      for ((fi=0; fi<nfit; fi++)); do
+        local rt
+        rt=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].radial_fits[$fi].target" < "$rank" 2>/dev/null)
+        [[ "$rt" != "$target" ]] && continue
+        # Extract 3 coefficients (r², r⁴, r⁶ basis)
+        b0=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].radial_fits[$fi].coefficients[0]" < "$rank" 2>/dev/null)
+        b1=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].radial_fits[$fi].coefficients[1]" < "$rank" 2>/dev/null)
+        b2=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].radial_fits[$fi].coefficients[2]" < "$rank" 2>/dev/null)
+        # For trial, we don't have separate trial radial_fits; use the same
+        # coefficients (the fit is on the base data; the chart shows the fit shape)
+        t0="$b0"; t1="$b1"; t2="$b2"
+        break
+      done
+      [[ -z "$b0" ]] && continue
+
+      # Evaluate polynomial at each field angle: val = c0*x² + c1*x⁴ + c2*x⁶
+      : > "$dat_file"
+      for ((fi=0; fi<nfields; fi++)); do
+        local a="${angles[$fi]}"
+        awk -v a="$a" -v c0="$b0" -v c1="$b1" -v c2="$b2" \
+          'BEGIN { x2=a*a; printf "%.6f %.9g\n", a, c0*x2 + c1*x2*x2 + c2*x2*x2*x2 }' >> "$dat_file"
+      done
+      has_data=true
+    done
+  done
+
+  if ! $has_data; then
+    echo "  (focus radial-fit chart skipped: no radial fit data)"
+    rm -f "$base".*.dat "$base".*.gnu
+    return 0
+  fi
+
+  # Gnuplot: multiplot, 2 columns per surface (mean focus, T-S split)
+  # Only include surfaces that have at least one non-empty data file.
+  local gs="$base.gnu"
+  local panels=0
+  local panel_sids=()
+  local panel_dm=()
+  local panel_dts=()
+  for ((si=0; si<nsurf; si++)); do
+    local dm="$base.$si.mean.dat" dts="$base.$si.ts.dat"
+    local has_mean=false has_ts=false
+    [[ -f "$dm" && -s "$dm" ]] && has_mean=true
+    [[ -f "$dts" && -s "$dts" ]] && has_ts=true
+    if $has_mean || $has_ts; then
+      local sid
+      sid=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[$si].surface_id" < "$rank" 2>/dev/null || echo "?")
+      panel_sids+=("$sid")
+      panel_dm+=("$dm")
+      panel_dts+=("$dts")
+      panels=$((panels+1))
+    fi
+  done
+  if [[ "$panels" -eq 0 ]]; then
+    echo "  (focus radial-fit chart skipped: no valid radial fit data)"
+    rm -f "$base".*.dat "$base".*.gnu
+    return 0
+  fi
+  {
+    echo "set terminal pngcairo size 1200,$((panels * 380))"
+    echo "set output \"$out\""
+    echo "set multiplot layout $panels,2 rowsfirst title \"Focus radial fits — $label\" font \",11\""
+    echo "set xlabel \"field angle (deg)\""
+    echo "set grid"
+    echo "set key outside right"
+    for ((pi=0; pi<panels; pi++)); do
+      local sid="${panel_sids[$pi]}" dm="${panel_dm[$pi]}" dts="${panel_dts[$pi]}"
+      if [[ -s "$dm" ]]; then
+        echo "set title sprintf(\"surface $sid — mean focus fit\")"
+        echo "set ylabel \"mean focus (mm)\""
+        echo "plot \"$dm\" using 1:2 with lines lw 2 lc rgb \"#1f77b4\" title \"fit\""
+      fi
+      if [[ -s "$dts" ]]; then
+        echo "set title sprintf(\"surface $sid — T-S split fit\")"
+        echo "set ylabel \"T-S split (mm)\""
+        echo "plot \"$dts\" using 1:2 with lines lw 2 lc rgb \"#d62728\" title \"fit\""
+      fi
+    done
+    echo "unset multiplot"
+  } > "$gs"
+  GNUTERM=pngcairo "$gnuplot" "$gs" 2>/dev/null
+  echo "Written: $out"
+}
+
+# ── Focus gain bar chart (per candidate surface) ──────────────
+# Grouped bar chart of field-curvature gain and astigmatism gain for each
+# candidate surface.  Gains range 0..1 (1 = perfect correction).
+# Requires gnuplot and focus channel data.
+plot_focus_gain() {
+  local out="$1" rank="$2" label="$3"
+  local gnuplot="${GNUPLOT:-$(command -v gnuplot || true)}"
+  if [[ -z "$gnuplot" && -x /opt/homebrew/bin/gnuplot ]]; then gnuplot=/opt/homebrew/bin/gnuplot; fi
+  if [[ -z "$gnuplot" ]]; then
+    echo "  (focus gain chart skipped: gnuplot not available)"
+    return 0
+  fi
+
+  local nrank
+  nrank=$("$RAYWEAVE" query --len asphere_candidate_result.rankings < "$rank" 2>/dev/null || echo 0)
+  if [[ -z "$nrank" || "$nrank" -eq 0 ]]; then
+    echo "  (focus gain chart skipped: no rankings)"
+    return 0
+  fi
+
+  # Extract ranking surface IDs and matching gains via yq (single pass).
+  local dat="$out.dat"
+  : > "$dat"
+  local has_data=false
+  for ((ri=0; ri<nrank; ri++)); do
+    local sid fc astig
+    sid=$("$RAYWEAVE" query -r "asphere_candidate_result.rankings[$ri].surface_id" < "$rank" 2>/dev/null)
+    [[ -z "$sid" ]] && continue
+    # Find matching surface in surfaces[] by ID and read gains
+    fc=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[] | select(.surface_id == $sid) | .summary.focus.field_curvature_gain" < "$rank" 2>/dev/null || echo "")
+    astig=$("$RAYWEAVE" query -r "asphere_candidate_result.surfaces[] | select(.surface_id == $sid) | .summary.focus.astigmatism_gain" < "$rank" 2>/dev/null || echo "")
+    [[ -z "$fc" || -z "$astig" ]] && continue
+    printf "%s %s %s\n" "$sid" "$fc" "$astig" >> "$dat"
+    has_data=true
+  done
+  if ! $has_data; then
+    echo "  (focus gain chart skipped: no gain data)"
+    rm -f "$dat"
+    return 0
+  fi
+
+  local gs="$out.gnu"
+  local nrows
+  nrows=$(wc -l < "$dat" | tr -d ' ')
+  local barwidth
+  barwidth=$(awk -v n="$nrows" 'BEGIN { w=0.8/n; if (w>0.25) w=0.25; printf "%.4g", w }')
+  {
+    echo "set terminal pngcairo size 700,450"
+    echo "set output \"$out\""
+    echo "set title \"Focus gains per candidate surface — $label\""
+    echo "set xlabel \"surface ID\""
+    echo "set ylabel \"gain (0..1)\""
+    echo "set yrange [0:1.05]"
+    echo "set grid y"
+    echo "set key outside right"
+    echo "set style fill solid 0.8 border -1"
+    echo "set xtics rotate"
+    echo "plot \"$dat\" using (column(0)-0.5):2:($barwidth) with boxes lc rgb \"#1f77b4\" title \"field curvature\", \\"
+    echo "     \"$dat\" using (column(0)+0.5):3:($barwidth) with boxes lc rgb \"#d62728\" title \"astigmatism\""
+  } > "$gs"
+  GNUTERM=pngcairo "$gnuplot" "$gs" 2>/dev/null
+  echo "Written: $out"
+}
+
 # ── Build the "initial asphere inserted" system for the before/after OPD chart ──
 # Writes a copy of `from` with the FIRST fitted candidate surface (the one the
 # demo will aspherize; unfit rankings like the image plane are skipped) turned
@@ -448,7 +763,8 @@ run_case() {
 
   # ── Step 1: candidate ranking ──
   echo "--- Step 1: candidate ranking (top $TOP_K) ---"
-  "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" < "$from" > "$rank"
+  "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
+    --diagnostics opd,focus < "$from" > "$rank"
   {
     printf "  %-6s %10s %10s %10s %10s\n" "surf" "score" "sens.imprv" "asym" "cons"
     for ri in $(seq 0 $((TOP_K - 1))); do
@@ -470,7 +786,8 @@ run_case() {
     echo "  (before/after OPD chart skipped: yq not available)"
   elif build_applied_initial "$rank" "$from" "$applied_init"; then
     echo "Written: $applied_init"
-    "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" < "$applied_init" > "$rank_after" 2>/dev/null
+    "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
+      --diagnostics opd,focus < "$applied_init" > "$rank_after" 2>/dev/null
     plot_opd_overlap "$OUTDIR/asphere-demo${tag}-opd-overlap.png" \
       "$rank" "$OUTDIR/asphere-demo${tag}-opd-before" "all-spherical (before)" \
       "$rank_after" "$OUTDIR/asphere-demo${tag}-opd-after" "initial asphere (after)"
@@ -478,6 +795,18 @@ run_case() {
     echo "  (before/after OPD chart skipped: top candidate has no initial coefficients)"
   fi
   echo
+
+  # ── Step 1b-f: Focus Channel charts (T/S focus, radial fit, gain) ──
+  if [[ -n "$YQ_BIN" ]]; then
+    echo "--- Step 1b-f: Focus Channel charts ---"
+    plot_ts_focus "$OUTDIR/asphere-demo${tag}-ts-focus.png" \
+      "$rank" "$label" "$from"
+    plot_focus_radial_fit "$OUTDIR/asphere-demo${tag}-focus-radial.png" \
+      "$rank" "$label" "$from"
+    plot_focus_gain "$OUTDIR/asphere-demo${tag}-focus-gain.png" \
+      "$rank" "$label"
+    echo
+  fi
 
   # ── Step 1c: field defocus chart (before/after comparison) ───
   if [[ -n "$YQ_BIN" ]] && build_applied_initial "$rank" "$from" "$applied_init"; then
@@ -495,7 +824,8 @@ run_case() {
   # ── Step 2: validation ──
   echo "--- Step 2: short-DLS validation (spot-RMS merit, $DLS_ITER it + ${NUM_RAYS} rays) ---"
   "$RAYWEAVE" asphere --validate --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
-    --dls-iter "$DLS_ITER" --num-rays "$NUM_RAYS" < "$from" > "$validated"
+    --dls-iter "$DLS_ITER" --num-rays "$NUM_RAYS" --diagnostics opd,focus \
+    < "$from" > "$validated"
   {
     printf "  %-6s %12s %12s %12s %13s\n" "surf" "before" "after" "imprv" "a4"
     for ri in $(seq 0 $((TOP_K - 1))); do
@@ -518,7 +848,8 @@ run_case() {
   # ── Step 3: apply the top-ranked aspherical ──
   echo "--- Step 3: inserting the top-ranked aspherical surface (--apply) ---"
   "$RAYWEAVE" asphere --apply --top-k "$TOP_K" \
-    --dls-iter "$DLS_ITER" --num-rays "$NUM_RAYS" < "$from" > "$applied"
+    --dls-iter "$DLS_ITER" --num-rays "$NUM_RAYS" --diagnostics opd,focus \
+    < "$from" > "$applied"
   echo "Written: $applied" | tee -a "$result"
   echo
 

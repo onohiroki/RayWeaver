@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/hiroki/rayweaver/internal/asphere"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -30,6 +31,10 @@ func runAsphere(data []byte) {
 	apply := fs.Bool("apply", false, "insert the top-ranked DLS-validated asphere onto its surface (implies --validate) and output the modified system")
 	dlsIter := fs.Int("dls-iter", 20, "DLS iterations per validated surface (with --validate)")
 	numRays := fs.Int("num-rays", 0, "pupil grid rays for validation DLS (default 64)")
+	diagnostics := fs.String("diagnostics", "", "comma-separated diagnostics to emit: opd (OPD map, existing), focus (T/S focus channel). Empty = no extra data (backward compatible)")
+	focusSamples := fs.Int("focus-samples", 0, "rays per T/S fan for focus channel (default 17)")
+	focusFans := fs.String("focus-fans", "", "comma-separated: tangential,sagittal (default both)")
+	rankingProfile := fs.String("ranking", "", "ranking profile for --apply selection: practical (default), wavefront, field")
 	fs.Parse(os.Args[2:])
 
 	input := parseYAML[types.Input](data)
@@ -68,6 +73,23 @@ func runAsphere(data []byte) {
 		cfg.ScaleProbes = parseFloatList(*scaleProbes, "scale probe")
 	}
 
+	// Focus channel flags: --diagnostics, --focus-fans, --focus-samples, --ranking.
+	if input.Asphere == nil {
+		input.Asphere = &types.AsphereCandidateConfig{}
+	}
+	if *diagnostics != "" {
+		input.Asphere.Diagnostics = parseDiagnostics(*diagnostics)
+	}
+	if *focusSamples > 0 {
+		input.Asphere.FocusSamples = *focusSamples
+	}
+	if *focusFans != "" {
+		input.Asphere.FocusFans = parseCommaList(*focusFans)
+	}
+	if *rankingProfile != "" {
+		input.Asphere.RankingProfile = *rankingProfile
+	}
+
 	// Principle 3: echo the flag-won analysis values back into the output's
 	// asphere_candidate: section (only for flags actually set).
 	writeBackAsphereConfig(&input, cfg, fs)
@@ -98,7 +120,7 @@ func runAsphere(data []byte) {
 	// during footprint generation.
 	surface.Precompute(surfaces)
 
-	res := asphere.Run(surfaces, fields, wavelengths, cfg, gc, stopSurface, input.Chief.ReferenceSurface)
+	res := asphere.Run(surfaces, fields, wavelengths, cfg, gc, stopSurface, input.Chief.ReferenceSurface, buildFocusConfig(input))
 
 	// Phase 4: optionally validate each fitted top-K asphere with a short DLS.
 	if (validateEff || applyEff) && dlsIterEff > 0 {
@@ -134,6 +156,7 @@ func runAsphere(data []byte) {
 		AsphereResult: &types.AsphereCandidateResult{
 			Rankings: res.Rankings,
 			Profiles: res.Profiles,
+			Surfaces: res.Surfaces,
 			Warnings: res.Warnings,
 		},
 	}
@@ -146,7 +169,8 @@ func runAsphere(data []byte) {
 // Only flags actually given are written back; untouched YAML stays as-is.
 func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.FlagSet) {
 	if !anyFlagSet(fs, "rings", "angles", "t-bins", "pupil-samples", "sensitivity-samples",
-		"top-k", "sag-scale", "calibrate-scale", "scale-probes") {
+		"top-k", "sag-scale", "calibrate-scale", "scale-probes",
+		"diagnostics", "focus-samples", "focus-fans", "ranking") {
 		return
 	}
 	if input.Asphere == nil {
@@ -180,6 +204,19 @@ func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.Fla
 	}
 	if flagWasSet(fs, "scale-probes") {
 		input.Asphere.ScaleProbes = cfg.ScaleProbes
+	}
+	if flagWasSet(fs, "diagnostics") {
+		// --diagnostics is handled by buildFocusConfig; write back here for YAML round-trip.
+		// The value was already applied to input.Asphere.Diagnostics by the caller.
+	}
+	if flagWasSet(fs, "focus-samples") {
+		// Already applied to input.Asphere.FocusSamples by the caller.
+	}
+	if flagWasSet(fs, "focus-fans") {
+		// Already applied to input.Asphere.FocusFans by the caller.
+	}
+	if flagWasSet(fs, "ranking") {
+		// Already applied to input.Asphere.RankingProfile by the caller.
 	}
 }
 
@@ -337,6 +374,69 @@ func resolveAsphereWavelengths(input types.Input, configFlag *string) []float64 
 	}
 	if len(out) == 0 {
 		out = []float64{types.DefaultWavelength}
+	}
+	return out
+}
+
+// buildFocusConfig builds the focus channel configuration from CLI flags and
+// YAML settings. Returns nil when focus diagnostics are not requested.
+func buildFocusConfig(input types.Input) *asphere.FocusConfig {
+	cfg := asphere.DefaultFocusConfig()
+	enabled := false
+
+	// YAML diagnostics
+	if input.Asphere != nil {
+		for _, d := range input.Asphere.Diagnostics {
+			if d == "focus" {
+				enabled = true
+			}
+		}
+	}
+
+	if !enabled {
+		return nil
+	}
+
+	if input.Asphere != nil {
+		if input.Asphere.FocusSamples > 0 {
+			cfg.NumSamples = input.Asphere.FocusSamples
+		}
+		if len(input.Asphere.FocusFans) > 0 {
+			cfg.Tangential = false
+			cfg.Sagittal = false
+			for _, f := range input.Asphere.FocusFans {
+				switch f {
+				case "tangential":
+					cfg.Tangential = true
+				case "sagittal":
+					cfg.Sagittal = true
+				}
+			}
+		}
+	}
+	return &cfg
+}
+
+// parseDiagnostics splits a comma-separated diagnostics string (e.g. "opd,focus").
+func parseDiagnostics(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// parseCommaList splits a comma-separated string.
+func parseCommaList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
 	}
 	return out
 }
