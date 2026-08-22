@@ -22,8 +22,8 @@ rayweave plot [-o file.svg|.png] [flags] < input.yaml
 | `--show-invalid-ray-fan` | boolean toggle, no value argument (default `false` = off): draw fan rays whose path carries an error code in full instead of the default hiding |
 | `--clip-invalid-ray-fan` | boolean toggle, no value argument (default `false` = off): draw error-coded fan rays only up to the first surface that errored |
 | `--glass-dir DIR` | AGF glass catalog directory (resolves material colours; written back into `glass_catalog.directory`) |
-| `--element-color "0=#ff0000,2=#00ff00"` | element fill colors by 0-based index (repeatable; hex, rgb(), or CSS named colors) |
-| `--asphere-color "#ff0000"` / `--asphere-color "3=#ff0000,7=#0000ff"` | asphere colors: single color for all aspheres, or per-surface-ID map (repeatable) |
+| `--element-color "1=#ff0000,3=#00ff00"` | element fill colors by 1-based index (repeatable; hex, rgb(), or CSS named colors) |
+| `--asphere-color "#ff0000"` / `--asphere-color "3=#ff0000,7=#0000ff"` | aspheric **surface edge** colors (the sag curve line, not the element fill): single color for all aspheres, or per-surface-ID map (repeatable) |
 
 ## Input
 
@@ -50,10 +50,26 @@ cat result.yaml | rayweave plot --config tele -o tele.png
 - Aspheric surfaces are drawn from the sag function (see the asphere rendering
   in `internal/render`).
 - **Element colors**: `--element-color "0=#ff0000,2=blue"` overrides the glass-based
-  fill for specific elements (0-based index from `findElements` order).
-- **Asphere colors**: `--asphere-color "#ff0000"` sets a single color for all
-  aspheric surfaces (lens elements and mirrors); `--asphere-color "3=#ff0000,7=blue"`
+  fill for specific elements (1-based index from `findElements` order).
+- **Asphere colors**: `--asphere-color "#ff0000"` colors the aspheric surface
+  **edge line** itself (the sag curve stroked on top of the lens body; mirrors
+  included) — the element fill keeps its glass colour. `--asphere-color "3=#ff0000,7=blue"`
   sets per-surface-ID colors. Both flags are repeatable.
+
+## Warnings (stderr, rendering continues)
+
+Three warning cases may appear when `--element-color` or `--asphere-color`
+are used:
+
+| Situation | Warning (stderr) |
+|---|---|
+| Element index out of range | `Warning: --element-color %d=... ignored: no element %d (elements are numbered 1..%d)` |
+| Non-aspheric surface ID | `Warning: --asphere-color %d=... ignored: surface %d is not an aspheric surface in this config` |
+| All-color but no aspheres | `Warning: --asphere-color %s ignored: this config has no aspheric surfaces` |
+
+All warnings are emitted to stderr, the run continues normally (exit 0), and the
+rendering proceeds with the effective (merged) values. The YAML output carries
+the merged element/asphere colors that were actually used.
 
 ## Invalid fan rays
 
@@ -84,14 +100,14 @@ cat samples/us2645157.yaml \
   | rayweave trace \
   | rayweave plot -o diagram.png
 
-# Custom element colors (element 0 = red, element 2 = blue)
+# Custom element colors (element 1 = red, element 3 = blue)
 cat samples/us2645157.yaml \
   | rayweave chief --clear-aperture \
   | rayweave chief --marginal-rays \
   | rayweave trace \
-  | rayweave plot --element-color "0=#ff0000,2=blue" -o colored.svg
+  | rayweave plot --element-color "1=#ff0000,3=blue" -o colored.svg
 
-# Custom asphere color (all aspheres = green)
+# Custom asphere edge color (all aspheric surfaces = green)
 cat samples/us2645157.yaml \
   | rayweave chief --clear-aperture \
   | rayweave chief --marginal-rays \

@@ -65,7 +65,7 @@ func isGlassSurface(s types.Surface) bool {
 
 func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 	var elems []element
-	elemIdx := 0
+	elemIdx := 1
 	for i := 0; i < len(surfaces); {
 		if !isGlassSurface(surfaces[i]) {
 			i++
@@ -91,6 +91,11 @@ func findElements(surfaces []types.Surface, globalMaxH float64) []element {
 		i = r2
 	}
 	return elems
+}
+
+// CountElements returns how many lens elements findElements detects.
+func CountElements(surfaces []types.Surface) int {
+	return len(findElements(surfaces, globalMaxSemiDiameter(surfaces)))
 }
 
 func buildElemPath(e element, z1, z2 float64) string {

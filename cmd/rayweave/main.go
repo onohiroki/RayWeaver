@@ -311,28 +311,32 @@ Output: augmented YAML with paraxial_result: section:
 
 See: samples/us2645157.yaml (reference values)
 `)
-	case "plot":
-		fmt.Print(`Usage: rayweave plot [-o file.svg|.png] [--config ID] [--lens-width 1.5] [--ray-width 1.5] < input.yaml
+case "plot":
+		fmt.Print(`Usage: rayweave plot [-o file.svg|.png] [flags] < input.yaml
 
 Generates a cross-section drawing (SVG or PNG) of the lens
 system with ray paths overlaid.
 
 Options:
-  -o, --output file.svg   output file (.svg or .png; default: stdout = SVG)
-  --config ID          select a config by id (multi-config mode)
-  --lens-width 1.5     lens body stroke width in pixels
-  --ray-width 1.5      ray path stroke width in pixels
-  --scale 0            SVG/PNG scale factor (0 = auto)
-  --right-margin 20    right-side margin beyond image plane (% of lens length)
-  --fan-rays 11        max fan rays drawn per field in the lens diagram
-                         (0 = hide fan rays)
-  --show-invalid-ray-fan  boolean toggle, no value argument (default false):
-                         draw fan rays whose path carries an error code in
-                         full instead of the default hiding
-  --clip-invalid-ray-fan  boolean toggle, no value argument (default false):
-                         draw error-coded fan rays only up to the first
-                         surface that errored
-  --glass-dir DIR      AGF glass catalog directory
+  -o, --output file.svg|.png   output file (default: stdout = SVG)
+  --config ID                  select a config by id (multi-config mode)
+  --lens-width 1.5             lens body stroke width in pixels
+  --ray-width 1.5              ray path stroke width in pixels
+  --scale 0                    SVG/PNG scale factor (0 = auto)
+  --right-margin 20            right-side margin beyond image plane (% of lens length)
+  --fan-rays 11                max fan rays drawn per field (0 = hide fan rays)
+  --show-invalid-ray-fan       draw fan rays with error codes in full (boolean)
+  --clip-invalid-ray-fan       draw error-coded fan rays up to first error (boolean)
+  --glass-dir DIR              AGF glass catalog directory
+  --element-color "1=#ff0000"  element fill colors by 1-based index (repeatable;
+	1 = first glass element; ignored if index out of range)
+  --asphere-color "#ff0000"    aspheric surface edge colors: single or per-surface-ID
+	 map (repeatable; the sag curve line, not the fill;
+	 surface IDs are 1-based; ignored if surface is not aspheric;
+	 --asphere-color with no surface IDs sets a global color;
+	 if given without aspheric surfaces warns and is ignored)
+
+Color formats: #rrggbb, #rgb, rgb(r,g,b), rgba(r,g,b,a), CSS named colors
 
 Invalid fan rays: a fan ray whose path records an error code on any surface
   (aperture_stop, missed_surface, total_internal_reflection, glass-path
@@ -356,6 +360,15 @@ glass_catalog section.  Ray colours follow the field angle
 
 Note: PNG output uses golang.org/x/image/vector for rasterization
   with anti-aliasing.  No external tools required.
+
+Warnings (stderr, exit 0, rendering continues):
+  --element-color out-of-range: index outside 1..N where N is the number
+    of lens elements detected. The warning identifies the invalid index.
+  --asphere-color non-asphere: surface ID specified does not correspond to
+    an aspheric surface in the current config. The warning identifies the
+    surface ID.
+  --asphere-color no-asphere: --asphere-color was given but this config
+    has no aspheric surfaces at all. The global color value is ignored.
 `)
 	case "vignette":
 		fmt.Print(`Usage: rayweave vignette [--iterations 3] [--min-glass-path 0.5] [--margin-mm 0.2] < system.yaml
@@ -671,7 +684,7 @@ Example:
   rayweave scale --efl 50 < ref25.yaml | rayweave optimize > optimized.yaml
 `)
 	case "asphere":
-		fmt.Print(`Usage: rayweave asphere [--rings 8] [--angles 16] [--pupil-samples 21] [--top-k 3] [--sag-scale 0.2] < system.yaml
+		fmt.Print(`Usage: rayweave asphere [--t-bins 8] [--pupil-samples 21] [--top-k 3] [--sag-scale 0.2] < system.yaml
 
 Ranks the candidate surfaces for asphere introduction and estimates safe initial
 even-order asphere coefficients (conic + A4..A12) from the per-field OPD
@@ -680,8 +693,7 @@ simultaneously correct the shared (common) OPD across fields while penalising
 inter-field conflict, manufacturing difficulty and optimisation instability.
 
 Options:
-  --rings N               polar cell radial rings (default 8)
-  --angles N              polar cell angular sectors (default 16)
+  --t-bins N              beam-frame tangential bins (default 8)
   --pupil-samples N       pupil grid radial samples (default 21)
   --sensitivity-samples N sensitivity trace radial samples (default 9; 0 = analytic proxy)
   --top-k N               number of top-ranked surfaces to fit (default 3)
@@ -712,8 +724,7 @@ with the asphere_candidate: section:
     sag_scale: 0.2              # safe starting scale (try 0.05..0.5)
     calibrate_scale: true       # per-surface scale from the measured response
     scale_probes: []            # explicit scales to verify ([] = quadratic)
-    cell_rings: 8
-    cell_angles: 16
+    t_bins: 8
     pupil_samples_radial: 21
     sensitivity_samples: 9      # 0 = analytic proxy only
     remove_tilt: true
@@ -724,8 +735,8 @@ with the asphere_candidate: section:
     apply: false                # insert the top validated asphere (--apply)
     validation_dls_iter: 20     # --dls-iter
     validation_num_rays: 64     # --num-rays
-    score_weights: {common: 0.35, unique: 0.15, fit: 0.20, sensitivity: 0.15,
-                     conflict: 0.10, manufacturing: 0.05}
+     score_weights: {common: 0.30, unique: 0.10, fit: 0.20, sensitivity: 0.15,
+                     conflict: 0.10, asym: 0.10, manufacturing: 0.05}
 
 Flags override the asphere_candidate: values; the effective (flag-won) values
 are written back into the output's asphere_candidate: section (CLI/YAML rule).
