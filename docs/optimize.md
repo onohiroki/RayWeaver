@@ -17,10 +17,15 @@ rayweave optimize [--verbose] [--log FILE] [--glass-dir DIR] [--exclude-param LI
 | `--log FILE` | write per-iteration progress to FILE (JSONL) |
 | `--glass-dir DIR` | AGF glass catalog directory |
 | `--exclude-param LIST` | comma-separated target param names to drop from the optimization variables (e.g. `conic,a4,a6`) |
+| `--central-diff` | use central-difference Jacobian (2nd-order accurate, 2× residual evaluations) |
+| `--bfgs` | enable BFGS-augmented damping (replaces μI with μ·B⁻¹) |
+| `--auto-scale` | enable Jacobian-based variable scaling (equalises sensitivity across variables) |
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`
 (CLI/YAML rule); `--exclude-param` removes the named targets from the echoed
 `optimization.variables`; `--verbose` / `--log` are run-stream flags.
+`--central-diff`, `--bfgs`, `--auto-scale` are written back into the
+output's `optimization` section.
 
 ## Input — single-config mode
 
@@ -29,6 +34,9 @@ optimization:
   method: dls
   jacobian_workers: 8       # parallel Jacobian goroutines (default GOMAXPROCS)
   max_iter: 100
+  central_diff: true        # central-difference Jacobian (2nd-order, 2× cost)
+  bfgs: true                # BFGS-augmented damping (μ·B⁻¹ instead of μI)
+  auto_scale: true          # Jacobian-based variable scaling
   variables:
     - name: s2_curvature
       target:
@@ -310,6 +318,17 @@ rayweave query --jsonl --where 'event=="breakdown"' \
 - `optimization.jacobian_workers` sets the goroutines used for the finite
   difference Jacobian (default `GOMAXPROCS`). The Jacobian is deterministic:
   the result is identical for any worker count.
+- `optimization.central_diff` switches to central-difference Jacobian
+  (2nd-order accurate). Doubles the residual evaluations per iteration but
+  improves gradient accuracy for tightly-coupled variables.
+- `optimization.bfgs` enables BFGS-augmented damping: the normal equations
+  use `μ·B⁻¹` instead of `μI`, where `B` is the damped-BFGS inverse Hessian
+  approximation. Gives superlinear convergence in well-conditioned valleys.
+- `optimization.auto_scale` enables Jacobian-based variable scaling: per-
+  variable factors `η_j = 1/√(H_jj + ε)` equalise the sensitivity of all
+  variables in the normal equations, compensating for min-max normalisation.
+- Grid traces for different (field, wavelength) pairs within a single merit
+  evaluation are now parallelised across CPU cores.
 - `configs[].ray_paths` is render-only metadata; the optimizer ignores it.
 - Glass variables (nd/vd) are constrained to stay inside the glass hull when
   `optimization.glass_hull.enabled: true`.

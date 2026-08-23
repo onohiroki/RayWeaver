@@ -115,6 +115,19 @@ func Solve(m Model) Result {
 		stallRelTol = 1e-4
 	}
 
+	// BFGS state: inverse Hessian approximation B (n×n). Initialised to I
+	// (equivalent to standard LM). Updated after each accepted step using the
+	// damped BFGS formula. The normal equations use μ·B⁻¹ instead of μI.
+	var bfgsB [][]float64
+	var bfgsPrevX, bfgsPrevG []float64
+	if opts.BFGS {
+		bfgsB = make([][]float64, nVars)
+		for i := range bfgsB {
+			bfgsB[i] = make([]float64, nVars)
+			bfgsB[i][i] = 1.0
+		}
+	}
+
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
 		if stopped(opts.Stop) {
 			status = StatusInterrupted
@@ -130,7 +143,7 @@ func Solve(m Model) Result {
 			status = StatusInterrupted
 			break
 		}
-		J_opt, r_opt, J_con, c_con := computeJacobians(m, xNorm, variables, scales, opts.Epsilon, opts.Workers, opts.Stop)
+		J_opt, r_opt, J_con, c_con := computeJacobians(m, xNorm, variables, scales, opts.Epsilon, opts.CentralDiff, opts.Workers, opts.Stop)
 		if stopped(opts.Stop) {
 			status = StatusInterrupted
 			break
@@ -141,6 +154,23 @@ func Solve(m Model) Result {
 			J, r = buildAugmented(J_opt, r_opt, J_con, c_con, lambdas, muConJ)
 		}
 
+		// Auto-scale: compute per-variable scaling factors from the
+		// Gauss-Newton Hessian diagonal H_jj = Σᵢ J_ij². The scaling
+		// η_j = 1/√(H_jj + ε) equalises the sensitivity of all variables
+		// in the normal equations, compensating for min-max normalisation
+		// not accounting for merit sensitivity (e.g. curvature vs nd/vd).
+		var eta []float64
+		if opts.AutoScale {
+			eta = make([]float64, nVars)
+			for j := 0; j < nVars; j++ {
+				hjj := 0.0
+				for i := 0; i < len(r); i++ {
+					hjj += J[i][j] * J[i][j]
+				}
+				eta[j] = 1.0 / math.Sqrt(hjj+1e-8)
+			}
+		}
+
 		g := make([]float64, nVars)
 		for j := 0; j < nVars; j++ {
 			sum := 0.0
@@ -148,6 +178,19 @@ func Solve(m Model) Result {
 				sum += J[i][j] * r[i]
 			}
 			g[j] = sum
+		}
+
+		// BFGS update: after an accepted step, update the inverse Hessian
+		// approximation using the damped BFGS formula. The step s and
+		// gradient change y are computed from the previous iteration's data.
+		if opts.BFGS && bfgsB != nil && bfgsPrevX != nil {
+			s := make([]float64, nVars)
+			y := make([]float64, nVars)
+			for j := 0; j < nVars; j++ {
+				s[j] = xNorm[j] - bfgsPrevX[j]
+				y[j] = g[j] - bfgsPrevG[j]
+			}
+			bfgsUpdate(bfgsB, s, y)
 		}
 
 		H := make([][]float64, nVars)
@@ -161,8 +204,35 @@ func Solve(m Model) Result {
 				H[j][k] = sum
 			}
 		}
-		for j := 0; j < nVars; j++ {
-			H[j][j] += mu
+		if opts.BFGS && bfgsB != nil {
+			// BFGS-augmented LM: replace μI with μ·B⁻¹.
+			// B⁻¹ is the Hessian approximation from the BFGS update.
+			if BInv, ok := invertB(bfgsB); ok {
+				for j := 0; j < nVars; j++ {
+					for k := 0; k < nVars; k++ {
+						H[j][k] += mu * BInv[j][k]
+					}
+				}
+			} else {
+				// Fallback to standard LM if B is not positive-definite.
+				for j := 0; j < nVars; j++ {
+					H[j][j] += mu
+				}
+			}
+		} else {
+			for j := 0; j < nVars; j++ {
+				H[j][j] += mu
+			}
+		}
+
+		// Apply auto-scaling: H_scaled = D·H·D, g_scaled = D·g.
+		if eta != nil {
+			for j := 0; j < nVars; j++ {
+				for k := 0; k < nVars; k++ {
+					H[j][k] *= eta[j] * eta[k]
+				}
+				g[j] *= eta[j]
+			}
 		}
 
 		negG := make([]float64, nVars)
@@ -200,6 +270,13 @@ func Solve(m Model) Result {
 		if delta == nil {
 			mu *= 2.0
 			continue
+		}
+
+		// Unscale the step: Δx = D^{-1}·Δx_scaled.
+		if eta != nil {
+			for j := 0; j < nVars; j++ {
+				delta[j] *= eta[j]
+			}
 		}
 
 		stepBeforeClamp := 0.0
@@ -357,6 +434,15 @@ func Solve(m Model) Result {
 				bestKnownMerit = merit
 				copy(bestXNorm, xNorm)
 				copy(bestKnownNorm, xNorm)
+			}
+			// Store x and g for the next iteration's BFGS update.
+			if opts.BFGS {
+				if bfgsPrevX == nil {
+					bfgsPrevX = make([]float64, nVars)
+					bfgsPrevG = make([]float64, nVars)
+				}
+				copy(bfgsPrevX, xNorm)
+				copy(bfgsPrevG, g)
 			}
 		}
 
@@ -535,7 +621,14 @@ func Solve(m Model) Result {
 // and constraints with respect to every variable. Each perturbed evaluation
 // writes a distinct column of J_opt/J_con, so the loop is embarrassingly
 // parallel and produces bit-identical results regardless of worker count.
-func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales []float64, epsilon float64, workers int, stop <-chan struct{}) ([][]float64, []float64, [][]float64, []float64) {
+//
+// When centralDiff is true, central differences are used:
+//   J[i][j] = (r(x+ε·e_j) - r(x-ε·e_j)) / (2ε)
+//
+// Otherwise, forward differences are used:
+//
+//	J[i][j] = (r(x+ε·e_j) - r(x)) / ε
+func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales []float64, epsilon float64, centralDiff bool, workers int, stop <-chan struct{}) ([][]float64, []float64, [][]float64, []float64) {
 	nVars := len(xNorm)
 	xPhys := denormalize(xNorm, variables, scales)
 
@@ -559,29 +652,61 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 		J_con[i] = make([]float64, nVars)
 	}
 
-	column := func(j int) {
-		xPert := make([]float64, nVars)
-		copy(xPert, xPhys)
-		xPert[j] += epsilon * scales[j]
+	if centralDiff {
+		column := func(j int) {
+			xPlus := make([]float64, nVars)
+			xMinus := make([]float64, nVars)
+			copy(xPlus, xPhys)
+			copy(xMinus, xPhys)
+			xPlus[j] += epsilon * scales[j]
+			xMinus[j] -= epsilon * scales[j]
 
-		rPert := m.ComputeResiduals(xPert)
-		cPert := m.ComputeConstraints(xPert)
+			rPlus := m.ComputeResiduals(xPlus)
+			cPlus := m.ComputeConstraints(xPlus)
+			rMinus := m.ComputeResiduals(xMinus)
+			cMinus := m.ComputeConstraints(xMinus)
 
-		for i := 0; i < nOpt; i++ {
-			diff := rPert[i] - r0[i]
-			J_opt[i][j] = sanitize(diff / epsilon)
+			twoEps := 2.0 * epsilon
+			for i := 0; i < nOpt; i++ {
+				J_opt[i][j] = sanitize((rPlus[i] - rMinus[i]) / twoEps)
+			}
+			for i := 0; i < nCon; i++ {
+				J_con[i][j] = sanitize((cPlus[i] - cMinus[i]) / twoEps)
+			}
 		}
-		for i := 0; i < nCon; i++ {
-			diff := cPert[i] - c0[i]
-			J_con[i][j] = sanitize(diff / epsilon)
-		}
-	}
 
-	if workers > 1 && nVars > 1 {
-		parallelColumns(nVars, workers, column, stop)
+		if workers > 1 && nVars > 1 {
+			parallelColumns(nVars, workers, column, stop)
+		} else {
+			for j := 0; j < nVars && !stopped(stop); j++ {
+				column(j)
+			}
+		}
 	} else {
-		for j := 0; j < nVars && !stopped(stop); j++ {
-			column(j)
+		column := func(j int) {
+			xPert := make([]float64, nVars)
+			copy(xPert, xPhys)
+			xPert[j] += epsilon * scales[j]
+
+			rPert := m.ComputeResiduals(xPert)
+			cPert := m.ComputeConstraints(xPert)
+
+			for i := 0; i < nOpt; i++ {
+				diff := rPert[i] - r0[i]
+				J_opt[i][j] = sanitize(diff / epsilon)
+			}
+			for i := 0; i < nCon; i++ {
+				diff := cPert[i] - c0[i]
+				J_con[i][j] = sanitize(diff / epsilon)
+			}
+		}
+
+		if workers > 1 && nVars > 1 {
+			parallelColumns(nVars, workers, column, stop)
+		} else {
+			for j := 0; j < nVars && !stopped(stop); j++ {
+				column(j)
+			}
 		}
 	}
 

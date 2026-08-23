@@ -60,6 +60,28 @@ type Options struct {
 	Workers            int
 	DisableStallEscape bool
 	EnableStallDone    bool
+	// CentralDiff uses central-difference Jacobian (2nd-order accurate) instead
+	// of forward-difference (1st-order). Doubles the number of residual
+	// evaluations per iteration but improves accuracy for tightly-coupled
+	// variables (e.g. high-order aspheres, multi-element lenses).
+	CentralDiff bool
+	// BFGS enables BFGS-augmented LM: the damping term μI is replaced by
+	// μ·B⁻¹ where B is the damped-BFGS inverse Hessian approximation. This
+	// improves convergence in well-conditioned valleys where the Hessian has
+	// strong anisotropy (typical for lens optimisation with many variables).
+	// The inverse Hessian is updated after each accepted step using the
+	// standard BFGS formula with damped update to maintain positive-
+	// definiteness. O(n²) per update, O(n³) to invert via Cholesky — for
+	// n ≤ 50 this is negligible relative to the Jacobian cost.
+	BFGS bool
+	// AutoScale enables Jacobian-based variable scaling: at each iteration,
+	// the diagonal of the Gauss-Newton Hessian H_jj = Σᵢ J_ij² is used to
+	// compute per-variable scaling factors η_j = 1/√(H_jj + ε), and the
+	// normal equations are scaled so all variables have comparable sensitivity.
+	// This compensates for the min-max normalisation not accounting for merit
+	// sensitivity (e.g. curvature vs nd/vd have very different Jacobian
+	// magnitudes). The scaling is recomputed every iteration.
+	AutoScale bool
 	// StallWindowFrac is the fraction of MaxIter used as the stalled-early-stop
 	// window (0 = default 20%, i.e. MaxIter/5, floor 50). Only consulted when
 	// EnableStallDone is true.

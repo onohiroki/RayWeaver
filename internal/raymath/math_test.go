@@ -345,6 +345,60 @@ func TestSolveLinearSingular(t *testing.T) {
 	}
 }
 
+func TestSolveCholesky(t *testing.T) {
+	// 2×2 SPD system: H = [[2,1],[1,3]], g = [3,5] → x = [0.8, 1.4]
+	H := [][]float64{{2, 1}, {1, 3}}
+	g := []float64{3, 5}
+	x, ok := SolveCholesky(H, g)
+	if !ok {
+		t.Fatal("SolveCholesky returned false for SPD system")
+	}
+	if math.Abs(x[0]-0.8) > 1e-10 || math.Abs(x[1]-1.4) > 1e-10 {
+		t.Errorf("SolveCholesky = %v, want [0.8, 1.4]", x)
+	}
+}
+
+func TestSolveCholesky3x3(t *testing.T) {
+	// 3×3 SPD diagonal system
+	H := [][]float64{{4, 0, 0}, {0, 9, 0}, {0, 0, 16}}
+	g := []float64{8, 18, 32}
+	x, ok := SolveCholesky(H, g)
+	if !ok {
+		t.Fatal("SolveCholesky returned false for diagonal SPD system")
+	}
+	for i, want := range []float64{2, 2, 2} {
+		if math.Abs(x[i]-want) > 1e-10 {
+			t.Errorf("x[%d] = %v, want %v", i, x[i], want)
+		}
+	}
+}
+
+func TestSolveCholeskyNotSPD(t *testing.T) {
+	// Non-positive-definite matrix (has a zero on diagonal)
+	H := [][]float64{{0, 1}, {1, 3}}
+	g := []float64{1, 2}
+	_, ok := SolveCholesky(H, g)
+	if ok {
+		t.Error("SolveCholesky should return false for non-SPD matrix")
+	}
+}
+
+func TestSolveCholeskyNegativeDiag(t *testing.T) {
+	H := [][]float64{{-1, 0}, {0, 1}}
+	g := []float64{1, 1}
+	_, ok := SolveCholesky(H, g)
+	if ok {
+		t.Error("SolveCholesky should return false for negative diagonal")
+	}
+}
+
+func TestSolveCholeskyEmpty(t *testing.T) {
+	_, ok := SolveCholesky(nil, nil)
+	if ok {
+		t.Error("SolveCholesky should return false for nil input")
+	}
+}
+
 func TestProjectOntoWavefront(t *testing.T) {
 	// dir along +Z: projection is identity in x/y, plane through c.
 	dir := types.Vec3{X: 0, Y: 0, Z: 1}

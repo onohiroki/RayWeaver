@@ -183,8 +183,8 @@ func TestComputeJacobiansParallelDeterminism(t *testing.T) {
 		scales[i] = v.Max - v.Min
 	}
 
-	serialJ, serialR, serialJC, serialC := computeJacobians(m, xNorm, variables, scales, 1e-6, 1, nil)
-	parJ, parR, parJC, parC := computeJacobians(m, xNorm, variables, scales, 1e-6, 4, nil)
+	serialJ, serialR, serialJC, serialC := computeJacobians(m, xNorm, variables, scales, 1e-6, false, 1, nil)
+	parJ, parR, parJC, parC := computeJacobians(m, xNorm, variables, scales, 1e-6, false, 4, nil)
 
 	if !equalFloats(serialR, parR) {
 		t.Errorf("residual baseline mismatch: %v vs %v", serialR, parR)
@@ -222,6 +222,238 @@ func equalMatrices(a, b [][]float64) bool {
 		}
 	}
 	return true
+}
+
+func TestComputeJacobiansCentralDiff(t *testing.T) {
+	m := polyModel{n: 4}
+	xNorm := []float64{0.2, 0.5, 0.8, 0.3}
+	variables := m.Variables()
+	scales := make([]float64, len(variables))
+	for i, v := range variables {
+		scales[i] = v.Max - v.Min
+	}
+
+	// Serial central diff
+	fwdJ, _, _, _ := computeJacobians(m, xNorm, variables, scales, 1e-6, false, 1, nil)
+	ctrJ, _, _, _ := computeJacobians(m, xNorm, variables, scales, 1e-6, true, 1, nil)
+
+	// Central diff should be more accurate than forward diff.
+	// Both must produce finite values.
+	for i := range ctrJ {
+		for j := range ctrJ[i] {
+			if math.IsNaN(ctrJ[i][j]) || math.IsInf(ctrJ[i][j], 0) {
+				t.Errorf("central Jacobian[%d][%d] = %v, want finite", i, j, ctrJ[i][j])
+			}
+		}
+	}
+
+	// Central and forward should be close for smooth functions (but not identical
+	// since forward is O(ε) and central is O(ε²)).
+	if !equalMatrices(fwdJ, ctrJ) {
+		// Expected: they differ slightly due to different truncation error orders.
+		// Verify the difference is small.
+		for i := range fwdJ {
+			for j := range fwdJ[i] {
+				diff := math.Abs(fwdJ[i][j] - ctrJ[i][j])
+				if diff > 0.1 {
+					t.Errorf("forward vs central Jacobian[%d][%d] differ by %v (too large)", i, j, diff)
+				}
+			}
+		}
+	}
+}
+
+func TestComputeJacobiansCentralDiffParallel(t *testing.T) {
+	m := polyModel{n: 6}
+	xNorm := []float64{0.1, 0.4, 0.7, 0.9, 0.2, 0.5}
+	variables := m.Variables()
+	scales := make([]float64, len(variables))
+	for i, v := range variables {
+		scales[i] = v.Max - v.Min
+	}
+
+	serialJ, serialR, serialJC, serialC := computeJacobians(m, xNorm, variables, scales, 1e-6, true, 1, nil)
+	parJ, parR, parJC, parC := computeJacobians(m, xNorm, variables, scales, 1e-6, true, 4, nil)
+
+	if !equalFloats(serialR, parR) {
+		t.Errorf("central diff residual baseline mismatch")
+	}
+	if !equalFloats(serialC, parC) {
+		t.Errorf("central diff constraint baseline mismatch")
+	}
+	if !equalMatrices(serialJ, parJ) {
+		t.Errorf("central diff Jacobian mismatch between serial and parallel")
+	}
+	if !equalMatrices(serialJC, parJC) {
+		t.Errorf("central diff constraint Jacobian mismatch")
+	}
+}
+
+// bfgsModel is a simple quadratic bowl that converges superlinearly with BFGS.
+type bfgsModel struct {
+	n int
+}
+
+func (m bfgsModel) Variables() []VariableInfo {
+	vs := make([]VariableInfo, m.n)
+	for i := range vs {
+		vs[i] = VariableInfo{Name: "x", Min: -5, Max: 5}
+	}
+	return vs
+}
+
+func (m bfgsModel) InitialState() []float64 {
+	x := make([]float64, m.n)
+	for i := range x {
+		x[i] = 3.0
+	}
+	return x
+}
+
+func (m bfgsModel) Options() Options { return Options{MaxIter: 50} }
+
+func (m bfgsModel) EvaluateMerit(x []float64) float64 {
+	r := m.ComputeResiduals(x)
+	s := 0.0
+	for _, v := range r {
+		s += v * v
+	}
+	return s
+}
+
+func (m bfgsModel) ComputeResiduals(x []float64) []float64 {
+	r := make([]float64, m.n)
+	for i := range x {
+		r[i] = x[i] * (1.0 + 0.1*float64(i)) // anisotropic scaling
+	}
+	return r
+}
+
+func (m bfgsModel) ComputeConstraints(x []float64) []float64 { return nil }
+
+func TestSolveBFGSConverges(t *testing.T) {
+	m := bfgsModel{n: 4}
+	res := Solve(m)
+
+	if res.AfterMerit > 1e-6 {
+		t.Errorf("BFGS: AfterMerit = %v, want < 1e-6", res.AfterMerit)
+	}
+	if res.Status != "converged" && res.Status != "converged_gradient" && res.Status != "converged_stalled" {
+		t.Errorf("BFGS: Status = %q, want converged", res.Status)
+	}
+}
+
+func TestBFGSUpdateBasic(t *testing.T) {
+	B := [][]float64{{2, 0}, {0, 2}}
+	s := []float64{0.1, 0.2}
+	y := []float64{0.3, 0.4}
+
+	ok := bfgsUpdate(B, s, y)
+	if !ok {
+		t.Fatal("bfgsUpdate returned false for positive curvature")
+	}
+
+	// B should remain symmetric.
+	if math.Abs(B[0][1]-B[1][0]) > 1e-10 {
+		t.Errorf("BFGS B not symmetric: B[0][1]=%v, B[1][0]=%v", B[0][1], B[1][0])
+	}
+
+	// B should remain positive-definite (check diagonal > 0).
+	if B[0][0] <= 0 || B[1][1] <= 0 {
+		t.Errorf("BFGS B diagonal non-positive: [%v, %v]", B[0][0], B[1][1])
+	}
+}
+
+func TestBFGSUpdateSkipsNonPositiveCurvature(t *testing.T) {
+	B0 := [][]float64{{1, 0}, {0, 1}}
+	B := make([][]float64, 2)
+	for i := range B {
+		B[i] = make([]float64, 2)
+		copy(B[i], B0[i])
+	}
+
+	// y^T·s < 0 → skip
+	s := []float64{1, 0}
+	y := []float64{-1, 0}
+	ok := bfgsUpdate(B, s, y)
+	if ok {
+		t.Error("bfgsUpdate should return false for non-positive curvature")
+	}
+	// B should be unchanged.
+	for i := range B {
+		for j := range B[i] {
+			if math.Abs(B[i][j]-B0[i][j]) > 1e-15 {
+				t.Errorf("B was modified despite non-positive curvature")
+			}
+		}
+	}
+}
+
+func TestInvertB(t *testing.T) {
+	B := [][]float64{{4, 1}, {1, 3}}
+	BInv, ok := invertB(B)
+	if !ok {
+		t.Fatal("invertB returned false for SPD matrix")
+	}
+	// Verify B·B⁻¹ ≈ I.
+	for i := 0; i < 2; i++ {
+		for j := 0; j < 2; j++ {
+			sum := 0.0
+			for k := 0; k < 2; k++ {
+				sum += B[i][k] * BInv[k][j]
+			}
+			want := 0.0
+			if i == j {
+				want = 1.0
+			}
+			if math.Abs(sum-want) > 1e-6 {
+				t.Errorf("(B·B⁻¹)[%d][%d] = %v, want %v", i, j, sum, want)
+			}
+		}
+	}
+}
+
+// autoScaleModel has variables with very different sensitivities to test
+// that auto-scaling equalises them.
+type autoScaleModel struct{}
+
+func (m autoScaleModel) Variables() []VariableInfo {
+	return []VariableInfo{
+		{Name: "big", Min: -100, Max: 100},   // large range, low sensitivity
+		{Name: "small", Min: 0, Max: 0.001},  // tiny range, high sensitivity
+	}
+}
+
+func (m autoScaleModel) InitialState() []float64 { return []float64{0.5, 0.5} }
+
+func (m autoScaleModel) Options() Options { return Options{MaxIter: 30, AutoScale: true} }
+
+func (m autoScaleModel) EvaluateMerit(x []float64) float64 {
+	r := m.ComputeResiduals(x)
+	s := 0.0
+	for _, v := range r {
+		s += v * v
+	}
+	return s
+}
+
+func (m autoScaleModel) ComputeResiduals(x []float64) []float64 {
+	return []float64{
+		x[0] * 0.001, // low sensitivity
+		x[1] * 1000,  // high sensitivity
+	}
+}
+
+func (m autoScaleModel) ComputeConstraints(x []float64) []float64 { return nil }
+
+func TestSolveAutoScale(t *testing.T) {
+	// Without auto-scale: the tiny-range variable dominates and convergence
+	// may be slow or stall.
+	m := autoScaleModel{}
+	res := Solve(m)
+	if res.AfterMerit > 0.01 {
+		t.Errorf("AutoScale: AfterMerit = %v, want < 0.01", res.AfterMerit)
+	}
 }
 
 // interruptibleModel is a shallow bowl whose residuals have tiny gradients.

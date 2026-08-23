@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"sync"
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/constraint"
@@ -1427,6 +1428,70 @@ func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, 
 	return o.gridForTerm(nil, gc, surfaces, cfg, term)
 }
 
+// precomputeGrids traces all grid merit terms for cfg in parallel, storing the
+// results in cache. This avoids redundant traces when multiple terms share the
+// same (field, wavelength) key, and the parallel trace overlaps the CPU-bound
+// ray-tracing across cores. The caller must have already called
+// sizeAutoApertures (which may also populate cache.extents).
+func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) {
+	// Collect unique grid keys from the scheduled terms.
+	type traceJob struct {
+		key gridKey
+		angle float64
+		wl  float64
+	}
+	seen := make(map[gridKey]bool)
+	var jobs []traceJob
+	for _, st := range o.scheduledTerms(cfg) {
+		if !isGridKind(st.term.kind) {
+			continue
+		}
+		angle := o.termFieldAngle(cfg, st.term, surfaces, gc)
+		key := gridKey{configID: cfg.id, fieldAngle: angle, wavelength: st.term.wavelength}
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		jobs = append(jobs, traceJob{key: key, angle: angle, wl: st.term.wavelength})
+	}
+	if len(jobs) == 0 {
+		return
+	}
+
+	// Trace in parallel with bounded concurrency.
+	workers := o.gridWorkers()
+	if workers > len(jobs) {
+		workers = len(jobs)
+	}
+	ch := make(chan traceJob, len(jobs))
+	for _, j := range jobs {
+		ch <- j
+	}
+	close(ch)
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range ch {
+				pupilZ := cfg.pupilZ
+				if cfg.pupilZs != nil {
+					if z, ok := cfg.pupilZs[job.angle]; ok {
+						pupilZ = z
+					}
+				}
+				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
+				mu.Lock()
+				cache.spots[job.key] = points
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 // isGridKind reports whether the merit kind is evaluated from the pupil-grid
 // spot statistics (rather than a chief-ray/paraxial/Seidel/wavefront kind).
 // The legacy empty kind means spot_rms.
@@ -1646,6 +1711,7 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 
 		o.restoreDiameters(cfg, surfaces)
 		o.sizeAutoApertures(cfg, surfaces, gc, cache)
+		o.precomputeGrids(cfg, surfaces, gc, cache)
 
 		cfgMerit := 0.0
 		for _, st := range o.scheduledTerms(cfg) {
@@ -1736,6 +1802,7 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 
 		o.restoreDiameters(cfg, surfaces)
 		o.sizeAutoApertures(cfg, surfaces, gc, cache)
+		o.precomputeGrids(cfg, surfaces, gc, cache)
 
 		for _, st := range o.scheduledTerms(cfg) {
 			term := st.term

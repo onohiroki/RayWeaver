@@ -60,6 +60,74 @@ func SolveLinearCopy(a [][]float64, b []float64) ([]float64, bool) {
 	return rhs, true
 }
 
+// SolveCholesky solves the symmetric positive-definite system H·x = g via
+// Cholesky decomposition H = L·Lᵀ. It returns the solution and reports true
+// on success. The input H is not mutated. On failure (non-positive-definite or
+// NaN/Inf) it returns nil, false so the caller can fall back to the general
+// Gaussian elimination solver.
+func SolveCholesky(H [][]float64, g []float64) ([]float64, bool) {
+	n := len(g)
+	if n == 0 {
+		return nil, false
+	}
+
+	// Copy H into L (lower triangular Cholesky factor).
+	L := make([][]float64, n)
+	for i := range L {
+		L[i] = make([]float64, n)
+		for j := range L[i] {
+			L[i][j] = sanitize(H[i][j])
+		}
+	}
+
+	for j := 0; j < n; j++ {
+		sum := L[j][j]
+		for k := 0; k < j; k++ {
+			sum -= L[j][k] * L[j][k]
+		}
+		if sum <= 0 {
+			return nil, false
+		}
+		Ljj := math.Sqrt(sum)
+		L[j][j] = Ljj
+		for i := j + 1; i < n; i++ {
+			sum := L[i][j]
+			for k := 0; k < j; k++ {
+				sum -= L[i][k] * L[j][k]
+			}
+			L[i][j] = sum / Ljj
+		}
+	}
+
+	// Forward substitution: L·y = g.
+	y := make([]float64, n)
+	for i := 0; i < n; i++ {
+		sum := sanitize(g[i])
+		for k := 0; k < i; k++ {
+			sum -= L[i][k] * y[k]
+		}
+		y[i] = sum / L[i][i]
+	}
+
+	// Back substitution: Lᵀ·x = y.
+	x := make([]float64, n)
+	for i := n - 1; i >= 0; i-- {
+		sum := y[i]
+		for k := i + 1; k < n; k++ {
+			sum -= L[k][i] * x[k]
+		}
+		x[i] = sum / L[i][i]
+	}
+
+	// Verify the solution is finite.
+	for i := 0; i < n; i++ {
+		if math.IsNaN(x[i]) || math.IsInf(x[i], 0) {
+			return nil, false
+		}
+	}
+	return x, true
+}
+
 func sanitize(v float64) float64 {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return 0
