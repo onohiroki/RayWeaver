@@ -5,14 +5,15 @@ one row per list element, or a structured YAML/JSON/CSV document. It replaces
 the `python3 -c "import yaml; ..."` snippets the sample demo scripts used to
 contain, so the demos depend only on the `rayweave` binary.
 
-`query` is **read-only**: it never modifies or re-emits the input document. In
-the default mode it is a terminal consumer of a pipeline. With `--yaml`/`--json`
-it can also extract a subtree for further use.
+`query` is **read-mostly**: in the default mode it is a terminal consumer of a
+pipeline and does not modify the input. With `--edit` it applies in-memory
+mutations (deep copy) before the selector runs. With `--yaml`/`--json` it can
+also extract a subtree for further use.
 
 ```
 rayweave query [--yaml|--json] [--csv PATH[:col,...]] [--printf FMT]
                [--each PATH[:col,...]] [--sum|--product|--count|--len PATH]
-               [--jsonl [--where EXPR] [--first]] [--set VAR=EXPR]
+               [--jsonl [--where EXPR] [--first]] [--set VAR=EXPR] [--edit EXPR]
                [--gate EXPR] [--default STR] [--expr EXPR] [-r] [SELECTOR]
 ```
 
@@ -287,6 +288,7 @@ layer.
 | `--first` | with `--jsonl`, use the first matching line instead of the last |
 | `--gate EXPR` | print a pass record and exit 0/1 by truthiness |
 | `--set VAR=EXPR` | bind a variable (repeatable, ordered) |
+| `--edit EXPR` | mutate the document in-memory (repeatable, see §10) |
 | `--printf FMT` | Go fmt format string for the value / each row |
 | `--default STR` | value for missing/null results (default `-1`) |
 | `-r`, `--raw` | raw text output (the default for scalars) |
@@ -343,3 +345,64 @@ rayweave query --gate "rms < 0.1" --set rms="chief_rays[0].spot_stats.rms_r" \
 | `glass-optimize-demo.bash` | `--set`+expr Airy/RMS, `--csv` spot diagrams, `--jsonl` |
 | `multi-config-zoom-demo.bash` | `--each`, `--count/--len`, `--gate` |
 | `run-demo.bash` | `--csv` spot/aberration extraction, `--yaml` paraxial display |
+
+## 10. Mutations: `--edit` (yq-style in-memory edits)
+
+`--edit EXPR` mutates a **deep copy** of the input document before the
+selector is evaluated. Multiple `--edit` flags are applied in order, later
+edits see earlier ones. The original stdin document is never modified.
+
+```
+rayweave query --edit 'a.b.c = 99' --edit 'del a.b.d' --yaml '.' < in.yaml
+rayweave query --edit 'surfaces[0].thickness = 5.5' -r surfaces[0].thickness < lens.yaml
+```
+
+### Supported syntax
+
+| Syntax | Meaning | Example |
+|--------|---------|---------|
+| `PATH = VALUE` | Set (auto-creates intermediate maps) | `a.b.c = 99` , `surfaces[0].thickness = 5.5` |
+| `PATH \|= EXPR` | Update with `.` bound to the current value | `a.b \|= . * 2` , `a.b \|= sqrt(.)` |
+| `ARR += VALUE` / `ARR[] += VALUE` | Append to array | `arr += 3` , `arr[] += {x: 1}` |
+| `ARR -= INDEX` | Remove array element at INDEX | `arr -= 1` , `arr -= -1` |
+| `del PATH` | Delete map key or array element | `del a.b` , `del surfaces[1]` |
+
+PATH is a dot/index chain (`a.b[0].c`, `configs[0].surfaces[2].thickness`);
+the same filter/index syntax as SELECTORs but only the `ident / .key / [N]`
+subset is valid for mutations. Missing intermediate maps on `=` are
+auto-created (yq semantics); setting through a scalar (`a: 1` then
+`a.b.c = 2`) is an error.
+
+`VALUE` / `EXPR` is any query expression (literals, arithmetic, function
+calls, `{k: v}` / `[1,2]` constructors, `.` in `|=`).
+
+### Examples
+
+```sh
+# Deep nesting and array indexing
+rayweave query --yaml --edit 'paraxial_result.focal_length = 50.0' < lens.yaml
+rayweave query --yaml --edit 'surfaces[1].thickness = 10.0' < lens.yaml
+rayweave query --yaml --edit 'configs[0].surfaces[0].thickness = 5.5' < lens.yaml
+
+# Chained edits and edit-then-select
+rayweave query --yaml --edit 'a.b.c = 99' --edit 'del a.b.d' '.' < in.yaml
+rayweave query --json --edit 'a.b = 99' 'a' < in.yaml   # → {"b":99,"c":2}
+
+# |= with the current value
+rayweave query --yaml --edit 'a.b |= . + 1' < in.yaml
+rayweave query --yaml --edit 'a.b |= sqrt(.)' < in.yaml
+
+# Arrays
+rayweave query --yaml --edit 'arr += 3' < in.yaml        # append
+rayweave query --yaml --edit 'arr[] += 3' < in.yaml      # same
+rayweave query --yaml --edit 'arr -= 0' < in.yaml        # remove index 0
+rayweave query --yaml --edit 'del arr[-1]' < in.yaml     # negative index
+```
+
+Notes:
+
+- Input is read from stdin; there is no `--in-place` file rewrite.
+- An `arr[]` on the LHS is syntactic sugar for `arr`; both append to `arr`.
+- `|=` evaluates its RHS with `.` bound to the **current** value at PATH
+  (like `jq`); other identifiers in the RHS resolve against that current
+  value, not the document root.

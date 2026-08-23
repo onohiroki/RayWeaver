@@ -488,3 +488,37 @@ func TestQueryCLIJSONL(t *testing.T) {
 		t.Errorf("jsonl breakdown = %q", out)
 	}
 }
+
+
+func TestQueryCLIRootDot(t *testing.T) {
+	// YAML with top-level keys for testing .prefix syntax
+	topLevelYAML := "focal_length: 25.033\nimage_space_f_number: 5.419\n"
+
+	// . → entire YAML document (with --yaml outputs the root)
+	out, code := runQueryCLI(t, topLevelYAML, "--yaml", ".")
+	if code != 0 {
+		t.Errorf("yaml '.' exit %d", code)
+	}
+	// Should contain the root keys
+	if !strings.Contains(out, "focal_length") || !strings.Contains(out, "image_space_f_number") {
+		t.Errorf("yaml '.' output = %q, want focal_length and image_space_f_number", out)
+	}
+
+	// .focal_length → same as focal_length
+	out, code = runQueryCLI(t, topLevelYAML, "-r", ".focal_length")
+	if code != 0 || strings.TrimSpace(out) != "25.033" {
+		t.Errorf(".focal_length = (%q, %d), want 25.033, 0", out, code)
+	}
+
+	// .image_space_f_number → same as image_space_f_number
+	out, code = runQueryCLI(t, topLevelYAML, "-r", ".image_space_f_number")
+	if code != 0 || strings.TrimSpace(out) != "5.419" {
+		t.Errorf(".image_space_f_number = (%q, %d), want 5.419, 0", out, code)
+	}
+
+	// .missing → default value
+	out, code = runQueryCLI(t, topLevelYAML, "-r", ".missing_key")
+	if code != 0 || strings.TrimSpace(out) != "-1" {
+		t.Errorf(".missing_key = (%q, %d), want -1, 0", out, code)
+	}
+}

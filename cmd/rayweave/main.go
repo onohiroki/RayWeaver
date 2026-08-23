@@ -929,9 +929,9 @@ Output: Rs, Ts, Rp, Tp (s- and p-polarisation reflectance/transmittance)
 	case "query":
 		printHelpText(`Usage: rayweave query [flags] [SELECTOR] < input.yaml
 
-Read-only YAML/JSONL selector: prints one plain-text value per invocation
-(the value the demo scripts used to fetch with python3 + PyYAML). Works on
-any YAML on stdin, including output of the other subcommands.
+YAML/JSONL selector with in-memory edits: prints one plain-text value per
+invocation (the value the demo scripts used to fetch with python3 + PyYAML).
+Works on any YAML on stdin, including output of the other subcommands.
 
 SELECTOR is an expression; paths are a subset of it:
   paraxial_result.focal_length
@@ -939,6 +939,8 @@ SELECTOR is an expression; paths are a subset of it:
   chief_rays[field_angle=0].spot_stats.rms_r     (filter by equality)
   configs[id=config1].surfaces[id=2].thickness
   results[].surfaces[interaction=REFLECT].intensity_s
+  .                    the whole document (like jq .)
+  .ray                 shorthand for ray (leading dot is stripped)
 
 Expressions also support arithmetic (+ - * / %), comparisons, &&/||/!,
 {...}/[...] literals, and the functions abs sqrt pow min max sin cos tan
@@ -963,6 +965,16 @@ Bindings (evaluated in order; later ones can reference earlier ones):
   --set VAR=EXPR   a PATH, a number, or an arithmetic expression
   --yaml --set a=... --set b=...        emit a {a:.., b:..} record
 
+Mutations (in-memory deep copy; repeatable, later edits see earlier ones):
+  --edit 'PATH = VALUE'        set (auto-creates intermediate maps)
+  --edit 'PATH |= EXPR'        update with . bound to current value
+  --edit 'ARR += VALUE'        append to array (also ARR[] += VALUE)
+  --edit 'ARR -= INDEX'        remove array element at INDEX
+  --edit 'del PATH'            delete map key or array element
+  PATH is dot/index chain (a.b[0].c); VALUE/EXPR is any expression.
+  Example: rayweave query --yaml --edit 'surfaces[0].thickness = 5.5' '.' < lens.yaml
+  See docs/query.md §10 for details.
+
 Input:
   YAML on stdin (default). With --jsonl read one JSON object per line
   (e.g. "optimize --log" or "escape --log" output); --where EXPR keeps
@@ -974,6 +986,8 @@ Options:
   --printf FMT     Go fmt format string (e.g. '%.4f') for the output value
   -r, --raw        raw text output (the default for scalars)
   --expr EXPR      same as the positional SELECTOR
+  --edit EXPR      mutation expression (repeatable; see Mutations above)
+  --set VAR=EXPR   bind variable (repeatable)
 
 Examples:
   rayweave paraxial < lens.yaml | rayweave query -r paraxial_result.focal_length
@@ -988,6 +1002,7 @@ Examples:
   rayweave query --count 'chief_rays[0].grid_points[].image_x' < chief.yaml
   rayweave query --len 'chief_rays[0].grid_points' < chief.yaml
   rayweave query --gate 'abs(efl-50.0)<=0.01' --set efl=paraxial_result.focal_length
+  echo 'a: {b: 1}' | rayweave query --yaml --edit 'a.b |= . + 1' '.'
 
 See docs/query.md for the full manual.
 `)
@@ -1011,7 +1026,7 @@ Subcommands:
   wavefront  Wavefront analysis (paraboloid, best-fit sphere, Fringe Zernike, best focus)
   import     Import system from ZEMAX ZMX / CODE V SEQ / OSLO LEN
   export     Export system to ZEMAX ZMX / CODE V SEQ / OSLO LEN
-  query      Read-only YAML/JSONL selector
+  query      YAML/JSONL selector with in-memory edits
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
   for detailed options and YAML structure.

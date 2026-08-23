@@ -14,9 +14,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// runQuery implements the `query` subcommand: a read-only YAML/JSONL
-// selector that turns a shell pipeline into plain-text values (or, with
-// --yaml/--json/--csv, structured output). It is designed to replace the
+// runQuery implements the `query` subcommand: a YAML/JSONL selector with
+// in-memory edits that turns a shell pipeline into plain-text values (or,
+// with --yaml/--json/--csv, structured output). It is designed to replace the
 // `python3 -c "import yaml; ..."` snippets that the sample demo scripts
 // previously used, so that the demos depend only on the rayweave binary.
 //
@@ -24,13 +24,15 @@ import (
 //
 //	rayweave query [--yaml|--json|--csv PATH[:col,...]] [--printf FMT]
 //	               [--each PATH[:col,...]] [--sum|--product|--count|--len PATH]
-//	               [--jsonl [--where EXPR] [--first]] [--set VAR=EXPR]
+//	               [--jsonl [--where EXPR] [--first]] [--set VAR=EXPR] [--edit EXPR]
 //	               [--gate EXPR] [--default STR] [--expr EXPR] [-r] [SELECTOR]
 //
 // SELECTOR is an expression. Paths (e.g. paraxial_result.focal_length,
-// chief_rays[0].spot_stats.rms_r, chief_rays[field_angle=0].spot_stats.rms_r)
-// are a subset of the expression language, which also supports arithmetic,
-// math functions, comparisons, and {..}/[..] literals.
+// chief_rays[0].spot_stats.rms_r, chief_rays[field_angle=0].spot_stats.rms_r,
+// . for the whole document, .ray for ray) are a subset of the expression
+// language, which also supports arithmetic, math functions, comparisons, and
+// {..}/[..] literals. --edit mutates a deep copy before the selector runs
+// (see docs/query.md §10).
 func runQuery(data []byte) {
 	fs := flag.NewFlagSet("query", flag.ExitOnError)
 	yamlOut := fs.Bool("yaml", false, "output the result as YAML")
@@ -50,6 +52,8 @@ func runQuery(data []byte) {
 	printfFmt := fs.String("printf", "", "Go fmt format string applied to the output value(s)")
 	defaultStr := fs.String("default", "-1", "value printed when a scalar result is missing/null (default -1)")
 	exprArg := fs.String("expr", "", "expression to evaluate (same as the positional SELECTOR)")
+	var editFlags multiSet
+	fs.Var(&editFlags, "edit", "mutation expression (repeatable, applied in order); supports =, +=, -=, |=, del PATH")
 	var setFlags multiSet
 	fs.Var(&setFlags, "set", "bind VAR=EXPR (repeatable, evaluated in order; later bindings may reference earlier ones)")
 	raw := fs.Bool("raw", false, "raw text output (the default for scalars; accepted for clarity)")
@@ -150,6 +154,32 @@ func runQuery(data []byte) {
 		}
 		bindings[kv[:eq]] = v
 	}
+	// Parse --edit expressions
+	var edits []expr
+	for _, editStr := range editFlags {
+		// Tokenize each edit expression separately
+		toks, err := lexQuery(editStr)
+		if err != nil {
+			errOut("Error tokenizing --edit %q: %v", editStr, err)
+			os.Exit(1)
+		}
+		p := &parser{toks: toks}
+		n, err := p.parseExpr()
+		if err != nil {
+			errOut("Error parsing --edit %q: %v", editStr, err)
+			os.Exit(1)
+		}
+		edits = append(edits, n)
+	}
+	// Apply mutations (deep copy and apply in order)
+	if len(edits) > 0 {
+		var err error
+		docRoot, err = applyMutations(docRoot, edits)
+		if err != nil {
+			errOut("Error applying mutations: %v", err)
+			os.Exit(1)
+		}
+	}
 	ctx := &evalCtx{root: docRoot, bindings: bindings}
 
 	resolve := func(path string) (any, error) {
@@ -173,7 +203,16 @@ func runQuery(data []byte) {
 		var result any
 		var err error
 		if selector != "" {
-			result, err = evalExpr(selector, ctx)
+			// Special handling for . and .prefix syntax
+			if selector == "." {
+				result = docRoot
+			} else if strings.HasPrefix(selector, ".") {
+				// Strip leading . and evaluate the remainder (e.g., .ray → ray)
+				selector = strings.TrimPrefix(selector, ".")
+				result, err = evalExpr(selector, ctx)
+			} else {
+				result, err = evalExpr(selector, ctx)
+			}
 		} else if len(bindings) > 0 {
 			result = bindings
 		} else {
@@ -906,6 +945,7 @@ type strNode struct{ v string }
 type boolNode struct{ v bool }
 type nilNode struct{}
 type identNode struct{ name string }
+type rootNode struct{}
 type callNode struct {
 	name string
 	args []expr
@@ -938,6 +978,14 @@ type structNode struct {
 	vals []expr
 }
 type arrNode struct{ vals []expr }
+type assignNode struct {
+	path  expr
+	op    string // =, +=, -=, |=
+	value expr
+}
+type deleteNode struct {
+	path expr
+}
 
 func evalExpr(src string, ctx *evalCtx) (any, error) {
 	toks, err := lexQuery(src)
@@ -957,7 +1005,7 @@ func evalExpr(src string, ctx *evalCtx) (any, error) {
 
 func (c *evalCtx) eval(n expr) (any, error) {
 	switch t := n.(type) {
-	case *numNode:
+case *numNode:
 		return t.v, nil
 	case *strNode:
 		return t.v, nil
@@ -969,14 +1017,19 @@ func (c *evalCtx) eval(n expr) (any, error) {
 		if b, ok := c.bindings[t.name]; ok {
 			return b, nil
 		}
-		if t.name == "pi" {
+		// Strip leading . for .prefix syntax (e.g., .ray → ray)
+		lookupName := t.name
+		if strings.HasPrefix(lookupName, ".") {
+			lookupName = lookupName[1:]
+		}
+		if lookupName == "pi" {
 			return math.Pi, nil
 		}
-		if t.name == "e" {
+		if lookupName == "e" {
 			return math.E, nil
 		}
 		if m, ok := asMap(c.root); ok {
-			if v, ok := m[t.name]; ok {
+			if v, ok := m[lookupName]; ok {
 				return v, nil
 			}
 		}
@@ -1101,8 +1154,510 @@ func (c *evalCtx) eval(n expr) (any, error) {
 			out[i] = x
 		}
 		return out, nil
+	case *rootNode:
+		return c.root, nil
 	}
 	return nil, fmt.Errorf("unknown expression node %T", n)
+}
+
+// ---- mutation evaluator -------------------------------------------------------
+
+// applyMutations applies a list of mutation expressions to a document.
+// It deep-copies the root and applies each mutation in order.
+// Supported mutations: assignNode (=, +=, -=, |=) and deleteNode (del).
+func applyMutations(root any, edits []expr) (any, error) {
+	// Deep copy the root
+	copied := deepCopy(root)
+
+	for _, edit := range edits {
+		switch e := edit.(type) {
+		case *assignNode:
+			if err := applyAssign(copied, e, root); err != nil {
+				return nil, err
+			}
+		case *deleteNode:
+			if err := applyDelete(copied, e); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("unsupported mutation type %T", edit)
+		}
+	}
+	return copied, nil
+}
+
+// deepCopy creates a deep copy of a YAML value (maps, arrays, scalars).
+func deepCopy(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = deepCopy(val)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, val := range t {
+			out[i] = deepCopy(val)
+		}
+		return out
+	default:
+		return v // scalars (float64, string, bool, nil)
+	}
+}
+
+// splitPath converts a mutation-path AST (ident / dot / idx chains) into
+// a flat key list: string for map keys, int for array indices.
+func splitPath(e expr) ([]any, error) {
+	switch p := e.(type) {
+	case *identNode:
+		return []any{p.name}, nil
+	case *dotNode:
+		left, err := splitPath(p.x)
+		if err != nil {
+			return nil, err
+		}
+		return append(left, p.key), nil
+	case *idxNode:
+		left, err := splitPath(p.x)
+		if err != nil {
+			return nil, err
+		}
+		return append(left, int(p.n)), nil
+	default:
+		return nil, fmt.Errorf("unsupported path for mutation: %T", e)
+	}
+}
+
+// getAtPath navigates from root following keys, returning the value at that path.
+func getAtPath(root any, keys []any) (any, error) {
+	cur := root
+	for _, k := range keys {
+		switch kk := k.(type) {
+		case string:
+			m, ok := cur.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("not a map at %q", kk)
+			}
+			child, ok := m[kk]
+			if !ok {
+				return nil, fmt.Errorf("key %q not found", kk)
+			}
+			cur = child
+		case int:
+			arr, ok := cur.([]any)
+			if !ok {
+				return nil, fmt.Errorf("not an array")
+			}
+			idx := kk
+			if idx < 0 {
+				idx += len(arr)
+			}
+			if idx < 0 || idx >= len(arr) {
+				return nil, fmt.Errorf("index out of bounds: %d (len=%d)", idx, len(arr))
+			}
+			cur = arr[idx]
+		default:
+			return nil, fmt.Errorf("invalid key type %T", k)
+		}
+	}
+	return cur, nil
+}
+
+// evalExprWithContext evaluates an expression with root as context.
+func evalExprWithContext(e expr, root, _ any) (any, error) {
+	ctx := &evalCtx{root: root, bindings: nil}
+	return ctx.eval(e)
+}
+
+// applyAssign applies an assignment mutation (=, +=, -=, |=).
+func applyAssign(root any, a *assignNode, origRoot any) error {
+	// Special case: arr[] += val  — mapNode path
+	if mn, ok := a.path.(*mapNode); ok && a.op == "+=" {
+		val, err := evalExprWithContext(a.value, root, origRoot)
+		if err != nil {
+			return err
+		}
+		return appendViaMapNode(root, mn, val)
+	}
+
+	keys, err := splitPath(a.path)
+	if err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("empty path")
+	}
+
+	switch a.op {
+	case "=":
+		val, err := evalExprWithContext(a.value, root, origRoot)
+		if err != nil {
+			return err
+		}
+		return setAtPath(root, keys, val)
+	case "|=":
+		cur, err := getAtPath(root, keys)
+		if err != nil {
+			cur = nil
+		}
+		ctx := &evalCtx{root: cur, bindings: nil}
+		newVal, err := ctx.eval(a.value)
+		if err != nil {
+			return err
+		}
+		return setAtPath(root, keys, newVal)
+	case "+=":
+		val, err := evalExprWithContext(a.value, root, origRoot)
+		if err != nil {
+			return err
+		}
+		return appendAtPath(root, keys, val)
+	case "-=":
+		val, err := evalExprWithContext(a.value, root, origRoot)
+		if err != nil {
+			return err
+		}
+		return removeAtPath(root, keys, val)
+	}
+	return fmt.Errorf("unknown assignment operator %q", a.op)
+}
+
+// applyDelete applies a delete mutation (del PATH).
+func applyDelete(root any, d *deleteNode) error {
+	keys, err := splitPath(d.path)
+	if err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		return fmt.Errorf("empty path")
+	}
+	return deleteAtPath(root, keys)
+}
+
+// setAtPath sets keys (last element) in the container reached by keys[:len-1].
+// Intermediate maps that are missing are auto-created (yq semantics).
+func setAtPath(root any, keys []any, val any) error {
+	if len(keys) == 1 {
+		return setDirect(root, keys[0], val)
+	}
+	parentKeys := keys[:len(keys)-1]
+	parent, err := getOrCreateParent(root, parentKeys)
+	if err != nil {
+		return err
+	}
+	return setDirect(parent, keys[len(keys)-1], val)
+}
+
+// appendAtPath appends val to the array at keys.
+func appendAtPath(root any, keys []any, val any) error {
+	// keys points to the array itself
+	target, err := getAtPath(root, keys)
+	if err != nil {
+		return err
+	}
+	arr, ok := target.([]any)
+	if !ok {
+		return fmt.Errorf("+= requires array")
+	}
+	newArr := append(arr, val)
+	if len(keys) == 1 {
+		if m, ok := root.(map[string]any); ok {
+			if s, ok := keys[0].(string); ok {
+				m[s] = newArr
+				return nil
+			}
+		}
+		return fmt.Errorf("cannot append to top-level array directly")
+	}
+	holderKeys := keys[:len(keys)-1]
+	holder, err := getAtPath(root, holderKeys)
+	if err != nil {
+		return err
+	}
+	return setDirect(holder, keys[len(keys)-1], newArr)
+}
+
+// appendViaMapNode handles arr[] += val where arr[] is a mapNode.
+func appendViaMapNode(root any, mn *mapNode, val any) error {
+	keys, err := splitPath(mn.x)
+	if err != nil {
+		return err
+	}
+	target, err := getAtPath(root, keys)
+	if err != nil {
+		return err
+	}
+	arr, ok := target.([]any)
+	if !ok {
+		return fmt.Errorf("+= requires array")
+	}
+	newArr := append(arr, val)
+	if len(keys) == 1 {
+		if m, ok := root.(map[string]any); ok {
+			if s, ok := keys[0].(string); ok {
+				m[s] = newArr
+				return nil
+			}
+		}
+		return fmt.Errorf("cannot append to top-level array directly")
+	}
+	// Same write-back logic as appendAtPath but target is at keys
+	holderKeys := keys[:len(keys)-1]
+	holder, err := getAtPath(root, holderKeys)
+	if err != nil {
+		return err
+	}
+	return setDirect(holder, keys[len(keys)-1], newArr)
+}
+
+// removeAtPath handles  arr -= value  and  map -= "key"  semantics.
+// For arrays the RHS value is the index to remove; for maps it is ignored
+// and the key in the path is removed — but we unify: if target is array,
+// val is numeric index; if target's parent is map, path's last key is removed.
+func removeAtPath(root any, keys []any, val any) error {
+	// Try array-index removal: target at keys should be an array, val is index.
+	target, err := getAtPath(root, keys)
+	if err == nil {
+		if arr, ok := target.([]any); ok {
+			f, ok := asNum(val)
+			if !ok {
+				return fmt.Errorf("-= on array requires numeric index")
+			}
+			idx := int(f)
+			if idx < 0 {
+				idx += len(arr)
+			}
+			if idx < 0 || idx >= len(arr) {
+				return fmt.Errorf("index out of bounds: %d (len=%d)", idx, len(arr))
+			}
+			newArr := append(arr[:idx], arr[idx+1:]...)
+			if len(keys) == 1 {
+				if m, ok := root.(map[string]any); ok {
+					if s, ok := keys[0].(string); ok {
+						m[s] = newArr
+						return nil
+					}
+				}
+				return fmt.Errorf("cannot delete from top-level array directly")
+			}
+			holderKeys := keys[:len(keys)-1]
+			holder, err := getAtPath(root, holderKeys)
+			if err != nil {
+				return err
+			}
+			return setDirect(holder, keys[len(keys)-1], newArr)
+		}
+	}
+	// Fallback: treat as map-key removal where last key is deleted from parent.
+	return deleteAtPath(root, keys)
+}
+
+// deleteAtPath deletes the value at keys.
+func deleteAtPath(root any, keys []any) error {
+	if len(keys) == 1 {
+		return deleteDirect(root, keys[0])
+	}
+	parentKeys := keys[:len(keys)-1]
+	parent, err := getAtPath(root, parentKeys)
+	if err != nil {
+		return err
+	}
+	finalKey := keys[len(keys)-1]
+	if idx, isInt := finalKey.(int); isInt {
+		arr, ok := parent.([]any)
+		if !ok {
+			return fmt.Errorf("parent is not array")
+		}
+		if idx < 0 {
+			idx += len(arr)
+		}
+		if idx < 0 || idx >= len(arr) {
+			return fmt.Errorf("index out of bounds: %d (len=%d)", idx, len(arr))
+		}
+		newArr := append(arr[:idx], arr[idx+1:]...)
+		if len(parentKeys) == 1 {
+			holderKey := parentKeys[0]
+			if s, ok := holderKey.(string); ok {
+				if m, ok := root.(map[string]any); ok {
+					m[s] = newArr
+					return nil
+				}
+			}
+			return fmt.Errorf("cannot write back array")
+		}
+		holderKeys := parentKeys[:len(parentKeys)-1]
+		holder, err := getAtPath(root, holderKeys)
+		if err != nil {
+			return err
+		}
+		return setDirect(holder, parentKeys[len(parentKeys)-1], newArr)
+	}
+	return deleteDirect(parent, finalKey)
+}
+
+// getOrCreateParent navigates to parentKeys, auto-creating missing intermediate maps.
+func getOrCreateParent(root any, parentKeys []any) (any, error) {
+	cur := root
+	for i, k := range parentKeys {
+		switch kk := k.(type) {
+		case string:
+			m, ok := cur.(map[string]any)
+			if !ok {
+				return nil, fmt.Errorf("not a map at %q", kk)
+			}
+			child, exists := m[kk]
+			if !exists {
+				// Auto-create intermediate map if next step is a map key (string).
+				// If the final target is an array index, we still need a map here —
+				// but if the missing key itself should be an array, caller must create it explicitly.
+				newMap := make(map[string]any)
+				m[kk] = newMap
+				child = newMap
+			} else if child == nil {
+				// Treat nil as missing map for auto-create when next key is string.
+				nextIsString := false
+				if i+1 < len(parentKeys) {
+					_, nextIsString = parentKeys[i+1].(string)
+				} else {
+					// final key type determines — peek via closure is messy; assume map
+					nextIsString = true
+				}
+				if nextIsString {
+					newMap := make(map[string]any)
+					m[kk] = newMap
+					child = newMap
+				}
+			}
+			cur = child
+		case int:
+			arr, ok := cur.([]any)
+			if !ok {
+				return nil, fmt.Errorf("not an array")
+			}
+			idx := kk
+			if idx < 0 {
+				idx += len(arr)
+			}
+			if idx < 0 || idx >= len(arr) {
+				return nil, fmt.Errorf("index out of bounds: %d (len=%d)", idx, len(arr))
+			}
+			cur = arr[idx]
+		default:
+			return nil, fmt.Errorf("invalid key type %T", k)
+		}
+	}
+	return cur, nil
+}
+
+// Helper functions for container manipulation
+
+// setDirect sets a value directly on a container (map or array).
+func setDirect(container any, key any, val any) error {
+	switch c := container.(type) {
+	case map[string]any:
+		k, ok := key.(string)
+		if !ok {
+			return fmt.Errorf("map key must be string")
+		}
+		c[k] = val
+		return nil
+	case []any:
+		i, ok := key.(int)
+		if !ok {
+			return fmt.Errorf("array index must be int")
+		}
+		if i < 0 || i >= len(c) {
+			return fmt.Errorf("index out of bounds: %d (len=%d)", i, len(c))
+		}
+		c[i] = val
+		return nil
+	default:
+		return fmt.Errorf("cannot set value on non-container")
+	}
+}
+
+// deleteDirect deletes a key/index directly from a container.
+func deleteDirect(container any, key any) error {
+	switch c := container.(type) {
+	case map[string]any:
+		k, ok := key.(string)
+		if !ok {
+			return fmt.Errorf("map key must be string")
+		}
+		delete(c, k)
+		return nil
+	case []any:
+		i, ok := key.(int)
+		if !ok {
+			return fmt.Errorf("array index must be int")
+		}
+		if i < 0 {
+			i += len(c)
+		}
+		if i < 0 || i >= len(c) {
+			return fmt.Errorf("index out of bounds: %d (len=%d)", i, len(c))
+		}
+		// Can't actually delete from slice in place without returning new slice
+		// This is a limitation - caller should use grandparent approach
+		return fmt.Errorf("direct array delete not supported, use grandparent")
+	default:
+		return fmt.Errorf("cannot delete from non-container")
+	}
+}
+
+// getFromContainer gets a value from a container (map or array) by key.
+func getFromContainer(container any, key any) (any, error) {
+	switch c := container.(type) {
+	case map[string]any:
+		k, ok := key.(string)
+		if !ok {
+			return nil, fmt.Errorf("map key must be string")
+		}
+		return c[k], nil
+	case []any:
+		i, ok := key.(int)
+		if !ok {
+			return nil, fmt.Errorf("array index must be int")
+		}
+		if i < 0 {
+			i += len(c)
+		}
+		if i < 0 || i >= len(c) {
+			return nil, fmt.Errorf("index out of bounds: %d (len=%d)", i, len(c))
+		}
+		return c[i], nil
+	default:
+		return nil, fmt.Errorf("cannot get from non-container")
+	}
+}
+
+// putToContainer puts a value back into a container (map or array) by key.
+func putToContainer(container any, key any, val any) error {
+	switch c := container.(type) {
+	case map[string]any:
+		k, ok := key.(string)
+		if !ok {
+			return fmt.Errorf("map key must be string")
+		}
+		c[k] = val
+		return nil
+	case []any:
+		i, ok := key.(int)
+		if !ok {
+			return fmt.Errorf("array index must be int")
+		}
+		if i < 0 {
+			i += len(c)
+		}
+		if i < 0 || i >= len(c) {
+			return fmt.Errorf("index out of bounds: %d (len=%d)", i, len(c))
+		}
+		c[i] = val
+		return nil
+	default:
+		return fmt.Errorf("cannot put to non-container")
+	}
 }
 
 func (c *evalCtx) evalBin(t *binNode) (any, error) {
@@ -1437,13 +1992,13 @@ func lexQuery(src string) ([]token, error) {
 			if i+1 < n {
 				two := src[i : i+2]
 				switch two {
-				case "==", "!=", "<=", ">=", "&&", "||":
+				case "==", "!=", "<=", ">=", "&&", "||", "+=", "-=", "|=":
 					toks = append(toks, token{kind: "op", text: two})
 					i += 2
 					continue
 				}
 			}
-			if strings.ContainsRune("+-*/%<>!=()[]{},:?.", rune(c)) {
+			if strings.ContainsRune("+-*/%<>!=()[]{},:?.|", rune(c)) {
 				toks = append(toks, token{kind: "op", text: string(c)})
 				i++
 				continue
@@ -1488,13 +2043,44 @@ func (p *parser) isOp(text string) bool {
 }
 
 func (p *parser) parseExpr() (expr, error) {
+	return p.parseAssign()
+}
+
+func (p *parser) parseAssign() (expr, error) {
+	l, err := p.parseTernary()
+	if err != nil {
+		return nil, err
+	}
+	// Check for assignment operators
+	for {
+		op := ""
+		for _, cand := range []string{"=", "+=", "-=", "|="} {
+			if p.isOp(cand) {
+				op = cand
+				break
+			}
+		}
+		if op == "" {
+			break
+		}
+		p.advance()
+		r, err := p.parseAssign() // right-associative
+		if err != nil {
+			return nil, err
+		}
+		l = &assignNode{path: l, op: op, value: r}
+	}
+	return l, nil
+}
+
+func (p *parser) parseTernary() (expr, error) {
 	cond, err := p.parseOr()
 	if err != nil {
 		return nil, err
 	}
 	if p.isOp("?") {
 		p.advance()
-		a, err := p.parseExpr()
+		a, err := p.parseAssign() // ternary branches can have assignments
 		if err != nil {
 			return nil, err
 		}
@@ -1502,7 +2088,7 @@ func (p *parser) parseExpr() (expr, error) {
 			return nil, fmt.Errorf("expected ':' in conditional expression")
 		}
 		p.advance()
-		b, err := p.parseExpr()
+		b, err := p.parseAssign()
 		if err != nil {
 			return nil, err
 		}
@@ -1683,6 +2269,9 @@ func (p *parser) parseFilterValue() (expr, error) {
 	case "num":
 		p.advance()
 		return &numNode{v: t.num}, nil
+	case "root":
+		p.advance()
+		return &rootNode{}, nil
 	case "str":
 		p.advance()
 		return &strNode{v: t.text}, nil
@@ -1708,11 +2297,22 @@ func (p *parser) parsePrimary() (expr, error) {
 	case "num":
 		p.advance()
 		return &numNode{v: t.num}, nil
+	case "root":
+		p.advance()
+		return &rootNode{}, nil
 	case "str":
 		p.advance()
 		return &strNode{v: t.text}, nil
 	case "id":
 		p.advance()
+		if t.text == "del" {
+			// del PATH - parse the path expression
+			path, err := p.parseAssign()
+			if err != nil {
+				return nil, err
+			}
+			return &deleteNode{path: path}, nil
+		}
 		if p.isOp("(") {
 			p.advance()
 			var args []expr
@@ -1744,9 +2344,17 @@ func (p *parser) parsePrimary() (expr, error) {
 		case "null":
 			return &nilNode{}, nil
 		}
-		return &identNode{name: t.text}, nil
+		return &identNode{name: strings.TrimPrefix(t.text, ".")}, nil
 	case "op":
 		switch t.text {
+		case ".":
+			p.advance()
+			if p.cur().kind == "id" {
+				id := p.advance()
+				// ".foo" shorthand → root.foo ; remaining postfix (".bar", "[0]") is handled by parsePostfix
+				return &dotNode{x: &rootNode{}, key: id.text}, nil
+			}
+			return &rootNode{}, nil
 		case "(":
 			p.advance()
 			e, err := p.parseExpr()
