@@ -27,13 +27,14 @@ set -euo pipefail
 #                fixed aperture is resized via yq. Requires yq.
 #   --fno N      stopped-down EPD set by F-number instead: N = EFL/N mm (e.g.
 #                --fno 5.6). Requires yq.
+#   --chart      generate diagnostic charts (OPD-overlap, focus-footprint,
+#                field-defocus) in addition to the cross-section PNGs.
+#                Default: off (only cross-section PNGs + text output).
 #
 # The demo runs one case — the full-aperture lens — and ONLY when a stop is
-# requested (--epd/--fno) also runs a stopped-down variant. EVERY case draws
-# its own side-by-side OPD-overlap chart: left = all-spherical (before), right
-# = right after the top-ranked initial asphere is inserted (residual OPD).
-# Each column gets its OWN y-range (the per-case OPD min/max): the residual
-# column is much smaller, so the two scales are each read separately.
+# requested (--epd/--fno) also runs a stopped-down variant.  By default only
+# cross-section PNGs and text output are produced; --chart adds the OPD-overlap,
+# focus-footprint and field-defocus diagnostic charts.
 #
 # How to read the result
 #   - The ranking score weights how well a rotationally-symmetric asphere
@@ -63,6 +64,7 @@ NUM_RAYS=128
 SENS_SAMPLES=6
 
 CLEAN=false
+CHART=false
 STOP_MODE=""   # "frac" | "mm" | "fno"
 STOP_VALUE=""  # the numeric argument from --epd/--fno
 STOP_TAG=""
@@ -70,6 +72,7 @@ STOP_LABEL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean) CLEAN=true; shift ;;
+    --chart) CHART=true; shift ;;
     --epd)
       STOP_MODE=mm
       STOP_VALUE="$2"; shift 2
@@ -864,8 +867,12 @@ run_case() {
   # ── Step 1: candidate ranking ──
   echo "--- Step 1: candidate ranking (top $TOP_K) ---"
   echo "  [progress] tracing pupil grids and ranking candidate surfaces..."
+  local DIAG_FLAGS=""
+  if [[ "$CHART" = true ]]; then
+    DIAG_FLAGS="--diagnostics opd,focus"
+  fi
   "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
-    --diagnostics opd,focus < "$from" > "$rank"
+    $DIAG_FLAGS < "$from" > "$rank"
   echo "  [progress] candidate ranking complete"
   {
     printf "  %-6s %10s %10s %10s %10s\n" "surf" "score" "sens.imprv" "asym" "cons"
@@ -881,27 +888,26 @@ run_case() {
   echo
 
   # ── Step 1b: before/after OPD chart (initial asphere inserted) ──
-  # Re-runs the analysis on the top-ranked initial asphere and draws the
-  # side-by-side OPD-overlap chart: left = all-spherical (before), right =
-  # residual right after the initial asphere is inserted (per-column y-ranges).
-  if [[ -z "$YQ_BIN" ]]; then
-    echo "  (before/after OPD chart skipped: yq not available)"
-  elif build_applied_initial "$rank" "$from" "$applied_init"; then
-    echo "Written: $applied_init"
-    echo "  [progress] re-running analysis for the initial-asphere OPD comparison..."
-    "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
-      --diagnostics opd,focus < "$applied_init" > "$rank_after" 2>/dev/null
-    echo "  [progress] initial-asphere analysis complete"
-    plot_opd_overlap "$OUTDIR/asphere-demo${tag}-opd-overlap.png" \
-      "$rank" "$OUTDIR/asphere-demo${tag}-opd-before" "all-spherical (before)" \
-      "$rank_after" "$OUTDIR/asphere-demo${tag}-opd-after" "initial asphere (after)"
-  else
-    echo "  (before/after OPD chart skipped: top candidate has no initial coefficients)"
+  if [[ "$CHART" = true ]]; then
+    if [[ -z "$YQ_BIN" ]]; then
+      echo "  (before/after OPD chart skipped: yq not available)"
+    elif build_applied_initial "$rank" "$from" "$applied_init"; then
+      echo "Written: $applied_init"
+      echo "  [progress] re-running analysis for the initial-asphere OPD comparison..."
+      "$RAYWEAVE" asphere --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
+        --diagnostics opd,focus < "$applied_init" > "$rank_after" 2>/dev/null
+      echo "  [progress] initial-asphere analysis complete"
+      plot_opd_overlap "$OUTDIR/asphere-demo${tag}-opd-overlap.png" \
+        "$rank" "$OUTDIR/asphere-demo${tag}-opd-before" "all-spherical (before)" \
+        "$rank_after" "$OUTDIR/asphere-demo${tag}-opd-after" "initial asphere (after)"
+    else
+      echo "  (before/after OPD chart skipped: top candidate has no initial coefficients)"
+    fi
   fi
   echo
 
   # ── Step 1b: Focus Channel footprint chart ──
-  if [[ -n "$YQ_BIN" ]]; then
+  if [[ "$CHART" = true ]] && [[ -n "$YQ_BIN" ]]; then
     echo "--- Step 1b: Focus Channel footprint chart ---"
     echo "  [progress] preparing focus-footprint data..."
     plot_focus_footprint "$OUTDIR/asphere-demo${tag}-focus-footprint.png" \
@@ -911,17 +917,19 @@ run_case() {
   fi
 
   # ── Step 1c: field defocus chart (before/after comparison) ───
-  if [[ -n "$YQ_BIN" ]] && build_applied_initial "$rank" "$from" "$applied_init"; then
-    echo "Written: $applied_init"
-    echo "  [progress] tracing wavefront data for the defocus comparison..."
-    "$RAYWEAVE" chief < "$applied_init" | "$RAYWEAVE" wavefront --wavelengths 0.00058756 --num-rays "$NUM_RAYS" > "$OUTDIR/asphere-demo${tag}-wf-after.yaml" 2>/dev/null
-    "$RAYWEAVE" chief < "$from"         | "$RAYWEAVE" wavefront --wavelengths 0.00058756 --num-rays "$NUM_RAYS" > "$OUTDIR/asphere-demo${tag}-wf-before.yaml" 2>/dev/null
-    echo "  [progress] defocus wavefront analysis complete"
-    plot_field_defocus "$OUTDIR/asphere-demo${tag}-defocus.png" \
-      "$OUTDIR/asphere-demo${tag}-wf-before.yaml" "all-spherical (before)" \
-      "$OUTDIR/asphere-demo${tag}-wf-after.yaml"  "initial asphere (after)"
-  else
-    echo "  (defocus chart skipped: wf generation failed)"
+  if [[ "$CHART" = true ]]; then
+    if [[ -n "$YQ_BIN" ]] && build_applied_initial "$rank" "$from" "$applied_init"; then
+      echo "Written: $applied_init"
+      echo "  [progress] tracing wavefront data for the defocus comparison..."
+      "$RAYWEAVE" chief < "$applied_init" | "$RAYWEAVE" wavefront --wavelengths 0.00058756 --num-rays "$NUM_RAYS" > "$OUTDIR/asphere-demo${tag}-wf-after.yaml" 2>/dev/null
+      "$RAYWEAVE" chief < "$from"         | "$RAYWEAVE" wavefront --wavelengths 0.00058756 --num-rays "$NUM_RAYS" > "$OUTDIR/asphere-demo${tag}-wf-before.yaml" 2>/dev/null
+      echo "  [progress] defocus wavefront analysis complete"
+      plot_field_defocus "$OUTDIR/asphere-demo${tag}-defocus.png" \
+        "$OUTDIR/asphere-demo${tag}-wf-before.yaml" "all-spherical (before)" \
+        "$OUTDIR/asphere-demo${tag}-wf-after.yaml"  "initial asphere (after)"
+    else
+      echo "  (defocus chart skipped: wf generation failed)"
+    fi
   fi
   echo
 
@@ -929,7 +937,7 @@ run_case() {
   echo "--- Step 2: short-DLS validation (spot-RMS merit, $DLS_ITER it + ${NUM_RAYS} rays) ---"
   echo "  [progress] running short DLS validation (this may take a while)..."
   "$RAYWEAVE" asphere --validate --top-k "$TOP_K" --sensitivity-samples "$SENS_SAMPLES" \
-    --dls-iter "$DLS_ITER" --num-rays "$NUM_RAYS" --diagnostics opd,focus \
+    --dls-iter "$DLS_ITER" --num-rays "$NUM_RAYS" \
     < "$from" > "$validated"
   echo "  [progress] DLS validation complete"
   {
@@ -954,7 +962,7 @@ run_case() {
   # ── Step 3: apply the top-ranked aspherical ──
   echo "--- Step 3: inserting the top-ranked aspherical surface (--apply) ---"
   "$RAYWEAVE" asphere --apply --top-k "$TOP_K" \
-    --dls-iter "$DLS_ITER" --num-rays "$NUM_RAYS" --diagnostics opd,focus \
+    --dls-iter "$DLS_ITER" --num-rays "$NUM_RAYS" \
     < "$from" > "$applied"
   echo "Written: $applied" | tee -a "$result"
   echo
