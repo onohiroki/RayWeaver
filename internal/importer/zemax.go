@@ -90,13 +90,6 @@ func ParseZemax(input string) (*ParseResult, error) {
 	buildZemaxFields(result, hdr, objectZ)
 	buildZemaxWavelengths(result, hdr)
 
-	// ZEMAX PWAV selects the primary (reference) wavelength by 1-based index;
-	// mark it so downstream selection (FNO sizing, chief wavelength, merit)
-	// uses it.
-	if result.ReferenceWavelengthIdx >= 0 && result.ReferenceWavelengthIdx < len(result.Wavelengths) {
-		result.Wavelengths[result.ReferenceWavelengthIdx].Primary = true
-	}
-
 	seenIDs := make(map[int]bool)
 	var pendingDecenter types.DecenterStep
 	var pendingTiltFirst bool
@@ -312,17 +305,12 @@ func parseZemaxHeader(hdr *zemaxHeader, keyword string, args []string) {
 			result.StopSurface = int(parseFloat(args[0]))
 		}
 	case "WAVL":
-		if len(args) > 0 {
-			wl := types.WavelengthItem{
-				ID:    len(result.Wavelengths),
-				Value: parseFloat(args[0]) / 1000.0,
-			}
-			if len(args) >= 2 {
-				wl.Weight = parseFloat(args[1])
-			} else {
-				wl.Weight = 1.0
-			}
-			result.Wavelengths = append(result.Wavelengths, wl)
+		for _, arg := range args {
+			result.Wavelengths = append(result.Wavelengths, types.WavelengthItem{
+				ID:     len(result.Wavelengths),
+				Value:  parseFloat(arg) / 1000.0,
+				Weight: 1.0,
+			})
 		}
 	case "YFLD", "YFLN":
 		// YFLD/YFLN <f0> <f1> ... — y field values, slot-aligned with XFLD/XFLN

@@ -44,7 +44,7 @@ effective (flag-won) values are written back into the output's
 The system must carry a `chief` section so the fields (and optionally the stop
 surface) are known. Fields may come from `chief.fields` / `chief.field_angles`,
 from the selected config's `fields` (which can carry per-field weights), or from
-`configs[0].fields`. Wavelengths come from `chief.wavelengths`, else the selected
+`configs[0].fields`. Wavelengths come from the selected
 config's `wavelengths`, else the default 587.56 nm.
 
 ```yaml

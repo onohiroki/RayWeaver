@@ -38,6 +38,7 @@ func runAsphere(data []byte) {
 	fs.Parse(os.Args[2:])
 
 	input := parseYAML[types.Input](data)
+	setReferenceWavelength(input.Chief)
 
 	if input.Chief == nil {
 		errOut("Error: 'chief' section is required (for fields and stop surface)")
@@ -354,28 +355,13 @@ func asphereFieldsFromItems(items []types.FieldItem) []asphere.Field {
 	return out
 }
 
-// resolveAsphereWavelengths returns the analysis wavelengths from the chief
-// section, else the selected config's wavelengths, else the default.
+// resolveAsphereWavelengths returns the selected config's analysis wavelengths,
+// falling back to the system reference wavelength.
 func resolveAsphereWavelengths(input types.Input, configFlag *string) []float64 {
-	if input.Chief != nil && len(input.Chief.Wavelengths) > 0 {
-		return input.Chief.Wavelengths
+	if out := configWavelengthValues(input.Configs, configFlag); len(out) > 0 {
+		return out
 	}
-	var items []types.WavelengthItem
-	if configFlag != nil && *configFlag != "" {
-		if idx, _ := resolveConfig(input.Configs, *configFlag); idx >= 0 {
-			items = input.Configs[idx].Wavelengths
-		}
-	} else if len(input.Configs) > 0 {
-		items = input.Configs[0].Wavelengths
-	}
-	var out []float64
-	for _, w := range items {
-		out = append(out, w.Value)
-	}
-	if len(out) == 0 {
-		out = []float64{types.DefaultWavelength}
-	}
-	return out
+	return []float64{effectiveReferenceWavelength(input.Chief)}
 }
 
 // buildFocusConfig builds the focus channel configuration from CLI flags and

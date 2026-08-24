@@ -24,6 +24,7 @@ func runScale(data []byte) {
 	fs.Parse(os.Args[2:])
 
 	input := parseYAML[types.Input](data)
+	setReferenceWavelength(input.Chief)
 
 	// Target EFL: --efl (flag) wins over scale.efl (YAML).
 	target := *eflTarget
@@ -52,7 +53,7 @@ func runScale(data []byte) {
 	}
 	surface.Precompute(refSurfaces)
 
-	wavelength := types.DefaultWavelength
+	wavelength := effectiveReferenceWavelength(input.Chief)
 	refSys := types.System{Surfaces: refSurfaces}
 	cur := paraxial.Compute(refSys, wavelength, gc, 0, nil).FocalLength
 	if math.Abs(cur) < 1e-9 {

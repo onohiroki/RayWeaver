@@ -88,9 +88,7 @@ func doubleGaussFootprints(t *testing.T) ([]types.Surface, []FieldFootprintData,
 		}
 	}
 	var wls []float64
-	if in.Chief != nil && len(in.Chief.Wavelengths) > 0 {
-		wls = in.Chief.Wavelengths
-	} else if len(in.Configs) > 0 {
+	if len(in.Configs) > 0 {
 		for _, w := range in.Configs[0].Wavelengths {
 			wls = append(wls, w.Value)
 		}

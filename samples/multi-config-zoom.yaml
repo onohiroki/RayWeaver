@@ -474,6 +474,7 @@ optimization:
   constraints: []
 chief:
   reference_surface: 12
+  reference_wavelength: 0.00058756
   num_rays: 256
   grid_type: hex
   dump_map: true

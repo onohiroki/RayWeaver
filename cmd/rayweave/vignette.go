@@ -26,8 +26,8 @@ func runVignette(data []byte) {
 		os.Exit(1)
 	}
 
-	// Resolve effective settings: flag (if set) > vignette: YAML section >
-	// built-in default.
+	// Resolve effective settings. The reference wavelength is system-wide and is
+	// shared with chief and paraxial.
 	vcfg := input.Vignette
 	if vcfg == nil {
 		vcfg = &types.VignetteConfig{}
@@ -44,10 +44,11 @@ func runVignette(data []byte) {
 	if !flagWasSet(fs, "margin-mm") && vcfg.MarginMM > 0 {
 		marginMMEff = vcfg.MarginMM
 	}
-	wlEff := *wlFlag
-	if !flagWasSet(fs, "wl") && vcfg.Wavelength > 0 {
-		wlEff = vcfg.Wavelength
+	wlEff := effectiveReferenceWavelength(input.Chief)
+	if flagWasSet(fs, "wl") && *wlFlag > 0 {
+		wlEff = *wlFlag
 	}
+	input.Chief.ReferenceWavelength = wlEff
 	// Principle 3: echo the flag-won values back into the output section
 	// (only for flags actually set; unset flags never inject defaults).
 	if anyFlagSet(fs, "iterations", "min-glass-path", "margin-mm", "wl") {
@@ -63,8 +64,8 @@ func runVignette(data []byte) {
 		if flagWasSet(fs, "margin-mm") {
 			input.Vignette.MarginMM = marginMMEff
 		}
-		if flagWasSet(fs, "wl") {
-			input.Vignette.Wavelength = wlEff
+		if flagWasSet(fs, "wl") && input.Chief != nil {
+			input.Chief.ReferenceWavelength = wlEff
 		}
 	}
 

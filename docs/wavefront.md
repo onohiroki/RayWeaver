@@ -57,7 +57,7 @@ yields the standard wavefront-aberration definition (the statistics
 | `--ref-surface N` | reference surface ID for wavefront sampling (default: the last optical surface) |
 | `--num-rays N` | entrance-pupil grid rays per field (default 400) |
 | `--fields I1,I2,...` | field indices to analyse (default: all chief fields) |
-| `--wavelengths W1,...` | wavelengths in mm (default: chief wavelengths, else 587.56 nm) |
+| `--wavelengths W1,...` | wavelengths in mm (default: selected config wavelengths, else reference wavelength) |
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` |
 | `--zernike-order N` | highest Fringe Zernike index to fit (default 15) |
 | `--wavefront-workers N` | per-field task parallelism (default: GOMAXPROCS) |

@@ -110,6 +110,10 @@ warned.
   carries one block per surface; consecutive ZEMAX `COORDBRK` surfaces would
   otherwise be dropped on re-import).
 - Per-config fields/wavelengths differences use the first config's values.
+- ZEMAX writes `configs[0].wavelengths[].value` as `WAVL` in micrometres and
+  `configs[0].wavelengths[].weight` as `WWGT`; `PWAV` is the 1-based position
+  of `chief.reference_wavelength` in that table. CODE V writes the same data
+  as `WL`/`WTW` in nanometres and `REF`.
 
 ## Examples
 

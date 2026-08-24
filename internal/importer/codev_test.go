@@ -887,16 +887,6 @@ END
 	if len(result.Wavelengths) != 3 {
 		t.Fatalf("expected 3 wavelengths, got %d", len(result.Wavelengths))
 	}
-	// REF 2 (1-based) marks the 587.6nm entry (0-based index 1) as primary.
-	if result.Wavelengths[0].Primary {
-		t.Error("wavelength 0 should not be primary")
-	}
-	if !result.Wavelengths[1].Primary {
-		t.Error("wavelength 1 (587.6nm) should be primary via REF 2")
-	}
-	if result.Wavelengths[2].Primary {
-		t.Error("wavelength 2 should not be primary")
-	}
 	if result.ReferenceWavelengthIdx != 1 {
 		t.Errorf("reference wavelength idx: expected 1, got %d", result.ReferenceWavelengthIdx)
 	}
@@ -917,8 +907,8 @@ END
 	if len(result.Wavelengths) != 3 {
 		t.Fatalf("expected 3 wavelengths, got %d", len(result.Wavelengths))
 	}
-	if !result.Wavelengths[2].Primary {
-		t.Error("wavelength 2 should be primary even when REF precedes WL")
+	if result.ReferenceWavelengthIdx != 2 {
+		t.Errorf("reference wavelength idx: expected 2, got %d", result.ReferenceWavelengthIdx)
 	}
 }
 
@@ -937,9 +927,6 @@ END
 	// out of range and must be ignored without error.
 	if len(result.Wavelengths) != 1 {
 		t.Fatalf("expected 1 default wavelength, got %d", len(result.Wavelengths))
-	}
-	if result.Wavelengths[0].Primary {
-		t.Error("default wavelength must not be marked primary")
 	}
 }
 

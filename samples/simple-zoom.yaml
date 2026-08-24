@@ -289,6 +289,7 @@ optimization:
 
 chief:
   reference_surface: 7
+  reference_wavelength: 0.00058756
   num_rays: 256
   fields:
     - image_height: 0.0

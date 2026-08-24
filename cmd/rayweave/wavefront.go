@@ -33,7 +33,7 @@ func runWavefront(data []byte) {
 	refSurface := fs.Int("ref-surface", 0, "reference surface ID for wavefront sampling (default: last optical surface)")
 	numRays := fs.Int("num-rays", 0, "pupil grid rays (default 400)")
 	fieldsFlag := fs.String("fields", "", "comma-separated field indices to compute (default: all)")
-	wlFlag := fs.String("wavelengths", "", "comma-separated wavelengths in mm (default: chief wavelengths, else 587.56 nm)")
+	wlFlag := fs.String("wavelengths", "", "comma-separated wavelengths in mm (default: config wavelengths, else reference wavelength)")
 	polFlag := fs.String("polarization", "", "input polarization: RCP (default) | LCP | X | Y | RCP+LCP")
 	zernikeOrder := fs.Int("zernike-order", 0, "highest Fringe Zernike index to fit (default 15)")
 	wfWorkers := fs.Int("wavefront-workers", 0, "per-field task parallelism (default: GOMAXPROCS)")
@@ -47,6 +47,7 @@ func runWavefront(data []byte) {
 	fs.Parse(os.Args[2:])
 
 	input := parseYAML[types.Input](data)
+	setReferenceWavelength(input.Chief)
 	if input.Chief == nil {
 		errOut("Error: 'chief' section is required (for fields)")
 		os.Exit(1)
@@ -79,10 +80,10 @@ func runWavefront(data []byte) {
 		wavelengths = parseFloatList(*wlFlag, "wavelength")
 	case input.Wavefront != nil && len(input.Wavefront.Wavelengths) > 0:
 		wavelengths = input.Wavefront.Wavelengths
-	case len(input.Chief.Wavelengths) > 0:
-		wavelengths = input.Chief.Wavelengths
+	case len(configWavelengthValues(input.Configs, configFlag)) > 0:
+		wavelengths = configWavelengthValues(input.Configs, configFlag)
 	default:
-		wavelengths = []float64{types.DefaultWavelength}
+		wavelengths = []float64{effectiveReferenceWavelength(input.Chief)}
 	}
 
 	var polLabels []string
@@ -102,10 +103,10 @@ func runWavefront(data []byte) {
 	mapGridVal := intOrYAML(*mapGrid, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.MapGrid }))
 
 	opts := wavefront.Options{
-		NumRays:          numRaysVal,
-		Workers:          workers,
-		ZernikeMaxOrder:  zOrder,
-		Polarizations:    polLabels,
+		NumRays:         numRaysVal,
+		Workers:         workers,
+		ZernikeMaxOrder: zOrder,
+		Polarizations:   polLabels,
 	}
 	opts.BestFocus = resolveBestFocus(input, fs, *bestFocus, *focusWeight, *focusWeights, len(fields))
 
@@ -189,7 +190,7 @@ func runWavefront(data []byte) {
 	output.WavefrontResults = wr
 
 	writeYAML(&output)
-}// resolveBestFocus builds the engine best-focus configuration from the CLI
+} // resolveBestFocus builds the engine best-focus configuration from the CLI
 // flags and the wavefront: YAML section (CLI wins). Returns nil when best
 // focus is disabled.
 func resolveBestFocus(input types.Input, fs *flag.FlagSet, bf bool, weightFlag, weightsFlag string, numFields int) *wavefront.FocusConfig {
@@ -342,8 +343,8 @@ func wavefrontFieldToTypes(r *wavefront.FieldResult, outFile string) types.Wavef
 			Tilt: r.Paraboloid.Tilt, RMSResidual: r.Paraboloid.RMSResidual,
 		},
 		Sphere: types.WavefrontSphere{
-			Radius: r.Sphere.Radius,
-			Center: types.Vec3{X: r.Sphere.CenterX, Y: r.Sphere.CenterY, Z: r.Sphere.CenterZ},
+			Radius:      r.Sphere.Radius,
+			Center:      types.Vec3{X: r.Sphere.CenterX, Y: r.Sphere.CenterY, Z: r.Sphere.CenterZ},
 			RMSResidual: r.Sphere.RMSResidual,
 		},
 		Zernike: types.WavefrontZernike{
@@ -368,10 +369,10 @@ func wavefrontFieldToTypes(r *wavefront.FieldResult, outFile string) types.Wavef
 
 // wavefrontYAMLFile is the full structured per-result output written by --yaml.
 type wavefrontYAMLFile struct {
-	FieldIndex   int                   `yaml:"field_index"`
-	FieldAngle   float64               `yaml:"field_angle"`
-	Wavelength   float64               `yaml:"wavelength"`
-	Polarization string                `yaml:"polarization"`
+	FieldIndex   int                       `yaml:"field_index"`
+	FieldAngle   float64                   `yaml:"field_angle"`
+	Wavelength   float64                   `yaml:"wavelength"`
+	Polarization string                    `yaml:"polarization"`
 	Paraboloid   types.WavefrontParaboloid `yaml:"paraboloid"`
 	Sphere       types.WavefrontSphere     `yaml:"best_fit_sphere"`
 	Zernike      types.WavefrontZernike    `yaml:"zernike"`
@@ -380,8 +381,8 @@ type wavefrontYAMLFile struct {
 	// Scattered is the raw per-sample wavefront data on the reference surface.
 	Scattered []wavefrontYAMLSample `yaml:"scattered"`
 	// Map is the interpolated residual-OPD grid over the pupil.
-	Map wavefrontYAMLMap `yaml:"map"`
-	OutputFile string `yaml:"output_file,omitempty"`
+	Map        wavefrontYAMLMap `yaml:"map"`
+	OutputFile string           `yaml:"output_file,omitempty"`
 }
 
 type wavefrontYAMLSample struct {
@@ -454,5 +455,3 @@ func writeWavefrontCSV(path string, r *wavefront.FieldResult, mapGrid int) error
 	}
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
-
-

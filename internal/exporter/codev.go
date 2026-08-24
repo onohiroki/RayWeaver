@@ -40,7 +40,9 @@ func WriteCodeV(input *types.Input, configs []int, gc *glass.Catalog, warn Warn,
 	if len(configs) > 1 {
 		fmt.Fprintf(&b, "ZOOM %d\n", len(configs))
 	}
-	writeCodeVWavelengths(&b, baseCfg)
+	if err := writeCodeVWavelengths(&b, input, baseCfg); err != nil {
+		return nil, err
+	}
 	writeCodeVFields(&b, baseCfg.Fields, ftyp, warn)
 	writeCodeVVignetting(&b, baseCfg.Fields)
 
@@ -74,22 +76,20 @@ func WriteCodeV(input *types.Input, configs []int, gc *glass.Catalog, warn Warn,
 	return []byte(b.String()), nil
 }
 
-func writeCodeVWavelengths(b *strings.Builder, cfg *types.Config) {
-	if len(cfg.Wavelengths) == 0 {
-		return
+func writeCodeVWavelengths(b *strings.Builder, input *types.Input, cfg *types.Config) error {
+	wavelengths, primary, err := exportWavelengths(input, cfg)
+	if err != nil {
+		return err
 	}
 	var wls, wws []string
-	ref := 1
-	for i, wl := range cfg.Wavelengths {
+	for _, wl := range wavelengths {
 		wls = append(wls, num(wl.Value*1e6))
 		wws = append(wws, num(wl.Weight))
-		if wl.Primary {
-			ref = i + 1
-		}
 	}
 	codeVLine(b, "WL ", wls, 100)
 	codeVLine(b, "WTW ", wws, 100)
-	fmt.Fprintf(b, "REF %d\n", ref)
+	fmt.Fprintf(b, "REF %d\n", primary)
+	return nil
 }
 
 // writeCodeVFields writes the YAN/XAN or YIM + WTF field rows. The CODE V

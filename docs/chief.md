@@ -60,7 +60,7 @@ spanned by the field vector and the optical axis.
   through the given coordinate on the given surface (the traditional
   "stop-centre" definition).
 
-Flags override the corresponding YAML values (`--wl` → `chief.wavelength`,
+Flags override the corresponding YAML values (`--wl` → `chief.reference_wavelength`,
 `--pass-through` → `pass_through.surface`); the effective values are written
 back into the output YAML (CLI/YAML rule).
 

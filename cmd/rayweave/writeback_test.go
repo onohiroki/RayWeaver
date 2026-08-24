@@ -76,7 +76,7 @@ configs:
 `
 
 // chiefInput returns the singlet with a chief section. A non-zero wl sets
-// chief.wavelength.
+// chief.reference_wavelength.
 func chiefInput(wl float64) string {
 	s := `glass_catalog:
   entries:
@@ -89,7 +89,7 @@ chief:
   grid_type: hex
 `
 	if wl > 0 {
-		s += fmt.Sprintf("  wavelength: %.6g\n", wl)
+		s += fmt.Sprintf("  reference_wavelength: %.6g\n", wl)
 	}
 	s += `configs:
   - id: cfg1
@@ -207,8 +207,8 @@ func TestWriteBackGlassDirHelper(t *testing.T) {
 	}
 }
 
-// TestChiefWavelengthWriteBack verifies --wl wins over YAML and is echoed into
-// chief.wavelength; an unset flag never injects the default.
+// TestChiefWavelengthWriteBack verifies --wl wins over YAML and the effective
+// reference wavelength is always echoed into the pipeline output.
 func TestChiefWavelengthWriteBack(t *testing.T) {
 	// Flag set: written back.
 	out := runCommand(t, []string{"rayweave", "chief", "--wl", "0.00052"},
@@ -217,12 +217,12 @@ func TestChiefWavelengthWriteBack(t *testing.T) {
 	if err := yaml.Unmarshal(out, &res); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
-	if res.Chief == nil || math.Abs(res.Chief.Wavelength-0.00052) > 1e-9 {
+	if res.Chief == nil || math.Abs(res.Chief.ReferenceWavelength-0.00052) > 1e-9 {
 		got := 0.0
 		if res.Chief != nil {
-			got = res.Chief.Wavelength
+			got = res.Chief.ReferenceWavelength
 		}
-		t.Errorf("chief.wavelength = %v, want 0.00052", got)
+		t.Errorf("chief.reference_wavelength = %v, want 0.00052", got)
 	}
 	res = types.Input{}
 
@@ -232,27 +232,27 @@ func TestChiefWavelengthWriteBack(t *testing.T) {
 	if err := yaml.Unmarshal(out, &res); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
-	if res.Chief == nil || math.Abs(res.Chief.Wavelength-0.00062) > 1e-9 {
+	if res.Chief == nil || math.Abs(res.Chief.ReferenceWavelength-0.00062) > 1e-9 {
 		got := 0.0
 		if res.Chief != nil {
-			got = res.Chief.Wavelength
+			got = res.Chief.ReferenceWavelength
 		}
-		t.Errorf("chief.wavelength = %v, want YAML value 0.00062", got)
+		t.Errorf("chief.reference_wavelength = %v, want YAML value 0.00062", got)
 	}
 	res = types.Input{}
 
-	// Neither flag nor YAML: nothing injected (omitempty -> 0).
+	// Neither flag nor YAML: the built-in default is written back.
 	out = runCommand(t, []string{"rayweave", "chief"},
 		func() { runChief([]byte(chiefInput(0))) })
 	if err := yaml.Unmarshal(out, &res); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
-	if res.Chief == nil || res.Chief.Wavelength != 0 {
+	if res.Chief == nil || math.Abs(res.Chief.ReferenceWavelength-types.DefaultWavelength) > 1e-12 {
 		got := -1.0
 		if res.Chief != nil {
-			got = res.Chief.Wavelength
+			got = res.Chief.ReferenceWavelength
 		}
-		t.Errorf("chief.wavelength = %v, want 0 (not injected)", got)
+		t.Errorf("chief.reference_wavelength = %v, want %v", got, types.DefaultWavelength)
 	}
 }
 

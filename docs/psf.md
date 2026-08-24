@@ -42,7 +42,7 @@ single flat exit pupil would break down.
 | `--psf-width W` | evaluation half-width in mm (default: auto from the Airy disk and the geometric spot) |
 | `--num-rays N` | pupil grid rays (default 400 ≈ 20×20 polar) |
 | `--fields I1,I2,...` | field indices to compute (default: all fields in the `chief` section) |
-| `--wavelengths W1,...` | wavelengths in mm (default: `chief.wavelengths`, else 587.56 nm) |
+| `--wavelengths W1,...` | wavelengths in mm (default: selected config wavelengths, else reference wavelength) |
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` (unpolarised average) |
 | `--psf-workers N` | parallel workers for the Huygens integral and wavefront tracing (default: GOMAXPROCS) |
 | `--max-freq N` | MTF frequency cap in cycles/mm (default: `psf.mtf_config.max_frequency`, else the Nyquist) |
@@ -105,7 +105,7 @@ psf:
   num_rays: 900               # pupil grid rays
   huygens_workers: 8          # parallel workers (0 = GOMAXPROCS)
   fields: [0, 1]              # field indices (default: all)
-  wavelengths: [0.00058756]   # mm (default: chief wavelengths)
+  wavelengths: [0.00058756]   # mm (default: selected config wavelengths)
   polarization: "RCP+LCP"     # RCP | LCP | X | Y | RCP+LCP
   best_focus: false           # per-field best-focus image plane (default: fixed plane)
   converge_check: true        # label sampling convergence (default: on)

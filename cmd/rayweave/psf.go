@@ -38,7 +38,7 @@ func runPSF(data []byte) {
 	halfWidth := fs.Float64("psf-width", 0, "evaluation half-width mm (0 = auto from Airy disk + spot)")
 	numRays := fs.Int("num-rays", 0, "pupil grid rays (default 400)")
 	fieldsFlag := fs.String("fields", "", "comma-separated field indices to compute (default: all)")
-	wlFlag := fs.String("wavelengths", "", "comma-separated wavelengths in mm (default: chief wavelengths, else 587.56 nm)")
+	wlFlag := fs.String("wavelengths", "", "comma-separated wavelengths in mm (default: config wavelengths, else reference wavelength)")
 	polFlag := fs.String("polarization", "", "input polarization: RCP (default) | LCP | X | Y | RCP+LCP (unpolarised average)")
 	spectralFlag := fs.String("spectral", "", "polychromatic (white) PSF: D65 (default) | FLAT")
 	psfWorkers := fs.Int("psf-workers", 0, "Huygens/wavefront parallel workers (default: GOMAXPROCS)")
@@ -51,6 +51,7 @@ func runPSF(data []byte) {
 	fs.Parse(os.Args[2:])
 
 	input := parseYAML[types.Input](data)
+	setReferenceWavelength(input.Chief)
 	if input.Chief == nil {
 		errOut("Error: 'chief' section is required (for fields)")
 		os.Exit(1)
@@ -74,8 +75,8 @@ func runPSF(data []byte) {
 		os.Exit(1)
 	}
 
-	// Wavelengths: flag > psf.wavelengths > spectral default grid > chief
-	// wavelengths > 587.56 nm.
+	// Wavelengths: flag > psf.wavelengths > spectral default grid > selected
+	// config wavelengths > the system reference wavelength.
 	var wavelengths []float64
 	spectralMode := *spectralFlag != "" ||
 		(input.PSF != nil && (input.PSF.SpectralCurve != "" || len(input.PSF.SpectralEntries) > 0))
@@ -88,10 +89,10 @@ func runPSF(data []byte) {
 		for wl := 400.0; wl <= 700; wl += 10 {
 			wavelengths = append(wavelengths, wl*1e-6)
 		}
-	case len(input.Chief.Wavelengths) > 0:
-		wavelengths = input.Chief.Wavelengths
+	case len(configWavelengthValues(input.Configs, configFlag)) > 0:
+		wavelengths = configWavelengthValues(input.Configs, configFlag)
 	default:
-		wavelengths = []float64{types.DefaultWavelength}
+		wavelengths = []float64{effectiveReferenceWavelength(input.Chief)}
 	}
 
 	var polLabels []string
@@ -242,9 +243,9 @@ func runPSF(data []byte) {
 			OutputFile:        outFile,
 			SpectralCurve:     r.SpectralCurve,
 			BestFocusShift:    r.BestFocusShift,
-			Converged:          convergenceFlag(opts.ConvergeCheck, r.Converged),
-			StrehlRelChange:    r.StrehlRelChange,
-			CheckRays:          r.CheckRays,
+			Converged:         convergenceFlag(opts.ConvergeCheck, r.Converged),
+			StrehlRelChange:   r.StrehlRelChange,
+			CheckRays:         r.CheckRays,
 			MTF:               psfMTFSummary(r.MTF),
 		})
 	}

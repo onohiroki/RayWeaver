@@ -707,10 +707,7 @@ chief:
         - 0
         - 1
   reference_surface: 14
+  reference_wavelength: 0.0005876
   num_rays: 256
   grid_type: hex
   dump_map: true
-  wavelengths:
-    - 0.0004861
-    - 0.0005876
-    - 0.0006563

@@ -31,8 +31,8 @@ chief:
   - angle: 24.0
     direction: [ 0, 1 ]
   reference_surface: 8
+  reference_wavelength: 0.0005876
   num_rays: 256
-  wavelengths: [ 0.0004358, 0.0005876, 0.0006563 ]
 
 optimization:
   method: dls

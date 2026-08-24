@@ -25,6 +25,7 @@ const (
 
 func runOptimize(data []byte, verbose bool, logFile string, glassDir string, excludeParams string, powerSolve bool, powerSolveSurfaces string, glassColor bool) {
 	input := parseYAML[types.Input](data)
+	setReferenceWavelength(input.Chief)
 
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
@@ -115,17 +116,18 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		}
 
 		configs = append(configs, optimize.ConfigInput{
-			ID:          cfg.ID,
-			Weight:      cfg.Weight,
-			StopSurface: stopSurface,
-			RefSurface:  chiefRefSurface(input),
-			PupilZ:      computePupilZ(input, surfaces, gc),
-			Surfaces:    surfaces,
-			Fields:      fields,
-			Wavelengths: wavelengths,
-			MeritTerms:  meritTerms,
-			MeritModes:  cfg.MeritModes,
-			Constraints: constraints,
+			ID:                  cfg.ID,
+			Weight:              cfg.Weight,
+			StopSurface:         stopSurface,
+			RefSurface:          chiefRefSurface(input),
+			PupilZ:              computePupilZ(input, surfaces, gc),
+			ReferenceWavelength: effectiveReferenceWavelength(input.Chief),
+			Surfaces:            surfaces,
+			Fields:              fields,
+			Wavelengths:         wavelengths,
+			MeritTerms:          meritTerms,
+			MeritModes:          cfg.MeritModes,
+			Constraints:         constraints,
 		})
 	}
 
@@ -134,14 +136,15 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	if len(configs) == 0 {
 		cfgSurfaces := firstConfigSurfaces(input)
 		configs = []optimize.ConfigInput{{
-			ID:          "config1",
-			Weight:      1.0,
-			StopSurface: 0,
-			RefSurface:  chiefRefSurface(input),
-			PupilZ:      computePupilZ(input, cfgSurfaces, gc),
-			Surfaces:    cfgSurfaces,
-			Fields:      loadFields(input),
-			Constraints: input.Optimization.Constraints,
+			ID:                  "config1",
+			Weight:              1.0,
+			StopSurface:         0,
+			RefSurface:          chiefRefSurface(input),
+			PupilZ:              computePupilZ(input, cfgSurfaces, gc),
+			ReferenceWavelength: effectiveReferenceWavelength(input.Chief),
+			Surfaces:            cfgSurfaces,
+			Fields:              loadFields(input),
+			Constraints:         input.Optimization.Constraints,
 		}}
 	}
 

@@ -28,6 +28,7 @@ import (
 // force quit), each producing interrupted: true and exit 0 except the last.
 func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassColor bool) {
 	input := parseYAML[types.Input](data)
+	setReferenceWavelength(input.Chief)
 	if input.Optimization == nil {
 		errOut("Error: 'optimization' section is required")
 		os.Exit(1)
@@ -227,26 +228,26 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	}
 
 	cfg := optimize.Config{
-		Surfaces:         surfaces,
-		Variables:        variables,
-		MeritTerms:       meritTerms,
-		Fields:           fields,
-		Constraints:      constraints,
-		GlassCatalog:     gc,
-		StopSurface:      stopSurface,
-		RefSurface:       chiefRefSurface(input),
-		PupilZ:           computePupilZ(input, surfaces, gc),
-		MaxIter:          input.Optimization.MaxIter,
-		Tol:              input.Optimization.Tol,
-		Epsilon:          input.Optimization.Epsilon,
-		NumRays:          input.Optimization.NumRays,
-		ApertureMargin:   apertureMargin,
-		ApertureMarginMM: apertureMarginMM,
-		MuConMax:         input.Optimization.MuConMax,
-		Workers:          workers,
-		CentralDiff:      input.Optimization.CentralDiff,
-		BFGS:             input.Optimization.BFGS,
-		AutoScale:        input.Optimization.AutoScale,
+		Surfaces:           surfaces,
+		Variables:          variables,
+		MeritTerms:         meritTerms,
+		Fields:             fields,
+		Constraints:        constraints,
+		GlassCatalog:       gc,
+		StopSurface:        stopSurface,
+		RefSurface:         chiefRefSurface(input),
+		PupilZ:             computePupilZ(input, surfaces, gc),
+		MaxIter:            input.Optimization.MaxIter,
+		Tol:                input.Optimization.Tol,
+		Epsilon:            input.Optimization.Epsilon,
+		NumRays:            input.Optimization.NumRays,
+		ApertureMargin:     apertureMargin,
+		ApertureMarginMM:   apertureMarginMM,
+		MuConMax:           input.Optimization.MuConMax,
+		Workers:            workers,
+		CentralDiff:        input.Optimization.CentralDiff,
+		BFGS:               input.Optimization.BFGS,
+		AutoScale:          input.Optimization.AutoScale,
 		PowerSolveSurfaces: gctx.surfaces,
 	}
 	if dg := input.Optimization.Degenerate; dg != nil {
@@ -423,16 +424,17 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			stopSurface = input.Chief.StopSurface
 		}
 		configs = append(configs, optimize.ConfigInput{
-			ID:          cfg.ID,
-			Weight:      cfg.Weight,
-			StopSurface: stopSurface,
-			RefSurface:  chiefRefSurface(input),
-			PupilZ:      computePupilZ(input, surfaces, gc),
-			Surfaces:    surfaces,
-			Fields:      fields,
-			Wavelengths: wavelengths,
-			MeritTerms:  meritTerms,
-			Constraints: constraints,
+			ID:                  cfg.ID,
+			Weight:              cfg.Weight,
+			StopSurface:         stopSurface,
+			RefSurface:          chiefRefSurface(input),
+			PupilZ:              computePupilZ(input, surfaces, gc),
+			ReferenceWavelength: effectiveReferenceWavelength(input.Chief),
+			Surfaces:            surfaces,
+			Fields:              fields,
+			Wavelengths:         wavelengths,
+			MeritTerms:          meritTerms,
+			Constraints:         constraints,
 		})
 	}
 	if len(configs) == 0 {

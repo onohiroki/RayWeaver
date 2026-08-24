@@ -82,7 +82,7 @@ func runImport(data []byte) {
 	surfaces := result.Surfaces
 	surface.Precompute(surfaces)
 	if *format == "oslo" {
-		wl := firstWavelength(result.Wavelengths)
+		wl := importedReferenceWavelength(result)
 		importer.ApplyImageDistance(result, gc, wl)
 		surfaces = result.Surfaces
 	}
@@ -102,7 +102,7 @@ func runImport(data []byte) {
 			}
 		}
 		if !hasDiam {
-			wl := firstWavelength(result.Wavelengths)
+			wl := importedReferenceWavelength(result)
 			pr := paraxial.Compute(types.System{Surfaces: surfaces}, wl, gc, 0, nil)
 			if pr.FocalLength > 0 {
 				epDiam := pr.FocalLength / result.FNO
@@ -187,7 +187,7 @@ func runImport(data []byte) {
 				Terms: []types.MeritTerm{{
 					Kind:       "spot_rms",
 					Field:      0,
-					Wavelength: firstWavelength(result.Wavelengths),
+					Wavelength: importedReferenceWavelength(result),
 					Weight:     1.0,
 				}},
 			},
@@ -210,9 +210,10 @@ func runImport(data []byte) {
 			Constraints:     []types.ConstraintOperand{},
 		},
 		Chief: &types.ChiefInput{
-			ReferenceSurface: lastID,
-			StopSurface:      stopSurface,
-			NumRays:          128,
+			ReferenceSurface:    lastID,
+			StopSurface:         stopSurface,
+			NumRays:             128,
+			ReferenceWavelength: importedReferenceWavelength(result),
 		},
 		Configs: configs,
 	}
@@ -243,7 +244,7 @@ func runImport(data []byte) {
 	}
 
 	if !*noChief && len(result.Fields) > 0 {
-		wavelength := firstWavelength(result.Wavelengths)
+		wavelength := importedReferenceWavelength(result)
 		pol := types.NewCircularJones(true)
 
 		pt := &types.PassThroughTarget{
@@ -307,13 +308,13 @@ func runImport(data []byte) {
 	writeYAML(&outputOut)
 }
 
-func firstWavelength(wavelengths []types.WavelengthItem) float64 {
-	for _, w := range wavelengths {
-		if w.Primary && w.Value > 0 {
-			return w.Value
+func importedReferenceWavelength(result *importer.ParseResult) float64 {
+	if result.ReferenceWavelengthIdx >= 0 && result.ReferenceWavelengthIdx < len(result.Wavelengths) {
+		if value := result.Wavelengths[result.ReferenceWavelengthIdx].Value; value > 0 {
+			return value
 		}
 	}
-	for _, w := range wavelengths {
+	for _, w := range result.Wavelengths {
 		if w.Value > 0 {
 			return w.Value
 		}

@@ -15,7 +15,7 @@ import (
 func testInput() *types.Input {
 	return &types.Input{
 		Metadata: &types.Metadata{Tool: "RayWeaver", URL: "https://github.com/onohiroki/RayWeaver", SchemaVersion: 1},
-		Chief:    &types.ChiefInput{StopSurface: 2},
+		Chief:    &types.ChiefInput{StopSurface: 2, ReferenceWavelength: 0.00058756},
 		Configs: []types.Config{
 			{
 				ID: "config1", Name: "Config1", Weight: 1, Active: true,
@@ -24,7 +24,7 @@ func testInput() *types.Input {
 					{ID: 1, AngleDeg: 10, Weight: 1},
 				},
 				Wavelengths: []types.WavelengthItem{
-					{ID: 0, Value: 0.00058756, Weight: 1, Primary: true},
+					{ID: 0, Value: 0.00058756, Weight: 1},
 					{ID: 1, Value: 0.00048613, Weight: 0.5},
 				},
 				Surfaces: []types.Surface{
@@ -153,6 +153,40 @@ func TestCodeVRoundTrip(t *testing.T) {
 	}
 	if len(pr.Fields) != 2 || math.Abs(pr.Fields[1].AngleDeg-10) > 1e-9 {
 		t.Errorf("fields not preserved: %+v", pr.Fields)
+	}
+}
+
+func TestWavelengthExportUsesReferenceWavelength(t *testing.T) {
+	in := testInput()
+	in.Chief.ReferenceWavelength = 0.00048613
+
+	zmx, err := WriteZemax(in, []int{0}, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(zmx)
+	if !strings.Contains(text, "WAVL 5.875600e-01 4.861300e-01") || !strings.Contains(text, "PWAV 2") {
+		t.Fatalf("ZMX wavelength section does not use reference index: %s", text)
+	}
+
+	seq, err := WriteCodeV(in, []int{0}, nil, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text = string(seq)
+	if !strings.Contains(text, "WL 587.56 486.13") || !strings.Contains(text, "REF 2") {
+		t.Fatalf("SEQ wavelength section does not use reference index: %s", text)
+	}
+}
+
+func TestWavelengthExportRejectsMissingReference(t *testing.T) {
+	in := testInput()
+	in.Chief.ReferenceWavelength = 0.00055
+	if _, err := WriteZemax(in, []int{0}, nil, nil); err == nil {
+		t.Fatal("ZMX export accepted a reference wavelength absent from the table")
+	}
+	if _, err := WriteCodeV(in, []int{0}, nil, nil, false); err == nil {
+		t.Fatal("CODE V export accepted a reference wavelength absent from the table")
 	}
 }
 

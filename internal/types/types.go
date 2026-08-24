@@ -384,12 +384,10 @@ type ChiefInput struct {
 	GridType         GridType           `yaml:"grid_type,omitempty"`
 	DumpMap          bool               `yaml:"dump_map,omitempty"`
 	PassThrough      *PassThroughTarget `yaml:"pass_through,omitempty"`
-	Wavelengths      []float64          `yaml:"wavelengths,omitempty"`
-	// Wavelength is the scalar reference wavelength (mm) used for the grid
-	// ray trace, the YAML counterpart of the --wl flag. wavelengths is the
-	// additional multi-wavelength spot-grid list. The effective value (flag
-	// wins over YAML) is written back into this field on output.
-	Wavelength float64 `yaml:"wavelength,omitempty"`
+	// ReferenceWavelength is the system reference wavelength (mm) used for
+	// chief-ray and paraxial calculations. The effective value is written back
+	// by commands that resolve it.
+	ReferenceWavelength float64 `yaml:"reference_wavelength"`
 }
 
 type RayInput struct {
@@ -464,9 +462,6 @@ type WavelengthItem struct {
 	Value  float64 `yaml:"value"`
 	Label  string  `yaml:"label,omitempty"`
 	Weight float64 `yaml:"weight"`
-	// Primary marks the reference (primary) wavelength of the system, e.g. the
-	// one selected by the CODE V REF header. It is omitted from YAML when false.
-	Primary bool `yaml:"primary,omitempty"`
 }
 
 type RayPath struct {
@@ -1310,7 +1305,6 @@ type VignetteConfig struct {
 	Iterations   int     `yaml:"iterations,omitempty"`
 	MinGlassPath float64 `yaml:"min_glass_path,omitempty"`
 	MarginMM     float64 `yaml:"margin_mm,omitempty"`
-	Wavelength   float64 `yaml:"wavelength,omitempty"`
 }
 
 // PlotConfig configures the `plot` subcommand (the `plot:` YAML section).

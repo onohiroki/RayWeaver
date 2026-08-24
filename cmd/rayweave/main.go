@@ -201,7 +201,7 @@ Options:
   --fan-rotation DEG   compute fan(s) in planes rotated by DEG around Z
                          (0 = XZ, 90 = YZ; implies --ray-fan; repeatable or
                          space-separated: --fan-rotation 0 45 90)
-  --wl 0.00058756      reference wavelength (mm; overrides chief.wavelength)
+	  --wl 0.00058756      reference wavelength (mm; overrides chief.reference_wavelength)
 
 Input YAML — chief section:
   fields:
@@ -312,7 +312,7 @@ Output: augmented YAML with paraxial_result: section:
 
 See: samples/us2645157.yaml (reference values)
 `)
-case "plot":
+	case "plot":
 		fmt.Print(`Usage: rayweave plot [-o file.svg|.png] [flags] < input.yaml
 
 Generates a cross-section drawing (SVG or PNG) of the lens
@@ -1270,16 +1270,18 @@ func runChief(data []byte) {
 		os.Exit(1)
 	}
 
-	// Reference wavelength: --wl (flag) wins over chief.wavelength (YAML),
-	// falling back to the built-in default.
+	// Reference wavelength: --wl wins over chief.reference_wavelength, with
+	// the built-in default as the final fallback. Always write the effective
+	// value so every pipeline stage sees the same reference.
 	wavelength := *wlFlag
-	if !wlSet && input.Chief.Wavelength > 0 {
-		wavelength = input.Chief.Wavelength
+	if !wlSet && input.Chief.ReferenceWavelength > 0 {
+		wavelength = input.Chief.ReferenceWavelength
 	}
-	if wlSet {
-		// Principle 3: echo the effective value back into the output section.
-		input.Chief.Wavelength = wavelength
+	if wavelength <= 0 {
+		wavelength = types.DefaultWavelength
 	}
+	input.Chief.ReferenceWavelength = wavelength
+	configWavelengths := configWavelengthValues(input.Configs, configFlag)
 
 	gc, _ := loadCatalogs(&input, *glassDir)
 	writeBackGlassDir(&input, *glassDir)
@@ -1310,7 +1312,7 @@ func runChief(data []byte) {
 		input.Chief.GridType,
 		pt,
 		fanCfg,
-		input.Chief.Wavelengths,
+		configWavelengths,
 	)
 
 	// --- --clear-aperture: scale grid points by entrance-pupil-based radius and set Diameter ---
@@ -1319,7 +1321,7 @@ func runChief(data []byte) {
 			// Re-trace with a denser grid so the beam footprint is accurate.
 			results = chief.DetermineChiefRaysGrid(
 				selectedSys, fields, input.Chief.ReferenceSurface, *clearApertureRays,
-				gc, pol, wavelength, false, input.Chief.GridType, pt, fanCfg, input.Chief.Wavelengths,
+				gc, pol, wavelength, false, input.Chief.GridType, pt, fanCfg, configWavelengths,
 			)
 		}
 		// The chief grid points already fill the aperture stop, so trace them
@@ -1495,6 +1497,45 @@ func resolveConfig(configs []types.Config, val string) (int, string) {
 	return -1, fmt.Sprintf("config %q not found", val)
 }
 
+// configWavelengthValues returns the selected config's wavelength table as
+// plain values for multi-wavelength analysis commands.
+func configWavelengthValues(configs []types.Config, configFlag *string) []float64 {
+	idx := 0
+	if configFlag != nil && *configFlag != "" {
+		var err string
+		idx, err = resolveConfig(configs, *configFlag)
+		if idx < 0 {
+			errOut("Error: %s", err)
+			os.Exit(1)
+		}
+	}
+	if idx < 0 || idx >= len(configs) {
+		return nil
+	}
+	values := make([]float64, 0, len(configs[idx].Wavelengths))
+	for _, wavelength := range configs[idx].Wavelengths {
+		if wavelength.Value > 0 {
+			values = append(values, wavelength.Value)
+		}
+	}
+	return values
+}
+
+func effectiveReferenceWavelength(chief *types.ChiefInput) float64 {
+	if chief != nil && chief.ReferenceWavelength > 0 {
+		return chief.ReferenceWavelength
+	}
+	return types.DefaultWavelength
+}
+
+func setReferenceWavelength(chief *types.ChiefInput) float64 {
+	wavelength := effectiveReferenceWavelength(chief)
+	if chief != nil {
+		chief.ReferenceWavelength = wavelength
+	}
+	return wavelength
+}
+
 // configSurfaces resolves the surface list for a command:
 //   - if configFlag is set, returns the matching config's surfaces
 //   - otherwise returns configs[0].surfaces
@@ -1661,6 +1702,7 @@ func gatherTraceRays(rays *types.RayInput, chiefRays []types.ChiefRayResult, pol
 func runParaxial(data []byte) {
 	args := os.Args[2:]
 	fs := flag.NewFlagSet("paraxial", flag.ExitOnError)
+	wlFlag := fs.Float64("wl", 0, "reference wavelength (mm) for paraxial calculation")
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	fs.Parse(args)
@@ -1680,6 +1722,16 @@ func runParaxial(data []byte) {
 	}
 
 	wavelength := types.DefaultWavelength
+	if input.Chief != nil && input.Chief.ReferenceWavelength > 0 {
+		wavelength = input.Chief.ReferenceWavelength
+	}
+	if flagWasSet(fs, "wl") && *wlFlag > 0 {
+		wavelength = *wlFlag
+	}
+	if input.Chief == nil {
+		input.Chief = &types.ChiefInput{}
+	}
+	input.Chief.ReferenceWavelength = wavelength
 	objectHeight := 0.0
 	if input.Paraxial != nil {
 		objectHeight = input.Paraxial.ObjectHeight

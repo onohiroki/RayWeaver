@@ -456,14 +456,6 @@ func ParseCodeV(input string) (*ParseResult, error) {
 		}
 	}
 
-	// CODE V REF selects the primary (reference) wavelength by 1-based index
-	// in the WL list; mark it so downstream selection (FNO sizing, chief ray
-	// wavelength, merit term) uses it. REF may appear before or after WL, so
-	// apply once all wavelengths are known.
-	if result.ReferenceWavelengthIdx >= 0 && result.ReferenceWavelengthIdx < len(result.Wavelengths) {
-		result.Wavelengths[result.ReferenceWavelengthIdx].Primary = true
-	}
-
 	// The base field vignetting (VUX/VLX/VUY/VLY rows) and the zoom-position
 	// overlays (ZOOM n + ZOO rows) are applied on top of the fold-normalised
 	// base geometry.
@@ -645,7 +637,7 @@ func parseCodeVHeader(upper string, tokens []string, result *ParseResult, inchMo
 	if strings.HasPrefix(upper, "REF ") && len(tokens) >= 2 {
 		// REF selects the primary (reference) wavelength by its 1-based
 		// position in the WL list. Stored 0-based; applied to the
-		// WavelengthItem Primary flag once all wavelengths are known.
+		// Apply the index once all wavelengths are known.
 		if n, err := strconv.Atoi(tokens[1]); err == nil && n > 0 {
 			result.ReferenceWavelengthIdx = n - 1
 		}

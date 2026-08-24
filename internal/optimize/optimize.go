@@ -63,17 +63,25 @@ type Config struct {
 // ConfigInput describes one configuration (zoom position) of a
 // multi-configuration optimisation.
 type ConfigInput struct {
-	ID          string
-	Weight      float64
-	StopSurface int
-	RefSurface  int
-	PupilZ      float64
-	Surfaces    []types.Surface
-	Fields      []types.FieldItem
-	Wavelengths []types.WavelengthItem
-	MeritTerms  []types.MeritTerm
-	MeritModes  []types.MeritMode
-	Constraints []types.ConstraintOperand
+	ID                  string
+	Weight              float64
+	StopSurface         int
+	RefSurface          int
+	PupilZ              float64
+	ReferenceWavelength float64
+	Surfaces            []types.Surface
+	Fields              []types.FieldItem
+	Wavelengths         []types.WavelengthItem
+	MeritTerms          []types.MeritTerm
+	MeritModes          []types.MeritMode
+	Constraints         []types.ConstraintOperand
+}
+
+func effectiveReferenceWavelength(wavelength float64) float64 {
+	if wavelength > 0 {
+		return wavelength
+	}
+	return types.DefaultWavelength
 }
 
 // Variable is one optimisation variable. It binds one component of the
@@ -146,11 +154,12 @@ type powerSolveEntry struct {
 
 // config is the internal per-configuration state of the unified Optimizer.
 type config struct {
-	id          string
-	weight      float64
-	stopSurface int
-	refSurface  int
-	pupilZ      float64
+	id                  string
+	weight              float64
+	stopSurface         int
+	refSurface          int
+	pupilZ              float64
+	referenceWavelength float64
 	// pupilZs holds the per-field dynamic entrance pupil Z keyed by field
 	// angle (degrees), refreshed by UpdatePupils. Grids for off-axis fields
 	// must be centred on their own pupil, not the field-0 one.
@@ -528,7 +537,7 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 		results := chief.DetermineChiefRaysGrid(
 			types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
 			cfg.fieldDefs, cfg.refSurface, o.numRays, gc, pol,
-			types.DefaultWavelength, false, types.GridPolar, nil, nil, nil,
+			effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridPolar, nil, nil, nil,
 		)
 		for i, r := range results {
 			if r.EntrancePupil == nil {
@@ -630,7 +639,7 @@ type Optimizer struct {
 	powerSolveEnabled bool
 	// glassMerit holds the per-config merit terms used during the glass phase
 	// (colour-only LCA/TCA). glassMeritActive routes scheduledTerms to them.
-	glassMerit      map[string][]meritTerm
+	glassMerit       map[string][]meritTerm
 	glassMeritActive bool
 	// pinnedVars remembers the original Min/Max of variables locked by
 	// EnterGlassPhase, so ExitGlassPhase can restore them exactly.
@@ -1450,9 +1459,9 @@ func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, 
 func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) {
 	// Collect unique grid keys from the scheduled terms.
 	type traceJob struct {
-		key gridKey
+		key   gridKey
 		angle float64
-		wl  float64
+		wl    float64
 	}
 	seen := make(map[gridKey]bool)
 	var jobs []traceJob
@@ -1629,7 +1638,7 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 
 	// The extents are geometric (aperture-clipping skipped), so one
 	// representative wavelength per field is enough for sizing.
-	wl := types.DefaultWavelength
+	wl := effectiveReferenceWavelength(cfg.referenceWavelength)
 	if len(cfg.wavelengths) > 0 {
 		wl = cfg.wavelengths[0].Value
 	}
@@ -2020,12 +2029,12 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 	results := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
 		cfg.fieldDefs, cfg.refSurface, o.extentRays(512), gc, pol,
-		types.DefaultWavelength, false, types.GridHex, nil, nil, nil,
+		effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridHex, nil, nil, nil,
 	)
 	engine := ray.NewEngine(gc, nil)
 	surface.Precompute(surfaces)
 	path := dls.BuildPath(surfaces)
-	env := chief.BeamEnvelope(results, engine, surfaces, path, types.DefaultWavelength, pol)
+	env := chief.BeamEnvelope(results, engine, surfaces, path, effectiveReferenceWavelength(cfg.referenceWavelength), pol)
 	for i := range surfaces {
 		if !surfaces[i].AutoAperture {
 			continue

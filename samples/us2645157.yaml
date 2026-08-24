@@ -80,6 +80,7 @@ chief:
     - angle: 24.0
       direction: [0, 1]
   reference_surface: 8
+  reference_wavelength: 0.00058756
   num_rays: 1000
   grid_type: hex
   dump_map: true

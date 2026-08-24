@@ -94,7 +94,9 @@ func WriteZemax(input *types.Input, configs []int, gc *glass.Catalog, warn Warn)
 	writeZemaxVignetting(&b, baseCfg.Fields)
 
 	// Wavelengths in µm with weights; PWAV marks the primary (1-based).
-	writeZemaxWavelengths(&b, baseCfg)
+	if err := writeZemaxWavelengths(&b, input, baseCfg); err != nil {
+		return nil, err
+	}
 
 	// Object surface: infinite distance, or the first field's object distance
 	// for finite-conjugate (object-height) fields.
@@ -207,26 +209,20 @@ func writeZemaxVignetting(b *strings.Builder, fields []types.FieldItem) {
 	b.WriteString("VANN " + strings.Join(van, " ") + "\n")
 }
 
-func writeZemaxWavelengths(b *strings.Builder, cfg *types.Config) {
-	if len(cfg.Wavelengths) == 0 {
-		return
+func writeZemaxWavelengths(b *strings.Builder, input *types.Input, cfg *types.Config) error {
+	wavelengths, primary, err := exportWavelengths(input, cfg)
+	if err != nil {
+		return err
 	}
-	var wws []string
-	primary := 1
-	for i, wl := range cfg.Wavelengths {
-		// ZEMAX writes one wavelength per WAVL line.
-		fmt.Fprintf(b, "WAVL %s\n", num(wl.Value*1000))
-		if wl.Weight != 0 {
-			wws = append(wws, num(wl.Weight))
-		}
-		if wl.Primary {
-			primary = i + 1
-		}
+	var wls, wws []string
+	for _, wl := range wavelengths {
+		wls = append(wls, fmt.Sprintf("%.6e", wl.Value*1000))
+		wws = append(wws, fmt.Sprintf("%.6e", wl.Weight))
 	}
-	if len(wws) == len(cfg.Wavelengths) {
-		fmt.Fprintf(b, "WWGT %s\n", strings.Join(wws, " "))
-	}
+	fmt.Fprintf(b, "WAVL %s\n", strings.Join(wls, " "))
+	fmt.Fprintf(b, "WWGT %s\n", strings.Join(wws, " "))
 	fmt.Fprintf(b, "PWAV %d\n", primary)
+	return nil
 }
 
 // writeZemaxSurface writes one ZEMAX surface block. isStop emits the STOP
