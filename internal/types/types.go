@@ -650,6 +650,9 @@ type OptimizationConfig struct {
 	ApertureMargin   float64                `yaml:"aperture_margin,omitempty"`
 	ApertureMarginMM float64                `yaml:"aperture_margin_mm,omitempty"`
 	JacobianWorkers  int                    `yaml:"jacobian_workers,omitempty"`
+	CentralDiff      bool                   `yaml:"central_diff,omitempty"`
+	BFGS             bool                   `yaml:"bfgs,omitempty"`
+	AutoScale        bool                   `yaml:"auto_scale,omitempty"`
 	Variables        []OptimizationVariable `yaml:"variables,omitempty"`
 	SharedVariables  []SharedVariable       `yaml:"shared_variables,omitempty"`
 	LocalVariables   []LocalVariableDef     `yaml:"local_variables,omitempty"`

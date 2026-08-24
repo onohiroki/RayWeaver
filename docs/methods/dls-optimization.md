@@ -101,6 +101,11 @@ At each iteration the normal equations become:
 (JᵀJ + μ·B⁻¹) δ = −Jᵀ r
 ```
 
+The step `s` and gradient change `y` are computed from the **pre-step** state:
+`s = xNorm − prevX`, `y = g − prevG`, where `prevX`/`prevG` are saved after
+Jacobian computation but **before** the line search applies the step. This
+ensures `s` captures the actual displacement rather than being zero.
+
 After each accepted step, `B` is updated using the standard BFGS formula:
 
 ```
@@ -115,6 +120,13 @@ The update is skipped when `yᵀ·s ≤ 0` (non-positive curvature), keeping `B`
 unchanged. `B⁻¹` is computed via Cholesky at each iteration (O(n³), negligible
 for n ≤ 50 typical in lens design). `B` is initialised to `I` (equivalent to
 standard LM) and the damping `μ` is adapted identically to the standard case.
+
+**Relationship with `central_diff`**: The BFGS `y = g_new − g_old` uses the
+Gauss–Newton gradient `g = Jᵀr`. With forward differences (1st-order), `g`
+carries O(ε) truncation error, making `y` noisy and the inverse Hessian
+approximation unreliable — BFGS may stall or diverge. Central differences
+(2nd-order) reduce this error to O(ε²), producing accurate `y` values and
+reliable BFGS updates. **Always pair `bfgs: true` with `central_diff: true`**.
 
 - The step length is capped (‖δ‖ ≤ 0.5 in normalized space) to avoid wild
   jumps.

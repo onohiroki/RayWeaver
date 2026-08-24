@@ -320,10 +320,14 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   the result is identical for any worker count.
 - `optimization.central_diff` switches to central-difference Jacobian
   (2nd-order accurate). Doubles the residual evaluations per iteration but
-  improves gradient accuracy for tightly-coupled variables.
+  improves gradient accuracy for tightly-coupled variables. **Strongly
+  recommended when using `bfgs: true`** — forward-difference gradient errors
+  make the BFGS inverse Hessian approximation unreliable.
 - `optimization.bfgs` enables BFGS-augmented damping: the normal equations
   use `μ·B⁻¹` instead of `μI`, where `B` is the damped-BFGS inverse Hessian
   approximation. Gives superlinear convergence in well-conditioned valleys.
+  **Always pair with `central_diff: true`** — BFGS alone may stall because
+  noisy forward-difference gradients corrupt the Hessian update.
 - `optimization.auto_scale` enables Jacobian-based variable scaling: per-
   variable factors `η_j = 1/√(H_jj + ε)` equalise the sensitivity of all
   variables in the normal equations, compensating for min-max normalisation.

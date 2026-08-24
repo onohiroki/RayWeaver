@@ -41,6 +41,9 @@ type Config struct {
 	MuConMax         float64
 	Workers          int
 	Logger           dls.Logger
+	CentralDiff      bool
+	BFGS             bool
+	AutoScale        bool
 	Hull             *glass.ConvexHull
 	HullMargin       float64
 	HullWeight       float64
@@ -586,6 +589,9 @@ type Optimizer struct {
 	workers          int
 	gridRotation     float64
 	logger           dls.Logger
+	centralDiff      bool
+	bfgs             bool
+	autoScale        bool
 	hull             *glass.ConvexHull
 	hullMargin       float64
 	hullWeight       float64
@@ -883,6 +889,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		[]config{c}, variables, cfg.GlassCatalog,
 		cfg.MaxIter, cfg.Mu, cfg.Tol, cfg.Epsilon, cfg.ApertureMargin, cfg.NumRays,
 		cfg.MuConMax, cfg.Workers, cfg.Logger, cfg.Hull, cfg.HullMargin, cfg.HullWeight,
+		cfg.CentralDiff, cfg.BFGS, cfg.AutoScale,
 	)
 	opt.SetApertureMarginMM(cfg.ApertureMarginMM)
 	opt.SetDegenerate(cfg.SpotDegenerate, cfg.OPDDegenerate, cfg.WavefrontDegenerate)
@@ -893,7 +900,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 // NewMultiOptimizer builds a unified Optimizer over one or more configs,
 // with shared variables (one x driving many bindings) and local variables
 // (one x driving a single surface of one config).
-func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64) *Optimizer {
+func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs, autoScale bool) *Optimizer {
 	internal := make([]config, len(configs))
 	for i, ci := range configs {
 		c := config{
@@ -963,6 +970,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 		internal, variables, gc,
 		maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax,
 		workers, logger, hull, hullMargin, hullWeight,
+		centralDiff, bfgs, autoScale,
 	)
 }
 
@@ -1010,7 +1018,7 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 	return mt
 }
 
-func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64) *Optimizer {
+func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs, autoScale bool) *Optimizer {
 	if maxIter <= 0 {
 		maxIter = 100
 	}
@@ -1101,6 +1109,9 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 		muConMax:            muConMax,
 		workers:             workers,
 		logger:              logger,
+		centralDiff:         centralDiff,
+		bfgs:                bfgs,
+		autoScale:           autoScale,
 		hull:                hull,
 		hullMargin:          hullMargin,
 		hullWeight:          hullWeight,
@@ -1164,6 +1175,9 @@ func (o *Optimizer) Options() dls.Options {
 		Workers:        o.workers,
 		Logger:         o.logger,
 		Stop:           o.stop,
+		CentralDiff:    o.centralDiff,
+		BFGS:           o.bfgs,
+		AutoScale:      o.autoScale,
 	}
 }
 

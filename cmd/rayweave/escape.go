@@ -244,6 +244,9 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		ApertureMarginMM: apertureMarginMM,
 		MuConMax:         input.Optimization.MuConMax,
 		Workers:          workers,
+		CentralDiff:      input.Optimization.CentralDiff,
+		BFGS:             input.Optimization.BFGS,
+		AutoScale:        input.Optimization.AutoScale,
 		PowerSolveSurfaces: gctx.surfaces,
 	}
 	if dg := input.Optimization.Degenerate; dg != nil {
@@ -484,7 +487,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	factory := func() dls.Model {
 		configsCopy := make([]optimize.ConfigInput, len(configs))
 		copy(configsCopy, configs)
-		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, nil, hull, hullMargin, hullWeight)
+		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, nil, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AutoScale)
 		opt.SetApertureMarginMM(apertureMarginMM)
 		applyDegenerate(opt, input.Optimization.Degenerate)
 		if gctx.enabled {

@@ -180,9 +180,10 @@ func Solve(m Model) Result {
 			g[j] = sum
 		}
 
-		// BFGS update: after an accepted step, update the inverse Hessian
-		// approximation using the damped BFGS formula. The step s and
-		// gradient change y are computed from the previous iteration's data.
+		// BFGS update: use the step s = x_new - x_old and gradient change
+		// y = g_new - g_old. prevX/prevG were saved at the END of the
+		// previous iteration (before the step was applied there), so s and
+		// y are computed from the correct pairs.
 		if opts.BFGS && bfgsB != nil && bfgsPrevX != nil {
 			s := make([]float64, nVars)
 			y := make([]float64, nVars)
@@ -191,6 +192,18 @@ func Solve(m Model) Result {
 				y[j] = g[j] - bfgsPrevG[j]
 			}
 			bfgsUpdate(bfgsB, s, y)
+		}
+
+		// Save pre-step x and g for the next iteration's BFGS update.
+		// Must happen AFTER Jacobian/g computation but BEFORE the line
+		// search modifies xNorm.
+		if opts.BFGS {
+			if bfgsPrevX == nil {
+				bfgsPrevX = make([]float64, nVars)
+				bfgsPrevG = make([]float64, nVars)
+			}
+			copy(bfgsPrevX, xNorm)
+			copy(bfgsPrevG, g)
 		}
 
 		H := make([][]float64, nVars)
@@ -434,15 +447,6 @@ func Solve(m Model) Result {
 				bestKnownMerit = merit
 				copy(bestXNorm, xNorm)
 				copy(bestKnownNorm, xNorm)
-			}
-			// Store x and g for the next iteration's BFGS update.
-			if opts.BFGS {
-				if bfgsPrevX == nil {
-					bfgsPrevX = make([]float64, nVars)
-					bfgsPrevG = make([]float64, nVars)
-				}
-				copy(bfgsPrevX, xNorm)
-				copy(bfgsPrevG, g)
 			}
 		}
 
