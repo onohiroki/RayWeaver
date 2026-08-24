@@ -160,6 +160,8 @@ Demo scripts use `set -euo pipefail` and a `--clean` flag. They are location-ind
 
 AGF files + inline entries. Dispersion: Sellmeier (preferred) or Cauchy from nd+vd. AGF files in `GLASS/` (gitignored `*.agf`).
 
+**Manufacturer priority**: when the same glass name exists in multiple manufacturers' AGF files, the preferred manufacturer's glass is used. The default priority is `SCHOTT → OHARA → HOYA → CDGM → HIKARI → SUMITA` (`glass.DefaultManufacturerOrder`). This can be overridden via `glass_catalog.manufacturer_order` in the YAML. During `import`, the order is auto-detected from AGF files (first-seen order); when detection fails, the default applies. Pipeline subcommands (`chief`, `trace`, etc.) use the order from the input YAML.
+
 ## Surface materials (`types.Material`)
 
 A surface `material` is a structured type, one of:

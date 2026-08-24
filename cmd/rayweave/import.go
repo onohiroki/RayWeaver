@@ -59,6 +59,9 @@ func runImport(data []byte) {
 			os.Exit(1)
 		}
 		mfrOrder = glass.BuildManufacturerOrder(*glassDir)
+		if len(mfrOrder) == 0 {
+			mfrOrder = glass.DefaultManufacturerOrder
+		}
 		result.GlassEntries = importer.EnhanceGlassEntriesFromAGFMfr(
 			result.GlassEntries, agfGlasses, mfrOrder,
 		)

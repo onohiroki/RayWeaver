@@ -1078,9 +1078,14 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 		}
 		needed := neededAGFKeys(referenced, agfGlasses)
 
-		// When manufacturer_order is set, add AGF glasses in priority order
-		// so that the preferred manufacturer's glass wins for duplicate names.
-		if mfrOrder := input.GlassCatalog.ManufacturerOrder; len(mfrOrder) > 0 {
+		// When manufacturer_order is set (or default applies), add AGF glasses
+		// in priority order so that the preferred manufacturer's glass wins
+		// for duplicate names.
+		mfrOrder := input.GlassCatalog.ManufacturerOrder
+		if len(mfrOrder) == 0 {
+			mfrOrder = glass.DefaultManufacturerOrder
+		}
+		{
 			ordered := orderAGFGlassesByManufacturer(agfGlasses, mfrOrder)
 			for _, g := range ordered {
 				key := types.ResolveGlassKey(g)
@@ -1089,13 +1094,6 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 				}
 				gc.Add(g)
 				if needed[key] && !containsGlass(input.GlassCatalog.Entries, g) {
-					input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
-				}
-			}
-		} else {
-			for _, g := range agfGlasses {
-				gc.Add(g)
-				if needed[types.ResolveGlassKey(g)] && !containsGlass(input.GlassCatalog.Entries, g) {
 					input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
 				}
 			}

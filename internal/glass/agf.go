@@ -13,6 +13,10 @@ import (
 
 var knownManufacturers = []string{"HOYA", "HIKARI", "OHARA", "SUMITA", "SCHOTT", "CDGM"}
 
+// DefaultManufacturerOrder is the default glass manufacturer search priority
+// used when no explicit manufacturer_order is specified in the YAML or CLI.
+var DefaultManufacturerOrder = []string{"SCHOTT", "OHARA", "HOYA", "CDGM", "HIKARI", "SUMITA"}
+
 // Warnf reports a non-fatal warning to stderr. The cmd/rayweave binary
 // overrides it (via errOut) so warnings are attributed to the active
 // subcommand in a pipeline.
