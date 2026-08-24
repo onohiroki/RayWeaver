@@ -186,3 +186,123 @@ func TestLookupGlassCodeVNames(t *testing.T) {
 		}
 	}
 }
+
+func makeAGFGlassesDuplicate() []types.Glass {
+	// Same glass name "F2" exists in two manufacturers with different ND values.
+	return []types.Glass{
+		{Name: "F2", Type: types.GlassTypeCatalog, ND: 1.62004, VD: 36.37, Manufacturer: "SCHOTT",
+			DispersionFormula: types.Sellmeier1, Coefficients: []float64{1.345, 0.009, 0.209, 0.047, 0.937, 111.886}},
+		{Name: "F2", Type: types.GlassTypeCatalog, ND: 1.62500, VD: 36.00, Manufacturer: "OHARA",
+			DispersionFormula: types.Sellmeier1, Coefficients: []float64{1.300, 0.008, 0.210, 0.045, 0.940, 110.000}},
+		{Name: "N-BK7", Type: types.GlassTypeCatalog, ND: 1.51680, VD: 64.17, Manufacturer: "SCHOTT",
+			DispersionFormula: types.Sellmeier1, Coefficients: []float64{1.039, 0.006, 0.231, 0.020, 1.010, 103.560}},
+	}
+}
+
+func TestEnhanceMfr_PriorityOrder(t *testing.T) {
+	entries := []types.Glass{
+		{Type: types.GlassTypeModel, Label: "F2", ND: 1.62004, VD: 36.37},
+	}
+	agf := makeAGFGlassesDuplicate()
+	mfrOrder := []string{"OHARA", "SCHOTT"}
+
+	got := EnhanceGlassEntriesFromAGFMfr(entries, agf, mfrOrder)
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
+	}
+	if got[0].Type != types.GlassTypeCatalog {
+		t.Errorf("expected type=catalog, got %q", got[0].Type)
+	}
+	// OHARA's F2 has ND=1.62500, so it should be picked over SCHOTT's ND=1.62004.
+	if got[0].ND != 1.62500 {
+		t.Errorf("expected ND=1.62500 (OHARA priority), got %g", got[0].ND)
+	}
+	if got[0].Manufacturer != "OHARA" {
+		t.Errorf("expected Manufacturer=OHARA, got %q", got[0].Manufacturer)
+	}
+}
+
+func TestEnhanceMfr_FallbackToOtherManufacturer(t *testing.T) {
+	entries := []types.Glass{
+		{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.51680, VD: 64.17},
+	}
+	agf := makeAGFGlassesDuplicate()
+	// OHARA doesn't have N-BK7, so it should fall back to SCHOTT.
+	mfrOrder := []string{"OHARA"}
+
+	got := EnhanceGlassEntriesFromAGFMfr(entries, agf, mfrOrder)
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
+	}
+	if got[0].Type != types.GlassTypeCatalog {
+		t.Errorf("expected type=catalog, got %q", got[0].Type)
+	}
+	if got[0].Manufacturer != "SCHOTT" {
+		t.Errorf("expected Manufacturer=SCHOTT (fallback), got %q", got[0].Manufacturer)
+	}
+}
+
+func TestEnhanceMfr_EmptyOrder(t *testing.T) {
+	entries := []types.Glass{
+		{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.51680, VD: 64.17},
+	}
+	agf := makeAGFGlasses()
+
+	// Empty mfrOrder: should work like the original function.
+	got := EnhanceGlassEntriesFromAGFMfr(entries, agf, nil)
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
+	}
+	if got[0].Type != types.GlassTypeCatalog {
+		t.Errorf("expected type=catalog, got %q", got[0].Type)
+	}
+	if got[0].Name != "N-BK7" {
+		t.Errorf("expected Name=N-BK7, got %q", got[0].Name)
+	}
+}
+
+func TestEnhanceMfr_CodeVNormalizedMatch(t *testing.T) {
+	entries := []types.Glass{
+		{Type: types.GlassTypeModel, Label: "LLAL12", ND: 1.62004, VD: 36.41},
+	}
+	agf := makeAGFGlasses()
+	mfrOrder := []string{"OHARA"}
+
+	got := EnhanceGlassEntriesFromAGFMfr(entries, agf, mfrOrder)
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
+	}
+	if got[0].Type != types.GlassTypeCatalog {
+		t.Errorf("expected type=catalog, got %q", got[0].Type)
+	}
+	if got[0].Name != "L-LAL12" {
+		t.Errorf("expected Name=L-LAL12, got %q", got[0].Name)
+	}
+	if got[0].Manufacturer != "OHARA" {
+		t.Errorf("expected Manufacturer=OHARA, got %q", got[0].Manufacturer)
+	}
+}
+
+func TestEnhanceMfr_EmptyEntries(t *testing.T) {
+	got := EnhanceGlassEntriesFromAGFMfr(nil, makeAGFGlasses(), []string{"SCHOTT"})
+	if len(got) != 0 {
+		t.Errorf("expected empty, got %d", len(got))
+	}
+}
+
+func TestEnhanceMfr_EmptyAGF(t *testing.T) {
+	entries := []types.Glass{
+		{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.51680, VD: 64.17},
+	}
+	got := EnhanceGlassEntriesFromAGFMfr(entries, nil, []string{"SCHOTT"})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 entry, got %d", len(got))
+	}
+	if got[0].Type != types.GlassTypeModel {
+		t.Errorf("expected type=model (unchanged), got %q", got[0].Type)
+	}
+}

@@ -337,9 +337,10 @@ type Glass struct {
 }
 
 type GlassCatalog struct {
-	Directory string   `yaml:"directory,omitempty"`
-	Files     []string `yaml:"files,omitempty"`
-	Entries   []Glass  `yaml:"entries,omitempty"`
+	Directory         string   `yaml:"directory,omitempty"`
+	Files             []string `yaml:"files,omitempty"`
+	Entries           []Glass  `yaml:"entries,omitempty"`
+	ManufacturerOrder []string `yaml:"manufacturer_order,omitempty"`
 }
 
 type CoatingLayer struct {

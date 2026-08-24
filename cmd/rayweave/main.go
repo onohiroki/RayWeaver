@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1076,10 +1077,27 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 			errOut("Warning: cannot load AGF directory %s: %v", agfPath, err)
 		}
 		needed := neededAGFKeys(referenced, agfGlasses)
-		for _, g := range agfGlasses {
-			gc.Add(g)
-			if needed[types.ResolveGlassKey(g)] && !containsGlass(input.GlassCatalog.Entries, g) {
-				input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
+
+		// When manufacturer_order is set, add AGF glasses in priority order
+		// so that the preferred manufacturer's glass wins for duplicate names.
+		if mfrOrder := input.GlassCatalog.ManufacturerOrder; len(mfrOrder) > 0 {
+			ordered := orderAGFGlassesByManufacturer(agfGlasses, mfrOrder)
+			for _, g := range ordered {
+				key := types.ResolveGlassKey(g)
+				if gc.Has(key) {
+					continue
+				}
+				gc.Add(g)
+				if needed[key] && !containsGlass(input.GlassCatalog.Entries, g) {
+					input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
+				}
+			}
+		} else {
+			for _, g := range agfGlasses {
+				gc.Add(g)
+				if needed[types.ResolveGlassKey(g)] && !containsGlass(input.GlassCatalog.Entries, g) {
+					input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
+				}
 			}
 		}
 	}
@@ -1169,6 +1187,31 @@ func neededAGFKeys(referenced map[string]bool, agfGlasses []types.Glass) map[str
 		}
 	}
 	return needed
+}
+
+// orderAGFGlassesByManufacturer returns agfGlasses sorted so that glasses from
+// manufacturers listed in mfrOrder come first (in that order), followed by
+// glasses from unlisted manufacturers. This ensures the preferred
+// manufacturer's glass wins when Catalog.Add is called for duplicate names.
+func orderAGFGlassesByManufacturer(agfGlasses []types.Glass, mfrOrder []string) []types.Glass {
+	if len(mfrOrder) == 0 {
+		return agfGlasses
+	}
+	priority := make(map[string]int, len(mfrOrder))
+	for i, mfr := range mfrOrder {
+		priority[strings.ToUpper(mfr)] = i
+	}
+	sorted := make([]types.Glass, len(agfGlasses))
+	copy(sorted, agfGlasses)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		oi, oki := priority[strings.ToUpper(sorted[i].Manufacturer)]
+		oj, okj := priority[strings.ToUpper(sorted[j].Manufacturer)]
+		if oki && okj {
+			return oi < oj
+		}
+		return oki && !okj
+	})
+	return sorted
 }
 
 func runChief(data []byte) {

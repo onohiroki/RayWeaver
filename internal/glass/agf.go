@@ -11,7 +11,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-var knownManufacturers = []string{"HOYA", "HIKARI", "OHARA", "SUMITA", "SCHOTT"}
+var knownManufacturers = []string{"HOYA", "HIKARI", "OHARA", "SUMITA", "SCHOTT", "CDGM"}
 
 // Warnf reports a non-fatal warning to stderr. The cmd/rayweave binary
 // overrides it (via errOut) so warnings are attributed to the active
@@ -230,6 +230,50 @@ func LoadAGFDir(dir string) ([]types.Glass, error) {
 		allGlasses = append(allGlasses, glasses...)
 	}
 	return allGlasses, nil
+}
+
+// ExtractAGFManufacturer reads a single AGF file and returns the manufacturer
+// string detected from its content or filename. Returns "" when the
+// manufacturer cannot be determined.
+func ExtractAGFManufacturer(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	text := string(decodeAGFContent(data))
+	lines := strings.Split(normalizeLineEndings(text), "\n")
+	return detectManufacturer(lines, filepath.Base(path)), nil
+}
+
+// BuildManufacturerOrder scans dir for .agf files and returns a deduplicated
+// list of manufacturer names in first-seen order. Unknown manufacturers are
+// skipped. The returned list is suitable for GlassCatalog.ManufacturerOrder.
+func BuildManufacturerOrder(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var order []string
+	seen := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := strings.ToLower(e.Name())
+		if !strings.HasSuffix(name, ".agf") {
+			continue
+		}
+		mfr, err := ExtractAGFManufacturer(filepath.Join(dir, e.Name()))
+		if err != nil || mfr == "" {
+			continue
+		}
+		upper := strings.ToUpper(mfr)
+		if !seen[upper] {
+			seen[upper] = true
+			order = append(order, upper)
+		}
+	}
+	return order
 }
 
 func detectManufacturer(lines []string, sourceName string) string {

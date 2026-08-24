@@ -51,14 +51,16 @@ func runImport(data []byte) {
 		os.Exit(1)
 	}
 
+	var mfrOrder []string
 	if *glassDir != "" {
 		agfGlasses, err := glass.LoadAGFDir(*glassDir)
 		if err != nil {
 			errOut("Error loading AGF files: %v", err)
 			os.Exit(1)
 		}
-		result.GlassEntries = importer.EnhanceGlassEntriesFromAGF(
-			result.GlassEntries, agfGlasses,
+		mfrOrder = glass.BuildManufacturerOrder(*glassDir)
+		result.GlassEntries = importer.EnhanceGlassEntriesFromAGFMfr(
+			result.GlassEntries, agfGlasses, mfrOrder,
 		)
 	}
 
@@ -217,6 +219,9 @@ func runImport(data []byte) {
 	}
 	if *glassDir != "" {
 		outputOut.GlassCatalog.Directory = *glassDir
+	}
+	if len(mfrOrder) > 0 {
+		outputOut.GlassCatalog.ManufacturerOrder = mfrOrder
 	}
 	withOutputMetadata(&outputOut.Input, "import", subcmdArgs())
 

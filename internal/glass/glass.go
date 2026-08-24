@@ -63,6 +63,20 @@ func NewCatalog() *Catalog {
 	}
 }
 
+// Has reports whether the catalog contains an entry for the given key (including
+// normalised variants).
+func (c *Catalog) Has(key string) bool {
+	if _, ok := c.ByName[key]; ok {
+		return true
+	}
+	if norm := NormalizeName(key); norm != key {
+		if _, ok := c.ByName[norm]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // NormalizeName normalizes a glass name for lookup: hyphens and underscores
 // are removed and the result is uppercased. CODE V references glasses without
 // the separators used in AGF names (e.g. "LLAL12" for "L-LAL12").
