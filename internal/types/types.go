@@ -815,31 +815,38 @@ type EscapeVarState struct {
 }
 
 // RayweaverTool is the canonical marker written in every pipeline document's
-// metadata.tool field, identifying it as RayWeaver-managed YAML.
+// metadata.tool.name field, identifying it as RayWeaver-managed YAML.
 const RayweaverTool = "RayWeaver"
 
-// RayweaverURL is the project repository, written in metadata.url.
+// RayweaverURL is the project repository, written in metadata.tool.url.
 const RayweaverURL = "https://github.com/onohiroki/RayWeaver"
 
 // SchemaVersion is the current RayWeaver pipeline-YAML schema version. It lives
-// in metadata.schema_version and replaces the old top-level `version` field.
+// in metadata.tool.schema_version and replaces the old top-level `version` field.
 const SchemaVersion = 1
 
-// Metadata carries the file-format identity and provenance of a pipeline
-// document. `tool` marks the document as RayWeaver-managed; `schema_version` is
+// ToolInfo holds the identity and generation metadata nested under
+// metadata.tool. Name marks the document as RayWeaver-managed; SchemaVersion is
 // the pipeline-YAML schema version (currently 1). Subcommands write back their
-// generator/command/timestamp/version on output; the rest are round-tripped
+// Generator/Command/Version/SchemaVersion on output; the rest are round-tripped
 // from the input. Input files hand-written or produced by `import` carry only
-// the identity trio (tool, url, schema_version).
-type Metadata struct {
-	Tool          string   `yaml:"tool"`
+// the identity trio (name, url, schema_version).
+type ToolInfo struct {
+	Name          string   `yaml:"name"`
 	URL           string   `yaml:"url"`
+	Version       string   `yaml:"version,omitempty"`
 	SchemaVersion int      `yaml:"schema_version"`
 	Generator     string   `yaml:"generator,omitempty"`
 	Command       []string `yaml:"command,omitempty"`
-	RayweaverVer  string   `yaml:"rayweaver_version,omitempty"`
-	CreatedAt     string   `yaml:"created_at,omitempty"` // RFC3339, UTC
-	Notes         string   `yaml:"notes,omitempty"`
+}
+
+// Metadata carries the file-format identity and provenance of a pipeline
+// document. Tool holds the identity fields (name, url, version, schema_version,
+// generator, command). CreatedAt and Notes are top-level convenience fields.
+type Metadata struct {
+	Tool      ToolInfo `yaml:"tool"`
+	CreatedAt string   `yaml:"created_at,omitempty"` // RFC3339, UTC
+	Notes     string   `yaml:"notes,omitempty"`
 }
 
 // AsphereCandidateConfig configures the asphere candidate selection and initial

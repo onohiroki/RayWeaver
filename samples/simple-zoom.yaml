@@ -1,12 +1,12 @@
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     3-config zoom lens (config0/1/2 = wide/mid/tele) with shared-variable DLS
     optimisation, fuzzy image-height / incident-angle constraints, and
     ray_paths (render-only metadata). Input of simple-zoom-demo.bash.
-
 glass_catalog:
   entries:
     - type: model

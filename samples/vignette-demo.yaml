@@ -30,9 +30,10 @@
 # it, so it only affects the direct trace plot.
 
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     Vignette demo input: the OPTIMIZED 6-element 50 mm f/2.8 double-Gauss
     (from doublegauss-result.yaml) with every auto_aperture surface
@@ -45,7 +46,6 @@ metadata:
     pupil). The `rays` section carries hand-written marginal rays (12.5 mm
     bundles) so the initial diagram draws every field at the same width. Input
     of vignette-demo.bash.
-
 glass_catalog:
     entries:
         - {type: model, name: SK18, nd: 1.63854, vd: 55.42}

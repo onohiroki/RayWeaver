@@ -1,13 +1,13 @@
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     3-config zoom demo (config0/1/2) using entrance_pupil_diameter EQUALITY
     constraints, edge_thickness with the surface2 back-surface field, and
     vignetting constraints. Input of multi-config-zoom-demo.bash (shared
     variables + per-config local air gaps, EPD pinned to 20 mm).
-
 glass_catalog:
   entries:
   - type: model

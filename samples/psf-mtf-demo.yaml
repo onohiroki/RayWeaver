@@ -10,9 +10,10 @@
 # the demo script's --max-freq CLI flag overrides this, so the cap stays
 # effective even when the run uses a different lens YAML.
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     PSF/OTF/MTF demo input: the US2645157 triplet after the escape-function
     global optimiser plus a DLS re-optimisation with the 16 deg
@@ -22,7 +23,6 @@ metadata:
     surface 8, best-focus default. Expected Strehl profile 0.99/0.62/0.59 with
     MTF50 ~104/~70/~51 c/mm (0 deg > 16 deg > 24 deg). Input of
     psf-mtf-demo.bash.
-
 glass_catalog:
     entries:
         - type: model

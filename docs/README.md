@@ -62,7 +62,7 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
 - All output documents preserve the input document and add a section; pipelines
   such as `chief → trace → plot` and `chief → paraxial` therefore work.
 - Every document carries a top-level `metadata:` block identifying it as
-  RayWeaver-managed (`tool: RayWeaver`, `url`, `schema_version`) and, on output,
+  RayWeaver-managed (`tool.name`, `tool.url`, `tool.schema_version`) and, on output,
   recording its generator command, build version and generation timestamp. See
   [format.md](format.md).
 

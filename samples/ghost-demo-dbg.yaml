@@ -20,9 +20,10 @@
 # effective diameters (`chief --clear-aperture --shrink`) before plotting.
 # Run:  rayweave trace < samples/ghost-demo-dbg.yaml
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     Ghost-ray trace sample on the optimised double-Gauss (6 elements / 14
     surfaces, 50 mm f/2.8). Each ray carries an ordered surface-ID list; a
@@ -31,7 +32,6 @@ metadata:
     [0,1,2,3,4,3,2,3,4,...,14] (reflect at 4, reversed refraction through 3,
     reflect at 2) plus a normal reference ray. The chief section lets
     ghost-demo.bash re-adjust lens diameters before plotting.
-
 glass_catalog:
   entries:
   - type: model

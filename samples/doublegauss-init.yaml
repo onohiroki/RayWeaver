@@ -1,7 +1,8 @@
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     6-element symmetric double-Gauss starting point for a 35mm-format 50 mm
     f/2.8 standard lens (synthesised by an AI agent via curvature-scale search
@@ -34,7 +35,6 @@ metadata:
     without drifting the layout. The surfaces list the dependent back surface
     of each element (2, 4, 6, 9, 11, 13); their curvatures are recomputed to
     hold power.
-
 glass_catalog:
   entries:
   - type: model

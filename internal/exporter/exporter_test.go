@@ -14,7 +14,7 @@ import (
 // fields and two wavelengths, ending in a flat image plane.
 func testInput() *types.Input {
 	return &types.Input{
-		Metadata: &types.Metadata{Tool: "RayWeaver", URL: "https://github.com/onohiroki/RayWeaver", SchemaVersion: 1},
+		Metadata: &types.Metadata{Tool: types.ToolInfo{Name: "RayWeaver", URL: "https://github.com/onohiroki/RayWeaver", SchemaVersion: 1}},
 		Chief:    &types.ChiefInput{StopSurface: 2, ReferenceWavelength: 0.00058756},
 		Configs: []types.Config{
 			{

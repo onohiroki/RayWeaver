@@ -1,14 +1,14 @@
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     3-lens 7-surface system (the real US2645157 Cooke triplet with the
     flint/crown glasses SWAPPED) with glass-model variables (nd/vd) for DLS
     optimisation. 3 fields (0/16/24 deg), 4 wavelengths (g/F/d/C). Demonstrates
     the conditional merit_schedule (color_first -> full blend). Input of
     glass-optimize-demo.bash.
-
 glass_catalog:
   entries:
   - name: "SK18"

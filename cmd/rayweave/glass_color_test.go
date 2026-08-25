@@ -15,8 +15,9 @@ import (
 
 const glassColorTripletYAML = `
 metadata:
-  tool: RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    schema_version: 1
 glass_catalog:
   entries:
   - name: "SK18"

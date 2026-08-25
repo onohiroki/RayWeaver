@@ -1,7 +1,8 @@
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     Input for samples/escape-demo.bash (default lens).
     Escape-function global optimisation of a degraded US2645157 triplet:
@@ -19,7 +20,6 @@ metadata:
     and then verifies the profile with `rayweave psf --best-focus`.
     Feed to `rayweave escape` to get escape_result.minima[]; the bash script
     wraps it with --verbose + JSONL progress.
-
 glass_catalog:
   entries:
     - name: "SK18"

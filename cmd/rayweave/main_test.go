@@ -652,7 +652,7 @@ func TestExportOutput(t *testing.T) {
 	}
 
 	foreign := []byte("SURF 1\n")
-	yaml := []byte("metadata: {tool: RayWeaver}\n")
+	yaml := []byte("metadata:\n  tool:\n    name: RayWeaver\n")
 
 	// Without -o the foreign format goes to stdout.
 	got := captureStdout(func() { exportOutput("", foreign, yaml) })

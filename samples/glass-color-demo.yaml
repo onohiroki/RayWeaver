@@ -1,7 +1,8 @@
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     The real US2645157 Cooke triplet with the flint/crown glasses SWAPPED
     (negative element S3 carries a crown, positive element S6 carries a flint)
@@ -11,7 +12,6 @@ metadata:
     --power-solve`, which auto-generates the nd/vd glass variables, a merit of
     only longitudinal_color + lateral_color, and pins the element powers via
     the power-preserving hard solve.
-
 glass_catalog:
   entries:
   - name: "SK18"

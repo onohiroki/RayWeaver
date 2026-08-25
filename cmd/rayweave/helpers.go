@@ -114,11 +114,11 @@ func writeBackGlassDir(input *types.Input, dir string) {
 
 // Version is the RayWeaver build version, intended to be injected at link time
 // via `-ldflags "-X main.Version=..."`. It defaults to "dev" for ad-hoc builds
-// and is stamped into output metadata.rayweaver_version when set.
+// and is stamped into output metadata.tool.version when set.
 var Version = "dev"
 
 // subcmdArgs returns the subcommand's arguments (os.Args minus the binary and
-// subcommand names) for recording in metadata.command.
+// subcommand names) for recording in metadata.tool.command.
 func subcmdArgs() []string {
 	if len(os.Args) > 2 {
 		return os.Args[2:]
@@ -127,12 +127,14 @@ func subcmdArgs() []string {
 }
 
 // newMetadata returns a fresh identity-only Metadata marking the document as
-// RayWeaver-managed (tool, repository URL, current schema version).
+// RayWeaver-managed (tool name, repository URL, current schema version).
 func newMetadata() *types.Metadata {
 	return &types.Metadata{
-		Tool:          types.RayweaverTool,
-		URL:           types.RayweaverURL,
-		SchemaVersion: types.SchemaVersion,
+		Tool: types.ToolInfo{
+			Name:          types.RayweaverTool,
+			URL:           types.RayweaverURL,
+			SchemaVersion: types.SchemaVersion,
+		},
 	}
 }
 
@@ -147,18 +149,18 @@ func withOutputMetadata(input *types.Input, generator string, argv []string) *ty
 	if input.Metadata == nil {
 		input.Metadata = newMetadata()
 	} else {
-		input.Metadata.Tool = types.RayweaverTool
-		input.Metadata.URL = types.RayweaverURL
-		input.Metadata.SchemaVersion = types.SchemaVersion
+		input.Metadata.Tool.Name = types.RayweaverTool
+		input.Metadata.Tool.URL = types.RayweaverURL
+		input.Metadata.Tool.SchemaVersion = types.SchemaVersion
 	}
 	if generator != "" {
-		input.Metadata.Generator = generator
+		input.Metadata.Tool.Generator = generator
 	}
 	if len(argv) > 0 {
-		input.Metadata.Command = argv
+		input.Metadata.Tool.Command = argv
 	}
 	if Version != "" {
-		input.Metadata.RayweaverVer = Version
+		input.Metadata.Tool.Version = Version
 	}
 	input.Metadata.CreatedAt = time.Now().UTC().Format(time.RFC3339)
 	return input
@@ -171,11 +173,11 @@ func warnToolMismatch(in *types.Input) {
 	if in == nil || in.Metadata == nil {
 		return
 	}
-	t := strings.TrimSpace(in.Metadata.Tool)
+	t := strings.TrimSpace(in.Metadata.Tool.Name)
 	if t == "" || strings.EqualFold(t, types.RayweaverTool) {
 		return
 	}
-	errOut("input metadata.tool = %q is not RayWeaver; continuing", t)
+	errOut("input metadata.tool.name = %q is not RayWeaver; continuing", t)
 }
 
 // parseYAML unmarshals a document into a value of type T, exiting on error.

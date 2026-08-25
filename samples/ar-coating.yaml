@@ -1,14 +1,14 @@
 # Single-layer AR coating (MgF2 on N-SK16 substrate)
 # Quarter-wave thickness at 550nm: t = lambda/(4n) = 550/(4*1.38) = 99.6nm
 metadata:
-  tool: RayWeaver
-  url: https://github.com/onohiroki/RayWeaver
-  schema_version: 1
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
   notes: |
     TMM (transfer-matrix) input for `rayweave tmm`, used by run-demo.bash step 7:
     single-layer MgF2 anti-reflection coating on N-SK16 (n=1.62), quarter-wave
     at 550 nm (t=99.6 nm). Expects rs/rp ~ 0 at 550 nm.
-
 n_air: 1.0
 n_substrate: 1.62
 lambda: 0.00055
