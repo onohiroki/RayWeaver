@@ -240,9 +240,40 @@ func TestFormatPrintf(t *testing.T) {
 		{"f%d", []any{0.0}, "f0"},
 	}
 	for _, c := range cases {
-		if got := formatPrintf(c.format, c.vals); got != c.want {
+		if got := formatPrintf(c.format, c.vals, false); got != c.want {
 			t.Errorf("formatPrintf(%q, %v) = %q, want %q", c.format, c.vals, got, c.want)
 		}
+	}
+}
+
+func TestFormatPrintfNanEmpty(t *testing.T) {
+	cases := []struct {
+		format string
+		vals   []any
+		want   string
+	}{
+		// NaN with width → spaces
+		{"%5.5f", []any{math.NaN()}, "     "},
+		{"%10.5f", []any{math.NaN()}, "          "},
+		{"%d", []any{math.NaN()}, " "},
+		{"%5d", []any{math.NaN()}, "     "},
+		// Non-NaN values pass through normally
+		{"%5.5f", []any{1.23}, "1.23000"},
+		{"%d", []any{3.0}, "3"},
+		// Mixed: NaN and non-NaN
+		{"%d,%5.5f,%5.5f", []any{1.0, math.NaN(), 3.45}, "1,     ,3.45000"},
+		// Multiple NaN
+		{"%5.5f %5.5f", []any{math.NaN(), math.NaN()}, "           "},
+	}
+	for _, c := range cases {
+		if got := formatPrintf(c.format, c.vals, true); got != c.want {
+			t.Errorf("formatPrintf(%q, %v, true) = %q, want %q", c.format, c.vals, got, c.want)
+		}
+	}
+	// Without nanEmpty, NaN is passed to Sprintf normally
+	got := formatPrintf("%5.5f", []any{math.NaN()}, false)
+	if !strings.Contains(got, "NaN") {
+		t.Errorf("formatPrintf without nanEmpty should contain NaN, got %q", got)
 	}
 }
 
@@ -258,6 +289,45 @@ func TestSplitEachArg(t *testing.T) {
 	path, cols = splitEachArg("terms:key,value")
 	if path != "terms" || !reflect.DeepEqual(cols, []string{"key", "value"}) {
 		t.Errorf("splitEachArg = (%q, %v)", path, cols)
+	}
+}
+
+func TestParseDefaultNum(t *testing.T) {
+	cases := []struct {
+		input   string
+		wantNaN bool
+		wantInf int // 0=finite, +1=+Inf, -1=-Inf
+		wantVal float64
+	}{
+		{"NaN", true, 0, 0},
+		{"nan", true, 0, 0},
+		{"Nan", true, 0, 0},
+		{"Inf", false, 1, 0},
+		{"+Inf", false, 1, 0},
+		{"inf", false, 1, 0},
+		{"-Inf", false, -1, 0},
+		{"-inf", false, -1, 0},
+		{"0", false, 0, 0},
+		{"3.14", false, 0, 3.14},
+		{"-1", false, 0, -1},
+	}
+	for _, c := range cases {
+		f, err := parseDefaultNum(c.input)
+		if err != nil {
+			t.Errorf("parseDefaultNum(%q) error: %v", c.input, err)
+			continue
+		}
+		if c.wantNaN {
+			if !math.IsNaN(f) {
+				t.Errorf("parseDefaultNum(%q) = %v, want NaN", c.input, f)
+			}
+		} else if c.wantInf != 0 {
+			if !math.IsInf(f, c.wantInf) {
+				t.Errorf("parseDefaultNum(%q) = %v, want Inf with sign %d", c.input, f, c.wantInf)
+			}
+		} else if f != c.wantVal {
+			t.Errorf("parseDefaultNum(%q) = %v, want %v", c.input, f, c.wantVal)
+		}
 	}
 }
 
@@ -412,6 +482,59 @@ func TestQueryCLIEach(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	if len(lines) != 2 || lines[0] != "field 0 deg" || lines[1] != "field 16 deg" {
 		t.Errorf("each = %q", out)
+	}
+}
+
+func TestQueryCLIDefaultNumNaN(t *testing.T) {
+	// YAML with some missing fields to trigger nil → NaN
+	yaml := `items:
+  - {a: 1, b: 2.5}
+  - {a: 3}
+  - {b: 4.0}
+`
+	// --default-num NaN --printf-nan-empty: nil → NaN → spaces
+	out, code := runQueryCLI(t, yaml,
+		"--each", "items[]:a,b",
+		"--default-num", "NaN",
+		"--printf-nan-empty",
+		"--printf", "%5.5f,%5.5f")
+	if code != 0 {
+		t.Fatalf("default-num NaN exit %d", code)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 lines, got %d: %q", len(lines), out)
+	}
+	// Line 1: both present
+	if lines[0] != "1.00000,2.50000" {
+		t.Errorf("line 0 = %q, want 1.00000,2.50000", lines[0])
+	}
+	// Line 2: b is nil → 5 spaces
+	if lines[1] != "3.00000,     " {
+		t.Errorf("line 1 = %q, want '3.00000,     '", lines[1])
+	}
+	// Line 3: a is nil → 5 spaces
+	if lines[2] != "     ,4.00000" {
+		t.Errorf("line 2 = %q, want '     ,4.00000'", lines[2])
+	}
+}
+
+func TestQueryCLIDefaultNumZero(t *testing.T) {
+	yaml := `items:
+  - {a: 1}
+  - {}
+`
+	// --default-num 0: nil → 0 (no NaN involved)
+	out, code := runQueryCLI(t, yaml,
+		"--each", "items[]:a",
+		"--default-num", "0",
+		"--printf", "%d")
+	if code != 0 {
+		t.Fatalf("default-num 0 exit %d", code)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 2 || lines[0] != "1" || lines[1] != "0" {
+		t.Errorf("default-num 0 = %q, want '1\\n0'", out)
 	}
 }
 

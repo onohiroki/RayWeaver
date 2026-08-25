@@ -14,7 +14,8 @@ also extract a subtree for further use.
 rayweave query [--yaml|--json] [--csv PATH[:col,...]] [--printf FMT]
                [--each PATH[:col,...]] [--sum|--product|--count|--len PATH]
                [--jsonl [--where EXPR] [--first]] [--set VAR=EXPR] [--edit EXPR]
-               [--gate EXPR] [--default STR] [--expr EXPR] [-r] [SELECTOR]
+               [--gate EXPR] [--default STR] [--default-num STR]
+               [--printf-nan-empty] [--expr EXPR] [-r] [SELECTOR]
 ```
 
 ---
@@ -153,6 +154,25 @@ floating-point verbs (`%.4f`, `%.6e`), and become their decimal string for
 rayweave query --each 'escape_result.minima[]:index,merit' \
                --printf '  [%d] merit=%.6e' < escape.yaml
 ```
+
+### `--default-num STR` / `--printf-nan-empty`
+
+`--default-num` provides a **numeric** default for missing/null `--each` column
+values (replacing the string `--default` for that path). It accepts `NaN`,
+`Inf`, `-Inf`, or any numeric string. Combined with `--printf-nan-empty`,
+NaN values are replaced with **width-matched spaces** so columns stay aligned:
+
+```sh
+rayweave query \
+  --each 'configs[0].surfaces[]:id,radius,thickness,material.nd,material.vd,diameter' \
+  --default-num NaN --printf-nan-empty \
+  --printf '%d,%8.4f,%8.4f,%8.4f,%8.4f,%8.4f' < lens.yaml
+```
+
+Without `--printf-nan-empty`, NaN values are passed to `fmt.Sprintf` as-is
+(e.g. `%f` produces `NaN`). With `--printf-nan-empty`, each NaN verb emits
+spaces equal to the format's minimum width (e.g. `%8.4f` → 8 spaces), keeping
+columns aligned.
 
 ### `--csv PATH:col1,col2,...`
 
@@ -295,7 +315,9 @@ layer.
 | `--set VAR=EXPR` | bind a variable (repeatable, ordered) |
 | `--edit EXPR` | mutate the document in-memory (repeatable, see §10) |
 | `--printf FMT` | Go fmt format string for the value / each row |
+| `--printf-nan-empty` | with `--printf`, replace NaN values with width-matched spaces |
 | `--default STR` | value for missing/null results (default `-1`) |
+| `--default-num STR` | numeric default for missing/null `--each` columns (e.g. `NaN`, `0`) |
 | `-r`, `--raw` | raw text output (the default for scalars) |
 
 Notes:

@@ -52,6 +52,8 @@ func runQuery(data []byte) {
 	gateExpr := fs.String("gate", "", "evaluate EXPR, print a pass record and exit 0/1 by truthiness")
 	printfFmt := fs.String("printf", "", "Go fmt format string applied to the output value(s)")
 	defaultStr := fs.String("default", "-1", "value printed when a scalar result is missing/null (default -1)")
+	defaultNumStr := fs.String("default-num", "", "numeric default for missing/null --each column values (e.g. NaN, 0, -1)")
+	printfNanEmpty := fs.Bool("printf-nan-empty", false, "with --printf, replace NaN values with width-matched spaces")
 	exprArg := fs.String("expr", "", "expression to evaluate (same as the positional SELECTOR)")
 	var editFlags multiSet
 	fs.Var(&editFlags, "edit", "mutation expression (repeatable, applied in order); supports =, +=, -=, |=, del PATH")
@@ -98,6 +100,18 @@ func runQuery(data []byte) {
 	}
 
 	rawMode := *raw || *rShort
+
+	// Parse --default-num
+	var defaultNumVal float64
+	defaultNumSet := *defaultNumStr != ""
+	if defaultNumSet {
+		var err error
+		defaultNumVal, err = parseDefaultNum(*defaultNumStr)
+		if err != nil {
+			errOut("Error: --default-num: %v", err)
+			os.Exit(1)
+		}
+	}
 
 	// ---- 1. Load the document(s) ----
 	var docRoot any  // used by SELECTOR / --set / --gate
@@ -195,11 +209,11 @@ func runQuery(data []byte) {
 	case *csvArg != "":
 		runQueryCSV(*csvArg, resolve, *csvHeader, *csvKeepAll, *defaultStr, *printfFmt)
 	case *eachArg != "":
-		runQueryEach(*eachArg, resolve, *defaultStr, *printfFmt, *yamlOut, *jsonOut)
+		runQueryEach(*eachArg, resolve, *defaultStr, *printfFmt, *yamlOut, *jsonOut, defaultNumVal, defaultNumSet, *printfNanEmpty)
 	case agg != "":
-		runQueryAgg(agg, aggPath, resolve, *defaultStr, *printfFmt)
+		runQueryAgg(agg, aggPath, resolve, *defaultStr, *printfFmt, *printfNanEmpty)
 	case *gateExpr != "":
-		runQueryGate(*gateExpr, ctx, bindings, *yamlOut, *jsonOut, *defaultStr)
+		runQueryGate(*gateExpr, ctx, bindings, *yamlOut, *jsonOut, *defaultStr, *printfNanEmpty)
 	default:
 		var result any
 		var err error
@@ -224,7 +238,7 @@ func runQuery(data []byte) {
 			errOut("Error evaluating expression: %v", err)
 			os.Exit(1)
 		}
-		emitResult(result, *defaultStr, *printfFmt, *yamlOut, *jsonOut, rawMode)
+		emitResult(result, *defaultStr, *printfFmt, *yamlOut, *jsonOut, rawMode, *printfNanEmpty)
 	}
 }
 
@@ -233,7 +247,7 @@ func runQuery(data []byte) {
 // emitResult prints a single selector / record result. Text mode unwraps
 // single-element arrays and prints larger arrays as a bracketed list; maps
 // require --yaml/--json.
-func emitResult(v any, defaultStr, printfFmt string, yamlOut, jsonOut, raw bool) {
+func emitResult(v any, defaultStr, printfFmt string, yamlOut, jsonOut, raw bool, nanEmpty bool) {
 	if v == nil {
 		fmt.Println(defaultStr)
 		return
@@ -259,13 +273,13 @@ func emitResult(v any, defaultStr, printfFmt string, yamlOut, jsonOut, raw bool)
 		errOut("Error: result is a mapping; use --yaml or --json to print it")
 		os.Exit(1)
 	}
-	emitScalar(v, printfFmt)
+	emitScalar(v, printfFmt, nanEmpty)
 }
 
 // emitScalar prints one scalar value, optionally through a printf format.
-func emitScalar(v any, printfFmt string) {
+func emitScalar(v any, printfFmt string, nanEmpty bool) {
 	if printfFmt != "" {
-		fmt.Println(formatPrintf(printfFmt, []any{v}))
+		fmt.Println(formatPrintf(printfFmt, []any{v}, nanEmpty))
 		return
 	}
 	fmt.Println(formatValue(v))
@@ -294,7 +308,7 @@ func emitJSON(v any) {
 // runQueryEach iterates the array/mapping at PATH (PATH[:col1,col2,...]) and
 // prints one row per element. Missing columns print --default in text mode;
 // with --yaml/--json the rows are emitted as a structured list.
-func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, printfFmt string, yamlOut, jsonOut bool) {
+func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, printfFmt string, yamlOut, jsonOut bool, defaultNumVal float64, defaultNumSet bool, printfNanEmpty bool) {
 	path, cols := splitEachArg(arg)
 	v, err := resolve(path)
 	if err != nil {
@@ -337,7 +351,7 @@ func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, pri
 					errOut("Error: element is a mapping; give columns (PATH:col1,col2,...) or use --yaml/--json")
 					os.Exit(1)
 				}
-				emitScalar(e, printfFmt)
+				emitScalar(e, printfFmt, printfNanEmpty)
 			}
 			continue
 		}
@@ -351,7 +365,11 @@ func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, pri
 				os.Exit(1)
 			}
 			if cv == nil {
-				cv = defaultStr
+				if defaultNumSet {
+					cv = defaultNumVal
+				} else {
+					cv = defaultStr
+				}
 			}
 			row[col] = cv
 			vals[i] = cv
@@ -361,7 +379,7 @@ func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, pri
 			continue
 		}
 		if printfFmt != "" {
-			fmt.Println(formatPrintf(printfFmt, vals))
+			fmt.Println(formatPrintf(printfFmt, vals, printfNanEmpty))
 		} else {
 			parts := make([]string, len(vals))
 			for i, x := range vals {
@@ -452,7 +470,7 @@ func quoteCSV(cells []string) []string {
 
 // ---- aggregates ---------------------------------------------------------------
 
-func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr, printfFmt string) {
+func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr, printfFmt string, nanEmpty bool) {
 	v, err := resolve(path)
 	if err != nil {
 		errOut("Error evaluating --%s path: %v", agg, err)
@@ -476,7 +494,7 @@ func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr
 			fmt.Println(defaultStr)
 			return
 		}
-		emitScalar(n, printfFmt)
+		emitScalar(n, printfFmt, nanEmpty)
 	case "count":
 		if v == nil {
 			fmt.Println(defaultStr)
@@ -495,7 +513,7 @@ func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr
 		default:
 			n = 1
 		}
-		emitScalar(n, printfFmt)
+		emitScalar(n, printfFmt, nanEmpty)
 	case "sum", "product":
 		if v == nil {
 			fmt.Println(defaultStr)
@@ -508,7 +526,7 @@ func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr
 				fmt.Println(defaultStr)
 				return
 			}
-			emitScalar(f, printfFmt)
+			emitScalar(f, printfFmt, nanEmpty)
 			return
 		}
 		acc := 0.0
@@ -531,7 +549,7 @@ func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr
 		if !found && agg == "sum" {
 			acc = 0
 		}
-		emitScalar(acc, printfFmt)
+		emitScalar(acc, printfFmt, nanEmpty)
 	case "stdev":
 		if v == nil {
 			fmt.Println(defaultStr)
@@ -561,13 +579,13 @@ func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr
 		for _, x := range xs {
 			ss += (x - mean) * (x - mean)
 		}
-		emitScalar(math.Sqrt(ss/float64(len(xs))), printfFmt)
+		emitScalar(math.Sqrt(ss/float64(len(xs))), printfFmt, nanEmpty)
 	}
 }
 
 // ---- --gate ------------------------------------------------------------------
 
-func runQueryGate(gate string, ctx *evalCtx, bindings map[string]any, yamlOut, jsonOut bool, defaultStr string) {
+func runQueryGate(gate string, ctx *evalCtx, bindings map[string]any, yamlOut, jsonOut bool, defaultStr string, nanEmpty bool) {
 	v, err := evalExpr(gate, ctx)
 	if err != nil {
 		errOut("Error in --gate expression: %v", err)
@@ -589,7 +607,7 @@ func runQueryGate(gate string, ctx *evalCtx, bindings map[string]any, yamlOut, j
 		if v == nil {
 			fmt.Println(defaultStr)
 		} else {
-			emitScalar(v, "")
+			emitScalar(v, "", nanEmpty)
 		}
 	}
 	if pass {
@@ -615,6 +633,21 @@ func splitEachArg(arg string) (string, []string) {
 		}
 	}
 	return arg[:i], cols
+}
+
+// parseDefaultNum parses a string as a float64, accepting "NaN", "Inf",
+// "+Inf", "-Inf" in addition to normal numeric syntax.
+func parseDefaultNum(s string) (float64, error) {
+	switch {
+	case strings.EqualFold(s, "NaN"):
+		return math.NaN(), nil
+	case strings.EqualFold(s, "Inf"), strings.EqualFold(s, "+Inf"):
+		return math.Inf(1), nil
+	case strings.EqualFold(s, "-Inf"):
+		return math.Inf(-1), nil
+	default:
+		return strconv.ParseFloat(s, 64)
+	}
 }
 
 func parseJSONL(data []byte) []any {
@@ -810,19 +843,93 @@ func formatValue(v any) string {
 
 // formatPrintf applies a Go fmt format string to vals, converting integral
 // float64 values to int64 for integer verbs (%d/%x/...) while leaving them
-// as float64 for floating-point verbs (%f/%e/%g/...).
-func formatPrintf(format string, vals []any) string {
-	verbs := scanVerbs(format)
-	args := make([]any, len(vals))
-	ai := 0
-	for _, vk := range verbs {
-		if vk == verbNone || ai >= len(vals) {
+// as float64 for floating-point verbs (%f/%e/%g/...). When nanEmpty is true
+// and a value is NaN, the verb's minimum-width field is replaced with spaces.
+func formatPrintf(format string, vals []any, nanEmpty bool) string {
+	var b strings.Builder
+	ai := 0 // index into vals
+	i, n := 0, len(format)
+	for i < n {
+		if format[i] != '%' {
+			b.WriteByte(format[i])
+			i++
 			continue
 		}
-		args[ai] = convArg(vals[ai], vk)
+		// Start of a percent verb
+		verbStart := i
+		i++
+		if i < n && format[i] == '%' {
+			b.WriteByte('%')
+			i++
+			continue
+		}
+		// Skip flags
+		for i < n && strings.ContainsRune("-+ #0", rune(format[i])) {
+			i++
+		}
+		// Parse width
+		widthStart := i
+		for i < n && (format[i] >= '0' && format[i] <= '9') {
+			i++
+		}
+		width := 0
+		if widthStart < i {
+			width, _ = strconv.Atoi(format[widthStart:i])
+		}
+		// * width (from argument)
+		if i < n && format[i] == '*' {
+			i++
+		}
+		// Skip precision
+		if i < n && format[i] == '.' {
+			i++
+			if i < n && format[i] == '*' {
+				i++
+			}
+			for i < n && (format[i] >= '0' && format[i] <= '9') {
+				i++
+			}
+		}
+		if i >= n {
+			b.WriteString(format[verbStart:])
+			break
+		}
+		verbChar := format[i]
+		i++
+		verbFmt := format[verbStart:i]
+
+		// Determine verb kind
+		var kind verbKind
+		switch verbChar {
+		case 'd', 'o', 'O', 'x', 'X', 'b', 'c', 'U':
+			kind = verbInt
+		case 'f', 'F', 'e', 'E', 'g', 'G':
+			kind = verbFloat
+		default:
+			kind = verbAny
+		}
+
+		if ai >= len(vals) {
+			b.WriteString(verbFmt)
+			continue
+		}
+
+		if nanEmpty {
+			if f, ok := vals[ai].(float64); ok && math.IsNaN(f) {
+				w := width
+				if w == 0 {
+					w = 1
+				}
+				b.WriteString(strings.Repeat(" ", w))
+				ai++
+				continue
+			}
+		}
+
+		b.WriteString(fmt.Sprintf(verbFmt, convArg(vals[ai], kind)))
 		ai++
 	}
-	return fmt.Sprintf(format, args...)
+	return b.String()
 }
 
 type verbKind int
@@ -834,60 +941,7 @@ const (
 	verbAny
 )
 
-// scanVerbs walks a fmt format string and reports the kind of each value
-// verb in order (%% consumes no argument).
-func scanVerbs(format string) []verbKind {
-	var out []verbKind
-	i, n := 0, len(format)
-	for i < n {
-		if format[i] != '%' {
-			i++
-			continue
-		}
-		i++
-		if i < n && format[i] == '%' {
-			i++
-			out = append(out, verbNone)
-			continue
-		}
-		for i < n && strings.ContainsRune("-+ #0", rune(format[i])) {
-			i++
-		}
-		for i < n && (format[i] >= '0' && format[i] <= '9') {
-			i++
-		}
-		if i < n && format[i] == '*' {
-			i++
-			out = append(out, verbInt)
-		}
-		if i < n && format[i] == '.' {
-			i++
-			if i < n && format[i] == '*' {
-				i++
-				out = append(out, verbInt)
-			}
-			for i < n && (format[i] >= '0' && format[i] <= '9') {
-				i++
-			}
-		}
-		if i >= n {
-			out = append(out, verbAny)
-			break
-		}
-		c := format[i]
-		i++
-		switch c {
-		case 'd', 'o', 'O', 'x', 'X', 'b', 'c', 'U':
-			out = append(out, verbInt)
-		case 'f', 'F', 'e', 'E', 'g', 'G':
-			out = append(out, verbFloat)
-		default:
-			out = append(out, verbAny)
-		}
-	}
-	return out
-}
-
+// verbInfo pairs a verb kind with its parsed minimum field width.
 // convArg prepares a value for a fmt verb: whole numbers become int64 for
 // integer verbs, stay float64 for floating-point verbs, and become their
 // decimal string for generic verbs (%s/%v/%q) so `%s` never sees an int64.

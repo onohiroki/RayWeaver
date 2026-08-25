@@ -984,7 +984,9 @@ Input:
 
 Options:
   --default STR    value printed when a scalar is missing/null (default -1)
+  --default-num STR numeric default for missing/null --each columns (e.g. NaN, 0)
   --printf FMT     Go fmt format string (e.g. '%.4f') for the output value
+  --printf-nan-empty with --printf, replace NaN values with width-matched spaces
   -r, --raw        raw text output (the default for scalars)
   --expr EXPR      same as the positional SELECTOR
   --edit EXPR      mutation expression (repeatable; see Mutations above)
@@ -1004,6 +1006,8 @@ Examples:
   rayweave query --len 'chief_rays[0].grid_points' < chief.yaml
   rayweave query --gate 'abs(efl-50.0)<=0.01' --set efl=paraxial_result.focal_length
   echo 'a: {b: 1}' | rayweave query --yaml --edit 'a.b |= . + 1' '.'
+  rayweave query --each 'surfaces[]:id,radius,thickness' \
+    --default-num NaN --printf-nan-empty --printf '%d,%8.4f,%8.4f' < lens.yaml
 
 See docs/query.md for the full manual.
 `)
