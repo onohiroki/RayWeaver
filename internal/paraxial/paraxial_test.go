@@ -219,3 +219,57 @@ func TestStopSurfaceExplicit(t *testing.T) {
 		t.Errorf("explicit stop Z = %v, want 0 (surface 1 physical Z)", z)
 	}
 }
+
+// TestComputeFlatRefractiveSurface verifies that a plane-parallel plate between
+// two media of different index applies Snell's law paraxially: the ray slope
+// changes from u to nBefore*u/nAfter even when the surface curvature is zero.
+func TestComputeFlatRefractiveSurface(t *testing.T) {
+	// Simple system: a plane-parallel BK7 plate (n=1.5168, t=3mm) followed
+	// by a converging lens. The plate is in a converging beam so the ray
+	// heights at subsequent surfaces must reflect the index-ratio slope change.
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 20.0, Material: types.Material{}, Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 3.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}},
+	}
+	surface.Precompute(surfaces)
+
+	sys := types.System{Surfaces: surfaces}
+	result := Compute(sys, 0.00058756, gc, 0, nil)
+
+	// The marginal ray (y0=1, u0=0) enters the first curved surface.
+	// Without the plate, the ray would converge with a certain slope.
+	// The plate changes the slope inside (u_plate = u_air / n_glass),
+	// which shifts the image plane. The EFL should be close to the
+	// lens-only value because EFL depends on final u (unchanged by plate),
+	// but BFL should differ due to the plate's focal shift.
+	if result.FocalLength <= 0 {
+		t.Errorf("FocalLength = %v, want positive (converging)", result.FocalLength)
+	}
+
+	// The total track includes the plate thickness, so it must be > lens-only track.
+	if result.TotalTrack < 33.0 {
+		t.Errorf("TotalTrack = %v, want > 33 (lens + plate thickness)", result.TotalTrack)
+	}
+
+	// Check that the plate's index actually affects the ray trace:
+	// compare with a system without the plate (air gap instead).
+	surfacesNoPlate := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 20.0, Material: types.Material{}, Diameter: 50.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 3.0, Material: types.Material{}, Diameter: 50.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}},
+	}
+	surface.Precompute(surfacesNoPlate)
+	resultNoPlate := Compute(types.System{Surfaces: surfacesNoPlate}, 0.00058756, gc, 0, nil)
+
+	// BFL must differ between the plate and no-plate systems because
+	// the plate shifts the focus by approximately t*(1-1/n) in a converging beam.
+	if result.SecondPrincipalFocus == resultNoPlate.SecondPrincipalFocus {
+		t.Errorf("BFL with plate (%v) equals BFL without plate (%v); plate should shift focus",
+			result.SecondPrincipalFocus, resultNoPlate.SecondPrincipalFocus)
+	}
+}

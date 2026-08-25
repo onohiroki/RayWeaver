@@ -44,6 +44,8 @@ func traceForward(surfaces []types.Surface, nIndex []float64, y0, u0 float64) ([
 		if R != 0 {
 			phi := surfacePower(surfaces[i], nBefore, nAfter, R)
 			u = (nBefore*u - y*phi) / nAfter
+		} else if !surfaces[i].Reflects() {
+			u = nBefore * u / nAfter
 		}
 
 		vertices = append(vertices, rayState{Z: physZ[i], Y: y, U: u})
@@ -77,6 +79,8 @@ func traceReversed(surfaces []types.Surface, nIndex []float64, y0, u0 float64) (
 		if R != 0 {
 			phi := surfacePower(surfaces[i], nBefore, nAfter, R)
 			u = (nBefore*u - y*phi) / nAfter
+		} else if !surfaces[i].Reflects() {
+			u = nBefore * u / nAfter
 		}
 
 		vertices = append(vertices, rayState{Z: z, Y: y, U: u})
@@ -101,6 +105,8 @@ func tracePupilForward(surfaces []types.Surface, nIndex []float64, startIdx int,
 		if R != 0 {
 			phi := surfacePower(surfaces[i], nBefore, nAfter, R)
 			u = (nBefore*u - y*phi) / nAfter
+		} else if !surfaces[i].Reflects() {
+			u = nBefore * u / nAfter
 		}
 
 		y += surfaces[i].Thickness * u
@@ -132,6 +138,8 @@ func tracePupilBackward(surfaces []types.Surface, nIndex []float64, startIdx int
 		if R != 0 {
 			phi := surfacePower(surfaces[i], nBefore, nAfter, R)
 			u = (nBefore*u - y*phi) / nAfter
+		} else if !surfaces[i].Reflects() {
+			u = nBefore * u / nAfter
 		}
 	}
 	return rayState{Y: y, U: u}
