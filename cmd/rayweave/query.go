@@ -1326,63 +1326,233 @@ func applyAssign(root any, a *assignNode, origRoot any) error {
 // applyDelete applies a delete mutation (del PATH).
 func applyDelete(root any, d *deleteNode) error {
 	for _, pathExpr := range d.paths {
-		_ = deleteWalk(root, pathExpr)
+		deleteWalk(root, pathExpr)
 	}
 	return nil
 }
 
-// deleteWalk recursively walks pathExpr and deletes the target from container.
-// mapNode ([]) recurses into every element; filterNode ([key=val]) recurses
-// into matching elements. Missing paths are silently ignored (no-op).
-func deleteWalk(container any, pathExpr expr) error {
+// deleteWalk navigates pathExpr from container and deletes the target.
+// dotNode deletes p.key from all containers found by p.x.
+// idxNode removes the element at index p.n from all arrays found by p.x.
+// mapNode/filterNode distribute the operation to matching elements.
+// Missing paths are silently ignored (no-op).
+func deleteWalk(container any, pathExpr expr) {
 	switch p := pathExpr.(type) {
 	case *identNode:
-		return deleteDirect(container, p.name)
+		if m, ok := container.(map[string]any); ok {
+			delete(m, p.name)
+		}
 
 	case *dotNode:
-		child := getField(container, p.key)
-		if child == nil {
-			return nil
-		}
-		rest := p.x
-		switch rest.(type) {
-		case *identNode:
-			return deleteDirect(container, p.key)
-		default:
-			return deleteWalk(child, rest)
+		parents := collectContainers(container, p.x)
+		for _, parent := range parents {
+			if m, ok := parent.(map[string]any); ok {
+				delete(m, p.key)
+			}
 		}
 
 	case *idxNode:
-		child := getIndex(container, int(p.n))
+		writeIdxDeletion(container, p.x, int(p.n))
+
+	case *mapNode:
+		parents := collectContainers(container, p.x)
+		for _, parent := range parents {
+			elems := toIterable(parent)
+			for i, elem := range elems {
+				elems[i] = deleteWalkReturn(elem, p.x)
+			}
+		}
+
+	case *filterNode:
+		parents := collectContainers(container, p.x)
+		for _, parent := range parents {
+			filtered := filterElements(parent, p.key, p.val)
+			for _, elem := range filtered {
+				_ = deleteWalkReturn(elem, p.x)
+			}
+		}
+	}
+}
+
+// deleteWalkReturn is like deleteWalk but returns the (potentially modified)
+// container. Used by mapNode to propagate array-element replacements.
+func deleteWalkReturn(container any, pathExpr expr) any {
+	switch p := pathExpr.(type) {
+	case *identNode:
+		if m, ok := container.(map[string]any); ok {
+			delete(m, p.name)
+		}
+		return container
+
+	case *dotNode:
+		parents := collectContainers(container, p.x)
+		for _, parent := range parents {
+			if m, ok := parent.(map[string]any); ok {
+				delete(m, p.key)
+			}
+		}
+		return container
+
+	case *idxNode:
+		return applyIdxDeletion(container, p.x, int(p.n))
+
+	case *mapNode:
+		parents := collectContainers(container, p.x)
+		for _, parent := range parents {
+			elems := toIterable(parent)
+			for i, elem := range elems {
+				elems[i] = deleteWalkReturn(elem, p.x)
+			}
+		}
+		return container
+
+	case *filterNode:
+		parents := collectContainers(container, p.x)
+		for _, parent := range parents {
+			filtered := filterElements(parent, p.key, p.val)
+			for _, elem := range filtered {
+				_ = deleteWalkReturn(elem, p.x)
+			}
+		}
+		return container
+	}
+	return container
+}
+
+// collectContainers resolves path from container and returns all values
+// the path points to. Used to find "parent" containers for deletion.
+func collectContainers(container any, path expr) []any {
+	switch p := path.(type) {
+	case *rootNode:
+		return []any{container}
+
+	case *identNode:
+		child := getField(container, p.name)
 		if child == nil {
 			return nil
 		}
-		rest := p.x
-		switch rest.(type) {
-		case *identNode:
-			return deleteDirect(container, int(p.n))
-		default:
-			return deleteWalk(child, rest)
+		return []any{child}
+
+	case *dotNode:
+		parents := collectContainers(container, p.x)
+		var result []any
+		for _, parent := range parents {
+			child := getField(parent, p.key)
+			if child != nil {
+				result = append(result, child)
+			}
+		}
+		return result
+
+	case *idxNode:
+		parents := collectContainers(container, p.x)
+		var result []any
+		for _, parent := range parents {
+			child := getIndex(parent, int(p.n))
+			if child != nil {
+				result = append(result, child)
+			}
+		}
+		return result
+
+	case *mapNode:
+		parents := collectContainers(container, p.x)
+		var result []any
+		for _, parent := range parents {
+			result = append(result, toIterable(parent)...)
+		}
+		return result
+
+	case *filterNode:
+		parents := collectContainers(container, p.x)
+		var result []any
+		for _, parent := range parents {
+			result = append(result, filterElements(parent, p.key, p.val)...)
+		}
+		return result
+	}
+	return nil
+}
+
+// writeIdxDeletion removes the element at idx from all arrays found by
+// pathToArrays, writing the shortened array back to its parent container.
+func writeIdxDeletion(container any, pathToArrays expr, idx int) {
+	applyIdxDeletion(container, pathToArrays, idx)
+}
+
+// applyIdxDeletion is the core array-index removal. It returns the
+// (potentially modified) container so callers can propagate changes.
+func applyIdxDeletion(container any, pathToArrays expr, idx int) any {
+	switch p := pathToArrays.(type) {
+	case *identNode:
+		arr := getField(container, p.name)
+		if a, ok := arr.([]any); ok {
+			newA := removeIndex(a, idx)
+			if m, ok := container.(map[string]any); ok {
+				m[p.name] = newA
+			}
+			return newA
+		}
+
+	case *dotNode:
+		children := collectContainers(container, p.x)
+		for _, child := range children {
+			arr := getField(child, p.key)
+			if a, ok := arr.([]any); ok {
+				newA := removeIndex(a, idx)
+				if m, ok := child.(map[string]any); ok {
+					m[p.key] = newA
+				}
+			}
+		}
+
+	case *idxNode:
+		containers := collectContainers(container, p.x)
+		for _, c := range containers {
+			child := getIndex(c, int(p.n))
+			if child == nil {
+				continue
+			}
+			if a, ok := child.([]any); ok {
+				newA := removeIndex(a, idx)
+				if arr, ok := c.([]any); ok {
+					i := int(p.n)
+					if i < 0 {
+						i += len(arr)
+					}
+					if i >= 0 && i < len(arr) {
+						arr[i] = newA
+					}
+				}
+			}
 		}
 
 	case *mapNode:
-		elems := toIterable(container)
-		if elems == nil {
-			return nil
+		parents := collectContainers(container, p.x)
+		for _, parent := range parents {
+			if a, ok := parent.([]any); ok {
+				for i, elem := range a {
+					if subArr, ok := elem.([]any); ok {
+						a[i] = removeIndex(subArr, idx)
+					}
+				}
+			}
 		}
-		for _, elem := range elems {
-			_ = deleteWalk(elem, p.x)
-		}
-		return nil
-
-	case *filterNode:
-		filtered := filterElements(container, p.key, p.val)
-		for _, elem := range filtered {
-			_ = deleteWalk(elem, p.x)
-		}
-		return nil
 	}
-	return nil
+	return container
+}
+
+func removeIndex(a []any, idx int) []any {
+	if idx < 0 {
+		idx += len(a)
+	}
+	if idx < 0 || idx >= len(a) {
+		return a
+	}
+	newArr := make([]any, 0, len(a)-1)
+	newArr = append(newArr, a[:idx]...)
+	newArr = append(newArr, a[idx+1:]...)
+	return newArr
 }
 
 func getField(v any, key string) any {
