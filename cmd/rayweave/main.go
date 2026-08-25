@@ -1300,6 +1300,12 @@ func runChief(data []byte) {
 
 	fanCfg := resolveRayFanConfig(*rayFan, *fanPlane, fanRotation)
 
+	// effective dumpMap: --clear-aperture or --marginal-rays implies grid_points
+	dumpMap := input.Chief.DumpMap
+	if *clearAperture || *marginalRays {
+		dumpMap = true
+	}
+
 	results := chief.DetermineChiefRaysGrid(
 		selectedSys,
 		fields,
@@ -1308,12 +1314,35 @@ func runChief(data []byte) {
 		gc,
 		pol,
 		wavelength,
-		input.Chief.DumpMap,
+		dumpMap,
 		input.Chief.GridType,
 		pt,
 		fanCfg,
 		configWavelengths,
 	)
+
+	// --- default clear-aperture: size unset-diameter surfaces ---
+	{
+		margin := *clearApertureMarginMM
+		envEngine := ray.NewEngine(gc, nil)
+		surface.Precompute(surfaces)
+		path := dls.BuildPath(surfaces)
+		envelope := chief.BeamEnvelope(results, envEngine, surfaces, path, wavelength, pol)
+
+		refID := input.Chief.ReferenceSurface
+		stopID := input.Chief.StopSurface
+		for i := range surfaces {
+			if surfaces[i].ID == refID || (stopID > 0 && surfaces[i].ID == stopID) {
+				continue
+			}
+			if surfaces[i].Diameter <= 0 {
+				surfaces[i].AutoAperture = true
+				if e := envelope[surfaces[i].ID]; e > 0 {
+					surfaces[i].Diameter = e*2 + 2*margin
+				}
+			}
+		}
+	}
 
 	// --- --clear-aperture: scale grid points by entrance-pupil-based radius and set Diameter ---
 	if *clearAperture && len(results) > 0 {
@@ -1321,7 +1350,7 @@ func runChief(data []byte) {
 			// Re-trace with a denser grid so the beam footprint is accurate.
 			results = chief.DetermineChiefRaysGrid(
 				selectedSys, fields, input.Chief.ReferenceSurface, *clearApertureRays,
-				gc, pol, wavelength, false, input.Chief.GridType, pt, fanCfg, configWavelengths,
+				gc, pol, wavelength, dumpMap, input.Chief.GridType, pt, fanCfg, configWavelengths,
 			)
 		}
 		// The chief grid points already fill the aperture stop, so trace them
@@ -1345,7 +1374,6 @@ func runChief(data []byte) {
 
 	// Build ChiefRayResult for YAML output
 	chiefRays := make([]types.ChiefRayResult, len(results))
-	dumpMap := input.Chief.DumpMap
 	for i, r := range results {
 		cr := types.ChiefRayResult{
 			FieldAngle:    r.FieldAngle,
