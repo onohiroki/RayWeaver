@@ -984,7 +984,7 @@ type assignNode struct {
 	value expr
 }
 type deleteNode struct {
-	path expr
+	paths []expr
 }
 
 func evalExpr(src string, ctx *evalCtx) (any, error) {
@@ -1325,14 +1325,117 @@ func applyAssign(root any, a *assignNode, origRoot any) error {
 
 // applyDelete applies a delete mutation (del PATH).
 func applyDelete(root any, d *deleteNode) error {
-	keys, err := splitPath(d.path)
-	if err != nil {
-		return err
+	for _, pathExpr := range d.paths {
+		_ = deleteWalk(root, pathExpr)
 	}
-	if len(keys) == 0 {
-		return fmt.Errorf("empty path")
+	return nil
+}
+
+// deleteWalk recursively walks pathExpr and deletes the target from container.
+// mapNode ([]) recurses into every element; filterNode ([key=val]) recurses
+// into matching elements. Missing paths are silently ignored (no-op).
+func deleteWalk(container any, pathExpr expr) error {
+	switch p := pathExpr.(type) {
+	case *identNode:
+		return deleteDirect(container, p.name)
+
+	case *dotNode:
+		child := getField(container, p.key)
+		if child == nil {
+			return nil
+		}
+		rest := p.x
+		switch rest.(type) {
+		case *identNode:
+			return deleteDirect(container, p.key)
+		default:
+			return deleteWalk(child, rest)
+		}
+
+	case *idxNode:
+		child := getIndex(container, int(p.n))
+		if child == nil {
+			return nil
+		}
+		rest := p.x
+		switch rest.(type) {
+		case *identNode:
+			return deleteDirect(container, int(p.n))
+		default:
+			return deleteWalk(child, rest)
+		}
+
+	case *mapNode:
+		elems := toIterable(container)
+		if elems == nil {
+			return nil
+		}
+		for _, elem := range elems {
+			_ = deleteWalk(elem, p.x)
+		}
+		return nil
+
+	case *filterNode:
+		filtered := filterElements(container, p.key, p.val)
+		for _, elem := range filtered {
+			_ = deleteWalk(elem, p.x)
+		}
+		return nil
 	}
-	return deleteAtPath(root, keys)
+	return nil
+}
+
+func getField(v any, key string) any {
+	if m, ok := v.(map[string]any); ok {
+		return m[key]
+	}
+	return nil
+}
+
+func getIndex(v any, idx int) any {
+	a, ok := v.([]any)
+	if !ok {
+		return nil
+	}
+	if idx < 0 {
+		idx += len(a)
+	}
+	if idx >= 0 && idx < len(a) {
+		return a[idx]
+	}
+	return nil
+}
+
+func toIterable(v any) []any {
+	switch t := v.(type) {
+	case []any:
+		return t
+	case map[string]any:
+		out := make([]any, 0, len(t))
+		for _, val := range t {
+			out = append(out, val)
+		}
+		return out
+	}
+	return nil
+}
+
+func filterElements(container any, key string, valExpr expr) []any {
+	arr, ok := container.([]any)
+	if !ok {
+		return nil
+	}
+	ctx := &evalCtx{root: container}
+	fv, _ := ctx.eval(valExpr)
+	var out []any
+	for _, e := range arr {
+		if m, ok := e.(map[string]any); ok {
+			if equalVal(m[key], fv) {
+				out = append(out, e)
+			}
+		}
+	}
+	return out
 }
 
 // setAtPath sets keys (last element) in the container reached by keys[:len-1].
@@ -2306,12 +2409,34 @@ func (p *parser) parsePrimary() (expr, error) {
 	case "id":
 		p.advance()
 		if t.text == "del" {
-			// del PATH - parse the path expression
+			if p.isOp("(") {
+				p.advance()
+				var paths []expr
+				if !p.isOp(")") {
+					for {
+						path, err := p.parseAssign()
+						if err != nil {
+							return nil, err
+						}
+						paths = append(paths, path)
+						if p.isOp(",") {
+							p.advance()
+							continue
+						}
+						break
+					}
+				}
+				if !p.isOp(")") {
+					return nil, fmt.Errorf("expected ')' after del arguments")
+				}
+				p.advance()
+				return &deleteNode{paths: paths}, nil
+			}
 			path, err := p.parseAssign()
 			if err != nil {
 				return nil, err
 			}
-			return &deleteNode{path: path}, nil
+			return &deleteNode{paths: []expr{path}}, nil
 		}
 		if p.isOp("(") {
 			p.advance()

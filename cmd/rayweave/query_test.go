@@ -490,6 +490,206 @@ func TestQueryCLIJSONL(t *testing.T) {
 }
 
 
+// ---- del() tests ----------------------------------------------------------
+
+func applyDelForTest(t *testing.T, editStr string, root any) any {
+	t.Helper()
+	toks, err := lexQuery(editStr)
+	if err != nil {
+		t.Fatalf("lexQuery(%q) error: %v", editStr, err)
+	}
+	p := &parser{toks: toks}
+	n, err := p.parseExpr()
+	if err != nil {
+		t.Fatalf("parseExpr(%q) error: %v", editStr, err)
+	}
+	result, err := applyMutations(root, []expr{n})
+	if err != nil {
+		t.Fatalf("applyMutations(%q) error: %v", editStr, err)
+	}
+	return result
+}
+
+func TestDelBasic(t *testing.T) {
+	root := map[string]any{"a": float64(1), "b": float64(2)}
+	got := applyDelForTest(t, "del(a)", root)
+	want := map[string]any{"b": float64(2)}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("del(a) = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelDotPath(t *testing.T) {
+	root := map[string]any{
+		"a": map[string]any{"b": float64(1), "c": float64(2)},
+	}
+	got := applyDelForTest(t, "del(a.b)", root)
+	want := map[string]any{
+		"a": map[string]any{"c": float64(2)},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("del(a.b) = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelArrayIndex(t *testing.T) {
+	root := map[string]any{
+		"a": []any{float64(1), float64(2), float64(3)},
+	}
+	got := applyDelForTest(t, "del(a[1])", root)
+	want := map[string]any{
+		"a": []any{float64(1), float64(3)},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("del(a[1]) = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelWildcard(t *testing.T) {
+	root := map[string]any{
+		"items": []any{
+			map[string]any{"x": float64(1), "y": float64(2)},
+			map[string]any{"x": float64(3), "y": float64(4)},
+		},
+	}
+	got := applyDelForTest(t, "del(items[].y)", root)
+	want := map[string]any{
+		"items": []any{
+			map[string]any{"x": float64(1)},
+			map[string]any{"x": float64(3)},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("del(items[].y) = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelNestedWildcard(t *testing.T) {
+	root := map[string]any{
+		"rays": []any{
+			map[string]any{
+				"wl": []any{
+					map[string]any{"s": float64(1)},
+					map[string]any{"s": float64(2)},
+				},
+			},
+			map[string]any{
+				"wl": []any{
+					map[string]any{"s": float64(3)},
+				},
+			},
+		},
+	}
+	got := applyDelForTest(t, "del(rays[].wl[].s)", root)
+	want := map[string]any{
+		"rays": []any{
+			map[string]any{
+				"wl": []any{map[string]any{}, map[string]any{}},
+			},
+			map[string]any{
+				"wl": []any{map[string]any{}},
+			},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("del(rays[].wl[].s) = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelFilter(t *testing.T) {
+	root := map[string]any{
+		"rays": []any{
+			map[string]any{"id": "a", "x": float64(1)},
+			map[string]any{"id": "b", "x": float64(2)},
+		},
+	}
+	got := applyDelForTest(t, `del(rays[id="a"].x)`, root)
+	want := map[string]any{
+		"rays": []any{
+			map[string]any{"id": "a"},
+			map[string]any{"id": "b", "x": float64(2)},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf(`del(rays[id="a"].x) = %#v, want %#v`, got, want)
+	}
+}
+
+func TestDelMultiplePaths(t *testing.T) {
+	root := map[string]any{"a": float64(1), "b": float64(2), "c": float64(3)}
+	got := applyDelForTest(t, "del(a, c)", root)
+	want := map[string]any{"b": float64(2)}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("del(a, c) = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelMissingPathNoOp(t *testing.T) {
+	root := map[string]any{"a": float64(1)}
+	got := applyDelForTest(t, "del(nonexistent)", root)
+	want := map[string]any{"a": float64(1)}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("del(nonexistent) = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelEmptyArrayNoOp(t *testing.T) {
+	root := map[string]any{"a": []any{}}
+	got := applyDelForTest(t, "del(a[].x)", root)
+	want := map[string]any{"a": []any{}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("del(a[].x) = %#v, want %#v", got, want)
+	}
+}
+
+func TestDelPreservesOriginal(t *testing.T) {
+	root := map[string]any{"a": float64(1), "b": float64(2)}
+	_ = applyDelForTest(t, "del(a)", root)
+	// Original must not be mutated
+	if root["a"] == nil {
+		t.Error("original was mutated by del")
+	}
+}
+
+func TestDelCLI(t *testing.T) {
+	yaml := "a:\n  b: 1\n  c: 2\nd: 3\n"
+	out, code := runQueryCLI(t, yaml, "--yaml", "--edit", "del(a.b)", ".")
+	if code != 0 {
+		t.Fatalf("del cli exit %d", code)
+	}
+	if !strings.Contains(out, "c: 2") || !strings.Contains(out, "d: 3") || strings.Contains(out, "b:") {
+		t.Errorf("del cli output = %q", out)
+	}
+}
+
+func TestDelCLIWildcard(t *testing.T) {
+	yaml := "items:\n  - {x: 1, y: 2}\n  - {x: 3, y: 4}\n"
+	out, code := runQueryCLI(t, yaml, "--yaml", "--edit", "del(items[].y)", ".")
+	if code != 0 {
+		t.Fatalf("del wildcard exit %d", code)
+	}
+	if strings.Contains(out, "y:") {
+		t.Errorf("del wildcard should remove y, got %q", out)
+	}
+	if !strings.Contains(out, "x: 1") || !strings.Contains(out, "x: 3") {
+		t.Errorf("del wildcard should preserve x, got %q", out)
+	}
+}
+
+func TestDelCLIFilter(t *testing.T) {
+	yaml := "rays:\n  - {id: a, x: 1}\n  - {id: b, x: 2}\n"
+	out, code := runQueryCLI(t, yaml, "--yaml", "--edit", `del(rays[id="a"].x)`, ".")
+	if code != 0 {
+		t.Fatalf("del filter exit %d", code)
+	}
+	if strings.Contains(out, "x: 1") {
+		t.Errorf("del filter should remove x from id=a, got %q", out)
+	}
+	if !strings.Contains(out, "x: 2") {
+		t.Errorf("del filter should preserve x from id=b, got %q", out)
+	}
+}
+
 func TestQueryCLIRootDot(t *testing.T) {
 	// YAML with top-level keys for testing .prefix syntax
 	topLevelYAML := "focal_length: 25.033\nimage_space_f_number: 5.419\n"
