@@ -439,6 +439,20 @@ func TestQueryCLICSV(t *testing.T) {
 	}
 }
 
+func TestQueryCLICSVKeepAll(t *testing.T) {
+	out, code := runQueryCLI(t, chiefYAML, "--csv-keep-all", "--csv", "chief_rays[0].grid_points[]:image_x,image_y")
+	if code != 0 {
+		t.Fatalf("csv keep-all exit %d", code)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 3 { // null row is now kept
+		t.Errorf("csv rows = %d, want 3: %q", len(lines), out)
+	}
+	if !strings.Contains(lines[1], ",") {
+		t.Errorf("null row must still have a comma separator: %q", lines[1])
+	}
+}
+
 func TestQueryCLIGate(t *testing.T) {
 	out, code := runQueryCLI(t, paraxialYAML, "--gate", "abs(efl-25.033)<0.01", "--set", "efl=paraxial_result.focal_length")
 	if code != 0 || !strings.Contains(out, "true") {

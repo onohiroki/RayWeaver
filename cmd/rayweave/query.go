@@ -39,6 +39,7 @@ func runQuery(data []byte) {
 	jsonOut := fs.Bool("json", false, "output the result as JSON")
 	csvArg := fs.String("csv", "", "CSV output: iterate PATH and emit one row per element (PATH[:col1,col2,...])")
 	csvHeader := fs.Bool("csv-header", false, "with --csv, emit a header row with the column names")
+	csvKeepAll := fs.Bool("csv-keep-all", false, "with --csv, keep rows where a column is missing/null (emit empty cells)")
 	eachArg := fs.String("each", "", "iterate PATH and print one row per element (PATH[:col1,col2,...])")
 	countArg := fs.String("count", "", "count non-null values resolved by PATH")
 	lenArg := fs.String("len", "", "length of the array/mapping resolved by PATH")
@@ -192,7 +193,7 @@ func runQuery(data []byte) {
 	// ---- 3. Dispatch ----
 	switch {
 	case *csvArg != "":
-		runQueryCSV(*csvArg, resolve, *csvHeader, *defaultStr, *printfFmt)
+		runQueryCSV(*csvArg, resolve, *csvHeader, *csvKeepAll, *defaultStr, *printfFmt)
 	case *eachArg != "":
 		runQueryEach(*eachArg, resolve, *defaultStr, *printfFmt, *yamlOut, *jsonOut)
 	case agg != "":
@@ -382,8 +383,9 @@ func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, pri
 
 // runQueryCSV iterates the array at PATH and emits CSV rows. Rows where any
 // column is missing/null are skipped (matching jq's `select(.x != null)`),
-// which is what the spot-diagram demos need. Header is optional.
-func runQueryCSV(arg string, resolve func(string) (any, error), header bool, defaultStr, printfFmt string) {
+// which is what the spot-diagram demos need. Header is optional. When keepAll
+// is true, null columns emit empty cells instead of skipping the row.
+func runQueryCSV(arg string, resolve func(string) (any, error), header, keepAll bool, defaultStr, printfFmt string) {
 	path, cols := splitEachArg(arg)
 	if len(cols) == 0 {
 		errOut("Error: --csv requires columns (PATH:col1,col2,...)")
@@ -419,7 +421,7 @@ func runQueryCSV(arg string, resolve func(string) (any, error), header bool, def
 				errOut("Error evaluating column %q: %v", col, err)
 				os.Exit(1)
 			}
-			if cv == nil {
+			if cv == nil && !keepAll {
 				skip = true
 				break
 			}

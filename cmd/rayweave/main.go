@@ -953,7 +953,7 @@ Output modes:
   --yaml    serialize the result as YAML (subtree dump, records, lists)
   --json    serialize the result as JSON
   --csv     PATH:col1,col2,... -> CSV rows, skipping rows with missing
-            columns (add --csv-header for a header)
+            columns (add --csv-header for a header; --csv-keep-all to keep all rows)
   --gate    evaluate EXPR, print the value and exit 0/1 by truthiness
 
 Iteration and aggregates:

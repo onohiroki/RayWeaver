@@ -158,11 +158,16 @@ rayweave query --each 'escape_result.minima[]:index,merit' \
 
 Iterate an array and emit one CSV row per element. Rows with a **missing/null
 column are skipped**, which is the jq `select(.x != null)` behaviour the
-spot-diagram demos need. Add `--csv-header` for a header row.
+spot-diagram demos need. Add `--csv-header` for a header row. Use
+**`--csv-keep-all`** to keep rows with missing columns (empty cells are emitted
+instead of skipping the row):
 
 ```sh
 rayweave query --csv 'chief_rays[0].grid_points[]:image_x,image_y,intensity' \
     < chief.yaml > spots.csv
+
+rayweave query --csv --csv-keep-all \
+    'surfaces[]:id,material.nd,diameter' < lens.yaml > all_surfaces.csv
 ```
 
 ### `--gate EXPR`
