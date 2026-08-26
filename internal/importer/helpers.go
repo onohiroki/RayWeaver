@@ -272,26 +272,64 @@ func addGlassEntryNDV(result *ParseResult, mat string, nd, vd float64) {
 	result.GlassEntries = append(result.GlassEntries, entry)
 }
 
-// decodeDispersionCode decodes a glass code into nd = 1.nnn and vd = vv.v.
-// The bare ZEMAX/OSLO 6-digit form is "nnnvvv" (e.g. 748523 -> 1.748/52.3);
-// CODE V writes the same digits with a separator dot, padding each half with
-// zeros (e.g. "500.700" -> 1.500/70.0, "517000.520000" -> 1.517/52.0).
+// decodeDispersionCode decodes a glass code into nd and vd.
+//
+// The bare ZEMAX/OSLO 6-digit form is "nnnvvv" (e.g. 748523 -> 1.748/52.3):
+// nd = 1 + nnn/1000, vd = vvv/10.
+//
+// CODE V uses a separator dot: the part before the dot encodes the fractional
+// digits of nd (nd = 1 + value/10^len), and the part after the dot encodes the
+// Abbe number with a fixed 2-digit integer part (vd = value/10^(len-2)).
+// Each half may be any length; trailing digits beyond the first 3 (nd) or
+// 2+decimals (vd) are significant.  Examples:
+//
+//	"506.47"    -> nd = 1 + 506/10^3 = 1.506,  vd = 47/10^0    = 47.0
+//	"5.654321"  -> nd = 1 + 5/10^1   = 1.5,    vd = 654321/10^4 = 65.4321
+//	"50.647"    -> nd = 1 + 50/10^2  = 1.50,   vd = 647/10^1   = 64.7
+//	"500.700"   -> nd = 1 + 500/10^3 = 1.500,  vd = 700/10^1   = 70.0
 func decodeDispersionCode(code string) (nd, vd float64, ok bool) {
 	ndStr, vdStr := "", ""
 	if i := strings.IndexByte(code, '.'); i >= 0 {
 		ndStr, vdStr = code[:i], code[i+1:]
-	} else {
-		if len(code) != 6 {
+		ndVal, ndLen, ok1 := parseLeadingDigits(ndStr)
+		vdVal, vdLen, ok2 := parseLeadingDigits(vdStr)
+		if !ok1 || !ok2 {
 			return 0, 0, false
 		}
-		ndStr, vdStr = code[:3], code[3:]
+		nd = 1 + float64(ndVal)/math.Pow(10, float64(ndLen))
+		if vdLen >= 2 {
+			vd = float64(vdVal) / math.Pow(10, float64(vdLen-2))
+		} else {
+			vd = float64(vdVal) * math.Pow(10, float64(2-vdLen))
+		}
+		return nd, vd, true
 	}
+	if len(code) != 6 {
+		return 0, 0, false
+	}
+	ndStr, vdStr = code[:3], code[3:]
 	nd3, ok1 := leadingDigits(ndStr)
 	vd3, ok2 := leadingDigits(vdStr)
 	if !ok1 || !ok2 {
 		return 0, 0, false
 	}
-	return 1 + nd3/1000.0, vd3 / 10.0, true
+	return 1 + nd3/1000.0, vd3/10.0, true
+}
+
+// parseLeadingDigits returns the integer value of the leading run of digits,
+// the count of digits consumed, and whether at least one digit was found.
+// Unlike leadingDigits it has no upper bound on the digit count.
+func parseLeadingDigits(s string) (int, int, bool) {
+	val := 0
+	n := 0
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			break
+		}
+		val = val*10 + int(r-'0')
+		n++
+	}
+	return val, n, n > 0
 }
 
 // leadingDigits returns the value of the leading run of up to three digits.

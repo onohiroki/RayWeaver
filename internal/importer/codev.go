@@ -70,268 +70,284 @@ func ParseCodeV(input string) (*ParseResult, error) {
 			continue
 		}
 
-		upper := strings.ToUpper(line)
-		tokens := strings.Fields(line)
+		stmts := splitCodeVStatements(line)
+		for _, stmt := range stmts {
+			stmt = strings.TrimSpace(stmt)
+			if stmt == "" {
+				continue
+			}
+			upper := strings.ToUpper(stmt)
+			tokens := strings.Fields(stmt)
 
-		if len(tokens) == 0 {
-			continue
-		}
+			if len(tokens) == 0 {
+				continue
+			}
 
-		// The RDM directive selects whether the surface first values are radii
-		// of curvature (RDM / RDM Y, or absent-but-leaf RDM; CODE V writes
-		// "RDM;..." for radius) or curvatures (RDM N / RDM NO). The default
-		// when RDM is absent is curvature mode. Apply the mode before any
-		// keyword dispatch so every following surface reads the right units.
-		// Only treat a line as a directive when it carries a mode word; look
-		// for the mode either fused into the token after "RDM" (e.g. ";LEN ")
-		// or as a Y/N/YES/NO keyword.
-		if parseCodeVRDMDirective(upper, tokens, &radiusMode) {
-			continue
-		}
+			// The RDM directive selects whether the surface first values are radii
+			// of curvature (RDM / RDM Y, or absent-but-leaf RDM; CODE V writes
+			// "RDM;..." for radius) or curvatures (RDM N / RDM NO). The default
+			// when RDM is absent is curvature mode. Apply the mode before any
+			// keyword dispatch so every following surface reads the right units.
+			// Only treat a line as a directive when it carries a mode word; look
+			// for the mode either fused into the token after "RDM" (e.g. ";LEN ")
+			// or as a Y/N/YES/NO keyword.
+			if parseCodeVRDMDirective(upper, tokens, &radiusMode) {
+				continue
+			}
 
-		// CODE V is case-insensitive; dispatch on the uppercased keyword while
-		// keeping the raw tokens for values and material labels.
-		first := strings.ToUpper(tokens[0])
+			// CODE V is case-insensitive; dispatch on the uppercased keyword while
+			// keeping the raw tokens for values and material labels.
+			first := strings.ToUpper(tokens[0])
 
-		// A partial-wavelength (PRV) block may precede or follow the lens
-		// data; handle it before any keyword dispatch so PWL/glass rows and
-		// the block-closing END are never parsed as surfaces or terminators.
-		if parseCodeVPRVLine(upper, tokens, result, &inPrv, &prvWavelengths) {
-			continue
-		}
+			// A partial-wavelength (PRV) block may precede or follow the lens
+			// data; handle it before any keyword dispatch so PWL/glass rows and
+			// the block-closing END are never parsed as surfaces or terminators.
+			if parseCodeVPRVLine(upper, tokens, result, &inPrv, &prvWavelengths) {
+				continue
+			}
 
-		if beforeLens {
-			if upper == "SEQ" || strings.HasPrefix(upper, "SEQ ") {
-				beforeLens = false
+			if beforeLens {
+				if upper == "SEQ" || strings.HasPrefix(upper, "SEQ ") {
+					beforeLens = false
+					continue
+				}
+
+				if parseCodeVHeader(upper, tokens, result, &inchMode, headerState) {
+					continue
+				}
+				// Some SEQ files omit the SEQ keyword entirely.
+				// SO/S/SI lines signal start of surface data.
+				if len(tokens) > 0 && (first == "SO" || first == "S" || first == "SI") {
+					beforeLens = false
+				} else {
+					continue
+				}
+			}
+
+			if upper == "END" || strings.HasPrefix(upper, "END ") {
+				// END terminates the entire lens; break the outer line loop.
+				// Use a labelled break via flag.
+				goto endLoop
+			}
+
+			// ZOO rows declare per-zoom-position parameter values; they may trail
+			// the surface data (before END/GO) or interleave with it.
+			if first == "ZOO" {
+				zoom.addRow(tokens)
 				continue
 			}
 
 			if parseCodeVHeader(upper, tokens, result, &inchMode, headerState) {
 				continue
 			}
-			// Some SEQ files omit the SEQ keyword entirely.
-			// SO/S/SI lines signal start of surface data.
-			if len(tokens) > 0 && (first == "SO" || first == "S" || first == "SI") {
-				beforeLens = false
-			} else {
+
+			if first == "ASP" {
+				if len(tokens) >= 2 {
+					surfNum := parseCodeVSurfNum(tokens[1])
+					if surfNum >= 0 {
+						surf := getOrCreate(surfMap, surfNum)
+						surf.SurfType = "ASPHERICAL"
+						lastSurfNum = surfNum
+						inAspBlock = false
+						continue
+					}
+				}
+				inAspBlock = true
+				if lastSurfNum > 0 {
+					s := getOrCreate(surfMap, lastSurfNum)
+					s.SurfType = "ASPHERICAL"
+				}
 				continue
 			}
-		}
 
-		if upper == "END" || strings.HasPrefix(upper, "END ") {
-			break
-		}
+			if inAspBlock && lastSurfNum > 0 {
+				surf := surfMap[lastSurfNum]
+				if first == "K" && len(tokens) >= 2 {
+					surf.Conic = parseFloat(tokens[1])
+					continue
+				}
+				if first == "CUF" {
+					continue
+				}
+				if isAsphereLetter(first) && len(tokens) >= 2 {
+					order := asphereOrder(first)
+					val := parseFloat(tokens[1])
+					if surf.Coeffs == nil {
+						surf.Coeffs = make(map[int]float64)
+					}
+					surf.Coeffs[order] = val
 
-		// ZOO rows declare per-zoom-position parameter values; they may trail
-		// the surface data (before END/GO) or interleave with it.
-		if first == "ZOO" {
-			zoom.addRow(tokens)
-			continue
-		}
-
-		if parseCodeVHeader(upper, tokens, result, &inchMode, headerState) {
-			continue
-		}
-
-		if first == "ASP" {
-			if len(tokens) >= 2 {
-				surfNum := parseCodeVSurfNum(tokens[1])
-				if surfNum >= 0 {
-					surf := getOrCreate(surfMap, surfNum)
-					surf.SurfType = "ASPHERICAL"
-					lastSurfNum = surfNum
-					inAspBlock = false
+					for j := 2; j+1 < len(tokens); j += 2 {
+						letter := tokens[j]
+						if !isAsphereLetter(letter) {
+							break
+						}
+						val := parseFloat(tokens[j+1])
+						surf.Coeffs[asphereOrder(letter)] = val
+					}
 					continue
 				}
 			}
-			inAspBlock = true
-			if lastSurfNum > 0 {
-				s := getOrCreate(surfMap, lastSurfNum)
-				s.SurfType = "ASPHERICAL"
-			}
-			continue
-		}
 
-		if inAspBlock && lastSurfNum > 0 {
-			surf := surfMap[lastSurfNum]
-			if first == "K" && len(tokens) >= 2 {
-				surf.Conic = parseFloat(tokens[1])
+			if first == "SO" && len(tokens) >= 3 {
+				compactMode = true
+				compactCounter = 0
+				lastSurfNum = 0
 				continue
 			}
-			if first == "CUF" {
-				continue
-			}
-			if isAsphereLetter(first) && len(tokens) >= 2 {
-				order := asphereOrder(first)
-				val := parseFloat(tokens[1])
-				if surf.Coeffs == nil {
-					surf.Coeffs = make(map[int]float64)
-				}
-				surf.Coeffs[order] = val
 
-				for j := 2; j+1 < len(tokens); j += 2 {
-					letter := tokens[j]
-					if !isAsphereLetter(letter) {
-						break
+			if first == "S" && len(tokens) >= 3 {
+				compactMode = true
+				compactCounter++
+				surf := getOrCreate(surfMap, compactCounter)
+				surf.Curvature = surfaceValue(parseFloat(tokens[1]), radiusMode)
+				surf.Thickness = parseThickness(parseFloat(tokens[2]))
+
+				if len(tokens) >= 4 {
+					raw := tokens[3]
+					raw = strings.Trim(raw, "'\"")
+					if strings.Contains(raw, ":") {
+						surf.Material = raw
+					} else {
+						surf.Material = raw
 					}
-					val := parseFloat(tokens[j+1])
-					surf.Coeffs[asphereOrder(letter)] = val
 				}
+
+				lastSurfNum = compactCounter
+				if compactCounter > imageSurface {
+					imageSurface = compactCounter
+				}
+				inAspBlock = false
 				continue
 			}
-		}
 
-		if first == "SO" && len(tokens) >= 3 {
-			compactMode = true
-			compactCounter = 0
-			lastSurfNum = 0
-			continue
-		}
-
-		if first == "S" && len(tokens) >= 3 {
-			compactMode = true
-			compactCounter++
-			surf := getOrCreate(surfMap, compactCounter)
-			surf.Curvature = surfaceValue(parseFloat(tokens[1]), radiusMode)
-			surf.Thickness = parseThickness(parseFloat(tokens[2]))
-
-			if len(tokens) >= 4 {
-				raw := tokens[3]
-				raw = strings.Trim(raw, "'\"")
-				if strings.Contains(raw, ":") {
-					surf.Material = raw
-				} else {
-					surf.Material = raw
-				}
-			}
-
-			lastSurfNum = compactCounter
-			if compactCounter > imageSurface {
+			if first == "SI" && len(tokens) >= 3 {
+				compactMode = true
+				compactCounter++
+				surf := getOrCreate(surfMap, compactCounter)
+				surf.Curvature = surfaceValue(parseFloat(tokens[1]), radiusMode)
+				surf.Thickness = parseThickness(parseFloat(tokens[2]))
+				lastSurfNum = compactCounter
 				imageSurface = compactCounter
+				inAspBlock = false
+				continue
 			}
-			inAspBlock = false
-			continue
-		}
 
-		if first == "SI" && len(tokens) >= 3 {
-			compactMode = true
-			compactCounter++
-			surf := getOrCreate(surfMap, compactCounter)
-			surf.Curvature = surfaceValue(parseFloat(tokens[1]), radiusMode)
-			surf.Thickness = parseThickness(parseFloat(tokens[2]))
-			lastSurfNum = compactCounter
-			imageSurface = compactCounter
-			inAspBlock = false
-			continue
-		}
-
-		if first == "CIR" && len(tokens) >= 2 {
-			if lastSurfNum > 0 {
-				surf := getOrCreate(surfMap, lastSurfNum)
-				if strings.EqualFold(tokens[1], "EDG") {
-					// Edge aperture: a mechanical edge spec, never the optical
-					// clear aperture. Use it only as a fallback so it cannot
-					// clobber a preceding clear CIR with a zero.
-					if surf.Diameter == 0 && len(tokens) >= 3 {
-						surf.Diameter = parseFloat(tokens[2]) * 2
+			if first == "CIR" && len(tokens) >= 2 {
+				if lastSurfNum > 0 {
+					surf := getOrCreate(surfMap, lastSurfNum)
+					if strings.EqualFold(tokens[1], "EDG") {
+						// Edge aperture: a mechanical edge spec, never the optical
+						// clear aperture. Use it only as a fallback so it cannot
+						// clobber a preceding clear CIR with a zero.
+						if surf.Diameter == 0 && len(tokens) >= 3 {
+							surf.Diameter = parseFloat(tokens[2]) * 2
+						}
+					} else {
+						surf.Diameter = parseFloat(tokens[1]) * 2
 					}
-				} else {
-					surf.Diameter = parseFloat(tokens[1]) * 2
-				}
-			}
-			inAspBlock = false
-			continue
-		}
-
-		if first == "STO" && compactMode {
-			if lastSurfNum > 0 {
-				surf := getOrCreate(surfMap, lastSurfNum)
-				surf.isStop = true
-				stopSurface = lastSurfNum
-			}
-			inAspBlock = false
-			continue
-		}
-
-		if first == "PIM" && compactMode {
-			if lastSurfNum > 0 {
-				surf := getOrCreate(surfMap, lastSurfNum)
-				surf.isPIM = true
-			}
-			inAspBlock = false
-			continue
-		}
-
-		if compactMode && lastSurfNum > 0 {
-			switch first {
-			case "CON", "K":
-				// Compact-mode conic statements. "CON" declares a conic type
-				// (the value may follow on the same line or in the next "K"
-				// line); "K <k>" sets the conic value directly. A line may join
-				// several statements with ';' (e.g.
-				// "K 0.226106; A 0.368950E-10"), so delegate to the statement
-				// walker. The 3-token "K <surf> <k>" keyword form falls
-				// through to the surface-prefixed handler below.
-				if first != "K" || len(tokens) != 3 {
-					applyCodeVCompactOps(getOrCreate(surfMap, lastSurfNum), tokens)
 				}
 				inAspBlock = false
 				continue
-			case "THC":
-				inAspBlock = false
-				continue
-			case "DAR":
-				// Decenter-and-return: the current surface is shifted/tilted
-				// locally and the axis returns after it. rayweave models this
-				// with a per-surface DecenterStep; the decenter components are
-				// supplied by following YDE/XDE/ZDE/ADE/BDE/CDE statements.
-				getOrCreate(surfMap, lastSurfNum).decActive = true
-				inAspBlock = false
-				continue
-			case "YDE", "XDE", "ZDE", "ADE", "BDE", "CDE":
-				surf := getOrCreate(surfMap, lastSurfNum)
-				surf.decActive = true
-				applyCodeVDecenterOps(surf, tokens)
-				inAspBlock = false
-				continue
 			}
-		}
 
-		switch first {
-		case "RDM", "RDY", "RD", "THI", "TH", "GLA", "K",
-			"DIA", "SDI", "SPS", "SPC", "SI":
-			if len(tokens) < 2 {
-				break
-			}
-			surfNum := parseCodeVSurfNum(tokens[1])
-			if surfNum < 0 {
-				break
-			}
-			surf := getOrCreate(surfMap, surfNum)
-			lastSurfNum = surfNum
-			processCodeVKeyword(surf, first, tokens)
-			if surfNum > imageSurface {
-				imageSurface = surfNum
-			}
-			continue
-		case "STO":
-			if len(tokens) >= 2 {
-				surfNum := parseCodeVSurfNum(tokens[1])
-				if surfNum >= 0 {
-					surf := getOrCreate(surfMap, surfNum)
+			if first == "STO" && compactMode {
+				if lastSurfNum > 0 {
+					surf := getOrCreate(surfMap, lastSurfNum)
 					surf.isStop = true
-					stopSurface = surfNum
-					lastSurfNum = surfNum
-					if surfNum > imageSurface {
-						imageSurface = surfNum
+					stopSurface = lastSurfNum
+				}
+				inAspBlock = false
+				continue
+			}
+
+			if first == "PIM" && compactMode {
+				if lastSurfNum > 0 {
+					surf := getOrCreate(surfMap, lastSurfNum)
+					surf.isPIM = true
+				}
+				inAspBlock = false
+				continue
+			}
+
+			if compactMode && lastSurfNum > 0 {
+				switch first {
+				case "CON", "K":
+					// Compact-mode conic statements. "CON" declares a conic type
+					// (the value may follow on the same line or in the next "K"
+					// line); "K <k>" sets the conic value directly. A line may join
+					// several statements with ';' (e.g.
+					// "K 0.226106; A 0.368950E-10"), so delegate to the statement
+					// walker. The 3-token "K <surf> <k>" keyword form falls
+					// through to the surface-prefixed handler below.
+					if first != "K" || len(tokens) != 3 {
+						applyCodeVCompactOps(getOrCreate(surfMap, lastSurfNum), tokens)
+					}
+					inAspBlock = false
+					continue
+				case "THC":
+					inAspBlock = false
+					continue
+				case "DAR":
+					// Decenter-and-return: the current surface is shifted/tilted
+					// locally and the axis returns after it. rayweave models this
+					// with a per-surface DecenterStep; the decenter components are
+					// supplied by following YDE/XDE/ZDE/ADE/BDE/CDE statements.
+					getOrCreate(surfMap, lastSurfNum).decActive = true
+					inAspBlock = false
+					continue
+				case "YDE", "XDE", "ZDE", "ADE", "BDE", "CDE":
+					surf := getOrCreate(surfMap, lastSurfNum)
+					surf.decActive = true
+					applyCodeVDecenterOps(surf, tokens)
+					inAspBlock = false
+					continue
+				default:
+					if isAsphereLetter(first) {
+						applyCodeVCompactOps(getOrCreate(surfMap, lastSurfNum), tokens)
+						inAspBlock = false
+						continue
 					}
 				}
 			}
-			continue
-		}
 
-		inAspBlock = false
+			switch first {
+			case "RDM", "RDY", "RD", "THI", "TH", "GLA", "K",
+				"DIA", "SDI", "SPS", "SPC", "SI":
+				if len(tokens) < 2 {
+					break
+				}
+				surfNum := parseCodeVSurfNum(tokens[1])
+				if surfNum < 0 {
+					break
+				}
+				surf := getOrCreate(surfMap, surfNum)
+				lastSurfNum = surfNum
+				processCodeVKeyword(surf, first, tokens)
+				if surfNum > imageSurface {
+					imageSurface = surfNum
+				}
+				continue
+			case "STO":
+				if len(tokens) >= 2 {
+					surfNum := parseCodeVSurfNum(tokens[1])
+					if surfNum >= 0 {
+						surf := getOrCreate(surfMap, surfNum)
+						surf.isStop = true
+						stopSurface = surfNum
+						lastSurfNum = surfNum
+						if surfNum > imageSurface {
+							imageSurface = surfNum
+						}
+					}
+				}
+				continue
+			}
+
+			inAspBlock = false
+		}
 	}
+endLoop:
 
 	if inchMode {
 		for _, s := range surfMap {
@@ -487,6 +503,36 @@ func joinContinuationLines(rawLines []string) []string {
 		out = append(out, buf)
 	}
 	return out
+}
+
+// splitCodeVStatements splits a CODE V line on ';' statement separators,
+// respecting single- and double-quoted strings.  In CODE V ';' is the
+// statement separator (like Perl), analogous to a newline.
+func splitCodeVStatements(line string) []string {
+	var stmts []string
+	var cur strings.Builder
+	inQuote := false
+	quoteChar := byte(0)
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if inQuote {
+			cur.WriteByte(c)
+			if c == quoteChar {
+				inQuote = false
+			}
+		} else if c == '\'' || c == '"' {
+			inQuote = true
+			quoteChar = c
+			cur.WriteByte(c)
+		} else if c == ';' {
+			stmts = append(stmts, cur.String())
+			cur.Reset()
+		} else {
+			cur.WriteByte(c)
+		}
+	}
+	stmts = append(stmts, cur.String())
+	return stmts
 }
 
 // parseCodeVWavelengths converts a CODE V WL row (wavelengths in nm) into
