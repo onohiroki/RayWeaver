@@ -122,7 +122,7 @@ func runList(data []byte) {
 
 	targets := args.positional
 	if len(targets) == 0 {
-		targets = []string{"surfaces"}
+		targets = []string{"surfaces", "glasses"}
 	}
 	printed := map[string]bool{}
 	for _, target := range targets {
