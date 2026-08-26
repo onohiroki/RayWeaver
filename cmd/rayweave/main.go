@@ -163,6 +163,8 @@ func main() {
 		runWavefront(data)
 	case "query":
 		runQuery(data)
+	case "clean":
+		runClean(data)
 	case "list":
 		runList(data)
 	default:
@@ -1098,6 +1100,26 @@ Examples:
   rayweave list --config wide < lens.yaml
   rayweave list --curvature --format csv < lens.yaml
   rayweave list surfaces glasses < lens.yaml
+`)
+	case "clean":
+		fmt.Print(`Usage: rayweave clean [--verbose] < pipeline.yaml
+
+Strips calculation results from a pipeline document, keeping only
+configuration settings. The metadata.tool section is overwritten with
+this tool's own identity.
+
+Removed fields: chief_rays, results, paraxial_result, opt_results,
+escape_result, vignetting_result, asphere_candidate_result,
+psf_results, wavefront_result.
+
+The "stop" section is preserved (it may be hand-entered as input).
+
+Options:
+  --verbose   print removed fields as JSONL to stderr
+
+Examples:
+  rayweave chief < lens.yaml | rayweave clean > clean.yaml
+  rayweave optimize < lens.yaml | rayweave clean --verbose > clean.yaml
 `)
 	}
 }
