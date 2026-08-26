@@ -50,6 +50,7 @@ Subcommands are grouped by their role in the data flow
 |---|---|---|---|
 | Data | `import` | Convert an external lens file into the internal YAML format. | ZMX / SEQ / LEN → YAML system |
 | Data | `export` | Write the internal YAML format back out as a native lens file. `--format zemax\|codev\|oslo`; every config by default (ZEMAX multi-config / CODE V zoom positions) or `--config` for one. | YAML system → ZMX / SEQ / LEN |
+| Data | `list` | Read-only listing of system definition data: surfaces, asphere coefficients, thickness differences and glasses. Flags: `--format table\|yaml\|json\|csv`, `--config`, `--glass-dir`, `--curvature`. See `docs/list.md`. | YAML system → formatted table / yaml / json / csv |
 | Propagation | `trace` | Trace individual rays and report per-surface intersection data (low-level). | rays → per-surface results |
 | Propagation | `chief` | Sample the beam for each field: chief ray, dynamic pupil (per-field entrance/exit pupil from the chief-ray crossings when no `stop_surface` is set), pupil grid, marginal rays, spot statistics and OPL. Flags: `--clear-aperture` (size `auto_aperture: true` surfaces to the beam footprint + margin; `--clear-aperture-margin-mm`, `--clear-aperture-rays`), `--preserve-rays` (keep the existing rays section during aperture adjustment), `--marginal-rays`, `--pass-through N`, `--config ID`, `--wl`. | system + fields → chief_rays / grid |
 | Analysis | `paraxial` | First-order / cardinal properties: EFL, BFL, FFL, principal points, pupil positions, f/#. | system → paraxial_result |
@@ -71,6 +72,7 @@ Per-subcommand usage manuals live in [`docs/`](docs/):
 |---|---|
 | [docs/import.md](docs/import.md) | ZEMAX / OSLO / CODE V import |
 | [docs/export.md](docs/export.md) | ZEMAX ZMX / CODE V SEQ / OSLO LEN export |
+| [docs/list.md](docs/list.md) | surfaces, glasses, asphere coefficients, thickness differences |
 | [docs/trace.md](docs/trace.md) | low-level ray tracing |
 | [docs/chief.md](docs/chief.md) | chief rays, pupil grids, spot stats, ray fans, clear aperture |
 | [docs/paraxial.md](docs/paraxial.md) | first-order / cardinal analysis |

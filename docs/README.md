@@ -14,6 +14,7 @@ system → ray bundle → quantities
 | [format.md](format.md) | _document format_ | top-level `metadata` block and pipeline document shape |
 | [import.md](import.md) | `rayweave import` | convert ZEMAX / OSLO / CODE V files to RayWeaver YAML |
 | [export.md](export.md) | `rayweave export` | write RayWeaver YAML back out as ZEMAX / CODE V / OSLO files |
+| [list.md](list.md) | `rayweave list` | read-only listing of system data (surfaces, glasses, asphere coefficients, thickness differences) |
 | [trace.md](trace.md) | `rayweave trace` | trace individual rays and report per-surface data |
 | [chief.md](chief.md) | `rayweave chief` | chief rays, pupil grids, spot statistics, ray fans, clear aperture |
 | [paraxial.md](paraxial.md) | `rayweave paraxial` | first-order (paraxial) analysis: EFL, pupils, cardinal points |
