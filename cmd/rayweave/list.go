@@ -125,11 +125,16 @@ func runList(data []byte) {
 		targets = []string{"surfaces", "glasses"}
 	}
 	printed := map[string]bool{}
+	first := true
 	for _, target := range targets {
 		if printed[target] {
 			continue
 		}
 		printed[target] = true
+		if !first && (*format == "table" || *format == "csv") {
+			fmt.Println()
+		}
+		first = false
 		switch target {
 		case "surfaces":
 			listSurfaces(surfaces, gc, *showCurvature, *format, input.Configs, *configFlag != "")
