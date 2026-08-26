@@ -67,6 +67,32 @@ type ThicknessDiffRow struct {
 	Thickness   float64 `json:"thickness" yaml:"thickness"`
 }
 
+// GlassIndex is one wavelength's refractive index of a glass.
+type GlassIndex struct {
+	WavelengthNM float64 `json:"wavelength_nm" yaml:"wavelength_nm"`
+	N            float64 `json:"n" yaml:"n"`
+}
+
+// GlassListRow is one row of the `list glasses` table. Type is the dispersion
+// category (formula name for catalog glasses, "model", "constant", or
+// "tabulated"); empty for an unresolved key. ND/VD are the d-line index and
+// Abbe number (stored values when present, computed from the dispersion data
+// otherwise; zero when unavailable — a constant-index glass has no Abbe
+// number). Indices holds n at every collected wavelength (longest first).
+type GlassListRow struct {
+	Name         string       `json:"name" yaml:"name"`
+	Manufacturer string       `json:"manufacturer,omitempty" yaml:"manufacturer,omitempty"`
+	Type         string       `json:"type,omitempty" yaml:"type,omitempty"`
+	ND           float64      `json:"nd,omitempty" yaml:"nd,omitempty"`
+	VD           float64      `json:"vd,omitempty" yaml:"vd,omitempty"`
+	Indices      []GlassIndex `json:"indices,omitempty" yaml:"indices,omitempty"`
+}
+
+// glassesListOutput is the structured (yaml/json) shape of `list glasses`.
+type glassesListOutput struct {
+	Glasses []GlassListRow `json:"glasses" yaml:"glasses"`
+}
+
 // runList implements the `list` subcommand: a read-only, human-readable
 // listing of the input system's definition data (surfaces today; glasses,
 // decenter, reflect planned). It never traces rays and prints formatted
@@ -75,13 +101,13 @@ type ThicknessDiffRow struct {
 //	rayweave list [--format table|yaml|json|csv] [--config ID]
 //	              [--glass-dir DIR] [--curvature] [TARGET...] < input.yaml
 func runList(data []byte) {
-	args := os.Args[2:]
+	args := splitFlagsAndPositional(os.Args[2:])
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	format := fs.String("format", "table", "output format: table | yaml | json | csv")
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	showCurvature := fs.Bool("curvature", false, "show curvature instead of radius")
-	fs.Parse(args)
+	fs.Parse(args.flags)
 
 	switch *format {
 	case "table", "yaml", "json", "csv":
@@ -94,7 +120,7 @@ func runList(data []byte) {
 	gc, _ := loadCatalogs(&input, *glassDir)
 	surfaces := configSurfaces(input.Configs, configFlag)
 
-	targets := fs.Args()
+	targets := args.positional
 	if len(targets) == 0 {
 		targets = []string{"surfaces"}
 	}
@@ -107,11 +133,46 @@ func runList(data []byte) {
 		switch target {
 		case "surfaces":
 			listSurfaces(surfaces, gc, *showCurvature, *format, input.Configs, *configFlag != "")
+		case "glasses":
+			listGlasses(surfaces, input, gc, *format)
 		default:
-			errOut("Error: unknown list target %q (supported: surfaces)", target)
+			errOut("Error: unknown list target %q (supported: surfaces, glasses)", target)
 			os.Exit(1)
 		}
 	}
+}
+
+// flagAndPositional holds the pre-split command line of the list subcommand.
+type flagAndPositional struct {
+	flags      []string
+	positional []string
+}
+
+// splitFlagsAndPositional separates value-taking flags from positional target
+// arguments so flags may appear after the targets (the stdlib FlagSet stops
+// parsing at the first non-flag argument). Boolean flags consume no value;
+// --format/--config/--glass-dir consume the following token. `--flag=value`
+// forms are single tokens and need no special casing.
+func splitFlagsAndPositional(args []string) flagAndPositional {
+	var out flagAndPositional
+	valueFlags := map[string]bool{
+		"-format": true, "--format": true,
+		"-config": true, "--config": true,
+		"-glass-dir": true, "--glass-dir": true,
+	}
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "-") && a != "-" {
+			out.flags = append(out.flags, a)
+			if valueFlags[a] && i+1 < len(args) {
+				i++
+				out.flags = append(out.flags, args[i])
+			}
+			continue
+		}
+		out.positional = append(out.positional, a)
+	}
+	return out
 }
 
 // listSurfaces renders the surface table of one config in the given format.
@@ -629,4 +690,252 @@ func thicknessDiffValue(rows []ThicknessDiffRow, configIndex, surfaceID int) (fl
 		}
 	}
 	return 0, false
+}
+
+// listGlasses renders the glasses table in the given format: glasses used by
+// the selected config's surfaces first (first-use order), then unresolved
+// keys, then the remaining glass_catalog entries (declaration order). The n
+// columns cover every wavelength collected from chief.reference_wavelength
+// and all configs' wavelengths (deduplicated, longest first).
+func listGlasses(surfaces []types.Surface, input types.Input, gc *glass.Catalog, format string) {
+	rows := buildGlassRows(surfaces, input, gc)
+	wavelengths := collectWavelengths(input)
+
+	switch format {
+	case "yaml":
+		outData, err := yaml.Marshal(glassesListOutput{Glasses: rows})
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+	case "json":
+		outData, err := json.MarshalIndent(glassesListOutput{Glasses: rows}, "", "  ")
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+		fmt.Println()
+	case "csv":
+		fmt.Println("Glasses:")
+		header := glassCSVHeader(rows, wavelengths)
+		fmt.Println(strings.Join(quoteCSV(header), ","))
+		for _, r := range rows {
+			cells := []string{r.Name, r.Manufacturer, r.Type}
+			ndCell := ""
+			if r.ND > 0 {
+				ndCell = strconv.FormatFloat(r.ND, 'g', -1, 64)
+			}
+			vdCell := ""
+			if r.VD > 0 {
+				vdCell = strconv.FormatFloat(r.VD, 'g', -1, 64)
+			}
+			cells = append(cells, ndCell, vdCell)
+			for k := range wavelengths {
+				cell := ""
+				if k < len(r.Indices) && r.Indices[k].N > 0 {
+					cell = strconv.FormatFloat(r.Indices[k].N, 'g', -1, 64)
+				}
+				cells = append(cells, cell)
+			}
+			fmt.Println(strings.Join(quoteCSV(cells), ","))
+		}
+	default:
+		fmt.Println("Glasses:")
+		if len(rows) == 0 {
+			fmt.Println("(no glasses)")
+			return
+		}
+		hasMfr := false
+		for _, r := range rows {
+			if r.Manufacturer != "" {
+				hasMfr = true
+				break
+			}
+		}
+		cols := []tableColumn{
+			{header: "Name"},
+		}
+		if hasMfr {
+			cols = append(cols, tableColumn{header: "Mfr"})
+		}
+		cols = append(cols, tableColumn{header: "Type"})
+		cols = append(cols, tableColumn{header: "nd", right: true})
+		cols = append(cols, tableColumn{header: "vd", right: true})
+		for _, wl := range wavelengths {
+			cols = append(cols, tableColumn{header: fmt.Sprintf("%.2fnm", wl*1e6), right: true})
+		}
+		for _, r := range rows {
+			cols[0].cells = append(cols[0].cells, r.Name)
+			i := 1
+			if hasMfr {
+				cols[i].cells = append(cols[i].cells, r.Manufacturer)
+				i++
+			}
+			typeCell := r.Type
+			if typeCell == "" {
+				typeCell = "-"
+			}
+			cols[i].cells = append(cols[i].cells, typeCell)
+			ndCell := "-"
+			if r.ND > 0 {
+				ndCell = formatTableFloat(r.ND)
+			}
+			vdCell := "-"
+			if r.VD > 0 {
+				vdCell = formatTableFloat(r.VD)
+			}
+			cols[i+1].cells = append(cols[i+1].cells, ndCell)
+			cols[i+2].cells = append(cols[i+2].cells, vdCell)
+			for k := range wavelengths {
+				nCell := "-"
+				if k < len(r.Indices) && r.Indices[k].N > 0 {
+					nCell = formatTableFloat(r.Indices[k].N)
+				}
+				cols[i+3+k].cells = append(cols[i+3+k].cells, nCell)
+			}
+		}
+		fmt.Print(renderTable(cols))
+	}
+}
+
+// glassCSVHeader builds the csv header row: name,mfr,type,nd,vd plus one
+// column per collected wavelength (the row Indices are aligned to
+// collectWavelengths).
+func glassCSVHeader(rows []GlassListRow, wavelengths []float64) []string {
+	header := []string{"name", "mfr", "type", "nd", "vd"}
+	for _, wl := range wavelengths {
+		header = append(header, fmt.Sprintf("%.2fnm", wl*1e6))
+	}
+	return header
+}
+
+// collectWavelengths gathers the analysis wavelengths from the input:
+// chief.reference_wavelength plus every config's wavelengths, deduplicated
+// within a small tolerance and sorted longest first. Falls back to the d line
+// when the input carries no wavelengths at all.
+func collectWavelengths(input types.Input) []float64 {
+	var wl []float64
+	if input.Chief != nil && input.Chief.ReferenceWavelength > 0 {
+		wl = append(wl, input.Chief.ReferenceWavelength)
+	}
+	for _, cfg := range input.Configs {
+		for _, w := range cfg.Wavelengths {
+			if w.Value > 0 {
+				wl = append(wl, w.Value)
+			}
+		}
+	}
+	const tol = 1e-12 // mm (= 1e-6 nm): near-equal wavelengths collapse to one
+	sort.Float64s(wl)
+	var deduped []float64
+	for i, v := range wl {
+		if i == 0 || math.Abs(v-deduped[len(deduped)-1]) > tol {
+			deduped = append(deduped, v)
+		}
+	}
+	for l, r := 0, len(deduped)-1; l < r; l, r = l+1, r-1 {
+		deduped[l], deduped[r] = deduped[r], deduped[l]
+	}
+	if len(deduped) == 0 {
+		return []float64{types.DefaultWavelength}
+	}
+	return deduped
+}
+
+// buildGlassRows assembles the glasses table rows: surfaces' catalog glasses
+// in first-use order, then unresolved material keys, then the remaining
+// glass_catalog entries (YAML/AGF declaration order). Each resolvable row
+// carries n at every collected wavelength.
+func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catalog) []GlassListRow {
+	wavelengths := collectWavelengths(input)
+	seenKeys := map[string]bool{}
+	unresolvedSeen := map[string]bool{}
+	var rows []GlassListRow
+
+	appendResolved := func(g *types.Glass) {
+		key := types.ResolveGlassKey(*g)
+		if key == "" || seenKeys[key] {
+			return
+		}
+		seenKeys[key] = true
+		row := GlassListRow{
+			Name:         glassDisplayName(g),
+			Manufacturer: g.Manufacturer,
+			Type:         glassTypeString(g),
+		}
+		if nd, vd, ok := glass.NDVD(g); ok {
+			row.ND = nd
+			row.VD = vd
+		}
+		mat := types.Material{Key: key}
+		for _, wl := range wavelengths {
+			idx := GlassIndex{WavelengthNM: wl * 1e6}
+			if n, err := gc.RefractiveIndex(mat, wl); err != nil {
+				glass.Warnf("list[glasses]: cannot compute %q at %.2fnm: %v", key, wl*1e6, err)
+			} else {
+				idx.N = n
+			}
+			row.Indices = append(row.Indices, idx)
+		}
+		rows = append(rows, row)
+	}
+
+	for _, s := range surfaces {
+		if s.ID == 0 || !s.Material.HasKey() {
+			continue
+		}
+		g, ok := gc.Lookup(s.Material.Key)
+		if !ok {
+			if !unresolvedSeen[s.Material.Key] {
+				unresolvedSeen[s.Material.Key] = true
+				rows = append(rows, GlassListRow{Name: s.Material.Key})
+				errOut("Warning: glass %q not found in the catalog", s.Material.Key)
+			}
+			continue
+		}
+		appendResolved(g)
+	}
+	if input.GlassCatalog != nil {
+		for i := range input.GlassCatalog.Entries {
+			appendResolved(&input.GlassCatalog.Entries[i])
+		}
+	}
+	return rows
+}
+
+// glassDisplayName picks a glass's display name: name, else key/label.
+func glassDisplayName(g *types.Glass) string {
+	switch {
+	case g.Name != "":
+		return g.Name
+	case g.Key != "":
+		return g.Key
+	case g.Label != "":
+		return g.Label
+	}
+	return types.ResolveGlassKey(*g)
+}
+
+// glassTypeString maps a glass onto its dispersion category label: the formula
+// name for catalog glasses (e.g. sellmeier_1), "constant" for a fixed index,
+// "model" for nd/vd-based computation and "tabulated" for index tables.
+func glassTypeString(g *types.Glass) string {
+	switch g.Type {
+	case types.GlassTypeModel:
+		return "model"
+	case types.GlassTypeTabulated:
+		return "tabulated"
+	}
+	// Catalog glass: an absent formula with stored nd/vd falls back to the
+	// model-glass computation inside CalcRefractiveIndex.
+	f := g.DispersionFormula
+	if f == "" {
+		if g.ND > 0 {
+			return "model"
+		}
+		return ""
+	}
+	return string(f)
 }

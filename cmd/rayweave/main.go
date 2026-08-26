@@ -1047,8 +1047,12 @@ Read-only listing of an optical system's definition data. Unlike the pipeline
 subcommands, list never traces rays and prints formatted tables by default,
 not pipeline YAML.
 
-Targets (space-separated; default: surfaces):
+Targets (space-separated, flags may appear before or after them;
+default: surfaces):
   surfaces   surface table of the selected config (object plane 0 excluded)
+  glasses    refractive-index table of the glasses: those used by the
+             selected config's surfaces first (first-use order), then
+             unresolved keys, then the remaining glass_catalog entries
 
 Options:
   --format table|yaml|json|csv   output format (default table)
@@ -1078,10 +1082,22 @@ Material column: AIR, resolved catalog glass name (+ manufacturer when known),
 inline model glass as nd:vd, or the raw key when it does not resolve in the
 catalog.
 
+glasses columns: Name, Mfr (only when a glass carries a manufacturer), Type,
+nd and vd (the d-line index and Abbe number: stored values when present,
+computed from the dispersion data otherwise; vd is "-" for constant-index
+glasses), and one n column per collected wavelength (longest first).
+Wavelengths come
+from chief.reference_wavelength and every config's wavelengths, deduplicated;
+the d line is used when the input carries none. Type labels: the dispersion
+formula name for catalog glasses, "constant" for a fixed index, "model" for
+nd/vd-based glasses, "tabulated" for index tables, "-" for keys that do not
+resolve in the catalog (their nd/vd/n cells are empty; a warning is printed).
+
 Examples:
   rayweave list < lens.yaml
   rayweave list --config wide < lens.yaml
   rayweave list --curvature --format csv < lens.yaml
+  rayweave list surfaces glasses < lens.yaml
 `)
 	}
 }
