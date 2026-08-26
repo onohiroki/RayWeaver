@@ -29,6 +29,29 @@ type SurfaceListRow struct {
 	Diameter  float64  `json:"diameter" yaml:"diameter"`
 }
 
+// AsphereCoefRow is one row of the separate Asphere Coefficients table: the
+// conic constant and even-order polynomial coefficients (a4..a12,
+// coefficients[0..4]) of an aspheric surface. Nil pointers mean the term is
+// not present on that surface. Fixed fields keep the YAML/JSON key order a4 <
+// a6 < ... (a map would sort "a10"/"a12" ahead of "a4").
+type AsphereCoefRow struct {
+	ID    int      `json:"id" yaml:"id"`
+	Type  string   `json:"type" yaml:"type"`
+	Conic float64  `json:"conic" yaml:"conic"`
+	A4    *float64 `json:"a4,omitempty" yaml:"a4,omitempty"`
+	A6    *float64 `json:"a6,omitempty" yaml:"a6,omitempty"`
+	A8    *float64 `json:"a8,omitempty" yaml:"a8,omitempty"`
+	A10   *float64 `json:"a10,omitempty" yaml:"a10,omitempty"`
+	A12   *float64 `json:"a12,omitempty" yaml:"a12,omitempty"`
+}
+
+// surfacesListOutput is the structured (yaml/json) shape of `list surfaces`:
+// the surface table plus, only when aspheres exist, their coefficients.
+type surfacesListOutput struct {
+	Surfaces            []SurfaceListRow `json:"surfaces" yaml:"surfaces"`
+	AsphereCoefficients []AsphereCoefRow `json:"asphere_coefficients,omitempty" yaml:"asphere_coefficients,omitempty"`
+}
+
 // runList implements the `list` subcommand: a read-only, human-readable
 // listing of the input system's definition data (surfaces today; glasses,
 // decenter, reflect planned). It never traces rays and prints formatted
@@ -77,19 +100,31 @@ func runList(data []byte) {
 }
 
 // listSurfaces renders the surface table of one config in the given format.
-// Face 0 (the implicit object plane) is excluded.
+// Face 0 (the implicit object plane) is excluded. When the config contains
+// aspheric surfaces, an "Asphere Coefficients:" section follows the
+// "Surfaces:" section; with no aspheres only Surfaces: is printed.
 func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature bool, format string) {
 	rows := buildSurfaceRows(surfaces, gc, showCurvature)
+	aspheres := buildAsphereRows(surfaces)
+
 	switch format {
 	case "yaml":
-		outData, err := yaml.Marshal(rows)
+		out := surfacesListOutput{Surfaces: rows}
+		if len(aspheres) > 0 {
+			out.AsphereCoefficients = aspheres
+		}
+		outData, err := yaml.Marshal(out)
 		if err != nil {
 			errOut("Error marshaling list output: %v", err)
 			os.Exit(1)
 		}
 		os.Stdout.Write(outData)
 	case "json":
-		outData, err := json.MarshalIndent(rows, "", "  ")
+		out := surfacesListOutput{Surfaces: rows}
+		if len(aspheres) > 0 {
+			out.AsphereCoefficients = aspheres
+		}
+		outData, err := json.MarshalIndent(out, "", "  ")
 		if err != nil {
 			errOut("Error marshaling list output: %v", err)
 			os.Exit(1)
@@ -97,6 +132,7 @@ func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature boo
 		os.Stdout.Write(outData)
 		fmt.Println()
 	case "csv":
+		fmt.Println("Surfaces:")
 		header := []string{"id", "type", "radius", "thickness", "material", "diameter"}
 		if showCurvature {
 			header = []string{"id", "type", "curvature", "thickness", "material", "diameter"}
@@ -120,43 +156,162 @@ func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature boo
 			}
 			fmt.Println(strings.Join(quoteCSV(cells), ","))
 		}
+		if len(aspheres) > 0 {
+			fmt.Println()
+			fmt.Println("Asphere Coefficients:")
+			maxOrder := asphereMaxOrder(aspheres)
+			header := []string{"id", "type", "conic"}
+			for order := 4; order <= maxOrder; order += 2 {
+				header = append(header, fmt.Sprintf("a%d", order))
+			}
+			fmt.Println(strings.Join(quoteCSV(header), ","))
+			for _, r := range aspheres {
+				cells := []string{
+					strconv.Itoa(r.ID), r.Type,
+					strconv.FormatFloat(r.Conic, 'g', -1, 64),
+				}
+				for order := 4; order <= maxOrder; order += 2 {
+					cell := ""
+					if v := asphereCoef(&r, order); v != nil {
+						cell = strconv.FormatFloat(*v, 'g', -1, 64)
+					}
+					cells = append(cells, cell)
+				}
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
+		}
 	default:
+		fmt.Println("Surfaces:")
 		if len(rows) == 0 {
 			fmt.Println("(no surfaces)")
-			return
-		}
-		radHeader := "Radius[mm]"
-		if showCurvature {
-			radHeader = "Curvature[1/mm]"
-		}
-		cols := []tableColumn{
-			{header: "ID", right: true},
-			{header: "Type"},
-			{header: radHeader, right: true},
-			{header: "Thickness[mm]", right: true},
-			{header: "Material"},
-			{header: "Diameter[mm]", right: true},
-		}
-		for _, r := range rows {
-			radCell := "inf"
-			if showCurvature && r.Curvature != nil {
-				radCell = formatTableFloat(*r.Curvature)
-			} else if !showCurvature && r.Radius != nil {
-				radCell = formatTableFloat(*r.Radius)
+		} else {
+			radHeader := "Radius[mm]"
+			if showCurvature {
+				radHeader = "Curvature[1/mm]"
 			}
-			diaCell := "0"
-			if r.Diameter != 0 {
-				diaCell = formatTableFloat(r.Diameter)
+			cols := []tableColumn{
+				{header: "ID", right: true},
+				{header: "Type"},
+				{header: radHeader, right: true},
+				{header: "Thickness[mm]", right: true},
+				{header: "Material"},
+				{header: "Diameter[mm]", right: true},
 			}
-			cols[0].cells = append(cols[0].cells, strconv.Itoa(r.ID))
-			cols[1].cells = append(cols[1].cells, r.Type)
-			cols[2].cells = append(cols[2].cells, radCell)
-			cols[3].cells = append(cols[3].cells, formatTableFloat(r.Thickness))
-			cols[4].cells = append(cols[4].cells, r.Material)
-			cols[5].cells = append(cols[5].cells, diaCell)
+			for _, r := range rows {
+				radCell := "inf"
+				if showCurvature && r.Curvature != nil {
+					radCell = formatTableFloat(*r.Curvature)
+				} else if !showCurvature && r.Radius != nil {
+					radCell = formatTableFloat(*r.Radius)
+				}
+				diaCell := "0"
+				if r.Diameter != 0 {
+					diaCell = formatTableFloat(r.Diameter)
+				}
+				cols[0].cells = append(cols[0].cells, strconv.Itoa(r.ID))
+				cols[1].cells = append(cols[1].cells, r.Type)
+				cols[2].cells = append(cols[2].cells, radCell)
+				cols[3].cells = append(cols[3].cells, formatTableFloat(r.Thickness))
+				cols[4].cells = append(cols[4].cells, r.Material)
+				cols[5].cells = append(cols[5].cells, diaCell)
+			}
+			fmt.Print(renderTable(cols))
 		}
-		fmt.Print(renderTable(cols))
+		if len(aspheres) > 0 {
+			maxOrder := asphereMaxOrder(aspheres)
+			cols := []tableColumn{
+				{header: "ID", right: true},
+				{header: "Type"},
+				{header: "Conic", right: true},
+			}
+			for order := 4; order <= maxOrder; order += 2 {
+				cols = append(cols, tableColumn{header: fmt.Sprintf("A%d", order), right: true})
+			}
+			for _, r := range aspheres {
+				cols[0].cells = append(cols[0].cells, strconv.Itoa(r.ID))
+				cols[1].cells = append(cols[1].cells, r.Type)
+				cols[2].cells = append(cols[2].cells, formatTableFloat(r.Conic))
+				for i, order := 3, 4; order <= maxOrder; order, i = order+2, i+1 {
+					cell := "-"
+					if v := asphereCoef(&r, order); v != nil {
+						cell = fmt.Sprintf("%.4e", *v)
+					}
+					cols[i].cells = append(cols[i].cells, cell)
+				}
+			}
+			fmt.Println("\nAsphere Coefficients:")
+			fmt.Print(renderTable(cols))
+		}
 	}
+}
+
+// buildAsphereRows collects the aspheric surfaces (asphere_polynomial /
+// asphere_zernike) of one config into coefficient-table rows. coefficients[i]
+// holds the even-order term a(4+2i); absent trailing terms stay nil.
+func buildAsphereRows(surfaces []types.Surface) []AsphereCoefRow {
+	rows := make([]AsphereCoefRow, 0, 4)
+	for _, s := range surfaces {
+		if s.ID == 0 || (s.Type != types.AspherePolynomial && s.Type != types.AsphereZernike) {
+			continue
+		}
+		row := AsphereCoefRow{
+			ID:    s.ID,
+			Type:  string(s.Type),
+			Conic: s.Conic,
+		}
+		for i, c := range s.Coefficients {
+			if i < 0 || i >= 5 {
+				break
+			}
+			v := c
+			switch i {
+			case 0:
+				row.A4 = &v
+			case 1:
+				row.A6 = &v
+			case 2:
+				row.A8 = &v
+			case 3:
+				row.A10 = &v
+			case 4:
+				row.A12 = &v
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// asphereCoef returns the row's coefficient of the given even order (4..12),
+// or nil when that term is not set on the surface.
+func asphereCoef(r *AsphereCoefRow, order int) *float64 {
+	switch order {
+	case 4:
+		return r.A4
+	case 6:
+		return r.A6
+	case 8:
+		return r.A8
+	case 10:
+		return r.A10
+	case 12:
+		return r.A12
+	}
+	return nil
+}
+
+// asphereMaxOrder returns the highest even-order coefficient present across
+// all rows (minimum 4, so at least an A4 column exists).
+func asphereMaxOrder(rows []AsphereCoefRow) int {
+	maxOrder := 4
+	for i := range rows {
+		for _, order := range []int{4, 6, 8, 10, 12} {
+			if v := asphereCoef(&rows[i], order); v != nil && order > maxOrder {
+				maxOrder = order
+			}
+		}
+	}
+	return maxOrder
 }
 
 // buildSurfaceRows converts the selected config's surfaces into listing rows.

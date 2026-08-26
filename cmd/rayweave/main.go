@@ -1060,6 +1060,13 @@ surfaces columns: ID, Type, Radius[mm] (or Curvature[1/mm] with --curvature),
 Thickness[mm], Material, Diameter[mm]. A flat surface has no finite radius:
 it is shown as "inf" in tables and null/empty in yaml/json/csv.
 
+When the config contains aspheric surfaces (asphere_polynomial /
+asphere_zernike), an "Asphere Coefficients:" section follows the Surfaces:
+section with one row per asphere: ID, Type, Conic, and the even-order
+coefficients A4..A12 present on that surface. With no aspheres the section
+is omitted entirely; structured output carries it under
+asphere_coefficients only when non-empty.
+
 Material column: AIR, resolved catalog glass name (+ manufacturer when known),
 inline model glass as nd:vd, or the raw key when it does not resolve in the
 catalog.
