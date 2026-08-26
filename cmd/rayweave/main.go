@@ -163,6 +163,8 @@ func main() {
 		runWavefront(data)
 	case "query":
 		runQuery(data)
+	case "list":
+		runList(data)
 	default:
 		errOut("Error: unknown subcommand %q", subcommand)
 		errOut("Run 'rayweave --help' for usage.")
@@ -1031,10 +1033,41 @@ Subcommands:
   wavefront  Wavefront analysis (paraboloid, best-fit sphere, Fringe Zernike, best focus)
   import     Import system from ZEMAX ZMX / CODE V SEQ / OSLO LEN
   export     Export system to ZEMAX ZMX / CODE V SEQ / OSLO LEN
-  query      YAML/JSONL selector with in-memory edits
+	query      YAML/JSONL selector with in-memory edits
+	list       Read-only listing of system data (surfaces)
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
   for detailed options and YAML structure.
+`)
+	case "list":
+		fmt.Print(`Usage: rayweave list [--format table|yaml|json|csv] [--config ID]
+                   [--glass-dir DIR] [--curvature] [TARGET...] < input.yaml
+
+Read-only listing of an optical system's definition data. Unlike the pipeline
+subcommands, list never traces rays and prints formatted tables by default,
+not pipeline YAML.
+
+Targets (space-separated; default: surfaces):
+  surfaces   surface table of the selected config (object plane 0 excluded)
+
+Options:
+  --format table|yaml|json|csv   output format (default table)
+  --config ID                    select config by id (multi-config mode)
+  --glass-dir DIR                AGF glass catalog directory
+  --curvature                    show curvature instead of radius
+
+surfaces columns: ID, Type, Radius[mm] (or Curvature[1/mm] with --curvature),
+Thickness[mm], Material, Diameter[mm]. A flat surface has no finite radius:
+it is shown as "inf" in tables and null/empty in yaml/json/csv.
+
+Material column: AIR, resolved catalog glass name (+ manufacturer when known),
+inline model glass as nd:vd, or the raw key when it does not resolve in the
+catalog.
+
+Examples:
+  rayweave list < lens.yaml
+  rayweave list --config wide < lens.yaml
+  rayweave list --curvature --format csv < lens.yaml
 `)
 	}
 }

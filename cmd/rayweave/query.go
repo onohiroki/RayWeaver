@@ -456,18 +456,6 @@ func runQueryCSV(arg string, resolve func(string) (any, error), header, keepAll 
 	}
 }
 
-func quoteCSV(cells []string) []string {
-	out := make([]string, len(cells))
-	for i, c := range cells {
-		if strings.ContainsAny(c, ",\"\n") {
-			out[i] = "\"" + strings.ReplaceAll(c, "\"", "\"\"") + "\""
-		} else {
-			out[i] = c
-		}
-	}
-	return out
-}
-
 // ---- aggregates ---------------------------------------------------------------
 
 func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr, printfFmt string, nanEmpty bool) {

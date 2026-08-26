@@ -436,6 +436,21 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 	return terms
 }
 
+// quoteCSV escapes one CSV row: cells containing comma, quote or newline are
+// double-quoted with embedded quotes doubled (RFC 4180). Shared by the query
+// and list subcommands' --csv output.
+func quoteCSV(cells []string) []string {
+	out := make([]string, len(cells))
+	for i, c := range cells {
+		if strings.ContainsAny(c, ",\"\n") {
+			out[i] = "\"" + strings.ReplaceAll(c, "\"", "\"\"") + "\""
+		} else {
+			out[i] = c
+		}
+	}
+	return out
+}
+
 // applyDegenerate copies the optimization.degenerate penalties (spot/opd/
 // wavefront) onto an optimizer. Non-positive values keep the built-in defaults
 // (spot 0.1, opd 0.01, wavefront 0.001 mm).
