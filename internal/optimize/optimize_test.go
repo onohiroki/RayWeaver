@@ -590,14 +590,15 @@ func TestOptimizerApplyVariablesND(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	_, effectiveGC := opt.applyVariables([]float64{1.7})
+	configSurfaces, _ := opt.applyVariables([]float64{1.7})
 
-	g, ok := effectiveGC.Lookup("N-BK7")
-	if !ok {
-		t.Fatal("N-BK7 not found in effective catalog after applyVariables")
+	surfaces := configSurfaces["config1"]
+	m := surfaces[0].Material
+	if m.HasKey() {
+		t.Errorf("material key should be stripped when nd is a variable, got key=%q", m.Key)
 	}
-	if g.ND != 1.7 {
-		t.Errorf("N-BK7 ND = %v, want 1.7", g.ND)
+	if m.ND != 1.7 {
+		t.Errorf("ND = %v, want 1.7", m.ND)
 	}
 }
 
@@ -616,14 +617,15 @@ func TestOptimizerApplyVariablesVD(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	_, effectiveGC := opt.applyVariables([]float64{50.0})
+	configSurfaces, _ := opt.applyVariables([]float64{50.0})
 
-	g, ok := effectiveGC.Lookup("N-BK7")
-	if !ok {
-		t.Fatal("N-BK7 not found in effective catalog after applyVariables")
+	surfaces := configSurfaces["config1"]
+	m := surfaces[0].Material
+	if m.HasKey() {
+		t.Errorf("material key should be stripped when vd is a variable, got key=%q", m.Key)
 	}
-	if g.VD != 50.0 {
-		t.Errorf("N-BK7 VD = %v, want 50.0", g.VD)
+	if m.VD != 50.0 {
+		t.Errorf("VD = %v, want 50.0", m.VD)
 	}
 }
 

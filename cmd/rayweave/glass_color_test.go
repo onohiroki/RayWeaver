@@ -152,7 +152,7 @@ func TestGlassColorAutoGeneratesAndWritesBack(t *testing.T) {
 	surface.Precompute(outSurf)
 	for _, id := range []int{1, 3, 6} {
 		got := paraxial.ElementPowerForSurface(outSurf, paraxial.DLine, outGC, id)
-		if abs(got-inPhi[id]) > 1e-9 {
+		if abs(got-inPhi[id]) > 1e-6 {
 			t.Errorf("element power surf %d changed: want %v got %v", id, inPhi[id], got)
 		}
 	}

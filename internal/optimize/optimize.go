@@ -1078,6 +1078,16 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 			v.GlassName = key
 			if key != "" {
 				if g, ok := gc.Lookup(key); ok {
+					// Strip the key from the surface material: convert the
+					// keyed catalog reference to an inline model glass so
+					// applyVariables uses the direct nd/vd path and the
+					// output YAML carries inline model values.
+					for i := range cfg.surfaces {
+						if cfg.surfaces[i].ID == v.SurfaceID && cfg.surfaces[i].Material.HasKey() {
+							cfg.surfaces[i].Material = types.Material{ND: g.ND, VD: g.VD}
+							break
+						}
+					}
 					cp := *g
 					cp.Label = key
 					if cp.Type == types.GlassTypeCatalog {
