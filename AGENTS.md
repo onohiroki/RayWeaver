@@ -25,7 +25,7 @@ Tests: `go test ./...` (13 test files across all packages, no CI).
 
 ## Subcommands
 
-`chief` | `trace` | `paraxial` | `tmm` | `plot` | `vignette` | `optimize` | `escape` | `import` | `export` | `asphere` | `psf` | `wavefront`
+`chief` | `trace` | `paraxial` | `tmm` | `plot` | `vignette` | `optimize` | `escape` | `import` | `export` | `asphere` | `psf` | `wavefront` | `clean`
 
 Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, writes YAML to stdout. `--config ID` on chief/trace/paraxial/plot for multi-config selection.
 
@@ -42,6 +42,8 @@ The ranking's sensitivity term is measured, not analytic: for every candidate su
 `asphere --validate` (`--dls-iter N`, default 20) verifies each fitted top-K asphere with a short DLS: the embedded coefficients (the calibration's `calibrated_coefficients` when calibration ran, else the `sag_scale`-scaled set) are inserted onto the candidate surface (conic left at 0 to avoid a degenerate discriminant on weakly-curved surfaces) and the asphere coefficients `a4..a12` become the only optimisation variables over a **spot-RMS** merit (one term per field × wavelength) — the same geometric spot the `chief` `spot_stats.rms_r` reports, so the validation improvement stays coherent with the spot before/after comparison of the `asphere-demo.bash` script. The dynamic pupil is recomputed against the asphered system before the solve so the initial grid hits the new surface. Each fitted surface gains a `validation:` block (`before_merit`, `after_merit`, `improvement`, `iterations`, `status`, plus `coefficients`: the DLS-solved `a4..a12`). `--apply` (implies `--validate`) inserts the top-ranked validated asphere's DLS-solved coefficients onto its surface in every config (conic 0, `asphere_polynomial`) and outputs the modified system, so the pipeline `asphere --validate --apply | chief | trace | plot` shows the all-spherical vs aspherized lens. The intersection of an `asphere_polynomial`/`asphere_zernike` surface seeds its Newton iterate from the analytic base-sphere intersection (`IntersectAsphere` takes the radius) so off-axis rays whose root lies far along the ray converge; a zero-coefficient asphere traces identically to its sphere.
 
 `escape` (sub-subcommands: `escape` run, `escape extract --index N`) is the Ishiki-Ono style escape-function global optimiser: DLS cycles with merit-function bumps at discovered local minima. Outputs the best solution pipeline-compatible plus `escape_result.minima[]` (full surfaces per minimum, plus `features[].element_powers`: the thin-lens power of each lens element per config as a solution fingerprint).
+
+`clean` (`rayweave clean [--verbose]`) strips calculation results from a pipeline document, keeping only configuration settings. Removed fields: `chief_rays`, `results`, `paraxial_result`, `opt_results`, `escape_result`, `vignetting_result`, `asphere_candidate_result`, `psf_results`, `wavefront_result`. The `stop` section is preserved (it may be hand-entered as input). `metadata.tool` is overwritten with RayWeaver's own identity. `--verbose` prints removed fields as JSONL to stderr.
 ## Key conventions
 
 ### CLI options vs input YAML (three principles)
