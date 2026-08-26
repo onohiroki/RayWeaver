@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/dls"
@@ -314,10 +315,15 @@ func importedReferenceWavelength(result *importer.ParseResult) float64 {
 			return value
 		}
 	}
+	pos := make([]float64, 0, len(result.Wavelengths))
 	for _, w := range result.Wavelengths {
 		if w.Value > 0 {
-			return w.Value
+			pos = append(pos, w.Value)
 		}
 	}
-	return types.DefaultWavelength
+	if len(pos) == 0 {
+		return types.DefaultWavelength
+	}
+	sort.Float64s(pos)
+	return pos[len(pos)/2]
 }
