@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -46,10 +47,24 @@ type AsphereCoefRow struct {
 }
 
 // surfacesListOutput is the structured (yaml/json) shape of `list surfaces`:
-// the surface table plus, only when aspheres exist, their coefficients.
+// the surface table plus, only when present, asphere coefficients and
+// cross-config thickness differences.
 type surfacesListOutput struct {
-	Surfaces            []SurfaceListRow `json:"surfaces" yaml:"surfaces"`
-	AsphereCoefficients []AsphereCoefRow `json:"asphere_coefficients,omitempty" yaml:"asphere_coefficients,omitempty"`
+	Surfaces            []SurfaceListRow   `json:"surfaces" yaml:"surfaces"`
+	AsphereCoefficients []AsphereCoefRow   `json:"asphere_coefficients,omitempty" yaml:"asphere_coefficients,omitempty"`
+	ThicknessDiffs      []ThicknessDiffRow `json:"thickness_differences,omitempty" yaml:"thickness_differences,omitempty"`
+}
+
+// ThicknessDiffRow is one (config, surface) record of the cross-config
+// thickness comparison: a surface ID whose thickness differs between configs
+// together with its value in one config. Structured output stores these
+// self-describing records; table/csv render them as a matrix (rows = configs,
+// columns = differing surfaces).
+type ThicknessDiffRow struct {
+	ConfigIndex int     `json:"config_index" yaml:"config_index"`
+	ConfigName  string  `json:"config_name" yaml:"config_name"`
+	SurfaceID   int     `json:"surface_id" yaml:"surface_id"`
+	Thickness   float64 `json:"thickness" yaml:"thickness"`
 }
 
 // runList implements the `list` subcommand: a read-only, human-readable
@@ -91,7 +106,7 @@ func runList(data []byte) {
 		printed[target] = true
 		switch target {
 		case "surfaces":
-			listSurfaces(surfaces, gc, *showCurvature, *format)
+			listSurfaces(surfaces, gc, *showCurvature, *format, input.Configs, *configFlag != "")
 		default:
 			errOut("Error: unknown list target %q (supported: surfaces)", target)
 			os.Exit(1)
@@ -102,14 +117,21 @@ func runList(data []byte) {
 // listSurfaces renders the surface table of one config in the given format.
 // Face 0 (the implicit object plane) is excluded. When the config contains
 // aspheric surfaces, an "Asphere Coefficients:" section follows the
-// "Surfaces:" section; with no aspheres only Surfaces: is printed.
-func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature bool, format string) {
+// "Surfaces:" section; with no aspheres only Surfaces: is printed. When no
+// --config was given and multiple configs carry differing thickness on common
+// surface IDs, a final "Thickness Differences:" matrix (rows = configs,
+// columns = differing surfaces) is appended.
+func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature bool, format string, configs []types.Config, configSelected bool) {
 	rows := buildSurfaceRows(surfaces, gc, showCurvature)
 	aspheres := buildAsphereRows(surfaces)
+	var thicknessDiffs []ThicknessDiffRow
+	if !configSelected {
+		thicknessDiffs = buildThicknessDiffRows(configs)
+	}
 
 	switch format {
 	case "yaml":
-		out := surfacesListOutput{Surfaces: rows}
+		out := surfacesListOutput{Surfaces: rows, ThicknessDiffs: thicknessDiffs}
 		if len(aspheres) > 0 {
 			out.AsphereCoefficients = aspheres
 		}
@@ -120,7 +142,7 @@ func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature boo
 		}
 		os.Stdout.Write(outData)
 	case "json":
-		out := surfacesListOutput{Surfaces: rows}
+		out := surfacesListOutput{Surfaces: rows, ThicknessDiffs: thicknessDiffs}
 		if len(aspheres) > 0 {
 			out.AsphereCoefficients = aspheres
 		}
@@ -174,6 +196,27 @@ func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature boo
 					cell := ""
 					if v := asphereCoef(&r, order); v != nil {
 						cell = strconv.FormatFloat(*v, 'g', -1, 64)
+					}
+					cells = append(cells, cell)
+				}
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
+		}
+		if len(thicknessDiffs) > 0 {
+			ids := thicknessDiffSurfaceIDs(thicknessDiffs)
+			header := []string{"config", "name"}
+			for _, id := range ids {
+				header = append(header, fmt.Sprintf("surface_%d", id))
+			}
+			fmt.Println()
+			fmt.Println("Thickness Differences:")
+			fmt.Println(strings.Join(quoteCSV(header), ","))
+			for _, ci := range thicknessDiffConfigIndexes(thicknessDiffs) {
+				cells := []string{strconv.Itoa(ci), thicknessDiffConfigName(thicknessDiffs, ci)}
+				for _, id := range ids {
+					cell := ""
+					if v, ok := thicknessDiffValue(thicknessDiffs, ci, id); ok {
+						cell = strconv.FormatFloat(v, 'g', -1, 64)
 					}
 					cells = append(cells, cell)
 				}
@@ -240,6 +283,29 @@ func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature boo
 				}
 			}
 			fmt.Println("\nAsphere Coefficients:")
+			fmt.Print(renderTable(cols))
+		}
+		if len(thicknessDiffs) > 0 {
+			ids := thicknessDiffSurfaceIDs(thicknessDiffs)
+			cols := []tableColumn{
+				{header: "Config", right: true},
+				{header: "Name"},
+			}
+			for _, id := range ids {
+				cols = append(cols, tableColumn{header: fmt.Sprintf("Surface %d", id), right: true})
+			}
+			for _, ci := range thicknessDiffConfigIndexes(thicknessDiffs) {
+				cols[0].cells = append(cols[0].cells, strconv.Itoa(ci))
+				cols[1].cells = append(cols[1].cells, thicknessDiffConfigName(thicknessDiffs, ci))
+				for i, id := range ids {
+					cell := ""
+					if v, ok := thicknessDiffValue(thicknessDiffs, ci, id); ok {
+						cell = formatTableFloat(v)
+					}
+					cols[2+i].cells = append(cols[2+i].cells, cell)
+				}
+			}
+			fmt.Println("\nThickness Differences:")
 			fmt.Print(renderTable(cols))
 		}
 	}
@@ -440,4 +506,127 @@ func padCell(s string, w int, right bool) string {
 		return spaces + s
 	}
 	return s + spaces
+}
+
+// thicknessTol is the thickness equality tolerance for the cross-config
+// comparison; differences within it count as identical (float noise).
+const thicknessTol = 1e-9
+
+// buildThicknessDiffRows compares the surface thickness of every config and
+// returns one record per (config, differing surface). Only surface IDs that
+// appear in all configs are compared; a surface qualifies when its thickness
+// differs between any two configs beyond thicknessTol. Rows are ordered by
+// surface (first-seen order), then config index. Nil when fewer than two
+// configs or no differences exist.
+func buildThicknessDiffRows(configs []types.Config) []ThicknessDiffRow {
+	if len(configs) < 2 {
+		return nil
+	}
+	thickness := map[int][]float64{}
+	present := map[int][]bool{}
+	var order []int
+	for ci := range configs {
+		for _, s := range configs[ci].Surfaces {
+			if s.ID == 0 {
+				continue
+			}
+			if _, seen := thickness[s.ID]; !seen {
+				order = append(order, s.ID)
+				thickness[s.ID] = make([]float64, len(configs))
+				present[s.ID] = make([]bool, len(configs))
+			}
+			if !present[s.ID][ci] {
+				thickness[s.ID][ci] = s.Thickness
+				present[s.ID][ci] = true
+			}
+		}
+	}
+	var rows []ThicknessDiffRow
+	for _, id := range order {
+		vals := thickness[id]
+		pr := present[id]
+		differs := false
+		for i := range vals {
+			if !pr[i] {
+				differs = false
+				break
+			}
+			if i > 0 && math.Abs(vals[i]-vals[0]) > thicknessTol {
+				differs = true
+			}
+		}
+		if !differs {
+			continue
+		}
+		for ci := range configs {
+			rows = append(rows, ThicknessDiffRow{
+				ConfigIndex: ci,
+				ConfigName:  configDisplayName(configs[ci]),
+				SurfaceID:   id,
+				Thickness:   vals[ci],
+			})
+		}
+	}
+	return rows
+}
+
+// configDisplayName picks a config's display name: name, else id, else "-".
+func configDisplayName(c types.Config) string {
+	if c.Name != "" {
+		return c.Name
+	}
+	if c.ID != "" {
+		return c.ID
+	}
+	return "-"
+}
+
+// thicknessDiffSurfaceIDs returns the distinct differing surface IDs in
+// first-seen row order.
+func thicknessDiffSurfaceIDs(rows []ThicknessDiffRow) []int {
+	seen := map[int]bool{}
+	var ids []int
+	for _, r := range rows {
+		if !seen[r.SurfaceID] {
+			seen[r.SurfaceID] = true
+			ids = append(ids, r.SurfaceID)
+		}
+	}
+	return ids
+}
+
+// thicknessDiffConfigIndexes returns the distinct config indexes in ascending
+// order (rows are generated per surface in config order, so first-seen order
+// is already sorted).
+func thicknessDiffConfigIndexes(rows []ThicknessDiffRow) []int {
+	seen := map[int]bool{}
+	var idxs []int
+	for _, r := range rows {
+		if !seen[r.ConfigIndex] {
+			seen[r.ConfigIndex] = true
+			idxs = append(idxs, r.ConfigIndex)
+		}
+	}
+	sort.Ints(idxs)
+	return idxs
+}
+
+// thicknessDiffConfigName returns the display name recorded for one config.
+func thicknessDiffConfigName(rows []ThicknessDiffRow, configIndex int) string {
+	for _, r := range rows {
+		if r.ConfigIndex == configIndex {
+			return r.ConfigName
+		}
+	}
+	return "-"
+}
+
+// thicknessDiffValue looks up one (config, surface) matrix cell.
+func thicknessDiffValue(rows []ThicknessDiffRow, configIndex, surfaceID int) (float64, bool) {
+	for _, r := range rows {
+		if r.ConfigIndex == configIndex && r.SurfaceID == surfaceID {
+			return r.Thickness, true
+		}
+	}
+	return 0, false
 }

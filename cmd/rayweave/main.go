@@ -1067,6 +1067,13 @@ coefficients A4..A12 present on that surface. With no aspheres the section
 is omitted entirely; structured output carries it under
 asphere_coefficients only when non-empty.
 
+Without --config and with multiple configs whose common surface IDs carry
+different thickness across configs, a final "Thickness Differences:"
+section compares them: one row per config (Config index + Name), one column
+per differing surface headed Surface <ID>. The section is skipped when
+--config is given or no differences exist; structured output carries it
+under thickness_differences only when non-empty.
+
 Material column: AIR, resolved catalog glass name (+ manufacturer when known),
 inline model glass as nd:vd, or the raw key when it does not resolve in the
 catalog.
