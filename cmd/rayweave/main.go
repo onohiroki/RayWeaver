@@ -1143,6 +1143,12 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 	}
 
 	for _, g := range input.GlassCatalog.Entries {
+		// Catalog-type entries without a dispersion formula are metadata
+		// overrides (name, label, manufacturer); do not register them in
+		// the catalog so that the full AGF data is used instead.
+		if g.Type == types.GlassTypeCatalog && g.DispersionFormula == "" && len(g.Coefficients) == 0 {
+			continue
+		}
 		gc.Add(g)
 	}
 

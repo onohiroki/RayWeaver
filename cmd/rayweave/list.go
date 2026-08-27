@@ -875,25 +875,36 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 			return
 		}
 		seenKeys[dedupKey] = true
-		row := GlassListRow{
-			Name:         glassDisplayName(g),
-			Manufacturer: g.Manufacturer,
-			Type:         glassTypeString(g),
+
+		// For catalog glasses, resolve through the catalog to pick up the
+		// full AGF data (dispersion formula, coefficients) when the YAML
+		// entry is incomplete (e.g. key-only override).
+		resolved := g
+		if g.Type == types.GlassTypeCatalog || (g.Type == "" && g.Key != "") {
+			if lookup, ok := gc.Lookup(types.ResolveGlassKey(*g)); ok {
+				resolved = lookup
+			}
 		}
-		if nd, vd, ok := glass.NDVD(g); ok {
+
+		row := GlassListRow{
+			Name:         glassDisplayName(resolved),
+			Manufacturer: resolved.Manufacturer,
+			Type:         glassTypeString(resolved),
+		}
+		if nd, vd, ok := glass.NDVD(resolved); ok {
 			row.ND = nd
 			row.VD = vd
 		}
 		var mat types.Material
-		if g.Type == types.GlassTypeModel {
-			mat = types.Material{ND: g.ND, VD: g.VD}
+		if resolved.Type == types.GlassTypeModel {
+			mat = types.Material{ND: resolved.ND, VD: resolved.VD}
 		} else {
-			mat = types.Material{Key: types.ResolveGlassKey(*g)}
+			mat = types.Material{Key: types.ResolveGlassKey(*resolved)}
 		}
 		for _, wl := range wavelengths {
 			idx := GlassIndex{WavelengthNM: wl * 1e6}
 			if n, err := gc.RefractiveIndex(mat, wl); err != nil {
-				glass.Warnf("list[glasses]: cannot compute model glass at %.2fnm: %v", wl*1e6, err)
+				glass.Warnf("list[glasses]: cannot compute %q at %.2fnm: %v", dedupKey, wl*1e6, err)
 			} else {
 				idx.N = n
 			}
