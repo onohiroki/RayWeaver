@@ -860,7 +860,7 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 	var rows []GlassListRow
 
 	modelDedupKey := func(g *types.Glass) string {
-		return fmt.Sprintf("model:%.5f:%.2f", g.ND, g.VD)
+		return "model:" + strconv.FormatFloat(g.ND, 'g', -1, 64) + ":" + strconv.FormatFloat(g.VD, 'g', -1, 64)
 	}
 
 	appendResolved := func(g *types.Glass) {
@@ -902,7 +902,7 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 			continue
 		}
 		if s.Material.HasModel() && !s.Material.HasKey() {
-			dk := fmt.Sprintf("model:%.5f:%.2f", s.Material.ND, s.Material.VD)
+			dk := "model:" + strconv.FormatFloat(s.Material.ND, 'g', -1, 64) + ":" + strconv.FormatFloat(s.Material.VD, 'g', -1, 64)
 			if !seenKeys[dk] {
 				seenKeys[dk] = true
 				row := GlassListRow{
