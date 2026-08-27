@@ -859,12 +859,22 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 	unresolvedSeen := map[string]bool{}
 	var rows []GlassListRow
 
+	modelDedupKey := func(g *types.Glass) string {
+		return fmt.Sprintf("model:%.5f:%.2f", g.ND, g.VD)
+	}
+
 	appendResolved := func(g *types.Glass) {
-		key := types.ResolveGlassKey(*g)
-		if key == "" || seenKeys[key] {
+		var dedupKey string
+		switch {
+		case g.Type == types.GlassTypeModel:
+			dedupKey = modelDedupKey(g)
+		default:
+			dedupKey = types.ResolveGlassKey(*g)
+		}
+		if dedupKey == "" || seenKeys[dedupKey] {
 			return
 		}
-		seenKeys[key] = true
+		seenKeys[dedupKey] = true
 		row := GlassListRow{
 			Name:         glassDisplayName(g),
 			Manufacturer: g.Manufacturer,
@@ -874,11 +884,11 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 			row.ND = nd
 			row.VD = vd
 		}
-		mat := types.Material{Key: key}
+		mat := types.Material{Key: types.ResolveGlassKey(*g)}
 		for _, wl := range wavelengths {
 			idx := GlassIndex{WavelengthNM: wl * 1e6}
 			if n, err := gc.RefractiveIndex(mat, wl); err != nil {
-				glass.Warnf("list[glasses]: cannot compute %q at %.2fnm: %v", key, wl*1e6, err)
+				glass.Warnf("list[glasses]: cannot compute %q at %.2fnm: %v", mat.Key, wl*1e6, err)
 			} else {
 				idx.N = n
 			}
@@ -888,7 +898,34 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 	}
 
 	for _, s := range surfaces {
-		if s.ID == 0 || !s.Material.HasKey() {
+		if s.ID == 0 {
+			continue
+		}
+		if s.Material.HasModel() && !s.Material.HasKey() {
+			dk := fmt.Sprintf("model:%.5f:%.2f", s.Material.ND, s.Material.VD)
+			if !seenKeys[dk] {
+				seenKeys[dk] = true
+				row := GlassListRow{
+					Name: fmt.Sprintf("%.5f:%.2f", s.Material.ND, s.Material.VD),
+					Type: "model",
+					ND:   s.Material.ND,
+					VD:   s.Material.VD,
+				}
+				mat := types.Material{ND: s.Material.ND, VD: s.Material.VD}
+				for _, wl := range wavelengths {
+					idx := GlassIndex{WavelengthNM: wl * 1e6}
+					if n, err := gc.RefractiveIndex(mat, wl); err != nil {
+						glass.Warnf("list[glasses]: cannot compute model glass at %.2fnm: %v", wl*1e6, err)
+					} else {
+						idx.N = n
+					}
+					row.Indices = append(row.Indices, idx)
+				}
+				rows = append(rows, row)
+			}
+			continue
+		}
+		if !s.Material.HasKey() {
 			continue
 		}
 		g, ok := gc.Lookup(s.Material.Key)

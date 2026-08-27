@@ -1228,13 +1228,19 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 }
 
 func containsGlass(entries []types.Glass, g types.Glass) bool {
-	key := types.ResolveGlassKey(g)
 	for _, e := range entries {
-		if types.ResolveGlassKey(e) == key {
+		if glassEqual(g, e) {
 			return true
 		}
 	}
 	return false
+}
+
+func glassEqual(a, b types.Glass) bool {
+	if a.Type == types.GlassTypeModel && b.Type == types.GlassTypeModel {
+		return a.ND == b.ND && a.VD == b.VD
+	}
+	return types.ResolveGlassKey(a) == types.ResolveGlassKey(b)
 }
 
 // referencedGlassKeys returns the set of glass catalog keys referenced by any
