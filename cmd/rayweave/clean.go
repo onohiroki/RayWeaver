@@ -58,12 +58,7 @@ func runClean(data []byte) {
 		output.WavefrontResults = nil
 	}
 
-	if output.Metadata == nil {
-		output.Metadata = newMetadata()
-	}
-	output.Metadata.Tool.Name = types.RayweaverTool
-	output.Metadata.Tool.URL = types.RayweaverURL
-	output.Metadata.Tool.SchemaVersion = types.SchemaVersion
+	withOutputMetadata(&output.Input, "clean", subcmdArgs())
 
 	if *verbose {
 		for _, r := range removed {
