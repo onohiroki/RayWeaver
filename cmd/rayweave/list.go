@@ -70,7 +70,7 @@ type ThicknessDiffRow struct {
 // GlassIndex is one wavelength's refractive index of a glass.
 type GlassIndex struct {
 	WavelengthNM float64 `json:"wavelength_nm" yaml:"wavelength_nm"`
-	N            float64 `json:"n" yaml:"n"`
+	Index        float64 `json:"index" yaml:"index"`
 }
 
 // GlassListRow is one row of the `list glasses` table. Type is the dispersion
@@ -739,8 +739,8 @@ func listGlasses(surfaces []types.Surface, input types.Input, gc *glass.Catalog,
 			cells = append(cells, ndCell, vdCell)
 			for k := range wavelengths {
 				cell := ""
-				if k < len(r.Indices) && r.Indices[k].N > 0 {
-					cell = strconv.FormatFloat(r.Indices[k].N, 'g', -1, 64)
+				if k < len(r.Indices) && r.Indices[k].Index > 0 {
+					cell = strconv.FormatFloat(r.Indices[k].Index, 'g', -1, 64)
 				}
 				cells = append(cells, cell)
 			}
@@ -795,8 +795,8 @@ func listGlasses(surfaces []types.Surface, input types.Input, gc *glass.Catalog,
 			cols[i+2].cells = append(cols[i+2].cells, vdCell)
 			for k := range wavelengths {
 				nCell := "-"
-				if k < len(r.Indices) && r.Indices[k].N > 0 {
-					nCell = formatTableFloat(r.Indices[k].N)
+				if k < len(r.Indices) && r.Indices[k].Index > 0 {
+					nCell = formatTableFloat(r.Indices[k].Index)
 				}
 				cols[i+3+k].cells = append(cols[i+3+k].cells, nCell)
 			}
@@ -929,7 +929,7 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 			if err != nil {
 				glass.Warnf("list[glasses]: cannot compute %q at %.2fnm: %v", dedupKey, wl*1e6, err)
 			} else {
-				idx.N = n
+				idx.Index = n
 			}
 			row.Indices = append(row.Indices, idx)
 		}
@@ -956,7 +956,7 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 					if n, err := gc.RefractiveIndex(mat, wl); err != nil {
 						glass.Warnf("list[glasses]: cannot compute model glass at %.2fnm: %v", wl*1e6, err)
 					} else {
-						idx.N = n
+						idx.Index = n
 					}
 					row.Indices = append(row.Indices, idx)
 				}
