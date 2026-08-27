@@ -884,11 +884,16 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 			row.ND = nd
 			row.VD = vd
 		}
-		mat := types.Material{Key: types.ResolveGlassKey(*g)}
+		var mat types.Material
+		if g.Type == types.GlassTypeModel {
+			mat = types.Material{ND: g.ND, VD: g.VD}
+		} else {
+			mat = types.Material{Key: types.ResolveGlassKey(*g)}
+		}
 		for _, wl := range wavelengths {
 			idx := GlassIndex{WavelengthNM: wl * 1e6}
 			if n, err := gc.RefractiveIndex(mat, wl); err != nil {
-				glass.Warnf("list[glasses]: cannot compute %q at %.2fnm: %v", mat.Key, wl*1e6, err)
+				glass.Warnf("list[glasses]: cannot compute model glass at %.2fnm: %v", wl*1e6, err)
 			} else {
 				idx.N = n
 			}

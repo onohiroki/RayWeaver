@@ -186,7 +186,7 @@ func (c *Catalog) RefractiveIndex(mat types.Material, wavelength float64) (float
 
 	// Self-contained model glass: nd/vd live directly on the material.
 	if mat.HasModel() {
-		key := "model|" + mat.String() + "|" + strconv.FormatFloat(wavelength, 'g', -1, 64)
+		key := "model|" + strconv.FormatFloat(mat.ND, 'g', -1, 64) + ":" + strconv.FormatFloat(mat.VD, 'g', -1, 64) + "|" + strconv.FormatFloat(wavelength, 'g', -1, 64)
 		if v, ok := c.indexCache.Load(key); ok {
 			return v.(float64), nil
 		}
