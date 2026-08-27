@@ -9,9 +9,6 @@ metadata:
     coefficients (asphere variables) in addition to curvatures. Input of
     asphere-optimize-demo.bash, which compares a spherical-only optimisation
     against one that also varies the asphere.
-glass_catalog:
-  entries:
-    - {type: model, name: N-BK7, nd: 1.5168, vd: 64.17}
 
 chief:
   stop_surface: 1
@@ -47,7 +44,7 @@ configs:
     wavelengths:
       - {id: 0, value: 0.0005876, weight: 1.0}
     surfaces:
-      - {id: 1, type: asphere_polynomial, curvature: 0.02, conic: 0.0, coefficients: [0.0, 0.0], thickness: 6.0, material: {key: N-BK7}, diameter: 12.5}
+      - {id: 1, type: asphere_polynomial, curvature: 0.02, conic: 0.0, coefficients: [0.0, 0.0], thickness: 6.0, material: {type: model, nd: 1.5168, vd: 64.17}, diameter: 12.5}
       - {id: 2, type: sphere, curvature: -0.04, thickness: 45.0, material: AIR, diameter: 12.5}
       - {id: 3, type: sphere, curvature: 0.0, thickness: 0.0, material: AIR, diameter: 44.0}
     merit:

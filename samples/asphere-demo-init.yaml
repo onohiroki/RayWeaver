@@ -13,12 +13,10 @@ glass_catalog:
   entries:
     - type: model
       key: 1.63854:55.42
-      name: SK18
       nd: 1.63854
       vd: 55.42
     - type: model
       key: 1.64831:33.84
-      name: SF12
       nd: 1.64831
       vd: 33.84
 optimization:

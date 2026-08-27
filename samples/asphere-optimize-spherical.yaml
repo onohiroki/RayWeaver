@@ -1,7 +1,7 @@
 glass_catalog:
   entries:
   - type: model
-    name: N-BK7
+    # name: N-BK7
     nd: 1.5168
     vd: 64.17
 chief:
@@ -65,7 +65,10 @@ configs:
     - 0.0
     - 0.0
     thickness: 6.0
-    material: {key: N-BK7}
+    material:
+      type: model
+      nd: 1.5168
+      vd: 64.17
     diameter: 12.5
   - id: 2
     type: sphere

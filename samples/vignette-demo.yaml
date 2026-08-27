@@ -46,10 +46,10 @@ metadata:
     pupil). The `rays` section carries hand-written marginal rays (12.5 mm
     bundles) so the initial diagram draws every field at the same width. Input
     of vignette-demo.bash.
-glass_catalog:
-    entries:
-        - {type: model, name: SK18, nd: 1.63854, vd: 55.42}
-        - {type: model, name: SF12, nd: 1.64831, vd: 33.84}
+# glass_catalog:
+#     entries:
+#         - {type: model, name: SK18, nd: 1.63854, vd: 55.42}
+#         - {type: model, name: SF12, nd: 1.64831, vd: 33.84}
 
 chief:
     fields:
