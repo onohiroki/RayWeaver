@@ -864,18 +864,6 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 	}
 
 	appendResolved := func(g *types.Glass) {
-		var dedupKey string
-		switch {
-		case g.Type == types.GlassTypeModel:
-			dedupKey = modelDedupKey(g)
-		default:
-			dedupKey = types.ResolveGlassKey(*g)
-		}
-		if dedupKey == "" || seenKeys[dedupKey] {
-			return
-		}
-		seenKeys[dedupKey] = true
-
 		// For catalog glasses, resolve through the catalog to pick up the
 		// full AGF data (dispersion formula, coefficients) when the YAML
 		// entry is incomplete (e.g. key-only override).
@@ -886,6 +874,36 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 			}
 		}
 
+		// Dedup key: same resolved display name, manufacturer,
+		// type and nd/vd means the same glass — show once.
+		// The exception is a catalog entry that resolves to a
+		// different type (e.g. a catalog override resolving to
+		// a tabulated glass): these are distinct rows.
+		var dedupKey string
+		switch {
+		case resolved.Type == types.GlassTypeModel:
+			dedupKey = modelDedupKey(resolved)
+		default:
+			nd, vd, _ := glass.NDVD(resolved)
+			dedupKey = strings.Join([]string{
+				glassDisplayName(resolved),
+				resolved.Manufacturer,
+				glassTypeString(resolved),
+				strconv.FormatFloat(nd, 'g', -1, 64),
+				strconv.FormatFloat(vd, 'g', -1, 64),
+			}, "|")
+			// A catalog entry resolving to a different type
+			// (e.g. a catalog override for a glass that exists
+			// only as tabulated in the catalog) is a distinct row.
+			if g.Type == types.GlassTypeCatalog && resolved.Type != g.Type {
+				dedupKey += "|" + string(g.Type)
+			}
+		}
+		if dedupKey == "" || seenKeys[dedupKey] {
+			return
+		}
+		seenKeys[dedupKey] = true
+
 		row := GlassListRow{
 			Name:         glassDisplayName(resolved),
 			Manufacturer: resolved.Manufacturer,
@@ -895,15 +913,20 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 			row.ND = nd
 			row.VD = vd
 		}
-		var mat types.Material
-		if resolved.Type == types.GlassTypeModel {
-			mat = types.Material{ND: resolved.ND, VD: resolved.VD}
-		} else {
-			mat = types.Material{Key: types.ResolveGlassKey(*resolved)}
-		}
 		for _, wl := range wavelengths {
 			idx := GlassIndex{WavelengthNM: wl * 1e6}
-			if n, err := gc.RefractiveIndex(mat, wl); err != nil {
+			var n float64
+			var err error
+			switch {
+			case resolved.Type == types.GlassTypeModel:
+				n, err = glass.CalcRefractiveIndex(resolved, wl)
+			case resolved.Type == types.GlassTypeTabulated && len(resolved.RefractiveIndices) > 0:
+				n, err = glass.CalcRefractiveIndex(resolved, wl)
+			default:
+				mat := types.Material{Key: types.ResolveGlassKey(*resolved)}
+				n, err = gc.RefractiveIndex(mat, wl)
+			}
+			if err != nil {
 				glass.Warnf("list[glasses]: cannot compute %q at %.2fnm: %v", dedupKey, wl*1e6, err)
 			} else {
 				idx.N = n

@@ -1184,7 +1184,12 @@ func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coat
 			ordered := orderAGFGlassesByManufacturer(agfGlasses, mfrOrder)
 			for _, g := range ordered {
 				key := types.ResolveGlassKey(g)
-				if gc.Has(key) {
+				// AGF catalog-type glasses always enter the catalog,
+				// overwriting YAML tabulated entries with the same key
+				// so that ray-trace commands get the full formula data.
+				// The YAML tabulated entry stays in GlassCatalog.Entries
+				// for display by 'list glasses'.
+				if existing, ok := gc.Lookup(key); ok && existing.Type == g.Type {
 					continue
 				}
 				gc.Add(g)
