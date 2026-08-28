@@ -71,22 +71,32 @@ type RaySummaryRow struct {
 }
 
 // RayDetailRow is one (ray, surface) record of the per-surface detail table.
+// IntensityS/IntensityP are the per-surface intensity transmittance (matching
+// SurfaceResult semantics); IntensityRs/IntensityRp are the per-surface power
+// reflection (only when --details populated them); Jones is the Jones vector.
+// TcumS/TcumP are the cumulative transmittance from the entrance (intensity
+// 1 at the object plane).
 type RayDetailRow struct {
-	RayID            string   `json:"ray_id" yaml:"ray_id"`
-	SurfaceID        int      `json:"surface_id" yaml:"surface_id"`
-	Position         [3]float64 `json:"position" yaml:"position"`
-	Direction        [3]float64 `json:"direction" yaml:"direction"`
-	Interaction      string   `json:"interaction" yaml:"interaction"`
-	OPL              float64  `json:"opl" yaml:"opl"`
-	IntensityS       float64  `json:"intensity_s" yaml:"intensity_s"`
-	IntensityP       float64  `json:"intensity_p" yaml:"intensity_p"`
-	AngleOfIncidence *float64 `json:"angle_of_incidence,omitempty" yaml:"angle_of_incidence,omitempty"`
-	N1               *float64 `json:"n1,omitempty" yaml:"n1,omitempty"`
-	N2               *float64 `json:"n2,omitempty" yaml:"n2,omitempty"`
-	Rs               *float64 `json:"rs,omitempty" yaml:"rs,omitempty"`
-	Rp               *float64 `json:"rp,omitempty" yaml:"rp,omitempty"`
-	Ts               *float64 `json:"ts,omitempty" yaml:"ts,omitempty"`
-	Tp               *float64 `json:"tp,omitempty" yaml:"tp,omitempty"`
+	RayID            string        `json:"ray_id" yaml:"ray_id"`
+	SurfaceID        int           `json:"surface_id" yaml:"surface_id"`
+	Position         [3]float64    `json:"position" yaml:"position"`
+	Direction        [3]float64    `json:"direction" yaml:"direction"`
+	Interaction      string        `json:"interaction" yaml:"interaction"`
+	OPL              float64       `json:"opl" yaml:"opl"`
+	IntensityS       float64       `json:"intensity_s" yaml:"intensity_s"`
+	IntensityP       float64       `json:"intensity_p" yaml:"intensity_p"`
+	IntensityRs      *float64      `json:"intensity_rs,omitempty" yaml:"intensity_rs,omitempty"`
+	IntensityRp      *float64      `json:"intensity_rp,omitempty" yaml:"intensity_rp,omitempty"`
+	Jones            types.JonesVector `json:"jones" yaml:"jones"`
+	TcumS            float64       `json:"tcum_s" yaml:"tcum_s"`
+	TcumP            float64       `json:"tcum_p" yaml:"tcum_p"`
+	AngleOfIncidence *float64      `json:"angle_of_incidence,omitempty" yaml:"angle_of_incidence,omitempty"`
+	N1               *float64      `json:"n1,omitempty" yaml:"n1,omitempty"`
+	N2               *float64      `json:"n2,omitempty" yaml:"n2,omitempty"`
+	Rs               *float64      `json:"rs,omitempty" yaml:"rs,omitempty"`
+	Rp               *float64      `json:"rp,omitempty" yaml:"rp,omitempty"`
+	Ts               *float64      `json:"ts,omitempty" yaml:"ts,omitempty"`
+	Tp               *float64      `json:"tp,omitempty" yaml:"tp,omitempty"`
 }
 
 // raysListOutput is the structured (yaml/json) shape of `list rays`.
@@ -1313,7 +1323,7 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 		if len(details) > 0 {
 			fmt.Println()
 			fmt.Println("Ray Detail:")
-			fmt.Println("ray_id,surface_id,position_x,position_y,position_z,direction_x,direction_y,direction_z,interaction,opl,intensity_s,intensity_p,angle_of_incidence,n1,n2,rs,rp,ts,tp")
+			fmt.Println("ray_id,surface_id,position_x,position_y,position_z,direction_x,direction_y,direction_z,interaction,opl,intensity_s,intensity_p,intensity_rs,intensity_rp,jones_re_ex,jones_im_ex,jones_re_ey,jones_im_ey,tcum_s,tcum_p,angle_of_incidence,n1,n2,rs,rp,ts,tp")
 			for _, r := range details {
 				cells := []string{
 					r.RayID,
@@ -1329,6 +1339,16 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 					strconv.FormatFloat(r.IntensityS, 'g', -1, 64),
 					strconv.FormatFloat(r.IntensityP, 'g', -1, 64),
 				}
+				cells = appendOptionalFloat(cells, r.IntensityRs)
+				cells = appendOptionalFloat(cells, r.IntensityRp)
+				cells = append(cells,
+					strconv.FormatFloat(real(r.Jones.Ex), 'g', -1, 64),
+					strconv.FormatFloat(imag(r.Jones.Ex), 'g', -1, 64),
+					strconv.FormatFloat(real(r.Jones.Ey), 'g', -1, 64),
+					strconv.FormatFloat(imag(r.Jones.Ey), 'g', -1, 64),
+					strconv.FormatFloat(r.TcumS, 'g', -1, 64),
+					strconv.FormatFloat(r.TcumP, 'g', -1, 64),
+				)
 				cells = appendOptionalFloat(cells, r.AngleOfIncidence)
 				cells = appendOptionalFloat(cells, r.N1)
 				cells = appendOptionalFloat(cells, r.N2)
@@ -1428,6 +1448,9 @@ func buildRayDetailRows(results []types.RayResult) []RayDetailRow {
 				Direction:   [3]float64{s.Direction.X, s.Direction.Y, s.Direction.Z},
 				Interaction: string(s.Interaction),
 				OPL:         s.OPL,
+				IntensityS:  s.IntensityS,
+				IntensityP:  s.IntensityP,
+				Jones:       s.Jones,
 			}
 			// Surface 0 (object plane) and ideal fold mirrors have intensity 1
 			// (no transmittance to accumulate); only accumulate physical
@@ -1436,8 +1459,16 @@ func buildRayDetailRows(results []types.RayResult) []RayDetailRow {
 				cumS *= s.IntensityS
 				cumP *= s.IntensityP
 			}
-			row.IntensityS = cumS
-			row.IntensityP = cumP
+			row.TcumS = cumS
+			row.TcumP = cumP
+			if s.IntensityRs != nil {
+				v := *s.IntensityRs
+				row.IntensityRs = &v
+			}
+			if s.IntensityRp != nil {
+				v := *s.IntensityRp
+				row.IntensityRp = &v
+			}
 			if s.AngleOfIncidence != nil {
 				v := *s.AngleOfIncidence
 				row.AngleOfIncidence = &v
@@ -1487,6 +1518,9 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 		{header: "dz", right: true},
 		{header: "Interact"},
 		{header: "OPL[mm]", right: true},
+		{header: "Is", right: true},
+		{header: "Ip", right: true},
+		{header: "Jones"},
 		{header: "Tcum s", right: true},
 		{header: "Tcum p", right: true},
 	}
@@ -1499,6 +1533,8 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 	}
 	if hasDetail {
 		detailCols = append(detailCols,
+			tableColumn{header: "Irs", right: true},
+			tableColumn{header: "Irp", right: true},
 			tableColumn{header: "θ[°]", right: true},
 			tableColumn{header: "n1", right: true},
 			tableColumn{header: "n2", right: true},
@@ -1520,17 +1556,38 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 		detailCols[8].cells = append(detailCols[8].cells, formatTableFloat(d.OPL))
 		detailCols[9].cells = append(detailCols[9].cells, formatTableFloat(d.IntensityS))
 		detailCols[10].cells = append(detailCols[10].cells, formatTableFloat(d.IntensityP))
+		detailCols[11].cells = append(detailCols[11].cells, formatJones(d.Jones))
+		detailCols[12].cells = append(detailCols[12].cells, formatTableFloat(d.TcumS))
+		detailCols[13].cells = append(detailCols[13].cells, formatTableFloat(d.TcumP))
 		if hasDetail {
-			detailCols[11].cells = appendOptionalFloatCells(detailCols[11].cells, d.AngleOfIncidence)
-			detailCols[12].cells = appendOptionalFloatCells(detailCols[12].cells, d.N1)
-			detailCols[13].cells = appendOptionalFloatCells(detailCols[13].cells, d.N2)
-			detailCols[14].cells = appendOptionalFloatCells(detailCols[14].cells, d.Rs)
-			detailCols[15].cells = appendOptionalFloatCells(detailCols[15].cells, d.Rp)
-			detailCols[16].cells = appendOptionalFloatCells(detailCols[16].cells, d.Ts)
-			detailCols[17].cells = appendOptionalFloatCells(detailCols[17].cells, d.Tp)
+			detailCols[14].cells = appendOptionalFloatCells(detailCols[14].cells, d.IntensityRs)
+			detailCols[15].cells = appendOptionalFloatCells(detailCols[15].cells, d.IntensityRp)
+			detailCols[16].cells = appendOptionalFloatCells(detailCols[16].cells, d.AngleOfIncidence)
+			detailCols[17].cells = appendOptionalFloatCells(detailCols[17].cells, d.N1)
+			detailCols[18].cells = appendOptionalFloatCells(detailCols[18].cells, d.N2)
+			detailCols[19].cells = appendOptionalFloatCells(detailCols[19].cells, d.Rs)
+			detailCols[20].cells = appendOptionalFloatCells(detailCols[20].cells, d.Rp)
+			detailCols[21].cells = appendOptionalFloatCells(detailCols[21].cells, d.Ts)
+			detailCols[22].cells = appendOptionalFloatCells(detailCols[22].cells, d.Tp)
 		}
 	}
 	fmt.Print(renderTable(detailCols))
+}
+
+// formatJones renders a Jones vector as two complex numbers "reEx±imExi
+// reEy±imEyi" (matching the YAML component order [ReEx, ImEx, ReEy, ImEy]).
+func formatJones(j types.JonesVector) string {
+	return formatComplexPart(real(j.Ex), imag(j.Ex)) + " " + formatComplexPart(real(j.Ey), imag(j.Ey))
+}
+
+// formatComplexPart renders "re±imi" with a sign-aware imaginary term.
+func formatComplexPart(re, im float64) string {
+	sign := "+"
+	if im < 0 {
+		sign = "-"
+		im = -im
+	}
+	return formatTableFloat(re) + sign + formatTableFloat(im) + "i"
 }
 
 // appendOptionalFloat appends a float cell (formatted or "-") to a CSV cell slice.

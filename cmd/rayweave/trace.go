@@ -82,11 +82,18 @@ func runTraceSingle(data []byte) {
 	path := resolvePath(fs, rayCfg, pathFlag, input.Configs, configFlag)
 
 	// --- Build types.Ray ---
+	// Default to right-circular polarization (matching the pipeline `trace`
+	// default) unless the input `rays` section carries an explicit one.
+	pol := types.NewCircularJones(true)
+	if input.Rays != nil {
+		pol = input.Rays.Polarization
+	}
 	r := types.Ray{
 		ID:         rayID,
 		Wavelength: wavelength,
 		Path:       path,
 		Lenient:    lenient,
+		Jones:      pol,
 	}
 	r.Initial.Origin = origin
 

@@ -1083,10 +1083,11 @@ default: surfaces and glasses):
   rays       ray trace results from results[] section (requires trace output).
              Shows a summary table (ID, λ, OPL, intensities, surface/transmit/
              miss counts) plus per-surface detail (position, direction,
-             interaction, OPL, cumulative transmittance from entrance (Tcum s/p),
-             angle of incidence, n1/n2, Fresnel coefficients) when the data
-             contains surface results. Use --summary to show only the summary
-             table.
+             interaction, OPL, per-surface intensity Is/Ip, Jones vector,
+             cumulative transmittance from entrance (Tcum s/p), and with
+             --details data: reflection intensity Irs/Irp, angle of incidence,
+             n1/n2, Fresnel coefficients) when the data contains surface
+             results. Use --summary to show only the summary table.
 
 Options:
   --format table|yaml|json|csv   output format (default table)
