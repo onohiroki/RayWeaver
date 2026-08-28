@@ -57,13 +57,18 @@ type surfacesListOutput struct {
 	ThicknessDiffs      []ThicknessDiffRow `json:"thickness_differences,omitempty" yaml:"thickness_differences,omitempty"`
 }
 
-// RaySummaryRow is one row of the `list rays` summary table.
+// RaySummaryRow is one row of the `list rays` summary table. IntensityS/
+// IntensityP are the per-surface intensity of the last surface (as reported by
+// the engine); TcumS/TcumP are the final cumulative transmittance from the
+// entrance (incident intensity = 1).
 type RaySummaryRow struct {
 	ID          string  `json:"id" yaml:"id"`
 	Wavelength  float64 `json:"wavelength" yaml:"wavelength"`
 	OPLTotal    float64 `json:"opl_total" yaml:"opl_total"`
 	IntensityS  float64 `json:"intensity_s" yaml:"intensity_s"`
 	IntensityP  float64 `json:"intensity_p" yaml:"intensity_p"`
+	TcumS       float64 `json:"tcum_s" yaml:"tcum_s"`
+	TcumP       float64 `json:"tcum_p" yaml:"tcum_p"`
 	Surfaces    int     `json:"surfaces" yaml:"surfaces"`
 	Transmitted int     `json:"transmitted" yaml:"transmitted"`
 	Missed      int     `json:"missed" yaml:"missed"`
@@ -1305,7 +1310,7 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 		fmt.Println()
 	case "csv":
 		fmt.Println("Ray Summary:")
-		fmt.Println("id,wavelength,opl_total,intensity_s,intensity_p,surfaces,transmitted,missed,error")
+		fmt.Println("id,wavelength,opl_total,intensity_s,intensity_p,tcum_s,tcum_p,surfaces,transmitted,missed,error")
 		for _, r := range summary {
 			cells := []string{
 				r.ID,
@@ -1313,6 +1318,8 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 				strconv.FormatFloat(r.OPLTotal, 'g', -1, 64),
 				strconv.FormatFloat(r.IntensityS, 'g', -1, 64),
 				strconv.FormatFloat(r.IntensityP, 'g', -1, 64),
+				strconv.FormatFloat(r.TcumS, 'g', -1, 64),
+				strconv.FormatFloat(r.TcumP, 'g', -1, 64),
 				strconv.Itoa(r.Surfaces),
 				strconv.Itoa(r.Transmitted),
 				strconv.Itoa(r.Missed),
@@ -1367,6 +1374,8 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 			{header: "OPL[mm]", right: true},
 			{header: "Is", right: true},
 			{header: "Ip", right: true},
+			{header: "Tcum s", right: true},
+			{header: "Tcum p", right: true},
 			{header: "Surf", right: true},
 			{header: "Tx", right: true},
 			{header: "Miss", right: true},
@@ -1377,9 +1386,11 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 			cols[2].cells = append(cols[2].cells, formatTableFloat(r.OPLTotal))
 			cols[3].cells = append(cols[3].cells, formatTableFloat(r.IntensityS))
 			cols[4].cells = append(cols[4].cells, formatTableFloat(r.IntensityP))
-			cols[5].cells = append(cols[5].cells, strconv.Itoa(r.Surfaces))
-			cols[6].cells = append(cols[6].cells, strconv.Itoa(r.Transmitted))
-			cols[7].cells = append(cols[7].cells, strconv.Itoa(r.Missed))
+			cols[5].cells = append(cols[5].cells, formatTableFloat(r.TcumS))
+			cols[6].cells = append(cols[6].cells, formatTableFloat(r.TcumP))
+			cols[7].cells = append(cols[7].cells, strconv.Itoa(r.Surfaces))
+			cols[8].cells = append(cols[8].cells, strconv.Itoa(r.Transmitted))
+			cols[9].cells = append(cols[9].cells, strconv.Itoa(r.Missed))
 		}
 		fmt.Print(renderTable(cols))
 
@@ -1416,6 +1427,10 @@ func buildRaySummaryRows(results []types.RayResult) []RaySummaryRow {
 			Surfaces:    len(r.Surfaces),
 			Error:       r.Error,
 		}
+		// Final cumulative transmittance: multiply each surface's single-surface
+		// intensity transmittance (intensity 1 at the object plane; surface 0 and
+		// ideal mirrors contribute 1 and are skipped).
+		var cumS, cumP float64 = 1, 1
 		for _, s := range r.Surfaces {
 			switch s.Interaction {
 			case types.Transmit:
@@ -1423,7 +1438,13 @@ func buildRaySummaryRows(results []types.RayResult) []RaySummaryRow {
 			case types.Missed:
 				row.Missed++
 			}
+			if s.SurfaceID != 0 && s.IntensityS > 0 && s.IntensityS <= 1 {
+				cumS *= s.IntensityS
+				cumP *= s.IntensityP
+			}
 		}
+		row.TcumS = cumS
+		row.TcumP = cumP
 		rows = append(rows, row)
 	}
 	return rows
