@@ -1063,7 +1063,7 @@ Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
 `)
 	case "list":
 		fmt.Print(`Usage: rayweave list [--format table|yaml|json|csv] [--config ID]
-                   [--glass-dir DIR] [--curvature] [--all] [--roles] [--details]
+                   [--glass-dir DIR] [--curvature] [--all] [--roles] [--summary]
                    [TARGET...] < input.yaml
 
 Read-only listing of an optical system's definition data. Unlike the pipeline
@@ -1078,10 +1078,12 @@ default: surfaces and glasses):
              With --all, also includes the remaining glass_catalog entries
   paraxial   first-order paraxial properties (EFL, F/#, NA, EPD, BFL, etc.)
              With --roles, also includes the per-element glass-role table
-  rays       ray trace results from results[] section (requires trace output)
-             With --details, also shows per-surface position, direction,
-             interaction, OPL, angle of incidence, n1/n2, and Fresnel
-             coefficients.
+  rays       ray trace results from results[] section (requires trace output).
+             Shows a summary table (ID, λ, OPL, intensities, surface/transmit/
+             miss counts) plus per-surface detail (position, direction,
+             interaction, OPL, angle of incidence, n1/n2, Fresnel coefficients)
+             when the data contains surface results. Use --summary to show
+             only the summary table.
 
 Options:
   --format table|yaml|json|csv   output format (default table)
@@ -1091,7 +1093,7 @@ Options:
   --all                          for glasses: also show glass_catalog entries
                                  not used by any surface
   --roles                        for paraxial: also show element roles table
-  --details                      for rays: show per-surface detail
+  --summary                      for rays: show only summary (no per-surface detail)
 
 surfaces columns: ID, Type, Radius[mm] (or Curvature[1/mm] with --curvature),
 Thickness[mm], Material, Diameter[mm]. A flat surface has no finite radius:
@@ -1140,7 +1142,7 @@ Examples:
   rayweave list paraxial < lens.yaml
   rayweave list paraxial --roles < lens.yaml
   rayweave trace single --origin 0,5,-100 --angle-yz 5 < lens.yaml | rayweave list rays
-  rayweave chief | rayweave trace | rayweave list rays --details
+  rayweave chief | rayweave trace | rayweave list rays --summary
 `)
 	case "clean":
 		fmt.Print(`Usage: rayweave clean [--verbose] < pipeline.yaml

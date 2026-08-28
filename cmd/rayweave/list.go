@@ -147,7 +147,7 @@ func runList(data []byte) {
 	showCurvature := fs.Bool("curvature", false, "show curvature instead of radius")
 	showAll := fs.Bool("all", false, "also show glass_catalog entries not used by any surface")
 	showRoles := fs.Bool("roles", false, "for paraxial: also show element roles table")
-	showDetails := fs.Bool("details", false, "for rays: show per-surface detail")
+	showSummaryOnly := fs.Bool("summary", false, "for rays: show only summary (no per-surface detail)")
 	fs.Parse(args.flags)
 
 	switch *format {
@@ -200,7 +200,7 @@ func runList(data []byte) {
 		case "paraxial":
 			listParaxial(data, input, gc, *format, *configFlag, *showRoles)
 		case "rays":
-			listRays(output, *showDetails, *format)
+			listRays(output, *showSummaryOnly, *format)
 		default:
 			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, rays)", target)
 			os.Exit(1)
@@ -1251,7 +1251,9 @@ func listParaxial(data []byte, input types.Input, gc *glass.Catalog, format stri
 }
 
 // listRays renders the ray trace results from the Output's results[] section.
-func listRays(output types.Output, showDetails bool, format string) {
+// When summaryOnly is false (default), per-surface detail is shown whenever
+// the results contain surface data.
+func listRays(output types.Output, summaryOnly bool, format string) {
 	// Filter out empty result slots (trace pre-allocates len(rayList) zero-value
 	// entries then appends the real results).
 	results := make([]types.RayResult, 0, len(output.Results))
@@ -1267,7 +1269,7 @@ func listRays(output types.Output, showDetails bool, format string) {
 
 	summary := buildRaySummaryRows(results)
 	var details []RayDetailRow
-	if showDetails {
+	if !summaryOnly {
 		details = buildRayDetailRows(results)
 	}
 
@@ -1306,7 +1308,7 @@ func listRays(output types.Output, showDetails bool, format string) {
 			}
 			fmt.Println(strings.Join(quoteCSV(cells), ","))
 		}
-		if showDetails && len(details) > 0 {
+		if len(details) > 0 {
 			fmt.Println()
 			fmt.Println("Ray Detail:")
 			fmt.Println("ray_id,surface_id,position_x,position_y,position_z,direction_x,direction_y,direction_z,interaction,opl,angle_of_incidence,n1,n2,rs,rp,ts,tp")
@@ -1357,7 +1359,7 @@ func listRays(output types.Output, showDetails bool, format string) {
 		}
 		fmt.Print(renderTable(cols))
 
-		if showDetails && len(details) > 0 {
+		if len(details) > 0 {
 			seen := map[string]bool{}
 			for _, r := range summary {
 				if seen[r.ID] {
