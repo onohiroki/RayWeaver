@@ -1391,6 +1391,7 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 			{header: "Surf", right: true},
 			{header: "Tx", right: true},
 			{header: "Miss", right: true},
+			{header: "Error"},
 		}
 		for _, r := range summary {
 			cols[0].cells = append(cols[0].cells, r.ID)
@@ -1403,6 +1404,7 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 			cols[7].cells = append(cols[7].cells, strconv.Itoa(r.Surfaces))
 			cols[8].cells = append(cols[8].cells, strconv.Itoa(r.Transmitted))
 			cols[9].cells = append(cols[9].cells, strconv.Itoa(r.Missed))
+			cols[10].cells = append(cols[10].cells, r.Error)
 		}
 		fmt.Print(renderTable(cols))
 
@@ -1595,6 +1597,16 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 			tableColumn{header: "Tp", right: true},
 		)
 	}
+	hasErr := false
+	for i := range rayDetails {
+		if rayDetails[i].ErrorCode != "" {
+			hasErr = true
+			break
+		}
+	}
+	if hasErr {
+		detailCols = append(detailCols, tableColumn{header: "Err"})
+	}
 	for _, d := range rayDetails {
 		detailCols[0].cells = append(detailCols[0].cells, strconv.Itoa(d.SurfaceID))
 		detailCols[1].cells = append(detailCols[1].cells, formatTableFloat(d.Position[0]))
@@ -1620,6 +1632,13 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 			detailCols[20].cells = appendOptionalFloatCells(detailCols[20].cells, d.Rp)
 			detailCols[21].cells = appendOptionalFloatCells(detailCols[21].cells, d.Ts)
 			detailCols[22].cells = appendOptionalFloatCells(detailCols[22].cells, d.Tp)
+		}
+		if hasErr {
+			idx := 14
+			if hasDetail {
+				idx = 23
+			}
+			detailCols[idx].cells = append(detailCols[idx].cells, d.ErrorCode)
 		}
 	}
 	fmt.Print(renderTable(detailCols))
