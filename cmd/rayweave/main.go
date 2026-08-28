@@ -277,6 +277,7 @@ Common options:
   --config ID           select config by id (multi-config mode)
   --glass-dir DIR       AGF glass catalog directory
   --lenient             skip aperture/glass-path checks
+  --details             add per-surface detail (AOI, n1/n2, Fresnel) to output YAML
 
 Input YAML — rays section:
   polarization: [1, 0, 0, 1]    # Jones vector [ReEx, ImEx, ReEy, ImEy]
@@ -295,6 +296,7 @@ Examples:
   rayweave trace single --origin 0,5,-100 --direction 0,0,1 < lens.yaml
   rayweave trace single --origin 0,5,-100 --angle-yz 5 --details < lens.yaml | rayweave plot
   rayweave trace single --origin 0,5,-100 --aim 0,2.5,25 --path 0,1,2,3,4 < lens.yaml
+  rayweave chief < lens.yaml | rayweave trace --details | rayweave list rays
 `)
 	case "paraxial":
 		fmt.Print(`Usage: rayweave paraxial [--config ID] < system.yaml
@@ -1743,6 +1745,7 @@ func runTrace(data []byte, singleMode bool) {
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	traceVerbose := fs.Bool("verbose", false, "print per-ray trace info to stderr")
+	traceDetails := fs.Bool("details", false, "add per-surface detail (AOI, n1/n2, Fresnel) to output YAML")
 	fs.String("lenient", "", "trace rays leniently: true|false (default: rays.lenient from the input YAML, else false)")
 	fs.Parse(args)
 
@@ -1820,7 +1823,7 @@ func runTrace(data []byte, singleMode bool) {
 					r.Lenient = true
 				}
 				ray.ResolveRay(r, surfaces, engine)
-				result := engine.TraceRay(*r, surfaces, false)
+				result := engine.TraceRay(*r, surfaces, *traceDetails)
 				if result.Error != "" {
 					errMsg := fmt.Sprintf("{\"ray\":%q,\"error\":%q,\"error_code\":%q}\n", r.ID, result.Error, result.ErrorCode)
 					errorsMu.Lock()
