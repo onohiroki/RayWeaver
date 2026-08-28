@@ -1463,8 +1463,12 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 	}
 	detailCols := []tableColumn{
 		{header: "Surf", right: true},
-		{header: "Position x,y,z"},
-		{header: "Direction dx,dy,dz"},
+		{header: "x", right: true},
+		{header: "y", right: true},
+		{header: "z", right: true},
+		{header: "dx", right: true},
+		{header: "dy", right: true},
+		{header: "dz", right: true},
 		{header: "Interact"},
 		{header: "OPL[mm]", right: true},
 	}
@@ -1487,27 +1491,23 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 		)
 	}
 	for _, d := range rayDetails {
-		pos := fmt.Sprintf("%s, %s, %s",
-			formatTableFloat(d.Position[0]),
-			formatTableFloat(d.Position[1]),
-			formatTableFloat(d.Position[2]))
-		dir := fmt.Sprintf("%s, %s, %s",
-			formatTableFloat(d.Direction[0]),
-			formatTableFloat(d.Direction[1]),
-			formatTableFloat(d.Direction[2]))
 		detailCols[0].cells = append(detailCols[0].cells, strconv.Itoa(d.SurfaceID))
-		detailCols[1].cells = append(detailCols[1].cells, pos)
-		detailCols[2].cells = append(detailCols[2].cells, dir)
-		detailCols[3].cells = append(detailCols[3].cells, d.Interaction)
-		detailCols[4].cells = append(detailCols[4].cells, formatTableFloat(d.OPL))
+		detailCols[1].cells = append(detailCols[1].cells, formatTableFloat(d.Position[0]))
+		detailCols[2].cells = append(detailCols[2].cells, formatTableFloat(d.Position[1]))
+		detailCols[3].cells = append(detailCols[3].cells, formatTableFloat(d.Position[2]))
+		detailCols[4].cells = append(detailCols[4].cells, formatTableFloat(d.Direction[0]))
+		detailCols[5].cells = append(detailCols[5].cells, formatTableFloat(d.Direction[1]))
+		detailCols[6].cells = append(detailCols[6].cells, formatTableFloat(d.Direction[2]))
+		detailCols[7].cells = append(detailCols[7].cells, d.Interaction)
+		detailCols[8].cells = append(detailCols[8].cells, formatTableFloat(d.OPL))
 		if hasDetail {
-			detailCols[5].cells = appendOptionalFloatCells(detailCols[5].cells, d.AngleOfIncidence)
-			detailCols[6].cells = appendOptionalFloatCells(detailCols[6].cells, d.N1)
-			detailCols[7].cells = appendOptionalFloatCells(detailCols[7].cells, d.N2)
-			detailCols[8].cells = appendOptionalFloatCells(detailCols[8].cells, d.Rs)
-			detailCols[9].cells = appendOptionalFloatCells(detailCols[9].cells, d.Rp)
-			detailCols[10].cells = appendOptionalFloatCells(detailCols[10].cells, d.Ts)
-			detailCols[11].cells = appendOptionalFloatCells(detailCols[11].cells, d.Tp)
+			detailCols[9].cells = appendOptionalFloatCells(detailCols[9].cells, d.AngleOfIncidence)
+			detailCols[10].cells = appendOptionalFloatCells(detailCols[10].cells, d.N1)
+			detailCols[11].cells = appendOptionalFloatCells(detailCols[11].cells, d.N2)
+			detailCols[12].cells = appendOptionalFloatCells(detailCols[12].cells, d.Rs)
+			detailCols[13].cells = appendOptionalFloatCells(detailCols[13].cells, d.Rp)
+			detailCols[14].cells = appendOptionalFloatCells(detailCols[14].cells, d.Ts)
+			detailCols[15].cells = appendOptionalFloatCells(detailCols[15].cells, d.Tp)
 		}
 	}
 	fmt.Print(renderTable(detailCols))
