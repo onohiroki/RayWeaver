@@ -2,6 +2,7 @@ package types
 
 import (
 	"bytes"
+	"encoding/json"
 	"math"
 	"strings"
 	"testing"
@@ -166,6 +167,37 @@ func TestJonesVectorYAMLSequence(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 	want := JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+	if j != want {
+		t.Errorf("Unmarshal = %v, want %v", j, want)
+	}
+}
+
+func TestJonesVectorJSONRoundTrip(t *testing.T) {
+	j := JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+	encoded, err := json.Marshal(j)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	// MarshalJSON must emit the same 4-element form as YAML.
+	if string(encoded) != "[1,0,0,1]" {
+		t.Errorf("json.Marshal = %s, want [1,0,0,1]", encoded)
+	}
+	var got JonesVector
+	if err := json.Unmarshal(encoded, &got); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if got.Ex != j.Ex || got.Ey != j.Ey {
+		t.Errorf("round-trip = %v, want %v", got, j)
+	}
+}
+
+func TestJonesVectorJSONSequence(t *testing.T) {
+	data := []byte("[0.5, -0.25, 0.1, 0.2]")
+	var j JonesVector
+	if err := json.Unmarshal(data, &j); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	want := JonesVector{Ex: complex(0.5, -0.25), Ey: complex(0.1, 0.2)}
 	if j != want {
 		t.Errorf("Unmarshal = %v, want %v", j, want)
 	}
