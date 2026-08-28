@@ -1043,7 +1043,8 @@ Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
 `)
 	case "list":
 		fmt.Print(`Usage: rayweave list [--format table|yaml|json|csv] [--config ID]
-                   [--glass-dir DIR] [--curvature] [--all] [TARGET...] < input.yaml
+                   [--glass-dir DIR] [--curvature] [--all] [--roles]
+                   [TARGET...] < input.yaml
 
 Read-only listing of an optical system's definition data. Unlike the pipeline
 subcommands, list never traces rays and prints formatted tables by default,
@@ -1055,6 +1056,8 @@ default: surfaces and glasses):
   glasses    refractive-index table of the glasses used by the selected
              config's surfaces (first-use order) plus unresolved keys.
              With --all, also includes the remaining glass_catalog entries
+  paraxial   first-order paraxial properties (EFL, F/#, NA, EPD, BFL, etc.)
+             With --roles, also includes the per-element glass-role table
 
 Options:
   --format table|yaml|json|csv   output format (default table)
@@ -1063,6 +1066,7 @@ Options:
   --curvature                    show curvature instead of radius
   --all                          for glasses: also show glass_catalog entries
                                  not used by any surface
+  --roles                        for paraxial: also show element roles table
 
 surfaces columns: ID, Type, Radius[mm] (or Curvature[1/mm] with --curvature),
 Thickness[mm], Material, Diameter[mm]. A flat surface has no finite radius:
@@ -1097,11 +1101,19 @@ formula name for catalog glasses, "constant" for a fixed index, "model" for
 nd/vd-based glasses, "tabulated" for index tables, "-" for keys that do not
 resolve in the catalog (their nd/vd/n cells are empty; a warning is printed).
 
+paraxial shows first-order optical properties: EFL, BFL, F/#, NA, entrance/exit
+pupil diameter and location, half-angle of view, total track, and magnification
+(for finite conjugates). With --roles, a per-element glass-role table is
+appended showing surface IDs, thin-lens power, chromatic weight, role
+(dominant/compensating/neutral), and target vd/nd.
+
 Examples:
   rayweave list < lens.yaml
   rayweave list --config wide < lens.yaml
   rayweave list --curvature --format csv < lens.yaml
   rayweave list surfaces glasses < lens.yaml
+  rayweave list paraxial < lens.yaml
+  rayweave list paraxial --roles < lens.yaml
 `)
 	case "clean":
 		fmt.Print(`Usage: rayweave clean [--verbose] < pipeline.yaml
