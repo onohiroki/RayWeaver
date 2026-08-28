@@ -155,9 +155,10 @@ type glassesListOutput struct {
 }
 
 // runList implements the `list` subcommand: a read-only, human-readable
-// listing of the input system's definition data (surfaces today; glasses,
-// decenter, reflect planned). It never traces rays and prints formatted
-// tables by default, with --yaml/--json/--csv variants for automation.
+// listing of the input system's definition data (surfaces, glasses, paraxial
+// properties, ray results). It never traces rays and prints formatted tables
+// by default, with --yaml/--json/--csv variants for automation. Without
+// targets, surfaces, glasses and paraxial are shown.
 //
 //	rayweave list [--format table|yaml|json|csv] [--config ID]
 //	              [--glass-dir DIR] [--curvature] [TARGET...] < input.yaml
@@ -182,7 +183,7 @@ func runList(data []byte) {
 
 	targets := args.positional
 	if len(targets) == 0 {
-		targets = []string{"surfaces", "glasses"}
+		targets = []string{"surfaces", "glasses", "paraxial"}
 	}
 
 	needsOutput := false

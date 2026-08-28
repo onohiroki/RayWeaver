@@ -14,8 +14,8 @@ rayweave list [--format table|yaml|json|csv] [--config ID]
 
 ## 1. Basic usage
 
-Without arguments, `list` shows both surfaces and glasses of the first (or
-only) config:
+Without arguments, `list` shows the surfaces, glasses and paraxial
+properties of the first (or only) config:
 
 ```sh
 rayweave list < lens.yaml
@@ -37,6 +37,18 @@ Glasses:
 Name  Type         nd         vd  587.56nm
 SK18  model  1.638540  55.420000  1.638540
 SF12  model  1.648310  33.840000  1.648310
+
+Paraxial:
+Property                     Value
+Focal Length (EFL) [mm]  25.033304
+BFL [mm]                 21.434321
+F/# (inf conj)            6.618138
+NA (inf conj)             0.075550
+F/# (working)             6.618138
+NA (working)              0.075550
+EPD [mm]                  3.782530
+EP Location [mm]          5.244050
+Total Track [mm]         29.774352
 ```
 
 Targets can be listed explicitly:
@@ -44,7 +56,8 @@ Targets can be listed explicitly:
 ```sh
 rayweave list surfaces < lens.yaml       # surfaces only
 rayweave list glasses < lens.yaml        # glasses only
-rayweave list surfaces glasses < lens.yaml  # both (same as default)
+rayweave list surfaces glasses < lens.yaml  # surfaces + glasses
+rayweave list surfaces glasses paraxial < lens.yaml  # all three (same as default)
 ```
 
 ---

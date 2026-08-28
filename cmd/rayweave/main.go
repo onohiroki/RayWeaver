@@ -1087,7 +1087,7 @@ subcommands, list never traces rays and prints formatted tables by default,
 not pipeline YAML.
 
 Targets (space-separated, flags may appear before or after them;
-default: surfaces and glasses):
+default: surfaces, glasses and paraxial):
   surfaces   surface table of the selected config (object plane 0 excluded)
   glasses    refractive-index table of the glasses used by the selected
              config's surfaces (first-use order) plus unresolved keys.
