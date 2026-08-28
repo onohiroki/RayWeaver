@@ -103,7 +103,7 @@ func findBracket(
 		t.PassThrough = nil
 		t.Lenient = false
 		apply(&t, v)
-		r := engine.TraceRay(t, surfaces)
+		r := engine.TraceRay(t, surfaces, false)
 		if r.Error != "" {
 			if r.Error == "ray missed surface (aperture stop)" {
 				return targetValue * 2, true, true

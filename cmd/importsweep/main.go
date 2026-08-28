@@ -480,7 +480,7 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 		r := &rays[i]
 		r.Jones = pol
 		ray.ResolveRay(r, surfaces, engine)
-		res := engine.TraceRay(*r, surfaces)
+		res := engine.TraceRay(*r, surfaces, false)
 		m.TraceTotal++
 		if res.Error == "" {
 			m.TraceOK++
@@ -494,7 +494,7 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 			// model/pupil error (the ray still cannot complete the path).
 			probe := *r
 			probe.SkipApertureCheck = true
-			if probeRes := engine.TraceRay(probe, surfaces); probeRes.Error == "" {
+			if probeRes := engine.TraceRay(probe, surfaces, false); probeRes.Error == "" {
 				m.ApertureStopTraceable++
 			} else {
 				m.ApertureStopUnreachable++

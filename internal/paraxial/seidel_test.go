@@ -64,7 +64,7 @@ func TestSeidelDistortionSignMatchesGeometricDistortion(t *testing.T) {
 		Path:       path,
 		Jones:      types.NewCircularJones(true),
 	}
-	result := engine.TraceRay(r, sys.Surfaces)
+	result := engine.TraceRay(r, sys.Surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("trace error: %s", result.Error)
 	}

@@ -343,7 +343,7 @@ func traceChiefImageHeight(surfaces []types.Surface, fieldAngleDeg float64, wave
 		Jones:      types.NewCircularJones(true),
 	}
 
-	result := engine.TraceRay(r, surfaces)
+	result := engine.TraceRay(r, surfaces, false)
 	if result.Error != "" || len(result.Surfaces) == 0 {
 		return 0
 	}

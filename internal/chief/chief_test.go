@@ -226,7 +226,7 @@ func TestSearchOriginForTargetVignettingRecovery(t *testing.T) {
 		Path:       dls.BuildPath(surfaces),
 		Jones:      types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)},
 	}
-	traceResult := engine.TraceRay(r, surfaces)
+	traceResult := engine.TraceRay(r, surfaces, false)
 	if traceResult.Error != "" {
 		t.Errorf("Ray from search result failed: %s", traceResult.Error)
 	} else {
@@ -503,7 +503,7 @@ func TestBackwardChiefObjectPoint(t *testing.T) {
 			Path:       path,
 			Jones:      types.NewCircularJones(true),
 		}
-		res := e.TraceRay(fwd, surfaces)
+		res := e.TraceRay(fwd, surfaces, false)
 		if res.Error != "" {
 			t.Fatalf("h=%v: forward ray failed: %v", h, res.Error)
 		}
@@ -756,7 +756,7 @@ func TestDetermineChiefRaysGridNegativeAnglePassThrough(t *testing.T) {
 		if cr.Initial.Direction.Y == 0 {
 			t.Errorf("field_angle=%v: chief ray collapsed to on-axis", results[i].FieldAngle)
 		}
-		tr := e.TraceRay(cr, sys.Surfaces)
+		tr := e.TraceRay(cr, sys.Surfaces, false)
 		if tr.Error != "" {
 			t.Errorf("field_angle=%v: chief ray failed: %v", results[i].FieldAngle, tr.Error)
 			continue
@@ -821,7 +821,7 @@ func TestDetermineChiefRaysGridNegativeImageHeight(t *testing.T) {
 			results[0].ChiefRay.Initial.Direction.Y, results[1].ChiefRay.Initial.Direction.Y)
 	}
 	for i, cr := range []types.Ray{results[0].ChiefRay, results[1].ChiefRay} {
-		tr := e.TraceRay(cr, sys.Surfaces)
+		tr := e.TraceRay(cr, sys.Surfaces, false)
 		if tr.Error != "" {
 			t.Errorf("field %v: chief ray failed: %v", results[i].FieldAngle, tr.Error)
 			continue

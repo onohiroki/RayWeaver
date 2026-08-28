@@ -162,7 +162,7 @@ func TestGlassDirWriteBackAcrossCommands(t *testing.T) {
 
 	// trace (single ray).
 	out = runCommand(t, []string{"rayweave", "trace", "--glass-dir", dir},
-		func() { runTrace([]byte(traceInput(false))) })
+		func() { runTrace([]byte(traceInput(false)), false) })
 	check(t, "trace", out)
 
 	// paraxial.
@@ -291,7 +291,7 @@ func TestBoolFlagHelper(t *testing.T) {
 func TestTraceLenientWriteBack(t *testing.T) {
 	// Flag set true: written back true.
 	out := runCommand(t, []string{"rayweave", "trace", "--lenient", "true"},
-		func() { runTrace([]byte(traceInput(false))) })
+		func() { runTrace([]byte(traceInput(false)), false) })
 	var res types.Input
 	if err := yaml.Unmarshal(out, &res); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
@@ -303,7 +303,7 @@ func TestTraceLenientWriteBack(t *testing.T) {
 
 	// YAML lenient: true honoured without the flag.
 	out = runCommand(t, []string{"rayweave", "trace"},
-		func() { runTrace([]byte(traceInput(true))) })
+		func() { runTrace([]byte(traceInput(true)), false) })
 	if err := yaml.Unmarshal(out, &res); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestTraceLenientWriteBack(t *testing.T) {
 
 	// Neither: not injected.
 	out = runCommand(t, []string{"rayweave", "trace"},
-		func() { runTrace([]byte(traceInput(false))) })
+		func() { runTrace([]byte(traceInput(false)), false) })
 	if err := yaml.Unmarshal(out, &res); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}
@@ -325,7 +325,7 @@ func TestTraceLenientWriteBack(t *testing.T) {
 
 	// --lenient false wins over the YAML lenient: true and writes back false.
 	out = runCommand(t, []string{"rayweave", "trace", "--lenient", "false"},
-		func() { runTrace([]byte(traceInput(true))) })
+		func() { runTrace([]byte(traceInput(true)), false) })
 	if err := yaml.Unmarshal(out, &res); err != nil {
 		t.Fatalf("unmarshal output: %v", err)
 	}

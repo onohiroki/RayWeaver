@@ -50,7 +50,7 @@ func TestTraceBackwardReversibility(t *testing.T) {
 			Path:       []int{0, 1, 2, 3},
 			Jones:      types.NewCircularJones(true),
 		}
-		res := e.TraceRay(fwd, surfaces)
+		res := e.TraceRay(fwd, surfaces, false)
 		if res.Error != "" {
 			t.Fatalf("reverse forward trace failed u=%v: %v", u, res.Error)
 		}

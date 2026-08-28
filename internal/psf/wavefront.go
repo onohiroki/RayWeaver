@@ -123,7 +123,7 @@ func TraceWavefront(system types.System, engine *ray.Engine, fg *PupilGrid,
 				Jones:        pol,
 				InitialField: &field0,
 			}
-			tr := engine.TraceRay(r, system.Surfaces)
+			tr := engine.TraceRay(r, system.Surfaces, false)
 			var sr *types.SurfaceResult
 			if tr.Error == "" {
 				for i := range tr.Surfaces {

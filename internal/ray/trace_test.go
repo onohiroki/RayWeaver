@@ -67,7 +67,7 @@ func TestTraceRayGhostBackwardRefraction(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(ray, surfaces)
+	result := engine.TraceRay(ray, surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("TraceRay error: %v", result.Error)
 	}
@@ -121,7 +121,7 @@ func TestTraceRayGhostReflectIntensity(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(ray, surfaces)
+	result := engine.TraceRay(ray, surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("TraceRay error: %v", result.Error)
 	}
@@ -147,7 +147,7 @@ func TestTraceRayOnAxis(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(ray, surfaces)
+	result := engine.TraceRay(ray, surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("TraceRay error: %v", result.Error)
 	}
@@ -170,7 +170,7 @@ func TestTraceRayOffAxis(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(ray, surfaces)
+	result := engine.TraceRay(ray, surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("TraceRay error: %v", result.Error)
 	}
@@ -190,7 +190,7 @@ func TestTraceRayMissesAperture(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(ray, surfaces)
+	result := engine.TraceRay(ray, surfaces, false)
 	if result.Error == "" {
 		t.Error("Expected error for ray that misses aperture")
 	}
@@ -218,7 +218,7 @@ func TestTraceRayPreservesOPL(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(ray, surfaces)
+	result := engine.TraceRay(ray, surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("TraceRay error: %v", result.Error)
 	}
@@ -257,7 +257,7 @@ func TestTraceRayReflectFlag(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(ray, surfaces)
+	result := engine.TraceRay(ray, surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("TraceRay error: %v", result.Error)
 	}
@@ -305,7 +305,7 @@ func TestTraceRayReflectFlagTilted(t *testing.T) {
 				Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 			},
 		}
-		result := engine.TraceRay(ray, surfaces)
+		result := engine.TraceRay(ray, surfaces, false)
 		if result.Error != "" {
 			t.Fatalf("h=%v TraceRay error: %v", h, result.Error)
 		}
@@ -351,7 +351,7 @@ func TestTraceRayLenientMissesAperture(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(r, surfaces)
+	result := engine.TraceRay(r, surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("Lenient ray should not error on aperture miss: %v", result.Error)
 	}
@@ -374,7 +374,7 @@ func TestTraceRayStrictMissesAperture(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(r, surfaces)
+	result := engine.TraceRay(r, surfaces, false)
 	if result.Error == "" {
 		t.Fatal("Strict ray should error on aperture miss")
 	}
@@ -396,7 +396,7 @@ func TestTraceRayLenientMissedSurface(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(r, surfaces)
+	result := engine.TraceRay(r, surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("Lenient ray should not error on geometric miss: %v", result.Error)
 	}
@@ -421,7 +421,7 @@ func TestTraceRayLenientTIR(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0.5, Z: 0.866},
 		},
 	}
-	strictResult := engine.TraceRay(strict, surfaces)
+	strictResult := engine.TraceRay(strict, surfaces, false)
 	if strictResult.Error == "" {
 		t.Fatal("Strict mode should fail on TIR")
 	}
@@ -440,7 +440,7 @@ func TestTraceRayLenientTIR(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0.5, Z: 0.866},
 		},
 	}
-	result := engine.TraceRay(lax, surfaces)
+	result := engine.TraceRay(lax, surfaces, false)
 	if result.Error != "" {
 		t.Fatalf("Lenient ray should not error on TIR: %v", result.Error)
 	}
@@ -493,7 +493,7 @@ func TestTraceRayLenientGlassPathShort(t *testing.T) {
 			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
 		},
 	}
-	result := engine.TraceRay(r, s)
+	result := engine.TraceRay(r, s, false)
 	if result.Error != "" {
 		t.Fatalf("Lenient ray should not error on short glass path: %v", result.Error)
 	}

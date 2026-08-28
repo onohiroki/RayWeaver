@@ -157,7 +157,7 @@ func Trace(engine *ray.Engine, path []int, surfaces []types.Surface,
 				SkipApertureCheck:  s.SkipApertureCheck,
 				SkipGlassPathCheck: s.SkipGlassPathCheck,
 			}
-			res := engine.TraceRay(r, surfaces)
+			res := engine.TraceRay(r, surfaces, false)
 			if res.Error != "" {
 				s.Err = res.Error
 				s.ErrorCode = res.ErrorCode

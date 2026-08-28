@@ -424,7 +424,7 @@ for fi, fd := range fields {
 // outgoingLine returns the image-space segment of a traced chief ray: the line
 // through the last two surface hits.
 func outgoingLine(engine *ray.Engine, r types.Ray, surfaces []types.Surface) (types.Vec3, types.Vec3, bool) {
-	tr := engine.TraceRay(r, surfaces)
+	tr := engine.TraceRay(r, surfaces, false)
 	if tr.Error != "" || len(tr.Surfaces) < 2 {
 		return types.Vec3{}, types.Vec3{}, false
 	}
@@ -459,7 +459,7 @@ func lineCrossingZ(p0, d0, p1, d1 types.Vec3) (float64, bool) {
 
 // fullChiefPath returns the traced polyline (per-surface positions) of a ray.
 func fullChiefPath(engine *ray.Engine, r types.Ray, surfaces []types.Surface) []types.Vec3 {
-	tr := engine.TraceRay(r, surfaces)
+	tr := engine.TraceRay(r, surfaces, false)
 	if tr.Error != "" {
 		return nil
 	}
@@ -752,7 +752,7 @@ func backwardChiefOrigin(
 		Path:       path,
 		Jones:      types.NewCircularJones(true),
 	}
-	pres := engine.TraceRay(probe, surfaces)
+	pres := engine.TraceRay(probe, surfaces, false)
 	reachedStop := false
 	for i := range pres.Surfaces {
 		if pres.Surfaces[i].SurfaceID == stopID {
@@ -875,7 +875,7 @@ func backwardChiefObjectPoint(
 		Path:       path,
 		Jones:      types.NewCircularJones(true),
 	}
-	pres := engine.TraceRay(probe, surfaces)
+	pres := engine.TraceRay(probe, surfaces, false)
 	reachedStop := false
 	for i := range pres.Surfaces {
 		if pres.Surfaces[i].SurfaceID == stopID {
@@ -1284,7 +1284,7 @@ func searchOriginForTarget(
 
 	trace := func(originComp float64) (float64, bool, bool) {
 		r := makeRay(originComp)
-		res := engine.TraceRay(r, surfaces)
+		res := engine.TraceRay(r, surfaces, false)
 		for _, sr := range res.Surfaces {
 			if sr.SurfaceID == targetID {
 				return getPos(sr), true, false
@@ -1437,7 +1437,7 @@ func searchDirectionForTarget(
 			Path:       path,
 			Jones:      pol,
 		}
-		res := engine.TraceRay(r, surfaces)
+		res := engine.TraceRay(r, surfaces, false)
 		for _, sr := range res.Surfaces {
 			if sr.SurfaceID == targetID {
 				return getPos(sr), true, false
@@ -1707,7 +1707,7 @@ func computeWavelengthStats(
 					Path:       path,
 					Jones:      pol,
 				}
-				tr := engine.TraceRay(r, system.Surfaces)
+				tr := engine.TraceRay(r, system.Surfaces, false)
 				if tr.Error != "" {
 					traced = append(traced, types.GridPoint{
 						PupilX: gp.PupilX, PupilY: gp.PupilY,
@@ -1769,7 +1769,7 @@ func buildResult(
 	}
 
 	// Trace chief ray for actual image height
-	if tr := engine.TraceRay(chiefRay, system.Surfaces); tr.Error == "" {
+	if tr := engine.TraceRay(chiefRay, system.Surfaces, false); tr.Error == "" {
 		for _, sr := range tr.Surfaces {
 			if sr.SurfaceID == refSurfaceID {
 				cx = sr.Position.X
@@ -1825,7 +1825,7 @@ func computeRayFan(
 		Lenient:    true,
 	}
 	var chiefX, chiefY float64
-	if tr := engine.TraceRay(chiefRay, system.Surfaces); tr.Error == "" {
+	if tr := engine.TraceRay(chiefRay, system.Surfaces, false); tr.Error == "" {
 		for _, sr := range tr.Surfaces {
 			if sr.SurfaceID == refSurfaceID {
 				chiefX = sr.Position.X
@@ -1846,7 +1846,7 @@ func computeRayFan(
 			Jones:      pol,
 			Lenient:    true,
 		}
-		tr := engine.TraceRay(r, system.Surfaces)
+		tr := engine.TraceRay(r, system.Surfaces, false)
 		if tr.Error != "" {
 			return types.FanPoint{}, false
 		}
@@ -2169,7 +2169,7 @@ func imageHeightForAnglePT(
 		Lenient:    true,
 	}
 
-	traceResult := engine.TraceRay(ray, system.Surfaces)
+	traceResult := engine.TraceRay(ray, system.Surfaces, false)
 
 	for _, sr := range traceResult.Surfaces {
 		if sr.SurfaceID == refSurfaceID {

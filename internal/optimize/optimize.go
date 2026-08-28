@@ -1608,7 +1608,7 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 			Jones:              pol,
 			SkipGlassPathCheck: mid == 0,
 		}
-		result := engine.TraceRay(r, surfaces)
+		result := engine.TraceRay(r, surfaces, false)
 		if result.Error != "" {
 			hi = mid
 			continue

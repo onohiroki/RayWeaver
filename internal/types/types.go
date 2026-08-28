@@ -254,6 +254,20 @@ type SurfaceResult struct {
 	IntensityS float64 `yaml:"intensity_s"`
 	IntensityP float64 `yaml:"intensity_p"`
 	ErrorCode  string  `yaml:"error_code,omitempty"`
+	// Per-surface detail (populated only when --details is active).
+	AngleOfIncidence *float64 `yaml:"angle_of_incidence,omitempty"` // degrees
+	N1               *float64 `yaml:"n1,omitempty"`                 // incident refractive index
+	N2               *float64 `yaml:"n2,omitempty"`                 // emergent refractive index
+	Rs               *float64 `yaml:"rs,omitempty"`                 // s-polarization Fresnel amplitude reflection
+	Rp               *float64 `yaml:"rp,omitempty"`                 // p-polarization Fresnel amplitude reflection
+	Ts               *float64 `yaml:"ts,omitempty"`                 // s-polarization Fresnel amplitude transmission
+	Tp               *float64 `yaml:"tp,omitempty"`                 // p-polarization Fresnel amplitude transmission
+	IntensityRs      *float64 `yaml:"intensity_rs,omitempty"`       // s-polarization power reflection (Rs^2)
+	IntensityRp      *float64 `yaml:"intensity_rp,omitempty"`       // p-polarization power reflection (Rp^2)
+	CoatingRs        *float64 `yaml:"coating_rs,omitempty"`         // coating power reflection s
+	CoatingRp        *float64 `yaml:"coating_rp,omitempty"`         // coating power reflection p
+	CoatingTs        *float64 `yaml:"coating_ts,omitempty"`         // coating power transmission s
+	CoatingTp        *float64 `yaml:"coating_tp,omitempty"`         // coating power transmission p
 }
 
 type RayResult struct {
@@ -397,6 +411,21 @@ type RayInput struct {
 	// continue past missed surfaces and TIR (the trace --lenient flag). The
 	// effective value (flag wins over YAML) is written back on output.
 	Lenient bool `yaml:"lenient,omitempty"`
+}
+
+// RayTraceConfig configures a single-ray trace via `trace single`.
+// All fields are optional; CLI flags override YAML values.
+type RayTraceConfig struct {
+	Origin      []float64 `yaml:"origin,omitempty"`
+	Direction   []float64 `yaml:"direction,omitempty"`
+	Aim         []float64 `yaml:"aim,omitempty"`
+	AngleYZ     *float64  `yaml:"angle_yz,omitempty"`
+	PassThrough []float64 `yaml:"pass_through,omitempty"` // [surface, Y, X]
+	Path        []int     `yaml:"path,omitempty"`
+	Wavelength  float64   `yaml:"wavelength,omitempty"`
+	ID          string    `yaml:"id,omitempty"`
+	Lenient     bool      `yaml:"lenient,omitempty"`
+	Details     bool      `yaml:"details,omitempty"`
 }
 
 type FieldItem struct {
@@ -1159,6 +1188,7 @@ type Input struct {
 	Optimization   *OptimizationConfig     `yaml:"optimization,omitempty"`
 	Chief          *ChiefInput             `yaml:"chief,omitempty"`
 	Rays           *RayInput               `yaml:"rays,omitempty"`
+	TraceSingle    *RayTraceConfig         `yaml:"trace_single,omitempty"`
 	Paraxial       *ParaxialInput          `yaml:"paraxial,omitempty"`
 	Asphere        *AsphereCandidateConfig `yaml:"asphere_candidate,omitempty"`
 	PSF            *PSFConfig              `yaml:"psf,omitempty"`

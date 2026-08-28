@@ -117,6 +117,15 @@ func main() {
 		}
 	}
 
+	// Trace has a sub-subcommand: single (CLI one-ray trace).
+	traceSingleMode := false
+	if subcommand == "trace" {
+		if len(args) >= 2 && args[1] == "single" {
+			traceSingleMode = true
+			args = append([]string{"trace"}, args[2:]...)
+		}
+	}
+
 	data, err := readStdin()
 	if err != nil {
 		// `query` can evaluate literal expressions / bindings without any
@@ -132,7 +141,7 @@ func main() {
 	case "chief":
 		runChief(data)
 	case "trace":
-		runTrace(data)
+		runTrace(data, traceSingleMode)
 	case "paraxial":
 		runParaxial(data)
 	case "tmm":
@@ -239,9 +248,35 @@ With pass_through, the chief ray is defined as the ray from the field
 See also: samples/us2645157.yaml
 `)
 	case "trace":
-		fmt.Print(`Usage: rayweave trace < system.yaml
+		fmt.Print(`Usage: rayweave trace [FLAGS] < system.yaml
+       rayweave trace single [FLAGS] < system.yaml
 
-Traces one or more rays through the system.
+Traces rays through the system.
+
+Without 'single':
+  Traces rays from the input 'rays' section and chief_rays.
+  Results are appended to any existing results in the input.
+
+With 'single':
+  Traces a single ray specified via CLI flags.
+  Results overwrite any existing results.
+
+Single-ray options:
+  --origin X,Y,Z        ray origin (mm)
+  --direction DX,DY,DZ  ray direction vector
+  --aim X,Y,Z           aim target (auto-computes direction)
+  --angle-yz DEG        incidence angle in YZ plane (degrees)
+  --pass-through S:Y:X  pass through Y,X on surface S
+  --path 0,1,2,...      surface path (comma-separated; default: sequential)
+  --wavelength MM       wavelength (mm)
+  --id NAME             ray ID (default: "trace_single")
+  --details             add per-surface detail to output YAML
+  --verbose             print per-surface info to stderr
+
+Common options:
+  --config ID           select config by id (multi-config mode)
+  --glass-dir DIR       AGF glass catalog directory
+  --lenient             skip aperture/glass-path checks
 
 Input YAML — rays section:
   polarization: [1, 0, 0, 1]    # Jones vector [ReEx, ImEx, ReEy, ImEy]
@@ -253,28 +288,13 @@ Input YAML — rays section:
         direction: [0, 0.1, 1]  # [dx, dy, dz] direction vector
       path: [0, 1, 2, ..., N]   # surface IDs to trace (0 = object)
 
-  Alternative ray definitions:
-    aim: [x, y, z]              # set direction toward target point
-    pass_through:
-      surface: 5                # find origin (or direction) so the ray
-      coordinate: [0, 8.9, 0]   #   passes through (x, y, z) on surface N
-      variable: "origin"        #   "origin" (default) or "direction"
+Output: pipeline-compatible YAML (results[] section).
+  Pipe into 'rayweave plot' for rendering.
 
-Output: YAML with results[] array.  Each result contains
-  per-surface data (position, normal, Fresnel coefficients).
-
-Options:
-  --config ID          select config by id (multi-config mode)
-  --lenient BOOL       trace rays leniently: skip aperture and glass-path
-                          checks, and continue past missed surfaces and TIR
-                          instead of stopping. Missed/TIR surfaces are recorded
-                          per-surface with their interaction set to MISSED/REFLECT.
-                          (default: rays.lenient from the input YAML, else false;
-                          the effective value is written back into the output)
-  --verbose            print per-ray trace errors as JSONL to stderr
-
-The "chief" subcommand outputs YAML that can be piped directly
-  into "rayweave trace".
+Examples:
+  rayweave trace single --origin 0,5,-100 --direction 0,0,1 < lens.yaml
+  rayweave trace single --origin 0,5,-100 --angle-yz 5 --details < lens.yaml | rayweave plot
+  rayweave trace single --origin 0,5,-100 --aim 0,2.5,25 --path 0,1,2,3,4 < lens.yaml
 `)
 	case "paraxial":
 		fmt.Print(`Usage: rayweave paraxial [--config ID] < system.yaml
@@ -1704,7 +1724,11 @@ func configSurfaces(configs []types.Config, configFlag *string) []types.Surface 
 	return nil
 }
 
-func runTrace(data []byte) {
+func runTrace(data []byte, singleMode bool) {
+	if singleMode {
+		runTraceSingle(data)
+		return
+	}
 	args := os.Args[2:]
 	fs := flag.NewFlagSet("trace", flag.ExitOnError)
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
@@ -1787,7 +1811,7 @@ func runTrace(data []byte) {
 					r.Lenient = true
 				}
 				ray.ResolveRay(r, surfaces, engine)
-				result := engine.TraceRay(*r, surfaces)
+				result := engine.TraceRay(*r, surfaces, false)
 				if result.Error != "" {
 					errMsg := fmt.Sprintf("{\"ray\":%q,\"error\":%q,\"error_code\":%q}\n", r.ID, result.Error, result.ErrorCode)
 					errorsMu.Lock()
@@ -1808,7 +1832,7 @@ func runTrace(data []byte) {
 	close(jobs)
 	wg.Wait()
 
-	output.Results = results
+	output.Results = append(output.Results, results...)
 
 	writeYAML(&output)
 }

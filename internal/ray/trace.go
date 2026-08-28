@@ -35,7 +35,7 @@ func NewEngine(gc *glass.Catalog, cc *coating.Catalog) *Engine {
 	}
 }
 
-func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResult {
+func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) types.RayResult {
 	result := types.RayResult{
 		ID:         ray.ID,
 		Wavelength: ray.Wavelength,
@@ -247,6 +247,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 		// the propagated electric field.
 		var ampS, ampP complex128 = 1, 1
 		coatingApplied := false
+		var rs, rp, ts, tp, coatingRs, coatingRp, coatingTs, coatingTp float64
 
 		if tir {
 			// TIR in Lenient mode: 100 % reflection.
@@ -256,7 +257,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			ampS, ampP = 1, 1
 		} else if interaction == types.Reflect {
 			cosTheta2 = math.Sqrt(math.Max(0, 1-(n1/n2)*(n1/n2)*(1-cosTheta1*cosTheta1)))
-			rs, rp, _, _ := raymath.FresnelAmplitude(n1, n2, cosTheta1, cosTheta2)
+			rs, rp, _, _ = raymath.FresnelAmplitude(n1, n2, cosTheta1, cosTheta2)
 			if currentSurf.Reflects() {
 				// Fold mirror: ideal reflection.
 				intensityS = 1.0
@@ -270,7 +271,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			}
 		} else {
 			cosTheta2 = math.Sqrt(math.Max(0, 1-(n1/n2)*(n1/n2)*(1-cosTheta1*cosTheta1)))
-			_, _, ts, tp := raymath.FresnelAmplitude(n1, n2, cosTheta1, cosTheta2)
+			_, _, ts, tp = raymath.FresnelAmplitude(n1, n2, cosTheta1, cosTheta2)
 			intensityS = ts * ts * (n2 * cosTheta2) / (n1 * cosTheta1)
 			intensityP = tp * tp * (n2 * cosTheta2) / (n1 * cosTheta1)
 			ampS, ampP = complex(ts, 0), complex(tp, 0)
@@ -279,6 +280,10 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 		if currentSurf.Coating != "" && e.Coating != nil {
 			if entry, ok := e.Coating.Lookup(currentSurf.Coating); ok {
 				tmmResult := coating.ComputeTMM(n1, n2, entry.Layers, ray.Wavelength, math.Acos(cosTheta1))
+				coatingRs = tmmResult.Rs
+				coatingRp = tmmResult.Rp
+				coatingTs = tmmResult.Ts
+				coatingTp = tmmResult.Tp
 				if interaction == types.Reflect {
 					intensityS = tmmResult.Rs
 					intensityP = tmmResult.Rp
@@ -401,6 +406,26 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface) types.RayResu
 			Field:       field,
 			IntensityS:  intensityS,
 			IntensityP:  intensityP,
+		}
+		if detail {
+			aoi := math.Acos(cosTheta1) * 180 / math.Pi
+			sr.AngleOfIncidence = &aoi
+			sr.N1 = &n1
+			sr.N2 = &n2
+			sr.Rs = &rs
+			sr.Rp = &rp
+			sr.Ts = &ts
+			sr.Tp = &tp
+			irs := rs * rs
+			irp := rp * rp
+			sr.IntensityRs = &irs
+			sr.IntensityRp = &irp
+			if coatingApplied {
+				sr.CoatingRs = &coatingRs
+				sr.CoatingRp = &coatingRp
+				sr.CoatingTs = &coatingTs
+				sr.CoatingTp = &coatingTp
+			}
 		}
 		if tir {
 			sr.ErrorCode = string(ErrTIR)

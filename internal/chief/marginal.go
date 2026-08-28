@@ -195,7 +195,7 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 			return cand != nil
 		}
 		cand.Lenient = true
-		res := engine.TraceRay(*cand, surfaces)
+		res := engine.TraceRay(*cand, surfaces, false)
 		for _, s := range res.Surfaces {
 			switch s.ErrorCode {
 			case string(ray.ErrApertureStop):

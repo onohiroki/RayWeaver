@@ -150,7 +150,7 @@ func analyze(work []types.Surface, results []chief.Result, opts Options, gc *gla
 				Path:                  path,
 				Jones:                 pol,
 				SkipAutoApertureCheck: true,
-			}, work)
+			}, work, false)
 			if tr.Error != "" || len(tr.Surfaces) == 0 {
 				continue
 			}
@@ -329,7 +329,7 @@ func chiefPlaneFrame(engine *ray.Engine, surfaces []types.Surface, path []int, r
 			Path:       path,
 			Jones:      pol,
 			Lenient:    true,
-		}, surfaces)
+		}, surfaces, false)
 		if tr.Error == "" {
 			z := r.EntrancePupil.Center.Z
 			if d, ok := rayDirAtZ(tr.Surfaces, z); ok && d.LengthSq() > 1e-18 {

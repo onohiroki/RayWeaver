@@ -21,7 +21,7 @@ func TestPolarizationOnAxisSinglet(t *testing.T) {
 		Path:       []int{0, 1, 2},
 		Jones:      types.NewCircularJones(true),
 	}
-	res := engine.TraceRay(ray, surfaces)
+	res := engine.TraceRay(ray, surfaces, false)
 	if res.Error != "" {
 		t.Fatalf("trace error: %s", res.Error)
 	}
@@ -50,7 +50,7 @@ func TestPolarizationRCPPreserved(t *testing.T) {
 		Path:       []int{0, 1, 2},
 		Jones:      types.NewCircularJones(true), // RCP (1, i)
 	}
-	res := engine.TraceRay(ray, surfaces)
+	res := engine.TraceRay(ray, surfaces, false)
 	if res.Error != "" {
 		t.Fatalf("trace error: %s", res.Error)
 	}
@@ -90,7 +90,7 @@ func TestPolarizationBrewster(t *testing.T) {
 		Jones:        types.NewLinearJones(0),
 		InitialField: &field,
 	}
-	res := engine.TraceRay(ray, surfaces)
+	res := engine.TraceRay(ray, surfaces, false)
 	if res.Error != "" {
 		t.Fatalf("trace error: %s", res.Error)
 	}

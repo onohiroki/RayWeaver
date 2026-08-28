@@ -114,7 +114,7 @@ func traceChiefRay(surfaces []types.Surface, fieldAngle, wavelength float64, gc 
 		Jones:      types.NewCircularJones(true),
 	}
 
-	return engine.TraceRay(r, surfaces)
+	return engine.TraceRay(r, surfaces, false)
 }
 
 func evaluateImageHeight(surfaces []types.Surface, fieldAngle, wavelength float64, gc *glass.Catalog) float64 {

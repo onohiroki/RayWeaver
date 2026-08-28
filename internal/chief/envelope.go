@@ -51,7 +51,7 @@ func BeamEnvelope(results []Result, engine *ray.Engine, surfaces []types.Surface
 					Jones:                 pol,
 					SkipAutoApertureCheck: true,
 				}
-				tr := engine.TraceRay(ray, surfaces)
+				tr := engine.TraceRay(ray, surfaces, false)
 				if tr.Error != "" {
 					continue
 				}
