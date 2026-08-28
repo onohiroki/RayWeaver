@@ -78,6 +78,8 @@ type RayDetailRow struct {
 	Direction        [3]float64 `json:"direction" yaml:"direction"`
 	Interaction      string   `json:"interaction" yaml:"interaction"`
 	OPL              float64  `json:"opl" yaml:"opl"`
+	IntensityS       float64  `json:"intensity_s" yaml:"intensity_s"`
+	IntensityP       float64  `json:"intensity_p" yaml:"intensity_p"`
 	AngleOfIncidence *float64 `json:"angle_of_incidence,omitempty" yaml:"angle_of_incidence,omitempty"`
 	N1               *float64 `json:"n1,omitempty" yaml:"n1,omitempty"`
 	N2               *float64 `json:"n2,omitempty" yaml:"n2,omitempty"`
@@ -1311,7 +1313,7 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 		if len(details) > 0 {
 			fmt.Println()
 			fmt.Println("Ray Detail:")
-			fmt.Println("ray_id,surface_id,position_x,position_y,position_z,direction_x,direction_y,direction_z,interaction,opl,angle_of_incidence,n1,n2,rs,rp,ts,tp")
+			fmt.Println("ray_id,surface_id,position_x,position_y,position_z,direction_x,direction_y,direction_z,interaction,opl,intensity_s,intensity_p,angle_of_incidence,n1,n2,rs,rp,ts,tp")
 			for _, r := range details {
 				cells := []string{
 					r.RayID,
@@ -1324,6 +1326,8 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 					strconv.FormatFloat(r.Direction[2], 'g', -1, 64),
 					r.Interaction,
 					strconv.FormatFloat(r.OPL, 'g', -1, 64),
+					strconv.FormatFloat(r.IntensityS, 'g', -1, 64),
+					strconv.FormatFloat(r.IntensityP, 'g', -1, 64),
 				}
 				cells = appendOptionalFloat(cells, r.AngleOfIncidence)
 				cells = appendOptionalFloat(cells, r.N1)
@@ -1413,6 +1417,9 @@ func buildRayDetailRows(results []types.RayResult) []RayDetailRow {
 		if rayID == "" {
 			rayID = "unnamed"
 		}
+		// Cumulative transmittance from the entrance (incident intensity = 1):
+		// multiply each surface's single-surface intensity transmittance.
+		var cumS, cumP float64 = 1, 1
 		for _, s := range r.Surfaces {
 			row := RayDetailRow{
 				RayID:       rayID,
@@ -1422,6 +1429,15 @@ func buildRayDetailRows(results []types.RayResult) []RayDetailRow {
 				Interaction: string(s.Interaction),
 				OPL:         s.OPL,
 			}
+			// Surface 0 (object plane) and ideal fold mirrors have intensity 1
+			// (no transmittance to accumulate); only accumulate physical
+			// refractive surfaces.
+			if s.SurfaceID != 0 && s.IntensityS > 0 && s.IntensityS <= 1 {
+				cumS *= s.IntensityS
+				cumP *= s.IntensityP
+			}
+			row.IntensityS = cumS
+			row.IntensityP = cumP
 			if s.AngleOfIncidence != nil {
 				v := *s.AngleOfIncidence
 				row.AngleOfIncidence = &v
@@ -1471,6 +1487,8 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 		{header: "dz", right: true},
 		{header: "Interact"},
 		{header: "OPL[mm]", right: true},
+		{header: "Tcum s", right: true},
+		{header: "Tcum p", right: true},
 	}
 	hasDetail := false
 	for i := range rayDetails {
@@ -1500,14 +1518,16 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 		detailCols[6].cells = append(detailCols[6].cells, formatTableFloat(d.Direction[2]))
 		detailCols[7].cells = append(detailCols[7].cells, d.Interaction)
 		detailCols[8].cells = append(detailCols[8].cells, formatTableFloat(d.OPL))
+		detailCols[9].cells = append(detailCols[9].cells, formatTableFloat(d.IntensityS))
+		detailCols[10].cells = append(detailCols[10].cells, formatTableFloat(d.IntensityP))
 		if hasDetail {
-			detailCols[9].cells = appendOptionalFloatCells(detailCols[9].cells, d.AngleOfIncidence)
-			detailCols[10].cells = appendOptionalFloatCells(detailCols[10].cells, d.N1)
-			detailCols[11].cells = appendOptionalFloatCells(detailCols[11].cells, d.N2)
-			detailCols[12].cells = appendOptionalFloatCells(detailCols[12].cells, d.Rs)
-			detailCols[13].cells = appendOptionalFloatCells(detailCols[13].cells, d.Rp)
-			detailCols[14].cells = appendOptionalFloatCells(detailCols[14].cells, d.Ts)
-			detailCols[15].cells = appendOptionalFloatCells(detailCols[15].cells, d.Tp)
+			detailCols[11].cells = appendOptionalFloatCells(detailCols[11].cells, d.AngleOfIncidence)
+			detailCols[12].cells = appendOptionalFloatCells(detailCols[12].cells, d.N1)
+			detailCols[13].cells = appendOptionalFloatCells(detailCols[13].cells, d.N2)
+			detailCols[14].cells = appendOptionalFloatCells(detailCols[14].cells, d.Rs)
+			detailCols[15].cells = appendOptionalFloatCells(detailCols[15].cells, d.Rp)
+			detailCols[16].cells = appendOptionalFloatCells(detailCols[16].cells, d.Ts)
+			detailCols[17].cells = appendOptionalFloatCells(detailCols[17].cells, d.Tp)
 		}
 	}
 	fmt.Print(renderTable(detailCols))
