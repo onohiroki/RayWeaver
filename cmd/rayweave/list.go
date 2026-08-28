@@ -1463,8 +1463,8 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 	}
 	detailCols := []tableColumn{
 		{header: "Surf", right: true},
-		{header: "Position(x,y,z)"},
-		{header: "Direction(dx,dy,dz)"},
+		{header: "Position x,y,z"},
+		{header: "Direction dx,dy,dz"},
 		{header: "Interact"},
 		{header: "OPL[mm]", right: true},
 	}
@@ -1487,11 +1487,11 @@ func printRayDetailTable(rayDetails []RayDetailRow) {
 		)
 	}
 	for _, d := range rayDetails {
-		pos := fmt.Sprintf("(%s, %s, %s)",
+		pos := fmt.Sprintf("%s, %s, %s",
 			formatTableFloat(d.Position[0]),
 			formatTableFloat(d.Position[1]),
 			formatTableFloat(d.Position[2]))
-		dir := fmt.Sprintf("(%s, %s, %s)",
+		dir := fmt.Sprintf("%s, %s, %s",
 			formatTableFloat(d.Direction[0]),
 			formatTableFloat(d.Direction[1]),
 			formatTableFloat(d.Direction[2]))
