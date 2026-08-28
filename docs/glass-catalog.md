@@ -1,8 +1,9 @@
-# Glass catalog: built-in entries and fallback resolution
+# Glass catalog and material resolution
 
-This document explains how RayWeave resolves glass (optical material) data: the
-built-in table, its contents, and the precedence/fallback behaviour between it
-and external (AGF) catalogs.
+This document explains how RayWeaver resolves glass (optical material) data:
+how materials are specified on surfaces in pipeline YAML, how the catalog is
+populated from AGF files and built-in entries, and the precedence/fallback
+behaviour at both import time and trace time.
 
 ## 1. Two data sources
 
@@ -60,9 +61,132 @@ Caveats:
   lists `LAF2` as a Nikon spec, normalized `LAF2` ≠ `HLAF2`). That case requires
   adding an alias entry or name normalization.
 - Currently only label matching is implemented; **n/νd-based fallback is not**
-  (a different-brand glass with the exact same n/νd will not switch automatically).
+   (a different-brand glass with the exact same n/νd will not switch automatically).
 
-## 6. Built-in `commonGlass` listing
+## 6. Material YAML syntax
+
+Each surface carries a `material` field that specifies the medium after that
+surface. Three forms are accepted:
+
+### Catalog reference (key-based)
+
+```yaml
+material: {key: N-BK7}
+# or flat string
+material: "N-BK7"
+```
+
+The key is looked up in the glass catalog via `Catalog.Lookup`. The catalog is
+populated from `glass_catalog.entries` in the pipeline YAML and from AGF files
+loaded via `glass_catalog.directory` or `--glass-dir`.
+
+### Inline model glass (self-contained)
+
+```yaml
+material: {nd: 1.5168, vd: 64.17}
+# or flat string
+material: "1.5168:64.17"
+```
+
+No catalog lookup is needed. The refractive index at any wavelength is
+computed from `nd`/`vd` using a cubic-spline dispersion model (see
+`docs/methods/glass-dispersion.md`). Useful for quick prototypes or when
+the exact glass identity does not matter.
+
+### Air
+
+```yaml
+material: AIR
+# or empty
+material: ""
+```
+
+Always resolves to `n = 1.0`.
+
+### Mapping form with mixed fields
+
+```yaml
+material:
+  key: N-BK7
+  nd: 1.5168
+  vd: 64.17
+```
+
+When `key` is present and non-empty, the catalog lookup takes precedence over
+the inline `nd`/`vd`. The inline values are ignored in this case.
+
+## 7. Catalog.Lookup fallback chain
+
+When a surface carries `material: {key: N-BK7}`, the runtime calls
+`Catalog.Lookup("N-BK7")` (`internal/glass/glass.go`) which applies the
+following fallback chain. Each step is tried in order; the first match wins.
+
+| Step | Pattern | Example | Action |
+|---|---|---|---|
+| 1. Direct map lookup | `ByName[key]` | `"N-BK7"` → exact match | Return immediately |
+| 2. Name scan | `g.Name == key` for all entries | Iterates all glasses | Slow but handles aliasing |
+| 3. Normalized match | `NormalizeName(key)` strips `-`/`_`, uppercases | `"N-BK7"` → `"NBK7"` | Catches different delimiter conventions |
+| 4. MFR_GLASS suffix | `GlassName_Manufacturer` split on `_` | `"N-BK7_SCHOTT"` → prefix `"N-BK7"`, manufacturer `"SCHOTT"` | Recursively looks up prefix, then verifies manufacturer matches |
+| 5. `_MOLD` suffix | `key` ends with `"_MOLD"` | `"N-BK7_MOLD"` → `"N-BK7"` | Moulding-grade blank is the same glass |
+| 6. Trailing `"M"` | `key` ends with `"M"` | `"S-BAL42M"` → `"S-BAL42"` | Ohara/CDGM/Sumita moulding suffix |
+| 7. Parenthesised resin | `(OKP4HT)` inside the string | `"AL-6263-(OKP4HT)"` → `"OKP4HT"` | Resin compound name inside brackets |
+| 8. Not found | — | Returns `(nil, false)` | Triggers `"glass not found"` error at trace time |
+
+Steps 4–7 recursively call `Lookup` on the derived key, so compound patterns
+(e.g. `"N-BK7_MOLD_SCHOTT"`) are handled naturally.
+
+### What happens when a glass is not found
+
+`RefractiveIndex` returns `0` and an error `"glass not found: <key>"`. The ray
+trace engine discards the error (assigned to `_`), and the Snell's law
+computation receives `n = 0`, which produces degenerate refraction or TIR.
+The result is silently incorrect — there is no explicit abort. Check `chief`
+output for `"glass not found"` warnings on stderr.
+
+## 8. Manufacturer priority
+
+When the same glass name exists in multiple manufacturers' AGF files (e.g.
+`N-BK7` from SCHOTT and a Chinese equivalent), only one entry is kept. The
+priority is controlled by `glass_catalog.manufacturer_order`:
+
+```yaml
+glass_catalog:
+  manufacturer_order: [SCHOTT, OHARA, HOYA, CDGM, HIKARI, SUMITA]  # default
+```
+
+`Catalog.Add()` registers glasses in this sorted order. Because `Add` overwrites
+existing keys, the first-registered (highest-priority) manufacturer's glass
+wins for duplicate names.
+
+During `import`, the order is auto-detected from AGF files (first-seen order)
+via `BuildManufacturerOrder`. When detection fails, the default applies.
+
+## 9. key / name / label
+
+A `types.Glass` entry in `glass_catalog.entries` carries three identity fields.
+They serve different purposes:
+
+| Field | Set by | Used for | Example |
+|---|---|---|---|
+| **`key`** | `ResolveGlassKey()` at `Catalog.Add()`; or set explicitly in YAML | Runtime catalog lookup (`Catalog.Lookup`); `Material.Key` on surfaces; cache keys; error messages | `"N-BK7"`, `"1.51680:64.17"` |
+| **`name`** | AGF parser (`NM`/`NAME` lines); preserved through AGF enhancement | Display name (`glassDisplayName`); CODE V export spelling; fallback key for catalog glasses | `"N-BK7"`, `"L-LAL12"` |
+| **`label`** | Importers (ZEMAX/CODE V/OSLO); hand-written YAML; required for tabulated glasses | Import-time AGF lookup key; registered as catalog alias; preserved through enhancement; used by `ResolveGlassKey` as fallback for model/tabulated glasses | `"___BLANK"`, `"NOA61"` |
+
+### Resolution by glass type
+
+| Glass type | `key` | `name` | `label` |
+|---|---|---|---|
+| AGF catalog | = glass name in AGF (`"N-BK7"`) | Same as AGF name | Empty (not set by AGF parser) |
+| Model glass (hand-written) | Auto-generated from `nd:vd` or from `label` | Empty | User-chosen name |
+| Model glass (imported, e.g. ZEMAX `___BLANK`) | Auto-generated from `nd:vd` | Empty | `"___BLANK"` |
+| Model glass (imported + AGF enhanced) | From AGF match | From AGF match | Preserved from import |
+| Tabulated glass (CODE V PRV) | Set to the PRV name | Empty | Same as key |
+
+The `ResolveGlassKey` function (`internal/types/yaml.go`) picks the key as
+follows: explicit `Key` → `Name` (catalog type) → `Label` (model/tabulated) →
+auto-generated `"nd:vd"` string.
+
+## 10. Built-in `commonGlass` listing
 
 The `commonGlass` map in `internal/importer/importer.go`. Current as of
 2026-08. Several of these entries were added from lens data obtained from
@@ -131,7 +255,7 @@ discontinued from HOYA's own catalog.
 Note: the listing is maintained manually. For the authoritative values always
 refer to `commonGlass` in `internal/importer/importer.go`.
 
-## 7. Obtaining the listing
+## 11. Obtaining the listing
 
 - Currently the only way is to read `commonGlass` in the source (there is no
   enumeration API).
@@ -140,7 +264,7 @@ refer to `commonGlass` in `internal/importer/importer.go`.
 - No CLI prints the full list (`importsweep -dump` prints the glass entries and
   unresolved determination for one file, not the entire built-in table).
 
-## 8. When unresolved entries remain
+## 12. When unresolved entries remain
 
 Patent files in the corpus often use non-catalog notations that do not match the
 AGF catalog (`H_LAF2`, `E48R`, `AL-6263-(OKP4HT)`, `MIRROR`, etc.). The built-in
