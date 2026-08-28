@@ -1056,14 +1056,14 @@ Subcommands:
   import     Import system from ZEMAX ZMX / CODE V SEQ / OSLO LEN
   export     Export system to ZEMAX ZMX / CODE V SEQ / OSLO LEN
 	query      YAML/JSONL selector with in-memory edits
-	list       Read-only listing of system data (surfaces)
+  list       Read-only listing of system data (surfaces, glasses, rays)
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
   for detailed options and YAML structure.
 `)
 	case "list":
 		fmt.Print(`Usage: rayweave list [--format table|yaml|json|csv] [--config ID]
-                   [--glass-dir DIR] [--curvature] [--all] [--roles]
+                   [--glass-dir DIR] [--curvature] [--all] [--roles] [--details]
                    [TARGET...] < input.yaml
 
 Read-only listing of an optical system's definition data. Unlike the pipeline
@@ -1078,6 +1078,10 @@ default: surfaces and glasses):
              With --all, also includes the remaining glass_catalog entries
   paraxial   first-order paraxial properties (EFL, F/#, NA, EPD, BFL, etc.)
              With --roles, also includes the per-element glass-role table
+  rays       ray trace results from results[] section (requires trace output)
+             With --details, also shows per-surface position, direction,
+             interaction, OPL, angle of incidence, n1/n2, and Fresnel
+             coefficients.
 
 Options:
   --format table|yaml|json|csv   output format (default table)
@@ -1087,6 +1091,7 @@ Options:
   --all                          for glasses: also show glass_catalog entries
                                  not used by any surface
   --roles                        for paraxial: also show element roles table
+  --details                      for rays: show per-surface detail
 
 surfaces columns: ID, Type, Radius[mm] (or Curvature[1/mm] with --curvature),
 Thickness[mm], Material, Diameter[mm]. A flat surface has no finite radius:
@@ -1134,6 +1139,8 @@ Examples:
   rayweave list surfaces glasses < lens.yaml
   rayweave list paraxial < lens.yaml
   rayweave list paraxial --roles < lens.yaml
+  rayweave trace single --origin 0,5,-100 --angle-yz 5 < lens.yaml | rayweave list rays
+  rayweave chief | rayweave trace | rayweave list rays --details
 `)
 	case "clean":
 		fmt.Print(`Usage: rayweave clean [--verbose] < pipeline.yaml

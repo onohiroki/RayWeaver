@@ -57,6 +57,42 @@ type surfacesListOutput struct {
 	ThicknessDiffs      []ThicknessDiffRow `json:"thickness_differences,omitempty" yaml:"thickness_differences,omitempty"`
 }
 
+// RaySummaryRow is one row of the `list rays` summary table.
+type RaySummaryRow struct {
+	ID          string  `json:"id" yaml:"id"`
+	Wavelength  float64 `json:"wavelength" yaml:"wavelength"`
+	OPLTotal    float64 `json:"opl_total" yaml:"opl_total"`
+	IntensityS  float64 `json:"intensity_s" yaml:"intensity_s"`
+	IntensityP  float64 `json:"intensity_p" yaml:"intensity_p"`
+	Surfaces    int     `json:"surfaces" yaml:"surfaces"`
+	Transmitted int     `json:"transmitted" yaml:"transmitted"`
+	Missed      int     `json:"missed" yaml:"missed"`
+	Error       string  `json:"error,omitempty" yaml:"error,omitempty"`
+}
+
+// RayDetailRow is one (ray, surface) record of the per-surface detail table.
+type RayDetailRow struct {
+	RayID            string   `json:"ray_id" yaml:"ray_id"`
+	SurfaceID        int      `json:"surface_id" yaml:"surface_id"`
+	Position         [3]float64 `json:"position" yaml:"position"`
+	Direction        [3]float64 `json:"direction" yaml:"direction"`
+	Interaction      string   `json:"interaction" yaml:"interaction"`
+	OPL              float64  `json:"opl" yaml:"opl"`
+	AngleOfIncidence *float64 `json:"angle_of_incidence,omitempty" yaml:"angle_of_incidence,omitempty"`
+	N1               *float64 `json:"n1,omitempty" yaml:"n1,omitempty"`
+	N2               *float64 `json:"n2,omitempty" yaml:"n2,omitempty"`
+	Rs               *float64 `json:"rs,omitempty" yaml:"rs,omitempty"`
+	Rp               *float64 `json:"rp,omitempty" yaml:"rp,omitempty"`
+	Ts               *float64 `json:"ts,omitempty" yaml:"ts,omitempty"`
+	Tp               *float64 `json:"tp,omitempty" yaml:"tp,omitempty"`
+}
+
+// raysListOutput is the structured (yaml/json) shape of `list rays`.
+type raysListOutput struct {
+	Summary []RaySummaryRow `json:"summary" yaml:"summary"`
+	Details []RayDetailRow  `json:"details,omitempty" yaml:"details,omitempty"`
+}
+
 // ThicknessDiffRow is one (config, surface) record of the cross-config
 // thickness comparison: a surface ID whose thickness differs between configs
 // together with its value in one config. Structured output stores these
@@ -111,6 +147,7 @@ func runList(data []byte) {
 	showCurvature := fs.Bool("curvature", false, "show curvature instead of radius")
 	showAll := fs.Bool("all", false, "also show glass_catalog entries not used by any surface")
 	showRoles := fs.Bool("roles", false, "for paraxial: also show element roles table")
+	showDetails := fs.Bool("details", false, "for rays: show per-surface detail")
 	fs.Parse(args.flags)
 
 	switch *format {
@@ -120,14 +157,30 @@ func runList(data []byte) {
 		os.Exit(1)
 	}
 
-	input := parseYAML[types.Input](data)
-	gc, _ := loadCatalogs(&input, *glassDir)
-	surfaces := configSurfaces(input.Configs, configFlag)
-
 	targets := args.positional
 	if len(targets) == 0 {
 		targets = []string{"surfaces", "glasses"}
 	}
+
+	needsOutput := false
+	for _, t := range targets {
+		if t == "rays" {
+			needsOutput = true
+		}
+	}
+
+	var input types.Input
+	var output types.Output
+	if needsOutput {
+		output = parseYAML[types.Output](data)
+		input = output.Input
+	} else {
+		input = parseYAML[types.Input](data)
+	}
+
+	gc, _ := loadCatalogs(&input, *glassDir)
+	surfaces := configSurfaces(input.Configs, configFlag)
+
 	printed := map[string]bool{}
 	first := true
 	for _, target := range targets {
@@ -146,8 +199,10 @@ func runList(data []byte) {
 			listGlasses(surfaces, input, gc, *format, *showAll)
 		case "paraxial":
 			listParaxial(data, input, gc, *format, *configFlag, *showRoles)
+		case "rays":
+			listRays(output, *showDetails, *format)
 		default:
-			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial)", target)
+			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, rays)", target)
 			os.Exit(1)
 		}
 	}
@@ -1193,4 +1248,281 @@ func listParaxial(data []byte, input types.Input, gc *glass.Catalog, format stri
 			fmt.Print(renderTable(roleCols))
 		}
 	}
+}
+
+// listRays renders the ray trace results from the Output's results[] section.
+func listRays(output types.Output, showDetails bool, format string) {
+	// Filter out empty result slots (trace pre-allocates len(rayList) zero-value
+	// entries then appends the real results).
+	results := make([]types.RayResult, 0, len(output.Results))
+	for _, r := range output.Results {
+		if r.ID != "" || r.OPLTotal != 0 || len(r.Surfaces) > 0 {
+			results = append(results, r)
+		}
+	}
+	if len(results) == 0 {
+		errOut("Error: no ray results found (results[] is empty; run 'trace' or 'trace single' first)")
+		os.Exit(1)
+	}
+
+	summary := buildRaySummaryRows(results)
+	var details []RayDetailRow
+	if showDetails {
+		details = buildRayDetailRows(results)
+	}
+
+	switch format {
+	case "yaml":
+		out := raysListOutput{Summary: summary, Details: details}
+		outData, err := yaml.Marshal(out)
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+	case "json":
+		out := raysListOutput{Summary: summary, Details: details}
+		outData, err := json.MarshalIndent(out, "", "  ")
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+		fmt.Println()
+	case "csv":
+		fmt.Println("Ray Summary:")
+		fmt.Println("id,wavelength,opl_total,intensity_s,intensity_p,surfaces,transmitted,missed,error")
+		for _, r := range summary {
+			cells := []string{
+				r.ID,
+				strconv.FormatFloat(r.Wavelength, 'g', -1, 64),
+				strconv.FormatFloat(r.OPLTotal, 'g', -1, 64),
+				strconv.FormatFloat(r.IntensityS, 'g', -1, 64),
+				strconv.FormatFloat(r.IntensityP, 'g', -1, 64),
+				strconv.Itoa(r.Surfaces),
+				strconv.Itoa(r.Transmitted),
+				strconv.Itoa(r.Missed),
+				r.Error,
+			}
+			fmt.Println(strings.Join(quoteCSV(cells), ","))
+		}
+		if showDetails && len(details) > 0 {
+			fmt.Println()
+			fmt.Println("Ray Detail:")
+			fmt.Println("ray_id,surface_id,position_x,position_y,position_z,direction_x,direction_y,direction_z,interaction,opl,angle_of_incidence,n1,n2,rs,rp,ts,tp")
+			for _, r := range details {
+				cells := []string{
+					r.RayID,
+					strconv.Itoa(r.SurfaceID),
+					strconv.FormatFloat(r.Position[0], 'g', -1, 64),
+					strconv.FormatFloat(r.Position[1], 'g', -1, 64),
+					strconv.FormatFloat(r.Position[2], 'g', -1, 64),
+					strconv.FormatFloat(r.Direction[0], 'g', -1, 64),
+					strconv.FormatFloat(r.Direction[1], 'g', -1, 64),
+					strconv.FormatFloat(r.Direction[2], 'g', -1, 64),
+					r.Interaction,
+					strconv.FormatFloat(r.OPL, 'g', -1, 64),
+				}
+				cells = appendOptionalFloat(cells, r.AngleOfIncidence)
+				cells = appendOptionalFloat(cells, r.N1)
+				cells = appendOptionalFloat(cells, r.N2)
+				cells = appendOptionalFloat(cells, r.Rs)
+				cells = appendOptionalFloat(cells, r.Rp)
+				cells = appendOptionalFloat(cells, r.Ts)
+				cells = appendOptionalFloat(cells, r.Tp)
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
+		}
+	default: // "table"
+		fmt.Println("Ray Summary:")
+		cols := []tableColumn{
+			{header: "ID"},
+			{header: "λ[mm]"},
+			{header: "OPL[mm]", right: true},
+			{header: "Is", right: true},
+			{header: "Ip", right: true},
+			{header: "Surf", right: true},
+			{header: "Tx", right: true},
+			{header: "Miss", right: true},
+		}
+		for _, r := range summary {
+			cols[0].cells = append(cols[0].cells, r.ID)
+			cols[1].cells = append(cols[1].cells, formatTableFloat(r.Wavelength))
+			cols[2].cells = append(cols[2].cells, formatTableFloat(r.OPLTotal))
+			cols[3].cells = append(cols[3].cells, formatTableFloat(r.IntensityS))
+			cols[4].cells = append(cols[4].cells, formatTableFloat(r.IntensityP))
+			cols[5].cells = append(cols[5].cells, strconv.Itoa(r.Surfaces))
+			cols[6].cells = append(cols[6].cells, strconv.Itoa(r.Transmitted))
+			cols[7].cells = append(cols[7].cells, strconv.Itoa(r.Missed))
+		}
+		fmt.Print(renderTable(cols))
+
+		if showDetails && len(details) > 0 {
+			seen := map[string]bool{}
+			for _, r := range summary {
+				if seen[r.ID] {
+					continue
+				}
+				seen[r.ID] = true
+				var rayDetails []RayDetailRow
+				for _, d := range details {
+					if d.RayID == r.ID {
+						rayDetails = append(rayDetails, d)
+					}
+				}
+				fmt.Printf("\nDetail — %s:\n", r.ID)
+				printRayDetailTable(rayDetails)
+			}
+		}
+	}
+}
+
+// buildRaySummaryRows builds the summary rows from RayResult slice.
+func buildRaySummaryRows(results []types.RayResult) []RaySummaryRow {
+	rows := make([]RaySummaryRow, 0, len(results))
+	for _, r := range results {
+		row := RaySummaryRow{
+			ID:          r.ID,
+			Wavelength:  r.Wavelength,
+			OPLTotal:    r.OPLTotal,
+			IntensityS:  r.IntensityS,
+			IntensityP:  r.IntensityP,
+			Surfaces:    len(r.Surfaces),
+			Error:       r.Error,
+		}
+		for _, s := range r.Surfaces {
+			switch s.Interaction {
+			case types.Transmit:
+				row.Transmitted++
+			case types.Missed:
+				row.Missed++
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// buildRayDetailRows builds the flattened per-surface detail rows.
+func buildRayDetailRows(results []types.RayResult) []RayDetailRow {
+	var rows []RayDetailRow
+	for _, r := range results {
+		rayID := r.ID
+		if rayID == "" {
+			rayID = "unnamed"
+		}
+		for _, s := range r.Surfaces {
+			row := RayDetailRow{
+				RayID:       rayID,
+				SurfaceID:   s.SurfaceID,
+				Position:    [3]float64{s.Position.X, s.Position.Y, s.Position.Z},
+				Direction:   [3]float64{s.Direction.X, s.Direction.Y, s.Direction.Z},
+				Interaction: string(s.Interaction),
+				OPL:         s.OPL,
+			}
+			if s.AngleOfIncidence != nil {
+				v := *s.AngleOfIncidence
+				row.AngleOfIncidence = &v
+			}
+			if s.N1 != nil {
+				v := *s.N1
+				row.N1 = &v
+			}
+			if s.N2 != nil {
+				v := *s.N2
+				row.N2 = &v
+			}
+			if s.Rs != nil {
+				v := *s.Rs
+				row.Rs = &v
+			}
+			if s.Rp != nil {
+				v := *s.Rp
+				row.Rp = &v
+			}
+			if s.Ts != nil {
+				v := *s.Ts
+				row.Ts = &v
+			}
+			if s.Tp != nil {
+				v := *s.Tp
+				row.Tp = &v
+			}
+			rows = append(rows, row)
+		}
+	}
+	return rows
+}
+
+// printRayDetailTable renders one ray's per-surface detail as a table.
+func printRayDetailTable(rayDetails []RayDetailRow) {
+	if len(rayDetails) == 0 {
+		return
+	}
+	detailCols := []tableColumn{
+		{header: "Surf", right: true},
+		{header: "Position(x,y,z)"},
+		{header: "Direction(dx,dy,dz)"},
+		{header: "Interact"},
+		{header: "OPL[mm]", right: true},
+	}
+	hasDetail := false
+	for i := range rayDetails {
+		if rayDetails[i].AngleOfIncidence != nil || rayDetails[i].N1 != nil {
+			hasDetail = true
+			break
+		}
+	}
+	if hasDetail {
+		detailCols = append(detailCols,
+			tableColumn{header: "θ[°]", right: true},
+			tableColumn{header: "n1", right: true},
+			tableColumn{header: "n2", right: true},
+			tableColumn{header: "Rs", right: true},
+			tableColumn{header: "Rp", right: true},
+			tableColumn{header: "Ts", right: true},
+			tableColumn{header: "Tp", right: true},
+		)
+	}
+	for _, d := range rayDetails {
+		pos := fmt.Sprintf("(%s, %s, %s)",
+			formatTableFloat(d.Position[0]),
+			formatTableFloat(d.Position[1]),
+			formatTableFloat(d.Position[2]))
+		dir := fmt.Sprintf("(%s, %s, %s)",
+			formatTableFloat(d.Direction[0]),
+			formatTableFloat(d.Direction[1]),
+			formatTableFloat(d.Direction[2]))
+		detailCols[0].cells = append(detailCols[0].cells, strconv.Itoa(d.SurfaceID))
+		detailCols[1].cells = append(detailCols[1].cells, pos)
+		detailCols[2].cells = append(detailCols[2].cells, dir)
+		detailCols[3].cells = append(detailCols[3].cells, d.Interaction)
+		detailCols[4].cells = append(detailCols[4].cells, formatTableFloat(d.OPL))
+		if hasDetail {
+			detailCols[5].cells = appendOptionalFloatCells(detailCols[5].cells, d.AngleOfIncidence)
+			detailCols[6].cells = appendOptionalFloatCells(detailCols[6].cells, d.N1)
+			detailCols[7].cells = appendOptionalFloatCells(detailCols[7].cells, d.N2)
+			detailCols[8].cells = appendOptionalFloatCells(detailCols[8].cells, d.Rs)
+			detailCols[9].cells = appendOptionalFloatCells(detailCols[9].cells, d.Rp)
+			detailCols[10].cells = appendOptionalFloatCells(detailCols[10].cells, d.Ts)
+			detailCols[11].cells = appendOptionalFloatCells(detailCols[11].cells, d.Tp)
+		}
+	}
+	fmt.Print(renderTable(detailCols))
+}
+
+// appendOptionalFloat appends a float cell (formatted or "-") to a CSV cell slice.
+func appendOptionalFloat(cells []string, v *float64) []string {
+	if v != nil {
+		return append(cells, strconv.FormatFloat(*v, 'g', -1, 64))
+	}
+	return append(cells, "")
+}
+
+// appendOptionalFloatCells appends a float cell to table column cells.
+func appendOptionalFloatCells(cells []string, v *float64) []string {
+	if v != nil {
+		return append(cells, formatTableFloat(*v))
+	}
+	return append(cells, "-")
 }
