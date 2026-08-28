@@ -107,6 +107,7 @@ func runList(data []byte) {
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	showCurvature := fs.Bool("curvature", false, "show curvature instead of radius")
+	showAll := fs.Bool("all", false, "also show glass_catalog entries not used by any surface")
 	fs.Parse(args.flags)
 
 	switch *format {
@@ -139,7 +140,7 @@ func runList(data []byte) {
 		case "surfaces":
 			listSurfaces(surfaces, gc, *showCurvature, *format, input.Configs, *configFlag != "")
 		case "glasses":
-			listGlasses(surfaces, input, gc, *format)
+			listGlasses(surfaces, input, gc, *format, *showAll)
 		default:
 			errOut("Error: unknown list target %q (supported: surfaces, glasses)", target)
 			os.Exit(1)
@@ -702,8 +703,8 @@ func thicknessDiffValue(rows []ThicknessDiffRow, configIndex, surfaceID int) (fl
 // keys, then the remaining glass_catalog entries (declaration order). The n
 // columns cover every wavelength collected from chief.reference_wavelength
 // and all configs' wavelengths (deduplicated, longest first).
-func listGlasses(surfaces []types.Surface, input types.Input, gc *glass.Catalog, format string) {
-	rows := buildGlassRows(surfaces, input, gc)
+func listGlasses(surfaces []types.Surface, input types.Input, gc *glass.Catalog, format string, showCatalog bool) {
+	rows := buildGlassRows(surfaces, input, gc, showCatalog)
 	wavelengths := collectWavelengths(input)
 
 	switch format {
@@ -853,7 +854,7 @@ func collectWavelengths(input types.Input) []float64 {
 // in first-use order, then unresolved material keys, then the remaining
 // glass_catalog entries (YAML/AGF declaration order). Each resolvable row
 // carries n at every collected wavelength.
-func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catalog) []GlassListRow {
+func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catalog, showCatalog bool) []GlassListRow {
 	wavelengths := collectWavelengths(input)
 	seenKeys := map[string]bool{}
 	unresolvedSeen := map[string]bool{}
@@ -978,7 +979,7 @@ func buildGlassRows(surfaces []types.Surface, input types.Input, gc *glass.Catal
 		}
 		appendResolved(g)
 	}
-	if input.GlassCatalog != nil {
+	if showCatalog && input.GlassCatalog != nil {
 		for i := range input.GlassCatalog.Entries {
 			appendResolved(&input.GlassCatalog.Entries[i])
 		}

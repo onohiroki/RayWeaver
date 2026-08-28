@@ -1043,7 +1043,7 @@ Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
 `)
 	case "list":
 		fmt.Print(`Usage: rayweave list [--format table|yaml|json|csv] [--config ID]
-                   [--glass-dir DIR] [--curvature] [TARGET...] < input.yaml
+                   [--glass-dir DIR] [--curvature] [--all] [TARGET...] < input.yaml
 
 Read-only listing of an optical system's definition data. Unlike the pipeline
 subcommands, list never traces rays and prints formatted tables by default,
@@ -1052,15 +1052,17 @@ not pipeline YAML.
 Targets (space-separated, flags may appear before or after them;
 default: surfaces and glasses):
   surfaces   surface table of the selected config (object plane 0 excluded)
-  glasses    refractive-index table of the glasses: those used by the
-             selected config's surfaces first (first-use order), then
-             unresolved keys, then the remaining glass_catalog entries
+  glasses    refractive-index table of the glasses used by the selected
+             config's surfaces (first-use order) plus unresolved keys.
+             With --all, also includes the remaining glass_catalog entries
 
 Options:
   --format table|yaml|json|csv   output format (default table)
   --config ID                    select config by id (multi-config mode)
   --glass-dir DIR                AGF glass catalog directory
   --curvature                    show curvature instead of radius
+  --all                          for glasses: also show glass_catalog entries
+                                 not used by any surface
 
 surfaces columns: ID, Type, Radius[mm] (or Curvature[1/mm] with --curvature),
 Thickness[mm], Material, Diameter[mm]. A flat surface has no finite radius:
