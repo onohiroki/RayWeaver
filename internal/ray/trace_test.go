@@ -503,3 +503,107 @@ func TestTraceRayLenientGlassPathShort(t *testing.T) {
 		}
 	}
 }
+
+// TestTraceRayIncludeErrorSurfaces verifies that, with IncludeErrorSurfaces
+// set, a non-lenient trace that stops at a surface still records that surface
+// as a MISSED entry carrying the error code (so the partial result shows where
+// the ray stopped). Without the flag the error surface is not appended.
+func TestTraceRayIncludeErrorSurfaces(t *testing.T) {
+	engine, surfaces := simpleSingletEngine()
+
+	// Shrink the singlet aperture so an off-axis ray stops at surface 1.
+	surfaces[0].Diameter = 10.0
+	surface.Precompute(surfaces)
+
+	apertureRay := types.Ray{
+		ID:         "aperture",
+		Wavelength: 0.00058756,
+		Path:       []int{0, 1, 2},
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: 6.0, Z: -100.0},
+			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
+		},
+	}
+
+	// Without the flag: the erroring surface is not appended.
+	plain := engine.TraceRay(apertureRay, surfaces, false)
+	if plain.Error == "" || plain.ErrorCode != string(ErrApertureStop) {
+		t.Fatalf("expected aperture_stop error, got %q/%q", plain.Error, plain.ErrorCode)
+	}
+	for _, sr := range plain.Surfaces {
+		if sr.SurfaceID == 1 {
+			t.Fatalf("error surface appended without IncludeErrorSurfaces")
+		}
+	}
+
+	// With the flag: the erroring surface is appended as MISSED + error code.
+	apertureRay.IncludeErrorSurfaces = true
+	withErr := engine.TraceRay(apertureRay, surfaces, false)
+	if withErr.Error == "" || withErr.ErrorCode != string(ErrApertureStop) {
+		t.Fatalf("expected aperture_stop error, got %q/%q", withErr.Error, withErr.ErrorCode)
+	}
+	last := withErr.Surfaces[len(withErr.Surfaces)-1]
+	if last.SurfaceID != 1 || last.Interaction != types.Missed {
+		t.Fatalf("last surface = id %d interaction %s, want id 1 MISSED",
+			last.SurfaceID, last.Interaction)
+	}
+	if last.ErrorCode != string(ErrApertureStop) {
+		t.Errorf("last surface ErrorCode = %q, want %q", last.ErrorCode, string(ErrApertureStop))
+	}
+	if last.Position.Y == 0 && last.Position.Z == 0 {
+		t.Errorf("error surface position is zero, want the out-of-aperture hit point")
+	}
+
+	// TIR: a ray starting inside the glass, exiting at beyond the critical
+	// angle, must record the exit surface as MISSED + total_internal_reflection.
+	surf := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 4.0,
+			Material: types.Material{Key: "N-BK7"}, Diameter: 30.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 10.0,
+			Material: types.Material{}, Diameter: 30.0},
+	}
+	surface.Precompute(surf)
+	tirRay := types.Ray{
+		ID:                   "tir",
+		Wavelength:           0.00058756,
+		Path:                 []int{0, 2},
+		IncludeErrorSurfaces: true,
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: 0, Z: 3.0},
+			Direction: types.Vec3{X: 0, Y: 0.87, Z: 0.5},
+		},
+	}
+	tirResult := engine.TraceRay(tirRay, surf, false)
+	if tirResult.Error == "" || tirResult.ErrorCode != string(ErrTIR) {
+		t.Fatalf("expected TIR error, got %q/%q", tirResult.Error, tirResult.ErrorCode)
+	}
+	tirLast := tirResult.Surfaces[len(tirResult.Surfaces)-1]
+	if tirLast.SurfaceID != 2 || tirLast.Interaction != types.Missed {
+		t.Fatalf("last TIR surface = id %d interaction %s, want id 2 MISSED",
+			tirLast.SurfaceID, tirLast.Interaction)
+	}
+	if tirLast.ErrorCode != string(ErrTIR) {
+		t.Errorf("TIR surface ErrorCode = %q, want %q", tirLast.ErrorCode, string(ErrTIR))
+	}
+
+	// Surface-not-found: the missing surface is recorded from the ray origin.
+	missing := types.Ray{
+		ID:                   "missing",
+		Wavelength:           0.00058756,
+		Path:                 []int{0, 99},
+		IncludeErrorSurfaces: true,
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: 1, Z: -50.0},
+			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
+		},
+	}
+	missingResult := engine.TraceRay(missing, surfaces, false)
+	if missingResult.Error == "" || missingResult.ErrorCode != string(ErrSurfaceNotFound) {
+		t.Fatalf("expected surface_not_found error, got %q/%q", missingResult.Error, missingResult.ErrorCode)
+	}
+	missLast := missingResult.Surfaces[len(missingResult.Surfaces)-1]
+	if missLast.SurfaceID != 99 || missLast.ErrorCode != string(ErrSurfaceNotFound) {
+		t.Errorf("missing surface = id %d code %q, want id 99 %q",
+			missLast.SurfaceID, missLast.ErrorCode, string(ErrSurfaceNotFound))
+	}
+}

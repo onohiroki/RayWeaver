@@ -89,11 +89,12 @@ func runTraceSingle(data []byte) {
 		pol = input.Rays.Polarization
 	}
 	r := types.Ray{
-		ID:         rayID,
-		Wavelength: wavelength,
-		Path:       path,
-		Lenient:    lenient,
-		Jones:      pol,
+		ID:                   rayID,
+		Wavelength:           wavelength,
+		Path:                 path,
+		Lenient:              lenient,
+		Jones:                pol,
+		IncludeErrorSurfaces: true,
 	}
 	r.Initial.Origin = origin
 
@@ -267,23 +268,30 @@ func printTraceSingleVerbose(result types.RayResult) {
 		surfID := sr.SurfaceID
 		y := sr.Position.Y
 		z := sr.Position.Z
+		marker := ""
+		if sr.ErrorCode != "" {
+			marker = fmt.Sprintf("  [ERROR: %s]", sr.ErrorCode)
+		}
 
 		if sr.AngleOfIncidence != nil && sr.N1 != nil && sr.N2 != nil {
 			n1 := *sr.N1
 			n2 := *sr.N2
 			aoi := *sr.AngleOfIncidence
 			if sr.CoatingRs != nil {
-				fmt.Fprintf(os.Stderr, "  s%-2d  %9s  y=%8.4f  z=%8.4f  \u03b8=%6.2f\u00b0  n1=%.3f  n2=%.3f  coating_Rs=%.4f  Rp=%.4f  Ts=%.4f  Tp=%.4f\n",
+				fmt.Fprintf(os.Stderr, "  s%-2d  %9s  y=%8.4f  z=%8.4f  \u03b8=%6.2f\u00b0  n1=%.3f  n2=%.3f  coating_Rs=%.4f  Rp=%.4f  Ts=%.4f  Tp=%.4f%s\n",
 					surfID, interact, y, z, aoi, n1, n2,
-					*sr.CoatingRs, *sr.CoatingRp, *sr.CoatingTs, *sr.CoatingTp)
+					*sr.CoatingRs, *sr.CoatingRp, *sr.CoatingTs, *sr.CoatingTp, marker)
 			} else if sr.Rs != nil {
-				fmt.Fprintf(os.Stderr, "  s%-2d  %9s  y=%8.4f  z=%8.4f  \u03b8=%6.2f\u00b0  n1=%.3f  n2=%.3f  Rs=%.4f  Rp=%.4f  Ts=%.4f  Tp=%.4f\n",
+				fmt.Fprintf(os.Stderr, "  s%-2d  %9s  y=%8.4f  z=%8.4f  \u03b8=%6.2f\u00b0  n1=%.3f  n2=%.3f  Rs=%.4f  Rp=%.4f  Ts=%.4f  Tp=%.4f%s\n",
 					surfID, interact, y, z, aoi, n1, n2,
-					*sr.Rs, *sr.Rp, *sr.Ts, *sr.Tp)
+					*sr.Rs, *sr.Rp, *sr.Ts, *sr.Tp, marker)
 			}
 		} else {
-			fmt.Fprintf(os.Stderr, "  s%-2d  %9s  y=%8.4f  z=%8.4f\n", surfID, interact, y, z)
+			fmt.Fprintf(os.Stderr, "  s%-2d  %9s  y=%8.4f  z=%8.4f%s\n", surfID, interact, y, z, marker)
 		}
+	}
+	if result.Error != "" {
+		fmt.Fprintf(os.Stderr, "  !!! Trace stopped: %s: %s\n", result.ErrorCode, result.Error)
 	}
 	fmt.Fprintf(os.Stderr, "  OPL_total = %.4f mm  Is=%.4f  Ip=%.4f\n",
 		result.OPLTotal, result.IntensityS, result.IntensityP)

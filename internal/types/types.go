@@ -238,6 +238,11 @@ type Ray struct {
 	// Chief rays and marginal rays use Lenient mode so they trace as far as the
 	// geometry allows even when partially vignetted.
 	Lenient bool `yaml:"lenient,omitempty"`
+	// IncludeErrorSurfaces, when true, appends a MISSED SurfaceResult for the
+	// surface where a non-lenient trace stops (aperture, TIR, missed,
+	// glass-path, surface-not-found), so the partial result shows where the ray
+	// stopped. Only the error code is set; detail fields stay empty.
+	IncludeErrorSurfaces bool `yaml:"-"`
 }
 
 type SurfaceResult struct {

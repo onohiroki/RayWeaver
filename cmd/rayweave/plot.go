@@ -260,6 +260,11 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 
 	glassMap := buildGlassMap(output, surfaces)
 
+	stopSurfaceID := 0
+	if output.Chief != nil {
+		stopSurfaceID = output.Chief.StopSurface
+	}
+
 	cfg := render.Config{
 		Surfaces:         surfaces,
 		Results:          output.Results,
@@ -270,7 +275,7 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 		ScaleOverride:    scaleOverride,
 		RightMarginPct:   rightMarginPct,
 		MaxFanRays:       fanRays,
-		StopSurfaceID:    output.Chief.StopSurface,
+		StopSurfaceID:    stopSurfaceID,
 		ElementColors:    elementColors,
 		AsphereColors:    asphereColors,
 		AsphereColorAll:  asphereColorAll,
