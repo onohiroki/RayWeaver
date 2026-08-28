@@ -6,7 +6,8 @@ formatted tables by default, not pipeline YAML.
 
 ```
 rayweave list [--format table|yaml|json|csv] [--config ID]
-              [--glass-dir DIR] [--curvature] [TARGET...] < input.yaml
+              [--glass-dir DIR] [--curvature] [--all] [--roles] [--summary]
+              [TARGET...] < input.yaml
 ```
 
 ---
@@ -54,8 +55,16 @@ rayweave list surfaces glasses < lens.yaml  # both (same as default)
 |---|---|
 | `surfaces` | Surface table of the selected config. Includes asphere coefficients and thickness differences when applicable. |
 | `glasses` | Refractive-index table of the glasses used by the selected config. |
+| `paraxial` | First-order optical properties (EFL, F/#, NA, EPD, BFL, …). With `--roles`, appends the per-element glass-role table. |
+| `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
 
 Default (no target arguments): `surfaces glasses`.
+
+```sh
+rayweave list paraxial < lens.yaml            # first-order properties
+rayweave list paraxial --roles < lens.yaml    # + element glass roles
+rayweave chief | rayweave trace | rayweave list rays
+```
 
 ---
 
@@ -67,6 +76,9 @@ Default (no target arguments): `surfaces glasses`.
 | `--config ID` | Select one config by id. Without it, all configs are considered. |
 | `--glass-dir DIR` | Load an AGF glass catalog directory (resolves glass names). |
 | `--curvature` | Show curvature [1/mm] instead of radius [mm]. |
+| `--all` | For `glasses`: also list the `glass_catalog` entries not used by any surface. |
+| `--roles` | For `paraxial`: append the per-element glass-role table. |
+| `--summary` | For `rays`: show only the summary table (no per-surface detail). |
 
 Flags may appear before or after the target arguments.
 
@@ -173,7 +185,120 @@ Unresolved keys produce a stderr warning instead of aborting.
 
 ---
 
-## 6. Output formats
+## 6. Rays section — ray trace results
+
+The `rays` target renders the results of a previous `trace` / `trace single`
+run (the `results[]` section). It never re-traces: the data comes straight from
+the pipeline document.
+
+```sh
+rayweave trace single --origin 0,2,-100 --direction 0,0,1 < lens.yaml | rayweave list rays
+rayweave chief | rayweave trace | rayweave list rays --summary
+```
+
+With no `results[]` present, `list rays` aborts with a hint:
+
+```
+rayweave[list]: Error: no ray results found (results[] is empty; run 'trace' or 'trace single' first)
+```
+
+### Summary table
+
+One row per ray:
+
+```
+Ray Summary:
+ID            λ[mm]          OPL[mm]        Is        Ip    Tcum s    Tcum p  Surf  Tx  Miss  Error
+trace_single  5.8756e-04  132.050200  1.000000  1.000000  0.681460  0.700724     9   9     0       
+chief_0deg    5.8756e-04  132.049964  1.000000  1.000000  0.694194  0.694194     9   9     0       
+```
+
+| Column | Meaning |
+|---|---|
+| `ID` | ray id |
+| `λ[mm]` | ray wavelength |
+| `OPL[mm]` | cumulative optical path length at the last surface |
+| `Is`, `Ip` | per-surface intensity of the last surface (as reported by the engine) |
+| `Tcum s`, `Tcum p` | **final cumulative transmittance** from the entrance (incident intensity 1 at the object plane; product of every physical refractive surface's single-surface intensity transmittance; the object plane and ideal fold mirrors contribute 1) |
+| `Surf` | number of surface records |
+| `Tx` | surfaces transmitted (`TRANSMIT` interaction) |
+| `Miss` | surfaces missed (e.g. `MISSED` on a stopping surface) |
+| `Error` | the ray's trace error message, when it stopped |
+
+A ray whose trace failed keeps its error in the summary (and its stopping
+surface carries the `error_code` in the detail table).
+
+### Per-surface detail
+
+Unless `--summary` is given, `list rays` prints a `Detail — <id>:` block per
+ray whenever the results carry surface data:
+
+```
+Detail — trace_single:
+Surf  x  y          z           dx  dy        dz  Interact  OPL[mm]  Is  Ip  Jones  Tcum s  Tcum p  ...
+```
+
+Base columns: `Surf`, `x`, `y`, `z` (intersection position), `dx`, `dy`, `dz`
+(propagated direction), `Interact` (`TRANSMIT`/`REFLECT`/`MISSED`), `OPL[mm]`,
+per-surface intensity `Is`/`Ip`, the Jones vector, and the cumulative
+transmittance `Tcum s`/`Tcum p` from the entrance.
+
+When the results carry detail data (a `--details` trace), the columns `Irs`,
+`Irp` (power reflection), `θ[°]` (angle of incidence), `n1`, `n2` and the
+Fresnel coefficients `Rs`, `Rp`, `Ts`, `Tp` are appended. An `Err` column is
+appended when any surface carries an error code:
+
+```
+Surf  x  y          z  dx  dy        dz  Interact  OPL[mm]  Is  Ip  Jones  Tcum s  Tcum p  Irs  Irp  θ[°]  n1  n2  Rs  Rp  Ts  Tp  Err
+   0  0  5.000000  -100  0  0.087156  0.996195  TRANSMIT        0  1  1  1+0i 0+1i  1.000  1.000   -    -    -    -   -   -   -   -
+   1  0  5.000000  -100  0  0.087156  0.996195  MISSED          0  0  0  0+0i 0+0i   1.000  1.000   -    -    -    -   -   -   -   -  missed_surface
+```
+
+Missing values render as `-`; empty `Jones` cells indicate the trace stopped
+before that surface was reached.
+
+### Structured output
+
+YAML/JSON wrap the tables in a self-describing shape:
+
+```yaml
+summary:
+    - id: trace_single
+      wavelength: 0.00058756
+      opl_total: 132.0502003574585
+      intensity_s: 1
+      intensity_p: 1
+      tcum_s: 0.68146029210437
+      tcum_p: 0.7007242275675368
+      surfaces: 9
+      transmitted: 9
+      missed: 0
+details:
+    - ray_id: trace_single
+      surface_id: 0
+      position: [0, 2, -100]
+      direction: [0, 0, 1]
+      interaction: TRANSMIT
+      thickness: 0
+      opl: 0
+      intensity_s: 1
+      intensity_p: 1
+      jones: [1, 0, 0, 1]          # [ReEx, ImEx, ReEy, ImEy]
+      tcum_s: 1
+      tcum_p: 1
+      angle_of_incidence: 11.21    # only with --details data
+      n1: 1
+      n2: 1.63854
+      rs: 0
+      ...
+```
+
+CSV emits a `Ray Summary:` block followed by a `Ray Detail:` block with
+one header row each.
+
+---
+
+## 7. Output formats
 
 ### Table (default)
 
@@ -250,7 +375,7 @@ rayweave list --format json < lens.yaml
 
 ---
 
-## 7. Examples
+## 8. Examples
 
 ```sh
 # Full listing (surfaces + glasses)
@@ -267,6 +392,15 @@ rayweave list --config tele < zoom.yaml
 
 # CSV for spreadsheet import
 rayweave list --format csv < lens.yaml > lenses.csv
+
+# Trace results: summary + per-surface detail
+rayweave trace single --origin 0,2,-100 --direction 0,0,1 < lens.yaml | rayweave list rays
+
+# Trace results: summary only
+rayweave chief | rayweave trace | rayweave list rays --summary
+
+# First-order properties with element glass roles
+rayweave list paraxial --roles < lens.yaml
 
 # Pipe into query for programmatic access
 rayweave list --format yaml < lens.yaml | rayweave query -r glasses[0].nd

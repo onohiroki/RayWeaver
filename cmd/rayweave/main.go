@@ -289,6 +289,20 @@ Input YAML — rays section:
         direction: [0, 0.1, 1]  # [dx, dy, dz] direction vector
       path: [0, 1, 2, ..., N]   # surface IDs to trace (0 = object)
 
+Input YAML — trace_single section (trace single only; CLI flags win and
+  the effective values are written back on output):
+  trace_single:
+    origin: [0, 5, -100]        # ray origin (mm)
+    direction: [0, 0, 1]        # or aim / angle_yz / pass_through
+    aim: [0, 2.5, 25]           #   aim target (auto-computes direction)
+    angle_yz: 5                 #   incidence angle in YZ plane (degrees)
+    pass_through: [5, 2.5, 0]   #   [surface, Y, X] pass-through target
+    path: [0, 1, 2, ..., N]     # surface IDs (default: sequential)
+    wavelength: 0.00058756      # mm
+    id: "my_ray"                # default: trace_single
+    lenient: false              # skip aperture/glass-path checks
+    details: false              # add per-surface detail to output YAML
+
 Output: pipeline-compatible YAML (results[] section).
   Pipe into 'rayweave plot' for rendering.
 
