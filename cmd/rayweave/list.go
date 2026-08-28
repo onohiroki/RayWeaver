@@ -87,6 +87,7 @@ type RayDetailRow struct {
 	Position         [3]float64    `json:"position" yaml:"position"`
 	Direction        [3]float64    `json:"direction" yaml:"direction"`
 	Interaction      string        `json:"interaction" yaml:"interaction"`
+	Thickness        float64       `json:"thickness" yaml:"thickness"`
 	OPL              float64       `json:"opl" yaml:"opl"`
 	IntensityS       float64       `json:"intensity_s" yaml:"intensity_s"`
 	IntensityP       float64       `json:"intensity_p" yaml:"intensity_p"`
@@ -102,6 +103,11 @@ type RayDetailRow struct {
 	Rp               *float64      `json:"rp,omitempty" yaml:"rp,omitempty"`
 	Ts               *float64      `json:"ts,omitempty" yaml:"ts,omitempty"`
 	Tp               *float64      `json:"tp,omitempty" yaml:"tp,omitempty"`
+	CoatingRs        *float64      `json:"coating_rs,omitempty" yaml:"coating_rs,omitempty"`
+	CoatingRp        *float64      `json:"coating_rp,omitempty" yaml:"coating_rp,omitempty"`
+	CoatingTs        *float64      `json:"coating_ts,omitempty" yaml:"coating_ts,omitempty"`
+	CoatingTp        *float64      `json:"coating_tp,omitempty" yaml:"coating_tp,omitempty"`
+	ErrorCode        string        `json:"error_code,omitempty" yaml:"error_code,omitempty"`
 }
 
 // raysListOutput is the structured (yaml/json) shape of `list rays`.
@@ -1330,7 +1336,7 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 		if len(details) > 0 {
 			fmt.Println()
 			fmt.Println("Ray Detail:")
-			fmt.Println("ray_id,surface_id,position_x,position_y,position_z,direction_x,direction_y,direction_z,interaction,opl,intensity_s,intensity_p,intensity_rs,intensity_rp,jones_re_ex,jones_im_ex,jones_re_ey,jones_im_ey,tcum_s,tcum_p,angle_of_incidence,n1,n2,rs,rp,ts,tp")
+			fmt.Println("ray_id,surface_id,position_x,position_y,position_z,direction_x,direction_y,direction_z,interaction,thickness,opl,intensity_s,intensity_p,intensity_rs,intensity_rp,jones_re_ex,jones_im_ex,jones_re_ey,jones_im_ey,tcum_s,tcum_p,angle_of_incidence,n1,n2,rs,rp,ts,tp,coating_rs,coating_rp,coating_ts,coating_tp,error_code")
 			for _, r := range details {
 				cells := []string{
 					r.RayID,
@@ -1342,6 +1348,7 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 					strconv.FormatFloat(r.Direction[1], 'g', -1, 64),
 					strconv.FormatFloat(r.Direction[2], 'g', -1, 64),
 					r.Interaction,
+					strconv.FormatFloat(r.Thickness, 'g', -1, 64),
 					strconv.FormatFloat(r.OPL, 'g', -1, 64),
 					strconv.FormatFloat(r.IntensityS, 'g', -1, 64),
 					strconv.FormatFloat(r.IntensityP, 'g', -1, 64),
@@ -1363,6 +1370,11 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 				cells = appendOptionalFloat(cells, r.Rp)
 				cells = appendOptionalFloat(cells, r.Ts)
 				cells = appendOptionalFloat(cells, r.Tp)
+				cells = appendOptionalFloat(cells, r.CoatingRs)
+				cells = appendOptionalFloat(cells, r.CoatingRp)
+				cells = appendOptionalFloat(cells, r.CoatingTs)
+				cells = appendOptionalFloat(cells, r.CoatingTp)
+				cells = append(cells, r.ErrorCode)
 				fmt.Println(strings.Join(quoteCSV(cells), ","))
 			}
 		}
@@ -1468,10 +1480,12 @@ func buildRayDetailRows(results []types.RayResult) []RayDetailRow {
 				Position:    [3]float64{s.Position.X, s.Position.Y, s.Position.Z},
 				Direction:   [3]float64{s.Direction.X, s.Direction.Y, s.Direction.Z},
 				Interaction: string(s.Interaction),
+				Thickness:   s.Thickness,
 				OPL:         s.OPL,
 				IntensityS:  s.IntensityS,
 				IntensityP:  s.IntensityP,
 				Jones:       s.Jones,
+				ErrorCode:   s.ErrorCode,
 			}
 			// Surface 0 (object plane) and ideal fold mirrors have intensity 1
 			// (no transmittance to accumulate); only accumulate physical
@@ -1517,6 +1531,22 @@ func buildRayDetailRows(results []types.RayResult) []RayDetailRow {
 			if s.Tp != nil {
 				v := *s.Tp
 				row.Tp = &v
+			}
+			if s.CoatingRs != nil {
+				v := *s.CoatingRs
+				row.CoatingRs = &v
+			}
+			if s.CoatingRp != nil {
+				v := *s.CoatingRp
+				row.CoatingRp = &v
+			}
+			if s.CoatingTs != nil {
+				v := *s.CoatingTs
+				row.CoatingTs = &v
+			}
+			if s.CoatingTp != nil {
+				v := *s.CoatingTp
+				row.CoatingTp = &v
 			}
 			rows = append(rows, row)
 		}
