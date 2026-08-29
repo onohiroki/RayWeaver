@@ -6,7 +6,7 @@ formatted tables by default, not pipeline YAML.
 
 ```
 rayweave list [--format table|yaml|json|csv] [--config ID]
-              [--glass-dir DIR] [--curvature] [--all] [--roles] [--summary]
+              [--glass-dir DIR] [--curvature] [--all-glasses] [--roles] [--summary]
               [TARGET...] < input.yaml
 ```
 
@@ -89,7 +89,7 @@ rayweave chief | rayweave trace | rayweave list rays
 | `--config ID` | Select one config by id. Without it, all configs are considered. |
 | `--glass-dir DIR` | Load an AGF glass catalog directory (resolves glass names). |
 | `--curvature` | Show curvature [1/mm] instead of radius [mm]. |
-| `--all` | For `glasses`: also list the `glass_catalog` entries not used by any surface. |
+| `--all-glasses` | For `glasses`: show all glasses, including the `glass_catalog` entries not used by any surface. |
 | `--roles` | For `paraxial`: append the per-element glass-role table. |
 | `--summary` | For `rays`: show only the summary table (no per-surface detail). |
 

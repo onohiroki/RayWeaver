@@ -1079,7 +1079,7 @@ Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
 `)
 	case "list":
 		fmt.Print(`Usage: rayweave list [--format table|yaml|json|csv] [--config ID]
-                   [--glass-dir DIR] [--curvature] [--all] [--roles] [--summary]
+                   [--glass-dir DIR] [--curvature] [--all-glasses] [--roles] [--summary]
                    [TARGET...] < input.yaml
 
 Read-only listing of an optical system's definition data. Unlike the pipeline
@@ -1091,7 +1091,7 @@ default: surfaces, glasses and paraxial):
   surfaces   surface table of the selected config (object plane 0 excluded)
   glasses    refractive-index table of the glasses used by the selected
              config's surfaces (first-use order) plus unresolved keys.
-             With --all, also includes the remaining glass_catalog entries
+             With --all-glasses, also includes the remaining glass_catalog entries
   paraxial   first-order paraxial properties (EFL, F/#, NA, EPD, BFL, etc.)
              With --roles, also includes the per-element glass-role table
   rays       ray trace results from results[] section (requires trace output).
@@ -1109,8 +1109,8 @@ Options:
   --config ID                    select config by id (multi-config mode)
   --glass-dir DIR                AGF glass catalog directory
   --curvature                    show curvature instead of radius
-  --all                          for glasses: also show glass_catalog entries
-                                 not used by any surface
+  --all-glasses                 for glasses: show all glasses, including
+                                 glass_catalog entries not used by any surface
   --roles                        for paraxial: also show element roles table
   --summary                      for rays: show only summary (no per-surface detail)
 

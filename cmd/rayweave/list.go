@@ -169,7 +169,7 @@ func runList(data []byte) {
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	showCurvature := fs.Bool("curvature", false, "show curvature instead of radius")
-	showAll := fs.Bool("all", false, "also show glass_catalog entries not used by any surface")
+	showAllGlasses := fs.Bool("all-glasses", false, "show all glasses: include glass_catalog entries not used by any surface")
 	showRoles := fs.Bool("roles", false, "for paraxial: also show element roles table")
 	showSummaryOnly := fs.Bool("summary", false, "for rays: show only summary (no per-surface detail)")
 	fs.Parse(args.flags)
@@ -220,7 +220,7 @@ func runList(data []byte) {
 		case "surfaces":
 			listSurfaces(surfaces, gc, *showCurvature, *format, input.Configs, *configFlag != "")
 		case "glasses":
-			listGlasses(surfaces, input, gc, *format, *showAll)
+			listGlasses(surfaces, input, gc, *format, *showAllGlasses)
 		case "paraxial":
 			listParaxial(data, input, gc, *format, *configFlag, *showRoles)
 		case "rays":
