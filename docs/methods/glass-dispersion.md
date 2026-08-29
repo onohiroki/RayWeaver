@@ -35,7 +35,9 @@ resolve to `n = 1`.
 
 A glass defined only by `nd` and `vd` — including **model glasses** whose
 `nd`/`vd` are optimization variables — is turned into a full dispersion curve
-as follows (`RefractiveIndexFromNDVD`):
+as follows (`RefractiveIndexFromNDVD`). The nd/vd approximation used here is
+described in detail at
+<http://onohiroki.cycling.jp/2011-01-21-1#d20110121n1>:
 
 1. The standard-line indices `nₙ`, `n_C`, `n_F`, `n_d`, `n_g`, … are derived
    from `nd`/`vd` using the industry approximation `n = 1 + (n_d − 1)(C + Aλ² +

@@ -114,3 +114,8 @@ cat samples/us2645157.yaml \
   | rayweave trace \
   | rayweave plot --asphere-color "green" -o asphere.svg
 ```
+
+## Reference
+
+The SVG rendering approach is based on the method described at
+<http://onohiroki.cycling.jp/comp-perllens>.

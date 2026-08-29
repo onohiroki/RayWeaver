@@ -51,17 +51,87 @@ positive dot product with it (`cos θ₁ > 0`).
 ## 4. Interaction type
 
 The interaction is `TRANSMIT` unless the surface is a fold mirror (top-level
-`reflect: true`) or the path encodes a reflection
-(`DetermineInteraction` detects a direction reversal: `prev → current → next`
-changing sign).
+`reflect: true`). Path-encoded reflections are detected by
+`DetermineInteraction` and treated as `REFLECT` — see §5.
 
-## 5. Media and refraction
+## 5. Surface-sequence encoding of ghost paths
+
+Every ray carries a `path` — an ordered list of surface IDs to visit. This is
+the fundamental design that lets rayweaver trace both normal sequential rays and
+ghost paths in a single framework, without a separate non-sequential mode.
+
+The interaction at each surface is determined by the direction of the surface-ID
+sequence around it:
+
+| Sequence pattern | Meaning | Example |
+|---|---|---|
+| continuous ascent or descent | refraction (TRANSMIT) | `[1, 2, 3]` |
+| direction reversal | reflection (REFLECT) at the turning point | `[3, 4, 3]` |
+
+`DetermineInteraction(prev, current, next)` implements this: if
+`(current − prev)` and `(next − current)` have opposite signs, the ray
+reflects at `current`; otherwise it transmits.
+
+This differs from other tools:
+
+- **CODE V / ZEMAX** — rays visit surfaces strictly in ascending surface-number
+  order (1, 2, 3, …, N). Ghost analysis requires a separate non-sequential
+  tool or a dedicated ghost-trace mode.
+- **LightTools** — fully non-sequential; rays visit surfaces based on spatial
+  proximity with no predefined path.
+- **Rayweaver** — the path is user-specified and can visit surfaces in **any
+  order**. The trace follows the path deterministically, so ghost paths,
+  double-bounce reflections, and arbitrary surface visitation sequences are all
+  expressible in the same framework as normal sequential tracing.
+
+### Media for backward-travelling rays
+
+A path-encoded reflection reverses the ray's physical direction. After the
+reflection the ray travels backward (negative local Z), so the incident and
+emergent media must be swapped relative to the surface-order convention: the
+incident medium is the current surface's material and the emergent medium is the
+preceding surface's material. The trace engine detects backward travel via
+`localDir.Z < 0` and swaps `n₁`/`n₂` accordingly (see `materialBefore` in
+`internal/ray/trace.go`).
+
+### Ghost reflection intensity
+
+Fold mirrors (`reflect: true`) reflect ideally (intensity 1.0). A path-encoded
+reflection at a refracting surface uses the Fresnel coefficients instead, so a
+ghost ray loses energy at each partial reflection — typically a few percent per
+bounce, making double-reflection ghosts ~100–1000× fainter than the primary
+image.
+
+### Example
+
+The ghost path `[0, 1, 2, 3, 4, 3, 2, 3, 4, 5, …, 14]` in a double-Gauss lens:
+
+```
+forward to surface 4 → reflect (3,4,3) → backward through surface 3
+→ reflect at surface 2 (3,2,3) → forward again to the image (surface 14)
+```
+
+The two REFLECT events (at surfaces 4 and 2) are the ghost reflections; every
+other surface is a Fresnel transmission. The full sample is in
+`samples/doublegauss-ghost.yaml`.
+
+### Reference
+
+The surface-sequence encoding follows the method described in:
+
+> H. Ono, S. Matsumura and Z. Ushiyama, "Exploring ghost ray tracing in a
+> massively parallel fast ray tracing within a cloud computing environment,"
+> *Opt. Rev.* **32**, 402–411 (2025).
+> DOI: [10.1007/s10043-025-00969-w](https://doi.org/10.1007/s10043-025-00969-w)
+
+## 6. Media and refraction
 
 The incident medium `n₁` is the material of the surface that precedes the
 current one in the sequence (skipping fold mirrors, which do not separate
 media), and the emergent medium `n₂` is the current surface's material. For
 backward-travelling ghost rays (after a path-encoded reflection) the two are
-swapped. Indices are looked up in the glass catalog at the ray's wavelength.
+swapped (see §5). Indices are looked up in the glass catalog at the ray's
+wavelength.
 
 **Refraction** uses the vector form of Snell's law:
 
@@ -75,9 +145,10 @@ If `1 − η²(1 − cos² θ₁) < 0` the ray is totally internally reflected
 (`total_internal_reflection` error).
 
 **Reflection** uses `d' = d − 2 (d·n) n`. Fold mirrors reflect ideally
-(intensity 1); path-encoded ghost reflections use the Fresnel coefficients.
+(intensity 1); path-encoded ghost reflections use the Fresnel coefficients
+(see §5).
 
-## 6. Fresnel coefficients and intensity
+## 7. Fresnel coefficients and intensity
 
 The amplitude coefficients (s- and p-polarisation) are
 
@@ -93,13 +164,13 @@ uncoated interface. If the surface carries a coating, the per-interface Fresnel
 intensities are multiplied by the coating's TMM transmittance (or replaced by
 its reflectance for reflections) — see [thin-film-tmm.md](thin-film-tmm.md).
 
-## 7. Optical path length
+## 8. Optical path length
 
 Each segment contributes `OPL = |t| · n₁`; the cumulative OPL is accumulated
 per surface and stored on the result. The total OPL of a ray is used for
 wavefront (OPD RMS) analysis.
 
-## 8. Glass-path constraints
+## 9. Glass-path constraints
 
 Optional `min_glass_path` / `max_glass_path` on the entry surface of a glass
 element bound the path length travelled inside the glass. A violation reports
