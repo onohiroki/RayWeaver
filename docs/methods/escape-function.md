@@ -72,6 +72,15 @@ last true minimum (`restartPerturb = 0.1` of the normalized range). Starting
 exactly on a recorded minimum would give a zero escape gradient (the bump is
 flat at its own centre), so the nudge is necessary.
 
+### Constraint interaction
+
+When `optimization.region_active` is enabled (see
+[region-active.md](region-active.md)), the active-set classification is
+re-evaluated at the start of each DLS iteration within every escape cycle.
+This means the set of binding constraints can change between escape/clean
+phases — constraints inactive at one local minimum may become active at
+another, which supports thorough global exploration.
+
 ## 3. Parallel workers
 
 `escape_workers` (default 4) goroutines each run their own cycle, sharing a

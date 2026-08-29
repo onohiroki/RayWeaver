@@ -667,6 +667,29 @@ type GlassHullConfig struct {
 	Weight  float64 `yaml:"weight,omitempty"`
 }
 
+// RegionActiveConfig configures the Okudaira Region Active Method: Lagrange
+// multipliers with hysteresis for dynamic active-set management of inequality
+// constraints. Equality constraints are always treated as active regardless
+// of this setting.
+type RegionActiveConfig struct {
+	// Enabled turns on the region active method. Enabled by default when
+	// present (nil or absent = disabled; explicit Enabled: true or just
+	// presence enables it — resolved in the optimizer constructor).
+	Enabled bool `yaml:"enabled,omitempty"`
+	// EpsActivate is the threshold above which an inactive constraint becomes
+	// active (violation > eps_activate). Default: 1e-3 (mm).
+	EpsActivate float64 `yaml:"eps_activate,omitempty"`
+	// EpsDeactivate is the threshold below which an active constraint becomes
+	// inactive (violation < eps_deactivate AND lambda small). Default: 1e-4 (mm).
+	// Must satisfy eps_activate > eps_deactivate for hysteresis.
+	EpsDeactivate float64 `yaml:"eps_deactivate,omitempty"`
+	// LambdaStep is the Lagrange multiplier update step size (alpha in
+	// mu_k <- max(0, mu_k + alpha * g_k)). Default: 1.0.
+	LambdaStep float64 `yaml:"lambda_step,omitempty"`
+	// MaxLambda caps the Lagrange multiplier magnitude. Default: 1e6.
+	MaxLambda float64 `yaml:"max_lambda,omitempty"`
+}
+
 type OptimizationConfig struct {
 	Method           string                 `yaml:"method"`
 	Aggregate        string                 `yaml:"aggregate,omitempty"`
@@ -691,6 +714,7 @@ type OptimizationConfig struct {
 	MeritSchedule    *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
 	Degenerate       *DegenerateConfig      `yaml:"degenerate,omitempty"`
 	PowerSolve       *PowerSolveConfig      `yaml:"power_solve,omitempty"`
+	RegionActive     *RegionActiveConfig    `yaml:"region_active,omitempty"`
 }
 
 // PowerSolveConfig configures the power-preserving hard solve: the curvatures

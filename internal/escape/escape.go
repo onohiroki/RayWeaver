@@ -258,6 +258,42 @@ func (w *Wrapper) ComputeConstraints(x []float64) []float64 {
 	return w.inner.ComputeConstraints(x)
 }
 
+// UpdateRegionActiveSet implements dls.RegionActiveUpdater by forwarding to
+// the inner model (the Optimizer). The escape terms are inequality-free so
+// only the inner model's constraints are evaluated for the active-set update.
+func (w *Wrapper) UpdateRegionActiveSet(x []float64) {
+	if ra, ok := w.inner.(dls.RegionActiveUpdater); ok {
+		ra.UpdateRegionActiveSet(x)
+	}
+}
+
+// ActiveConstraintIndices implements dls.ActiveConstraintIndices by forwarding
+// to the inner model. Returns nil when the inner model has no active-set info
+// (legacy: all constraints active).
+func (w *Wrapper) ActiveConstraintIndices() []int {
+	if aci, ok := w.inner.(dls.ActiveConstraintIndices); ok {
+		return aci.ActiveConstraintIndices()
+	}
+	return nil
+}
+
+// ConstraintMultipliers implements dls.ConstraintMultipliers by forwarding to
+// the inner model.
+func (w *Wrapper) ConstraintMultipliers() []float64 {
+	if cmp, ok := w.inner.(dls.ConstraintMultipliers); ok {
+		return cmp.ConstraintMultipliers()
+	}
+	return nil
+}
+
+// SetConstraintMultipliers implements dls.ConstraintMultipliers setter by
+// forwarding to the inner model.
+func (w *Wrapper) SetConstraintMultipliers(lambdas []float64) {
+	if cmp, ok := w.inner.(dls.ConstraintMultipliers); ok {
+		cmp.SetConstraintMultipliers(lambdas)
+	}
+}
+
 // innerMerit evaluates the real (unescaped) merit at x.
 func (w *Wrapper) innerMerit(x []float64) float64 {
 	return w.inner.EvaluateMerit(x)

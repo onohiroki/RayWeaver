@@ -263,7 +263,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	var hull *glass.ConvexHull
 	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull)
 
-	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AutoScale)
+	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AutoScale, input.Optimization.RegionActive)
 	opt.SetApertureMarginMM(apertureMarginMM)
 	if input.Optimization.PowerSolve != nil && input.Optimization.PowerSolve.Enabled {
 		opt.SetPowerSolve(input.Optimization.PowerSolve.Surfaces)

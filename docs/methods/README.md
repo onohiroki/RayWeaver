@@ -13,6 +13,7 @@ instead.
 | [paraxial.md](paraxial.md) | first-order ray trace, cardinal points, entrance/exit pupils, f/# |
 | [merit-functions.md](merit-functions.md) | merit terms (spot RMS, distortion, colour, Seidel, OPD RMS), weights |
 | [dls-optimization.md](dls-optimization.md) | damped least squares: normalised variables, finite-difference Jacobian, augmented-Lagrangian constraints, damping control |
+| [region-active.md](region-active.md) | Okudaira Region Active Method: Lagrange-multiplier-based dynamic active-set with hysteresis for inequality constraints |
 | [escape-function.md](escape-function.md) | escape-function global optimization |
 | [glass-dispersion.md](glass-dispersion.md) | Sellmeier / Schott / Cauchy / nd-vd dispersion models, glass hull |
 | [thin-film-tmm.md](thin-film-tmm.md) | transfer-matrix method for thin-film coatings |

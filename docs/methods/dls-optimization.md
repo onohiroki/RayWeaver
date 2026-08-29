@@ -175,6 +175,11 @@ grows ×10 when a violation persists, up to `mu_con_max`. Each constraint is
 therefore enforced tightly when satisfiable, but an infeasible constraint can be
 relaxed rather than freezing the solve.
 
+When `optimization.region_active` is enabled, only a dynamically-selected
+**active subset** of inequality constraints contributes to the penalty (see
+[region-active.md](region-active.md) for the hysteresis-based switching rules
+and Lagrange multiplier management).  Equality constraints are always included.
+
 ## 6. Options summary
 
 | Option | Default | Meaning |
@@ -190,6 +195,7 @@ relaxed rather than freezing the solve.
 | `optimization.central_diff` | false | central-difference Jacobian (2nd-order) |
 | `optimization.bfgs` | false | BFGS-augmented damping |
 | `optimization.auto_scale` | false | Jacobian-based variable scaling |
+| `optimization.region_active` | nil | Okudaira Region Active Method (see [region-active.md](region-active.md)) |
 
 ## 7. Shared / local variables (multi-config)
 

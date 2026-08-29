@@ -144,3 +144,33 @@ type PupilUpdater interface {
 type MeritScheduleUpdater interface {
 	UpdateMeritWeights(x []float64, iter int)
 }
+
+// RegionActiveUpdater is an optional Model capability: update the dynamic
+// active set of inequality constraints at the current variable state before
+// the next Jacobian column sweep. The solver calls it once per iteration at
+// the current x, so the active set is frozen within one iteration — the
+// base-point and all finite-difference residual evaluations share the same
+// active constraint subset, keeping the Jacobian consistent. Models that do
+// not implement it keep all constraints active (legacy behaviour).
+type RegionActiveUpdater interface {
+	UpdateRegionActiveSet(x []float64)
+}
+
+// ActiveConstraintIndices is an optional Model capability: return the indices
+// of constraints that should be included in the augmented system. The solver
+// calls this after UpdateRegionActiveSet to determine which constraints to
+// treat as active in the normal equations. Models that do not implement it
+// return nil, causing the solver to include all constraints (legacy behaviour).
+type ActiveConstraintIndices interface {
+	ActiveConstraintIndices() []int
+}
+
+// ConstraintMultipliers is an optional Model capability: read/write the
+// Lagrange multipliers for the region-active constraints. The solver reads
+// the current multipliers before building the augmented system and writes
+// the updated multipliers after an accepted step. Models that do not
+// implement it use the solver's internal lambda tracking (legacy behaviour).
+type ConstraintMultipliers interface {
+	ConstraintMultipliers() []float64
+	SetConstraintMultipliers(lambdas []float64)
+}

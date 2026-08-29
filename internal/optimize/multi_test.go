@@ -40,7 +40,7 @@ func TestMultiOptimizerSeidelDistortionKind(t *testing.T) {
 		},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false, nil)
 	x := []float64{}
 	merit := opt.EvaluateMerit(x)
 
@@ -89,7 +89,7 @@ func TestMultiOptimizerApplySharedVariables(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false, nil)
 
 	x := []float64{0.05}
 	configSurfaces, _ := opt.applyVariables(x)
@@ -150,7 +150,7 @@ func TestMultiOptimizerApplyLocalVariables(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := NewMultiOptimizer(configs, nil, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, nil, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false, nil)
 	x := []float64{75.0}
 	configSurfaces, _ := opt.applyVariables(x)
 
@@ -192,7 +192,7 @@ func TestMultiOptimizerSizeAutoAperturesGeometric(t *testing.T) {
 		},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, nil, gc, 10, 1.0, 1e-6, 1e-6, 1.0, 64, 100.0, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, nil, nil, gc, 10, 1.0, 1e-6, 1e-6, 1.0, 64, 100.0, 0, nil, nil, 0, 0, false, false, false, nil)
 
 	// True geometric beam extent at surface 2 for the extreme (16deg) field,
 	// measured without aperture clipping.
@@ -253,7 +253,7 @@ func TestMultiOptimizerEvaluateMerit(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false, nil)
 	x := []float64{0.0}
 	merit := opt.EvaluateMerit(x)
 
@@ -304,7 +304,7 @@ func TestMultiOptimizerGetInitialState(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := NewMultiOptimizer(configs, sharedVars, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, sharedVars, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false, nil)
 	x := opt.getInitialState()
 
 	if len(x) != 2 {
@@ -348,7 +348,7 @@ func TestMultiOptimizerBuildVariableStates(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false, nil)
 	x := []float64{0.03}
 	states := opt.buildVariableStates(x)
 
@@ -395,7 +395,7 @@ func TestMultiOptimizerNoGlassCatalog(t *testing.T) {
 		},
 	}
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false, nil)
 	x := []float64{0.0}
 	merit := opt.EvaluateMerit(x)
 
@@ -436,7 +436,7 @@ func TestMultiOptimizerResultHasExpectedFields(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, false, nil)
 	result := opt.Optimize()
 
 	if result.Status != "max_iterations" {
@@ -506,7 +506,7 @@ func TestMultiOptimizerSatisfiableEqualityConstraints(t *testing.T) {
 		{Name: "s7_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 7, Param: "curvature"}, Min: -0.2, Max: -0.01, Active: true},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, false, nil)
 	result := opt.Optimize()
 
 	if result.AfterMerit >= result.BeforeMerit {
@@ -543,7 +543,7 @@ func TestMultiOptimizerUnsatisfiableConstraintWarns(t *testing.T) {
 		{Name: "s7_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 7, Param: "curvature"}, Min: -0.2, Max: -0.01, Active: true},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, false, nil)
 	result := opt.Optimize()
 
 	if result.Status == "converged" {
@@ -582,7 +582,7 @@ func TestMultiOptimizerApertureMarginClamp(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := NewMultiOptimizer(configs, nil, nil, gc, 10, 0.01, 1e-6, 1e-6, 0.8, 64, 100, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, nil, nil, gc, 10, 0.01, 1e-6, 1e-6, 0.8, 64, 100, 0, nil, nil, 0, 0, false, false, false, nil)
 	if got := opt.Options().ApertureMargin; got != 1.0 {
 		t.Errorf("ApertureMargin = %v, want 1.0 (clamped)", got)
 	}
@@ -613,7 +613,7 @@ func TestMultiOptimizerAsphereVariables(t *testing.T) {
 		{Name: "s1_coef1", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "coefficient_1"}, Min: -1e-3, Max: 1e-3, Active: true},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, localVars, gc, 5, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, nil, localVars, gc, 5, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, false, nil)
 
 	// Initial state must read the surface values (a4 = 1e-5, coefficient_1 = 0).
 	x := opt.getInitialState()
@@ -644,7 +644,7 @@ func TestMultiOptimizerMeritBreakdown(t *testing.T) {
 		{Name: "s1_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature"}, Min: 0.05, Max: 0.2, Active: true},
 		{Name: "s3_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "curvature"}, Min: -0.15, Max: -0.01, Active: true},
 	}
-	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 10, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, false)
+	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 10, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, false, nil)
 
 	x := opt.getInitialState()
 	bd := opt.MeritBreakdown(x)

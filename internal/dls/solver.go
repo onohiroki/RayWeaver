@@ -69,12 +69,19 @@ func Solve(m Model) Result {
 	for j := range muConJ {
 		muConJ[j] = 0.01
 	}
+
+	// allActive is the full set of constraint indices [0..nCon).
+	// activeIndices is set per-iteration by the RegionActiveUpdater (or
+	// defaults to allActive for legacy behaviour).
+	allActive := make([]int, nCon)
+	for j := 0; j < nCon; j++ {
+		allActive[j] = j
+	}
+
 	merit := m.EvaluateMerit(xPhys0)
 	meritOnly := merit
 	if hasConstraints {
-		for j, cj := range c0 {
-			merit += constraintTerm(j, cj, lambdas, muConJ)
-		}
+		merit += sumConstraintTerms(c0, allActive, lambdas, muConJ)
 	}
 	if merit < meritOnly {
 		merit = meritOnly
@@ -139,6 +146,25 @@ func Solve(m Model) Result {
 		if msu, ok := m.(MeritScheduleUpdater); ok {
 			msu.UpdateMeritWeights(denormalize(xNorm, variables, scales), totalIter)
 		}
+		// Region active set update: let the model decide which inequality
+		// constraints are active at the current x. The active set is frozen
+		// for the rest of this iteration (Jacobian + line search).
+		activeIndices := allActive // default: include all constraints
+		// Sync lambdas from the model (the model may have updated them
+		// externally, e.g. during the previous iteration's write-back).
+		if cmp, ok := m.(ConstraintMultipliers); ok {
+			if ml := cmp.ConstraintMultipliers(); len(ml) == nCon {
+				copy(lambdas, ml)
+			}
+		}
+		if ra, ok := m.(RegionActiveUpdater); ok {
+			ra.UpdateRegionActiveSet(denormalize(xNorm, variables, scales))
+			if aci, ok := m.(ActiveConstraintIndices); ok {
+				if idx := aci.ActiveConstraintIndices(); len(idx) > 0 {
+					activeIndices = idx
+				}
+			}
+		}
 		if stopped(opts.Stop) {
 			status = StatusInterrupted
 			break
@@ -151,7 +177,15 @@ func Solve(m Model) Result {
 
 		J, r := J_opt, r_opt
 		if hasConstraints {
-			J, r = buildAugmented(J_opt, r_opt, J_con, c_con, lambdas, muConJ)
+			// Filter to active constraints only for the augmented system.
+			// This is the core of the Region Active Method: only constraints
+			// in the active set are treated as equality constraints in the
+			// DLS subproblem.
+			if len(activeIndices) < nCon {
+				J, r = buildAugmentedActive(J_opt, r_opt, J_con, c_con, lambdas, muConJ, activeIndices)
+			} else {
+				J, r = buildAugmented(J_opt, r_opt, J_con, c_con, lambdas, muConJ)
+			}
 		}
 
 		// Auto-scale: compute per-variable scaling factors from the
@@ -325,9 +359,7 @@ func Solve(m Model) Result {
 		var cNew []float64
 		if hasConstraints {
 			cNew = m.ComputeConstraints(xPhysNew)
-			for j, cj := range cNew {
-				meritNew += constraintTerm(j, cj, lambdas, muConJ)
-			}
+			meritNew += sumConstraintTerms(cNew, activeIndices, lambdas, muConJ)
 		}
 		if meritNew < meritNewOnly {
 			meritNew = meritNewOnly
@@ -368,9 +400,7 @@ func Solve(m Model) Result {
 				var cTest []float64
 				if hasConstraints {
 					cTest = m.ComputeConstraints(xTestPhys)
-					for j, cj := range cTest {
-						meritTest += constraintTerm(j, cj, lambdas, muConJ)
-					}
+					meritTest += sumConstraintTerms(cTest, activeIndices, lambdas, muConJ)
 				}
 				if meritTest < meritTestOnly {
 					meritTest = meritTestOnly
@@ -427,8 +457,14 @@ func Solve(m Model) Result {
 			copy(xNorm, xNormNew)
 			merit = meritNew
 			if hasConstraints && cNew != nil {
-				for j, cj := range cNew {
-					lambdas[j] += muConJ[j] * cj
+				// Update Lagrange multipliers only for active constraints.
+				// Inactive constraints keep their current lambda (0 for
+				// freshly deactivated, or the stored value from the model
+				// for previously-active ones).
+				for _, j := range activeIndices {
+					if j < len(cNew) {
+						lambdas[j] += muConJ[j] * cNew[j]
+					}
 				}
 				for j, cj := range cNew {
 					// Enforce harder when this constraint's violation persists
@@ -439,6 +475,11 @@ func Solve(m Model) Result {
 							muConJ[j] = opts.MuConMax
 						}
 					}
+				}
+				// Write back updated lambdas to the model so it can track
+				// them across iterations (region-active state).
+				if cmp, ok := m.(ConstraintMultipliers); ok {
+					cmp.SetConstraintMultipliers(lambdas)
 				}
 				copy(cPrev, cNew)
 			}
@@ -530,8 +571,8 @@ func Solve(m Model) Result {
 				cNew := m.ComputeConstraints(xPhys)
 				for j, cj := range cNew {
 					cPrev[j] = cj
-					meritNew += constraintTerm(j, cj, lambdas, muConJ)
 				}
+				meritNew += sumConstraintTerms(cNew, activeIndices, lambdas, muConJ)
 			}
 			if meritNew < meritNewOnly {
 				meritNew = meritNewOnly
@@ -783,6 +824,19 @@ func constraintTerm(j int, cj float64, lambdas []float64, muConJ []float64) floa
 	return term
 }
 
+// sumConstraintTerms sums the augmented-Lagrangian penalty for the given
+// constraint indices. Used by the region-active solver to only count active
+// constraints in the merit.
+func sumConstraintTerms(c []float64, indices []int, lambdas []float64, muConJ []float64) float64 {
+	s := 0.0
+	for _, j := range indices {
+		if j < len(c) {
+			s += constraintTerm(j, c[j], lambdas, muConJ)
+		}
+	}
+	return s
+}
+
 func buildAugmented(J_opt [][]float64, r_opt []float64, J_con [][]float64, c_con []float64, lambdas []float64, muConJ []float64) ([][]float64, []float64) {
 	nOpt := len(r_opt)
 	nCon := len(c_con)
@@ -809,6 +863,39 @@ func buildAugmented(J_opt [][]float64, r_opt []float64, J_con [][]float64, c_con
 		JAug[nOpt+j] = make([]float64, nVars)
 		for k := 0; k < nVars; k++ {
 			JAug[nOpt+j][k] = sqrtMu * J_con[j][k]
+		}
+	}
+
+	return JAug, rAug
+}
+
+// buildAugmentedActive is like buildAugmented but only includes the constraints
+// whose indices are in activeIndices. This is the core of the Region Active
+// Method: only the active subset of inequality constraints is treated as an
+// equality constraint in the DLS subproblem.
+func buildAugmentedActive(J_opt [][]float64, r_opt []float64, J_con [][]float64, c_con []float64, lambdas []float64, muConJ []float64, activeIndices []int) ([][]float64, []float64) {
+	nOpt := len(r_opt)
+	nActive := len(activeIndices)
+	nVars := len(J_opt[0])
+
+	rAug := make([]float64, nOpt+nActive)
+	JAug := make([][]float64, nOpt+nActive)
+
+	for i := 0; i < nOpt; i++ {
+		rAug[i] = r_opt[i]
+		JAug[i] = make([]float64, nVars)
+		copy(JAug[i], J_opt[i])
+	}
+
+	for k, j := range activeIndices {
+		if j >= len(c_con) {
+			continue
+		}
+		sqrtMu := math.Sqrt(muConJ[j] / 2.0)
+		rAug[nOpt+k] = sqrtMu * (c_con[j] + lambdas[j]/muConJ[j])
+		JAug[nOpt+k] = make([]float64, nVars)
+		for v := 0; v < nVars; v++ {
+			JAug[nOpt+k][v] = sqrtMu * J_con[j][v]
 		}
 	}
 
