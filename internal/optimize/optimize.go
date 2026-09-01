@@ -1953,12 +1953,8 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 			term := st.term
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache)
-				if term.kind == "" || term.kind == dls.MeritSpotRMS {
-					cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * val * val
-				} else {
-					diff := val - term.target
-					cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
-				}
+				diff := val - term.target
+				cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache)
 				diff := val - term.target
@@ -1998,12 +1994,8 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 			var contrib float64
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache)
-				if term.kind == "" || term.kind == dls.MeritSpotRMS {
-					contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * val * val
-				} else {
-					diff := val - term.target
-					contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
-				}
+				diff := val - term.target
+				contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache)
 				diff := val - term.target
@@ -2044,11 +2036,7 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 			w := math.Sqrt(cfg.weight * st.scale * term.weight * term.fieldWeight * term.wavWeight)
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache)
-				if term.kind == "" || term.kind == dls.MeritSpotRMS {
-					allR = append(allR, w*val)
-				} else {
-					allR = append(allR, w*(val-term.target))
-				}
+				allR = append(allR, w*(val-term.target))
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache)
 				allR = append(allR, w*(val-term.target))

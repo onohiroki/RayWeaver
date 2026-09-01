@@ -46,7 +46,9 @@ radius about the centroid is computed (see
 [chief-rays-and-spot.md](chief-rays-and-spot.md), §5). The grid density follows
 `optimization.num_rays`, and the pupil is scaled by
 `optimization.aperture_margin` (clamped ≥ 1). Polychromatic spot RMS uses the
-per-wavelength grid re-trace.
+per-wavelength grid re-trace. The contribution is `(value − target)²`, so
+`target: 0` (the default) minimises the spot size and a non-zero target drives
+the spot to that value.
 
 ### Off-axis spot kinds (spot_rms_t / _s / _worst / spot_rms_weighted / spot_ee_radius)
 
@@ -74,8 +76,8 @@ The five off-axis kinds reuse the same pupil grid but weight and decompose it:
   `fraction` YAML field). Insensitive to a sparse tail, so it correlates with
   MTF better than RMS for off-axis fields.
 
-All five contribute `(value − target)²`, so `target: 0` minimises them and a
-non-zero target drives them to that value.
+All grid-based kinds contribute `(value − target)²`, so `target: 0` minimises
+them and a non-zero target drives them to that value.
 
 ### opd_rms
 
