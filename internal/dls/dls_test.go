@@ -413,49 +413,6 @@ func TestInvertB(t *testing.T) {
 	}
 }
 
-// autoScaleModel has variables with very different sensitivities to test
-// that auto-scaling equalises them.
-type autoScaleModel struct{}
-
-func (m autoScaleModel) Variables() []VariableInfo {
-	return []VariableInfo{
-		{Name: "big", Min: -100, Max: 100},   // large range, low sensitivity
-		{Name: "small", Min: 0, Max: 0.001},  // tiny range, high sensitivity
-	}
-}
-
-func (m autoScaleModel) InitialState() []float64 { return []float64{0.5, 0.5} }
-
-func (m autoScaleModel) Options() Options { return Options{MaxIter: 30, AutoScale: true} }
-
-func (m autoScaleModel) EvaluateMerit(x []float64) float64 {
-	r := m.ComputeResiduals(x)
-	s := 0.0
-	for _, v := range r {
-		s += v * v
-	}
-	return s
-}
-
-func (m autoScaleModel) ComputeResiduals(x []float64) []float64 {
-	return []float64{
-		x[0] * 0.001, // low sensitivity
-		x[1] * 1000,  // high sensitivity
-	}
-}
-
-func (m autoScaleModel) ComputeConstraints(x []float64) []float64 { return nil }
-
-func TestSolveAutoScale(t *testing.T) {
-	// Without auto-scale: the tiny-range variable dominates and convergence
-	// may be slow or stall.
-	m := autoScaleModel{}
-	res := Solve(m)
-	if res.AfterMerit > 0.01 {
-		t.Errorf("AutoScale: AfterMerit = %v, want < 0.01", res.AfterMerit)
-	}
-}
-
 // interruptibleModel is a shallow bowl whose residuals have tiny gradients.
 // Once the solver reaches the second iteration, UpdatePupils blocks on the
 // Stop channel, so the solve cannot run ahead of a test closing it — the

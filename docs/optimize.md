@@ -36,7 +36,15 @@ optimization:
   max_iter: 100
   central_diff: true        # central-difference Jacobian (2nd-order, 2× cost)
   bfgs: true                # BFGS-augmented damping (μ·B⁻¹ instead of μI)
-  auto_scale: true          # Jacobian-based variable scaling
+  adaptive_damping:         # per-variable adaptive damping (sensitivity-based)
+    sensitivity_ema: 0.70
+    classes:
+      curvature:
+        sensitivity_power: 1.20
+        multiplier: 1.50
+      thickness:
+        sensitivity_power: 0.75
+        multiplier: 0.50
   variables:
     - name: s2_curvature
       target:
@@ -328,9 +336,12 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   approximation. Gives superlinear convergence in well-conditioned valleys.
   **Always pair with `central_diff: true`** — BFGS alone may stall because
   noisy forward-difference gradients corrupt the Hessian update.
-- `optimization.auto_scale` enables Jacobian-based variable scaling: per-
-  variable factors `η_j = 1/√(H_jj + ε)` equalise the sensitivity of all
-  variables in the normal equations, compensating for min-max normalisation.
+- `optimization.adaptive_damping` enables per-variable adaptive damping: the
+  solver replaces the fixed μI damping with μD where D is a diagonal matrix
+  derived from Jacobian sensitivity, variable class (curvature, thickness,
+  asphere, etc.), and accept/reject history. This gives high-sensitivity
+  variables stronger damping while letting low-sensitivity variables move more
+  freely.
 - Grid traces for different (field, wavelength) pairs within a single merit
   evaluation are now parallelised across CPU cores.
 - `configs[].ray_paths` is render-only metadata; the optimizer ignores it.

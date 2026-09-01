@@ -1,5 +1,7 @@
 package dls
 
+import "github.com/hiroki/rayweaver/internal/types"
+
 const (
 	MeritSpotRMS      = "spot_rms"
 	MeritSpotRMST     = "spot_rms_t"
@@ -74,14 +76,11 @@ type Options struct {
 	// definiteness. O(n²) per update, O(n³) to invert via Cholesky — for
 	// n ≤ 50 this is negligible relative to the Jacobian cost.
 	BFGS bool
-	// AutoScale enables Jacobian-based variable scaling: at each iteration,
-	// the diagonal of the Gauss-Newton Hessian H_jj = Σᵢ J_ij² is used to
-	// compute per-variable scaling factors η_j = 1/√(H_jj + ε), and the
-	// normal equations are scaled so all variables have comparable sensitivity.
-	// This compensates for the min-max normalisation not accounting for merit
-	// sensitivity (e.g. curvature vs nd/vd have very different Jacobian
-	// magnitudes). The scaling is recomputed every iteration.
-	AutoScale bool
+	// AdaptiveDamping configures per-variable adaptive damping. When non-nil,
+	// the solver replaces the fixed μI damping with μD where D is a diagonal
+	// matrix derived from Jacobian sensitivity, variable class, and accept/reject
+	// history. nil preserves the legacy μI behaviour.
+	AdaptiveDamping *types.AdaptiveDampingConfig
 	// StallWindowFrac is the fraction of MaxIter used as the stalled-early-stop
 	// window (0 = default 20%, i.e. MaxIter/5, floor 50). Only consulted when
 	// EnableStallDone is true.
@@ -173,4 +172,22 @@ type ActiveConstraintIndices interface {
 type ConstraintMultipliers interface {
 	ConstraintMultipliers() []float64
 	SetConstraintMultipliers(lambdas []float64)
+}
+
+// DampingVarInfo carries per-variable diagnostic information for the
+// adaptive damping logger.
+type DampingVarInfo struct {
+	Name        string  `json:"name"`
+	Class       string  `json:"class"`
+	HDiag       float64 `json:"hessian_diagonal"`
+	Ratio       float64 `json:"sensitivity_ratio"`
+	LocalFactor float64 `json:"local_factor"`
+	Diagonal    float64 `json:"damping_diagonal"`
+	Step        float64 `json:"normalized_step"`
+}
+
+// DampingLogger is an optional Logger capability: report the per-variable
+// adaptive damping diagnostics each iteration.
+type DampingLogger interface {
+	LogDamping(iter int, mu float64, ref float64, vars []DampingVarInfo)
 }

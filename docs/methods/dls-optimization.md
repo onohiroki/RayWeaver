@@ -20,24 +20,26 @@ space in which escape bumps are defined (see
 [escape-function.md](escape-function.md)). Variables with `min == max` are
 fixed.
 
-### 1a. Jacobian-based auto-scaling (`optimization.auto_scale`)
+### 1a. Adaptive damping (`optimization.adaptive_damping`)
 
 Min–max normalisation does not account for merit sensitivity: a curvature
 variable (range ±100) and an nd variable (range 1.4–2.0) may have very
-different Jacobian magnitudes. When `auto_scale: true`, the solver computes
-per-variable scaling factors from the Gauss–Newton Hessian diagonal after
-each Jacobian evaluation:
+different Jacobian magnitudes. When `adaptive_damping` is configured, the
+solver replaces the fixed μI damping with μD where D is a diagonal matrix
+derived from Jacobian sensitivity:
 
 ```
-H_jj = Σᵢ J_ij²
-η_j  = 1 / √(H_jj + ε)      (ε = 1e-8)
+H_jj = Σᵢ J_ij²                  (Gauss-Newton Hessian diagonal)
+h_ref = exp(avg(log(H_jj)))       (geometric mean reference)
+q_j   = clamp(H_jj / h_ref)      (sensitivity ratio)
+d_j   = clamp(q_j^α × c × l_j)   (per-variable damping)
 ```
 
-The normal equations and gradient are then scaled as `D·H·D` and `D·g`
-(with `D = diag(η₁, …, η_n)`), and the solved step is unscaled
-`Δx = D⁻¹·Δx_scaled` before application. This equalises the effective
-step size across variables with different sensitivity, improving convergence
-for heterogeneous variable sets (e.g. curvature + asphere + glass).
+Here α is the per-class sensitivity power, c is the per-class multiplier,
+and l_j is the history-based local factor (boosted on rejection, relaxed on
+acceptance). Variable classes (curvature, thickness, asphere, etc.) are
+auto-detected from `VariableInfo.Param`. Per-variable overrides in
+`adaptive_damping.variables` take precedence over class settings.
 
 ## 2. Residuals and Jacobian
 
@@ -194,7 +196,7 @@ and Lagrange multiplier management).  Equality constraints are always included.
 | `optimization.jacobian_workers` | GOMAXPROCS | Jacobian parallelism |
 | `optimization.central_diff` | false | central-difference Jacobian (2nd-order) |
 | `optimization.bfgs` | false | BFGS-augmented damping |
-| `optimization.auto_scale` | false | Jacobian-based variable scaling |
+| `optimization.adaptive_damping` | nil | per-variable adaptive damping (see §1a) |
 | `optimization.region_active` | nil | Okudaira Region Active Method (see [region-active.md](region-active.md)) |
 
 ## 7. Shared / local variables (multi-config)

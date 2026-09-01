@@ -704,7 +704,6 @@ type OptimizationConfig struct {
 	JacobianWorkers  int                    `yaml:"jacobian_workers,omitempty"`
 	CentralDiff      bool                   `yaml:"central_diff,omitempty"`
 	BFGS             bool                   `yaml:"bfgs,omitempty"`
-	AutoScale        bool                   `yaml:"auto_scale,omitempty"`
 	Variables        []OptimizationVariable `yaml:"variables,omitempty"`
 	SharedVariables  []SharedVariable       `yaml:"shared_variables,omitempty"`
 	LocalVariables   []LocalVariableDef     `yaml:"local_variables,omitempty"`
@@ -715,6 +714,72 @@ type OptimizationConfig struct {
 	Degenerate       *DegenerateConfig      `yaml:"degenerate,omitempty"`
 	PowerSolve       *PowerSolveConfig      `yaml:"power_solve,omitempty"`
 	RegionActive     *RegionActiveConfig    `yaml:"region_active,omitempty"`
+	AdaptiveDamping  *AdaptiveDampingConfig `yaml:"adaptive_damping,omitempty"`
+}
+
+// AdaptiveDampingConfig configures per-variable adaptive damping for the DLS
+// solver. Instead of the fixed μI damping, the solver uses μD where D is a
+// diagonal matrix derived from Jacobian sensitivity, variable class, and
+// accept/reject history. This gives high-sensitivity variables (curvature,
+// asphere) stronger damping while letting low-sensitivity variables (thickness)
+// move more freely.
+type AdaptiveDampingConfig struct {
+	// SensitivityEMA is the exponential moving average coefficient for
+	// smoothing the per-variable sensitivity across iterations (0 = no
+	// smoothing, 0.7 = typical). Higher values reduce oscillation.
+	SensitivityEMA float64 `yaml:"sensitivity_ema,omitempty"`
+	// SensitivityFloor is the minimum value for the Hessian diagonal H_jj,
+	// preventing division by zero for variables with zero Jacobian columns.
+	SensitivityFloor float64 `yaml:"sensitivity_floor,omitempty"`
+	// RatioMin/RatioMax clamp the per-variable sensitivity ratio q_j =
+	// h_j / h_ref, preventing extreme damping values.
+	RatioMin float64 `yaml:"ratio_min,omitempty"`
+	RatioMax float64 `yaml:"ratio_max,omitempty"`
+	// DampingMin/DampingMax clamp the final per-variable damping diagonal
+	// d_j, ensuring numerical stability.
+	DampingMin float64 `yaml:"damping_min,omitempty"`
+	DampingMax float64 `yaml:"damping_max,omitempty"`
+	// RejectBoost multiplies localFactor[j] for variables that contributed
+	// significantly to a rejected step (default 2.0).
+	RejectBoost float64 `yaml:"reject_boost,omitempty"`
+	// AcceptRelax multiplies localFactor[j] toward 1.0 for variables that
+	// contributed to an accepted step (default 0.85).
+	AcceptRelax float64 `yaml:"accept_relax,omitempty"`
+	// ContributionThreshold is the minimum normalised contribution |g_j δ_j|
+	// / Σ|g δ| for a variable to be considered responsible for a rejected step
+	// (default 0.10).
+	ContributionThreshold float64 `yaml:"contribution_threshold,omitempty"`
+	// Classes maps variable class names (curvature, thickness, diameter, nd,
+	// vd, conic, asphere, shared) to per-class damping parameters. Unset
+	// classes use built-in defaults.
+	Classes map[string]DampingClassConfig `yaml:"classes,omitempty"`
+	// Variables maps individual variable names to damping overrides that take
+	// precedence over class settings.
+	Variables map[string]DampingVarConfig `yaml:"variables,omitempty"`
+}
+
+// DampingClassConfig holds per-class damping parameters for a variable class
+// (curvature, thickness, asphere, etc.).
+type DampingClassConfig struct {
+	// SensitivityPower is the exponent α applied to the sensitivity ratio:
+	// q_j^α. Values > 1 amplify the difference between high and low
+	// sensitivity variables; values < 1 compress it.
+	SensitivityPower *float64 `yaml:"sensitivity_power,omitempty"`
+	// Multiplier is the base class coefficient c applied to the damping
+	// diagonal: d_j = q_j^α × c × localFactor. Higher values mean stronger
+	// damping for the entire class.
+	Multiplier *float64 `yaml:"multiplier,omitempty"`
+}
+
+// DampingVarConfig holds per-variable damping overrides. When a variable name
+// matches an entry in AdaptiveDampingConfig.Variables, these values take
+// precedence over the class-level settings.
+type DampingVarConfig struct {
+	SensitivityPower *float64 `yaml:"sensitivity_power,omitempty"`
+	Multiplier       *float64 `yaml:"multiplier,omitempty"`
+	// Min/Max override the global DampingMin/DampingMax for this variable.
+	Min *float64 `yaml:"min,omitempty"`
+	Max *float64 `yaml:"max,omitempty"`
 }
 
 // PowerSolveConfig configures the power-preserving hard solve: the curvatures

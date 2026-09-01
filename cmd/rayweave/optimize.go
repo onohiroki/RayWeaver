@@ -263,7 +263,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	var hull *glass.ConvexHull
 	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull)
 
-	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AutoScale, input.Optimization.RegionActive)
+	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
 	opt.SetApertureMarginMM(apertureMarginMM)
 	if input.Optimization.PowerSolve != nil && input.Optimization.PowerSolve.Enabled {
 		opt.SetPowerSolve(input.Optimization.PowerSolve.Surfaces)
@@ -584,6 +584,22 @@ func (j *jsonLogger) LogModeWeights(iter int, weights map[string]float64) {
 	fmt.Fprintln(j.w, string(data))
 }
 
+func (j *jsonLogger) LogDamping(iter int, mu, ref float64, vars []dls.DampingVarInfo) {
+	entry := dampingLog{
+		Event: "adaptive_damping",
+		Iter:  iter,
+		Mu:    safeF(mu),
+		Ref:   safeF(ref),
+		Vars:  vars,
+	}
+	data, err := json.Marshal(entry)
+	if err != nil {
+		fmt.Fprintf(j.w, "ERR damping: %v\n", err)
+		return
+	}
+	fmt.Fprintln(j.w, string(data))
+}
+
 type multiLogger struct {
 	loggers []dls.Logger
 }
@@ -608,6 +624,14 @@ func (m *multiLogger) LogModeWeights(iter int, weights map[string]float64) {
 	}
 }
 
+func (m *multiLogger) LogDamping(iter int, mu, ref float64, vars []dls.DampingVarInfo) {
+	for _, l := range m.loggers {
+		if dl, ok := l.(dls.DampingLogger); ok {
+			dl.LogDamping(iter, mu, ref, vars)
+		}
+	}
+}
+
 type constraintInfo struct {
 	Residual float64 `json:"residual"`
 }
@@ -616,6 +640,14 @@ type modeWeightsLog struct {
 	Event   string             `json:"event"`
 	Iter    int                `json:"iter"`
 	Weights map[string]float64 `json:"weights"`
+}
+
+type dampingLog struct {
+	Event string             `json:"event"`
+	Iter  int                `json:"iteration"`
+	Mu    float64            `json:"mu"`
+	Ref   float64            `json:"sensitivity_reference"`
+	Vars  []dls.DampingVarInfo `json:"variables"`
 }
 
 type iterLog struct {

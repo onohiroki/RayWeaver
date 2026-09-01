@@ -43,7 +43,6 @@ type Config struct {
 	Logger           dls.Logger
 	CentralDiff      bool
 	BFGS             bool
-	AutoScale        bool
 	Hull             *glass.ConvexHull
 	HullMargin       float64
 	HullWeight       float64
@@ -63,6 +62,8 @@ type Config struct {
 	MeritModes []types.MeritMode
 	// RegionActive configures the Okudaira Region Active Method (nil = disabled).
 	RegionActive *types.RegionActiveConfig
+	// AdaptiveDamping configures per-variable adaptive damping (nil = legacy μI).
+	AdaptiveDamping *types.AdaptiveDampingConfig
 }
 
 // ConfigInput describes one configuration (zoom position) of a
@@ -606,7 +607,7 @@ type Optimizer struct {
 	logger           dls.Logger
 	centralDiff      bool
 	bfgs             bool
-	autoScale        bool
+	adaptiveDamping  *types.AdaptiveDampingConfig
 	hull             *glass.ConvexHull
 	hullMargin       float64
 	hullWeight       float64
@@ -853,6 +854,12 @@ func (o *Optimizer) SetPowerSolve(solveSurfaces []int) {
 	o.powerSolveEnabled = true
 }
 
+// SetAdaptiveDamping configures per-variable adaptive damping. nil disables
+// adaptive damping (legacy μI behaviour).
+func (o *Optimizer) SetAdaptiveDamping(cfg *types.AdaptiveDampingConfig) {
+	o.adaptiveDamping = cfg
+}
+
 // powerTargetForSurface returns the current thin-lens power (curvature-based)
 // of the refractive element containing surface id (for use as a power-preserve
 // target), with a boolean reporting whether the surface belongs to a solvable
@@ -957,7 +964,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		[]config{c}, variables, cfg.GlassCatalog,
 		cfg.MaxIter, cfg.Mu, cfg.Tol, cfg.Epsilon, cfg.ApertureMargin, cfg.NumRays,
 		cfg.MuConMax, cfg.Workers, cfg.Logger, cfg.Hull, cfg.HullMargin, cfg.HullWeight,
-		cfg.CentralDiff, cfg.BFGS, cfg.AutoScale, cfg.RegionActive,
+		cfg.CentralDiff, cfg.BFGS, cfg.AdaptiveDamping, cfg.RegionActive,
 	)
 	opt.SetApertureMarginMM(cfg.ApertureMarginMM)
 	opt.SetDegenerate(cfg.SpotDegenerate, cfg.OPDDegenerate, cfg.WavefrontDegenerate)
@@ -968,7 +975,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 // NewMultiOptimizer builds a unified Optimizer over one or more configs,
 // with shared variables (one x driving many bindings) and local variables
 // (one x driving a single surface of one config).
-func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs, autoScale bool, raCfg *types.RegionActiveConfig) *Optimizer {
+func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs bool, adaptiveDamping *types.AdaptiveDampingConfig, raCfg *types.RegionActiveConfig) *Optimizer {
 	internal := make([]config, len(configs))
 	for i, ci := range configs {
 		c := config{
@@ -1038,7 +1045,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 		internal, variables, gc,
 		maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax,
 		workers, logger, hull, hullMargin, hullWeight,
-		centralDiff, bfgs, autoScale, raCfg,
+		centralDiff, bfgs, adaptiveDamping, raCfg,
 	)
 }
 
@@ -1086,7 +1093,7 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 	return mt
 }
 
-func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs, autoScale bool, raCfg *types.RegionActiveConfig) *Optimizer {
+func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs bool, adaptiveDamping *types.AdaptiveDampingConfig, raCfg *types.RegionActiveConfig) *Optimizer {
 	if maxIter <= 0 {
 		maxIter = 100
 	}
@@ -1189,7 +1196,7 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 		logger:              logger,
 		centralDiff:         centralDiff,
 		bfgs:                bfgs,
-		autoScale:           autoScale,
+		adaptiveDamping:     adaptiveDamping,
 		hull:                hull,
 		hullMargin:          hullMargin,
 		hullWeight:          hullWeight,
@@ -1391,7 +1398,7 @@ func (o *Optimizer) Options() dls.Options {
 		Stop:           o.stop,
 		CentralDiff:    o.centralDiff,
 		BFGS:           o.bfgs,
-		AutoScale:      o.autoScale,
+		AdaptiveDamping: o.adaptiveDamping,
 	}
 }
 

@@ -135,6 +135,13 @@ func Solve(m Model) Result {
 		}
 	}
 
+	// Adaptive damping state: per-variable diagonal D built from Jacobian
+	// sensitivity, variable class, and accept/reject history.
+	var adaptiveState *AdaptiveDampingState
+	if opts.AdaptiveDamping != nil {
+		adaptiveState = NewAdaptiveDampingState(nVars)
+	}
+
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
 		if stopped(opts.Stop) {
 			status = StatusInterrupted
@@ -188,23 +195,6 @@ func Solve(m Model) Result {
 			}
 		}
 
-		// Auto-scale: compute per-variable scaling factors from the
-		// Gauss-Newton Hessian diagonal H_jj = Σᵢ J_ij². The scaling
-		// η_j = 1/√(H_jj + ε) equalises the sensitivity of all variables
-		// in the normal equations, compensating for min-max normalisation
-		// not accounting for merit sensitivity (e.g. curvature vs nd/vd).
-		var eta []float64
-		if opts.AutoScale {
-			eta = make([]float64, nVars)
-			for j := 0; j < nVars; j++ {
-				hjj := 0.0
-				for i := 0; i < len(r); i++ {
-					hjj += J[i][j] * J[i][j]
-				}
-				eta[j] = 1.0 / math.Sqrt(hjj+1e-8)
-			}
-		}
-
 		g := make([]float64, nVars)
 		for j := 0; j < nVars; j++ {
 			sum := 0.0
@@ -241,6 +231,7 @@ func Solve(m Model) Result {
 		}
 
 		H := make([][]float64, nVars)
+		hDiag := make([]float64, nVars)
 		for j := 0; j < nVars; j++ {
 			H[j] = make([]float64, nVars)
 			for k := 0; k < nVars; k++ {
@@ -250,6 +241,7 @@ func Solve(m Model) Result {
 				}
 				H[j][k] = sum
 			}
+			hDiag[j] = H[j][j]
 		}
 		if opts.BFGS && bfgsB != nil {
 			// BFGS-augmented LM: replace μI with μ·B⁻¹.
@@ -266,19 +258,14 @@ func Solve(m Model) Result {
 					H[j][j] += mu
 				}
 			}
+		} else if adaptiveState != nil {
+			diag := adaptiveState.BuildDiagonal(hDiag, variables, *opts.AdaptiveDamping)
+			for j := 0; j < nVars; j++ {
+				H[j][j] += mu * diag[j]
+			}
 		} else {
 			for j := 0; j < nVars; j++ {
 				H[j][j] += mu
-			}
-		}
-
-		// Apply auto-scaling: H_scaled = D·H·D, g_scaled = D·g.
-		if eta != nil {
-			for j := 0; j < nVars; j++ {
-				for k := 0; k < nVars; k++ {
-					H[j][k] *= eta[j] * eta[k]
-				}
-				g[j] *= eta[j]
 			}
 		}
 
@@ -317,13 +304,6 @@ func Solve(m Model) Result {
 		if delta == nil {
 			mu *= 2.0
 			continue
-		}
-
-		// Unscale the step: Δx = D^{-1}·Δx_scaled.
-		if eta != nil {
-			for j := 0; j < nVars; j++ {
-				delta[j] *= eta[j]
-			}
 		}
 
 		stepBeforeClamp := 0.0
@@ -489,6 +469,13 @@ func Solve(m Model) Result {
 				copy(bestXNorm, xNorm)
 				copy(bestKnownNorm, xNorm)
 			}
+			if adaptiveState != nil {
+				adaptiveState.OnAccepted(delta, variables, *opts.AdaptiveDamping)
+			}
+		} else {
+			if adaptiveState != nil {
+				adaptiveState.OnRejected(g, delta, variables, *opts.AdaptiveDamping)
+			}
 		}
 
 		stepNorm := math.Sqrt(normDelta)
@@ -507,6 +494,24 @@ func Solve(m Model) Result {
 				}
 			}
 			opts.Logger.LogIter(totalIter+1, merit, actualReduction, stepNorm, currVars, constr)
+		}
+
+		if adaptiveState != nil {
+			if dl, ok := opts.Logger.(DampingLogger); ok {
+				infos := make([]DampingVarInfo, nVars)
+				for j, v := range variables {
+					infos[j] = DampingVarInfo{
+						Name:        v.Name,
+						Class:       dampingClass(v.Param),
+						HDiag:       hDiag[j],
+						Ratio:       adaptiveState.lastRatio[j],
+						LocalFactor: adaptiveState.localFactor[j],
+						Diagonal:    adaptiveState.diagonal[j],
+						Step:        delta[j],
+					}
+				}
+				dl.LogDamping(totalIter+1, mu, adaptiveState.lastRef, infos)
+			}
 		}
 
 		if actualReduction > 0 {
