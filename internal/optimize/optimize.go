@@ -417,12 +417,21 @@ func (o *Optimizer) spotDiffractionRatio(x []float64) (float64, bool) {
 			continue
 		}
 
-		// Image-space NA from paraxial (infinite conjugate).
+		// Image-space NA from paraxial (infinite conjugate).  For systems
+		// without an explicit stop surface, paraxial.Compute returns EPD=0
+		// so ImageSpaceNA is zero; fall back to EPD/(2·focal_length) using
+		// the entrance-pupil radius from ApertureRadiusForGrid.
 		sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
 		pr := paraxial.Compute(sys, wl, gc, 0, nil)
 		na := pr.ImageSpaceNA
 		if na <= 0 {
 			na = pr.InfConjImageSpaceNA
+		}
+		if na <= 0 && pr.FocalLength > 1e-9 {
+			epRad := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, wl, gc, 1.0)
+			if epRad > 0 {
+				na = epRad / pr.FocalLength
+			}
 		}
 		if na <= 0 {
 			continue
@@ -481,9 +490,10 @@ func (o *Optimizer) spotDiffractionRatio(x []float64) (float64, bool) {
 
 			rms := dls.ComputeSpotRMS(points)
 			if rms <= 0 || rms >= 1e6 {
-				// Degenerate grid (0 valid rays) → treat as strongly
-				// aberration-limited: a large ratio keeps geometric mode active.
-				rms = 1e3 * airy
+				// Degenerate grid (0 valid rays or fully vignetted field)
+				// → skip this field from the average rather than polluting
+				// the metric with a 1e3 fallback.
+				continue
 			}
 			ratio := rms / airy
 			rw := cfgWeight * fe.weight
