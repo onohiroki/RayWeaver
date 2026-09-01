@@ -94,40 +94,14 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	return points, perSurfMax
 }
 
-const (
-	estimatedEPDMargin          = 0.85
-	maxEstimatedEPDMultiplier   = 3.0
-)
-
-// estimateEntrancePupilDiameterFromFirstSurface returns an estimated
-// entrance-pupil diameter as 2*|R| where R is the radius of the first
-// surface that carries glass (material != AIR) or is a mirror
-// (reflect:true). Plane surfaces (curvature==0) are skipped. When no such
-// surface exists the estimate is 0.
+// estimateEntrancePupilDiameterFromFirstSurface is a thin wrapper over the
+// paraxial implementation, kept for backward compatibility (dls grid tests).
 func estimateEntrancePupilDiameterFromFirstSurface(surfaces []types.Surface) float64 {
-	for _, s := range surfaces {
-		if s.Curvature == 0 {
-			continue
-		}
-		isGlass := !s.Material.IsAir()
-		if !isGlass && !s.Reflects() {
-			continue
-		}
-		r := s.Radius()
-		if r == 0 {
-			continue
-		}
-		return 2 * math.Abs(r)
-	}
-	return 0
+	return paraxial.EstimateEntrancePupilDiameterFromFirstSurface(surfaces)
 }
 
 func estimateEntrancePupilRadiusFromFirstSurface(surfaces []types.Surface) float64 {
-	d := estimateEntrancePupilDiameterFromFirstSurface(surfaces)
-	if d <= 0 {
-		return 0
-	}
-	return d / 2
+	return paraxial.EstimateEntrancePupilRadiusFromFirstSurface(surfaces)
 }
 
 // ApertureRadiusForGrid returns the entrance-pupil radius used for grid
@@ -142,20 +116,31 @@ func estimateEntrancePupilRadiusFromFirstSurface(surfaces []types.Surface) float
 // estimate from the first glass/mirror surface radius: 2*|R| with a 0.85
 // safety margin, capped at 3x the estimate.
 func ApertureRadiusForGrid(surfaces []types.Surface, stopSurface int, wavelength float64, gc *glass.Catalog, margin float64) float64 {
-	rPar := paraxialEntranceRadius(surfaces, stopSurface, wavelength, gc, margin)
+	sys := types.System{Surfaces: surfaces, StopSurface: stopSurface}
+	res := paraxial.Compute(sys, wavelength, gc, 0, nil)
+	rPar := 0.0
+	if res.EntrancePupilDiameter > 0 {
+		rPar = (res.EntrancePupilDiameter / 2) * margin
+	}
 	if stopSurface > 0 && rPar > 0 {
 		return rPar
 	}
-	rFixed := fixedApertureAtPupil(surfaces, wavelength, gc)
-	if rFixed > 0 {
-		return rFixed
-	}
+	// Stop-free: paraxial.Compute infers EPD via EntrancePupilRadiusStopFree,
+	// so rPar is the beam-aware radius (margin-scaled).
 	if rPar > 0 {
 		return rPar
 	}
-	if rEst := estimateEntrancePupilRadiusFromFirstSurface(surfaces); rEst > 0 {
-		r := rEst * estimatedEPDMargin
-		maxR := rEst * maxEstimatedEPDMultiplier
+	// Fallback: estimate from the first glass/mirror surface radius.
+	// This covers the case where paraxial.Compute returns EPD=0 (e.g.
+	// surfaces not yet precomputed or a degenerate system).
+	rFixed := paraxial.EntrancePupilRadiusStopFree(surfaces, wavelength, gc)
+	if rFixed > 0 {
+		return rFixed
+	}
+	rEst := estimateEntrancePupilRadiusFromFirstSurface(surfaces)
+	if rEst > 0 {
+		r := rEst * paraxial.EstimatedEPDMargin
+		maxR := rEst * paraxial.MaxEstimatedEPDMultiplier
 		if r > maxR {
 			r = maxR
 		}
@@ -164,63 +149,9 @@ func ApertureRadiusForGrid(surfaces []types.Surface, stopSurface int, wavelength
 	return surface.MinApertureRadius(surfaces)
 }
 
-// fixedApertureAtPupil returns the grid-radius cap imposed by the fixed
-// (auto_aperture: false) surfaces for a dynamic (stop-free) pupil, with each
-// surface's aperture projected back to the aperture position along the
-// paraxial marginal ray. The reference marginal height is the tightest fixed
-// surface's (the dynamic-pupil aperture position); a surface at marginal
-// height y_s caps the grid at r_s * yRef / y_s. Image-side surfaces whose
-// clear diameter exceeds the local beam (e.g. a field flattener near the
-// image, where the marginal has converged) therefore do not wrongly shrink
-// the entrance pupil.
+// fixedApertureAtPupil is a thin wrapper kept for backward compatibility.
 func fixedApertureAtPupil(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) float64 {
-	ys := paraxial.MarginalRayHeights(surfaces, wavelength, gc)
-	if len(ys) != len(surfaces) {
-		return surface.FixedMinApertureRadius(surfaces)
-	}
-
-	refIdx := -1
-	refR := math.MaxFloat64
-	for i, s := range surfaces {
-		if s.AutoAperture || s.Diameter <= 0 {
-			continue
-		}
-		if s.Diameter/2 < refR {
-			refR = s.Diameter / 2
-			refIdx = i
-		}
-	}
-	if refIdx < 0 || math.Abs(ys[refIdx]) < 1e-12 {
-		return surface.FixedMinApertureRadius(surfaces)
-	}
-	yRef := math.Abs(ys[refIdx])
-
-	best := math.MaxFloat64
-	for i, s := range surfaces {
-		if s.AutoAperture || s.Diameter <= 0 {
-			continue
-		}
-		if i >= len(ys) || math.Abs(ys[i]) < 1e-12 {
-			continue
-		}
-		cap := (s.Diameter / 2) * yRef / math.Abs(ys[i])
-		if cap < best {
-			best = cap
-		}
-	}
-	if best == math.MaxFloat64 {
-		return surface.FixedMinApertureRadius(surfaces)
-	}
-	return best
-}
-
-func paraxialEntranceRadius(surfaces []types.Surface, stopSurface int, wavelength float64, gc *glass.Catalog, margin float64) float64 {
-	sys := types.System{Surfaces: surfaces, StopSurface: stopSurface}
-	res := paraxial.Compute(sys, wavelength, gc, 0, nil)
-	if res.EntrancePupilDiameter > 0 {
-		return (res.EntrancePupilDiameter / 2) * margin
-	}
-	return 0
+	return paraxial.EntrancePupilRadiusStopFree(surfaces, wavelength, gc)
 }
 
 // RecommendedThresholds returns the adaptive re-estimation thresholds for a
@@ -289,7 +220,7 @@ func ReestimateApertureRadiusFromSamples(samples []pupil.Sample, initialEstimate
 	if !has {
 		return 0
 	}
-	maxAllowed := initialEstimateRadius * maxEstimatedEPDMultiplier
+	maxAllowed := initialEstimateRadius * paraxial.MaxEstimatedEPDMultiplier
 	if maxR > maxAllowed {
 		maxR = maxAllowed
 	}
@@ -302,7 +233,7 @@ func ClampToMaxEstimate(reestimated, initialEstimateRadius float64) float64 {
 	if initialEstimateRadius <= 0 {
 		return reestimated
 	}
-	m := initialEstimateRadius * maxEstimatedEPDMultiplier
+	m := initialEstimateRadius * paraxial.MaxEstimatedEPDMultiplier
 	if reestimated > m {
 		return m
 	}

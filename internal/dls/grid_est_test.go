@@ -5,7 +5,9 @@ import (
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/pupil"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -173,5 +175,52 @@ func TestReestimateFromSamples(t *testing.T) {
 	// No survivors
 	if got := ReestimateApertureRadiusFromSamples([]pupil.Sample{{PupilX: 0, OK: false}}, 10); got != 0 {
 		t.Errorf("no survivors should be 0, got %v", got)
+	}
+}
+
+// TestApertureRadiusConsistentWithParaxial verifies that
+// ApertureRadiusForGrid(stopSurface=0, margin=1.0) produces the same
+// entrance-pupil radius as paraxial.Compute for stop-free systems.
+func TestApertureRadiusConsistentWithParaxial(t *testing.T) {
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 1.0 / 60.0, Thickness: 3.0, Material: types.Material{ND: 1.64, VD: 55.0}, Diameter: 36.0, AutoAperture: true},
+		{ID: 2, Type: types.Sphere, Curvature: 0.0, Thickness: 10.0, Material: types.Material{}, Diameter: 15.8},
+		{ID: 3, Type: types.Sphere, Curvature: -1.0 / 60.0, Thickness: 0.5, Material: types.Material{}, Diameter: 36.0, AutoAperture: true},
+	}
+	surface.Precompute(surfaces)
+	gc := glass.NewCatalog()
+	wl := 0.00058756
+
+	// Debug: check paraxial result
+	sys := types.System{Surfaces: surfaces}
+	for i, s := range surfaces {
+		t.Logf("surface[%d]: id=%d curv=%v paraxR=%v physZ=%v thick=%v", i, s.ID, s.Curvature, s.ParaxialRadius, s.PhysicalZ, s.Thickness)
+	}
+	pr := paraxial.Compute(sys, wl, gc, 0, nil)
+	t.Logf("paraxial: fl=%v epd=%v na=%v", pr.FocalLength, pr.EntrancePupilDiameter, pr.ImageSpaceNA)
+
+	rStopFree := paraxial.EntrancePupilRadiusStopFree(surfaces, wl, gc)
+	t.Logf("EntrancePupilRadiusStopFree = %v", rStopFree)
+
+	rGrid := ApertureRadiusForGrid(surfaces, 0, wl, gc, 1.0)
+	t.Logf("ApertureRadiusForGrid = %v", rGrid)
+
+	if rGrid <= 0 {
+		t.Fatalf("ApertureRadiusForGrid = %v, want > 0", rGrid)
+	}
+	if rStopFree <= 0 {
+		t.Fatalf("EntrancePupilRadiusStopFree = %v, want > 0", rStopFree)
+	}
+	if math.Abs(rGrid-rStopFree) > 1e-9 {
+		t.Errorf("ApertureRadiusForGrid=%v != EntrancePupilRadiusStopFree=%v", rGrid, rStopFree)
+	}
+
+	// Also verify paraxial.Compute returns a non-zero EPD for this system.
+	if pr.EntrancePupilDiameter <= 0 {
+		t.Errorf("paraxial.Compute EPD = %v, want > 0 for stop-free system", pr.EntrancePupilDiameter)
+	}
+	epFromGrid := 2 * rGrid
+	if math.Abs(pr.EntrancePupilDiameter-epFromGrid) > 1e-9 {
+		t.Errorf("paraxial.Compute EPD=%v != 2*ApertureRadiusForGrid=%v", pr.EntrancePupilDiameter, epFromGrid)
 	}
 }

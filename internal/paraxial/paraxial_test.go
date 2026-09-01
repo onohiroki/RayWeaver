@@ -84,21 +84,26 @@ func TestComputeWithChiefRays(t *testing.T) {
 
 func TestComputeDynamicPupilDiameter(t *testing.T) {
 	sys, gc := singletSystem()
-	// No stop surface and no chief pupil: EPD must remain unset (no inference).
-	if r := Compute(sys, 0.00058756, gc, 0, nil); r.EntrancePupilDiameter != 0 {
-		t.Errorf("EntrancePupilDiameter without stop or chief pupil = %v, want 0", r.EntrancePupilDiameter)
+	// No stop surface and no chief pupil: EPD is inferred from the beam-aware
+	// fixed-aperture projection. The singlet has two fixed diameter-50 surfaces
+	// with equal marginal-ray heights → EPD = 50.
+	r := Compute(sys, 0.00058756, gc, 0, nil)
+	if r.EntrancePupilDiameter <= 0 {
+		t.Errorf("EntrancePupilDiameter without stop or chief pupil = %v, want > 0 (inferred)", r.EntrancePupilDiameter)
 	}
-	// A chief dynamic-pupil entrance pupil (radius) provides the EPD even
-	// though the system has no explicit stop.
+	if want := 50.0; math.Abs(r.EntrancePupilDiameter-want) > 1e-9 {
+		t.Errorf("EntrancePupilDiameter = %v, want %v", r.EntrancePupilDiameter, want)
+	}
+	// A chief dynamic-pupil entrance pupil (radius) overrides the inferred EPD.
 	chiefRays := []types.ChiefRayResult{
 		{EntrancePupil: &types.Pupil{Center: types.Vec3{Z: 12.5}, Radius: 10.0}},
 	}
-	r := Compute(sys, 0.00058756, gc, 0, chiefRays)
-	if want := 20.0; math.Abs(r.EntrancePupilDiameter-want) > 1e-9 {
-		t.Errorf("EntrancePupilDiameter = %v, want %v", r.EntrancePupilDiameter, want)
+	r2 := Compute(sys, 0.00058756, gc, 0, chiefRays)
+	if want := 20.0; math.Abs(r2.EntrancePupilDiameter-want) > 1e-9 {
+		t.Errorf("EntrancePupilDiameter = %v, want %v", r2.EntrancePupilDiameter, want)
 	}
-	if math.Abs(r.EntrancePupilLocation-12.5) > 1e-9 {
-		t.Errorf("EntrancePupilLocation = %v, want 12.5", r.EntrancePupilLocation)
+	if math.Abs(r2.EntrancePupilLocation-12.5) > 1e-9 {
+		t.Errorf("EntrancePupilLocation = %v, want 12.5", r2.EntrancePupilLocation)
 	}
 }
 

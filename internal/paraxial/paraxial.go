@@ -342,9 +342,10 @@ func Compute(
 
 	// --- Entrance pupil ---
 	// With an explicit stop, the diameter comes from a paraxial trace through
-	// the stop aperture. Without a stop (dynamic-pupil systems), the chief rays
-	// carry the entrance pupil (location + radius); use that radius for the
-	// diameter so EPD is still reported for stop-free systems.
+	// the stop aperture. Without a stop (dynamic-pupil systems), prefer the
+	// chief-ray entrance pupil when available; otherwise use the beam-aware
+	// fixed-aperture projection to estimate the entrance-pupil diameter
+	// internally.
 	var chiefPupil *types.Pupil
 	for _, cr := range chiefRays {
 		if cr.EntrancePupil != nil && cr.EntrancePupil.Radius > 0 {
@@ -369,6 +370,16 @@ func Compute(
 		}
 	} else if chiefPupil != nil {
 		r.EntrancePupilDiameter = 2 * chiefPupil.Radius
+	} else {
+		// Stop-free, no chief pupil: infer from the beam-aware fixed-aperture
+		// projection or first-glass/mirror surface estimate.
+		if epRad := EntrancePupilRadiusStopFree(surfaces, wavelength, gc); epRad > 0 {
+			r.EntrancePupilDiameter = 2 * epRad
+			// Use the Z of the tightest fixed aperture as the entrance-pupil location.
+			if z := surface.FixedMinApertureRadiusZ(surfaces); z != 0 {
+				r.EntrancePupilLocation = z
+			}
+		}
 	}
 
 	if r.EntrancePupilDiameter > 0 && math.Abs(r.FocalLength) > 1e-15 {
@@ -420,4 +431,118 @@ func Compute(
 	}
 
 	return r
+}
+
+// --- Stop-free entrance-pupil estimation ---
+
+const (
+	// EstimatedEPDMargin is the safety margin applied to the first-surface
+	// EPD estimate when no stop or fixed aperture is present.
+	EstimatedEPDMargin = 0.85
+	// MaxEstimatedEPDMultiplier caps the first-surface estimate at this
+	// multiple to prevent a wildly wrong aperture.
+	MaxEstimatedEPDMultiplier = 3.0
+)
+
+// EntrancePupilRadiusStopFree returns the beam-aware entrance-pupil radius for
+// a system without an explicit stop surface. It replicates the logic used by
+// the chief ray and dls grid traces: (1) project every fixed-surface aperture
+// back to the reference marginal-ray height (the tightest fixed surface) and
+// take the minimum, or (2) fall back to an estimate from the first
+// glass/mirror surface radius. The returned radius is at margin 1.0 (no extra
+// safety margin), suitable for both EPD reporting and grid sizing.
+func EntrancePupilRadiusStopFree(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) float64 {
+	rFixed := fixedApertureAtPupil(surfaces, wavelength, gc)
+	if rFixed > 0 {
+		return rFixed
+	}
+	rEst := EstimateEntrancePupilRadiusFromFirstSurface(surfaces)
+	if rEst > 0 {
+		r := rEst * EstimatedEPDMargin
+		maxR := rEst * MaxEstimatedEPDMultiplier
+		if r > maxR {
+			r = maxR
+		}
+		return r
+	}
+	return 0
+}
+
+// fixedApertureAtPupil returns the grid-radius cap imposed by the fixed
+// (auto_aperture: false) surfaces, with each surface's aperture projected back
+// to the aperture position along the paraxial marginal ray. The reference
+// marginal height is the tightest fixed surface's (the dynamic-pupil aperture
+// position); a surface at marginal height y_s caps the grid at r_s * yRef / y_s.
+func fixedApertureAtPupil(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) float64 {
+	ys := MarginalRayHeights(surfaces, wavelength, gc)
+	if len(ys) != len(surfaces) {
+		return surface.FixedMinApertureRadius(surfaces)
+	}
+
+	refIdx := -1
+	refR := math.MaxFloat64
+	for i, s := range surfaces {
+		if s.AutoAperture || s.Diameter <= 0 {
+			continue
+		}
+		if s.Diameter/2 < refR {
+			refR = s.Diameter / 2
+			refIdx = i
+		}
+	}
+	if refIdx < 0 || math.Abs(ys[refIdx]) < 1e-12 {
+		return surface.FixedMinApertureRadius(surfaces)
+	}
+	yRef := math.Abs(ys[refIdx])
+
+	best := math.MaxFloat64
+	for i, s := range surfaces {
+		if s.AutoAperture || s.Diameter <= 0 {
+			continue
+		}
+		if i >= len(ys) || math.Abs(ys[i]) < 1e-12 {
+			continue
+		}
+		cap := (s.Diameter / 2) * yRef / math.Abs(ys[i])
+		if cap < best {
+			best = cap
+		}
+	}
+	if best == math.MaxFloat64 {
+		return surface.FixedMinApertureRadius(surfaces)
+	}
+	return best
+}
+
+// EstimateEntrancePupilDiameterFromFirstSurface returns an estimated
+// entrance-pupil diameter as 2*|R| where R is the radius of the first
+// surface that carries glass (material != AIR) or is a mirror
+// (reflect:true). Plane surfaces (curvature==0) are skipped. When no such
+// surface exists the estimate is 0.
+func EstimateEntrancePupilDiameterFromFirstSurface(surfaces []types.Surface) float64 {
+	for _, s := range surfaces {
+		if s.Curvature == 0 {
+			continue
+		}
+		isGlass := !s.Material.IsAir()
+		if !isGlass && !s.Reflects() {
+			continue
+		}
+		r := s.Radius()
+		if r == 0 {
+			continue
+		}
+		return 2 * math.Abs(r)
+	}
+	return 0
+}
+
+// EstimateEntrancePupilRadiusFromFirstSurface returns the radius form of the
+// first-surface EPD estimate.
+func EstimateEntrancePupilRadiusFromFirstSurface(surfaces []types.Surface) float64 {
+	d := EstimateEntrancePupilDiameterFromFirstSurface(surfaces)
+	if d <= 0 {
+		return 0
+	}
+	return d / 2
 }

@@ -417,21 +417,12 @@ func (o *Optimizer) spotDiffractionRatio(x []float64) (float64, bool) {
 			continue
 		}
 
-		// Image-space NA from paraxial (infinite conjugate).  For systems
-		// without an explicit stop surface, paraxial.Compute returns EPD=0
-		// so ImageSpaceNA is zero; fall back to EPD/(2·focal_length) using
-		// the entrance-pupil radius from ApertureRadiusForGrid.
+		// Image-space NA from paraxial (infinite conjugate).
 		sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
 		pr := paraxial.Compute(sys, wl, gc, 0, nil)
 		na := pr.ImageSpaceNA
 		if na <= 0 {
 			na = pr.InfConjImageSpaceNA
-		}
-		if na <= 0 && pr.FocalLength > 1e-9 {
-			epRad := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, wl, gc, 1.0)
-			if epRad > 0 {
-				na = epRad / pr.FocalLength
-			}
 		}
 		if na <= 0 {
 			continue
