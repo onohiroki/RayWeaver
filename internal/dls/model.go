@@ -108,9 +108,10 @@ type Logger interface {
 }
 
 // ModeLogger is an optional Logger capability: report the per-iteration
-// merit-blend weights of a conditional merit schedule.
+// merit-blend weights of a conditional merit schedule, plus the evaluated
+// metric value (e.g. the spot/Airy ratio for spot_diffraction).
 type ModeLogger interface {
-	LogModeWeights(iter int, weights map[string]float64)
+	LogModeWeights(iter int, weights map[string]float64, metric float64)
 }
 
 type Model interface {

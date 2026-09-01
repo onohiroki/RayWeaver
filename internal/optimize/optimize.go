@@ -215,11 +215,12 @@ type meritTerm struct {
 // meritSchedule is the compiled optimization.merit_schedule: a smooth blend of
 // named merit modes whose weights follow a scalar state metric.
 type meritSchedule struct {
-	metric        string // merit_ratio | iteration | glass_role
+	metric        string // merit_ratio | iteration | glass_role | spot_diffraction
 	curve         string // linear | sigmoid | step
 	anchorFrom    float64
 	anchorTo      float64
 	glassSurfaces []int
+	aggregation   string // mean (default) | max
 	modes         []scheduleMode
 }
 
@@ -294,6 +295,18 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 	if ms.curve == "" {
 		ms.curve = "linear"
 	}
+	ms.aggregation = s.MetricAggregation
+	if ms.aggregation == "" {
+		ms.aggregation = "mean"
+	}
+	// Default anchors for spot_diffraction when unset (both 0): a 0,0 pair
+	// yields t=0.5 fixed, which is a footgun for this metric.  Use 3→1 as
+	// the sensible default: switch from geometric to wavefront when the
+	// average spot/Airy ratio drops from ≥3 to ≤1 (near diffraction limit).
+	if ms.metric == "spot_diffraction" && ms.anchorFrom == 0 && ms.anchorTo == 0 {
+		ms.anchorFrom = 3.0
+		ms.anchorTo = 1.0
+	}
 	o.modeWeights = make(map[string]float64, len(s.Modes))
 	for _, m := range s.Modes {
 		ms.modes = append(ms.modes, scheduleMode{name: m.Name, weightFrom: m.WeightFrom, weightTo: m.WeightTo})
@@ -316,14 +329,16 @@ func (o *Optimizer) UpdateMeritWeights(x []float64, iter int) {
 	if o.meritSchedule == nil {
 		return
 	}
+	s := o.scheduleMetric(x, iter)
+	o.lastMetric = s
 	prev := dominantMode(o.modeWeights)
-	cur := o.setModeWeightsAt(o.scheduleMetric(x, iter))
+	cur := o.setModeWeightsAt(s)
 	if cur != prev {
 		o.modeChanges++
 	}
 	if o.logger != nil {
 		if ml, ok := o.logger.(dls.ModeLogger); ok {
-			ml.LogModeWeights(iter, copyWeights(o.modeWeights))
+			ml.LogModeWeights(iter, copyWeights(o.modeWeights), s)
 		}
 	}
 }
@@ -367,12 +382,132 @@ func (o *Optimizer) scheduleMetric(x []float64, iter int) float64 {
 			}
 		}
 		return total
+	case "spot_diffraction":
+		r, _ := o.spotDiffractionRatio(x)
+		return r
 	default: // merit_ratio
 		if o.initialMerit == 0 {
 			return 1.0
 		}
 		return o.EvaluateMerit(x) / o.initialMerit
 	}
+}
+
+// spotDiffractionRatio computes the ratio of the weighted-average geometric
+// spot RMS to the diffraction-limited Airy radius (0.61·λ/NA) across all
+// configs and fields.  The second return value reports whether any valid
+// data was found (all configs with at least one traced grid).
+func (o *Optimizer) spotDiffractionRatio(x []float64) (float64, bool) {
+	configSurfaces, tempGC := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+
+	var weightedSum, totalWeight float64
+	maxRatio := 0.0
+	hasData := false
+
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+
+		wl := effectiveReferenceWavelength(cfg.referenceWavelength)
+		if len(cfg.wavelengths) > 0 {
+			wl = cfg.wavelengths[0].Value
+		}
+		if wl <= 0 {
+			continue
+		}
+
+		// Image-space NA from paraxial (infinite conjugate).
+		sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
+		pr := paraxial.Compute(sys, wl, gc, 0, nil)
+		na := pr.ImageSpaceNA
+		if na <= 0 {
+			na = pr.InfConjImageSpaceNA
+		}
+		if na <= 0 {
+			continue
+		}
+		airy := 0.61 * wl / na
+		if airy <= 0 {
+			continue
+		}
+
+		// Collect field angles.
+		type fieldEntry struct {
+			angle  float64
+			weight float64
+		}
+		var fields []fieldEntry
+		for fi := range cfg.fields {
+			fields = append(fields, fieldEntry{
+				angle:  o.fieldSizingAngle(cfg, &cfg.fields[fi], surfaces, gc, wl),
+				weight: cfg.fields[fi].Weight,
+			})
+		}
+		if len(fields) == 0 {
+			// Fallback: use angles from grid merit terms.
+			seen := make(map[float64]bool)
+			for ti := range cfg.meritTerms {
+				term := &cfg.meritTerms[ti]
+				if !isGridKind(term.kind) {
+					continue
+				}
+				a := o.termFieldAngle(cfg, term, surfaces, gc)
+				if !seen[a] {
+					seen[a] = true
+					fields = append(fields, fieldEntry{angle: a, weight: 1.0})
+				}
+			}
+		}
+		if len(fields) == 0 {
+			continue
+		}
+
+		cfgWeight := cfg.weight
+		if cfgWeight <= 0 {
+			cfgWeight = 1.0
+		}
+
+		for _, fe := range fields {
+			pupilZ := cfg.pupilZ
+			if cfg.pupilZs != nil {
+				if z, ok := cfg.pupilZs[fe.angle]; ok {
+					pupilZ = z
+				}
+			}
+			points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ,
+				fe.angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays,
+				o.gridRotation, o.gridWorkers())
+
+			rms := dls.ComputeSpotRMS(points)
+			if rms <= 0 || rms >= 1e6 {
+				// Degenerate grid (0 valid rays) → treat as strongly
+				// aberration-limited: a large ratio keeps geometric mode active.
+				rms = 1e3 * airy
+			}
+			ratio := rms / airy
+			rw := cfgWeight * fe.weight
+			weightedSum += rw * ratio
+			totalWeight += rw
+			if ratio > maxRatio {
+				maxRatio = ratio
+			}
+			hasData = true
+		}
+	}
+
+	if !hasData {
+		// No valid grid data → strongly aberration-limited fallback.
+		return 1e3, false
+	}
+	if o.meritSchedule.aggregation == "max" {
+		return maxRatio, true
+	}
+	// Default: weighted mean.
+	if totalWeight <= 0 {
+		return maxRatio, true
+	}
+	return weightedSum / totalWeight, true
 }
 
 // scheduleCurve maps the normalised metric t ∈ [0,1] to a blend fraction.
@@ -412,13 +547,14 @@ func copyWeights(src map[string]float64) map[string]float64 {
 }
 
 // MeritScheduleState returns the active (largest-weight) mode, the final
-// per-mode weights, and the number of dominant-mode transitions. The zero value
-// is returned when no schedule is configured.
-func (o *Optimizer) MeritScheduleState() (string, map[string]float64, int) {
+// per-mode weights, the number of dominant-mode transitions, and the last
+// evaluated metric value. The zero value is returned when no schedule is
+// configured.
+func (o *Optimizer) MeritScheduleState() (string, map[string]float64, int, float64) {
 	if o.meritSchedule == nil {
-		return "", nil, 0
+		return "", nil, 0, 0
 	}
-	return dominantMode(o.modeWeights), copyWeights(o.modeWeights), o.modeChanges
+	return dominantMode(o.modeWeights), copyWeights(o.modeWeights), o.modeChanges, o.lastMetric
 }
 
 // scheduledTerm is one effective term of a config with the mode weight folded
@@ -629,6 +765,7 @@ type Optimizer struct {
 	modeWeights   map[string]float64
 	initialMerit  float64
 	modeChanges   int
+	lastMetric    float64
 	// stop, when set, is forwarded into dls.Options.Stop so the solver aborts
 	// mid-solve (returning the best point found so far with Status
 	// "interrupted") once the channel is closed. nil disables interruption.

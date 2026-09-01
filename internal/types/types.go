@@ -545,8 +545,9 @@ type MeritScheduleMode struct {
 // metric and each mode weight w_k is a monotone curve between the anchors.
 type MeritScheduleConfig struct {
 	// Metric is the state signal driving the blend: merit_ratio (default),
-	// iteration, or glass_role (the glass-role residual magnitude summed
-	// over GlassSurfaces across all configs).
+	// iteration, glass_role (the glass-role residual magnitude summed
+	// over GlassSurfaces across all configs), or spot_diffraction (the
+	// per-field weighted-average geometric spot RMS / Airy radius).
 	Metric string `yaml:"metric"`
 	// Curve is the interpolation shape between the anchors: linear (default),
 	// sigmoid, or step (a hard mode switch at the midpoint).
@@ -557,8 +558,12 @@ type MeritScheduleConfig struct {
 	AnchorTo   float64 `yaml:"anchor_to"`
 	// GlassSurfaces are the glass surface IDs evaluated for the glass_role
 	// metric (required when Metric is glass_role).
-	GlassSurfaces []int               `yaml:"glass_surfaces,omitempty"`
-	Modes         []MeritScheduleMode `yaml:"modes"`
+	GlassSurfaces []int `yaml:"glass_surfaces,omitempty"`
+	// MetricAggregation combines the per-field spot/Airy ratios into one
+	// scalar for the spot_diffraction metric: mean (config×field weighted
+	// average, default) or max (worst field).
+	MetricAggregation string               `yaml:"metric_aggregation,omitempty"`
+	Modes             []MeritScheduleMode  `yaml:"modes"`
 }
 
 type Config struct {
@@ -857,6 +862,9 @@ type OptimizationResult struct {
 	ActiveMode  string             `yaml:"active_mode,omitempty"`
 	ModeWeights map[string]float64 `yaml:"mode_weights,omitempty"`
 	ModeChanges int                `yaml:"mode_changes,omitempty"`
+	// MetricValue is the last evaluated merit-schedule metric (e.g. the
+	// spot/Airy ratio for spot_diffraction). Present only with a schedule.
+	MetricValue float64 `yaml:"metric_value,omitempty"`
 }
 
 // ConstraintMeasurement records the final measured value and residual of one

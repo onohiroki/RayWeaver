@@ -288,6 +288,10 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 			errOut("Error: optimization.merit_schedule metric 'glass_role' requires glass_surfaces")
 			os.Exit(1)
 		}
+		if agg := input.Optimization.MeritSchedule.MetricAggregation; agg != "" && agg != "mean" && agg != "max" {
+			errOut("Error: optimization.merit_schedule metric_aggregation must be 'mean' or 'max'")
+			os.Exit(1)
+		}
 	}
 	checkGlassRole := func(terms []types.MeritTerm) {
 		for _, mt := range terms {
@@ -434,10 +438,13 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		Interrupted: interrupted,
 		Constraints: opt.FinalConstraintMeasurements(finalX),
 	}
-	if active, weights, changes := opt.MeritScheduleState(); active != "" {
+	if active, weights, changes, metricVal := opt.MeritScheduleState(); active != "" {
 		optResults.ActiveMode = active
 		optResults.ModeWeights = weights
 		optResults.ModeChanges = changes
+		if metricVal != 0 {
+			optResults.MetricValue = metricVal
+		}
 	}
 	output.OptResults = optResults
 
@@ -570,11 +577,12 @@ func (j *jsonLogger) LogFinal(iter int, status string, merit float64, stepNorm f
 	fmt.Fprintln(j.w, string(data))
 }
 
-func (j *jsonLogger) LogModeWeights(iter int, weights map[string]float64) {
+func (j *jsonLogger) LogModeWeights(iter int, weights map[string]float64, metric float64) {
 	entry := modeWeightsLog{
 		Event:   "weights",
 		Iter:    iter,
 		Weights: weights,
+		Metric:  metric,
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -616,10 +624,10 @@ func (m *multiLogger) LogFinal(iter int, status string, merit float64, stepNorm 
 	}
 }
 
-func (m *multiLogger) LogModeWeights(iter int, weights map[string]float64) {
+func (m *multiLogger) LogModeWeights(iter int, weights map[string]float64, metric float64) {
 	for _, l := range m.loggers {
 		if ml, ok := l.(dls.ModeLogger); ok {
-			ml.LogModeWeights(iter, weights)
+			ml.LogModeWeights(iter, weights, metric)
 		}
 	}
 }
@@ -640,6 +648,7 @@ type modeWeightsLog struct {
 	Event   string             `json:"event"`
 	Iter    int                `json:"iter"`
 	Weights map[string]float64 `json:"weights"`
+	Metric  float64            `json:"metric,omitempty"`
 }
 
 type dampingLog struct {

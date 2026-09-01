@@ -360,6 +360,7 @@ merit uses.
 | `merit_ratio` (default) | `EvaluateMerit(x) / initialMerit` |
 | `iteration` | the DLS iteration number |
 | `glass_role` | Σ over `glass_surfaces` of the glass-role residual magnitude (the §2 term, aggregated over every config) |
+| `spot_diffraction` | weighted-average geometric spot RMS / Airy radius (`0.61·λ/NA`). Measures how many Airy radii the geometric spot spans. Ratio ≥ 1 means the geometric spot exceeds the diffraction-limited Airy disk. Per-config image-space NA from `paraxial.Compute`. Field-weighted mean (default) or max via `metric_aggregation`. When no valid grid data is available, falls back to a large ratio (1e3) so geometric mode stays active. Default anchors: `anchor_from: 3` / `anchor_to: 1` (switch from geometric to wavefront when the average ratio drops from ≥3 to ≤1). |
 
 ### Weight curve
 
@@ -377,6 +378,50 @@ A two-mode schedule `color_first {weight_from: 1, weight_to: 0}` /
 `full {weight_from: 0, weight_to: 1}` over `merit_ratio` therefore runs the
 colour-only merit while the objective is large and blends to the full merit as
 it improves.
+
+### `spot_diffraction` — geometric vs wavefront switching
+
+The `spot_diffraction` metric drives a two-stage optimization strategy:
+start with a geometric merit (e.g. `spot_rms`) while aberrations dominate,
+then switch to a wavefront/diffraction merit (e.g. `wavefront_sphere_rms` /
+`opd_rms`) once the system approaches the diffraction limit.
+
+The metric evaluates:
+
+```
+s(x) = (weighted-average geometric spot RMS) / (0.61·λ / NA)
+```
+
+where the NA comes from `paraxial.Compute` (image-space NA) and the spot RMS
+is the per-field `dls.ComputeSpotRMS` traced with the frozen pupil grid
+(the same grid the `spot_rms` merit uses).
+
+**Recommended anchors and mode wiring:**
+
+```yaml
+optimization:
+  merit_schedule:
+    metric: spot_diffraction
+    curve: step              # hard switch
+    anchor_from: 3.0         # spot/Airy ratio ≥ 3 → geometric mode
+    anchor_to: 1.0           # spot/Airy ratio ≤ 1 → wavefront mode
+    modes:
+      - {name: spot,      weight_from: 1.0, weight_to: 0.0}
+      - {name: wavefront, weight_from: 0.0, weight_to: 1.0}
+configs:
+  - id: cfg1
+    merit_modes:
+      - {name: spot,      terms: [{kind: spot_rms, ...}]}
+      - {name: wavefront, terms: [{kind: wavefront_sphere_rms, ...}]}
+```
+
+**Aggregation** (`metric_aggregation`): `mean` (default, config×field weighted
+average) or `max` (worst field). Use `mean` for overall quality; use `max` to
+delay switching until the worst field approaches the diffraction limit.
+
+**Output:** The last evaluated ratio is reported in `opt_results.metric_value`
+and in the `{"event":"weights","metric":...}` JSONL record, so you can tune
+the anchors empirically.
 
 ### Freezing and convergence
 
