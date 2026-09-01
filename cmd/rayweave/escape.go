@@ -195,8 +195,18 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	}
 	meritTerms := buildMeritTerms(input)
 	if len(meritTerms) == 0 {
-		errOut("Error: no merit terms defined (add 'optimization.merit' or 'configs[].merit')")
-		os.Exit(1)
+		// Also accept configs with merit_modes (handled by merit_schedule).
+		hasModes := false
+		for _, c := range input.Configs {
+			if len(c.MeritModes) > 0 {
+				hasModes = true
+				break
+			}
+		}
+		if !hasModes {
+			errOut("Error: no merit terms defined (add 'optimization.merit', 'configs[].merit' or 'configs[].merit_modes')")
+			os.Exit(1)
+		}
 	}
 
 	fields := loadFields(input)
@@ -231,6 +241,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		Surfaces:           surfaces,
 		Variables:          variables,
 		MeritTerms:         meritTerms,
+		MeritModes:         input.Configs[0].MeritModes,
 		Fields:             fields,
 		Constraints:        constraints,
 		GlassCatalog:       gc,
@@ -276,6 +287,9 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		// glass phase (EnterGlassPhase) toggles it on per solve and restores it
 		// after, so the escape/clean phases keep full curvature freedom.
 		opt.SetPowerSolveEnabled(false)
+		if input.Optimization.MeritSchedule != nil {
+			opt.SetMeritSchedule(input.Optimization.MeritSchedule)
+		}
 		if gctx.enabled {
 			// NewOptimizer registers the single config under id "config1".
 			for _, terms := range gctx.merit {

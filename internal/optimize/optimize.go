@@ -58,6 +58,9 @@ type Config struct {
 	// each containing element's thin-lens power stays at its initial value
 	// (optimization.power_solve.surfaces). Empty disables the solve.
 	PowerSolveSurfaces []int
+	// MeritModes defines named merit modes for conditional merit scheduling.
+	// When non-empty, SetMeritSchedule activates mode blending.
+	MeritModes []types.MeritMode
 	// RegionActive configures the Okudaira Region Active Method (nil = disabled).
 	RegionActive *types.RegionActiveConfig
 }
@@ -897,6 +900,46 @@ func NewOptimizer(cfg Config) *Optimizer {
 			fraction:    t.Fraction,
 			surfaceSet:  append([]int(nil), t.SurfaceSet...),
 		})
+	}
+	if len(cfg.MeritModes) > 0 {
+		c.meritModes = make(map[string][]meritTerm, len(cfg.MeritModes))
+		for _, m := range cfg.MeritModes {
+			var terms []meritTerm
+			for _, t := range m.Terms {
+				// Resolve field angle/direction from the config fields.
+				var fieldAngle, fieldWeight float64
+				var fieldDirX, fieldDirY float64 = 0.0, 1.0
+				for _, f := range cfg.Fields {
+					if f.ID == t.Field {
+						fieldAngle = f.AngleDeg
+						fieldWeight = f.Weight
+						if len(f.Direction) >= 2 {
+							fieldDirX, fieldDirY = normalizeDir(f.Direction)
+						}
+						break
+					}
+				}
+				if fieldWeight == 0 {
+					fieldWeight = 1.0
+				}
+				terms = append(terms, meritTerm{
+					kind:        t.Kind,
+					fieldAngle:  fieldAngle,
+					fieldDirX:   fieldDirX,
+					fieldDirY:   fieldDirY,
+					fieldIndex:  t.Field,
+					fieldWeight: fieldWeight,
+					wavelength:  t.Wavelength,
+					wavelength2: t.Wavelength2,
+					wavWeight:   1.0,
+					weight:      t.Weight,
+					target:      t.Target,
+					fraction:    t.Fraction,
+					surfaceSet:  append([]int(nil), t.SurfaceSet...),
+				})
+			}
+			c.meritModes[m.Name] = terms
+		}
 	}
 	variables := make([]Variable, len(cfg.Variables))
 	for i, v := range cfg.Variables {

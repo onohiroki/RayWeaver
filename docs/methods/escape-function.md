@@ -1,7 +1,24 @@
 # Escape-function global optimization
 
+## References
+
+The escape-function method was originally proposed by Masaki Isshiki and
+Hiroki Ono. The first implementation was carried out by Ono using the OSLO CCL
+(C-compatible language) environment.
+
+- M. Isshiki, H. Ono & S. Nakadate: "Lens Design: An Attempt to Use 'Escape
+  Function' as a Tool in Global Optimization," *Optical Review* **2**(1), 47–51
+  (1995). DOI: [10.1007/s10043-995-0047-5](https://doi.org/10.1007/s10043-995-0047-5)
+- M. Isshiki, H. Ono, K. Hiraga, J. Ishikawa & S. Nakadate: "Lens Design:
+  Global Optimization with Escape Function," *Optical Review* **2**(6), 463–470
+  (1995). DOI: [10.1007/s10043-995-0463-6](https://doi.org/10.1007/s10043-995-0463-6)
+- M. Isshiki: "Global optimization with escape function," *Proc. SPIE* **3482**,
+  104–114 (1998). DOI: [10.1117/12.321984](https://doi.org/10.1117/12.321984)
+
+---
+
 DLS (see [dls-optimization.md](dls-optimization.md)) converges to a *local*
-minimum. The escape-function method (Ishiki–Ono style) turns a sequence of DLS
+minimum. The escape-function method (Isshiki–Ono style) turns a sequence of DLS
 runs into a *global* search: after each convergence a smooth **bump** is added
 to the merit landscape around the found minimum so the next run is pushed out
 of that valley and can discover other local minima.

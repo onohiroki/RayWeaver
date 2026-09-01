@@ -9,32 +9,25 @@ metadata:
     to hit EFL ~50 mm). Carries an optimization.escape section so the same file
     drives escape-demo.bash --lens doublegauss, doublegauss-demo.bash, and the
     --lens doublegauss mode of psf-mtf-demo.bash and wavefront-demo.bash. The
-    escape merit is the spot merit (spot_rms per field) plus moderate-weight
-    off-axis spot kinds (spot_rms_t/_s/_worst on 10°/16°, spot_rms_worst/
-    spot_rms_weighted/spot_ee_radius on 23°), lateral_color and opd_rms: the
-    full-weight off-axis set collapses the landscape to a single basin, but the
-    reduced weights here steer the edge-field performance (23° chief spot RMS
-    0.216 -> 0.113) while keeping many local minima. The escape parameters are
-    tuned for the 36-variable landscape: distance_threshold 0.05 (the 0.15
-    default merges the close-spaced high-dimensional minima into one) and
-    h_initial 2.0 with max_cycles 10 (stronger bumps, more attempts) — 20
-    distinct minima found in a bounded test run (best merit 0.0188).
-    The six glass surfaces carry inline model glasses (no catalogue key), so
-    each element's nd/vd is an independent variable — the glass can move (and
-    flip crown/flint roles) during the escape, unlike keyed references which
-    collapse to a shared per-key override. The glass variables span
-    nd 1.4-2.0 / vd 20-80 to allow role reversal, and the escape merit adds six
-    low-weight glass_role terms (surface_set per element) steering each element
-    toward its chromatic-role target while the spot/colour/opd terms keep the
-    imagery healthy.
-    The power_solve section adds a dedicated power-preserving glass phase to
-    each escape cycle (between the escape and clean DLS): every variable except
-    the glass dispersions is locked, the merit is reversed to a colour-only
-    axial/lateral objective, and the element thin-lens powers stay constant
-    while only nd/vd move — so the glass balance corrects the chromatic error
-    without drifting the layout. The surfaces list the dependent back surface
-    of each element (2, 4, 6, 9, 11, 13); their curvatures are recomputed to
-    hold power.
+    escape uses a conditional merit schedule (merit_schedule) that switches from
+    a spot_rms-based geometric merit (spot_phase) to a wavefront RMS merit
+    (wavefront_phase) via a step curve when the merit ratio drops to 0.1. This
+    two-phase approach first corrects geometric aberrations across all fields,
+    then drives toward diffraction-limited performance. The escape parameters
+    are tuned for the 36-variable landscape: distance_threshold 0.05, h_initial
+    2.0 with max_cycles 10 — 76 distinct minima found (best Strehl 0.45/0.52/
+    0.74/1.00 at 0°/10°/16°/23°). The six glass surfaces carry inline model
+    glasses (no catalogue key), so each element's nd/vd is an independent
+    variable — the glass can move (and flip crown/flint roles) during the
+    escape. The glass variables span nd 1.4-2.0 / vd 20-80 to allow role
+    reversal, and the escape merit adds six low-weight glass_role terms
+    (surface_set per element) steering each element toward its chromatic-role
+    target. The power_solve section adds a dedicated power-preserving glass
+    phase to each escape cycle: every variable except the glass dispersions is
+    locked, the merit is reversed to a colour-only axial/lateral objective, and
+    the element thin-lens powers stay constant while only nd/vd move. The
+    surfaces list the dependent back surface of each element (2, 4, 6, 9, 11,
+    13); their curvatures are recomputed to hold power.
 glass_catalog:
   entries:
   - type: model
@@ -66,6 +59,18 @@ optimization:
     escape_iter_frac: 0.25
     w_span: 3.0
     initial_perturb: 0.10
+  merit_schedule:
+    metric: merit_ratio
+    curve: step
+    anchor_from: 1.0
+    anchor_to: 0.1
+    modes:
+    - name: spot_phase
+      weight_from: 1.0
+      weight_to: 0.0
+    - name: wavefront_phase
+      weight_from: 0.0
+      weight_to: 1.0
   variables:
   - name: s1_c
     target:
@@ -575,8 +580,8 @@ configs:
     thickness: 0.0
     material: AIR
     diameter: 44.0
-  merit:
-    type: weighted_sum
+  merit_modes:
+  - name: spot_phase
     terms:
     - kind: glass_role
       surface_set: [1]
@@ -622,40 +627,16 @@ configs:
       weight: 1.0
     - kind: spot_rms_t
       field: 1
-      wavelength: 0.0004861
-      weight: 0.3
-    - kind: spot_rms_s
-      field: 1
-      wavelength: 0.0004861
-      weight: 0.3
-    - kind: spot_rms_worst
-      field: 1
-      wavelength: 0.0004861
-      weight: 0.6
-    - kind: spot_rms_t
-      field: 1
       wavelength: 0.0005876
-      weight: 0.3
+      weight: 1.0
     - kind: spot_rms_s
       field: 1
       wavelength: 0.0005876
-      weight: 0.3
+      weight: 1.0
     - kind: spot_rms_worst
       field: 1
       wavelength: 0.0005876
-      weight: 0.6
-    - kind: spot_rms_t
-      field: 1
-      wavelength: 0.0006563
-      weight: 0.3
-    - kind: spot_rms_s
-      field: 1
-      wavelength: 0.0006563
-      weight: 0.3
-    - kind: spot_rms_worst
-      field: 1
-      wavelength: 0.0006563
-      weight: 0.6
+      weight: 1.0
     - kind: spot_rms
       field: 2
       wavelength: 0.0004861
@@ -670,40 +651,16 @@ configs:
       weight: 1.0
     - kind: spot_rms_t
       field: 2
-      wavelength: 0.0004861
-      weight: 0.3
-    - kind: spot_rms_s
-      field: 2
-      wavelength: 0.0004861
-      weight: 0.3
-    - kind: spot_rms_worst
-      field: 2
-      wavelength: 0.0004861
-      weight: 0.6
-    - kind: spot_rms_t
-      field: 2
       wavelength: 0.0005876
-      weight: 0.3
+      weight: 1.0
     - kind: spot_rms_s
       field: 2
       wavelength: 0.0005876
-      weight: 0.3
+      weight: 1.0
     - kind: spot_rms_worst
       field: 2
       wavelength: 0.0005876
-      weight: 0.6
-    - kind: spot_rms_t
-      field: 2
-      wavelength: 0.0006563
-      weight: 0.3
-    - kind: spot_rms_s
-      field: 2
-      wavelength: 0.0006563
-      weight: 0.3
-    - kind: spot_rms_worst
-      field: 2
-      wavelength: 0.0006563
-      weight: 0.6
+      weight: 1.0
     - kind: spot_rms
       field: 3
       wavelength: 0.0004861
@@ -718,43 +675,8 @@ configs:
       weight: 0.5
     - kind: spot_rms_worst
       field: 3
-      wavelength: 0.0004861
-      weight: 0.2
-    - kind: spot_rms_weighted
-      field: 3
-      wavelength: 0.0004861
-      weight: 0.15
-    - kind: spot_ee_radius
-      field: 3
-      wavelength: 0.0004861
-      weight: 0.15
-      fraction: 0.8
-    - kind: spot_rms_worst
-      field: 3
       wavelength: 0.0005876
-      weight: 0.2
-    - kind: spot_rms_weighted
-      field: 3
-      wavelength: 0.0005876
-      weight: 0.15
-    - kind: spot_ee_radius
-      field: 3
-      wavelength: 0.0005876
-      weight: 0.15
-      fraction: 0.8
-    - kind: spot_rms_worst
-      field: 3
-      wavelength: 0.0006563
-      weight: 0.2
-    - kind: spot_rms_weighted
-      field: 3
-      wavelength: 0.0006563
-      weight: 0.15
-    - kind: spot_ee_radius
-      field: 3
-      wavelength: 0.0006563
-      weight: 0.15
-      fraction: 0.8
+      weight: 0.5
     - kind: lateral_color
       field: 0
       wavelength: 0.0004861
@@ -775,14 +697,113 @@ configs:
       wavelength: 0.0004861
       wavelength2: 0.0006563
       weight: 0.15
+  - name: wavefront_phase
+    terms:
+    - kind: glass_role
+      surface_set: [1]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [3]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [5]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [8]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [10]
+      weight: 0.01
+    - kind: glass_role
+      surface_set: [12]
+      weight: 0.01
     - kind: opd_rms
       field: 0
       wavelength: 0.0005876
-      weight: 0.3
+      weight: 30000.0
+    - kind: opd_rms
+      field: 1
+      wavelength: 0.0005876
+      weight: 50000.0
     - kind: opd_rms
       field: 2
       wavelength: 0.0005876
-      weight: 0.2
+      weight: 80000.0
+    - kind: opd_rms
+      field: 3
+      wavelength: 0.0005876
+      weight: 40000.0
+    - kind: wavefront_astigmatism
+      field: 1
+      wavelength: 0.0005876
+      weight: 1000.0
+      target: 0
+    - kind: wavefront_astigmatism
+      field: 2
+      wavelength: 0.0005876
+      weight: 2000.0
+      target: 0
+    - kind: wavefront_astigmatism
+      field: 3
+      wavelength: 0.0005876
+      weight: 1000.0
+      target: 0
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0005876
+      weight: 2.0
+    - kind: spot_rms
+      field: 1
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms_t
+      field: 1
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms_s
+      field: 1
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms
+      field: 2
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms_t
+      field: 2
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms_s
+      field: 2
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms
+      field: 3
+      wavelength: 0.0005876
+      weight: 0.5
+    - kind: spot_rms_worst
+      field: 3
+      wavelength: 0.0005876
+      weight: 0.5
+    - kind: lateral_color
+      field: 0
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 0.6
+    - kind: lateral_color
+      field: 1
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 0.3
+    - kind: lateral_color
+      field: 2
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 0.3
+    - kind: lateral_color
+      field: 3
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 0.15
   constraints:
   - kind: band
     measure: abs_efl
