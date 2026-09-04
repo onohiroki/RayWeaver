@@ -448,6 +448,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			Fields:              fields,
 			Wavelengths:         wavelengths,
 			MeritTerms:          meritTerms,
+			MeritModes:          cfg.MeritModes,
 			Constraints:         constraints,
 		})
 	}
@@ -506,6 +507,9 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, nil, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
 		opt.SetApertureMarginMM(apertureMarginMM)
 		applyDegenerate(opt, input.Optimization.Degenerate)
+		if input.Optimization.MeritSchedule != nil {
+			opt.SetMeritSchedule(input.Optimization.MeritSchedule)
+		}
 		if gctx.enabled {
 			opt.SetPowerSolve(gctx.surfaces)
 			// Start with the power-preserving solve off; the cycle's glass phase

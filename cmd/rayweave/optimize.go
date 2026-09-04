@@ -438,12 +438,15 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		Interrupted: interrupted,
 		Constraints: opt.FinalConstraintMeasurements(finalX),
 	}
-	if active, weights, changes, metricVal := opt.MeritScheduleState(); active != "" {
+	if active, weights, changes, metricVal, effNumRays := opt.MeritScheduleState(); active != "" {
 		optResults.ActiveMode = active
 		optResults.ModeWeights = weights
 		optResults.ModeChanges = changes
 		if metricVal != 0 {
 			optResults.MetricValue = metricVal
+		}
+		if effNumRays > 0 {
+			optResults.EffectiveNumRays = effNumRays
 		}
 	}
 	output.OptResults = optResults

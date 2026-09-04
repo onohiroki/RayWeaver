@@ -527,8 +527,9 @@ type MeritFunction struct {
 // config declares merit_modes, the active `optimization.merit_schedule` mode's
 // terms replace the config's fixed `merit`.
 type MeritMode struct {
-	Name  string      `yaml:"name"`
-	Terms []MeritTerm `yaml:"terms"`
+	Name    string      `yaml:"name"`
+	NumRays int         `yaml:"num_rays,omitempty"`
+	Terms   []MeritTerm `yaml:"terms"`
 }
 
 // MeritScheduleMode assigns one mode a weight that interpolates between
@@ -547,7 +548,9 @@ type MeritScheduleConfig struct {
 	// Metric is the state signal driving the blend: merit_ratio (default),
 	// iteration, glass_role (the glass-role residual magnitude summed
 	// over GlassSurfaces across all configs), or spot_diffraction (the
-	// per-field weighted-average geometric spot RMS / Airy radius).
+	// per-field weighted-average geometric spot RMS / Airy radius, normalised
+	// by the initial value so the metric always starts at 1.0 and drops as the
+	// geometric spot shrinks toward the diffraction limit).
 	Metric string `yaml:"metric"`
 	// Curve is the interpolation shape between the anchors: linear (default),
 	// sigmoid, or step (a hard mode switch at the midpoint).
@@ -865,6 +868,10 @@ type OptimizationResult struct {
 	// MetricValue is the last evaluated merit-schedule metric (e.g. the
 	// spot/Airy ratio for spot_diffraction). Present only with a schedule.
 	MetricValue float64 `yaml:"metric_value,omitempty"`
+	// EffectiveNumRays is the final num_rays resolved from the merit-mode
+	// schedule (max across configs). Present only with a schedule that
+	// declares per-mode num_rays.
+	EffectiveNumRays int `yaml:"effective_num_rays,omitempty"`
 }
 
 // ConstraintMeasurement records the final measured value and residual of one

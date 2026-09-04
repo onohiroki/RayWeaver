@@ -411,7 +411,7 @@ func TestMeritScheduleDLSRecoversGlassRoles(t *testing.T) {
 	if vd6 <= 45.0 {
 		t.Errorf("S6 vd after = %v, want > 45 (crown): the positive-power element did not become a crown", vd6)
 	}
-	active, weights, changes, _ := opt.MeritScheduleState()
+	active, weights, changes, _, _ := opt.MeritScheduleState()
 	t.Logf("status=%s iters=%d active_mode=%s mode_changes=%d weights=%v S3(vd)=%.3f S6(vd)=%.3f",
 		res.Status, res.Iterations, active, changes, weights, vd3, vd6)
 	if active == "" {
@@ -568,4 +568,135 @@ func TestSpotDiffractionStepSwitch(t *testing.T) {
 		t.Errorf("Σr² = %v, merit = %v", sum, merit)
 	}
 	t.Logf("Σr²=%v merit=%v", sum, merit)
+}
+
+// numRaysScheduleConfig creates a config with num_rays in merit modes for
+// testing the num_rays scheduling feature. Mode "coarse" uses num_rays=16
+// (paraxial terms only, no grid), mode "fine" uses num_rays=64 (also paraxial).
+func numRaysScheduleConfig() ([]ConfigInput, *types.MeritScheduleConfig) {
+	s := tripletModesSurfaces(false)
+	surface.Precompute(s)
+	cfg := ConfigInput{
+		ID:       "cfg1",
+		Weight:   1.0,
+		Surfaces: s,
+		Fields: []types.FieldItem{
+			{ID: 0, AngleDeg: 0.0, Weight: 1.0},
+		},
+		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+		MeritModes: []types.MeritMode{
+			{Name: "coarse", NumRays: 16, Terms: []types.MeritTerm{
+				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+			}},
+			{Name: "fine", NumRays: 64, Terms: []types.MeritTerm{
+				{Kind: "longitudinal_color", Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+			}},
+		},
+	}
+	schedule := &types.MeritScheduleConfig{
+		Metric:     "iteration",
+		Curve:      "step",
+		AnchorFrom: 0,
+		AnchorTo:   100,
+		Modes: []types.MeritScheduleMode{
+			{Name: "coarse", WeightFrom: 1.0, WeightTo: 0.0},
+			{Name: "fine", WeightFrom: 0.0, WeightTo: 1.0},
+		},
+	}
+	return []ConfigInput{cfg}, schedule
+}
+
+// TestMeritScheduleNumRaysSwitches verifies that o.numRays changes when the
+// merit schedule switches between modes that declare different num_rays.
+func TestMeritScheduleNumRaysSwitches(t *testing.T) {
+	configs, schedule := numRaysScheduleConfig()
+	opt := NewMultiOptimizer(configs, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 8, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt.SetMeritSchedule(schedule)
+
+	x := []float64{}
+
+	// step curve at iter 10: t=0.1 < 0.5 → "coarse" at full weight
+	opt.UpdateMeritWeights(x, 10)
+	if opt.numRays != 16 {
+		t.Errorf("iter 10: numRays = %d, want 16", opt.numRays)
+	}
+
+	// step curve at iter 90: t=0.9 > 0.5 → "fine" at full weight
+	opt.UpdateMeritWeights(x, 90)
+	if opt.numRays != 64 {
+		t.Errorf("iter 90: numRays = %d, want 64", opt.numRays)
+	}
+
+	// Verify MeritScheduleState reports the effective num_rays
+	_, _, _, _, effNumRays := opt.MeritScheduleState()
+	if effNumRays != 64 {
+		t.Errorf("MeritScheduleState effNumRays = %d, want 64", effNumRays)
+	}
+}
+
+// TestMeritScheduleNumRaysMaxAcrossConfigs verifies that the maximum num_rays
+// across configs is used when configs declare different values for the same mode.
+func TestMeritScheduleNumRaysMaxAcrossConfigs(t *testing.T) {
+	s := tripletModesSurfaces(false)
+	surface.Precompute(s)
+
+	cfg0 := ConfigInput{
+		ID:       "cfg0",
+		Weight:   0.5,
+		Surfaces: s,
+		Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+		MeritModes: []types.MeritMode{
+			{Name: "A", NumRays: 16, Terms: []types.MeritTerm{
+				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+			}},
+		},
+	}
+	cfg1 := ConfigInput{
+		ID:       "cfg1",
+		Weight:   0.5,
+		Surfaces: s,
+		Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+		MeritModes: []types.MeritMode{
+			{Name: "A", NumRays: 48, Terms: []types.MeritTerm{
+				{Kind: "longitudinal_color", Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+			}},
+		},
+	}
+	schedule := &types.MeritScheduleConfig{
+		Metric:     "iteration",
+		Curve:      "step",
+		AnchorFrom: 0,
+		AnchorTo:   100,
+		Modes: []types.MeritScheduleMode{
+			{Name: "A", WeightFrom: 1.0, WeightTo: 1.0},
+		},
+	}
+
+	opt := NewMultiOptimizer([]ConfigInput{cfg0, cfg1}, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt.SetMeritSchedule(schedule)
+
+	opt.UpdateMeritWeights([]float64{}, 0)
+	if opt.numRays != 48 {
+		t.Errorf("numRays = %d, want max(16,48) = 48", opt.numRays)
+	}
+}
+
+// TestMeritScheduleNumRaysFallbackToBase verifies that when no mode declares
+// num_rays, the base value is used unchanged.
+func TestMeritScheduleNumRaysFallbackToBase(t *testing.T) {
+	configs, schedule := modesScheduleConfig("step")
+	opt := NewMultiOptimizer(configs, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt.SetMeritSchedule(schedule)
+
+	x := []float64{}
+	opt.UpdateMeritWeights(x, 10)
+	if opt.numRays != 32 {
+		t.Errorf("numRays = %d, want base 32 (no mode declares num_rays)", opt.numRays)
+	}
+	opt.UpdateMeritWeights(x, 90)
+	if opt.numRays != 32 {
+		t.Errorf("numRays = %d, want base 32 (no mode declares num_rays)", opt.numRays)
+	}
 }

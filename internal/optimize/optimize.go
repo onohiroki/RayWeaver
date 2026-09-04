@@ -179,7 +179,10 @@ type config struct {
 	// meritModes holds the config's named merit-mode term lists (from
 	// configs[].merit_modes). Nil when the config uses its fixed merit.
 	meritModes  map[string][]meritTerm
-	constraints []types.ConstraintOperand
+	// meritModeNumRays holds the per-mode num_rays override (from
+	// configs[].merit_modes[].num_rays). Nil when no mode declares num_rays.
+	meritModeNumRays map[string]int
+	constraints      []types.ConstraintOperand
 }
 
 // meritTerm is the unified merit term: weights and (for angle fields) the
@@ -299,13 +302,13 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 	if ms.aggregation == "" {
 		ms.aggregation = "mean"
 	}
-	// Default anchors for spot_diffraction when unset (both 0): a 0,0 pair
-	// yields t=0.5 fixed, which is a footgun for this metric.  Use 3→1 as
-	// the sensible default: switch from geometric to wavefront when the
-	// average spot/Airy ratio drops from ≥3 to ≤1 (near diffraction limit).
+	// Default anchors for spot_diffraction when unset (both 0): the metric is
+	// normalised by its initial value so anchor_from=1.0 is the starting point;
+	// anchor_to=0.005 corresponds to the geometric spot shrinking to the Airy
+	// radius (0.0023 mm / ~0.477 mm for the double-Gauss).
 	if ms.metric == "spot_diffraction" && ms.anchorFrom == 0 && ms.anchorTo == 0 {
-		ms.anchorFrom = 3.0
-		ms.anchorTo = 1.0
+		ms.anchorFrom = 1.0
+		ms.anchorTo = 0.005
 	}
 	o.modeWeights = make(map[string]float64, len(s.Modes))
 	for _, m := range s.Modes {
@@ -315,6 +318,12 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 	o.meritSchedule = ms
 
 	x0 := o.InitialState()
+	// For spot_diffraction, snapshot the initial ratio so subsequent values are
+	// normalised (initial = 1.0, improving = <1.0).
+	if ms.metric == "spot_diffraction" {
+		r, _ := o.spotDiffractionRatioRaw(x0)
+		o.initialSpotRatio = r
+	}
 	// The merit_ratio metric is 1.0 at the initial state by definition (the
 	// initialMerit guard below); the other metrics evaluate directly.
 	o.setModeWeightsAt(o.scheduleMetric(x0, 0))
@@ -336,6 +345,7 @@ func (o *Optimizer) UpdateMeritWeights(x []float64, iter int) {
 	if cur != prev {
 		o.modeChanges++
 	}
+	o.numRays = o.resolveScheduledNumRays()
 	if o.logger != nil {
 		if ml, ok := o.logger.(dls.ModeLogger); ok {
 			ml.LogModeWeights(iter, copyWeights(o.modeWeights), s)
@@ -363,6 +373,30 @@ func (o *Optimizer) setModeWeightsAt(s float64) string {
 		o.modeWeights[sm.name] = sm.weightFrom + (sm.weightTo-sm.weightFrom)*f
 	}
 	return dominantMode(o.modeWeights)
+}
+
+// resolveScheduledNumRays returns the effective num_rays from the currently
+// active merit modes. It takes the maximum across all configs so that no
+// config is under-sampled. When no mode declares num_rays, the base value
+// (o.baseNumRays) is returned unchanged.
+func (o *Optimizer) resolveScheduledNumRays() int {
+	maxRays := o.baseNumRays
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		if cfg.meritModeNumRays == nil {
+			continue
+		}
+		for _, sm := range o.meritSchedule.modes {
+			w := o.modeWeights[sm.name]
+			if w <= 0 {
+				continue
+			}
+			if r, ok := cfg.meritModeNumRays[sm.name]; ok && r > maxRays {
+				maxRays = r
+			}
+		}
+	}
+	return maxRays
 }
 
 // scheduleMetric evaluates the state metric s(x) driving the blend.
@@ -393,11 +427,23 @@ func (o *Optimizer) scheduleMetric(x []float64, iter int) float64 {
 	}
 }
 
-// spotDiffractionRatio computes the ratio of the weighted-average geometric
-// spot RMS to the diffraction-limited Airy radius (0.61·λ/NA) across all
-// configs and fields.  The second return value reports whether any valid
-// data was found (all configs with at least one traced grid).
+// spotDiffractionRatio returns the normalised spot/Airy ratio.  The raw ratio
+// (weighted-average geometric spot RMS / Airy radius) is divided by the
+// initial ratio snapshot so the metric always starts at 1.0 and drops as the
+// geometric spot shrinks toward the diffraction limit.
 func (o *Optimizer) spotDiffractionRatio(x []float64) (float64, bool) {
+	r, ok := o.spotDiffractionRatioRaw(x)
+	if !ok || o.initialSpotRatio <= 0 {
+		return r, ok
+	}
+	return r / o.initialSpotRatio, true
+}
+
+// spotDiffractionRatioRaw computes the un-normalised ratio of the weighted-
+// average geometric spot RMS to the diffraction-limited Airy radius
+// (0.61·λ/NA) across all configs and fields.  The second return value reports
+// whether any valid data was found (all configs with at least one traced grid).
+func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 	configSurfaces, tempGC := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 
@@ -548,14 +594,14 @@ func copyWeights(src map[string]float64) map[string]float64 {
 }
 
 // MeritScheduleState returns the active (largest-weight) mode, the final
-// per-mode weights, the number of dominant-mode transitions, and the last
-// evaluated metric value. The zero value is returned when no schedule is
-// configured.
-func (o *Optimizer) MeritScheduleState() (string, map[string]float64, int, float64) {
+// per-mode weights, the number of dominant-mode transitions, the last
+// evaluated metric value, and the effective num_rays. The zero value is
+// returned when no schedule is configured.
+func (o *Optimizer) MeritScheduleState() (string, map[string]float64, int, float64, int) {
 	if o.meritSchedule == nil {
-		return "", nil, 0, 0
+		return "", nil, 0, 0, o.baseNumRays
 	}
-	return dominantMode(o.modeWeights), copyWeights(o.modeWeights), o.modeChanges, o.lastMetric
+	return dominantMode(o.modeWeights), copyWeights(o.modeWeights), o.modeChanges, o.lastMetric, o.numRays
 }
 
 // scheduledTerm is one effective term of a config with the mode weight folded
@@ -736,6 +782,7 @@ type Optimizer struct {
 	tol              float64
 	epsilon          float64
 	numRays          int
+	baseNumRays      int
 	apertureMargin   float64
 	apertureMarginMM float64
 	muConMax         float64
@@ -764,9 +811,10 @@ type Optimizer struct {
 	// weights recomputed at the top of every DLS iteration.
 	meritSchedule *meritSchedule
 	modeWeights   map[string]float64
-	initialMerit  float64
-	modeChanges   int
-	lastMetric    float64
+	initialMerit    float64
+	initialSpotRatio float64 // initial spot_diffraction ratio for normalisation
+	modeChanges     int
+	lastMetric      float64
 	// stop, when set, is forwarded into dls.Options.Stop so the solver aborts
 	// mid-solve (returning the best point found so far with Status
 	// "interrupted") once the channel is closed. nil disables interruption.
@@ -1130,12 +1178,16 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 		}
 		if len(ci.MeritModes) > 0 {
 			c.meritModes = make(map[string][]meritTerm, len(ci.MeritModes))
+			c.meritModeNumRays = make(map[string]int, len(ci.MeritModes))
 			for _, m := range ci.MeritModes {
 				var terms []meritTerm
 				for _, t := range m.Terms {
 					terms = append(terms, buildMeritTermFromTypes(t, ci))
 				}
 				c.meritModes[m.Name] = terms
+				if m.NumRays > 0 {
+					c.meritModeNumRays[m.Name] = m.NumRays
+				}
 			}
 		}
 		for _, t := range ci.MeritTerms {
@@ -1327,6 +1379,7 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 		tol:                 tol,
 		epsilon:             epsilon,
 		numRays:             numRays,
+		baseNumRays:         numRays,
 		apertureMargin:      apertureMargin,
 		apertureMarginMM:    0.2,
 		muConMax:            muConMax,
