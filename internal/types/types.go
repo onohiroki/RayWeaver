@@ -1521,6 +1521,15 @@ type PSFMTFConfig struct {
 	// FrequencyPoints is the number of samples along the reported curve; 0 =
 	// the FFT grid size / 2.
 	FrequencyPoints int `yaml:"frequency_points,omitempty"`
+	// SpectralCurve selects the SPD for polychromatic MTF weighting:
+	// "" (monochromatic), "D65", "FLAT". Independent of psf.spectral_curve.
+	SpectralCurve string `yaml:"spectral_curve,omitempty"`
+	// SpectralEntries overrides SpectralCurve with custom (nm, relative) points.
+	SpectralEntries []SpectralEntry `yaml:"spectral_entries,omitempty"`
+	// CombinationMethod selects how to combine wavelengths for MTF:
+	// "intensity" (default) = incoherent sum of intensities -> MTF from combined PSF
+	// "otf" = weighted average of monochromatic OTFs -> MTF from combined OTF
+	CombinationMethod string `yaml:"combination_method,omitempty"`
 }
 
 // PSFMTFPoint is one OTF/MTF sample at a spatial frequency.
@@ -1547,10 +1556,22 @@ type PSFMTFAxis struct {
 	Evaluated  []PSFMTFPoint `yaml:"evaluated,omitempty"`
 }
 
+// WavelengthMTF holds per-wavelength MTF threshold crossings and evaluated
+// points for polychromatic MTF results. Curve is omitted to keep output compact.
+type WavelengthMTF struct {
+	Wavelength      float64    `yaml:"wavelength"`       // mm
+	SpectralWeight  float64    `yaml:"spectral_weight"`  // SPD weight × transmittance × Δλ
+	Sagittal        PSFMTFAxis `yaml:"sagittal"`         // Thresholds, Evaluated only
+	Tangential      PSFMTFAxis `yaml:"tangential"`       // Thresholds, Evaluated only
+}
+
 // PSFMTFSummary is the MTF/OTF summary of one PSF result.
 type PSFMTFSummary struct {
-	Sagittal   PSFMTFAxis `yaml:"sagittal"`
-	Tangential PSFMTFAxis `yaml:"tangential"`
+	Sagittal           PSFMTFAxis     `yaml:"sagittal"`
+	Tangential         PSFMTFAxis     `yaml:"tangential"`
+	SpectralCurve      string         `yaml:"spectral_curve,omitempty"`
+	CombinationMethod  string         `yaml:"combination_method,omitempty"`
+	WavelengthMTFs     []WavelengthMTF `yaml:"wavelength_mtfs,omitempty"`
 }
 
 // PSFConfig configures the `psf` subcommand (the `psf:` YAML section).

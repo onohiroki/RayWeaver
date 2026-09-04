@@ -113,6 +113,75 @@ func (c *Curve) Weight(wavelengthMM float64) float64 {
 	return v
 }
 
+// IntegratedWeight returns the spectral weight for a wavelength sample,
+// including the integration width Δλ (trapezoidal rule). The weight is
+// S(λ) * Δλ where Δλ is half the distance to adjacent samples.
+// This is used for proper energy-conserving spectral integration.
+func (c *Curve) IntegratedWeight(wavelengthMM float64) float64 {
+	if len(c.mm) == 0 || wavelengthMM < c.mm[0] || wavelengthMM > c.mm[len(c.mm)-1] {
+		return 0
+	}
+	// Find the index where this wavelength would be inserted
+	lo := 0
+	hi := len(c.mm) - 1
+	for lo < hi {
+		mid := (lo + hi) / 2
+		if c.mm[mid] < wavelengthMM {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	i := lo
+	// Exact match at sample point
+	if i > 0 && math.Abs(c.mm[i-1]-wavelengthMM) <= 1e-12 {
+		if v := c.rel[i-1]; v > 0 {
+			return v * c.deltaLambdaMM(i - 1)
+		}
+		return 0
+	}
+	if math.Abs(c.mm[i]-wavelengthMM) <= 1e-12 {
+		if v := c.rel[i]; v > 0 {
+			return v * c.deltaLambdaMM(i)
+		}
+		return 0
+	}
+	// Interpolated between samples i-1 and i
+	if i == 0 {
+		return 0
+	}
+	w0, w1 := c.mm[i-1], c.mm[i]
+	if w1 <= w0 {
+		return 0
+	}
+	t := (wavelengthMM - w0) / (w1 - w0)
+	v := c.rel[i-1] + t*(c.rel[i]-c.rel[i-1])
+	if v < 0 {
+		return 0
+	}
+	// Use interpolated Δλ (trapezoidal)
+	dl0 := c.deltaLambdaMM(i - 1)
+	dl1 := c.deltaLambdaMM(i)
+	dl := dl0 + t*(dl1-dl0)
+	return v * dl
+}
+
+// deltaLambdaMM returns the integration width Δλ for sample at index i
+// using trapezoidal rule: half distance to previous + half distance to next.
+func (c *Curve) deltaLambdaMM(i int) float64 {
+	n := len(c.mm)
+	if n <= 1 {
+		return 0
+	}
+	if i == 0 {
+		return (c.mm[1] - c.mm[0]) / 2
+	}
+	if i == n-1 {
+		return (c.mm[n-1] - c.mm[n-2]) / 2
+	}
+	return (c.mm[i+1] - c.mm[i-1]) / 2
+}
+
 // Flat returns a Curve with unit relative power over [minNM, maxNM].
 func Flat(minNM, maxNM float64) *Curve {
 	if maxNM <= minNM {
