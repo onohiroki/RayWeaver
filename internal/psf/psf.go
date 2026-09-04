@@ -521,6 +521,11 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 	stats := WavefrontStats{}
 	var refPowerTotal, windowPowerTotal, whiteRawSum float64
 
+	// For polychromatic MTF: collect per-wavelength physical intensity grids
+	var mtfWavelengths []float64
+	var mtfIntensities [][]float64
+	var mtfTransmittances []float64
+
 	for _, td := range tds {
 		// Evaluate each polarization on the shared grid, then combine
 		// incoherently (group of 1 or 2).
@@ -566,6 +571,12 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 			stats.Missed += td.stats[p].Missed
 		}
 		cxw, cyw := act.Centroid()
+		
+		// Store per-wavelength physical intensity for polychromatic MTF
+		mtfWavelengths = append(mtfWavelengths, td.wl)
+		mtfIntensities = append(mtfIntensities, act.Intensity)
+		mtfTransmittances = append(mtfTransmittances, tau)
+
 		contributions = append(contributions, WavelengthContribution{
 			Wavelength:     td.wl,
 			SpectralWeight: w,
@@ -594,6 +605,52 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 
 	whiteRawIntensity := make([]float64, len(whiteGrid.Intensity))
 	copy(whiteRawIntensity, whiteGrid.Intensity)
+
+	// Compute polychromatic MTF using OTF complex-weighted averaging
+	// when MTF config specifies spectral curve or entries
+	var mtfResult *types.PSFMTFSummary
+	if opts.MTFCfg != nil && (opts.MTFCfg.SpectralCurve != "" || len(opts.MTFCfg.SpectralEntries) > 0) {
+		// Build SPD curve for MTF if different from PSF
+		var mtfSPD *spectral.Curve
+		if len(opts.MTFCfg.SpectralEntries) > 0 {
+			nm := make([]float64, len(opts.MTFCfg.SpectralEntries))
+			rel := make([]float64, len(opts.MTFCfg.SpectralEntries))
+			for i, e := range opts.MTFCfg.SpectralEntries {
+				nm[i] = e.Wavelength
+				rel[i] = e.Relative
+			}
+			mtfSPD = spectral.NewCurve(nm, rel)
+		} else if opts.MTFCfg.SpectralCurve == "FLAT" {
+			l := minFloat(mtfWavelengths)
+			h := maxFloat(mtfWavelengths)
+			mtfSPD = spectral.Flat(l*1e6, h*1e6)
+		} else {
+			mtfSPD = spectral.D65()
+		}
+		mtfResult = ComputePolychromaticMTF(mtfWavelengths, mtfIntensities, spec, mtfSPD, mtfTransmittances, opts.MTFCfg)
+		
+		// Add per-wavelength MTF threshold data to summary
+		if mtfResult != nil {
+			for i, wl := range mtfWavelengths {
+				if i < len(contributions) && contributions[i].MTF != nil {
+					mtfResult.WavelengthMTFs = append(mtfResult.WavelengthMTFs, types.WavelengthMTF{
+						Wavelength:     wl,
+						SpectralWeight: mtfTransmittances[i] * mtfSPD.IntegratedWeight(wl),
+						Sagittal: types.PSFMTFAxis{
+							Thresholds:  contributions[i].MTF.Sagittal.Thresholds,
+							Evaluated:   contributions[i].MTF.Sagittal.Evaluated,
+						},
+						Tangential: types.PSFMTFAxis{
+							Thresholds:  contributions[i].MTF.Tangential.Thresholds,
+							Evaluated:   contributions[i].MTF.Tangential.Evaluated,
+						},
+					})
+				}
+			}
+		}
+	} else {
+		mtfResult = ComputeMTF(whiteRawIntensity, spec, opts.MTFCfg)
+	}
 
 	whiteGrid.Normalize()
 	peakVal, peakX, peakY := whiteGrid.Peak()
@@ -633,7 +690,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 		SpectralCurve:      opts.SpectralCurve,
 		BestFocusShift:     evaluateZ - planeZ,
 		Contributions:      contributions,
-		MTF:                ComputeMTF(whiteRawIntensity, spec, opts.MTFCfg),
+		MTF:                mtfResult,
 		whiteRawIntensity:  whiteRawIntensity,
 	}
 }
