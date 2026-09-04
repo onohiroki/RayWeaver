@@ -93,6 +93,9 @@ type Result struct {
 	Contributions []WavelengthContribution
 	// MTF is the OTF/MTF summary of the result's PSF grid.
 	MTF *types.PSFMTFSummary
+	// whiteRawIntensity is the pre-normalization intensity grid used for
+	// physical-scale MTF computation (polychromatic results only).
+	whiteRawIntensity []float64
 }
 
 // WavelengthContribution is one wavelength's weighted share of a
@@ -244,9 +247,12 @@ func computeOne(engine *ray.Engine, gc *glass.Catalog, system types.System, pg *
 	// Evaluate actual + ideal in one shared pass (geometry computed once).
 	pair := fieldPair{samples: samples, center: center, actual: NewFieldGrid(spec), ideal: NewFieldGrid(spec)}
 	computePairs([]fieldPair{pair}, evaluateZ, nImage, wl, spec, opts.Workers)
+	rawIntensity := make([]float64, len(pair.actual.Intensity))
+	copy(rawIntensity, pair.actual.Intensity)
 	r := finishResult(pair.actual, pair.ideal, samples, center, nImage, wl, evaluateZ, fieldAngle, fi, label, stats, samplePower(samples))
 	r.BestFocusShift = evaluateZ - planeZ
-	r.MTF = ComputeMTF(r.Grid.Intensity, r.Grid.Spec, opts.MTFCfg)
+	r.MTF = ComputeMTF(rawIntensity, spec, opts.MTFCfg)
+	r.whiteRawIntensity = rawIntensity
 	applyConvergence(r, engine, system, gc, fd, opts, planeZ, nImage, wl, fieldAngle, fi, pol)
 	return r
 }
@@ -296,6 +302,8 @@ func computeCombined(engine *ray.Engine, gc *glass.Catalog, system types.System,
 		comb.Intensity[i] = pairs[0].actual.Intensity[i] + pairs[1].actual.Intensity[i]
 		idealComb.Intensity[i] = pairs[0].ideal.Intensity[i] + pairs[1].ideal.Intensity[i]
 	}
+	rawIntensity := make([]float64, len(comb.Intensity))
+	copy(rawIntensity, comb.Intensity)
 	stats := r1.stats
 	stats.Total += r2.stats.Total
 	stats.Valid += r2.stats.Valid
@@ -303,7 +311,8 @@ func computeCombined(engine *ray.Engine, gc *glass.Catalog, system types.System,
 	r := finishResult(comb, idealComb, r1.samples, center, nImage, wl, evaluateZ, fieldAngle, fi,
 		string(types.PolRCPLCP), stats, samplePower(r1.samples)+samplePower(r2.samples))
 	r.BestFocusShift = evaluateZ - planeZ
-	r.MTF = ComputeMTF(r.Grid.Intensity, r.Grid.Spec, opts.MTFCfg)
+	r.MTF = ComputeMTF(rawIntensity, spec, opts.MTFCfg)
+	r.whiteRawIntensity = rawIntensity
 	applyConvergenceCombined(r, engine, system, gc, fd, opts, planeZ, nImage, wl, fieldAngle, fi, pol1, pol2)
 	return r
 }
@@ -583,6 +592,9 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 	_, _, spotRMS := ImagePlaneSpot(ref.samples[refIdx], evaluateZ)
 	rmsOPD, pvOPD := wavefrontOPD(ref.samples[refIdx], center, ref.nImage)
 
+	whiteRawIntensity := make([]float64, len(whiteGrid.Intensity))
+	copy(whiteRawIntensity, whiteGrid.Intensity)
+
 	whiteGrid.Normalize()
 	peakVal, peakX, peakY := whiteGrid.Peak()
 	wcx, wcy := whiteGrid.Centroid()
@@ -595,33 +607,34 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 	}
 
 	return &Result{
-		FieldIndex:      fi,
-		FieldAngle:      angleFromDir(ref.chiefDir),
-		Wavelength:      ref.wl,
-		Polarization:    label,
-		Grid:            whiteGrid,
-		IdealPeak:       idealPeak,
-		Strehl:          strehl,
-		FWHMX:           fx,
-		FWHMY:           fy,
-		CentroidX:       wcx,
-		CentroidY:       wcy,
-		PeakValue:       peakVal,
-		PeakX:           peakX,
-		PeakY:           peakY,
-		Encircled50:     ee50,
-		AiryRadius:      AiryRadius(ref.wl, na),
-		ImageNA:         na,
-		SpotRMS:         spotRMS,
-		RMSOPD:          rmsOPD,
-		PVOPD:           pvOPD,
-		Stats:           stats,
-		RawIntensitySum: whiteRawSum,
-		Transmittance:   transmittance,
-		SpectralCurve:   opts.SpectralCurve,
-		BestFocusShift:  evaluateZ - planeZ,
-		Contributions:   contributions,
-		MTF:             ComputeMTF(whiteGrid.Intensity, spec, opts.MTFCfg),
+		FieldIndex:         fi,
+		FieldAngle:         angleFromDir(ref.chiefDir),
+		Wavelength:         ref.wl,
+		Polarization:       label,
+		Grid:               whiteGrid,
+		IdealPeak:          idealPeak,
+		Strehl:             strehl,
+		FWHMX:              fx,
+		FWHMY:              fy,
+		CentroidX:          wcx,
+		CentroidY:          wcy,
+		PeakValue:          peakVal,
+		PeakX:              peakX,
+		PeakY:              peakY,
+		Encircled50:        ee50,
+		AiryRadius:         AiryRadius(ref.wl, na),
+		ImageNA:            na,
+		SpotRMS:            spotRMS,
+		RMSOPD:             rmsOPD,
+		PVOPD:              pvOPD,
+		Stats:              stats,
+		RawIntensitySum:    whiteRawSum,
+		Transmittance:      transmittance,
+		SpectralCurve:      opts.SpectralCurve,
+		BestFocusShift:     evaluateZ - planeZ,
+		Contributions:      contributions,
+		MTF:                ComputeMTF(whiteRawIntensity, spec, opts.MTFCfg),
+		whiteRawIntensity:  whiteRawIntensity,
 	}
 }
 
