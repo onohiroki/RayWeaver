@@ -148,15 +148,23 @@ func validAtHeight(surf types.Surface, h float64) bool {
 // converging (convex) lens has c1 >= c2. This covers biconvex, biconcave,
 // plano and meniscus shapes alike.
 //
-//   - Concave lens (c1 < c2) or a cemented element: the surface carrying the
-//     horizontal chamfer of half the Z separation between the two surface
-//     edges (parallel to the optical axis) is the cemented surface when the
-//     element is part of a cemented pair, otherwise the taller surface; the
-//     other surface connects to the chamfer end diagonally. Putting the
-//     chamfer on the cemented side keeps the bonded rim flat. The chamfer
-//     always points from the carrier's edge toward the other surface, so it
-//     works whether the carrier edge lies before or after the other edge in Z
-//     (e.g. a rear negative meniscus or biconcave lens in a double Gauss).
+//   - Concave lens (c1 < c2) or a cemented element: the chamfer carrier (the
+//     surface from which the edge chamfer extends) is the cemented surface
+//     when the element is part of a cemented pair, otherwise the taller
+//     surface — except for negative curvature radii where the mirror-image
+//     geometry makes surface 2 the carrier.  The chamfer geometry depends on
+//     the curvature sign:
+//     * Positive curvature: when the carrier edge is closer to the image
+//       plane (zChamfer >= zOther), the edge extends from the carrier in the
+//       +Z direction by the edge thickness (minimum 1 mm), drops vertically
+//       to the Y-midpoint, then connects diagonally to the other edge.
+//       Otherwise the classic midpoint-Z chamfer is used.
+//     * Negative curvature (c1 < 0, non-cemented): always uses the chamfer
+//       approach.  The carrier is surface 2 and the chamfer extends from
+//       z2Top in the −Z direction (toward z1Top) by the edge thickness.
+//       Top polyline: p2Top → carrier-Y at chamferZ → Y-midpoint at
+//       chamferZ → p1Top (the carrier-Y segment is horizontal, mirroring
+//       the positive-curvature case).
 //     Equal-height elements keep a plain horizontal rim.
 //   - Convex lens (c1 >= c2) with no cemented surface: both surfaces are drawn
 //     at the taller surface's height so the rim is a plain horizontal line,
@@ -230,6 +238,11 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 	if e.r1Cemented != e.r2Cemented {
 		chamferR1 = e.r1Cemented
 	}
+	// Negative curvature radii produce a mirror-image geometry: the chamfer
+	// carrier is always surface 2 (R2/Z2) rather than the taller surface.
+	if c1 < 0 && e.r1Cemented == e.r2Cemented {
+		chamferR1 = false
+	}
 	var hChamfer, zChamfer, hOther, zOther float64
 	if chamferR1 {
 		hChamfer, zChamfer = h1eff, z1Top
@@ -259,9 +272,34 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 		return ee
 	}
 
-	chZ := (zChamfer + zOther) / 2
-	ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hChamfer}, p1Top}
-	ee.bottomPts = []vec2{p1Bot, vec2{X: chZ, Y: -hChamfer}, p2Bot}
+	// Negative curvature: mirror-image geometry.  The chamfer carrier is
+	// surface 2 (swapped above) and the chamfer extends from z2Top toward
+	// z1Top (−Z direction) by a fixed 1 mm edge thickness (sag is not
+	// considered).  Top polyline: p2Top → carrier-Y at chamferZ →
+	// Y-midpoint at chamferZ → p1Top.
+	if c1 < 0 && e.r1Cemented == e.r2Cemented {
+		chamferZ := zChamfer - 1.0
+		chamferY := (h1eff + h2eff) / 2
+		ee.topPts = []vec2{p2Top, vec2{X: chamferZ, Y: hChamfer}, vec2{X: chamferZ, Y: chamferY}, p1Top}
+		ee.bottomPts = []vec2{p1Bot, vec2{X: chamferZ, Y: -chamferY}, vec2{X: chamferZ, Y: -hChamfer}, p2Bot}
+	} else {
+		// Positive curvature or cemented element with negative curvature:
+		// determine direction and use the existing logic.
+		direction := 1.0
+		if c1 < 0 {
+			direction = -1.0
+		}
+		if (zChamfer-zOther)*direction >= 0 {
+			chamferZ := zChamfer + direction*1.0
+			chamferY := (h1eff + h2eff) / 2
+			ee.topPts = []vec2{p2Top, vec2{X: chamferZ, Y: chamferY}, vec2{X: chamferZ, Y: hChamfer}, p1Top}
+			ee.bottomPts = []vec2{p1Bot, vec2{X: chamferZ, Y: -hChamfer}, vec2{X: chamferZ, Y: -chamferY}, p2Bot}
+		} else {
+			chZ := (zChamfer + zOther) / 2
+			ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hChamfer}, p1Top}
+			ee.bottomPts = []vec2{p1Bot, vec2{X: chZ, Y: -hChamfer}, p2Bot}
+		}
+	}
 	return ee
 }
 

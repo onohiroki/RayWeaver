@@ -9,12 +9,9 @@ metadata:
     to hit EFL ~50 mm). Carries an optimization.escape section so the same file
     drives escape-demo.bash --lens doublegauss, doublegauss-demo.bash, and the
     --lens doublegauss mode of psf-mtf-demo.bash and wavefront-demo.bash. The
-    escape uses a conditional merit schedule (merit_schedule) with the
-    spot_diffraction metric: it compares the per-field weighted-average geometric
-    spot RMS to the diffraction-limited Airy radius (0.61·λ/NA) and switches
-    from a spot_rms-based geometric merit (spot_phase) to a wavefront RMS merit
-    (wavefront_phase) via a step curve when the ratio drops below 1 (near the
-    diffraction limit). Default anchors: anchor_from 3 / anchor_to 1. This
+    escape uses a conditional merit schedule (merit_schedule) that switches from
+    a spot_rms-based geometric merit (spot_phase) to a wavefront RMS merit
+    (wavefront_phase) via a step curve when the merit ratio drops to 0.1. This
     two-phase approach first corrects geometric aberrations across all fields,
     then drives toward diffraction-limited performance. The escape parameters
     are tuned for the 36-variable landscape: distance_threshold 0.05, h_initial
@@ -63,11 +60,10 @@ optimization:
     w_span: 3.0
     initial_perturb: 0.10
   merit_schedule:
-    metric: spot_diffraction
-    metric_aggregation: mean
+    metric: merit_ratio
     curve: step
-    anchor_from: 3.0
-    anchor_to: 1.0
+    anchor_from: 1.0
+    anchor_to: 0.1
     modes:
     - name: spot_phase
       weight_from: 1.0
