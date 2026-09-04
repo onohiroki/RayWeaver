@@ -43,6 +43,8 @@ func runPSF(data []byte) {
 	spectralFlag := fs.String("spectral", "", "polychromatic (white) PSF: D65 (default) | FLAT")
 	psfWorkers := fs.Int("psf-workers", 0, "Huygens/wavefront parallel workers (default: GOMAXPROCS)")
 	maxFreq := fs.Float64("max-freq", 0, "MTF frequency cap in cycles/mm (0 = Nyquist; default psf.mtf_config.max_frequency)")
+	mtfSpectral := fs.String("mtf-spectral", "", "MTF polychromatic weighting: D65 (default) | FLAT (independent of PSF spectral)")
+	mtfCombination := fs.String("mtf-combination", "", "MTF combination method: intensity (default) | otf")
 	yamlOut := fs.String("yaml", "", "write full structured PSF data to FILE (index-suffixed per result)")
 	csvOut := fs.String("csv", "", "write gnuplot x,y,intensity map to FILE (index-suffixed per result)")
 	bestFocus := fs.Bool("best-focus", false, "evaluate each field at its best-focus image plane (removes field-curvature defocus)")
@@ -180,6 +182,27 @@ func runPSF(data []byte) {
 			opts.MTFCfg = &types.PSFMTFConfig{}
 		}
 		opts.MTFCfg.MaxFrequency = *maxFreq
+	}
+	// MTF spectral configuration (CLI overrides YAML)
+	if *mtfSpectral != "" {
+		if opts.MTFCfg == nil {
+			opts.MTFCfg = &types.PSFMTFConfig{}
+		}
+		switch strings.ToUpper(strings.TrimSpace(*mtfSpectral)) {
+		case "D65":
+			opts.MTFCfg.SpectralCurve = "D65"
+		case "FLAT":
+			opts.MTFCfg.SpectralCurve = "FLAT"
+		default:
+			errOut("Error: invalid --mtf-spectral %q (D65 | FLAT)", *mtfSpectral)
+			os.Exit(1)
+		}
+	}
+	if *mtfCombination != "" {
+		if opts.MTFCfg == nil {
+			opts.MTFCfg = &types.PSFMTFConfig{}
+		}
+		opts.MTFCfg.CombinationMethod = strings.ToLower(strings.TrimSpace(*mtfCombination))
 	}
 
 	results, err := psf.Compute(system, gc, fields, wavelengths, opts)
@@ -341,6 +364,9 @@ func psfMTFSummary(m *types.PSFMTFSummary) *types.PSFMTFSummary {
 	s.Sagittal.Evaluated = m.Sagittal.Evaluated
 	s.Tangential.Thresholds = m.Tangential.Thresholds
 	s.Tangential.Evaluated = m.Tangential.Evaluated
+	s.SpectralCurve = m.SpectralCurve
+	s.CombinationMethod = m.CombinationMethod
+	s.WavelengthMTFs = m.WavelengthMTFs
 	return s
 }
 

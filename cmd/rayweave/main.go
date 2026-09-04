@@ -812,31 +812,34 @@ polarization-averaged (unpolarised) PSF.
 
 Options:
   --ref-surface N     reference surface ID for wavefront sampling
-                        (default: the last optical surface)
+                         (default: the last optical surface)
   --psf-grid N        image-plane pixels per side (default 64)
   --psf-width W       evaluation half-width in mm (default: auto from Airy
-                        disk and geometric spot)
+                         disk and geometric spot)
   --num-rays N        pupil grid rays (default 400 ≈ 20×20 polar)
   --fields I1,I2,...  field indices to compute (default: all)
   --wavelengths W1,...  wavelengths in mm (default: chief wavelengths,
-                        else 587.56 nm)
+                         else 587.56 nm)
   --polarization S    RCP (default) | LCP | X | Y | RCP+LCP
   --psf-workers N     parallel workers for the Huygens integral and wavefront
-                        tracing (default: GOMAXPROCS)
+                         tracing (default: GOMAXPROCS)
   --max-freq N        MTF frequency cap in cycles/mm (default:
-                        psf.mtf_config.max_frequency, else the Nyquist)
+                         psf.mtf_config.max_frequency, else the Nyquist)
+  --mtf-spectral S    MTF polychromatic weighting: D65 (default) | FLAT
+                         (independent of PSF spectral)
+  --mtf-combination S MTF combination method: intensity (default) | otf
   --best-focus        evaluate each field at its best-focus image plane
-                        (the spot-RMS-minimizing shift, as in wavefront), so a
-                        field-curved system's defocus-dominated fixed-plane
-                        Strehl is replaced by the wavefront-quality number
+                         (the spot-RMS-minimizing shift, as in wavefront), so a
+                         field-curved system's defocus-dominated fixed-plane
+                         Strehl is replaced by the wavefront-quality number
   --converge-check BOOL  label sampling convergence by re-evaluating each result
-                        at a higher ray count (on by default; --converge-check
-                        false skips the 1.5x re-evaluation)
+                         at a higher ray count (on by default; --converge-check
+                         false skips the 1.5x re-evaluation)
   --yaml FILE         write full structured data (intensity, Ex/Ey/Ez,
-                        encircled energy, wavefront OPD) to FILE, one
-                        index-suffixed file per result
+                         encircled energy, wavefront OPD) to FILE, one
+                         index-suffixed file per result
   --csv FILE          write a gnuplot x,y,intensity map to FILE, one
-                        index-suffixed file per result
+                         index-suffixed file per result
   --config ID         select config by id (multi-config mode)
   --glass-dir DIR     AGF glass catalog directory
 
@@ -853,6 +856,8 @@ Input YAML — psf section (optional; flags override):
     best_focus: false
     mtf_config:
       max_frequency: 200
+      spectral_curve: D65
+      combination_method: otf
 
 Output: augmented YAML with a lightweight psf_results[] summary (Strehl,
 FWHM, centroid, encircled energy, Airy radius, sampling counts). Full grids

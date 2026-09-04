@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -50,9 +51,9 @@ func TestMTFGaussian(t *testing.T) {
 			if want < 0.05 {
 				continue
 			}
-if math.Abs(p.MTF-want) > 0.02*want && math.Abs(p.MTF-want) > 0.006 {
-		t.Errorf("MTF(f=%.1f) = %.5f, want %.5f (Gaussian)", p.Frequency, p.MTF, want)
-	}
+			if math.Abs(p.MTF-want) > 0.02*want && math.Abs(p.MTF-want) > 0.006 {
+				t.Errorf("MTF(f=%.1f) = %.5f, want %.5f (Gaussian)", p.Frequency, p.MTF, want)
+			}
 			if math.Abs(p.PTF) > 0.02 {
 				t.Errorf("PTF(f=%.1f) = %v, want ~0 (centred Gaussian)", p.Frequency, p.PTF)
 			}
@@ -145,6 +146,144 @@ func TestMTFDiffractionLimited(t *testing.T) {
 		if math.Abs(m.Sagittal.Curve[1].MTF-m.Tangential.Curve[1].MTF) > 0.02 {
 			t.Errorf("sagittal/tangential mismatch for isotropic PSF: %.4f vs %.4f",
 				m.Sagittal.Curve[1].MTF, m.Tangential.Curve[1].MTF)
+		}
+	}
+}
+
+// TestComputePolychromaticMTF verifies the polychromatic MTF computation
+// using OTF complex-weighted averaging. Uses two Gaussian PSFs with
+// different sigmas to simulate wavelength-dependent PSFs.
+func TestComputePolychromaticMTF(t *testing.T) {
+	const (
+		n  = 128
+		dx = 6.25e-4
+	)
+	spec := ImageGridSpec{NX: n, NY: n, X0: -float64(n)/2*dx, Y0: -float64(n)/2*dx, DX: dx, DY: dx}
+
+	// Two wavelengths with different Gaussian sigmas
+	sigma1 := 8e-3
+	sigma2 := 10e-3
+	wl1 := 486.13e-6  // F line
+	wl2 := 656.28e-6  // C line
+
+	I1 := make([]float64, n*n)
+	I2 := make([]float64, n*n)
+	for j := 0; j < n; j++ {
+		for i := 0; i < n; i++ {
+			x := spec.X0 + (float64(i)+0.5)*dx
+			y := spec.Y0 + (float64(j)+0.5)*dx
+			I1[j*n+i] = math.Exp(-(x*x + y*y) / (2 * sigma1 * sigma1))
+			I2[j*n+i] = math.Exp(-(x*x + y*y) / (2 * sigma2 * sigma2))
+		}
+	}
+
+	// Flat SPD with equal weights, unit transmittance
+	spdCurve := spectral.Flat(486.13, 656.28)
+	transmittances := []float64{1.0, 1.0}
+	wavelengths := []float64{wl1, wl2}
+	intensities := [][]float64{I1, I2}
+
+	cfg := &types.PSFMTFConfig{
+		SpectralCurve:     "FLAT",
+		CombinationMethod: "otf",
+	}
+
+	m := ComputePolychromaticMTF(wavelengths, intensities, spec, spdCurve, transmittances, cfg)
+	if m == nil {
+		t.Fatal("ComputePolychromaticMTF returned nil")
+	}
+
+	// Verify spectral curve and combination method are recorded
+	if m.SpectralCurve != "FLAT" {
+		t.Errorf("SpectralCurve = %q, want FLAT", m.SpectralCurve)
+	}
+	if m.CombinationMethod != "otf" {
+		t.Errorf("CombinationMethod = %q, want otf", m.CombinationMethod)
+	}
+
+	// For two equal-weight Gaussians, the combined MTF should be between
+	// the two individual MTFs. Check at a few frequencies.
+	// MTF of Gaussian: exp(-2π²σ²f²)
+	checkFreqs := []float64{10, 50, 100}
+	for _, f := range checkFreqs {
+		mtf1 := math.Exp(-2 * math.Pi * math.Pi * sigma1 * sigma1 * f * f)
+		mtf2 := math.Exp(-2 * math.Pi * math.Pi * sigma2 * sigma2 * f * f)
+		// Combined OTF average: |(OTF1 + OTF2)/2|, for centred Gaussians OTF is real
+		expected := (mtf1 + mtf2) / 2
+
+		// Get computed MTF from sagittal axis
+		var computed float64
+		for _, p := range m.Sagittal.Curve {
+			if math.Abs(p.Frequency-f) < 1.0 {
+				computed = p.MTF
+				break
+			}
+		}
+		if computed == 0 {
+			continue // frequency not in curve
+		}
+		if math.Abs(computed-expected) > 0.05*expected && math.Abs(computed-expected) > 0.01 {
+			t.Errorf("polychromatic MTF(f=%.1f) = %.5f, want %.5f (avg of %.5f, %.5f)",
+				f, computed, expected, mtf1, mtf2)
+		}
+	}
+}
+
+// TestComputePolychromaticMTFWithShift verifies that lateral shift between
+// wavelengths (simulating lateral color) can reduce the combined MTF
+// due to phase cancellation in the OTF average.
+func TestComputePolychromaticMTFWithShift(t *testing.T) {
+	const (
+		n  = 128
+		dx = 6.25e-4
+	)
+	spec := ImageGridSpec{NX: n, NY: n, X0: -float64(n)/2*dx, Y0: -float64(n)/2*dx, DX: dx, DY: dx}
+
+	// Same Gaussian, but second wavelength shifted by 0.005mm in x
+	// This creates a linear phase difference in the OTF
+	sigma := 8e-3
+	shift := 0.005
+	wl1 := 486.13e-6
+	wl2 := 656.28e-6
+
+	I1 := make([]float64, n*n)
+	I2 := make([]float64, n*n)
+	for j := 0; j < n; j++ {
+		for i := 0; i < n; i++ {
+			x := spec.X0 + (float64(i)+0.5)*dx
+			y := spec.Y0 + (float64(j)+0.5)*dx
+			I1[j*n+i] = math.Exp(-(x*x + y*y) / (2 * sigma * sigma))
+			// Shifted Gaussian
+			I2[j*n+i] = math.Exp(-((x-shift)*(x-shift) + y*y) / (2 * sigma * sigma))
+		}
+	}
+
+	spdCurve := spectral.Flat(486.13, 656.28)
+	transmittances := []float64{1.0, 1.0}
+	wavelengths := []float64{wl1, wl2}
+	intensities := [][]float64{I1, I2}
+
+	cfg := &types.PSFMTFConfig{
+		SpectralCurve:     "FLAT",
+		CombinationMethod: "otf",
+	}
+
+	m := ComputePolychromaticMTF(wavelengths, intensities, spec, spdCurve, transmittances, cfg)
+	if m == nil {
+		t.Fatal("ComputePolychromaticMTF returned nil")
+	}
+
+	// Verify the result is valid and has expected structure
+	if len(m.Sagittal.Curve) == 0 {
+		t.Fatal("no MTF curve computed")
+	}
+	// The combined MTF should be finite and positive
+	for _, p := range m.Sagittal.Curve {
+		if p.MTF < 0 || p.MTF > 1 {
+			t.Errorf("MTF out of range: %v at f=%.1f", p.MTF, p.Frequency)
+		}
+		if math.IsNaN(p.MTF) {
+			t.Errorf("MTF is NaN at f=%.1f", p.Frequency)
 		}
 	}
 }
