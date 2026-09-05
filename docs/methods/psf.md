@@ -210,3 +210,270 @@ summed across incoherent states, so no fictitious interference is introduced.
 - The method treats each ray's tube as coherent across the pupil (valid for
   single-mode illumination). Incoherent broadband illumination should be
   evaluated wavelength by wavelength and the intensities summed.
+
+---
+
+## 5. Polychromatic (white-light) PSF, OTF, MTF
+
+### 5.1 Principle
+
+For incoherent broadband illumination (natural light, typical white sources),
+different wavelengths are mutually incoherent. RayWeaver computes:
+
+1. **Monochromatic PSFs** — per wavelength, via vector Huygens integration
+2. **Polychromatic PSF** — incoherent intensity sum on a **common image grid**
+3. **Polychromatic MTF** — via **OTF complex-weighted averaging** (not MTF averaging)
+
+Key principle: all wavelengths share the **same physical image plane** and
+**same image grid**. Lateral color and longitudinal chromatic aberration are
+preserved, not removed by per-wavelength recentering or refocusing.
+
+### 5.1.1 Pipeline
+
+```
+For each (field, polarization):
+  For each wavelength λ_i:
+    1. Trace polarized wavefront to reference surface
+    2. Huygens integral → physical (unnormalized) intensity grid I_i
+    3. Record transmittance τ_i = window_power / ref_power
+    4. Compute spectral weight w_i = SPD(λ_i) · Δλ_i · τ_i
+  5. Common grid: centre = ref λ chief ray, size = max envelope, pitch = λ_min
+  6. Polychromatic PSF: I_poly = Σ w_i I_i / Σ w_i
+  7. Normalize: Σ I_poly·Δx·Δy = 1
+  8. Polychromatic MTF:
+     a. Each I_i → FFT → complex OTF_i (DC=1, phase-corrected)
+     b. OTF_poly = Σ w_i OTF_i / Σ w_i
+     c. MTF_poly = |OTF_poly|
+  9. Strehl = peak(I_poly) / peak(I_ideal_poly)
+```
+
+The polychromatic PSF is therefore the **incoherent sum** (intensity-weighted)
+of monochromatic PSFs:
+
+```
+h_poly(x, y) = Σ_i w_i h_i(x, y) / Σ_i w_i
+```
+
+where `h_i` is the monochromatic PSF at wavelength `λ_i` and `w_i` is the
+effective spectral weight.
+
+**Critical physical requirement**: all monochromatic PSFs must be evaluated
+on the **same physical image plane** and the **same image grid** (same `x0, y0,
+dx, dy, nx, ny`). Separate centering or refocusing per wavelength would
+artificially remove lateral color and longitudinal chromatic aberration, giving
+an unrealistically optimistic "white-light" performance.
+
+### 5.2 Spectral weight
+
+The effective weight for each wavelength sample is
+
+```
+w_i = S(λ_i) · T_sys(λ_i) · Q(λ_i) · Δλ_i
+```
+
+- `S(λ)` — source SPD (e.g., CIE D65, flat, or custom)
+- `T_sys(λ)` — system transmittance at this wavelength, including Fresnel
+  losses, coating TMM, vignetting, and glass absorption. In RayWeaver this is
+  the **per-wavelength window power / reference-surface power** (`tau` in the
+  code), computed from the Huygens integral's physical (unnormalized) intensity
+  grid:
+
+  ```
+  τ = (window_power × λ²) / ref_surface_power
+  ```
+
+  where `window_power = Σ I_i·Δx·Δy` from the **unnormalized** Huygens grid.
+  The `λ²` factor corrects the Huygens integral's `1/λ` prefactor (field
+  amplitude ∝ 1/λ, intensity ∝ 1/λ²) so that physical power is comparable
+  across wavelengths.
+- `Q(λ)` — detector QE or photopic response (not yet implemented; defaults to
+  1)
+- `Δλ_i` — integration width (trapezoidal rule on the SPD sample spacing)
+  `Δλ_i = (λ_{i+1} - λ_{i-1})/2` (endpoints: half-interval)
+
+The `spectral.Curve.IntegratedWeight(λ)` method returns `S(λ)·Δλ`.
+
+### 5.3 Common image grid
+
+All wavelengths share a single image grid (`ImageGridSpec`) determined from the
+**reference wavelength** (the first traced wavelength with valid samples):
+
+| Parameter | Determination |
+|-----------|---------------|
+| Centre (cx, cy) | Chief-ray image point of the reference wavelength |
+| Half-width | max over λ of `max(4 × Airy_radius(λ, NA), 3 × spot_RMS(λ))` |
+| Pixel pitch (dx, dy) | Auto-enlarged until `dx ≤ Airy_radius(λ_min)/2` |
+| Grid size (nx, ny) | `--psf-grid` (default 64) |
+
+This ensures:
+- The grid encloses the broadest PSF (longest λ Airy disk + lateral color shifts)
+- The shortest λ diffraction core is resolved (pixel ≤ Airy_radius/2)
+- No per-wavelength recentering → lateral color preserved
+
+### 5.4 Polychromatic MTF via OTF complex-weighted averaging
+
+The OTF is the Fourier transform of the PSF. For incoherent broadband light:
+
+```
+OTF_poly(f_x, f_y) = Σ_i w_i OTF_i(f_x, f_y) / Σ_i w_i
+MTF_poly(f)        = |OTF_poly(f)|
+```
+
+**Crucially, the complex OTFs are averaged before taking the magnitude.**
+Averaging the MTFs directly (`Σ w_i MTF_i / Σ w_i`) would discard the phase
+information and overestimate contrast when lateral color or other phase
+differences exist between wavelengths.
+
+RayWeaver computes the polychromatic MTF as follows:
+
+1. For each wavelength `λ_i`:
+   - Use the **physical (unnormalized) intensity grid** `I_i(x,y)`
+   - Zero-pad to next power of 2
+   - 2D FFT → complex array
+   - fftshift so DC at center
+   - Extract sagittal (center row) and tangential (center column) 1D OTFs
+   - Phase-correct: `OTF_c(f) = OTF_raw(f) · exp(-2πi·f·(origin - centroid))`
+   - Normalize to DC = 1
+2. Compute weighted complex average: `OTF_poly = Σ(w_i OTF_i) / Σ w_i`
+3. Take magnitude: `MTF_poly = |OTF_poly|`
+4. Extract sagittal (fx-axis) and tangential (fy-axis) 1D curves
+5. Build `PSFMTFSummary` with thresholds, evaluated frequencies, and
+   per-wavelength `WavelengthMTF` data
+
+This correctly captures lateral color effects: a wavelength-dependent lateral
+shift introduces a linear phase tilt in its OTF, and the complex average
+produces the correct contrast reduction.
+
+### 5.5 Configuration
+
+**PSF spectral settings** (`psf:` section):
+```yaml
+psf:
+  spectral_curve: D65          # or FLAT, or custom spectral_entries
+  spectral_entries:
+    - wavelength: 486.13       # nm
+      relative: 1.0
+    - wavelength: 587.56
+      relative: 1.0
+    - wavelength: 656.28
+      relative: 1.0
+```
+
+**MTF spectral settings** (`psf.mtf_config:` section, independent of PSF):
+```yaml
+psf:
+  mtf_config:
+    spectral_curve: D65        # independent of psf.spectral_curve
+    combination_method: otf    # currently only "otf" implemented
+    max_frequency: 200         # cycles/mm
+    thresholds: [0.50, 0.30, 0.10]
+    frequencies: [10, 25, 50, 100]
+```
+
+CLI flags:
+```bash
+rayweave psf --spectral D65 --mtf-spectral D65 --mtf-combination otf < input.yaml
+```
+
+### 5.6 Output
+
+The pipeline YAML (`psf_results[]`) includes:
+- `mtf` — `PSFMTFSummary` with combined sagittal/tangential thresholds and
+  evaluated frequencies
+- `mtf.spectral_curve` / `mtf.combination_method` — effective settings
+- `mtf.wavelength_mtfs[]` — per-wavelength threshold crossings and evaluated
+  points (for diagnosis of which wavelengths limit the contrast)
+
+Full per-wavelength and combined PSF/OTF/MTF grids are written to `--yaml`
+and `--csv` files (one per result).
+
+### 5.7 Best focus and polychromatic evaluation
+
+- **Fixed image plane (default)**: all wavelengths evaluated at the nominal
+  image plane. Longitudinal color appears as defocus blur in the combined PSF;
+  the polychromatic Strehl and MTF reflect real sensor-plane performance.
+- **`--best-focus`**: the best-focus shift is determined from the **reference
+  wavelength's** geometric spot RMS minimum, and **applied to all wavelengths
+  identically**. This removes the field-curvature defocus common to all
+  wavelengths while preserving lateral color and the relative defocus between
+  wavelengths. Use for comparing intrinsic wavefront quality.
+
+Per-wavelength independent best focus is not provided for polychromatic
+evaluation as it would remove longitudinal chromatic aberration.
+
+### 5.8 Convergence
+
+The `--converge-check` mechanism (enabled by default) re-evaluates at 1.5×
+ray count and reports the relative Strehl change. For polychromatic results,
+the convergence check applies to the combined Strehl. Strongly aberrated
+polychromatic fields may require higher `--num-rays` (900..1600) to converge.
+
+### 5.9 Output details
+
+#### 5.9.1 Pipeline YAML (`psf_results[]`)
+
+```yaml
+psf_results:
+  - field_index: 0
+    field_angle: 0.0
+    wavelength: 0          # 0 = polychromatic
+    polarization: RCP+LCP
+    spectral_curve: D65
+    strehl_ratio: 0.85
+    mtf:
+      spectral_curve: D65
+      combination_method: otf
+      sagittal:
+        thresholds:
+          - mtf: 0.5
+            frequency: 42.3
+          - mtf: 0.3
+            frequency: 68.1
+        evaluated:
+          - frequency: 10
+            mtf: 0.92
+            otf_real: 0.92
+            otf_imag: 0.0
+            ptf: 0.0
+      tangential:
+        thresholds: [...]
+        evaluated: [...]
+      wavelength_mtfs:       # per-wavelength threshold crossings
+        - wavelength: 4.8613e-07
+          spectral_weight: 0.25
+          sagittal:
+            thresholds: [...]
+          tangential:
+            thresholds: [...]
+        - wavelength: 5.8756e-07
+          ...
+```
+
+#### 5.9.2 Full output files (`--yaml`, `--csv`)
+
+Per-result files contain:
+- Combined polychromatic intensity grid
+- Per-wavelength intensity grids (`wavelength_contributions[].intensity`)
+- Combined and per-wavelength MTF curves (`mtf.curve`, `wavelength_contributions[].mtf`)
+- Encircled energy, wavefront OPD, wavefront samples
+
+### 5.10 Implementation files
+
+| File | Role |
+|------|------|
+| `internal/psf/psf.go` | `whiteGroup` — collects per-λ physical grids, calls MTF |
+| `internal/psf/mtf.go` | `ComputePolychromaticMTF` — OTF complex average |
+| `internal/spectral/spectrum.go` | `IntegratedWeight` — SPD × Δλ |
+| `internal/types/types.go` | `PSFMTFConfig`, `PSFMTFSummary`, `WavelengthMTF` |
+| `cmd/rayweave/psf.go` | CLI flags, write-back, output summary |
+
+### 5.11 Unit tests
+
+- `TestComputePolychromaticMTF` — two Gaussian PSFs, equal weights, verifies
+  combined MTF = average of individual MTFs (centered Gaussians → real OTF)
+- `TestComputePolychromaticMTFWithShift` — lateral shift between λ, verifies
+  combined MTF < single-λ MTF due to phase cancellation
+
+### 5.12 References
+
+- `docs/psf.md` — user-facing PSF command documentation
