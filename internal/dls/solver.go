@@ -4,6 +4,8 @@ import (
 	"math"
 	"runtime"
 	"sync"
+
+	"github.com/hiroki/rayweaver/internal/types"
 )
 
 const (
@@ -136,11 +138,14 @@ func Solve(m Model) Result {
 	}
 
 	// Adaptive damping state: per-variable diagonal D built from Jacobian
-	// sensitivity, variable class, and accept/reject history.
-	var adaptiveState *AdaptiveDampingState
-	if opts.AdaptiveDamping != nil {
-		adaptiveState = NewAdaptiveDampingState(nVars)
+	// sensitivity, variable class, and accept/reject history. Always active;
+	// a nil YAML config uses the built-in class defaults.
+	adDampingCfg := opts.AdaptiveDamping
+	if adDampingCfg == nil {
+		defaultCfg := types.AdaptiveDampingConfig{}
+		adDampingCfg = &defaultCfg
 	}
+	adaptiveState := NewAdaptiveDampingState(nVars)
 
 	for totalIter = 0; totalIter < opts.MaxIter; totalIter++ {
 		if stopped(opts.Stop) {
@@ -253,19 +258,16 @@ func Solve(m Model) Result {
 					}
 				}
 			} else {
-				// Fallback to standard LM if B is not positive-definite.
+				// Fallback to adaptive damping if B is not positive-definite.
+				diag := adaptiveState.BuildDiagonal(hDiag, variables, *adDampingCfg)
 				for j := 0; j < nVars; j++ {
-					H[j][j] += mu
+					H[j][j] += mu * diag[j]
 				}
 			}
-		} else if adaptiveState != nil {
-			diag := adaptiveState.BuildDiagonal(hDiag, variables, *opts.AdaptiveDamping)
+		} else {
+			diag := adaptiveState.BuildDiagonal(hDiag, variables, *adDampingCfg)
 			for j := 0; j < nVars; j++ {
 				H[j][j] += mu * diag[j]
-			}
-		} else {
-			for j := 0; j < nVars; j++ {
-				H[j][j] += mu
 			}
 		}
 
@@ -469,13 +471,9 @@ func Solve(m Model) Result {
 				copy(bestXNorm, xNorm)
 				copy(bestKnownNorm, xNorm)
 			}
-			if adaptiveState != nil {
-				adaptiveState.OnAccepted(delta, variables, *opts.AdaptiveDamping)
-			}
+			adaptiveState.OnAccepted(delta, variables, *adDampingCfg)
 		} else {
-			if adaptiveState != nil {
-				adaptiveState.OnRejected(g, delta, variables, *opts.AdaptiveDamping)
-			}
+			adaptiveState.OnRejected(g, delta, variables, *adDampingCfg)
 		}
 
 		stepNorm := math.Sqrt(normDelta)
@@ -496,22 +494,20 @@ func Solve(m Model) Result {
 			opts.Logger.LogIter(totalIter+1, merit, actualReduction, stepNorm, currVars, constr)
 		}
 
-		if adaptiveState != nil {
-			if dl, ok := opts.Logger.(DampingLogger); ok {
-				infos := make([]DampingVarInfo, nVars)
-				for j, v := range variables {
-					infos[j] = DampingVarInfo{
-						Name:        v.Name,
-						Class:       dampingClass(v.Param),
-						HDiag:       hDiag[j],
-						Ratio:       adaptiveState.lastRatio[j],
-						LocalFactor: adaptiveState.localFactor[j],
-						Diagonal:    adaptiveState.diagonal[j],
-						Step:        delta[j],
-					}
+		if dl, ok := opts.Logger.(DampingLogger); ok {
+			infos := make([]DampingVarInfo, nVars)
+			for j, v := range variables {
+				infos[j] = DampingVarInfo{
+					Name:        v.Name,
+					Class:       dampingClass(v.Param),
+					HDiag:       hDiag[j],
+					Ratio:       adaptiveState.lastRatio[j],
+					LocalFactor: adaptiveState.localFactor[j],
+					Diagonal:    adaptiveState.diagonal[j],
+					Step:        delta[j],
 				}
-				dl.LogDamping(totalIter+1, mu, adaptiveState.lastRef, infos)
 			}
+			dl.LogDamping(totalIter+1, mu, adaptiveState.lastRef, infos)
 		}
 
 		if actualReduction > 0 {

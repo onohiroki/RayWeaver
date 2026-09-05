@@ -76,10 +76,10 @@ type Options struct {
 	// definiteness. O(n²) per update, O(n³) to invert via Cholesky — for
 	// n ≤ 50 this is negligible relative to the Jacobian cost.
 	BFGS bool
-	// AdaptiveDamping configures per-variable adaptive damping. When non-nil,
-	// the solver replaces the fixed μI damping with μD where D is a diagonal
-	// matrix derived from Jacobian sensitivity, variable class, and accept/reject
-	// history. nil preserves the legacy μI behaviour.
+	// AdaptiveDamping configures per-variable adaptive damping. The solver
+	// uses μD where D is a diagonal matrix derived from Jacobian sensitivity,
+	// variable class, and accept/reject history. nil uses built-in class
+	// defaults (curvature 1.5×, thickness 0.5×, asphere 3.0×, etc.).
 	AdaptiveDamping *types.AdaptiveDampingConfig
 	// StallWindowFrac is the fraction of MaxIter used as the stalled-early-stop
 	// window (0 = default 20%, i.e. MaxIter/5, floor 50). Only consulted when

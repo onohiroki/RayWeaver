@@ -62,7 +62,7 @@ type Config struct {
 	MeritModes []types.MeritMode
 	// RegionActive configures the Okudaira Region Active Method (nil = disabled).
 	RegionActive *types.RegionActiveConfig
-	// AdaptiveDamping configures per-variable adaptive damping (nil = legacy μI).
+	// AdaptiveDamping configures per-variable adaptive damping (nil = built-in defaults).
 	AdaptiveDamping *types.AdaptiveDampingConfig
 }
 
@@ -1040,8 +1040,8 @@ func (o *Optimizer) SetPowerSolve(solveSurfaces []int) {
 	o.powerSolveEnabled = true
 }
 
-// SetAdaptiveDamping configures per-variable adaptive damping. nil disables
-// adaptive damping (legacy μI behaviour).
+// SetAdaptiveDamping configures per-variable adaptive damping. nil uses
+// built-in class defaults (no YAML configuration needed).
 func (o *Optimizer) SetAdaptiveDamping(cfg *types.AdaptiveDampingConfig) {
 	o.adaptiveDamping = cfg
 }

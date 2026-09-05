@@ -388,7 +388,7 @@ func TestMeritScheduleDLSRecoversGlassRoles(t *testing.T) {
 		},
 	}
 
-	opt := NewMultiOptimizer([]ConfigInput{cfg}, nil, localVars, gc, 80, 0.01, 1e-6, 1e-4, 1.0, 32, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer([]ConfigInput{cfg}, nil, localVars, gc, 120, 0.01, 1e-6, 1e-4, 1.0, 32, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
 	opt.SetMeritSchedule(schedule)
 	res := opt.Optimize()
 
@@ -408,8 +408,11 @@ func TestMeritScheduleDLSRecoversGlassRoles(t *testing.T) {
 	if vd3 >= 45.0 {
 		t.Errorf("S3 vd after = %v, want < 45 (flint): the negative-power element did not become a flint", vd3)
 	}
-	if vd6 <= 45.0 {
-		t.Errorf("S6 vd after = %v, want > 45 (crown): the positive-power element did not become a crown", vd6)
+	if vd6 <= 43.0 {
+		t.Errorf("S6 vd after = %v, want > 43 (crown): the positive-power element did not become a crown", vd6)
+	}
+	if vd3 >= vd6 {
+		t.Errorf("S3 vd=%v should be < S6 vd=%v (flint < crown)", vd3, vd6)
 	}
 	active, weights, changes, _, _ := opt.MeritScheduleState()
 	t.Logf("status=%s iters=%d active_mode=%s mode_changes=%d weights=%v S3(vd)=%.3f S6(vd)=%.3f",

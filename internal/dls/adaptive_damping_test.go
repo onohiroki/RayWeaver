@@ -44,8 +44,8 @@ func TestBuildDiagonalNilConfig(t *testing.T) {
 		{Name: "b", Param: "thickness"},
 		{Name: "c", Param: "nd"},
 	}
-	// nil config path: BuildDiagonal should not be called with nil config
-	// in practice, but the state should be initialised correctly.
+	// Empty config (built-in defaults): BuildDiagonal should produce valid
+	// diagonal values using class multipliers (curvature 1.5, thickness 0.5, nd 1.0).
 	if len(state.localFactor) != n {
 		t.Errorf("localFactor length = %d, want %d", len(state.localFactor), n)
 	}
@@ -54,8 +54,16 @@ func TestBuildDiagonalNilConfig(t *testing.T) {
 			t.Errorf("localFactor[%d] = %v, want 1.0", j, lf)
 		}
 	}
-	_ = hDiag
-	_ = vars
+	diag := state.BuildDiagonal(hDiag, vars, types.AdaptiveDampingConfig{})
+	for j, d := range diag {
+		if d <= 0 {
+			t.Errorf("diag[%d] = %v, want > 0", j, d)
+		}
+	}
+	// curvature multiplier (1.5) > thickness multiplier (0.5)
+	if diag[0] <= diag[1] {
+		t.Errorf("curvature diag[0]=%v should be > thickness diag[1]=%v", diag[0], diag[1])
+	}
 }
 
 func TestBuildDiagonalSensitivity(t *testing.T) {

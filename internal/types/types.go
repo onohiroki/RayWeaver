@@ -726,11 +726,10 @@ type OptimizationConfig struct {
 }
 
 // AdaptiveDampingConfig configures per-variable adaptive damping for the DLS
-// solver. Instead of the fixed μI damping, the solver uses μD where D is a
-// diagonal matrix derived from Jacobian sensitivity, variable class, and
-// accept/reject history. This gives high-sensitivity variables (curvature,
-// asphere) stronger damping while letting low-sensitivity variables (thickness)
-// move more freely.
+// solver. The solver uses μD where D is a diagonal matrix derived from
+// Jacobian sensitivity, variable class, and accept/reject history. An empty
+// config uses built-in class defaults (curvature 1.5×, thickness 0.5×,
+// asphere 3.0×, etc.). YAML fields override individual parameters.
 type AdaptiveDampingConfig struct {
 	// SensitivityEMA is the exponential moving average coefficient for
 	// smoothing the per-variable sensitivity across iterations (0 = no
