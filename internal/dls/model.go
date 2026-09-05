@@ -107,11 +107,11 @@ type Logger interface {
 	LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []ConstraintState)
 }
 
-// ModeLogger is an optional Logger capability: report the per-iteration
-// merit-blend weights of a conditional merit schedule, plus the evaluated
-// metric value (e.g. the spot/Airy ratio for spot_diffraction).
-type ModeLogger interface {
-	LogModeWeights(iter int, weights map[string]float64, metric float64)
+// ModeChangeLogger is an optional Logger capability: report when the dominant
+// mode of a conditional merit schedule changes. Called once per DLS iteration
+// only when the dominant mode (largest weight) transitions.
+type ModeChangeLogger interface {
+	LogModeChange(iter int, from, to string, weights map[string]float64, metric float64)
 }
 
 type Model interface {

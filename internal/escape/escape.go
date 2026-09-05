@@ -294,6 +294,25 @@ func (w *Wrapper) SetConstraintMultipliers(lambdas []float64) {
 	}
 }
 
+// UpdatePupils implements dls.PupilUpdater by forwarding to the inner model
+// (the Optimizer), so the dynamic pupil grid is recomputed at the current
+// variable state during each DLS iteration inside escape.
+func (w *Wrapper) UpdatePupils(x []float64) {
+	if pu, ok := w.inner.(dls.PupilUpdater); ok {
+		pu.UpdatePupils(x)
+	}
+}
+
+// UpdateMeritWeights implements dls.MeritScheduleUpdater by forwarding to the
+// inner model (the Optimizer), so the conditional merit schedule weights are
+// recomputed at the current variable state during each DLS iteration inside
+// escape.
+func (w *Wrapper) UpdateMeritWeights(x []float64, iter int) {
+	if msu, ok := w.inner.(dls.MeritScheduleUpdater); ok {
+		msu.UpdateMeritWeights(x, iter)
+	}
+}
+
 // innerMerit evaluates the real (unescaped) merit at x.
 func (w *Wrapper) innerMerit(x []float64) float64 {
 	return w.inner.EvaluateMerit(x)

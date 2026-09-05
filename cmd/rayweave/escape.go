@@ -59,6 +59,7 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 
 	progress := escape.NewProgress()
 	var logFiles []*os.File
+	var logFileHandle *os.File
 	if verbose {
 		progress.AddCompactWriter(os.Stderr)
 	}
@@ -68,6 +69,7 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 			errOut("Error creating log file: %v", err)
 			os.Exit(1)
 		}
+		logFileHandle = f
 		logFiles = append(logFiles, f)
 		progress.AddWriter(f)
 	}
@@ -76,6 +78,18 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 			f.Close()
 		}
 	}()
+
+	var dlsLogger dls.Logger
+	if verbose {
+		dlsLogger = &jsonLogger{w: os.Stderr}
+	}
+	if logFileHandle != nil {
+		if dlsLogger == nil {
+			dlsLogger = &jsonLogger{w: logFileHandle}
+		} else {
+			dlsLogger = &multiLogger{loggers: []dls.Logger{dlsLogger, &jsonLogger{w: logFileHandle}}}
+		}
+	}
 
 	// Three-stage stop on SIGINT/SIGTERM.
 	//
@@ -117,10 +131,10 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, progress, saveBase, ctx, hardStop, gctx)
+		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx)
 		return
 	}
-	runEscapeSingle(input, gc, progress, saveBase, ctx, hardStop, gctx)
+	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx)
 }
 
 // glassPhaseCtx carries the power-preserving glass-phase configuration through
@@ -177,7 +191,7 @@ func buildGlassPhaseContext(input *types.Input) glassPhaseCtx {
 	return ctx
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -275,6 +289,8 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 			cfg.HullWeight = 1.0
 		}
 	}
+
+	cfg.Logger = dlsLogger
 
 	// Each worker builds an isolated Optimizer so concurrent merit
 	// evaluations never share mutable glass-override state.
@@ -399,7 +415,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	writeEscapeOutput(input, escResult)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -504,7 +520,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	factory := func() dls.Model {
 		configsCopy := make([]optimize.ConfigInput, len(configs))
 		copy(configsCopy, configs)
-		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, nil, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
+		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, dlsLogger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
 		opt.SetApertureMarginMM(apertureMarginMM)
 		applyDegenerate(opt, input.Optimization.Degenerate)
 		if input.Optimization.MeritSchedule != nil {

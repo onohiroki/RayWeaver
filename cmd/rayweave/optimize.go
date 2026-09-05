@@ -580,16 +580,18 @@ func (j *jsonLogger) LogFinal(iter int, status string, merit float64, stepNorm f
 	fmt.Fprintln(j.w, string(data))
 }
 
-func (j *jsonLogger) LogModeWeights(iter int, weights map[string]float64, metric float64) {
-	entry := modeWeightsLog{
-		Event:   "weights",
+func (j *jsonLogger) LogModeChange(iter int, from, to string, weights map[string]float64, metric float64) {
+	entry := modeChangeLog{
+		Event:   "mode_change",
 		Iter:    iter,
+		From:    from,
+		To:      to,
 		Weights: weights,
 		Metric:  metric,
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
-		fmt.Fprintf(j.w, "ERR weights: %v\n", err)
+		fmt.Fprintf(j.w, "ERR mode_change: %v\n", err)
 		return
 	}
 	fmt.Fprintln(j.w, string(data))
@@ -627,10 +629,10 @@ func (m *multiLogger) LogFinal(iter int, status string, merit float64, stepNorm 
 	}
 }
 
-func (m *multiLogger) LogModeWeights(iter int, weights map[string]float64, metric float64) {
+func (m *multiLogger) LogModeChange(iter int, from, to string, weights map[string]float64, metric float64) {
 	for _, l := range m.loggers {
-		if ml, ok := l.(dls.ModeLogger); ok {
-			ml.LogModeWeights(iter, weights, metric)
+		if ml, ok := l.(dls.ModeChangeLogger); ok {
+			ml.LogModeChange(iter, from, to, weights, metric)
 		}
 	}
 }
@@ -647,9 +649,11 @@ type constraintInfo struct {
 	Residual float64 `json:"residual"`
 }
 
-type modeWeightsLog struct {
+type modeChangeLog struct {
 	Event   string             `json:"event"`
 	Iter    int                `json:"iter"`
+	From    string             `json:"from"`
+	To      string             `json:"to"`
 	Weights map[string]float64 `json:"weights"`
 	Metric  float64            `json:"metric,omitempty"`
 }

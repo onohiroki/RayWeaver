@@ -344,13 +344,13 @@ func (o *Optimizer) UpdateMeritWeights(x []float64, iter int) {
 	cur := o.setModeWeightsAt(s)
 	if cur != prev {
 		o.modeChanges++
-	}
-	o.numRays = o.resolveScheduledNumRays()
-	if o.logger != nil {
-		if ml, ok := o.logger.(dls.ModeLogger); ok {
-			ml.LogModeWeights(iter, copyWeights(o.modeWeights), s)
+		if o.logger != nil {
+			if ml, ok := o.logger.(dls.ModeChangeLogger); ok {
+				ml.LogModeChange(iter, prev, cur, copyWeights(o.modeWeights), s)
+			}
 		}
 	}
+	o.numRays = o.resolveScheduledNumRays()
 }
 
 // setModeWeightsAt evaluates the weight curve at the metric value s and stores
