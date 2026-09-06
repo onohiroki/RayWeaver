@@ -317,10 +317,11 @@ func TestOptimizerDegeneratePenalty(t *testing.T) {
 		t.Fatalf("merit with a degenerate term = %v, want bounded (< 1)", merit)
 	}
 
-	// A wavefront fit that cannot run (89° field: too few valid rays even
-	// with the dynamic-pupil fallback) must return the bounded wavefront
-	// penalty, never the 1e6 sentinel.
-	wf := opt.evaluateWavefrontTerm(ccfg, &meritTerm{kind: MeritWavefrontAstigmatism, fieldAngle: 89.0, wavelength: 0.00058756}, ccfg.surfaces, gc)
+	// A wavefront fit that cannot run (89.9° field: grazing incidence
+	// against a plane makes every grid ray miss the system even after the
+	// adaptive pupil probe) must return the bounded wavefront penalty,
+	// never the 1e6 sentinel.
+	wf := opt.evaluateWavefrontTerm(ccfg, &meritTerm{kind: MeritWavefrontAstigmatism, fieldAngle: 89.9, wavelength: 0.00058756}, ccfg.surfaces, gc)
 	if wf != 0.001 {
 		t.Fatalf("degenerate wavefront = %v, want bounded penalty 0.001", wf)
 	}

@@ -163,7 +163,7 @@ func determineChiefRays(
 		for i := range results {
 			results[i].Wavelengths = computeWavelengthStats(
 				engine, system, results[i].ChiefRay.Path, refSurfaceID, pol,
-				results[i].GridPoints, results[i].ImageHeight, wavelengths,
+				results[i].GridPoints, wavelengths,
 			)
 		}
 	}
@@ -641,6 +641,109 @@ func surfaceZRange(surfaces []types.Surface) (lo, hi, track float64) {
 	return lo, hi, track
 }
 
+// gridSurviveFraction is the minimum fraction of full-aperture grid rays that
+// must reach the reference surface for the grid to define the chief ray's
+// centroid target directly. Below it the beam is too heavily clipped for the
+// full-grid centroid to be meaningful and the adaptive radius probe looks for
+// a reduced, mostly-surviving grid instead.
+const gridSurviveFraction = 0.25
+
+// centroidGrid traces the field's pupil grid, keeping the chief-ray centroid
+// target, the spot statistics and the beam-envelope measurement mutually
+// consistent. The FULL-aperture grid is always emitted (grid): BeamEnvelope
+// re-traces its launch origins to size auto_aperture surfaces, so the emitted
+// grid must span the whole pupil even when most rays are vignetted. The spot
+// statistics (statsGrid) and the chief-ray centroid target (cx, cy) come from
+// that same full grid whenever it survives well enough (>= gridSurviveFraction)
+// to define a usable centroid — keeping image height, centroid and RMS about
+// one point. Only a heavily clipped beam (< gridSurviveFraction surviving)
+// falls back to the adaptive radius probe: the centroid target and the stats
+// then come from the reduced, mostly-surviving probe grid, while the emitted
+// grid stays full-aperture for the envelope measurement.
+func centroidGrid(
+	system types.System,
+	engine *ray.Engine,
+	path []int,
+	thetaRad float64,
+	numRays int,
+	apertureRadius float64,
+	pupilCenterX, pupilCenterY, zStart float64,
+	rayDir types.Vec3,
+	refSurfaceID int,
+	pol types.JonesVector,
+	wavelength float64,
+	dumpMap bool,
+	gridType types.GridType,
+	vig *types.VignettingDef,
+) (cx, cy float64, grid, statsGrid []types.GridPoint) {
+	cx, cy, grid = tracePupilGrid(system, engine, path, numRays, apertureRadius,
+		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
+	if math.Abs(thetaRad) <= 0.0873 { // ≤ ~5°: no vignetting expected
+		return cx, cy, grid, grid
+	}
+	surviving := 0
+	for i := range grid {
+		if grid[i].ImageX != nil {
+			surviving++
+		}
+	}
+	if float64(surviving) >= float64(numRays)*gridSurviveFraction {
+		return cx, cy, grid, grid
+	}
+	radius := probeGridRadius(system, engine, path,
+		pupilCenterX, pupilCenterY, zStart, rayDir,
+		refSurfaceID, numRays, apertureRadius,
+		pol, wavelength, dumpMap, gridType, vig)
+	scx, scy, stats := tracePupilGrid(system, engine, path, numRays, radius,
+		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
+	return scx, scy, grid, stats
+}
+
+// probeGridRadius adaptively reduces the grid radius for off-axis fields
+// until a minimum fraction of rays survive to the reference surface.
+// This handles vignetting where the full paraxial entrance pupil overfills
+// the off-axis beam footprint at the stop.
+func probeGridRadius(
+	system types.System,
+	engine *ray.Engine,
+	path []int,
+	pupilCenterX, pupilCenterY, zStart float64,
+	rayDir types.Vec3,
+	refSurfaceID int,
+	numRays int,
+	initialRadius float64,
+	pol types.JonesVector,
+	wavelength float64,
+	dumpMap bool,
+	gridType types.GridType,
+	vig *types.VignettingDef,
+) float64 {
+	const (
+		shrinkFactor  = 0.8
+		minRadiusFrac = 0.15
+	)
+	minRadius := initialRadius * minRadiusFrac
+	radius := initialRadius
+	for radius >= minRadius {
+		_, _, grid := tracePupilGrid(system, engine, path, numRays, radius,
+			pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
+			refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
+		surviving := 0
+		for i := range grid {
+			if grid[i].ImageX != nil {
+				surviving++
+			}
+		}
+		if float64(surviving) >= float64(numRays)*gridSurviveFraction {
+			return radius
+		}
+		radius *= shrinkFactor
+	}
+	return radius
+}
+
 // --- angle-based (infinite conjugate) ---
 
 func computeChiefRayAngleGrid(
@@ -675,9 +778,11 @@ func computeChiefRayAngleGrid(
 	gc := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
 	pupilCenterX, pupilCenterY := gc.X, gc.Y
 
-	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
-		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
+	// One grid serves the centroid target, the spot statistics and the output
+	// grid_points, so the chief ray lands exactly on the measured centroid.
+	cx, cy, grid, statsGrid := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
+		pupilCenterX, pupilCenterY, zStart, rayDir, refSurfaceID,
+		pol, wavelength, dumpMap, gridType, vig)
 
 	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, refSurfaceID, cy,
 		path, wavelength, pol, engine, system.Surfaces, pupilZ, false,
@@ -690,7 +795,7 @@ func computeChiefRayAngleGrid(
 	}
 
 	origin := types.Vec3{X: originX, Y: originY, Z: zStart}
-	return buildResult(engine, system, path, origin, rayDir, refSurfaceID, pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
+	return buildResult(engine, system, path, origin, rayDir, refSurfaceID, pol, wavelength, cx, cy, apertureRadius, grid, statsGrid, dumpMap)
 }
 
 // --- pass-through constrained chief ray (angle-based) ---
@@ -1133,12 +1238,14 @@ func computeChiefRayAngleGridWithPassThrough(
 	gc := raymath.WavefrontGridCenter(pupilCenter, rayDir, zStart)
 	pupilCenterX, pupilCenterY := gc.X, gc.Y
 
-	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
-		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
+	// One grid serves the centroid target, the spot statistics and the output
+	// grid_points, so the reported image point stays on the measured centroid.
+	cx, cy, grid, statsGrid := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
+		pupilCenterX, pupilCenterY, zStart, rayDir, refSurfaceID,
+		pol, wavelength, dumpMap, gridType, vig)
 
 	return buildResult(engine, system, path, origin, rayDir, refSurfaceID,
-		pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
+		pol, wavelength, cx, cy, apertureRadius, grid, statsGrid, dumpMap)
 }
 
 // --- pass-through constrained chief ray (height-based) ---
@@ -1194,7 +1301,7 @@ func computeChiefRayHeightGridWithPassThrough(
 		refSurfaceID, pol, wavelength, dumpMap, gridType, vig)
 
 	return buildResult(engine, system, path, objectPoint, refinedDir, refSurfaceID,
-		pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
+		pol, wavelength, cx, cy, apertureRadius, grid, nil, dumpMap)
 }
 
 // --- height-based (finite conjugate) ---
@@ -1236,7 +1343,7 @@ func computeChiefRayHeightGrid(
 		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
 
 	return buildResult(engine, system, path, objectPoint, refinedDir, refSurfaceID,
-		pol, wavelength, cx, cy, apertureRadius, grid, dumpMap)
+		pol, wavelength, cx, cy, apertureRadius, grid, nil, dumpMap)
 }
 
 // --- binary search helpers ---
@@ -1350,6 +1457,13 @@ func searchOriginForTarget(
 		step = 0.01
 	}
 
+	// Track the closest reachable valid origin: the landing map is not
+	// guaranteed to cover the target (a heavily vignetted field's meridian
+	// chief-ray family can land away from the bundle centroid), so the walk
+	// keeps the best valid sample as a fallback instead of returning an
+	// unvalidated clip-boundary point.
+	bestV, bestDist := anchor, math.Abs(vAnc-targetVal)
+
 	v := anchor
 	currentVal := vAnc
 
@@ -1366,15 +1480,30 @@ func searchOriginForTarget(
 		if !ok {
 			break
 		}
+		if !clipped {
+			if d := math.Abs(val - targetVal); d < bestDist {
+				bestV, bestDist = v, d
+			}
+		}
 		currentVal = val
 
 		if clipped || (currentVal-targetVal)*(prevVal-targetVal) <= 0 {
-			return binarySearchOrigin(math.Min(prevV, v), math.Max(prevV, v),
+			cand := binarySearchOrigin(math.Min(prevV, v), math.Max(prevV, v),
 				targetVal, prevVal, currentVal, trace)
+			// Accept the bisection result only when it traces cleanly AND
+			// actually converged to the target: against a discontinuous
+			// (vignetting-edge) landing map the bisection can exhaust its
+			// iterations on the clip boundary and return a point whose ray
+			// never reaches the target surface.
+			cv, ok2, clip2 := trace(cand)
+			if ok2 && !clip2 && math.Abs(cv-targetVal) < 1e-6 {
+				return cand
+			}
+			break
 		}
 	}
 
-	return geoEst
+	return bestV
 }
 
 func binarySearchOrigin(lo, hi, targetVal, valLo, valHi float64, trace func(float64) (float64, bool, bool)) float64 {
@@ -1630,16 +1759,21 @@ func tracePupilGrid(
 	return
 }
 
-func computeSpotStats(grid []types.GridPoint, cx, cy float64) *types.SpotStats {
+func computeSpotStats(grid []types.GridPoint) *types.SpotStats {
 	s := &types.SpotStats{
-		Centroid: types.Vec3{X: cx, Y: cy},
-		MinX:     1e18,
-		MinY:     1e18,
-		MaxX:     -1e18,
-		MaxY:     -1e18,
+		MinX: 1e18,
+		MinY: 1e18,
+		MaxX: -1e18,
+		MaxY: -1e18,
 	}
-	var sumSqX, sumSqY float64
 
+	// Collect the surviving samples; the RMS is measured about the grid's own
+	// equal-weight centroid — the same reference the DLS merit's spot_rms uses
+	// — so chief-reported spot statistics and optimizer-internal spot values
+	// stay comparable even for vignetted off-axis fields where the meridian
+	// chief ray lands away from the bundle centroid.
+	type sample struct{ x, y float64 }
+	var samples []sample
 	for _, gp := range grid {
 		s.TotalRays++
 		if gp.ImageX == nil || gp.ImageY == nil {
@@ -1647,11 +1781,7 @@ func computeSpotStats(grid []types.GridPoint, cx, cy float64) *types.SpotStats {
 			continue
 		}
 		s.TracedRays++
-		dx := *gp.ImageX - cx
-		dy := *gp.ImageY - cy
-		sumSqX += dx * dx
-		sumSqY += dy * dy
-
+		samples = append(samples, sample{x: *gp.ImageX, y: *gp.ImageY})
 		if *gp.ImageX < s.MinX {
 			s.MinX = *gp.ImageX
 		}
@@ -1665,13 +1795,30 @@ func computeSpotStats(grid []types.GridPoint, cx, cy float64) *types.SpotStats {
 			s.MaxY = *gp.ImageY
 		}
 	}
-
-	if s.TracedRays > 0 {
-		n := float64(s.TracedRays)
-		s.RMS_X = math.Sqrt(sumSqX / n)
-		s.RMS_Y = math.Sqrt(sumSqY / n)
-		s.RMS_R = math.Sqrt((sumSqX + sumSqY) / n)
+	if s.TracedRays == 0 {
+		return s
 	}
+	cx := 0.0
+	cy := 0.0
+	for _, sp := range samples {
+		cx += sp.x
+		cy += sp.y
+	}
+	cx /= float64(len(samples))
+	cy /= float64(len(samples))
+	s.Centroid = types.Vec3{X: cx, Y: cy}
+
+	var sumSqX, sumSqY float64
+	for _, sp := range samples {
+		dx := sp.x - cx
+		dy := sp.y - cy
+		sumSqX += dx * dx
+		sumSqY += dy * dy
+	}
+	n := float64(len(samples))
+	s.RMS_X = math.Sqrt(sumSqX / n)
+	s.RMS_Y = math.Sqrt(sumSqY / n)
+	s.RMS_R = math.Sqrt((sumSqX + sumSqY) / n)
 	return s
 }
 
@@ -1682,7 +1829,6 @@ func computeWavelengthStats(
 	refSurfaceID int,
 	pol types.JonesVector,
 	grid []types.GridPoint,
-	chiefImgHeight types.Vec3,
 	wavelengths []float64,
 ) []types.WavelengthStats {
 	type wlResult struct {
@@ -1696,8 +1842,6 @@ func computeWavelengthStats(
 		wg.Add(1)
 		go func(i int, wl float64) {
 			defer wg.Done()
-			var cx, cy float64
-			var sumW, wcx, wcy float64
 			var traced []types.GridPoint
 
 			for _, gp := range grid {
@@ -1718,9 +1862,6 @@ func computeWavelengthStats(
 				for _, sr := range tr.Surfaces {
 					if sr.SurfaceID == refSurfaceID {
 						weight := (sr.IntensityS + sr.IntensityP) / 2.0
-						sumW += weight
-						wcx += sr.Position.X * weight
-						wcy += sr.Position.Y * weight
 						ix, iy := sr.Position.X, sr.Position.Y
 						traced = append(traced, types.GridPoint{
 							PupilX: gp.PupilX, PupilY: gp.PupilY,
@@ -1730,12 +1871,7 @@ func computeWavelengthStats(
 					}
 				}
 			}
-			cx, cy = chiefImgHeight.X, chiefImgHeight.Y
-			if sumW > 0 {
-				cx = wcx / sumW
-				cy = wcy / sumW
-			}
-			ss := computeSpotStats(traced, cx, cy)
+			ss := computeSpotStats(traced)
 			ch <- wlResult{i, *ss}
 		}(i, wl)
 	}
@@ -1757,7 +1893,7 @@ func buildResult(
 	pol types.JonesVector,
 	wavelength float64,
 	cx, cy, apertureRadius float64,
-	grid []types.GridPoint,
+	grid, statsGrid []types.GridPoint,
 	dumpMap bool,
 ) Result {
 	chiefRay := types.Ray{
@@ -1778,14 +1914,18 @@ func buildResult(
 		}
 	}
 
+	sg := statsGrid
+	if sg == nil {
+		sg = grid
+	}
 	res := Result{
 		ImageHeight:   types.Vec3{X: cx, Y: cy},
 		EntrancePupil: &types.Pupil{Radius: apertureRadius},
 		ChiefRay:      chiefRay,
 		GridPoints:    grid,
 	}
-	if len(grid) > 0 {
-		res.SpotStats = computeSpotStats(grid, cx, cy)
+	if len(sg) > 0 {
+		res.SpotStats = computeSpotStats(sg)
 	}
 	return res
 }

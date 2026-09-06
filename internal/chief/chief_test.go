@@ -71,7 +71,7 @@ func TestComputeSpotStats(t *testing.T) {
 		{ImageX: float64ptr(0.0), ImageY: float64ptr(1.0), Intensity: 1.0},
 		{ImageX: float64ptr(0.0), ImageY: float64ptr(-1.0), Intensity: 1.0},
 	}
-	stats := computeSpotStats(pts, 0, 0)
+	stats := computeSpotStats(pts)
 	if stats.Centroid.X != 0.0 || stats.Centroid.Y != 0.0 {
 		t.Errorf("Centroid = %v, want (0,0)", stats.Centroid)
 	}
