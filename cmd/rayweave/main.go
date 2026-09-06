@@ -1124,6 +1124,15 @@ targets followed by merit):
              weight, target), merit modes with term counts, and constraints.
              When piped from optimize/escape, also shows the optimization result
              (status, iterations, merit).
+  optimization optimization configuration from optimization[]: solver settings
+             (method, max_iter, tol, mu, ...), variables (per-config,
+             shared with bindings, local), the merit_schedule section, and the
+             sub-configs (escape, glass_hull, degenerate, power_solve,
+             region_active, adaptive_damping). Constraints are not shown here —
+             the effective constraint display lives in the merit target (per-
+             config constraints, else inherited from optimization.constraints).
+             When piped from optimize, also shows the optimization result
+             (status, iterations, active mode, metric value).
 
 Options:
   --format table|yaml|json|csv   output format (default table)

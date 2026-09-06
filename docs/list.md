@@ -71,7 +71,8 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `paraxial` | First-order optical properties (EFL, F/#, NA, EPD, BFL, …). With `--roles`, appends the per-element glass-role table. |
 | `fields` | Field-of-view definitions from `chief.fields[]` (or `configs[].fields[]` as fallback). Shows each field's type (`angle`, `image_height`, `height`) with input values from the YAML and computed values (actual angle, image height) from the real-ray chief trace. When input and computed values match, only one is shown; when they differ (e.g. `image_height` mode where the angle is solved iteratively), both are shown as `input (computed)`. |
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
-| `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, weight, target), merit modes with term counts, and constraints. When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
+| `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
+| `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables, `merit_schedule`, and the sub-configs (`escape`, `glass_hull`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
 
 Default (no target arguments): `surfaces glasses paraxial fields`. The
 explicit keyword `default` expands to this set **in place**, preserving the
@@ -86,8 +87,10 @@ rayweave list fields < lens.yaml              # field-of-view definitions
 rayweave list merit < lens.yaml               # merit function definition
 rayweave list default < lens.yaml             # same as the bare invocation
 rayweave list default merit < lens.yaml       # default targets, then merit
+rayweave list optimization < lens.yaml        # optimizer configuration
 rayweave chief | rayweave trace | rayweave list rays
-rayweave optimize < lens.yaml | rayweave list merit  # + optimization result
+rayweave optimize < lens.yaml | rayweave list merit         # + optimization result
+rayweave optimize < lens.yaml | rayweave list optimization  # + optimization result
 ```
 
 ---
@@ -299,8 +302,14 @@ rayweave optimize < lens.yaml | rayweave list merit
 |---|---|---|
 | Merit Terms | `configs[].merit.terms` | When a fixed merit is defined |
 | Merit Modes | `configs[].merit_modes` | When merit_modes is used instead of fixed merit |
-| Constraints | `configs[].constraints` | When constraints are defined |
+| Constraints | `configs[].constraints`, else `optimization.constraints` | When constraints are defined (per-config first, matching the optimizer's resolution) |
 | Optimization Result | `output.opt_results` / `output.escape_result` | Only when piped from optimize/escape |
+
+Constraints follow the optimizer's per-config resolution: a config's own
+`constraints` win; a config without its own inherits `optimization.constraints`
+(shown with an `inherited from optimization` marker). When `configs[]` is
+absent entirely, `optimization.constraints` display under a `single-config`
+label.
 
 ### Table format
 
@@ -488,7 +497,110 @@ one header row each.
 
 ---
 
-## 9. Output formats
+## 9. Optimization section — optimizer configuration
+
+The `optimization` target shows the optimizer configuration from
+`optimization[]`: solver settings, variables, the merit schedule and the
+sub-configs. It shows **no constraints** — the effective constraint display
+lives in the `merit` target (per-config constraints, else inherited from
+`optimization.constraints`).
+
+```sh
+rayweave list optimization < lens.yaml
+rayweave optimize < lens.yaml | rayweave list optimization
+```
+
+### What is shown
+
+| Section | Source | When shown |
+|---|---|---|
+| Optimization | `optimization.method` + solver settings | Set values only |
+| Variables | `optimization.variables[]` | When per-config variables exist |
+| Shared Variables | `optimization.shared_variables[]` | When shared variables exist |
+| Local Variables | `optimization.local_variables[]` | When local variables exist |
+| Merit Schedule | `optimization.merit_schedule` | When a schedule is configured |
+| Escape / Glass Hull / Degenerate / Power Solve / Region Active / Adaptive Damping | sub-configs | Each only when present |
+| Optimization Result | `output.opt_results` | Only when piped from optimize |
+
+### Table format
+
+```
+Optimization (dls):
+Property              Value
+Method                  dls
+Max Iterations          500
+Tolerance        1.0000e-07
+Num Rays                256
+
+Shared Variables:
+Name                Min        Max  Active  Bindings
+s1_curvature  -0.200000   0.200000  true    config0:1:curvature, config1:1:curvature, ...
+
+Merit Schedule (metric=merit_ratio, curve=step, anchors 1.000000→0.100000):
+Mode             WeightFrom  WeightTo
+spot_phase         1.000000         0
+wavefront_phase           0  1.000000
+
+Power Solve:
+Property            Value
+Enabled              true
+Surfaces  [2 4 6 9 11 13]
+```
+
+Bindings render as `config:id:param` with optional `(×scale)` / `(+offset)`
+suffixes when non-zero. Boolean settings appear only when true; numeric and
+string settings appear only when set (mirroring the `omitempty` YAML
+semantics).
+
+### Structured output
+
+```yaml
+solver:
+    - name: Method
+      value: dls
+    - name: Max Iterations
+      value: "500"
+shared_variables:
+    - name: s1_curvature
+      min: -0.2
+      max: 0.2
+      active: true
+      bindings:
+        - {config: config0, id: 1, param: curvature}
+merit_schedule:
+    metric: merit_ratio
+    curve: step
+    anchor_from: 1
+    anchor_to: 0.1
+    modes:
+      - {name: spot_phase, weight_from: 1, weight_to: 0}
+      - {name: wavefront_phase, weight_from: 0, weight_to: 1}
+sub_configs:
+    - name: power_solve
+      settings:
+        - {name: Enabled, value: "true"}
+        - {name: Surfaces, value: "[2 4 6 9 11 13]"}
+opt_result:
+    status: converged
+    iterations: 38
+```
+
+### Optimization Result (piped)
+
+```
+Optimization Result:
+Property        Value
+Status      converged
+Iterations         38
+```
+
+Fields: `Status`, `Iterations`, `Active Mode`, `Mode Weights` (sorted `k=v`
+pairs), `Mode Changes`, `Metric Value`, `Effective Num Rays`, `Interrupted`,
+`Reason` — each only when present.
+
+---
+
+## 10. Output formats
 
 ### Table (default)
 
@@ -565,7 +677,7 @@ rayweave list --format json < lens.yaml
 
 ---
 
-## 10. Examples
+## 11. Examples
 
 ```sh
 # Full listing (surfaces + glasses + paraxial + fields)
@@ -610,6 +722,9 @@ rayweave list merit --format yaml < lens.yaml
 
 # After optimization: merit definition + optimization result
 rayweave optimize < lens.yaml | rayweave list merit
+
+# Optimizer configuration (solver, variables, sub-configs)
+rayweave list optimization < lens.yaml
 
 # Pipe into query for programmatic access
 rayweave list --format yaml < lens.yaml | rayweave query -r glasses[0].nd

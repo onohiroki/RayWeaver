@@ -212,6 +212,10 @@ type MeritConstraintRow struct {
 	BandWidth float64 `json:"band_width,omitempty" yaml:"band_width,omitempty"`
 	Weight    float64 `json:"weight" yaml:"weight"`
 	Active    bool    `json:"active" yaml:"active"`
+	// Inherited marks constraints resolved from optimization.constraints
+	// because the config defines none of its own (matching the optimizer's
+	// per-config constraint fallback).
+	Inherited bool `json:"inherited,omitempty" yaml:"inherited,omitempty"`
 }
 
 // OptResultSummary is a lightweight summary of the optimization result.
@@ -228,6 +232,110 @@ type meritListOutput struct {
 	Modes       []MeritModeRow       `json:"modes,omitempty" yaml:"modes,omitempty"`
 	Constraints []MeritConstraintRow `json:"constraints,omitempty" yaml:"constraints,omitempty"`
 	OptResult   *OptResultSummary    `json:"opt_result,omitempty" yaml:"opt_result,omitempty"`
+}
+
+// propRow is a name/value pair used by `list optimization` for the solver
+// settings and sub-config sections (same shape as paraxialProp).
+type propRow struct {
+	Name  string `json:"name" yaml:"name"`
+	Value string `json:"value" yaml:"value"`
+}
+
+// OptVarRow is one row of the `list optimization` per-config variables table
+// (optimization.variables[]).
+type OptVarRow struct {
+	Name    string  `json:"name" yaml:"name"`
+	Config  string  `json:"config,omitempty" yaml:"config,omitempty"`
+	Surface int     `json:"surface,omitempty" yaml:"surface,omitempty"`
+	Param   string  `json:"param" yaml:"param"`
+	Min     float64 `json:"min" yaml:"min"`
+	Max     float64 `json:"max" yaml:"max"`
+	Step    float64 `json:"step,omitempty" yaml:"step,omitempty"`
+	Active  bool    `json:"active" yaml:"active"`
+}
+
+// SharedBindingRow is one binding of a shared variable.
+type SharedBindingRow struct {
+	Config string  `json:"config" yaml:"config"`
+	ID     int     `json:"id" yaml:"id"`
+	Param  string  `json:"param" yaml:"param"`
+	Scale  float64 `json:"scale,omitempty" yaml:"scale,omitempty"`
+	Offset float64 `json:"offset,omitempty" yaml:"offset,omitempty"`
+}
+
+// SharedVarRow is one row of the shared-variables table
+// (optimization.shared_variables[]).
+type SharedVarRow struct {
+	Name     string             `json:"name" yaml:"name"`
+	Min      float64            `json:"min" yaml:"min"`
+	Max      float64            `json:"max" yaml:"max"`
+	Active   bool               `json:"active" yaml:"active"`
+	Bindings []SharedBindingRow `json:"bindings" yaml:"bindings"`
+}
+
+// LocalVarRow is one row of the local-variables table
+// (optimization.local_variables[]).
+type LocalVarRow struct {
+	Name    string  `json:"name" yaml:"name"`
+	Config  string  `json:"config" yaml:"config"`
+	Surface int     `json:"surface,omitempty" yaml:"surface,omitempty"`
+	Param   string  `json:"param" yaml:"param"`
+	Min     float64 `json:"min" yaml:"min"`
+	Max     float64 `json:"max" yaml:"max"`
+	Active  bool    `json:"active" yaml:"active"`
+}
+
+// ScheduleModeRow is one mode of the merit-schedule table.
+type ScheduleModeRow struct {
+	Name       string  `json:"name" yaml:"name"`
+	WeightFrom float64 `json:"weight_from" yaml:"weight_from"`
+	WeightTo   float64 `json:"weight_to" yaml:"weight_to"`
+}
+
+// ScheduleSection is the structured shape of optimization.merit_schedule.
+type ScheduleSection struct {
+	Metric      string            `json:"metric,omitempty" yaml:"metric,omitempty"`
+	Curve       string            `json:"curve,omitempty" yaml:"curve,omitempty"`
+	AnchorFrom  float64           `json:"anchor_from,omitempty" yaml:"anchor_from,omitempty"`
+	AnchorTo    float64           `json:"anchor_to,omitempty" yaml:"anchor_to,omitempty"`
+	Aggregation string            `json:"metric_aggregation,omitempty" yaml:"metric_aggregation,omitempty"`
+	Modes       []ScheduleModeRow `json:"modes" yaml:"modes"`
+}
+
+// SubConfigSection is one named sub-config of optimization (escape,
+// glass_hull, degenerate, power_solve, region_active, adaptive_damping) as a
+// key-value settings list.
+type SubConfigSection struct {
+	Name     string    `json:"name" yaml:"name"`
+	Settings []propRow `json:"settings" yaml:"settings"`
+}
+
+// OptimizationResultSummary is the piped-output summary shown by
+// `list optimization` (output.opt_results).
+type OptimizationResultSummary struct {
+	Status           string             `json:"status" yaml:"status"`
+	Iterations       int                `json:"iterations" yaml:"iterations"`
+	ActiveMode       string             `json:"active_mode,omitempty" yaml:"active_mode,omitempty"`
+	ModeWeights      map[string]float64 `json:"mode_weights,omitempty" yaml:"mode_weights,omitempty"`
+	ModeChanges      int                `json:"mode_changes,omitempty" yaml:"mode_changes,omitempty"`
+	MetricValue      float64            `json:"metric_value,omitempty" yaml:"metric_value,omitempty"`
+	EffectiveNumRays int                `json:"effective_num_rays,omitempty" yaml:"effective_num_rays,omitempty"`
+	Interrupted      bool               `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
+	Reason           string             `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+// optimizationListOutput is the structured (yaml/json) shape of
+// `list optimization`. No constraints: the effective constraint display lives
+// in `list merit` (per-config constraints, else inherited from
+// optimization.constraints).
+type optimizationListOutput struct {
+	Solver          []propRow                  `json:"solver,omitempty" yaml:"solver,omitempty"`
+	Variables       []OptVarRow                `json:"variables,omitempty" yaml:"variables,omitempty"`
+	SharedVariables []SharedVarRow             `json:"shared_variables,omitempty" yaml:"shared_variables,omitempty"`
+	LocalVariables  []LocalVarRow              `json:"local_variables,omitempty" yaml:"local_variables,omitempty"`
+	MeritSchedule   *ScheduleSection           `json:"merit_schedule,omitempty" yaml:"merit_schedule,omitempty"`
+	SubConfigs      []SubConfigSection         `json:"sub_configs,omitempty" yaml:"sub_configs,omitempty"`
+	OptResult       *OptimizationResultSummary `json:"opt_result,omitempty" yaml:"opt_result,omitempty"`
 }
 
 // runList implements the `list` subcommand: a read-only, human-readable
@@ -281,7 +389,7 @@ func runList(data []byte) {
 
 	needsOutput := false
 	for _, t := range targets {
-		if t == "rays" || t == "merit" {
+		if t == "rays" || t == "merit" || t == "optimization" {
 			needsOutput = true
 		}
 	}
@@ -322,8 +430,10 @@ func runList(data []byte) {
 			listFields(input, *format)
 		case "merit":
 			listMerit(input, output, *format)
+		case "optimization":
+			listOptimization(input, output, *format)
 		default:
-			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, or \"default\")", target)
+			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, or \"default\")", target)
 			os.Exit(1)
 		}
 	}
@@ -2024,6 +2134,34 @@ func listMerit(input types.Input, output types.Output, format string) {
 	var modes []MeritModeRow
 	var constraints []MeritConstraintRow
 
+	// optimization.constraints is the fallback source when a config defines
+	// no constraints of its own (matching the optimizer's per-config
+	// resolution in optimize.go); also used when configs[] is absent entirely
+	// (the synthetic single-config path).
+	var optConstraints []types.ConstraintOperand
+	if input.Optimization != nil {
+		optConstraints = input.Optimization.Constraints
+	}
+
+	appendConstraints := func(cfgID string, ops []types.ConstraintOperand, inherited bool) {
+		for _, c := range ops {
+			constraints = append(constraints, MeritConstraintRow{
+				Config:    cfgID,
+				ID:        c.ID,
+				Kind:      string(c.Kind),
+				Measure:   string(c.Measure),
+				Field:     c.Field,
+				Target:    c.Target,
+				Lower:     c.Lower,
+				Upper:     c.Upper,
+				BandWidth: c.BandWidth,
+				Weight:    c.Weight,
+				Active:    c.Active,
+				Inherited: inherited,
+			})
+		}
+	}
+
 	for _, cfg := range input.Configs {
 		cfgID := configDisplayName(cfg)
 
@@ -2054,22 +2192,19 @@ func listMerit(input types.Input, output types.Output, format string) {
 			})
 		}
 
-		// Constraints.
-		for _, c := range cfg.Constraints {
-			constraints = append(constraints, MeritConstraintRow{
-				Config:    cfgID,
-				ID:        c.ID,
-				Kind:      string(c.Kind),
-				Measure:   string(c.Measure),
-				Field:     c.Field,
-				Target:    c.Target,
-				Lower:     c.Lower,
-				Upper:     c.Upper,
-				BandWidth: c.BandWidth,
-				Weight:    c.Weight,
-				Active:    c.Active,
-			})
+		// Constraints: per-config first, else inherited from
+		// optimization.constraints.
+		if len(cfg.Constraints) > 0 {
+			appendConstraints(cfgID, cfg.Constraints, false)
+		} else if len(optConstraints) > 0 {
+			appendConstraints(cfgID, optConstraints, true)
 		}
+	}
+
+	// Synthetic single-config fallback: no configs[] at all, constraints only
+	// under optimization (mirrors the optimizer's synthetic config1).
+	if len(input.Configs) == 0 && len(optConstraints) > 0 {
+		appendConstraints("single-config", optConstraints, true)
 	}
 
 	// Optimization result (only when piped from optimize/escape).
@@ -2154,9 +2289,20 @@ func listMerit(input types.Input, output types.Output, format string) {
 			}
 		}
 		if len(constraints) > 0 {
+			anyInherited := false
+			for _, r := range constraints {
+				if r.Inherited {
+					anyInherited = true
+					break
+				}
+			}
 			fmt.Println()
 			fmt.Println("Constraints:")
-			fmt.Println("config,id,kind,measure field,target,lower,upper,band_width,weight,active")
+			header := "config,id,kind,measure,field,target,lower,upper,band_width,weight,active"
+			if anyInherited {
+				header += ",inherited"
+			}
+			fmt.Println(header)
 			for _, r := range constraints {
 				cells := []string{
 					r.Config, r.ID, r.Kind, r.Measure,
@@ -2167,6 +2313,9 @@ func listMerit(input types.Input, output types.Output, format string) {
 					strconv.FormatFloat(r.BandWidth, 'g', -1, 64),
 					strconv.FormatFloat(r.Weight, 'g', -1, 64),
 					strconv.FormatBool(r.Active),
+				}
+				if anyInherited {
+					cells = append(cells, strconv.FormatBool(r.Inherited))
 				}
 				fmt.Println(strings.Join(quoteCSV(cells), ","))
 			}
@@ -2240,7 +2389,11 @@ func listMerit(input types.Input, output types.Output, format string) {
 			constraintsByConfig := groupMeritConstraintsByConfig(constraints)
 			for _, cfgID := range sortedConfigKeys(constraintsByConfig) {
 				cfgConstraints := constraintsByConfig[cfgID]
-				fmt.Printf("Constraints (%s):\n", cfgID)
+				if len(cfgConstraints) > 0 && cfgConstraints[0].Inherited {
+					fmt.Printf("Constraints (%s, inherited from optimization):\n", cfgID)
+				} else {
+					fmt.Printf("Constraints (%s):\n", cfgID)
+				}
 				cols := []tableColumn{
 					{header: "ID"},
 					{header: "Kind"},
@@ -2337,4 +2490,554 @@ func sortedConfigKeys[T any](m map[string][]T) []string {
 		}
 	}
 	return keys
+}
+
+// appendNumProp appends a non-zero numeric property to a key-value list.
+func appendNumProp(props []propRow, name string, v float64) []propRow {
+	if v != 0 {
+		return append(props, propRow{Name: name, Value: formatTableFloat(v)})
+	}
+	return props
+}
+
+// appendIntProp appends a non-zero integer property to a key-value list.
+func appendIntProp(props []propRow, name string, v int) []propRow {
+	if v != 0 {
+		return append(props, propRow{Name: name, Value: strconv.Itoa(v)})
+	}
+	return props
+}
+
+// appendStrProp appends a non-empty string property to a key-value list.
+func appendStrProp(props []propRow, name, v string) []propRow {
+	if v != "" {
+		return append(props, propRow{Name: name, Value: v})
+	}
+	return props
+}
+
+// appendBoolTrueProp appends a boolean property only when it is true (unset
+// boolean settings default to false and carry no information).
+func appendBoolTrueProp(props []propRow, name string, v bool) []propRow {
+	if v {
+		return append(props, propRow{Name: name, Value: "true"})
+	}
+	return props
+}
+
+// appendBoolPtrProp appends a boolean property when the pointer is set.
+func appendBoolPtrProp(props []propRow, name string, v *bool) []propRow {
+	if v != nil {
+		return append(props, propRow{Name: name, Value: strconv.FormatBool(*v)})
+	}
+	return props
+}
+
+// sortedFloatMapJoin renders a string→float map as sorted "k=v" pairs so the
+// output is deterministic despite Go map iteration order.
+func sortedFloatMapJoin(m map[string]float64) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s=%s", k, formatTableFloat(m[k]))
+	}
+	return strings.Join(parts, ",")
+}
+
+// sortedStringKeysJoin renders the sorted keys of a string-keyed map.
+func sortedStringKeysJoin[T any](m map[string]T) string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return strings.Join(keys, ", ")
+}
+
+// sharedBindingsCompact renders a shared variable's bindings as a compact
+// comma-joined list for table/csv cells: config:id:param with optional
+// (×scale) / (+offset) suffixes when non-zero.
+func sharedBindingsCompact(bindings []SharedBindingRow) string {
+	parts := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		s := fmt.Sprintf("%s:%d:%s", b.Config, b.ID, b.Param)
+		if b.Scale != 0 {
+			s += fmt.Sprintf("(×%s)", formatTableFloat(b.Scale))
+		}
+		if b.Offset != 0 {
+			s += fmt.Sprintf("(+%s)", formatTableFloat(b.Offset))
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// escapeSettings flattens the set fields of optimization.escape into
+// key-value rows.
+func escapeSettings(e *types.EscapeConfig) []propRow {
+	var p []propRow
+	p = appendIntProp(p, "Max Cycles", e.MaxCycles)
+	p = appendIntProp(p, "Escape Workers", e.EscapeWorkers)
+	p = appendNumProp(p, "Max Seconds", e.MaxSeconds)
+	p = appendNumProp(p, "Distance Threshold", e.DistanceThreshold)
+	p = appendNumProp(p, "Fingerprint Distance Threshold", e.FingerprintDistanceThreshold)
+	p = appendNumProp(p, "H Initial", e.HInitial)
+	p = appendNumProp(p, "W Initial", e.WInitial)
+	p = appendNumProp(p, "H Mult", e.HMult)
+	p = appendNumProp(p, "W Mult", e.WMult)
+	p = appendNumProp(p, "Escape Iter Frac", e.EscapeIterFrac)
+	p = appendNumProp(p, "W Span", e.WSpan)
+	p = appendNumProp(p, "Stall Window Frac", e.StallWindowFrac)
+	p = appendNumProp(p, "Stall Rel Tol", e.StallRelTol)
+	p = appendBoolPtrProp(p, "Stall Early Stop", e.StallEarlyStop)
+	p = appendNumProp(p, "Initial Perturb", e.InitialPerturb)
+	if len(e.VariableWeights) > 0 {
+		p = append(p, propRow{Name: "Variable Weights", Value: sortedFloatMapJoin(e.VariableWeights)})
+	}
+	return p
+}
+
+// listOptimization renders the optimization configuration from
+// input.optimization: solver settings, variables (per-config, shared, local),
+// the merit schedule and the sub-config sections (escape, glass_hull,
+// degenerate, power_solve, region_active, adaptive_damping). Constraints are
+// NOT shown here — the effective constraint display lives in `list merit`
+// (per-config constraints, else inherited from optimization.constraints).
+// When piped from optimize, output.opt_results is appended.
+func listOptimization(input types.Input, output types.Output, format string) {
+	opt := input.Optimization
+
+	var solver []propRow
+	var variables []OptVarRow
+	var shared []SharedVarRow
+	var local []LocalVarRow
+	var schedule *ScheduleSection
+	var subConfigs []SubConfigSection
+
+	if opt != nil {
+		// Solver settings (set values only).
+		solver = appendStrProp(solver, "Method", opt.Method)
+		solver = appendStrProp(solver, "Aggregate", opt.Aggregate)
+		solver = appendIntProp(solver, "Max Iterations", opt.MaxIter)
+		solver = appendNumProp(solver, "Tolerance", opt.Tol)
+		solver = appendNumProp(solver, "Mu", opt.Mu)
+		solver = appendNumProp(solver, "Epsilon", opt.Epsilon)
+		solver = appendIntProp(solver, "Num Rays", opt.NumRays)
+		solver = appendNumProp(solver, "Mu Con Max", opt.MuConMax)
+		solver = appendNumProp(solver, "Aperture Margin", opt.ApertureMargin)
+		solver = appendNumProp(solver, "Aperture Margin MM", opt.ApertureMarginMM)
+		solver = appendIntProp(solver, "Jacobian Workers", opt.JacobianWorkers)
+		solver = appendBoolTrueProp(solver, "Central Diff", opt.CentralDiff)
+		solver = appendBoolTrueProp(solver, "BFGS", opt.BFGS)
+
+		for _, v := range opt.Variables {
+			variables = append(variables, OptVarRow{
+				Name:    v.Name,
+				Config:  v.Target.Config,
+				Surface: v.Target.ID,
+				Param:   v.Target.Param,
+				Min:     v.Min,
+				Max:     v.Max,
+				Step:    v.Step,
+				Active:  v.Active,
+			})
+		}
+		for _, v := range opt.SharedVariables {
+			bindings := make([]SharedBindingRow, 0, len(v.Bindings))
+			for _, b := range v.Bindings {
+				bindings = append(bindings, SharedBindingRow{
+					Config: b.Config, ID: b.ID, Param: b.Param,
+					Scale: b.Scale, Offset: b.Offset,
+				})
+			}
+			shared = append(shared, SharedVarRow{
+				Name: v.Name, Min: v.Min, Max: v.Max, Active: v.Active,
+				Bindings: bindings,
+			})
+		}
+		for _, v := range opt.LocalVariables {
+			local = append(local, LocalVarRow{
+				Name: v.Name, Config: v.Config, Surface: v.Target.ID,
+				Param: v.Target.Param, Min: v.Min, Max: v.Max, Active: v.Active,
+			})
+		}
+
+		if ms := opt.MeritSchedule; ms != nil {
+			schedule = &ScheduleSection{
+				Metric:      ms.Metric,
+				Curve:       ms.Curve,
+				AnchorFrom:  ms.AnchorFrom,
+				AnchorTo:    ms.AnchorTo,
+				Aggregation: ms.MetricAggregation,
+			}
+			for _, m := range ms.Modes {
+				schedule.Modes = append(schedule.Modes, ScheduleModeRow{
+					Name: m.Name, WeightFrom: m.WeightFrom, WeightTo: m.WeightTo,
+				})
+			}
+		}
+
+		if esc := opt.Escape; esc != nil {
+			subConfigs = append(subConfigs, SubConfigSection{Name: "escape", Settings: escapeSettings(esc)})
+		}
+		if gh := opt.GlassHull; gh != nil {
+			var p []propRow
+			p = appendBoolTrueProp(p, "Enabled", gh.Enabled)
+			p = appendNumProp(p, "Margin", gh.Margin)
+			p = appendNumProp(p, "Weight", gh.Weight)
+			subConfigs = append(subConfigs, SubConfigSection{Name: "glass_hull", Settings: p})
+		}
+		if dg := opt.Degenerate; dg != nil {
+			var p []propRow
+			p = appendNumProp(p, "Spot Value", dg.SpotValue)
+			p = appendNumProp(p, "OPD Value", dg.OPDValue)
+			p = appendNumProp(p, "Wavefront Value", dg.WavefrontValue)
+			subConfigs = append(subConfigs, SubConfigSection{Name: "degenerate", Settings: p})
+		}
+		if ps := opt.PowerSolve; ps != nil {
+			var p []propRow
+			p = appendBoolTrueProp(p, "Enabled", ps.Enabled)
+			if len(ps.Surfaces) > 0 {
+				p = append(p, propRow{Name: "Surfaces", Value: fmt.Sprintf("%v", ps.Surfaces)})
+			}
+			subConfigs = append(subConfigs, SubConfigSection{Name: "power_solve", Settings: p})
+		}
+		if ra := opt.RegionActive; ra != nil {
+			var p []propRow
+			p = appendBoolTrueProp(p, "Enabled", ra.Enabled)
+			p = appendNumProp(p, "Eps Activate", ra.EpsActivate)
+			p = appendNumProp(p, "Eps Deactivate", ra.EpsDeactivate)
+			p = appendNumProp(p, "Lambda Step", ra.LambdaStep)
+			p = appendNumProp(p, "Max Lambda", ra.MaxLambda)
+			subConfigs = append(subConfigs, SubConfigSection{Name: "region_active", Settings: p})
+		}
+		if ad := opt.AdaptiveDamping; ad != nil {
+			var p []propRow
+			p = appendNumProp(p, "Sensitivity EMA", ad.SensitivityEMA)
+			p = appendNumProp(p, "Sensitivity Floor", ad.SensitivityFloor)
+			p = appendNumProp(p, "Ratio Min", ad.RatioMin)
+			p = appendNumProp(p, "Ratio Max", ad.RatioMax)
+			p = appendNumProp(p, "Damping Min", ad.DampingMin)
+			p = appendNumProp(p, "Damping Max", ad.DampingMax)
+			p = appendNumProp(p, "Reject Boost", ad.RejectBoost)
+			p = appendNumProp(p, "Accept Relax", ad.AcceptRelax)
+			p = appendNumProp(p, "Contribution Threshold", ad.ContributionThreshold)
+			if len(ad.Classes) > 0 {
+				p = append(p, propRow{Name: "Classes", Value: sortedStringKeysJoin(ad.Classes)})
+			}
+			if len(ad.Variables) > 0 {
+				p = append(p, propRow{Name: "Variables", Value: sortedStringKeysJoin(ad.Variables)})
+			}
+			subConfigs = append(subConfigs, SubConfigSection{Name: "adaptive_damping", Settings: p})
+		}
+	}
+
+	// Piped optimization result (output.opt_results).
+	var optResult *OptimizationResultSummary
+	if output.OptResults != nil {
+		or := output.OptResults
+		optResult = &OptimizationResultSummary{
+			Status:           or.Status,
+			Iterations:       or.Iterations,
+			ActiveMode:       or.ActiveMode,
+			ModeWeights:      or.ModeWeights,
+			ModeChanges:      or.ModeChanges,
+			MetricValue:      or.MetricValue,
+			EffectiveNumRays: or.EffectiveNumRays,
+			Interrupted:      or.Interrupted,
+			Reason:           or.Reason,
+		}
+	}
+
+	if len(solver) == 0 && len(variables) == 0 && len(shared) == 0 &&
+		len(local) == 0 && schedule == nil && len(subConfigs) == 0 && optResult == nil {
+		switch format {
+		case "yaml":
+			os.Stdout.Write([]byte("solver: []\n"))
+		case "json":
+			fmt.Println(`{"solver":[]}`)
+		default:
+			fmt.Println("Optimization: (no optimization section)")
+		}
+		return
+	}
+
+	// optResultProps flattens the summary into key-value rows.
+	optResultProps := func() []propRow {
+		var p []propRow
+		if optResult == nil {
+			return p
+		}
+		if optResult.Status != "" {
+			p = append(p, propRow{Name: "Status", Value: optResult.Status})
+		}
+		p = appendIntProp(p, "Iterations", optResult.Iterations)
+		p = appendStrProp(p, "Active Mode", optResult.ActiveMode)
+		if len(optResult.ModeWeights) > 0 {
+			p = append(p, propRow{Name: "Mode Weights", Value: sortedFloatMapJoin(optResult.ModeWeights)})
+		}
+		p = appendIntProp(p, "Mode Changes", optResult.ModeChanges)
+		p = appendNumProp(p, "Metric Value", optResult.MetricValue)
+		p = appendIntProp(p, "Effective Num Rays", optResult.EffectiveNumRays)
+		p = appendBoolTrueProp(p, "Interrupted", optResult.Interrupted)
+		p = appendStrProp(p, "Reason", optResult.Reason)
+		return p
+	}
+
+	// scheduleTitle builds the "Merit Schedule (...)" header suffix.
+	scheduleTitle := func() string {
+		parts := make([]string, 0, 4)
+		if schedule.Metric != "" {
+			parts = append(parts, "metric="+schedule.Metric)
+		}
+		if schedule.Curve != "" {
+			parts = append(parts, "curve="+schedule.Curve)
+		}
+		if schedule.AnchorFrom != 0 || schedule.AnchorTo != 0 {
+			parts = append(parts, fmt.Sprintf("anchors %s→%s",
+				formatTableFloat(schedule.AnchorFrom), formatTableFloat(schedule.AnchorTo)))
+		}
+		if schedule.Aggregation != "" {
+			parts = append(parts, "aggregation="+schedule.Aggregation)
+		}
+		if len(parts) == 0 {
+			return "Merit Schedule:"
+		}
+		return "Merit Schedule (" + strings.Join(parts, ", ") + "):"
+	}
+
+	switch format {
+	case "yaml":
+		outData, err := yaml.Marshal(optimizationListOutput{
+			Solver: solver, Variables: variables, SharedVariables: shared,
+			LocalVariables: local, MeritSchedule: schedule,
+			SubConfigs: subConfigs, OptResult: optResult,
+		})
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+	case "json":
+		outData, err := json.MarshalIndent(optimizationListOutput{
+			Solver: solver, Variables: variables, SharedVariables: shared,
+			LocalVariables: local, MeritSchedule: schedule,
+			SubConfigs: subConfigs, OptResult: optResult,
+		}, "", "  ")
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+		fmt.Println()
+	case "csv":
+		if len(solver) > 0 {
+			fmt.Println("Optimization:")
+			fmt.Println("property,value")
+			for _, p := range solver {
+				fmt.Println(strings.Join(quoteCSV([]string{p.Name, p.Value}), ","))
+			}
+		}
+		printVarSectionCSV := func(title, header string, rows [][]string) {
+			fmt.Println()
+			fmt.Println(title + ":")
+			fmt.Println(header)
+			for _, cells := range rows {
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
+		}
+		if len(variables) > 0 {
+			var rows [][]string
+			for _, r := range variables {
+				rows = append(rows, []string{
+					r.Name, r.Config, strconv.Itoa(r.Surface), r.Param,
+					strconv.FormatFloat(r.Min, 'g', -1, 64),
+					strconv.FormatFloat(r.Max, 'g', -1, 64),
+					strconv.FormatFloat(r.Step, 'g', -1, 64),
+					strconv.FormatBool(r.Active),
+				})
+			}
+			printVarSectionCSV("Variables", "name,config,surface,param,min,max,step,active", rows)
+		}
+		if len(shared) > 0 {
+			var rows [][]string
+			for _, r := range shared {
+				rows = append(rows, []string{
+					r.Name,
+					strconv.FormatFloat(r.Min, 'g', -1, 64),
+					strconv.FormatFloat(r.Max, 'g', -1, 64),
+					strconv.FormatBool(r.Active),
+					sharedBindingsCompact(r.Bindings),
+				})
+			}
+			printVarSectionCSV("Shared Variables", "name,min,max,active,bindings", rows)
+		}
+		if len(local) > 0 {
+			var rows [][]string
+			for _, r := range local {
+				rows = append(rows, []string{
+					r.Name, r.Config, strconv.Itoa(r.Surface), r.Param,
+					strconv.FormatFloat(r.Min, 'g', -1, 64),
+					strconv.FormatFloat(r.Max, 'g', -1, 64),
+					strconv.FormatBool(r.Active),
+				})
+			}
+			printVarSectionCSV("Local Variables", "name,config,surface,param,min,max,active", rows)
+		}
+		if schedule != nil {
+			fmt.Println()
+			fmt.Println(scheduleTitle())
+			fmt.Println("mode,weight_from,weight_to")
+			for _, m := range schedule.Modes {
+				fmt.Printf("%s,%s,%s\n", m.Name,
+					strconv.FormatFloat(m.WeightFrom, 'g', -1, 64),
+					strconv.FormatFloat(m.WeightTo, 'g', -1, 64))
+			}
+		}
+		for _, sc := range subConfigs {
+			fmt.Println()
+			fmt.Println(subConfigTitle(sc.Name) + ":")
+			fmt.Println("property,value")
+			for _, p := range sc.Settings {
+				fmt.Println(strings.Join(quoteCSV([]string{p.Name, p.Value}), ","))
+			}
+		}
+		if p := optResultProps(); len(p) > 0 {
+			fmt.Println()
+			fmt.Println("Optimization Result:")
+			fmt.Println("property,value")
+			for _, r := range p {
+				fmt.Println(strings.Join(quoteCSV([]string{r.Name, r.Value}), ","))
+			}
+		}
+	default: // "table"
+		title := "Optimization:"
+		if opt != nil && opt.Method != "" {
+			title = fmt.Sprintf("Optimization (%s):", opt.Method)
+		}
+		printPropsSection(title, solver)
+		if len(variables) > 0 {
+			fmt.Println("Variables:")
+			cols := []tableColumn{
+				{header: "Name"},
+				{header: "Config"},
+				{header: "Surface", right: true},
+				{header: "Param"},
+				{header: "Min", right: true},
+				{header: "Max", right: true},
+				{header: "Step", right: true},
+				{header: "Active"},
+			}
+			for _, r := range variables {
+				cols[0].cells = append(cols[0].cells, r.Name)
+				cols[1].cells = append(cols[1].cells, r.Config)
+				cols[2].cells = append(cols[2].cells, strconv.Itoa(r.Surface))
+				cols[3].cells = append(cols[3].cells, r.Param)
+				cols[4].cells = append(cols[4].cells, formatTableFloat(r.Min))
+				cols[5].cells = append(cols[5].cells, formatTableFloat(r.Max))
+				cols[6].cells = append(cols[6].cells, formatTableFloat(r.Step))
+				cols[7].cells = append(cols[7].cells, strconv.FormatBool(r.Active))
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
+		}
+		if len(shared) > 0 {
+			fmt.Println("Shared Variables:")
+			cols := []tableColumn{
+				{header: "Name"},
+				{header: "Min", right: true},
+				{header: "Max", right: true},
+				{header: "Active"},
+				{header: "Bindings"},
+			}
+			for _, r := range shared {
+				cols[0].cells = append(cols[0].cells, r.Name)
+				cols[1].cells = append(cols[1].cells, formatTableFloat(r.Min))
+				cols[2].cells = append(cols[2].cells, formatTableFloat(r.Max))
+				cols[3].cells = append(cols[3].cells, strconv.FormatBool(r.Active))
+				cols[4].cells = append(cols[4].cells, sharedBindingsCompact(r.Bindings))
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
+		}
+		if len(local) > 0 {
+			fmt.Println("Local Variables:")
+			cols := []tableColumn{
+				{header: "Name"},
+				{header: "Config"},
+				{header: "Surface", right: true},
+				{header: "Param"},
+				{header: "Min", right: true},
+				{header: "Max", right: true},
+				{header: "Active"},
+			}
+			for _, r := range local {
+				cols[0].cells = append(cols[0].cells, r.Name)
+				cols[1].cells = append(cols[1].cells, r.Config)
+				cols[2].cells = append(cols[2].cells, strconv.Itoa(r.Surface))
+				cols[3].cells = append(cols[3].cells, r.Param)
+				cols[4].cells = append(cols[4].cells, formatTableFloat(r.Min))
+				cols[5].cells = append(cols[5].cells, formatTableFloat(r.Max))
+				cols[6].cells = append(cols[6].cells, strconv.FormatBool(r.Active))
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
+		}
+		if schedule != nil {
+			fmt.Println(scheduleTitle())
+			cols := []tableColumn{
+				{header: "Mode"},
+				{header: "WeightFrom", right: true},
+				{header: "WeightTo", right: true},
+			}
+			for _, m := range schedule.Modes {
+				cols[0].cells = append(cols[0].cells, m.Name)
+				cols[1].cells = append(cols[1].cells, formatTableFloat(m.WeightFrom))
+				cols[2].cells = append(cols[2].cells, formatTableFloat(m.WeightTo))
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
+		}
+		for _, sc := range subConfigs {
+			printPropsSection(subConfigTitle(sc.Name)+":", sc.Settings)
+		}
+		if p := optResultProps(); len(p) > 0 {
+			printPropsSection("Optimization Result:", p)
+		}
+	}
+}
+
+// subConfigTitle renders a sub-config key as a section title: underscores
+// become spaces and each word is capitalised (power_solve → "Power Solve").
+func subConfigTitle(name string) string {
+	words := strings.Split(name, "_")
+	for i, w := range words {
+		if w != "" {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+// printPropsSection renders one key-value section of `list optimization` as a
+// two-column table (table format).
+func printPropsSection(title string, props []propRow) {
+	if len(props) == 0 {
+		return
+	}
+	fmt.Println(title)
+	cols := []tableColumn{
+		{header: "Property"},
+		{header: "Value", right: true},
+	}
+	for _, p := range props {
+		cols[0].cells = append(cols[0].cells, p.Name)
+		cols[1].cells = append(cols[1].cells, p.Value)
+	}
+	fmt.Print(renderTable(cols))
+	fmt.Println()
 }
