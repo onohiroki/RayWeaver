@@ -154,17 +154,21 @@ func validAtHeight(surf types.Surface, h float64) bool {
 //     surface — except for negative curvature radii where the mirror-image
 //     geometry makes surface 2 the carrier.  The chamfer geometry depends on
 //     the curvature sign:
-//     * Positive curvature: when the carrier edge is closer to the image
-//       plane (zChamfer >= zOther), the edge extends from the carrier in the
-//       +Z direction by the edge thickness (minimum 1 mm), drops vertically
-//       to the Y-midpoint, then connects diagonally to the other edge.
-//       Otherwise the classic midpoint-Z chamfer is used.
-//     * Negative curvature (c1 < 0, non-cemented): always uses the chamfer
-//       approach.  The carrier is surface 2 and the chamfer extends from
-//       z2Top in the −Z direction (toward z1Top) by the edge thickness.
-//       Top polyline: p2Top → carrier-Y at chamferZ → Y-midpoint at
-//       chamferZ → p1Top (the carrier-Y segment is horizontal, mirroring
-//       the positive-curvature case).
+//   - Positive curvature: when the carrier edge is closer to the image
+//     plane (zChamfer >= zOther), the edge extends from the carrier in the
+//     +Z direction by the edge thickness (minimum 1 mm), drops vertically
+//     to the Y-midpoint, then connects diagonally to the other edge.
+//     Otherwise the classic midpoint-Z chamfer is used.
+//   - Negative curvature (c1 < 0, non-cemented): the carrier is surface
+//     2.  When Z1 < Z2 (R2's edge lies on the +Z side of R1's edge,
+//     e.g. a tight concave R1 with a looser R2): classic midpoint
+//     chamfer — a Z-parallel line at the carrier height (Y2) up to the
+//     midpoint of Z1 and Z2, then a single diagonal to Y1 (no vertical
+//     segment).  When Z1 >= Z2 (e.g. a rear negative meniscus whose
+//     large rear rim curls back past the front edge): the chamfer
+//     extends from z2Top in the −Z direction by the edge thickness
+//     (minimum 1 mm), drops vertically to the Y-midpoint, then connects
+//     diagonally to p1Top.
 //     Equal-height elements keep a plain horizontal rim.
 //   - Convex lens (c1 >= c2) with no cemented surface: both surfaces are drawn
 //     at the taller surface's height so the rim is a plain horizontal line,
@@ -273,15 +277,20 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 	}
 
 	// Negative curvature: mirror-image geometry.  The chamfer carrier is
-	// surface 2 (swapped above) and the chamfer extends from z2Top toward
-	// z1Top (−Z direction) by a fixed 1 mm edge thickness (sag is not
-	// considered).  Top polyline: p2Top → carrier-Y at chamferZ →
-	// Y-midpoint at chamferZ → p1Top.
+	// surface 2 (swapped above), so zChamfer = z2Top and zOther = z1Top.
+	// Z1 < Z2 restores the classic midpoint chamfer (no vertical segment);
+	// Z1 >= Z2 keeps the 1 mm −Z chamfer with the vertical drop.
 	if c1 < 0 && e.r1Cemented == e.r2Cemented {
-		chamferZ := zChamfer - 1.0
-		chamferY := (h1eff + h2eff) / 2
-		ee.topPts = []vec2{p2Top, vec2{X: chamferZ, Y: hChamfer}, vec2{X: chamferZ, Y: chamferY}, p1Top}
-		ee.bottomPts = []vec2{p1Bot, vec2{X: chamferZ, Y: -chamferY}, vec2{X: chamferZ, Y: -hChamfer}, p2Bot}
+		if zChamfer > zOther {
+			chZ := (zChamfer + zOther) / 2
+			ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hChamfer}, p1Top}
+			ee.bottomPts = []vec2{p1Bot, vec2{X: chZ, Y: -hChamfer}, p2Bot}
+		} else {
+			chamferZ := zChamfer - 1.0
+			chamferY := (h1eff + h2eff) / 2
+			ee.topPts = []vec2{p2Top, vec2{X: chamferZ, Y: hChamfer}, vec2{X: chamferZ, Y: chamferY}, p1Top}
+			ee.bottomPts = []vec2{p1Bot, vec2{X: chamferZ, Y: -chamferY}, vec2{X: chamferZ, Y: -hChamfer}, p2Bot}
+		}
 	} else {
 		// Positive curvature or cemented element with negative curvature:
 		// determine direction and use the existing logic.
