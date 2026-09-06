@@ -25,7 +25,7 @@ Tests: `go test ./...` (13 test files across all packages, no CI).
 
 ## Subcommands
 
-`chief` | `trace` | `paraxial` | `tmm` | `plot` | `vignette` | `optimize` | `escape` | `import` | `export` | `asphere` | `psf` | `wavefront` | `clean`
+`chief` | `trace` | `paraxial` | `tmm` | `plot` | `vignette` | `optimize` | `escape` | `import` | `export` | `asphere` | `psf` | `wavefront` | `clean` | `list`
 
 Standard pipeline: `chief → trace → plot`. Each reads YAML from stdin, writes YAML to stdout. `--config ID` on chief/trace/paraxial/plot for multi-config selection.
 
@@ -44,6 +44,8 @@ The ranking's sensitivity term is measured, not analytic: for every candidate su
 `escape` (sub-subcommands: `escape` run, `escape extract --index N`) is the Ishiki-Ono style escape-function global optimiser: DLS cycles with merit-function bumps at discovered local minima. Outputs the best solution pipeline-compatible plus `escape_result.minima[]` (full surfaces per minimum, plus `features[].element_powers`: the thin-lens power of each lens element per config as a solution fingerprint).
 
 `clean` (`rayweave clean [--verbose]`) strips calculation results from a pipeline document, keeping only configuration settings. Removed fields: `chief_rays`, `results`, `paraxial_result`, `opt_results`, `escape_result`, `vignetting_result`, `asphere_candidate_result`, `psf_results`, `wavefront_result`. The `stop` section is preserved (it may be hand-entered as input). `metadata.tool` is overwritten with RayWeaver's own identity. `--verbose` prints removed fields as JSONL to stderr.
+
+`list` (`rayweave list [--format table|yaml|json|csv] [--config ID] [--glass-dir DIR] [--curvature] [--all-glasses] [--roles] [--summary] [TARGET...]`) is a read-only command that prints formatted tables of the input system's definition data without tracing rays. Targets: `surfaces`, `glasses`, `paraxial`, `fields`, `rays`. Default targets: `surfaces glasses paraxial fields`. The `fields` target runs the chief ray trace internally to show both YAML input values and computed values (actual angle, image height from the real-ray chief trace) for each field definition (`angle`, `image_height`, or `height` mode).
 ## Key conventions
 
 ### CLI options vs input YAML (three principles)

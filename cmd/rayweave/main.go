@@ -1092,13 +1092,19 @@ subcommands, list never traces rays and prints formatted tables by default,
 not pipeline YAML.
 
 Targets (space-separated, flags may appear before or after them;
-default: surfaces, glasses and paraxial):
+default: surfaces, glasses, paraxial and fields):
   surfaces   surface table of the selected config (object plane 0 excluded)
   glasses    refractive-index table of the glasses used by the selected
              config's surfaces (first-use order) plus unresolved keys.
              With --all-glasses, also includes the remaining glass_catalog entries
   paraxial   first-order paraxial properties (EFL, F/#, NA, EPD, BFL, etc.)
              With --roles, also includes the per-element glass-role table
+  fields     field-of-view definitions from chief.fields[] (or configs[].fields[]
+             as fallback). Shows each field's type (angle, image_height, height)
+             with input values from the YAML and computed values (actual angle,
+             image height) from the real-ray chief trace. When input and computed
+             values match, only one is shown; when they differ (e.g. image_height
+             mode where the angle is solved iteratively), both are shown.
   rays       ray trace results from results[] section (requires trace output).
              Shows a summary table (ID, λ, OPL, Is/Ip, final cumulative
              transmittance Tcum s/p, surface/transmit/miss counts) plus

@@ -14,8 +14,8 @@ rayweave list [--format table|yaml|json|csv] [--config ID]
 
 ## 1. Basic usage
 
-Without arguments, `list` shows the surfaces, glasses and paraxial
-properties of the first (or only) config:
+Without arguments, `list` shows the surfaces, glasses, paraxial
+properties and field-of-view definitions of the first (or only) config:
 
 ```sh
 rayweave list < lens.yaml
@@ -57,7 +57,7 @@ Targets can be listed explicitly:
 rayweave list surfaces < lens.yaml       # surfaces only
 rayweave list glasses < lens.yaml        # glasses only
 rayweave list surfaces glasses < lens.yaml  # surfaces + glasses
-rayweave list surfaces glasses paraxial < lens.yaml  # all three (same as default)
+rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as default)
 ```
 
 ---
@@ -69,13 +69,15 @@ rayweave list surfaces glasses paraxial < lens.yaml  # all three (same as defaul
 | `surfaces` | Surface table of the selected config. Includes asphere coefficients and thickness differences when applicable. |
 | `glasses` | Refractive-index table of the glasses used by the selected config. |
 | `paraxial` | First-order optical properties (EFL, F/#, NA, EPD, BFL, …). With `--roles`, appends the per-element glass-role table. |
+| `fields` | Field-of-view definitions from `chief.fields[]` (or `configs[].fields[]` as fallback). Shows each field's type (`angle`, `image_height`, `height`) with input values from the YAML and computed values (actual angle, image height) from the real-ray chief trace. When input and computed values match, only one is shown; when they differ (e.g. `image_height` mode where the angle is solved iteratively), both are shown as `input (computed)`. |
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
 
-Default (no target arguments): `surfaces glasses`.
+Default (no target arguments): `surfaces glasses paraxial fields`.
 
 ```sh
 rayweave list paraxial < lens.yaml            # first-order properties
 rayweave list paraxial --roles < lens.yaml    # + element glass roles
+rayweave list fields < lens.yaml              # field-of-view definitions
 rayweave chief | rayweave trace | rayweave list rays
 ```
 
@@ -198,7 +200,65 @@ Unresolved keys produce a stderr warning instead of aborting.
 
 ---
 
-## 6. Rays section — ray trace results
+## 6. Fields section — field-of-view definitions
+
+The `fields` target shows the field-of-view definitions from `chief.fields[]`
+(or `configs[].fields[]` as fallback). It runs the chief ray trace internally
+to provide computed values alongside the YAML input values.
+
+```sh
+rayweave list fields < lens.yaml
+```
+
+### Field types
+
+| Type | Input | Computed |
+|---|---|---|
+| `angle` | `angle` (degrees) | `angle` (same, verified), `image_height` (chief ray Y on reference surface) |
+| `image_height` | `image_height` (mm) | `angle` (bisection-recovered angle), `image_height` (chief ray Y on reference surface) |
+| `height` | `height` (mm), `object_z` (mm) | `image_height` (chief ray Y on reference surface) |
+
+### Table format
+
+```
+Fields:
+#  Type          Angle[deg]       Image Height[mm]  Height[mm]  Object Z[mm]  Direction
+1  angle                  0                      0           -             -  [0 1]
+2  image_height    7.873695  10.000000 (12.340900)           -             -  [0 1]
+3  image_height   12.003209  15.000000 (14.832436)           -             -  [0 1]
+```
+
+When input and computed values match (within 1e-9), only one value is shown.
+When they differ (e.g. `image_height` mode where the angle is solved
+iteratively), both are shown as `input (computed)`.
+
+For `height` mode, the Angle column shows `-` (the field angle is not stored
+in `ChiefRayResult` for height-mode fields).
+
+### Structured output
+
+```yaml
+fields:
+    - index: 1
+      type: angle
+      input_angle: 0
+      direction: [0, 1]
+      computed_angle: 0
+      computed_image_height: 0
+    - index: 2
+      type: image_height
+      input_image_height: 10
+      direction: [0, 1]
+      computed_angle: 7.873695168791073
+      computed_image_height: 12.340900
+```
+
+Nil fields (not applicable for the type) are omitted in yaml/json and shown
+as `-` in table/csv.
+
+---
+
+## 7. Rays section — ray trace results
 
 The `rays` target renders the results of a previous `trace` / `trace single`
 run (the `results[]` section). It never re-traces: the data comes straight from
@@ -311,7 +371,7 @@ one header row each.
 
 ---
 
-## 7. Output formats
+## 8. Output formats
 
 ### Table (default)
 
@@ -388,10 +448,10 @@ rayweave list --format json < lens.yaml
 
 ---
 
-## 8. Examples
+## 9. Examples
 
 ```sh
-# Full listing (surfaces + glasses)
+# Full listing (surfaces + glasses + paraxial + fields)
 rayweave list < lens.yaml
 
 # Surfaces only with curvature
@@ -402,6 +462,12 @@ rayweave list < zoom.yaml
 
 # Single config: thickness differences suppressed
 rayweave list --config tele < zoom.yaml
+
+# Field-of-view definitions with computed image heights
+rayweave list fields < lens.yaml
+
+# Fields only in YAML format
+rayweave list fields --format yaml < lens.yaml
 
 # CSV for spreadsheet import
 rayweave list --format csv < lens.yaml > lenses.csv
