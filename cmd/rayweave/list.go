@@ -177,6 +177,57 @@ type fieldsListOutput struct {
 	Fields []FieldListRow `json:"fields" yaml:"fields"`
 }
 
+// MeritTermRow is one row of the `list merit` terms table.
+type MeritTermRow struct {
+	Config      string  `json:"config" yaml:"config"`
+	Kind        string  `json:"kind" yaml:"kind"`
+	Field       int     `json:"field,omitempty" yaml:"field,omitempty"`
+	Wavelength  float64 `json:"wavelength,omitempty" yaml:"wavelength,omitempty"`
+	Wavelength2 float64 `json:"wavelength2,omitempty" yaml:"wavelength2,omitempty"`
+	Target      float64 `json:"target,omitempty" yaml:"target,omitempty"`
+	Fraction    float64 `json:"fraction,omitempty" yaml:"fraction,omitempty"`
+	SurfaceSet  []int   `json:"surface_set,omitempty" yaml:"surface_set,omitempty"`
+	Weight      float64 `json:"weight" yaml:"weight"`
+}
+
+// MeritModeRow is one row of the `list merit` modes table.
+type MeritModeRow struct {
+	Config   string `json:"config" yaml:"config"`
+	Name     string `json:"name" yaml:"name"`
+	NumTerms int    `json:"num_terms" yaml:"num_terms"`
+}
+
+// MeritConstraintRow is one row of the `list merit` constraints table.
+type MeritConstraintRow struct {
+	Config    string  `json:"config" yaml:"config"`
+	ID        string  `json:"id" yaml:"id"`
+	Kind      string  `json:"kind" yaml:"kind"`
+	Measure   string  `json:"measure" yaml:"measure"`
+	Field     int     `json:"field,omitempty" yaml:"field,omitempty"`
+	Target    float64 `json:"target,omitempty" yaml:"target,omitempty"`
+	Lower     float64 `json:"lower,omitempty" yaml:"lower,omitempty"`
+	Upper     float64 `json:"upper,omitempty" yaml:"upper,omitempty"`
+	BandWidth float64 `json:"band_width,omitempty" yaml:"band_width,omitempty"`
+	Weight    float64 `json:"weight" yaml:"weight"`
+	Active    bool    `json:"active" yaml:"active"`
+}
+
+// OptResultSummary is a lightweight summary of the optimization result.
+type OptResultSummary struct {
+	Status      string  `json:"status" yaml:"status"`
+	Iterations  int     `json:"iterations" yaml:"iterations"`
+	Merit       float64 `json:"merit,omitempty" yaml:"merit,omitempty"`
+	Interrupted bool    `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
+}
+
+// meritListOutput is the structured (yaml/json) shape of `list merit`.
+type meritListOutput struct {
+	Terms       []MeritTermRow       `json:"terms,omitempty" yaml:"terms,omitempty"`
+	Modes       []MeritModeRow       `json:"modes,omitempty" yaml:"modes,omitempty"`
+	Constraints []MeritConstraintRow `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+	OptResult   *OptResultSummary    `json:"opt_result,omitempty" yaml:"opt_result,omitempty"`
+}
+
 // runList implements the `list` subcommand: a read-only, human-readable
 // listing of the input system's definition data (surfaces, glasses, paraxial
 // properties, ray results). It never traces rays and prints formatted tables
@@ -204,14 +255,30 @@ func runList(data []byte) {
 		os.Exit(1)
 	}
 
+	// defaultListTargets is the target set of the bare `list` invocation; the
+	// explicit "default" keyword expands to it in place.
+	defaultListTargets := []string{"surfaces", "glasses", "paraxial", "fields"}
+
 	targets := args.positional
 	if len(targets) == 0 {
-		targets = []string{"surfaces", "glasses", "paraxial", "fields"}
+		targets = append([]string(nil), defaultListTargets...)
+	} else {
+		// Expand the "default" keyword in place, preserving user order
+		// (e.g. "list default merit" shows the default set, then merit).
+		expanded := make([]string, 0, len(targets)+len(defaultListTargets))
+		for _, t := range targets {
+			if t == "default" {
+				expanded = append(expanded, defaultListTargets...)
+			} else {
+				expanded = append(expanded, t)
+			}
+		}
+		targets = expanded
 	}
 
 	needsOutput := false
 	for _, t := range targets {
-		if t == "rays" {
+		if t == "rays" || t == "merit" {
 			needsOutput = true
 		}
 	}
@@ -250,8 +317,10 @@ func runList(data []byte) {
 			listRays(output, *showSummaryOnly, *format)
 		case "fields":
 			listFields(input, *format)
+		case "merit":
+			listMerit(input, output, *format)
 		default:
-			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, rays, fields)", target)
+			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, or \"default\")", target)
 			os.Exit(1)
 		}
 	}
@@ -1913,4 +1982,327 @@ func optionalFloatCSV(v *float64) string {
 		return ""
 	}
 	return strconv.FormatFloat(*v, 'g', -1, 64)
+}
+
+// listMerit renders the merit function definition (terms, modes, constraints)
+// from the input configs, and the optimization result when available from the
+// piped output.
+func listMerit(input types.Input, output types.Output, format string) {
+	var terms []MeritTermRow
+	var modes []MeritModeRow
+	var constraints []MeritConstraintRow
+
+	for _, cfg := range input.Configs {
+		cfgID := configDisplayName(cfg)
+
+		// Fixed merit terms.
+		if cfg.Merit != nil {
+			for _, t := range cfg.Merit.Terms {
+				row := MeritTermRow{
+					Config:      cfgID,
+					Kind:        t.Kind,
+					Field:       t.Field,
+					Wavelength:  t.Wavelength,
+					Wavelength2: t.Wavelength2,
+					Target:      t.Target,
+					Fraction:    t.Fraction,
+					SurfaceSet:  t.SurfaceSet,
+					Weight:      t.Weight,
+				}
+				terms = append(terms, row)
+			}
+		}
+
+		// Merit modes.
+		for _, m := range cfg.MeritModes {
+			modes = append(modes, MeritModeRow{
+				Config:   cfgID,
+				Name:     m.Name,
+				NumTerms: len(m.Terms),
+			})
+		}
+
+		// Constraints.
+		for _, c := range cfg.Constraints {
+			constraints = append(constraints, MeritConstraintRow{
+				Config:    cfgID,
+				ID:        c.ID,
+				Kind:      string(c.Kind),
+				Measure:   string(c.Measure),
+				Field:     c.Field,
+				Target:    c.Target,
+				Lower:     c.Lower,
+				Upper:     c.Upper,
+				BandWidth: c.BandWidth,
+				Weight:    c.Weight,
+				Active:    c.Active,
+			})
+		}
+	}
+
+	// Optimization result (only when piped from optimize/escape).
+	var optResult *OptResultSummary
+	if output.OptResults != nil {
+		optResult = &OptResultSummary{
+			Status:      output.OptResults.Status,
+			Iterations:  output.OptResults.Iterations,
+			Interrupted: output.OptResults.Interrupted,
+		}
+	}
+	if output.EscapeResult != nil {
+		if optResult == nil {
+			optResult = &OptResultSummary{}
+		}
+		optResult.Merit = output.EscapeResult.BestMerit
+		if output.EscapeResult.Interrupted {
+			optResult.Interrupted = true
+		}
+		if optResult.Status == "" {
+			optResult.Status = "escape"
+		}
+	}
+
+	isEmpty := len(terms) == 0 && len(modes) == 0 && len(constraints) == 0 && optResult == nil
+	if isEmpty {
+		switch format {
+		case "yaml":
+			os.Stdout.Write([]byte("terms: []\n"))
+		case "json":
+			fmt.Println(`{"terms":[]}`)
+		default:
+			fmt.Println("Merit: (no merit defined)")
+		}
+		return
+	}
+
+	switch format {
+	case "yaml":
+		outData, err := yaml.Marshal(meritListOutput{
+			Terms: terms, Modes: modes, Constraints: constraints, OptResult: optResult,
+		})
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+	case "json":
+		outData, err := json.MarshalIndent(meritListOutput{
+			Terms: terms, Modes: modes, Constraints: constraints, OptResult: optResult,
+		}, "", "  ")
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+		fmt.Println()
+	case "csv":
+		if len(terms) > 0 {
+			fmt.Println("Merit Terms:")
+			fmt.Println("config,kind,field,wavelength,wavelength2,target,fraction,surface_set,weight")
+			for _, r := range terms {
+				cells := []string{
+					r.Config, r.Kind,
+					strconv.Itoa(r.Field),
+					strconv.FormatFloat(r.Wavelength, 'g', -1, 64),
+					strconv.FormatFloat(r.Wavelength2, 'g', -1, 64),
+					strconv.FormatFloat(r.Target, 'g', -1, 64),
+					strconv.FormatFloat(r.Fraction, 'g', -1, 64),
+					fmt.Sprintf("%v", r.SurfaceSet),
+					strconv.FormatFloat(r.Weight, 'g', -1, 64),
+				}
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
+		}
+		if len(modes) > 0 {
+			fmt.Println()
+			fmt.Println("Merit Modes:")
+			fmt.Println("config,name,num_terms")
+			for _, r := range modes {
+				fmt.Printf("%s,%s,%d\n", r.Config, r.Name, r.NumTerms)
+			}
+		}
+		if len(constraints) > 0 {
+			fmt.Println()
+			fmt.Println("Constraints:")
+			fmt.Println("config,id,kind,measure field,target,lower,upper,band_width,weight,active")
+			for _, r := range constraints {
+				cells := []string{
+					r.Config, r.ID, r.Kind, r.Measure,
+					strconv.Itoa(r.Field),
+					strconv.FormatFloat(r.Target, 'g', -1, 64),
+					strconv.FormatFloat(r.Lower, 'g', -1, 64),
+					strconv.FormatFloat(r.Upper, 'g', -1, 64),
+					strconv.FormatFloat(r.BandWidth, 'g', -1, 64),
+					strconv.FormatFloat(r.Weight, 'g', -1, 64),
+					strconv.FormatBool(r.Active),
+				}
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
+		}
+		if optResult != nil {
+			fmt.Println()
+			fmt.Println("Optimization Result:")
+			fmt.Println("status,iterations,merit,interrupted")
+			fmt.Printf("%s,%d,%s,%v\n", optResult.Status, optResult.Iterations,
+				strconv.FormatFloat(optResult.Merit, 'g', -1, 64), optResult.Interrupted)
+		}
+	default: // "table"
+		// Group terms by config for display.
+		termsByConfig := groupMeritTermsByConfig(terms)
+		for _, cfgID := range sortedConfigKeys(termsByConfig) {
+			cfgTerms := termsByConfig[cfgID]
+			// Find the merit type from the first term's config.
+			meritType := "weighted_sum"
+			for _, cfg := range input.Configs {
+				if configDisplayName(cfg) == cfgID && cfg.Merit != nil {
+					meritType = cfg.Merit.Type
+					break
+				}
+			}
+			fmt.Printf("Merit Terms (%s, %s):\n", cfgID, meritType)
+			cols := []tableColumn{
+				{header: "Kind"},
+				{header: "Field", right: true},
+				{header: "λ[mm]", right: true},
+				{header: "Weight", right: true},
+				{header: "Target", right: true},
+				{header: "Surface Set"},
+			}
+			for _, r := range cfgTerms {
+				cols[0].cells = append(cols[0].cells, r.Kind)
+				cols[1].cells = append(cols[1].cells, strconv.Itoa(r.Field))
+				cols[2].cells = append(cols[2].cells, formatTableFloat(r.Wavelength))
+				cols[3].cells = append(cols[3].cells, formatTableFloat(r.Weight))
+				cols[4].cells = append(cols[4].cells, formatTableFloat(r.Target))
+				sset := "-"
+				if len(r.SurfaceSet) > 0 {
+					sset = fmt.Sprintf("%v", r.SurfaceSet)
+				}
+				cols[5].cells = append(cols[5].cells, sset)
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
+		}
+
+		// Merit modes.
+		if len(modes) > 0 {
+			modesByConfig := groupMeritModesByConfig(modes)
+			for _, cfgID := range sortedConfigKeys(modesByConfig) {
+				cfgModes := modesByConfig[cfgID]
+				fmt.Printf("Merit Modes (%s):\n", cfgID)
+				cols := []tableColumn{
+					{header: "Mode"},
+					{header: "Terms", right: true},
+				}
+				for _, r := range cfgModes {
+					cols[0].cells = append(cols[0].cells, r.Name)
+					cols[1].cells = append(cols[1].cells, strconv.Itoa(r.NumTerms))
+				}
+				fmt.Print(renderTable(cols))
+				fmt.Println()
+			}
+		}
+
+		// Constraints.
+		if len(constraints) > 0 {
+			constraintsByConfig := groupMeritConstraintsByConfig(constraints)
+			for _, cfgID := range sortedConfigKeys(constraintsByConfig) {
+				cfgConstraints := constraintsByConfig[cfgID]
+				fmt.Printf("Constraints (%s):\n", cfgID)
+				cols := []tableColumn{
+					{header: "ID"},
+					{header: "Kind"},
+					{header: "Measure"},
+					{header: "Field", right: true},
+					{header: "Target", right: true},
+					{header: "BandWidth", right: true},
+					{header: "Weight", right: true},
+					{header: "Active"},
+				}
+				for _, r := range cfgConstraints {
+					cols[0].cells = append(cols[0].cells, r.ID)
+					cols[1].cells = append(cols[1].cells, r.Kind)
+					cols[2].cells = append(cols[2].cells, r.Measure)
+					cols[3].cells = append(cols[3].cells, strconv.Itoa(r.Field))
+					cols[4].cells = append(cols[4].cells, formatTableFloat(r.Target))
+					cols[5].cells = append(cols[5].cells, formatTableFloat(r.BandWidth))
+					cols[6].cells = append(cols[6].cells, formatTableFloat(r.Weight))
+					cols[7].cells = append(cols[7].cells, strconv.FormatBool(r.Active))
+				}
+				fmt.Print(renderTable(cols))
+				fmt.Println()
+			}
+		}
+
+		// Optimization result.
+		if optResult != nil {
+			fmt.Println("Optimization Result:")
+			cols := []tableColumn{
+				{header: "Status"},
+				{header: "Iterations", right: true},
+				{header: "Merit", right: true},
+				{header: "Interrupted"},
+			}
+			cols[0].cells = append(cols[0].cells, optResult.Status)
+			cols[1].cells = append(cols[1].cells, strconv.Itoa(optResult.Iterations))
+			cols[2].cells = append(cols[2].cells, formatTableFloat(optResult.Merit))
+			cols[3].cells = append(cols[3].cells, strconv.FormatBool(optResult.Interrupted))
+			fmt.Print(renderTable(cols))
+		}
+	}
+}
+
+// groupMeritTermsByConfig groups merit terms by config display name, preserving
+// config order.
+func groupMeritTermsByConfig(terms []MeritTermRow) map[string][]MeritTermRow {
+	out := make(map[string][]MeritTermRow)
+	for _, t := range terms {
+		out[t.Config] = append(out[t.Config], t)
+	}
+	return out
+}
+
+// groupMeritModesByConfig groups merit modes by config display name.
+func groupMeritModesByConfig(modes []MeritModeRow) map[string][]MeritModeRow {
+	out := make(map[string][]MeritModeRow)
+	for _, m := range modes {
+		out[m.Config] = append(out[m.Config], m)
+	}
+	return out
+}
+
+// groupMeritConstraintsByConfig groups constraints by config display name.
+func groupMeritConstraintsByConfig(constraints []MeritConstraintRow) map[string][]MeritConstraintRow {
+	out := make(map[string][]MeritConstraintRow)
+	for _, c := range constraints {
+		out[c.Config] = append(out[c.Config], c)
+	}
+	return out
+}
+
+// sortedConfigKeys returns the keys of a map in the order they first appear
+// in the values' Config field (insertion order).
+func sortedConfigKeys[T any](m map[string][]T) []string {
+	seen := map[string]bool{}
+	var keys []string
+	for _, items := range m {
+		for _, item := range items {
+			var key string
+			switch v := any(item).(type) {
+			case MeritTermRow:
+				key = v.Config
+			case MeritModeRow:
+				key = v.Config
+			case MeritConstraintRow:
+				key = v.Config
+			default:
+				continue
+			}
+			if !seen[key] {
+				seen[key] = true
+				keys = append(keys, key)
+			}
+		}
+	}
+	return keys
 }

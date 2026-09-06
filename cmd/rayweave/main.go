@@ -1092,7 +1092,9 @@ subcommands, list never traces rays and prints formatted tables by default,
 not pipeline YAML.
 
 Targets (space-separated, flags may appear before or after them;
-default: surfaces, glasses, paraxial and fields):
+default: surfaces, glasses, paraxial and fields — the keyword "default"
+expands to this set in place, e.g. "list default merit" shows the default
+targets followed by merit):
   surfaces   surface table of the selected config (object plane 0 excluded)
   glasses    refractive-index table of the glasses used by the selected
              config's surfaces (first-use order) plus unresolved keys.
@@ -1114,6 +1116,11 @@ default: surfaces, glasses, paraxial and fields):
              intensity Irs/Irp, angle of incidence, n1/n2, Fresnel coefficients)
              when the data contains surface results. Use --summary to show only
              the summary table.
+  merit      merit function definition from configs[].merit, configs[].merit_modes
+             and configs[].constraints. Shows merit terms (kind, field, wavelength,
+             weight, target), merit modes with term counts, and constraints.
+             When piped from optimize/escape, also shows the optimization result
+             (status, iterations, merit).
 
 Options:
   --format table|yaml|json|csv   output format (default table)

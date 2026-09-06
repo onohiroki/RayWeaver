@@ -71,14 +71,23 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `paraxial` | First-order optical properties (EFL, F/#, NA, EPD, BFL, …). With `--roles`, appends the per-element glass-role table. |
 | `fields` | Field-of-view definitions from `chief.fields[]` (or `configs[].fields[]` as fallback). Shows each field's type (`angle`, `image_height`, `height`) with input values from the YAML and computed values (actual angle, image height) from the real-ray chief trace. When input and computed values match, only one is shown; when they differ (e.g. `image_height` mode where the angle is solved iteratively), both are shown as `input (computed)`. |
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
+| `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, weight, target), merit modes with term counts, and constraints. When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
 
-Default (no target arguments): `surfaces glasses paraxial fields`.
+Default (no target arguments): `surfaces glasses paraxial fields`. The
+explicit keyword `default` expands to this set **in place**, preserving the
+order of the remaining targets — `rayweave list default merit` shows the
+default targets followed by merit, and `rayweave list merit default` shows
+merit first. Duplicate targets (e.g. `default surfaces`) are shown once.
 
 ```sh
 rayweave list paraxial < lens.yaml            # first-order properties
 rayweave list paraxial --roles < lens.yaml    # + element glass roles
 rayweave list fields < lens.yaml              # field-of-view definitions
+rayweave list merit < lens.yaml               # merit function definition
+rayweave list default < lens.yaml             # same as the bare invocation
+rayweave list default merit < lens.yaml       # default targets, then merit
 rayweave chief | rayweave trace | rayweave list rays
+rayweave optimize < lens.yaml | rayweave list merit  # + optimization result
 ```
 
 ---
@@ -258,7 +267,100 @@ as `-` in table/csv.
 
 ---
 
-## 7. Rays section — ray trace results
+## 7. Merit section — merit function definition
+
+The `merit` target shows the merit function definition from `configs[].merit`,
+`configs[].merit_modes` and `configs[].constraints`. When piped from
+`optimize`/`escape`, it also shows the optimization result.
+
+```sh
+rayweave list merit < lens.yaml
+rayweave optimize < lens.yaml | rayweave list merit
+```
+
+### What is shown
+
+| Section | Source | When shown |
+|---|---|---|
+| Merit Terms | `configs[].merit.terms` | When a fixed merit is defined |
+| Merit Modes | `configs[].merit_modes` | When merit_modes is used instead of fixed merit |
+| Constraints | `configs[].constraints` | When constraints are defined |
+| Optimization Result | `output.opt_results` / `output.escape_result` | Only when piped from optimize/escape |
+
+### Table format
+
+For a config with fixed merit:
+
+```
+Merit Terms (config0, weighted_sum):
+Kind         Field  λ[mm]       Weight  Target  Surface Set
+spot_rms        0  4.8610e-04      1.0       0  -
+spot_rms        0  5.8760e-04      1.0       0  -
+spot_rms        0  6.5630e-04      1.0       0  -
+spot_rms        1  4.8610e-04      1.0       0  -
+spot_rms        1  5.8760e-04      1.0       0  -
+spot_rms        1  6.5630e-04      1.0       0  -
+```
+
+For a config with merit modes:
+
+```
+Merit Modes (config0):
+Mode             Terms
+spot_phase          15
+wavefront_phase     15
+```
+
+For constraints:
+
+```
+Constraints (config0):
+ID       Kind   Measure         Field  Target  BandWidth  Weight  Active
+img_h0   fuzzy  image_height       0     0.0        0.5     1.0  true
+img_h1   fuzzy  image_height       1    10.0        0.5     1.0  true
+img_h2   fuzzy  image_height       2    15.0        0.5     1.0  true
+```
+
+After optimization (when `opt_results` is present):
+
+```
+Optimization Result:
+Status    Iterations  Merit
+converged         47  3.2451e-03
+```
+
+### Structured output
+
+```yaml
+terms:
+    - config: config0
+      kind: spot_rms
+      wavelength: 0.0005876
+      weight: 1
+modes:
+    - config: config0
+      name: spot_phase
+      num_terms: 15
+constraints:
+    - config: config0
+      id: img_h0
+      kind: fuzzy
+      measure: image_height
+      target: 0
+      band_width: 0.5
+      weight: 1
+      active: true
+opt_result:
+    status: converged
+    iterations: 47
+    merit: 0.0032451
+```
+
+When no merit is defined, `Merit: (no merit defined)` is printed.
+
+---
+
+## 8. Rays section — ray trace results
 
 The `rays` target renders the results of a previous `trace` / `trace single`
 run (the `results[]` section). It never re-traces: the data comes straight from
@@ -371,7 +473,7 @@ one header row each.
 
 ---
 
-## 8. Output formats
+## 9. Output formats
 
 ### Table (default)
 
@@ -448,7 +550,7 @@ rayweave list --format json < lens.yaml
 
 ---
 
-## 9. Examples
+## 10. Examples
 
 ```sh
 # Full listing (surfaces + glasses + paraxial + fields)
@@ -480,6 +582,15 @@ rayweave chief | rayweave trace | rayweave list rays --summary
 
 # First-order properties with element glass roles
 rayweave list paraxial --roles < lens.yaml
+
+# Merit function definition
+rayweave list merit < lens.yaml
+
+# Merit definition in YAML format
+rayweave list merit --format yaml < lens.yaml
+
+# After optimization: merit definition + optimization result
+rayweave optimize < lens.yaml | rayweave list merit
 
 # Pipe into query for programmatic access
 rayweave list --format yaml < lens.yaml | rayweave query -r glasses[0].nd
