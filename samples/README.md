@@ -18,6 +18,7 @@ This directory contains sample optical system data and demo scripts for the
 | `simple-zoom.yaml` | 3-config zoom with fuzzy image-height / incident-angle constraints and `ray_paths` (render-only metadata). |
 | `asphere-optimize.yaml` | Singlet whose first surface is `asphere_polynomial`; optimizes `conic` and `a4`/`a6` coefficients (asphere variables). |
 | `doublegauss-init.yaml` | 6-element symmetric double-Gauss starting point for a 35mm-format 50 mm f/2.8 standard lens. The structure was synthesised by an AI agent (see `design/REPORT_designs.md` appendix) via curvature-scale search to hit EFL ≈ 50 mm, then handed to DLS optimisation. The optimised result reaches on-axis RMS < 0.1 mm (see `doublegauss-demo.bash`). It also carries an `optimization.escape` section so the same file drives the escape-function demo (`escape-demo.bash --lens doublegauss`); the normal `doublegauss-demo.bash` ignores it. The escape merit is the spot merit (`spot_rms` per field, weights 2.0/1.0/1.0/0.5) plus moderate-weight off-axis spot kinds (`spot_rms_t`/`_s`/`spot_rms_worst` on 10°/16° at 0.3/0.3/0.6, `spot_rms_worst`/`spot_rms_weighted`/`spot_ee_radius` on 23° at 0.2/0.15/0.15), `lateral_color` and `opd_rms` — the full-weight off-axis set collapses the escape landscape to a single basin, but these reduced weights keep ~20 local minima while improving the edge-field (23°) spot RMS. |
+| `6elements-init.yaml` | Escape-demo starting point: the escape-optimised 6-element F/4 double-Gauss (`test-014-result.yaml` lineage, EFL 49.53, EPD 12.198 = F/4.06, PSF Strehl 0.987/0.841/0.623/0.439/0.404 at d-line, 5 fields 0–23°) **flattened** — only surface 1 keeps its convex radius (r=53.92), surfaces 2–12 are plane and every glass is BK7 (`nd=1.5168, vd=64.17`), so the start is one refracting surface + parallel plates (EFL ≈ 104 mm, out of the 49.5–50.5 band). Element powers are `power` variables (targets 2,4,6,8,10,12, [-0.04, 0.04], start 0) so the optimisation can build them from the zero-power start, and the escape glass phase freezes them without `power_solve`. Merit = conditional schedule (`spot_phase` → `wavefront_phase`, `merit_ratio` step 1→0.1) — `merit_modes` alone would leave the objective at 0. Start apertures are widened so every field traces (fixed stop s7 dia 20 as the EPD handle via `s7_dia`, auto surfaces 30, image plane 120); `num_rays` 128, `max_iter` 50, escape 10 cycles / 8 workers / threshold 0.05 / max_seconds 1800, forward-difference Jacobian. |
 | `doublegauss-ghost.yaml` | Ghost-ray trace sample on the optimised double-Gauss. Uses the surface-sequence encoding of Ono et al. (Optical Review 32:402-411): each ray carries an ordered surface-ID list; a direction reversal in the list means reflection. One ghost path `[0,1,2,3,4,3,2,3,4,...,14]` (reflect at surface 4, reversed refraction through surface 3, reflect at surface 2) plus a normal reference ray, and a `chief` section for re-adjusting the lens effective diameters. See `ghost-demo.bash`. |
 | `run-demo.bash` | End-to-end demo script using `us2645157.yaml`. |
 | `optimize-demo.bash` | DLS optimisation of the degraded US2645157 triplet, comparing the `spot_rms`-only merit against the off-axis spot merit kinds: per-field spot RMS before/old/new (chief), the new-merit final values from the `--log` breakdown, and PNG diagrams. |
@@ -53,6 +54,13 @@ a message and skip those renderings.
   `surface2` (the old `target`-as-back-surface usage is gone).
 - Asphere variables: `conic`, `a4`/`a6`/`a8`/`a10`/`a12` (aliases
   `coefficient_0`…`coefficient_4`).
+- `power` variables (element thin-lens power): the dependent back surface's
+  curvature is re-solved every evaluation; the escape glass phase freezes them
+  (power preservation) without `power_solve`, whose snapshot would pin a
+  zero-power start's zeros forever.
+- `merit_modes` require `optimization.merit_schedule`: without a schedule the
+  config's (possibly absent) fixed `merit` is evaluated and the objective stays
+  0, so the run chases constraints only.
 - `chief --clear-aperture --shrink` sizes diameters down to the beam footprint.
 - `optimize --verbose` / `--log` also emits a per-term `{"event":"breakdown"}` line.
 - The `optimize` output YAML gains an `opt_results.constraints` block: the final

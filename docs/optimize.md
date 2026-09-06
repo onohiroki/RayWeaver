@@ -87,9 +87,43 @@ configs:
 | `nd` / `vd` | glass refractive index / Abbe number (model glasses) |
 | `conic` | conic constant (on `asphere_polynomial` surfaces) |
 | `a4` / `a6` / `a8` / `a10` / `a12` | even asphere polynomial coefficients (also addressable as `coefficient_0`…`coefficient_4`) |
+| `power` | thin-lens power φ (1/mm) of the element containing the target surface (see below) |
 
 Asphere coefficients can be excluded from the variable set wholesale with
 `--exclude-param`.
+
+#### The `power` variable
+
+A `power` variable targets the element's **dependent solve surface** (the back
+surface of a lens element):
+
+```yaml
+  variables:
+    - name: s2_power
+      target: {type: surface, id: 2, param: power}
+      min: -0.04
+      max: 0.04
+```
+
+The element's thin-lens power φ becomes the optimisation variable;
+`applyVariables` re-solves the targeted surface's curvature via
+`paraxial.SolveElementPower` after every curvature and glass variable is
+applied, so the element power is exact — not finite-differenced geometry — and
+matches the φ that `rayweave paraxial`'s `element_roles` reports. The initial
+state reads φ from the surfaces (`ElementPowerCurvature`), so a flattened
+zero-power start starts at 0 and the optimisation can **build** element power.
+Declare the dependent back surfaces as `power` variables instead of
+`curvature` variables (the power solve overwrites the curvature); the front
+surfaces stay ordinary curvature variables.
+
+The `power` variable composes with the escape glass phase: the non-glass lock
+freezes the power variables (`Min == Max`), which activates the
+power-preserving solve for exactly the glass phase — without any
+`optimization.power_solve` section (whose initial-state snapshot would pin a
+zero-power start's zeros forever). A surface driven by a power variable is
+skipped by `power_solve`'s snapshot when both are declared, so the variable
+wins. Adaptive damping treats `power` like curvature (sensitivity power 1.20,
+multiplier 1.50).
 
 ## Input — multi-config mode
 
@@ -273,7 +307,10 @@ optimization:
 ```
 
 `configs[].merit_modes` replaces that config's `merit`; configs without
-`merit_modes` keep their fixed `merit` at full weight. The schedule's weights
+`merit_modes` keep their fixed `merit` at full weight. **`merit_modes` without
+a `merit_schedule` evaluates the config's fixed `merit`** (empty when
+undefined) — the mode terms are ignored and the objective stays 0, so a
+schedule is required for the modes to run. The schedule's weights
 are continuous functions of the state metric (`merit_ratio`, `iteration`, or
 the `glass_role` residual aggregated over `glass_surfaces`), are recomputed once
 per DLS iteration and frozen for it, and `Σ residual² == merit` is preserved via

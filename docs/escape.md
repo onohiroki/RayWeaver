@@ -164,6 +164,19 @@ start. Each cycle emits a `glass_dls` cycle event (accepted/rejected) with the
 colour merit. Combine with the real-glass convex hull (on by default) so the
 glasses stay physical while they are rebalanced.
 
+**Power variables instead of `power_solve`**: the glass phase preserves element
+powers without `optimization.power_solve` when the dependent back surfaces are
+declared as `power` variables (see `docs/optimize.md`). The non-glass lock
+freezes the power variables (`Min == Max`), so `SolveElementPower` keeps
+reproducing the same dependent curvature while only the glasses move — the
+power-preserving solve becomes active exactly during the phase. This is the
+preferred setup for designs that must **build** element power (e.g. a flattened
+zero-power start): `power_solve`'s initial-state snapshot would pin those zeros
+forever, while a `power` variable starts at 0 and is driven by the merit
+elsewhere. A surface driven by a `power` variable is skipped by `power_solve`'s
+snapshot when both are declared, so the two can coexist (some elements pinned,
+some variable-driven).
+
 ### Exploration depth vs. breadth
 
 Two search strategies are useful, and the knobs above map directly onto them.

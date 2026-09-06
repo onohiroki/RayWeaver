@@ -347,7 +347,11 @@ merit(x) = Σ_configs  w_cfg · Σ_modes  w_k(s(x)) · M_{cfg,k}(x)
 
 where `M_{cfg,k}` is the config's merit built from that mode's terms. A config
 without `merit_modes` keeps its ordinary `merit` terms, always active at full
-weight. The residual vector carries each term scaled by `√w_k`, so
+weight. `merit_modes` **without** a `merit_schedule` has no weights to blend
+with: the config's fixed `merit` is evaluated instead (empty when undefined),
+the mode terms are ignored, and the objective stays 0 — a run then chases the
+constraints only. A schedule is required for the modes to run. The residual
+vector carries each term scaled by `√w_k`, so
 `Σ residual² == merit` exactly — the same least-squares identity the fixed
 merit uses.
 
