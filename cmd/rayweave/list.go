@@ -22,15 +22,17 @@ import (
 // SurfaceListRow is one row of the `list surfaces` table. Radius is nil for a
 // flat surface (infinite radius) and Curvature is set instead under
 // --curvature; the pointers keep flat surfaces visible as null/empty rather
-// than a misleading 0.
+// than a misleading 0. AutoAperture is set only when --auto-aperture is given
+// (nil = field absent from the structured output).
 type SurfaceListRow struct {
-	ID        int      `json:"id" yaml:"id"`
-	Type      string   `json:"type" yaml:"type"`
-	Radius    *float64 `json:"radius,omitempty" yaml:"radius,omitempty"`
-	Curvature *float64 `json:"curvature,omitempty" yaml:"curvature,omitempty"`
-	Thickness float64  `json:"thickness" yaml:"thickness"`
-	Material  string   `json:"material" yaml:"material"`
-	Diameter  float64  `json:"diameter" yaml:"diameter"`
+	ID           int      `json:"id" yaml:"id"`
+	Type         string   `json:"type" yaml:"type"`
+	Radius       *float64 `json:"radius,omitempty" yaml:"radius,omitempty"`
+	Curvature    *float64 `json:"curvature,omitempty" yaml:"curvature,omitempty"`
+	Thickness    float64  `json:"thickness" yaml:"thickness"`
+	Material     string   `json:"material" yaml:"material"`
+	Diameter     float64  `json:"diameter" yaml:"diameter"`
+	AutoAperture *bool    `json:"auto_aperture,omitempty" yaml:"auto_aperture,omitempty"`
 }
 
 // AsphereCoefRow is one row of the separate Asphere Coefficients table: the
@@ -83,32 +85,32 @@ type RaySummaryRow struct {
 // TcumS/TcumP are the cumulative transmittance from the entrance (intensity
 // 1 at the object plane).
 type RayDetailRow struct {
-	RayID            string        `json:"ray_id" yaml:"ray_id"`
-	SurfaceID        int           `json:"surface_id" yaml:"surface_id"`
-	Position         [3]float64    `json:"position" yaml:"position"`
-	Direction        [3]float64    `json:"direction" yaml:"direction"`
-	Interaction      string        `json:"interaction" yaml:"interaction"`
-	Thickness        float64       `json:"thickness" yaml:"thickness"`
-	OPL              float64       `json:"opl" yaml:"opl"`
-	IntensityS       float64       `json:"intensity_s" yaml:"intensity_s"`
-	IntensityP       float64       `json:"intensity_p" yaml:"intensity_p"`
-	IntensityRs      *float64      `json:"intensity_rs,omitempty" yaml:"intensity_rs,omitempty"`
-	IntensityRp      *float64      `json:"intensity_rp,omitempty" yaml:"intensity_rp,omitempty"`
+	RayID            string            `json:"ray_id" yaml:"ray_id"`
+	SurfaceID        int               `json:"surface_id" yaml:"surface_id"`
+	Position         [3]float64        `json:"position" yaml:"position"`
+	Direction        [3]float64        `json:"direction" yaml:"direction"`
+	Interaction      string            `json:"interaction" yaml:"interaction"`
+	Thickness        float64           `json:"thickness" yaml:"thickness"`
+	OPL              float64           `json:"opl" yaml:"opl"`
+	IntensityS       float64           `json:"intensity_s" yaml:"intensity_s"`
+	IntensityP       float64           `json:"intensity_p" yaml:"intensity_p"`
+	IntensityRs      *float64          `json:"intensity_rs,omitempty" yaml:"intensity_rs,omitempty"`
+	IntensityRp      *float64          `json:"intensity_rp,omitempty" yaml:"intensity_rp,omitempty"`
 	Jones            types.JonesVector `json:"jones" yaml:"jones"`
-	TcumS            float64       `json:"tcum_s" yaml:"tcum_s"`
-	TcumP            float64       `json:"tcum_p" yaml:"tcum_p"`
-	AngleOfIncidence *float64      `json:"angle_of_incidence,omitempty" yaml:"angle_of_incidence,omitempty"`
-	N1               *float64      `json:"n1,omitempty" yaml:"n1,omitempty"`
-	N2               *float64      `json:"n2,omitempty" yaml:"n2,omitempty"`
-	Rs               *float64      `json:"rs,omitempty" yaml:"rs,omitempty"`
-	Rp               *float64      `json:"rp,omitempty" yaml:"rp,omitempty"`
-	Ts               *float64      `json:"ts,omitempty" yaml:"ts,omitempty"`
-	Tp               *float64      `json:"tp,omitempty" yaml:"tp,omitempty"`
-	CoatingRs        *float64      `json:"coating_rs,omitempty" yaml:"coating_rs,omitempty"`
-	CoatingRp        *float64      `json:"coating_rp,omitempty" yaml:"coating_rp,omitempty"`
-	CoatingTs        *float64      `json:"coating_ts,omitempty" yaml:"coating_ts,omitempty"`
-	CoatingTp        *float64      `json:"coating_tp,omitempty" yaml:"coating_tp,omitempty"`
-	ErrorCode        string        `json:"error_code,omitempty" yaml:"error_code,omitempty"`
+	TcumS            float64           `json:"tcum_s" yaml:"tcum_s"`
+	TcumP            float64           `json:"tcum_p" yaml:"tcum_p"`
+	AngleOfIncidence *float64          `json:"angle_of_incidence,omitempty" yaml:"angle_of_incidence,omitempty"`
+	N1               *float64          `json:"n1,omitempty" yaml:"n1,omitempty"`
+	N2               *float64          `json:"n2,omitempty" yaml:"n2,omitempty"`
+	Rs               *float64          `json:"rs,omitempty" yaml:"rs,omitempty"`
+	Rp               *float64          `json:"rp,omitempty" yaml:"rp,omitempty"`
+	Ts               *float64          `json:"ts,omitempty" yaml:"ts,omitempty"`
+	Tp               *float64          `json:"tp,omitempty" yaml:"tp,omitempty"`
+	CoatingRs        *float64          `json:"coating_rs,omitempty" yaml:"coating_rs,omitempty"`
+	CoatingRp        *float64          `json:"coating_rp,omitempty" yaml:"coating_rp,omitempty"`
+	CoatingTs        *float64          `json:"coating_ts,omitempty" yaml:"coating_ts,omitempty"`
+	CoatingTp        *float64          `json:"coating_tp,omitempty" yaml:"coating_tp,omitempty"`
+	ErrorCode        string            `json:"error_code,omitempty" yaml:"error_code,omitempty"`
 }
 
 // raysListOutput is the structured (yaml/json) shape of `list rays`.
@@ -243,6 +245,7 @@ func runList(data []byte) {
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
 	showCurvature := fs.Bool("curvature", false, "show curvature instead of radius")
+	showAutoAperture := fs.Bool("auto-aperture", false, "for surfaces: show the auto_aperture state column (auto/fixed)")
 	showAllGlasses := fs.Bool("all-glasses", false, "show all glasses: include glass_catalog entries not used by any surface")
 	showRoles := fs.Bool("roles", false, "for paraxial: also show element roles table")
 	showSummaryOnly := fs.Bool("summary", false, "for rays: show only summary (no per-surface detail)")
@@ -308,7 +311,7 @@ func runList(data []byte) {
 		first = false
 		switch target {
 		case "surfaces":
-			listSurfaces(surfaces, gc, *showCurvature, *format, input.Configs, *configFlag != "")
+			listSurfaces(surfaces, gc, *showCurvature, *showAutoAperture, *format, input.Configs, *configFlag != "")
 		case "glasses":
 			listGlasses(surfaces, input, gc, *format, *showAllGlasses)
 		case "paraxial":
@@ -366,8 +369,8 @@ func splitFlagsAndPositional(args []string) flagAndPositional {
 // --config was given and multiple configs carry differing thickness on common
 // surface IDs, a final "Thickness Differences:" matrix (rows = configs,
 // columns = differing surfaces) is appended.
-func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature bool, format string, configs []types.Config, configSelected bool) {
-	rows := buildSurfaceRows(surfaces, gc, showCurvature)
+func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature bool, showAutoAperture bool, format string, configs []types.Config, configSelected bool) {
+	rows := buildSurfaceRows(surfaces, gc, showCurvature, showAutoAperture)
 	aspheres := buildAsphereRows(surfaces)
 	var thicknessDiffs []ThicknessDiffRow
 	if !configSelected {
@@ -404,6 +407,9 @@ func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature boo
 		if showCurvature {
 			header = []string{"id", "type", "curvature", "thickness", "material", "diameter"}
 		}
+		if showAutoAperture {
+			header = append(header, "auto_aperture")
+		}
 		fmt.Println(strings.Join(quoteCSV(header), ","))
 		for _, r := range rows {
 			radOrCurv := ""
@@ -420,6 +426,13 @@ func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature boo
 				strconv.Itoa(r.ID), r.Type, radOrCurv,
 				strconv.FormatFloat(r.Thickness, 'g', -1, 64),
 				r.Material, dia,
+			}
+			if showAutoAperture {
+				aa := ""
+				if r.AutoAperture != nil {
+					aa = strconv.FormatBool(*r.AutoAperture)
+				}
+				cells = append(cells, aa)
 			}
 			fmt.Println(strings.Join(quoteCSV(cells), ","))
 		}
@@ -485,6 +498,9 @@ func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature boo
 				{header: "Material"},
 				{header: "Diameter[mm]", right: true},
 			}
+			if showAutoAperture {
+				cols = append(cols, tableColumn{header: "Auto Ap"})
+			}
 			for _, r := range rows {
 				radCell := "inf"
 				if showCurvature && r.Curvature != nil {
@@ -502,6 +518,16 @@ func listSurfaces(surfaces []types.Surface, gc *glass.Catalog, showCurvature boo
 				cols[3].cells = append(cols[3].cells, formatTableFloat(r.Thickness))
 				cols[4].cells = append(cols[4].cells, r.Material)
 				cols[5].cells = append(cols[5].cells, diaCell)
+				if showAutoAperture {
+					aaCell := "-"
+					if r.AutoAperture != nil {
+						aaCell = "fixed"
+						if *r.AutoAperture {
+							aaCell = "auto"
+						}
+					}
+					cols[6].cells = append(cols[6].cells, aaCell)
+				}
 			}
 			fmt.Print(renderTable(cols))
 		}
@@ -627,7 +653,9 @@ func asphereMaxOrder(rows []AsphereCoefRow) int {
 
 // buildSurfaceRows converts the selected config's surfaces into listing rows.
 // An absent surface type defaults to sphere (the parse-time zero value).
-func buildSurfaceRows(surfaces []types.Surface, gc *glass.Catalog, showCurvature bool) []SurfaceListRow {
+// When showAutoAperture is set, each row carries the surface's auto_aperture
+// state; otherwise the field stays nil (absent from structured output).
+func buildSurfaceRows(surfaces []types.Surface, gc *glass.Catalog, showCurvature bool, showAutoAperture bool) []SurfaceListRow {
 	rows := make([]SurfaceListRow, 0, len(surfaces))
 	for _, s := range surfaces {
 		if s.ID == 0 {
@@ -649,6 +677,10 @@ func buildSurfaceRows(surfaces []types.Surface, gc *glass.Catalog, showCurvature
 		} else if s.Curvature != 0 {
 			r := 1.0 / s.Curvature
 			row.Radius = &r
+		}
+		if showAutoAperture {
+			aa := s.AutoAperture
+			row.AutoAperture = &aa
 		}
 		rows = append(rows, row)
 	}
@@ -1278,7 +1310,7 @@ func listParaxial(data []byte, input types.Input, gc *glass.Catalog, format stri
 	switch format {
 	case "yaml":
 		type kvOutput struct {
-			Properties []paraxialProp `json:"properties" yaml:"properties"`
+			Properties []paraxialProp      `json:"properties" yaml:"properties"`
 			Roles      []types.ElementRole `json:"element_roles,omitempty" yaml:"element_roles,omitempty"`
 		}
 		out := kvOutput{Properties: props}
@@ -1293,7 +1325,7 @@ func listParaxial(data []byte, input types.Input, gc *glass.Catalog, format stri
 		os.Stdout.Write(outData)
 	case "json":
 		type kvOutput struct {
-			Properties []paraxialProp `json:"properties" yaml:"properties"`
+			Properties []paraxialProp      `json:"properties" yaml:"properties"`
 			Roles      []types.ElementRole `json:"element_roles,omitempty" yaml:"element_roles,omitempty"`
 		}
 		out := kvOutput{Properties: props}
@@ -1528,13 +1560,13 @@ func buildRaySummaryRows(results []types.RayResult) []RaySummaryRow {
 	rows := make([]RaySummaryRow, 0, len(results))
 	for _, r := range results {
 		row := RaySummaryRow{
-			ID:          r.ID,
-			Wavelength:  r.Wavelength,
-			OPLTotal:    r.OPLTotal,
-			IntensityS:  r.IntensityS,
-			IntensityP:  r.IntensityP,
-			Surfaces:    len(r.Surfaces),
-			Error:       r.Error,
+			ID:         r.ID,
+			Wavelength: r.Wavelength,
+			OPLTotal:   r.OPLTotal,
+			IntensityS: r.IntensityS,
+			IntensityP: r.IntensityP,
+			Surfaces:   len(r.Surfaces),
+			Error:      r.Error,
 		}
 		// Final cumulative transmittance: multiply each surface's single-surface
 		// intensity transmittance (intensity 1 at the object plane; surface 0 and

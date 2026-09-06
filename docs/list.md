@@ -100,6 +100,7 @@ rayweave optimize < lens.yaml | rayweave list merit  # + optimization result
 | `--config ID` | Select one config by id. Without it, all configs are considered. |
 | `--glass-dir DIR` | Load an AGF glass catalog directory (resolves glass names). |
 | `--curvature` | Show curvature [1/mm] instead of radius [mm]. |
+| `--auto-aperture` | For `surfaces`: show the per-surface `auto_aperture` state column (`auto`/`fixed`; raw bool in yaml/json/csv). Also applies to the `default` set, which includes `surfaces`. |
 | `--all-glasses` | For `glasses`: show all glasses, including the `glass_catalog` entries not used by any surface. |
 | `--roles` | For `paraxial`: append the per-element glass-role table. |
 | `--summary` | For `rays`: show only the summary table (no per-surface detail). |
@@ -111,10 +112,24 @@ Flags may appear before or after the target arguments.
 ## 4. Surfaces section
 
 Columns: `ID`, `Type`, `Radius[mm]` (or `Curvature[1/mm]` with `--curvature`),
-`Thickness[mm]`, `Material`, `Diameter[mm]`. Object plane 0 is excluded.
+`Thickness[mm]`, `Material`, `Diameter[mm]`, and with `--auto-aperture` an
+`Auto Ap` column. Object plane 0 is excluded.
 
 A flat surface has no finite radius: it is shown as `inf` in tables and
 omitted in yaml/json/csv.
+
+### Auto Ap column
+
+With `--auto-aperture`, each row shows the surface's `auto_aperture` state:
+
+| State | Table | yaml/json/csv |
+|---|---|---|
+| `auto_aperture: true` | `auto` — resized by `vignette` / `chief --clear-aperture` / `optimize` | `auto_aperture: true` |
+| `auto_aperture: false` | `fixed` — never resized | `auto_aperture: false` |
+
+Without the flag the column (and the `auto_aperture` field in structured
+output) is absent entirely. The flag also applies when `surfaces` is reached
+via the `default` keyword (`rayweave list --auto-aperture`).
 
 ### Material display
 
@@ -558,6 +573,10 @@ rayweave list < lens.yaml
 
 # Surfaces only with curvature
 rayweave list surfaces --curvature < lens.yaml
+
+# Surfaces with the auto_aperture state column (also works via default)
+rayweave list surfaces --auto-aperture < lens.yaml
+rayweave list --auto-aperture < lens.yaml
 
 # Multi-config: thickness differences shown automatically
 rayweave list < zoom.yaml

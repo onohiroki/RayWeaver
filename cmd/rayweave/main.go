@@ -1084,8 +1084,8 @@ Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
 `)
 	case "list":
 		fmt.Print(`Usage: rayweave list [--format table|yaml|json|csv] [--config ID]
-                   [--glass-dir DIR] [--curvature] [--all-glasses] [--roles] [--summary]
-                   [TARGET...] < input.yaml
+                   [--glass-dir DIR] [--curvature] [--auto-aperture] [--all-glasses]
+                   [--roles] [--summary] [TARGET...] < input.yaml
 
 Read-only listing of an optical system's definition data. Unlike the pipeline
 subcommands, list never traces rays and prints formatted tables by default,
@@ -1096,6 +1096,9 @@ default: surfaces, glasses, paraxial and fields — the keyword "default"
 expands to this set in place, e.g. "list default merit" shows the default
 targets followed by merit):
   surfaces   surface table of the selected config (object plane 0 excluded)
+              With --auto-aperture, also shows the per-surface auto_aperture
+              state (auto = resized by vignette/clear-aperture/optimize,
+              fixed = never resized)
   glasses    refractive-index table of the glasses used by the selected
              config's surfaces (first-use order) plus unresolved keys.
              With --all-glasses, also includes the remaining glass_catalog entries
@@ -1127,14 +1130,18 @@ Options:
   --config ID                    select config by id (multi-config mode)
   --glass-dir DIR                AGF glass catalog directory
   --curvature                    show curvature instead of radius
+  --auto-aperture                for surfaces: show the auto_aperture state
+                                 column (auto/fixed)
   --all-glasses                 for glasses: show all glasses, including
                                  glass_catalog entries not used by any surface
   --roles                        for paraxial: also show element roles table
   --summary                      for rays: show only summary (no per-surface detail)
 
 surfaces columns: ID, Type, Radius[mm] (or Curvature[1/mm] with --curvature),
-Thickness[mm], Material, Diameter[mm]. A flat surface has no finite radius:
-it is shown as "inf" in tables and null/empty in yaml/json/csv.
+Thickness[mm], Material, Diameter[mm], and with --auto-aperture an Auto Ap
+column (auto/fixed; raw auto_aperture bool in yaml/json/csv). A flat surface
+has no finite radius: it is shown as "inf" in tables and null/empty in
+yaml/json/csv.
 
 When the config contains aspheric surfaces (asphere_polynomial /
 asphere_zernike), an "Asphere Coefficients:" section follows the Surfaces:
