@@ -134,6 +134,21 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 	}
 	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
 
+	// Frozen pupil Z for the term's own field. Stop-free (dynamic-pupil)
+	// systems keep a PER-FIELD entrance pupil, so the config-level pupilZ
+	// (field 0's aperture) is wrong for off-axis terms: a grid frozen at
+	// field 0's pupil plane misses the term field's beam and the sphere fit
+	// inflates the OPD with mis-centred crescent sampling (observed 40x on a
+	// 23deg corner). Mirror evaluateGridKind's per-field lookup, falling back
+	// to the config-level pupilZ when the field has no entry (static stop
+	// path) or the angle is not an exact map key.
+	frozenZ := cfg.pupilZ
+	if cfg.pupilZs != nil {
+		if z, ok := cfg.pupilZs[angle]; ok {
+			frozenZ = z
+		}
+	}
+
 	// fit evaluates the term's quantity on the given (frozen or dynamic)
 	// pupil. The closure keeps the frozen→dynamic fallback and the bounded
 	// degenerate penalty shared by both the paraboloid and sphere kinds.
@@ -157,7 +172,7 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 		}
 	}
 
-	val, err := fit(&cfg.pupilZ)
+	val, err := fit(&frozenZ)
 	if err != nil {
 		// Fall back to the dynamic pupil (chief resolves the entrance pupil
 		// itself). The frozen grid does not apply the fixed-surface vignetting
