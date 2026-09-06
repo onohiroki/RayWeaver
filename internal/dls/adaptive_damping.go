@@ -12,6 +12,7 @@ import (
 // often stalls with uniform damping).
 var defaultClassConfig = map[string]types.DampingClassConfig{
 	"curvature": {sensitivityPower(1.20), multiplierPtr(1.50)},
+	"power":     {sensitivityPower(1.20), multiplierPtr(1.50)},
 	"thickness": {sensitivityPower(0.75), multiplierPtr(0.50)},
 	"diameter":  {sensitivityPower(1.00), multiplierPtr(1.00)},
 	"nd":        {sensitivityPower(1.00), multiplierPtr(1.00)},
@@ -52,6 +53,8 @@ func dampingClass(param string) string {
 	switch param {
 	case "curvature":
 		return "curvature"
+	case "power":
+		return "power"
 	case "thickness":
 		return "thickness"
 	case "diameter":

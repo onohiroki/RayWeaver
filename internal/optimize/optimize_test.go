@@ -1183,3 +1183,91 @@ func TestFinalAperturesCoverBeam(t *testing.T) {
 		}
 	}
 }
+
+// TestPowerVariable verifies the "power" variable param: the variable's
+// thin-lens power drives the element's dependent solve surface via
+// paraxial.SolveElementPower, InitialState reads the element's current power,
+// and the escape glass phase preserves the power by locking the variable.
+func TestPowerVariable(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	// A plano-convex BK7 singlet: front curved (C1 = 0.02), back plane. The
+	// element's thin-lens power is (n-1)*C1 = 0.5168*0.02 = 0.010336.
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0,
+			Material: types.Material{ND: 1.5168, VD: 64.17}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0.0, Thickness: 95.0,
+			Material: types.Material{}, Diameter: 50.0},
+	}
+
+	opt := NewOptimizer(Config{
+		Surfaces:     surfaces,
+		Variables:    []Variable{{Name: "s2_power", SurfaceID: 2, Param: "power", Min: -0.04, Max: 0.04, Config: "config1"}},
+		MeritTerms:   []MeritTerm{{FieldAngle: 0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
+		GlassCatalog: gc,
+		NumRays:      32,
+	})
+
+	x0 := opt.InitialState()
+	if got := x0[0]; math.Abs(got-0.010336) > 1e-9 {
+		t.Fatalf("InitialState power = %v, want (n-1)*C1 = 0.010336", got)
+	}
+
+	// Applying a power value re-solves the back curvature so the element's
+	// thin-lens power equals the variable value.
+	wantPower := 0.02
+	app, _ := opt.applyVariables([]float64{wantPower})
+	idx := -1
+	for i, s := range app["config1"] {
+		if s.ID == 2 {
+			idx = i
+		}
+	}
+	if idx < 0 {
+		t.Fatal("surface 2 not found in applied config")
+	}
+	// SolveElementPower: C2 = (phi - (n-1)*C1) / (0 - n) = (0.02 - 0.010336)/(-0.5168).
+	wantC2 := (wantPower - 0.5168*0.02) / (-0.5168)
+	if got := app["config1"][idx].Curvature; math.Abs(got-wantC2) > 1e-12 {
+		t.Fatalf("applied back curvature = %v, want %v", got, wantC2)
+	}
+	if got := paraxial.ElementPowerCurvature(app["config1"], gc, 2); math.Abs(got-wantPower) > 1e-12 {
+		t.Fatalf("element power after apply = %v, want %v", got, wantPower)
+	}
+
+	// The glass phase locks the (non-glass) power variable (Min==Max): the
+	// DLS denormalises x into [Min,Max], so every evaluation during the phase
+	// reproduces exactly the locked power (the escape/DLS never moves it).
+	opt.EnterGlassPhase([]float64{wantPower})
+	v := &opt.variables[0]
+	if v.Min != wantPower || v.Max != wantPower {
+		t.Fatalf("glass phase lock = [%v, %v], want [%v, %v]", v.Min, v.Max, wantPower, wantPower)
+	}
+	locked, _ := opt.applyVariables([]float64{wantPower})
+	if got := paraxial.ElementPowerCurvature(locked["config1"], gc, 2); math.Abs(got-wantPower) > 1e-12 {
+		t.Fatalf("power during glass phase = %v, want preserved %v", got, wantPower)
+	}
+	opt.ExitGlassPhase()
+	if opt.variables[0].Min != -0.04 || opt.variables[0].Max != 0.04 {
+		t.Fatalf("ExitGlassPhase did not restore the variable range: [%v, %v]",
+			opt.variables[0].Min, opt.variables[0].Max)
+	}
+	free, _ := opt.applyVariables([]float64{0.03})
+	if got := paraxial.ElementPowerCurvature(free["config1"], gc, 2); math.Abs(got-0.03) > 1e-12 {
+		t.Fatalf("power after ExitGlassPhase = %v, want 0.03", got)
+	}
+
+	// SetPowerSolve must not snapshot a surface a power variable drives.
+	opt2 := NewOptimizer(Config{
+		Surfaces:     surfaces,
+		Variables:    []Variable{{Name: "s2_power", SurfaceID: 2, Param: "power", Min: -0.04, Max: 0.04, Config: "config1"}},
+		MeritTerms:   []MeritTerm{{FieldAngle: 0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0}},
+		GlassCatalog: gc,
+		NumRays:      32,
+	})
+	opt2.SetPowerSolve([]int{2})
+	if len(opt2.powerSolve["config1"]) != 0 {
+		t.Fatalf("power_solve snapshotted a power-variable-driven surface: %v", opt2.powerSolve["config1"])
+	}
+}

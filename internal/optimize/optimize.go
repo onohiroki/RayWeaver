@@ -1020,6 +1020,30 @@ func (o *Optimizer) SetPowerSolve(solveSurfaces []int) {
 	if len(solveSurfaces) == 0 {
 		return
 	}
+	// Surfaces driven by a "power" variable are variable-controlled: their
+	// element power is an optimisation variable (applyPowerVariables), so a
+	// snapshot-pinned entry here would fight the variable. The snapshot
+	// preserves only the surfaces no power variable drives.
+	powerDriven := make(map[string]map[int]bool)
+	for i := range o.variables {
+		v := &o.variables[i]
+		if v.Param != "power" {
+			continue
+		}
+		add := func(cfgID string, id int) {
+			if powerDriven[cfgID] == nil {
+				powerDriven[cfgID] = make(map[int]bool)
+			}
+			powerDriven[cfgID][id] = true
+		}
+		if v.IsShared {
+			for _, b := range v.Bindings {
+				add(b.Config, b.ID)
+			}
+			continue
+		}
+		add(v.Config, v.SurfaceID)
+	}
 	m := make(map[string][]powerSolveEntry, len(o.configs))
 	// The targets come from a curvature-based element-power snapshot (the
 	// initial surfaces have not been Precomputed), matching the power the solve
@@ -1027,6 +1051,9 @@ func (o *Optimizer) SetPowerSolve(solveSurfaces []int) {
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		for _, id := range solveSurfaces {
+			if powerDriven[cfg.id][id] {
+				continue
+			}
 			phi, ok := powerTargetForSurface(cfg.surfaces, o.gc, id)
 			if !ok {
 				continue
@@ -1729,6 +1756,16 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 		}
 	}
 
+	// Power variables drive their element's dependent solve surface to the
+	// variable's thin-lens power (paraxial.SolveElementPower). They run after
+	// every curvature and glass variable so the solve reads final front
+	// curvatures and glass indices, and independent of powerSolveEnabled: a
+	// power variable is an ordinary variable in the main phases (so a design
+	// can build element power from a zero-power start), and the escape glass
+	// phase preserves it by locking the variable (Min==Max), which keeps
+	// SolveElementPower reproducing the same curvature every evaluation.
+	o.applyPowerVariables(x, configSurfaces, effectiveGC(o.gc, tempGC))
+
 	// Apply the power-preserving solve after the variables and in-flight glass
 	// overrides are in place but before Precompute, so the solved curvature
 	// feeds both ParaxialRadius (Precompute) and every downstream consumer.
@@ -1742,6 +1779,44 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 	}
 
 	return configSurfaces, tempGC
+}
+
+// applyPowerVariables applies every "power" variable: the element containing
+// the target (solve) surface is re-solved to the variable's thin-lens power
+// via paraxial.SolveElementPower, recomputing the dependent surface's
+// curvature from the already-applied front curvatures and glass indices.
+// Called from applyVariables (pure). Shared variables scale/offset each
+// binding like the other params; local variables apply the value directly.
+// Surfaces that cannot host a solve (mirrors, non-element surfaces) are
+// silently skipped by SolveElementPower, so the variable simply has no
+// surface effect there.
+func (o *Optimizer) applyPowerVariables(x []float64, configSurfaces map[string][]types.Surface, gc *glass.Catalog) {
+	for vi := range o.variables {
+		v := &o.variables[vi]
+		if v.Param != "power" {
+			continue
+		}
+		val := x[vi]
+		if v.IsShared {
+			for _, b := range v.Bindings {
+				surfaces, ok := configSurfaces[b.Config]
+				if !ok {
+					continue
+				}
+				scale := b.Scale
+				if scale == 0 {
+					scale = 1.0
+				}
+				paraxial.SolveElementPower(surfaces, gc, b.ID, scale*val+b.Offset)
+			}
+			continue
+		}
+		surfaces, ok := configSurfaces[v.Config]
+		if !ok {
+			continue
+		}
+		paraxial.SolveElementPower(surfaces, gc, v.SurfaceID, val)
+	}
 }
 
 // applyPowerSolve reconciles every pinned solve surface's curvature so the
@@ -2601,6 +2676,17 @@ func (o *Optimizer) getInitialState() []float64 {
 			if x[i] == 0 {
 				x[i] = (v.Min + v.Max) / 2
 			}
+		case "power":
+			if cfg != nil {
+				x[i] = paraxial.ElementPowerCurvature(cfg.surfaces, o.gc, v.SurfaceID)
+			} else {
+				x[i] = (v.Min + v.Max) / 2
+			}
+			if x[i] < v.Min {
+				x[i] = v.Min
+			} else if x[i] > v.Max {
+				x[i] = v.Max
+			}
 		default:
 			x[i] = (v.Min + v.Max) / 2
 		}
@@ -2641,7 +2727,9 @@ func (o *Optimizer) buildVariableStates(x []float64) []VariableState {
 			st.GlassName = v.GlassName
 			if cfg := findConfigByID(o.configs, v.Config); cfg != nil {
 				if idx := surfaceIndex(cfg.surfaces, v.SurfaceID); idx >= 0 {
-					if v.Param == "nd" || v.Param == "vd" {
+					if v.Param == "power" {
+						st.Before = paraxial.ElementPowerCurvature(cfg.surfaces, o.gc, v.SurfaceID)
+					} else if v.Param == "nd" || v.Param == "vd" {
 						m := cfg.surfaces[idx].Material
 						switch {
 						case m.HasModel() && !m.HasKey():
