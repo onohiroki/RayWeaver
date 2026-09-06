@@ -175,20 +175,26 @@ type ConstraintMultipliers interface {
 	SetConstraintMultipliers(lambdas []float64)
 }
 
-// DampingVarInfo carries per-variable diagnostic information for the
-// adaptive damping logger.
-type DampingVarInfo struct {
-	Name        string  `json:"name"`
-	Class       string  `json:"class"`
-	HDiag       float64 `json:"hessian_diagonal"`
-	Ratio       float64 `json:"sensitivity_ratio"`
-	LocalFactor float64 `json:"local_factor"`
-	Diagonal    float64 `json:"damping_diagonal"`
-	Step        float64 `json:"normalized_step"`
+// DampingClassStats holds aggregated adaptive damping statistics for one
+// variable class (curvature, thickness, asphere, etc.).
+type DampingClassStats struct {
+	Count  int     `json:"count"`
+	DMean  float64 `json:"d_mean"`
+	DMax   float64 `json:"d_max"`
+	LfMean float64 `json:"lf_mean"`
 }
 
-// DampingLogger is an optional Logger capability: report the per-variable
+// DampingSummary carries class-aggregated adaptive damping diagnostics for
+// one DLS iteration, replacing the per-variable dump with a compact summary.
+type DampingSummary struct {
+	Classes  map[string]DampingClassStats `json:"classes"`
+	DMin     float64                      `json:"d_min"`
+	DMax     float64                      `json:"d_max"`
+	DMean    float64                      `json:"d_mean"`
+}
+
+// DampingLogger is an optional Logger capability: report class-aggregated
 // adaptive damping diagnostics each iteration.
 type DampingLogger interface {
-	LogDamping(iter int, mu float64, ref float64, vars []DampingVarInfo)
+	LogDamping(iter int, mu float64, ref float64, summary DampingSummary)
 }

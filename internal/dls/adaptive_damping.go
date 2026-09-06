@@ -271,3 +271,69 @@ func (s *AdaptiveDampingState) OnAccepted(
 		}
 	}
 }
+
+// buildDampingSummary aggregates per-variable adaptive damping diagnostics
+// into per-class statistics and global min/max/mean for compact logging.
+func buildDampingSummary(vars []VariableInfo, state *AdaptiveDampingState) DampingSummary {
+	type classAcc struct {
+		count int
+		dSum  float64
+		dMax  float64
+		lfSum float64
+	}
+	byClass := make(map[string]*classAcc)
+
+	n := len(vars)
+	dMin := math.MaxFloat64
+	dMax := -math.MaxFloat64
+	dSum := 0.0
+
+	for j := 0; j < n; j++ {
+		class := dampingClass(vars[j].Param)
+		d := state.diagonal[j]
+		lf := state.localFactor[j]
+
+		acc, ok := byClass[class]
+		if !ok {
+			acc = &classAcc{}
+			byClass[class] = acc
+		}
+		acc.count++
+		acc.dSum += d
+		acc.lfSum += lf
+		if d > acc.dMax {
+			acc.dMax = d
+		}
+
+		if d < dMin {
+			dMin = d
+		}
+		if d > dMax {
+			dMax = d
+		}
+		dSum += d
+	}
+
+	classes := make(map[string]DampingClassStats, len(byClass))
+	for class, acc := range byClass {
+		classes[class] = DampingClassStats{
+			Count:  acc.count,
+			DMean:  acc.dSum / float64(acc.count),
+			DMax:   acc.dMax,
+			LfMean: acc.lfSum / float64(acc.count),
+		}
+	}
+
+	summary := DampingSummary{
+		Classes: classes,
+		DMin:    dMin,
+		DMax:    dMax,
+		DMean:   dSum / float64(n),
+	}
+	if n == 0 {
+		summary.DMin = 0
+		summary.DMax = 0
+		summary.DMean = 0
+	}
+	return summary
+}

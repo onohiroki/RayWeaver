@@ -597,13 +597,16 @@ func (j *jsonLogger) LogModeChange(iter int, from, to string, weights map[string
 	fmt.Fprintln(j.w, string(data))
 }
 
-func (j *jsonLogger) LogDamping(iter int, mu, ref float64, vars []dls.DampingVarInfo) {
+func (j *jsonLogger) LogDamping(iter int, mu, ref float64, summary dls.DampingSummary) {
 	entry := dampingLog{
-		Event: "adaptive_damping",
-		Iter:  iter,
-		Mu:    safeF(mu),
-		Ref:   safeF(ref),
-		Vars:  vars,
+		Event:   "adaptive_damping",
+		Iter:    iter,
+		Mu:      safeF(mu),
+		Ref:     safeF(ref),
+		Classes: summary.Classes,
+		DMin:    safeF(summary.DMin),
+		DMax:    safeF(summary.DMax),
+		DMean:   safeF(summary.DMean),
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -637,10 +640,10 @@ func (m *multiLogger) LogModeChange(iter int, from, to string, weights map[strin
 	}
 }
 
-func (m *multiLogger) LogDamping(iter int, mu, ref float64, vars []dls.DampingVarInfo) {
+func (m *multiLogger) LogDamping(iter int, mu, ref float64, summary dls.DampingSummary) {
 	for _, l := range m.loggers {
 		if dl, ok := l.(dls.DampingLogger); ok {
-			dl.LogDamping(iter, mu, ref, vars)
+			dl.LogDamping(iter, mu, ref, summary)
 		}
 	}
 }
@@ -659,11 +662,14 @@ type modeChangeLog struct {
 }
 
 type dampingLog struct {
-	Event string             `json:"event"`
-	Iter  int                `json:"iteration"`
-	Mu    float64            `json:"mu"`
-	Ref   float64            `json:"sensitivity_reference"`
-	Vars  []dls.DampingVarInfo `json:"variables"`
+	Event   string                         `json:"event"`
+	Iter    int                            `json:"iteration"`
+	Mu      float64                        `json:"mu"`
+	Ref     float64                        `json:"sensitivity_reference"`
+	Classes map[string]dls.DampingClassStats `json:"classes"`
+	DMin    float64                        `json:"d_min"`
+	DMax    float64                        `json:"d_max"`
+	DMean   float64                        `json:"d_mean"`
 }
 
 type iterLog struct {

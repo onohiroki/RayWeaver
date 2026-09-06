@@ -495,19 +495,8 @@ func Solve(m Model) Result {
 		}
 
 		if dl, ok := opts.Logger.(DampingLogger); ok {
-			infos := make([]DampingVarInfo, nVars)
-			for j, v := range variables {
-				infos[j] = DampingVarInfo{
-					Name:        v.Name,
-					Class:       dampingClass(v.Param),
-					HDiag:       hDiag[j],
-					Ratio:       adaptiveState.lastRatio[j],
-					LocalFactor: adaptiveState.localFactor[j],
-					Diagonal:    adaptiveState.diagonal[j],
-					Step:        delta[j],
-				}
-			}
-			dl.LogDamping(totalIter+1, mu, adaptiveState.lastRef, infos)
+			summary := buildDampingSummary(variables, adaptiveState)
+			dl.LogDamping(totalIter+1, mu, adaptiveState.lastRef, summary)
 		}
 
 		if actualReduction > 0 {
