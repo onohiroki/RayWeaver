@@ -944,19 +944,18 @@ func parseEscapeExtractFlags(args []string) int {
 	return *index
 }
 
-// noIterLogger wraps a dls.Logger but suppresses high-frequency per-iteration
-// events (LogIter, LogDamping) while delegating LogFinal and LogModeChange.
-// The solver's type assertion (opts.Logger.(DampingLogger)) fails because
-// LogDamping is not implemented, so adaptive_damping events are never called.
+// noIterLogger wraps a dls.Logger but suppresses everything except rare
+// mode_change diagnostics: LogIter and LogFinal (per-iteration and per-solve
+// reports — escape Progress cycle events already carry dls_status and merit)
+// are no-ops, and LogDamping is never called because the type assertion
+// (opts.Logger.(DampingLogger)) fails. Only LogModeChange is delegated.
 type noIterLogger struct {
 	inner dls.Logger
 }
 
 func (n *noIterLogger) LogIter(int, float64, float64, float64, []float64, []dls.ConstraintState) {}
 
-func (n *noIterLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
-	n.inner.LogFinal(iter, status, merit, stepNorm, variables, constraints)
-}
+func (n *noIterLogger) LogFinal(int, string, float64, float64, []float64, []dls.ConstraintState) {}
 
 func (n *noIterLogger) LogModeChange(iter int, from, to string, weights map[string]float64, metric float64) {
 	if ml, ok := n.inner.(dls.ModeChangeLogger); ok {
