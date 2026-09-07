@@ -81,12 +81,8 @@ func Solve(m Model) Result {
 	}
 
 	merit := m.EvaluateMerit(xPhys0)
-	meritOnly := merit
 	if hasConstraints {
 		merit += sumConstraintTerms(c0, allActive, lambdas, muConJ)
-	}
-	if merit < meritOnly {
-		merit = meritOnly
 	}
 	beforeMerit := merit
 
@@ -337,14 +333,10 @@ func Solve(m Model) Result {
 		xPhysNew := denormalize(xNormNew, variables, scales)
 
 		meritNew := m.EvaluateMerit(xPhysNew)
-		meritNewOnly := meritNew
 		var cNew []float64
 		if hasConstraints {
 			cNew = m.ComputeConstraints(xPhysNew)
 			meritNew += sumConstraintTerms(cNew, activeIndices, lambdas, muConJ)
-		}
-		if meritNew < meritNewOnly {
-			meritNew = meritNewOnly
 		}
 
 		actualReduction := merit - meritNew
@@ -378,14 +370,10 @@ func Solve(m Model) Result {
 
 				xTestPhys := denormalize(xTestNorm, variables, scales)
 				meritTest := m.EvaluateMerit(xTestPhys)
-				meritTestOnly := meritTest
 				var cTest []float64
 				if hasConstraints {
 					cTest = m.ComputeConstraints(xTestPhys)
 					meritTest += sumConstraintTerms(cTest, activeIndices, lambdas, muConJ)
-				}
-				if meritTest < meritTestOnly {
-					meritTest = meritTestOnly
 				}
 
 				if meritTest <= merit+1e-4*alpha*dirDeriv {
@@ -535,15 +523,15 @@ func Solve(m Model) Result {
 		// reset damping. A plateau can be caused by an unsatisfiable constraint
 		// (its penalty dominates the merit with no descent direction), a
 		// vignetting discontinuity, or a degenerate spot evaluation.
-		if consecStall >= 30 && totalIter < opts.MaxIter-10 && !opts.DisableStallEscape {
+		if consecStall >= 10 && totalIter < opts.MaxIter-10 && !opts.DisableStallEscape {
 			// Reset to best known state before perturbing
 			copy(xNorm, bestKnownNorm)
 			merit = bestKnownMerit
 
-			// Deterministic pseudo-random perturbation (±1% of normalized range)
+			// Deterministic pseudo-random perturbation (±10% of normalized range)
 			for j := 0; j < nVars; j++ {
 				perturb := float64((totalIter+1)*(j+1)%53) / 53.0
-				xNorm[j] += (perturb - 0.5) * 0.02
+				xNorm[j] += (perturb - 0.5) * 0.2
 			}
 			for j := 0; j < nVars; j++ {
 				if xNorm[j] < 0 {
@@ -556,16 +544,12 @@ func Solve(m Model) Result {
 			xPhys := denormalize(xNorm, variables, scales)
 
 			meritNew := m.EvaluateMerit(xPhys)
-			meritNewOnly := meritNew
 			if hasConstraints {
 				cNew := m.ComputeConstraints(xPhys)
 				for j, cj := range cNew {
 					cPrev[j] = cj
 				}
 				meritNew += sumConstraintTerms(cNew, activeIndices, lambdas, muConJ)
-			}
-			if meritNew < meritNewOnly {
-				meritNew = meritNewOnly
 			}
 			merit = meritNew
 

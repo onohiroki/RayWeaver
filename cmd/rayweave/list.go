@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -338,6 +339,25 @@ type optimizationListOutput struct {
 	OptResult       *OptimizationResultSummary `json:"opt_result,omitempty" yaml:"opt_result,omitempty"`
 }
 
+// EscapeMinimumRow is one local minimum for `list escape`.
+type EscapeMinimumRow struct {
+	Index         int        `json:"index" yaml:"index"`
+	Merit         float64    `json:"merit" yaml:"merit"`
+	File          string     `json:"file,omitempty" yaml:"file,omitempty"`
+	ElementPowers [][]float64 `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
+}
+
+// escapeListOutput is the structured (yaml/json) shape of `list escape`.
+type escapeListOutput struct {
+	Params      []propRow          `json:"params,omitempty" yaml:"params,omitempty"`
+	Minima      []EscapeMinimumRow `json:"minima,omitempty" yaml:"minima,omitempty"`
+	BestIndex   int                `json:"best_index" yaml:"best_index"`
+	BestMerit   float64            `json:"best_merit" yaml:"best_merit"`
+	FileDir     string             `json:"file_directory,omitempty" yaml:"file_directory,omitempty"`
+	TimedOut    bool               `json:"timed_out,omitempty" yaml:"timed_out,omitempty"`
+	Interrupted bool               `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
+}
+
 // runList implements the `list` subcommand: a read-only, human-readable
 // listing of the input system's definition data (surfaces, glasses, paraxial
 // properties, ray results). It never traces rays and prints formatted tables
@@ -389,7 +409,7 @@ func runList(data []byte) {
 
 	needsOutput := false
 	for _, t := range targets {
-		if t == "rays" || t == "merit" || t == "optimization" {
+		if t == "rays" || t == "merit" || t == "optimization" || t == "escape" {
 			needsOutput = true
 		}
 	}
@@ -432,8 +452,10 @@ func runList(data []byte) {
 			listMerit(input, output, *format)
 		case "optimization":
 			listOptimization(input, output, *format)
+		case "escape":
+			listEscape(output, *format)
 		default:
-			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, or \"default\")", target)
+			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, escape, or \"default\")", target)
 			os.Exit(1)
 		}
 	}
@@ -2599,6 +2621,258 @@ func escapeSettings(e *types.EscapeConfig) []propRow {
 		p = append(p, propRow{Name: "Variable Weights", Value: sortedFloatMapJoin(e.VariableWeights)})
 	}
 	return p
+}
+
+// escapeParamsSettings flattens the set fields of escape_result.params into
+// key-value rows.
+func escapeParamsSettings(p *types.EscapeParamsInfo) []propRow {
+	var rows []propRow
+	rows = appendIntProp(rows, "Max Cycles", p.MaxCycles)
+	rows = appendIntProp(rows, "Escape Workers", p.EscapeWorkers)
+	rows = appendNumProp(rows, "Max Seconds", p.MaxSeconds)
+	rows = appendNumProp(rows, "Distance Threshold", p.DistanceThreshold)
+	rows = appendNumProp(rows, "Fingerprint Distance Threshold", p.FingerprintDistanceThreshold)
+	rows = appendNumProp(rows, "H Initial", p.HInitial)
+	rows = appendNumProp(rows, "W Initial", p.WInitial)
+	rows = appendNumProp(rows, "H Mult", p.HMult)
+	rows = appendNumProp(rows, "W Mult", p.WMult)
+	rows = appendNumProp(rows, "Escape Iter Frac", p.EscapeIterFrac)
+	rows = appendNumProp(rows, "W Span", p.WSpan)
+	rows = appendNumProp(rows, "Stall Window Frac", p.StallWindowFrac)
+	rows = appendNumProp(rows, "Stall Rel Tol", p.StallRelTol)
+	rows = appendBoolPtrProp(rows, "Stall Early Stop", p.StallEarlyStop)
+	rows = appendNumProp(rows, "Initial Perturb", p.InitialPerturb)
+	if len(p.VariableWeights) > 0 {
+		rows = append(rows, propRow{Name: "Variable Weights", Value: sortedFloatMapJoin(p.VariableWeights)})
+	}
+	return rows
+}
+
+// listEscape renders the escape-function global optimisation results from
+// output.escape_result: parameters, the list of local minima (index, merit,
+// file basename) and per-minimum element powers.
+func listEscape(output types.Output, format string) {
+	esc := output.EscapeResult
+	if esc == nil {
+		switch format {
+		case "yaml":
+			os.Stdout.Write([]byte("params: []\n"))
+		case "json":
+			fmt.Println(`{"params":[]}`)
+		default:
+			fmt.Println("Escape: (no escape result)")
+		}
+		return
+	}
+
+	params := escapeParamsSettings(&esc.Params)
+
+	// Determine common file directory (only when all minima share one).
+	fileDir := ""
+	if len(esc.Minima) > 0 {
+		dir := ""
+		same := true
+		for i, m := range esc.Minima {
+			if m.File == "" {
+				continue
+			}
+			d := filepath.Dir(m.File)
+			if i == 0 || dir == "" {
+				dir = d
+			} else if d != dir {
+				same = false
+				break
+			}
+		}
+		if same && dir != "" {
+			fileDir = dir
+		}
+	}
+
+	// Build minima rows.
+	minima := make([]EscapeMinimumRow, 0, len(esc.Minima))
+	for _, m := range esc.Minima {
+		var powers [][]float64
+		for _, f := range m.Features {
+			if len(f.ElementPowers) > 0 {
+				powers = append(powers, f.ElementPowers)
+			}
+		}
+		minima = append(minima, EscapeMinimumRow{
+			Index:         m.Index,
+			Merit:         m.Merit,
+			File:          fileBase(m.File),
+			ElementPowers: powers,
+		})
+	}
+
+	switch format {
+	case "yaml":
+		outData, err := yaml.Marshal(escapeListOutput{
+			Params:      params,
+			Minima:      minima,
+			BestIndex:   esc.BestIndex,
+			BestMerit:   esc.BestMerit,
+			FileDir:     fileDir,
+			TimedOut:    esc.TimedOut,
+			Interrupted: esc.Interrupted,
+		})
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+	case "json":
+		outData, err := json.MarshalIndent(escapeListOutput{
+			Params:      params,
+			Minima:      minima,
+			BestIndex:   esc.BestIndex,
+			BestMerit:   esc.BestMerit,
+			FileDir:     fileDir,
+			TimedOut:    esc.TimedOut,
+			Interrupted: esc.Interrupted,
+		}, "", "  ")
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+		fmt.Println()
+	case "csv":
+		printPropsSection("Escape Parameters:", params)
+		if len(minima) > 0 {
+			fmt.Println("Local Minima:")
+			fmt.Println("index,merit,file")
+			for _, m := range minima {
+				fmt.Println(strings.Join(quoteCSV([]string{
+					strconv.Itoa(m.Index),
+					strconv.FormatFloat(m.Merit, 'g', -1, 64),
+					m.File,
+				}), ","))
+			}
+		}
+		if hasAnyElementPowers(minima) {
+			fmt.Println()
+			fmt.Println("Element Powers:")
+			numElems := maxElementPowerCount(minima)
+			header := []string{"index", "config"}
+			for i := 1; i <= numElems; i++ {
+				header = append(header, fmt.Sprintf("element_%d", i))
+			}
+			fmt.Println(strings.Join(quoteCSV(header), ","))
+			for _, m := range minima {
+				if len(m.ElementPowers) == 0 {
+					continue
+				}
+				for ci, ep := range m.ElementPowers {
+					cells := []string{
+						strconv.Itoa(m.Index),
+						strconv.Itoa(ci),
+					}
+					for _, v := range ep {
+						cells = append(cells, strconv.FormatFloat(v, 'g', -1, 64))
+					}
+					fmt.Println(strings.Join(quoteCSV(cells), ","))
+				}
+			}
+		}
+	default: // "table"
+		// Build escape result props.
+		var resultProps []propRow
+		resultProps = appendIntProp(resultProps, "Best Index", esc.BestIndex)
+		resultProps = appendNumProp(resultProps, "Best Merit", esc.BestMerit)
+		if fileDir != "" {
+			resultProps = appendStrProp(resultProps, "File Directory", fileDir)
+		}
+		if esc.TimedOut {
+			resultProps = appendBoolTrueProp(resultProps, "Timed Out", esc.TimedOut)
+		}
+		if esc.Interrupted {
+			resultProps = appendBoolTrueProp(resultProps, "Interrupted", esc.Interrupted)
+		}
+
+		printPropsSection("Escape Parameters:", params)
+		if len(resultProps) > 0 {
+			printPropsSection("Escape Result:", resultProps)
+		}
+
+		if len(minima) > 0 {
+			fmt.Println("Local Minima:")
+			cols := []tableColumn{
+				{header: "Index", right: true},
+				{header: "Merit", right: true},
+				{header: "File"},
+			}
+			for _, m := range minima {
+				cols[0].cells = append(cols[0].cells, strconv.Itoa(m.Index))
+				cols[1].cells = append(cols[1].cells, formatTableFloat(m.Merit))
+				cols[2].cells = append(cols[2].cells, m.File)
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
+		}
+
+		if hasAnyElementPowers(minima) {
+			fmt.Println("Element Powers:")
+			numElems := maxElementPowerCount(minima)
+			numCols := make([]tableColumn, 2+numElems)
+			numCols[0] = tableColumn{header: "Index", right: true}
+			numCols[1] = tableColumn{header: "Config"}
+			for i := 0; i < numElems; i++ {
+				numCols[2+i] = tableColumn{header: fmt.Sprintf("Element %d", i+1), right: true}
+			}
+			for _, m := range minima {
+				if len(m.ElementPowers) == 0 {
+					continue
+				}
+				for ci, ep := range m.ElementPowers {
+					numCols[0].cells = append(numCols[0].cells, strconv.Itoa(m.Index))
+					numCols[1].cells = append(numCols[1].cells, strconv.Itoa(ci))
+					for ei := 0; ei < numElems; ei++ {
+						if ei < len(ep) {
+							numCols[2+ei].cells = append(numCols[2+ei].cells, formatTableFloat(ep[ei]))
+						} else {
+							numCols[2+ei].cells = append(numCols[2+ei].cells, "-")
+						}
+					}
+				}
+			}
+			fmt.Print(renderTable(numCols))
+			fmt.Println()
+		}
+	}
+}
+
+// fileBase returns the basename of a file path, or "-" when empty.
+func fileBase(path string) string {
+	if path == "" {
+		return "-"
+	}
+	return filepath.Base(path)
+}
+
+// hasAnyElementPowers reports whether any minimum has element powers.
+func hasAnyElementPowers(minima []EscapeMinimumRow) bool {
+	for _, m := range minima {
+		if len(m.ElementPowers) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// maxElementPowerCount returns the maximum number of element powers per config
+// across all minima.
+func maxElementPowerCount(minima []EscapeMinimumRow) int {
+	n := 0
+	for _, m := range minima {
+		for _, ep := range m.ElementPowers {
+			if len(ep) > n {
+				n = len(ep)
+			}
+		}
+	}
+	return n
 }
 
 // listOptimization renders the optimization configuration from

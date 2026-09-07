@@ -1131,8 +1131,13 @@ targets followed by merit):
              region_active, adaptive_damping). Constraints are not shown here —
              the effective constraint display lives in the merit target (per-
              config constraints, else inherited from optimization.constraints).
-             When piped from optimize, also shows the optimization result
-             (status, iterations, active mode, metric value).
+              When piped from optimize, also shows the optimization result
+              (status, iterations, active mode, metric value).
+  escape     escape-function global optimisation results (requires escape
+             output). Shows escape parameters (h_initial, w_initial,
+             max_cycles, etc.), the list of discovered local minima (index,
+             merit, file), per-minimum element powers, and the best solution.
+             File directory is shown when all minima share the same path.
 
 Options:
   --format table|yaml|json|csv   output format (default table)

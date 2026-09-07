@@ -50,6 +50,11 @@ const (
 	MeritWavefrontX           = "wavefront_x"
 	MeritWavefrontY           = "wavefront_y"
 	MeritWavefrontConstant    = "wavefront_constant"
+
+	// field_alive penalises a field whose pupil grid has too few valid rays.
+	// The term value is max(0, threshold − nValid/totalRays); a fully dead
+	// field returns threshold (max penalty). Per-field: add one term per field.
+	MeritFieldAlive = "field_alive"
 )
 
 // evaluateKindTerm evaluates a non-spot merit term for the given config,
@@ -68,6 +73,8 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 			return o.opdDegenerate
 		}
 		return val
+	case MeritFieldAlive:
+		return o.evaluateFieldAliveTerm(cfg, term, surfaces, gc, cache)
 	default:
 		if isGridKind(term.kind) {
 			return o.evaluateGridKind(cfg, term, surfaces, gc, cache)
@@ -247,6 +254,39 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 	default:
 		return 0
 	}
+}
+
+// evaluateFieldAliveTerm traces the pupil grid for the term's field and returns
+// the "aliveness deficit": max(0, threshold − nValid/totalRays). A fully dead
+// field (nValid=0) returns threshold; a fully alive field returns 0. The
+// threshold defaults to 0.1 (10% of the grid must survive) when target is 0.
+func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) float64 {
+	points := o.gridForTerm(cache, gc, surfaces, cfg, term)
+	totalRays := len(points)
+	if totalRays == 0 {
+		// Grid could not be traced at all — treat as fully dead.
+		threshold := term.target
+		if threshold <= 0 {
+			threshold = 0.1
+		}
+		return threshold
+	}
+	nValid := 0
+	for _, p := range points {
+		if p.OK {
+			nValid++
+		}
+	}
+	ratio := float64(nValid) / float64(totalRays)
+	threshold := term.target
+	if threshold <= 0 {
+		threshold = 0.3
+	}
+ deficit := threshold - ratio
+	if deficit <= 0 {
+		return 0
+	}
+	return deficit
 }
 
 // EvaluateMeritKind is the public wrapper over the merit-kind evaluator,
