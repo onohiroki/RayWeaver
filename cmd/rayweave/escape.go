@@ -91,6 +91,12 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 		}
 	}
 
+	// Suppress adaptive_damping events during escape: the high-frequency
+	// per-iteration damping log clutters escape output without adding value.
+	if dlsLogger != nil {
+		dlsLogger = &noDampingLogger{inner: dlsLogger}
+	}
+
 	// Three-stage stop on SIGINT/SIGTERM.
 	//
 	//  1st signal: graceful stop. Cancels the shared context; workers stop at
@@ -934,4 +940,26 @@ func parseEscapeExtractFlags(args []string) int {
 	index := fs.Int("index", 0, "local minimum index to extract")
 	fs.Parse(args)
 	return *index
+}
+
+// noDampingLogger wraps a dls.Logger but intentionally omits the
+// dls.DampingLogger interface. The solver's type assertion
+// (opts.Logger.(DampingLogger)) fails, so LogDamping is never called and
+// adaptive_damping events are suppressed. All other log events are delegated.
+type noDampingLogger struct {
+	inner dls.Logger
+}
+
+func (n *noDampingLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
+	n.inner.LogIter(iter, merit, improvement, stepNorm, variables, constraints)
+}
+
+func (n *noDampingLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
+	n.inner.LogFinal(iter, status, merit, stepNorm, variables, constraints)
+}
+
+func (n *noDampingLogger) LogModeChange(iter int, from, to string, weights map[string]float64, metric float64) {
+	if ml, ok := n.inner.(dls.ModeChangeLogger); ok {
+		ml.LogModeChange(iter, from, to, weights, metric)
+	}
 }
