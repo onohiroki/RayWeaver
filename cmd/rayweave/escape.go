@@ -91,10 +91,12 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 		}
 	}
 
-	// Suppress adaptive_damping events during escape: the high-frequency
-	// per-iteration damping log clutters escape output without adding value.
+	// Suppress high-frequency DLS events during escape: LogIter (per-iteration)
+	// and LogDamping (adaptive damping) clutter the output without adding value
+	// to the escape-level progress stream. LogFinal and LogModeChange are kept
+	// (mode_change is rare and useful for debugging merit schedule transitions).
 	if dlsLogger != nil {
-		dlsLogger = &noDampingLogger{inner: dlsLogger}
+		dlsLogger = &noIterLogger{inner: dlsLogger}
 	}
 
 	// Three-stage stop on SIGINT/SIGTERM.
@@ -942,23 +944,21 @@ func parseEscapeExtractFlags(args []string) int {
 	return *index
 }
 
-// noDampingLogger wraps a dls.Logger but intentionally omits the
-// dls.DampingLogger interface. The solver's type assertion
-// (opts.Logger.(DampingLogger)) fails, so LogDamping is never called and
-// adaptive_damping events are suppressed. All other log events are delegated.
-type noDampingLogger struct {
+// noIterLogger wraps a dls.Logger but suppresses high-frequency per-iteration
+// events (LogIter, LogDamping) while delegating LogFinal and LogModeChange.
+// The solver's type assertion (opts.Logger.(DampingLogger)) fails because
+// LogDamping is not implemented, so adaptive_damping events are never called.
+type noIterLogger struct {
 	inner dls.Logger
 }
 
-func (n *noDampingLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
-	n.inner.LogIter(iter, merit, improvement, stepNorm, variables, constraints)
-}
+func (n *noIterLogger) LogIter(int, float64, float64, float64, []float64, []dls.ConstraintState) {}
 
-func (n *noDampingLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
+func (n *noIterLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	n.inner.LogFinal(iter, status, merit, stepNorm, variables, constraints)
 }
 
-func (n *noDampingLogger) LogModeChange(iter int, from, to string, weights map[string]float64, metric float64) {
+func (n *noIterLogger) LogModeChange(iter int, from, to string, weights map[string]float64, metric float64) {
 	if ml, ok := n.inner.(dls.ModeChangeLogger); ok {
 		ml.LogModeChange(iter, from, to, weights, metric)
 	}
