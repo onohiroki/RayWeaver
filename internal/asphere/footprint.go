@@ -79,7 +79,7 @@ func GenerateFootprints(surfaces []types.Surface, fields []Field, wavelengths []
 		for _, wl := range wavelengths {
 			fd := FieldFootprintData{FieldID: f.ID, Wavelength: wl, Weight: f.Weight, Direction: f.Direction}
 
-			radius := dls.ApertureRadiusForGrid(surfaces, 0, wl, gc, 1.0)
+			radius := dls.ApertureRadiusForGrid(surfaces, 0, wl, gc, 1.0, 0)
 			if radius <= 0 {
 				radius = surface.MinApertureRadius(surfaces)
 			}

@@ -102,7 +102,7 @@ func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 // at pupilZ. Unlike psf.ComputeFieldGrid the dynamic pupil is NOT re-settled.
 func frozenPupilGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	refSurface, numRays int, wavelength float64, apertureMargin, pupilZ float64) (*psf.PupilGrid, error) {
-	apertureRadius := dls.ApertureRadiusForGrid(system.Surfaces, system.StopSurface, wavelength, gc, apertureMargin)
+	apertureRadius := dls.ApertureRadiusForGrid(system.Surfaces, system.StopSurface, wavelength, gc, apertureMargin, 0)
 	if apertureRadius <= 0 {
 		return nil, fmt.Errorf("no entrance-pupil radius for the wavefront grid")
 	}

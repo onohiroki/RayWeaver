@@ -531,7 +531,7 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 			}
 			points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ,
 				fe.angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays,
-				o.gridRotation, o.gridWorkers())
+				o.gridRotation, o.gridWorkers(), o.pupilModelDiameter(cfg))
 
 			rms := dls.ComputeSpotRMS(points)
 			if rms <= 0 || rms >= 1e6 {
@@ -886,6 +886,16 @@ type regionActiveState struct {
 // place so EnterGlassPhase can re-enable it.
 func (o *Optimizer) SetPowerSolveEnabled(enabled bool) {
 	o.powerSolveEnabled = enabled
+}
+
+// pupilModelDiameter returns the virtual entrance-pupil diameter for cfg when
+// the virtual pupil mode is active, or 0 when it is not (falling back to the
+// standard paraxial-based aperture sizing).
+func (o *Optimizer) pupilModelDiameter(cfg *config) float64 {
+	if cfg.pupilModel != nil && cfg.pupilModel.Mode == "virtual_entrance_pupil" && cfg.pupilModel.Diameter > 0 {
+		return cfg.pupilModel.Diameter
+	}
+	return 0
 }
 
 // SetGlassMerit installs the per-config merit terms used during the glass
@@ -1951,7 +1961,7 @@ func newEvalGridCache() *evalGridCache {
 func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
 	trace := func() []dls.IPoint {
-		points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
+		points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), o.pupilModelDiameter(cfg))
 		return points
 	}
 	if cache == nil {
@@ -2026,7 +2036,7 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 						pupilZ = z
 					}
 				}
-				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers())
+				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), o.pupilModelDiameter(cfg))
 				mu.Lock()
 				cache.spots[job.key] = points
 				mu.Unlock()
@@ -2099,7 +2109,7 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 	path := dls.BuildPath(surfaces)
 	engine := ray.NewEngine(gc, nil)
 
-	apertureRadius := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, wavelength, gc, o.apertureMargin)
+	apertureRadius := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, wavelength, gc, o.apertureMargin, 0)
 	if apertureRadius <= 0 {
 		return 0
 	}
@@ -2228,7 +2238,7 @@ func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glas
 			pupilZ = z
 		}
 	}
-	return dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.extentRays(256), o.gridRotation, o.gridWorkers())
+	return dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.extentRays(256), o.gridRotation, o.gridWorkers(), 0)
 }
 
 // extentRays returns the ray count for a beam-extent measurement. The extent

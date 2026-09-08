@@ -852,7 +852,7 @@ func TestProbeAxisCrossing(t *testing.T) {
 	pol := types.NewCircularJones(true)
 	const wl = 0.00058756
 	engine := ray.NewEngine(gc, nil)
-	apertureRadius := dls.ApertureRadiusForGrid(sys.Surfaces, 0, wl, gc, 1.0)
+	apertureRadius := dls.ApertureRadiusForGrid(sys.Surfaces, 0, wl, gc, 1.0, 0)
 	if apertureRadius <= 0 {
 		t.Fatal("no aperture radius for singlet")
 	}

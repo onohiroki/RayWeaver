@@ -109,7 +109,7 @@ func determineChiefRays(
 		// Grid radius: with an explicit stop the paraxial entrance pupil (the
 		// stop's image); without one the beam-aware fixed-aperture cap so the
 		// F-number is preserved while auto_aperture:false surfaces cap the beam.
-		apertureRadius = dls.ApertureRadiusForGrid(system.Surfaces, system.StopSurface, wavelength, gc, 1.0)
+		apertureRadius = dls.ApertureRadiusForGrid(system.Surfaces, system.StopSurface, wavelength, gc, 1.0, 0)
 		if apertureRadius <= 0 {
 			return nil
 		}

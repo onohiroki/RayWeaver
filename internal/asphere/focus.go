@@ -378,7 +378,7 @@ func ComputeFieldFocus(surfaces []types.Surface, fields []Field, wavelengths []f
 				ReferenceImageZ: refImageZ,
 			}
 
-			radius := dls.ApertureRadiusForGrid(surfaces, 0, wl, gc, 1.0)
+			radius := dls.ApertureRadiusForGrid(surfaces, 0, wl, gc, 1.0, 0)
 			if radius <= 0 {
 				radius = surface.MinApertureRadius(surfaces)
 			}

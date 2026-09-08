@@ -84,7 +84,7 @@ func TestApertureRadiusForGridUsesEstimateFallback(t *testing.T) {
 	}
 	// Need PhysicalZ for some helpers but not for estimate path; keep zero
 	gc := &glass.Catalog{}
-	r := ApertureRadiusForGrid(surfaces, 0, 0.00058756, gc, 1.0)
+	r := ApertureRadiusForGrid(surfaces, 0, 0.00058756, gc, 1.0, 0)
 	want := 20.0 * 0.85 // |R|*0.85
 	if math.Abs(r-want) > 1e-9 {
 		t.Errorf("ApertureRadiusForGrid estimate fallback = %v, want %v", r, want)
@@ -102,7 +102,7 @@ func TestApertureRadiusPrefersFixedOverEstimate(t *testing.T) {
 		{ID: 2, Curvature: 0, Material: types.Material{}, Diameter: 5, AutoAperture: false, PhysicalZ: 10},
 	}
 	gc := &glass.Catalog{}
-	r := ApertureRadiusForGrid(surfaces, 0, 0.00058756, gc, 1.0)
+	r := ApertureRadiusForGrid(surfaces, 0, 0.00058756, gc, 1.0, 0)
 	// fixedApertureAtPupil will be <=2.5, not 17.0 estimate
 	if math.Abs(r-17.0) < 1e-9 {
 		t.Errorf("should prefer fixed aperture over estimate, got estimate %v", r)
@@ -202,7 +202,7 @@ func TestApertureRadiusConsistentWithParaxial(t *testing.T) {
 	rStopFree := paraxial.EntrancePupilRadiusStopFree(surfaces, wl, gc)
 	t.Logf("EntrancePupilRadiusStopFree = %v", rStopFree)
 
-	rGrid := ApertureRadiusForGrid(surfaces, 0, wl, gc, 1.0)
+	rGrid := ApertureRadiusForGrid(surfaces, 0, wl, gc, 1.0, 0)
 	t.Logf("ApertureRadiusForGrid = %v", rGrid)
 
 	if rGrid <= 0 {

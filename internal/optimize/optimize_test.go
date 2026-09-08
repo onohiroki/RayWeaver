@@ -864,7 +864,7 @@ func TestSizeAutoAperturesCoversAllFields(t *testing.T) {
 
 	// The corner (14.3°) beam extent at each surface must be covered by the
 	// sized diameter. Measure it directly with the beam-aware extent grid.
-	cornerExtents := dls.TraceFieldGridExtents(gc, resized, 0, 0, 14.3, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 1)
+	cornerExtents := dls.TraceFieldGridExtents(gc, resized, 0, 0, 14.3, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 1, 0)
 	for i := range resized {
 		if !resized[i].AutoAperture {
 			continue
