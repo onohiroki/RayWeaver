@@ -23,6 +23,7 @@ rayweave escape extract --index N < escape-output.yaml
 | `--power-solve-surfaces A,B,…` | surface IDs whose curvature is recomputed to hold the containing element's thin-lens power (with `--power-solve`) |
 | `--glass-color` | with the glass phase, reverse the merit to colour-only axial/lateral chromatic aberration |
 | `--index N` | (with `escape extract`) local minimum index to extract |
+| `--keep-infeasible` | include `escape_result.infeasible_basins[]` in stdout YAML (default: discard; `--save` never includes infeasible basins) |
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`
 (CLI/YAML rule); `--save` records the per-minimum files in
@@ -299,6 +300,49 @@ applied, ready for `chief`/`trace`/`plot` or a re-optimisation):
   leaves a partial file. The per-minimum file name is also recorded in
   `escape_result.minima[].file`.
 
+### Infeasible basins
+
+Not every DLS-converged point is a valid optical design. A point whose
+throughput drops below a threshold — any field blocked or severely vigneted —
+represents an **infeasible basin**: a region of variable space where the
+geometry is broken (insufficient clear aperture, rays lost to the stop, etc.).
+The escape-function method classifies each converged point and handles the two
+categories differently:
+
+1. **Feasible local minimum** (`status: feasible_local_minimum`) — the point
+   passes validation; it is recorded and reported as a solution.
+2. **Infeasible basin** (`status: infeasible_basin`) — the point fails
+   validation; it is **not** listed as a solution, but an escape bump is added
+   at its location so the search does not re-enter the same broken basin.
+3. **Evaluation failure** (`status: evaluation_failure`) — the merit is NaN or
+   Inf; the point is not recorded at all (no bump, no solution).
+
+The default infeasibility rule: **any** field with fewer than 30 % of its pupil
+rays surviving the validation trace causes the point to be classified as
+infeasible. The threshold is the same 0.3 default used by the `field_alive`
+merit term, so the two are consistent.
+
+Validation happens **post-DLS only** — after the clean DLS converges, the
+converged point is traced through `chief.DetermineChiefRaysGrid` with the same
+pupil model (dynamic or virtual) the DLS used. If validation fails, the DLS
+result is still used for the escape bump, so the search is pushed away from the
+broken basin.
+
+The invalid reason is reported per basin:
+
+| Reason | Meaning |
+|---|---|
+| `insufficient_field_throughput` | fewer than 30 % of pupil rays reach the image for at least one field |
+| `field_unreachable` | zero rays reach the image for at least one field |
+| `severe_vignetting` | intermediate vignetting caused catastrophic beam loss |
+| `geometry_violation` | negative thickness or other surface-geometry error |
+| `numerical_failure` | merit is NaN or Inf |
+
+By default infeasible basins are discarded from the stdout YAML. Pass
+`--keep-infeasible` to include them as `escape_result.infeasible_basins[]`
+(useful for diagnosing broken regions of variable space). The `--save` flag
+**never** includes infeasible basins.
+
 ## Output
 
 The best solution is written to `configs[].surfaces` (pipeline-compatible with
@@ -329,10 +373,18 @@ escape_result:
   minima:
     - index: 0
       merit: ...
+      status: feasible_local_minimum   # always feasible_local_minimum in minima[]
       file: result0.yaml        # --save output file for this minimum (if any)
       features:                  # compact fingerprint of the minimum (per config)
         - id: config1
           element_powers: [0.0075, -0.0041, 0.0022]
+      surfaces: [...]
+      variables: [...]
+  infeasible_basins:            # only present with --keep-infeasible (default: absent)
+    - index: 0
+      merit: ...
+      status: infeasible_basin
+      invalid_reason: insufficient_field_throughput
       surfaces: [...]
       variables: [...]
 ```

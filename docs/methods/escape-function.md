@@ -75,7 +75,7 @@ Each worker repeats, up to `max_cycles` times:
 The true minimum is then classified:
 
 - **New** (normalized distance to every known minimum > `distance_threshold`):
-  record it as a new `Point{X, Merit, H, W}`.
+  record it as a new `Point{X, Merit, H, W, Status}`.
 - **Repeat** of a known minimum: **strengthen** the nearest bump (`H ×= h_mult`,
   `W ×= w_mult`) and double the restart offset, so the next escape run starts on
   a steeper part of the (now taller/wider) bump. If the repeat arrives with a
@@ -83,6 +83,11 @@ The true minimum is then classified:
   the strengthened `H`/`W`), so the search always keeps the better data — the
   version counter (`Store.Replace`, exposed to `--save` file versioning)
   records how many times a minimum has been improved.
+
+Infeasible basins are additionally classified by an optional `ValidateFn` (see
+[Infeasible basins](#infeasible-basins) below). A feasible minimum is recorded
+as before; an infeasible one is recorded as an infeasible basin (with its own
+escape bump to prevent re-visiting) but never listed as a solution.
 
 The starting point for the next cycle is a deterministic perturbation of the
 last true minimum (`restartPerturb = 0.1` of the normalized range). Starting
@@ -97,6 +102,38 @@ re-evaluated at the start of each DLS iteration within every escape cycle.
 This means the set of binding constraints can change between escape/clean
 phases — constraints inactive at one local minimum may become active at
 another, which supports thorough global exploration.
+
+### Infeasible basins
+
+In lens design, some regions of variable space produce broken geometries: rays
+miss the stop, clear apertures clip the beam, or surface curvatures cause
+negative thicknesses. A DLS solver will happily converge to a local minimum
+inside such a basin — the merit may be low (all the rays that *do* reach the
+image have small spots) but the design is useless. Recording these as minima
+pollutes the solution list and wastes escape bumps on invalid regions.
+
+The `ValidateFn` callback addresses this. After each clean DLS converges, the
+cycle calls `ValidateFn` with the converged point. The function traces the
+pupil grid through the optical system and classifies the point:
+
+- `feasible_local_minimum` — the point passes validation and is recorded as a
+  normal minimum (solution).
+- `infeasible_basin` — the point fails validation (e.g. insufficient field
+  throughput); it is recorded in a separate `InfeasibleBasins` list and
+  receives its own escape bump so the search avoids the broken region, but it
+  is **not** listed as a solution.
+- `evaluation_failure` — the merit is NaN or Inf; the point is not recorded at
+  all (no bump, no solution).
+
+The validation is a cheap post-DLS check (one pupil-grid trace per field), not
+a mid-iteration abort. This keeps the DLS solver clean — no infeasibility hooks
+inside the Jacobian — while still preventing the search from re-entering
+broken basins.
+
+The default criterion: any field with fewer than 30 % of its pupil rays
+surviving the trace (the `field_alive` threshold) causes the entire point to
+be classified as infeasible. This is consistent with the `field_alive` merit
+term, so the two classifications agree.
 
 ## 3. Parallel workers
 
@@ -146,6 +183,7 @@ cut off.
 | `stall_rel_tol` | `1e-4` | stalled-early-stop relative merit threshold |
 | `stall_early_stop` | true | stalled-early-stop in the escape phase (clean phase never stalls) |
 | `initial_perturb` | 0.05 | normalised spread of parallel-worker start points |
+| `keep_infeasible` | false | include infeasible basins in stdout YAML (`--keep-infeasible`) |
 
 ## 4b. Termination
 
@@ -202,7 +240,12 @@ minima against each other — with one entry per config (`id`) holding
 system order (the sum of the surface powers bounding each element, which for a
 refractive element in air equals `(n-1)(c1-c2)`; mirrors are single-surface
 elements with power `-2n/R`). `merit` stays at the minimum level as the
-objective scalar.
+objective scalar. Every minimum in `minima[]` has `status: feasible_local_minimum`.
+
+Infeasible basins (when `--keep-infeasible` is used) are listed separately in
+`escape_result.infeasible_basins[]` with the same structure, plus
+`status: infeasible_basin` and `invalid_reason`. The `--save` flag never
+includes infeasible basins.
 
 ## Relationship to DLS
 
