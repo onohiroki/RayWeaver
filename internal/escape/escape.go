@@ -11,6 +11,40 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 )
 
+// MinStatus classifies a converged DLS point. The escape package uses these
+// local constants to keep the package decoupled from the types package; the
+// cmd layer maps them to types.EscapeMinimumStatus.
+type MinStatus int
+
+const (
+	// MinStatusFeasibleLocalMinimum is a valid local minimum satisfying all
+	// constraints. It is listed as a solution and receives escape bumps.
+	MinStatusFeasibleLocalMinimum MinStatus = iota
+	// MinStatusInfeasibleBasin is a point where DLS converged but constraints
+	// are violated. It is not listed as a solution but receives an escape
+	// bump to prevent re-visiting the basin.
+	MinStatusInfeasibleBasin
+	// MinStatusEvaluationFailure is a point where merit evaluation failed.
+	// It is not listed and does not receive an escape bump.
+	MinStatusEvaluationFailure
+)
+
+// InvalidReason describes why an infeasible basin was classified as such.
+type InvalidReason int
+
+const (
+	// ReasonNone means no invalidity was detected.
+	ReasonNone InvalidReason = iota
+	ReasonInsufficientFieldThroughput
+	ReasonFieldUnreachable
+	ReasonSevereVignetting
+	ReasonApertureClipping
+	ReasonPupilInconsistency
+	ReasonRayTraceFailure
+	ReasonGeometryViolation
+	ReasonNumericalFailure
+)
+
 // Params holds the escape-function parameters. H controls the bump height
 // (escape strength), W controls its width (locality), and per-variable
 // weights normalise the physical scale differences between variable types.
@@ -59,11 +93,13 @@ func DefaultParams() Params {
 // the same minimum. Fingerprint is the optional design descriptor (e.g. the
 // thin-lens element powers) used as an additional "distinct minimum" criterion.
 type Point struct {
-	X           []float64
-	Merit       float64
-	H           float64
-	W           float64
-	Fingerprint []float64
+	X            []float64
+	Merit        float64
+	H            float64
+	W            float64
+	Fingerprint  []float64
+	Status       MinStatus
+	InvalidReason InvalidReason
 }
 
 // Phase selects the current phase of the escape cycle for the Wrapper's

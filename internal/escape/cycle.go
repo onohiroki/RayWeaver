@@ -19,39 +19,42 @@ import (
 // is better) and the restart offset grows so the next escape run starts
 // farther from the trap.
 type Cycle struct {
-	wrapper   *Wrapper
-	store     *Store
-	params    Params
-	maxCycles int
-	maxFail   int
-	seed      int64
-	workerID  int
-	progress  *Progress
-	deadline  time.Time
-	ctx       context.Context
-	hardStop  <-chan struct{}
-	escaped   int
-	recorded  int
-	stopped   bool
+	wrapper    *Wrapper
+	store      *Store
+	params     Params
+	maxCycles  int
+	maxFail    int
+	seed       int64
+	workerID   int
+	progress   *Progress
+	deadline   time.Time
+	ctx        context.Context
+	hardStop   <-chan struct{}
+	validateFn func(x []float64, merit float64, inner dls.Model) (MinStatus, InvalidReason)
+	escaped    int
+	recorded   int
+	stopped    bool
 }
 
 // NewCycle creates an escape cycle bound to a wrapper and shared store.
 // progress may be nil to disable verbose reporting. A zero deadline disables
 // the time budget (unlimited runtime); a nil context and a nil hardStop are
-// ignored.
-func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time, ctx context.Context, hardStop <-chan struct{}) *Cycle {
+// ignored. validateFn is called after each clean DLS convergence to classify
+// the point; nil treats every converged point as feasible.
+func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time, ctx context.Context, hardStop <-chan struct{}, validateFn func(x []float64, merit float64, inner dls.Model) (MinStatus, InvalidReason)) *Cycle {
 	return &Cycle{
-		wrapper:   wrapper,
-		store:     store,
-		params:    params,
-		maxCycles: maxCycles,
-		maxFail:   3,
-		seed:      seed,
-		workerID:  int(seed),
-		progress:  progress,
-		deadline:  deadline,
-		ctx:       ctx,
-		hardStop:  hardStop,
+		wrapper:    wrapper,
+		store:      store,
+		params:     params,
+		maxCycles:  maxCycles,
+		maxFail:    3,
+		seed:       seed,
+		workerID:   int(seed),
+		progress:   progress,
+		deadline:   deadline,
+		ctx:        ctx,
+		hardStop:   hardStop,
+		validateFn: validateFn,
 	}
 }
 
@@ -302,15 +305,40 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 
 		trueMerit := c.wrapper.innerMerit(trueX)
 
+		// Validate the converged point: classify as feasible, infeasible, or
+		// evaluation failure. When validateFn is nil, every point is feasible.
+		status := MinStatusFeasibleLocalMinimum
+		invalidReason := ReasonNone
+		if c.validateFn != nil {
+			status, invalidReason = c.validateFn(trueX, trueMerit, c.wrapper.inner)
+		}
+
+		// Evaluation failures are not recorded (no escape bump placed).
+		if status == MinStatusEvaluationFailure {
+			c.progress.Event("cycle", map[string]any{
+				"cycle":         cyc,
+				"worker":        c.workerID,
+				"phase":         "clean_dls",
+				"status":        "accepted",
+				"dls_status":    cleanRes.Status,
+				"merit":         trueMerit,
+				"min_status":    "evaluation_failure",
+			})
+			currentX = c.perturb(trueX, cyc, restartAmp)
+			continue
+		}
+
 		if c.store.IsNew(trueX) {
-			idx := c.store.Add(Point{X: trueX, Merit: trueMerit})
+			idx := c.store.Add(Point{X: trueX, Merit: trueMerit, Status: status, InvalidReason: invalidReason})
 			c.recorded++
 			c.progress.Event("minimum", map[string]any{
-				"cycle":  cyc,
-				"worker": c.workerID,
-				"kind":   "new",
-				"index":  idx,
-				"merit":  trueMerit,
+				"cycle":         cyc,
+				"worker":        c.workerID,
+				"kind":          "new",
+				"index":         idx,
+				"merit":         trueMerit,
+				"min_status":    statusString(status),
+				"invalid_reason": reasonString(invalidReason),
 			})
 			repeatStreak = 0
 			restartAmp = restartPerturb
@@ -320,21 +348,25 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			// grown values, then replace the stored X/Merit when the new point
 			// is better.
 			c.store.Strengthen(nearest)
-			if _, improved := c.store.Replace(nearest, Point{X: trueX, Merit: trueMerit}); improved {
+			if _, improved := c.store.Replace(nearest, Point{X: trueX, Merit: trueMerit, Status: status, InvalidReason: invalidReason}); improved {
 				c.progress.Event("minimum", map[string]any{
-					"cycle":  cyc,
-					"worker": c.workerID,
-					"kind":   "improved",
-					"index":  nearest,
-					"merit":  trueMerit,
+					"cycle":         cyc,
+					"worker":        c.workerID,
+					"kind":          "improved",
+					"index":         nearest,
+					"merit":         trueMerit,
+					"min_status":    statusString(status),
+					"invalid_reason": reasonString(invalidReason),
 				})
 			} else {
 				c.progress.Event("minimum", map[string]any{
-					"cycle":  cyc,
-					"worker": c.workerID,
-					"kind":   "repeat",
-					"index":  nearest,
-					"merit":  trueMerit,
+					"cycle":         cyc,
+					"worker":        c.workerID,
+					"kind":          "repeat",
+					"index":         nearest,
+					"merit":         trueMerit,
+					"min_status":    statusString(status),
+					"invalid_reason": reasonString(invalidReason),
 				})
 			}
 			// Repeatedly returning to the same minimum: strengthen the escape
@@ -421,5 +453,45 @@ func (c *Cycle) recordInterrupted(res dls.Result, cyc int, phase string) {
 			"index":  nearest,
 			"merit":  m,
 		})
+	}
+}
+
+// statusString returns a human-readable label for a MinStatus.
+func statusString(s MinStatus) string {
+	switch s {
+	case MinStatusFeasibleLocalMinimum:
+		return "feasible_local_minimum"
+	case MinStatusInfeasibleBasin:
+		return "infeasible_basin"
+	case MinStatusEvaluationFailure:
+		return "evaluation_failure"
+	default:
+		return "unknown"
+	}
+}
+
+// reasonString returns a human-readable label for an InvalidReason.
+func reasonString(r InvalidReason) string {
+	switch r {
+	case ReasonNone:
+		return ""
+	case ReasonInsufficientFieldThroughput:
+		return "insufficient_field_throughput"
+	case ReasonFieldUnreachable:
+		return "field_unreachable"
+	case ReasonSevereVignetting:
+		return "severe_vignetting"
+	case ReasonApertureClipping:
+		return "aperture_clipping"
+	case ReasonPupilInconsistency:
+		return "pupil_inconsistency"
+	case ReasonRayTraceFailure:
+		return "ray_trace_failure"
+	case ReasonGeometryViolation:
+		return "geometry_violation"
+	case ReasonNumericalFailure:
+		return "numerical_failure"
+	default:
+		return "unknown"
 	}
 }

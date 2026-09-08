@@ -4,10 +4,12 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"os/signal"
 	"syscall"
 
+	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/escape"
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -26,7 +28,7 @@ import (
 // saveBase1.yaml, ... (see escapeFileSaver). SIGINT/SIGTERM stops the search
 // in three escalating stages (graceful cycle boundary → mid-DLS interrupt →
 // force quit), each producing interrupted: true and exit 0 except the last.
-func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassColor bool) {
+func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassColor bool, keepInfeasible bool) {
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
 	if input.Optimization == nil {
@@ -139,10 +141,10 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx)
+		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible)
 		return
 	}
-	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx)
+	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible)
 }
 
 // glassPhaseCtx carries the power-preserving glass-phase configuration through
@@ -199,7 +201,7 @@ func buildGlassPhaseContext(input *types.Input) glassPhaseCtx {
 	return ctx
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -341,10 +343,73 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		return paraxial.ElementPowers(surf, paraxial.DLine, gc)
 	}
 
+	// ValidateFn classifies each converged DLS point as feasible, infeasible,
+	// or evaluation failure by tracing the pupil grid for every field and
+	// checking that the fraction of valid rays exceeds the threshold (0.3,
+	// matching the field_alive merit term default). The virtual entrance pupil
+	// model (if configured) is forwarded to the chief ray tracer so the
+	// validation uses the same pupil configuration as the DLS.
+	var validateFn func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason)
+	if input.Chief != nil && len(input.Chief.Fields) > 0 {
+		fieldDefs := input.Chief.Fields
+		refSurf := chiefRefSurface(input)
+		numRays := input.Optimization.NumRays
+		if numRays <= 0 {
+			numRays = 64
+		}
+		wl := effectiveReferenceWavelength(input.Chief)
+		pupilModel := input.Chief.PupilModel
+		throughputThreshold := 0.3
+
+		validateFn = func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
+			surf, newGlasses := applyEscapeX(surfaces, variables, x, gc)
+			for _, g := range newGlasses {
+				gc.Add(g)
+			}
+			// Check for numerical failure: NaN or Inf merit.
+			if math.IsNaN(merit) || math.IsInf(merit, 0) {
+				return escape.MinStatusEvaluationFailure, escape.ReasonNumericalFailure
+			}
+			// Check for geometry violations: negative thickness.
+			for i := range surf {
+				if i == 0 || surf[i].Thickness < -1e-9 {
+					if i > 0 {
+						return escape.MinStatusInfeasibleBasin, escape.ReasonGeometryViolation
+					}
+				}
+			}
+			// Trace pupil grids for each field and count valid rays.
+			sys := types.System{Surfaces: surf, StopSurface: stopSurface}
+			results := chief.DetermineChiefRaysGrid(
+				sys, fieldDefs, refSurf, numRays, gc,
+				types.NewCircularJones(true), wl,
+				false, types.GridPolar, nil, nil, nil, pupilModel,
+			)
+			for _, r := range results {
+				total := len(r.GridPoints)
+				if total == 0 {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
+				}
+				nValid := 0
+				for _, gp := range r.GridPoints {
+					if gp.ImageX != nil && gp.ImageY != nil && gp.ErrorCode == "" {
+						nValid++
+					}
+				}
+				ratio := float64(nValid) / float64(total)
+				if ratio < throughputThreshold {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
+				}
+			}
+			return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
+		}
+	}
+
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
 		Progress:    progress,
 		OnRecord:    onRecord,
 		Fingerprint: fingerprint,
+		ValidateFn:  validateFn,
 		Context:     ctx,
 		HardStop:    hardStop,
 		GlassPhase:  gctx.enabled,
@@ -396,6 +461,27 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		}
 	}
 
+	// Build infeasible basins list.
+	infeasibleMinima := make([]types.EscapeMinimum, len(res.InfeasibleBasins))
+	for i, p := range res.InfeasibleBasins {
+		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
+		for _, g := range newGlasses {
+			gc.Add(g)
+		}
+		infeasibleMinima[i] = types.EscapeMinimum{
+			Index:         i,
+			Merit:         p.Merit,
+			Status:        types.EscapeMinimumStatus(statusString(p.Status)),
+			InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
+			Surfaces:      surf,
+			Variables:     buildSingleVarStates(variables, p.X),
+			Features: []types.ConfigFeatures{{
+				ID:            cfgID,
+				ElementPowers: paraxial.ElementPowers(surf, paraxial.DLine, gc),
+			}},
+		}
+	}
+
 	// Apply the best solution to the top-level surfaces (pipeline-compatible).
 	bestSurfaces := make([]types.Surface, len(surfaces))
 	copy(bestSurfaces, surfaces)
@@ -418,12 +504,17 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
 	}
 
-	escResult := assembleEscapeResult(res, minima)
+	// Discard infeasible basins from output unless --keep-infeasible is set.
+	if !keepInfeasible {
+		infeasibleMinima = nil
+	}
+
+	escResult := assembleEscapeResult(res, minima, infeasibleMinima)
 	reportEscape(res)
 	writeEscapeOutput(input, escResult)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -574,10 +665,73 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		return fp
 	}
 
+	// ValidateFn for multi-config: checks numerical failure and geometry
+	// violations across all configs. Full per-config field throughput
+	// validation would require tracing each config's pupil grid separately;
+	// for now we validate the first config's fields as a proxy.
+	var validateFn func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason)
+	if input.Chief != nil && len(input.Chief.Fields) > 0 && len(template) > 0 {
+		fieldDefs := input.Chief.Fields
+		refSurf := chiefRefSurface(input)
+		numRays := input.Optimization.NumRays
+		if numRays <= 0 {
+			numRays = 64
+		}
+		wl := effectiveReferenceWavelength(input.Chief)
+		pupilModel := input.Chief.PupilModel
+		throughputThreshold := 0.3
+		// Use the first config's surfaces as the primary validation target.
+		primarySurfaces := template[0].Surfaces
+		primaryStop := 0
+		if input.Chief != nil {
+			primaryStop = input.Chief.StopSurface
+		}
+
+		validateFn = func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
+			configSurfaces := applyEscapeMulti(template, input.Optimization, x)
+			surf, ok := configSurfaces[template[0].ID]
+			if !ok {
+				surf = primarySurfaces
+			}
+			if math.IsNaN(merit) || math.IsInf(merit, 0) {
+				return escape.MinStatusEvaluationFailure, escape.ReasonNumericalFailure
+			}
+			for i := range surf {
+				if i > 0 && surf[i].Thickness < -1e-9 {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonGeometryViolation
+				}
+			}
+			sys := types.System{Surfaces: surf, StopSurface: primaryStop}
+			results := chief.DetermineChiefRaysGrid(
+				sys, fieldDefs, refSurf, numRays, gc,
+				types.NewCircularJones(true), wl,
+				false, types.GridPolar, nil, nil, nil, pupilModel,
+			)
+			for _, r := range results {
+				total := len(r.GridPoints)
+				if total == 0 {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
+				}
+				nValid := 0
+				for _, gp := range r.GridPoints {
+					if gp.ImageX != nil && gp.ImageY != nil && gp.ErrorCode == "" {
+						nValid++
+					}
+				}
+				ratio := float64(nValid) / float64(total)
+				if ratio < throughputThreshold {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
+				}
+			}
+			return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
+		}
+	}
+
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
 		Progress:    progress,
 		OnRecord:    onRecord,
 		Fingerprint: fingerprint,
+		ValidateFn:  validateFn,
 		Context:     ctx,
 		HardStop:    hardStop,
 		GlassPhase:  gctx.enabled,
@@ -628,6 +782,34 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		}
 	}
 
+	// Build infeasible basins list.
+	infeasibleMinima := make([]types.EscapeMinimum, len(res.InfeasibleBasins))
+	for i, p := range res.InfeasibleBasins {
+		configSurfaces := applyEscapeMulti(template, input.Optimization, p.X)
+		var cfgs []types.Config
+		var features []types.ConfigFeatures
+		for ci := range template {
+			if s, ok := configSurfaces[template[ci].ID]; ok {
+				c := template[ci]
+				c.Surfaces = s
+				cfgs = append(cfgs, c)
+				features = append(features, types.ConfigFeatures{
+					ID:            template[ci].ID,
+					ElementPowers: paraxial.ElementPowers(s, paraxial.DLine, gc),
+				})
+			}
+		}
+		infeasibleMinima[i] = types.EscapeMinimum{
+			Index:         i,
+			Merit:         p.Merit,
+			Status:        types.EscapeMinimumStatus(statusString(p.Status)),
+			InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
+			Configs:       cfgs,
+			Variables:     buildMultiVarStates(input.Optimization, p.X),
+			Features:      features,
+		}
+	}
+
 	// Apply the best solution to the top-level configs.
 	if len(res.Minima) > 0 {
 		best := res.Minima[res.BestIdx]
@@ -639,13 +821,18 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		}
 	}
 
-	escapeResult := assembleEscapeResult(res, minima)
+	// Discard infeasible basins from output unless --keep-infeasible is set.
+	if !keepInfeasible {
+		infeasibleMinima = nil
+	}
+
+	escapeResult := assembleEscapeResult(res, minima, infeasibleMinima)
 	reportEscape(res)
 	writeEscapeOutput(input, escapeResult)
 }
 
 // assembleEscapeResult wraps the minima list with the report metadata.
-func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum) *types.EscapeResult {
+func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum, infeasibleMinima []types.EscapeMinimum) *types.EscapeResult {
 	return &types.EscapeResult{
 		BestIndex: res.BestIdx,
 		BestMerit: res.BestMerit,
@@ -666,9 +853,10 @@ func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum) *type
 			StallEarlyStop:               boolPtr(res.Params.StallEarlyStop),
 			InitialPerturb:               res.Params.InitialPerturb,
 		},
-		TimedOut:    res.TimedOut,
-		Interrupted: res.Interrupted,
-		Minima:      minima,
+		TimedOut:         res.TimedOut,
+		Interrupted:      res.Interrupted,
+		Minima:           minima,
+		InfeasibleBasins: infeasibleMinima,
 	}
 }
 
@@ -868,12 +1056,18 @@ func reportEscape(res escape.Result) {
 	}
 	fmt.Fprintf(os.Stderr, "  Escapes:   %d\n", res.Escapes)
 	fmt.Fprintf(os.Stderr, "  Minima:    %d\n", len(res.Minima))
+	if len(res.InfeasibleBasins) > 0 {
+		fmt.Fprintf(os.Stderr, "  Infeasible basins: %d\n", len(res.InfeasibleBasins))
+	}
 	for i, p := range res.Minima {
 		mark := " "
 		if i == res.BestIdx {
 			mark = "*"
 		}
 		fmt.Fprintf(os.Stderr, "    %s[%d] merit=%.6e\n", mark, i, p.Merit)
+	}
+	for i, p := range res.InfeasibleBasins {
+		fmt.Fprintf(os.Stderr, "    ![%d] merit=%.6e (%s)\n", i, p.Merit, reasonString(p.InvalidReason))
 	}
 }
 
@@ -961,5 +1155,45 @@ func (n *noIterLogger) LogFinal(int, string, float64, float64, []float64, []dls.
 func (n *noIterLogger) LogModeChange(iter int, from, to string, weights map[string]float64, metric float64) {
 	if ml, ok := n.inner.(dls.ModeChangeLogger); ok {
 		ml.LogModeChange(iter, from, to, weights, metric)
+	}
+}
+
+// statusString converts an escape.MinStatus to a types.EscapeMinimumStatus string.
+func statusString(s escape.MinStatus) string {
+	switch s {
+	case escape.MinStatusFeasibleLocalMinimum:
+		return string(types.StatusFeasibleLocalMinimum)
+	case escape.MinStatusInfeasibleBasin:
+		return string(types.StatusInfeasibleBasin)
+	case escape.MinStatusEvaluationFailure:
+		return string(types.StatusEvaluationFailure)
+	default:
+		return "unknown"
+	}
+}
+
+// reasonString converts an escape.InvalidReason to a types.InvalidReason string.
+func reasonString(r escape.InvalidReason) string {
+	switch r {
+	case escape.ReasonNone:
+		return ""
+	case escape.ReasonInsufficientFieldThroughput:
+		return string(types.ReasonInsufficientFieldThroughput)
+	case escape.ReasonFieldUnreachable:
+		return string(types.ReasonFieldUnreachable)
+	case escape.ReasonSevereVignetting:
+		return string(types.ReasonSevereVignetting)
+	case escape.ReasonApertureClipping:
+		return string(types.ReasonApertureClipping)
+	case escape.ReasonPupilInconsistency:
+		return string(types.ReasonPupilInconsistency)
+	case escape.ReasonRayTraceFailure:
+		return string(types.ReasonRayTraceFailure)
+	case escape.ReasonGeometryViolation:
+		return string(types.ReasonGeometryViolation)
+	case escape.ReasonNumericalFailure:
+		return string(types.ReasonNumericalFailure)
+	default:
+		return "unknown"
 	}
 }

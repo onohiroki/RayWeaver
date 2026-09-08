@@ -100,6 +100,7 @@ func main() {
 	optEscapePowerSolve := false
 	optEscapePowerSolveSurfaces := ""
 	optEscapeGlassColor := false
+	optEscapeKeepInfeasible := false
 	if subcommand == "escape" {
 		if len(args) >= 2 && args[1] == "extract" {
 			escapeExtractMode = true
@@ -113,6 +114,7 @@ func main() {
 			fs.BoolVar(&optEscapePowerSolve, "power-solve", false, "insert the power-preserving glass phase between each escape and clean DLS (holds element powers fixed while the glasses are rebalanced)")
 			fs.StringVar(&optEscapePowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs whose curvature is recomputed to hold the containing element's thin-lens power (with --power-solve; also enables the glass phase)")
 			fs.BoolVar(&optEscapeGlassColor, "glass-color", false, "with the glass phase, reverse the merit to colour-only axial/lateral chromatic aberration for the glass solve")
+			fs.BoolVar(&optEscapeKeepInfeasible, "keep-infeasible", false, "include infeasible basins in stdout YAML (default: discard)")
 			fs.Parse(args[1:])
 		}
 	}
@@ -156,7 +158,7 @@ func main() {
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
 		} else {
-			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassColor)
+			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassColor, optEscapeKeepInfeasible)
 		}
 	case "import":
 		runImport(data)

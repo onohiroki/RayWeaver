@@ -929,12 +929,13 @@ type ConstraintMeasurement struct {
 // solution's surfaces live in the top-level system/configs (pipeline-compatible);
 // every discovered local minimum is listed here with its full surface data.
 type EscapeResult struct {
-	BestIndex   int              `yaml:"best_index"`
-	BestMerit   float64          `yaml:"best_merit"`
-	Params      EscapeParamsInfo `yaml:"params"`
-	TimedOut    bool             `yaml:"timed_out,omitempty"`
-	Interrupted bool             `yaml:"interrupted,omitempty"`
-	Minima      []EscapeMinimum  `yaml:"minima"`
+	BestIndex        int              `yaml:"best_index"`
+	BestMerit        float64          `yaml:"best_merit"`
+	Params           EscapeParamsInfo `yaml:"params"`
+	TimedOut         bool             `yaml:"timed_out,omitempty"`
+	Interrupted      bool             `yaml:"interrupted,omitempty"`
+	Minima           []EscapeMinimum  `yaml:"minima"`
+	InfeasibleBasins []EscapeMinimum  `yaml:"infeasible_basins,omitempty"`
 }
 
 // EscapeParamsInfo records the escape parameter values actually used.
@@ -959,6 +960,56 @@ type EscapeParamsInfo struct {
 	InitialPerturb               float64            `yaml:"initial_perturb,omitempty"`
 }
 
+// EscapeMinimumStatus classifies a converged DLS point: feasible (all
+// constraints satisfied), infeasible (constraints violated but a valid basin
+// for escape bumps), or evaluation failure (numerical / ray-trace error).
+type EscapeMinimumStatus string
+
+const (
+	// StatusFeasibleLocalMinimum is a valid local minimum that satisfies all
+	// constraints. It is listed as a solution in escape_result.minima.
+	StatusFeasibleLocalMinimum EscapeMinimumStatus = "feasible_local_minimum"
+	// StatusInfeasibleBasin is a point where DLS converged but one or more
+	// constraints are violated (e.g. insufficient field throughput). It is
+	// not listed as a solution, but an escape bump is placed there to prevent
+	// re-visiting the basin. When --keep-infeasible is set, it appears in
+	// escape_result.infeasible_basins.
+	StatusInfeasibleBasin EscapeMinimumStatus = "infeasible_basin"
+	// StatusEvaluationFailure is a point where merit/residual evaluation
+	// failed (NaN, Inf, ray-trace error, degenerate). It is not listed as a
+	// solution and does not receive an escape bump.
+	StatusEvaluationFailure EscapeMinimumStatus = "evaluation_failure"
+)
+
+// InvalidReason describes why an infeasible basin was classified as such.
+type InvalidReason string
+
+const (
+	// ReasonInsufficientFieldThroughput: one or more fields have too few
+	// valid rays (pupil grid survival < threshold, default 0.3).
+	ReasonInsufficientFieldThroughput InvalidReason = "insufficient_field_throughput"
+	// ReasonFieldUnreachable: chief ray or pupil bundle does not form for a
+	// required field.
+	ReasonFieldUnreachable InvalidReason = "field_unreachable"
+	// ReasonSevereVignetting: vignetting factor exceeds the allowed threshold.
+	ReasonSevereVignetting InvalidReason = "severe_vignetting"
+	// ReasonApertureClipping: the beam is clipped by a fixed aperture or
+	// mechanical diameter.
+	ReasonApertureClipping InvalidReason = "aperture_clipping"
+	// ReasonPupilInconsistency: the virtual entrance pupil model and the
+	// actual trace results disagree on the pupil position.
+	ReasonPupilInconsistency InvalidReason = "pupil_inconsistency"
+	// ReasonRayTraceFailure: a required ray fails to intersect, refract, or
+	// trace through the system.
+	ReasonRayTraceFailure InvalidReason = "ray_trace_failure"
+	// ReasonGeometryViolation: negative thickness, surface collision, or
+	// minimum-edge-thickness violation.
+	ReasonGeometryViolation InvalidReason = "geometry_violation"
+	// ReasonNumericalFailure: NaN, Inf, or singular matrix in merit or
+	// Jacobian computation.
+	ReasonNumericalFailure InvalidReason = "numerical_failure"
+)
+
 // ConfigFeatures is one config's feature set for a local minimum — a compact
 // fingerprint used to compare minima against each other. ElementPowers holds
 // the thin-lens power of every lens element in system order.
@@ -971,13 +1022,15 @@ type ConfigFeatures struct {
 // Surfaces; multi-config runs populate Configs. Features lists the fingerprint
 // of each config; Merit stays at the minimum level as the objective scalar.
 type EscapeMinimum struct {
-	Index     int              `yaml:"index"`
-	Merit     float64          `yaml:"merit"`
-	File      string           `yaml:"file,omitempty"`
-	Configs   []Config         `yaml:"configs,omitempty"`
-	Surfaces  []Surface        `yaml:"surfaces,omitempty"`
-	Variables []EscapeVarState `yaml:"variables"`
-	Features  []ConfigFeatures `yaml:"features,omitempty"`
+	Index         int                  `yaml:"index"`
+	Merit         float64              `yaml:"merit"`
+	Status        EscapeMinimumStatus  `yaml:"status,omitempty"`
+	InvalidReason InvalidReason        `yaml:"invalid_reason,omitempty"`
+	File          string               `yaml:"file,omitempty"`
+	Configs       []Config             `yaml:"configs,omitempty"`
+	Surfaces      []Surface            `yaml:"surfaces,omitempty"`
+	Variables     []EscapeVarState     `yaml:"variables"`
+	Features      []ConfigFeatures     `yaml:"features,omitempty"`
 }
 
 // EscapeVarState records the variable values at a local minimum.

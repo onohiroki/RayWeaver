@@ -12,17 +12,19 @@ import (
 // Result is the outcome of a parallel escape search: every discovered local
 // minimum ordered by merit, plus the parameters used.
 type Result struct {
-	Params      Params
-	Minima      []Point
-	MinimaIdx   []int // discovery-order store index of each minimum in Minima
-	BestIdx     int
-	BestMerit   float64
-	Escapes     int
-	Workers     int
-	Cycles      int
-	MaxSeconds  float64
-	TimedOut    bool
-	Interrupted bool
+	Params            Params
+	Minima            []Point   // feasible local minima only
+	MinimaIdx         []int     // discovery-order store index of each minimum in Minima
+	InfeasibleBasins  []Point   // infeasible basins (not listed as solutions)
+	InfeasibleBasinIdx []int    // discovery-order store index of each basin
+	BestIdx           int
+	BestMerit         float64
+	Escapes           int
+	Workers           int
+	Cycles            int
+	MaxSeconds        float64
+	TimedOut          bool
+	Interrupted       bool
 }
 
 // RunOptions configures a parallel escape search.
@@ -38,6 +40,14 @@ type RunOptions struct {
 	// fingerprint space, so numerically-close but structurally-different
 	// solutions are recorded as distinct minima. nil disables the criterion.
 	Fingerprint func(x []float64) []float64
+	// ValidateFn is called after each DLS convergence to classify the point
+	// as feasible, infeasible, or evaluation failure. When nil, every
+	// converged point is treated as feasible. The function receives the
+	// converged variable vector and merit value, and should return the
+	// classification and (for infeasible) the invalidity reason. The inner
+	// model is passed so the callback can call EvaluateMerit to re-check
+	// under the current variable state if needed.
+	ValidateFn func(x []float64, merit float64, inner dls.Model) (MinStatus, InvalidReason)
 	// Context cancels the search: workers stop at the next cycle boundary
 	// once the current DLS run finishes (nil = run to completion).
 	Context context.Context
@@ -178,7 +188,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 			}
 			wrapper := NewWrapper(inner, workerParams)
 			wrapper.SetGlassPhase(opts.GlassPhase)
-			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop)
+			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop, opts.ValidateFn)
 
 			x0 := inner.InitialState()
 			if seed != 0 {
@@ -203,22 +213,42 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 	}
 	wg.Wait()
 
-	points, idxs := store.SortedByMerit()
-	res := Result{
-		Params:      params,
-		Minima:      points,
-		MinimaIdx:   idxs,
-		Escapes:     totalEscapes,
-		Workers:     numWorkers,
-		Cycles:      maxCycles,
-		MaxSeconds:  cfg.MaxSeconds,
-		TimedOut:    timedOut,
-		Interrupted: (opts.Context != nil && opts.Context.Err() != nil) || hardStopped(opts.HardStop),
-		BestIdx:     -1,
+	allPoints, allIdxs := store.SortedByMerit()
+
+	// Separate feasible minima from infeasible basins. The store stores all
+	// points (both types get escape bumps to prevent re-visiting); only
+	// feasible points are listed as solutions in the output.
+	var feasiblePoints []Point
+	var feasibleIdxs []int
+	var infeasiblePoints []Point
+	var infeasibleIdxs []int
+	for i, p := range allPoints {
+		if p.Status == MinStatusInfeasibleBasin {
+			infeasiblePoints = append(infeasiblePoints, p)
+			infeasibleIdxs = append(infeasibleIdxs, allIdxs[i])
+		} else {
+			feasiblePoints = append(feasiblePoints, p)
+			feasibleIdxs = append(feasibleIdxs, allIdxs[i])
+		}
 	}
-	if len(points) > 0 {
+
+	res := Result{
+		Params:             params,
+		Minima:             feasiblePoints,
+		MinimaIdx:          feasibleIdxs,
+		InfeasibleBasins:   infeasiblePoints,
+		InfeasibleBasinIdx: infeasibleIdxs,
+		Escapes:            totalEscapes,
+		Workers:            numWorkers,
+		Cycles:             maxCycles,
+		MaxSeconds:         cfg.MaxSeconds,
+		TimedOut:           timedOut,
+		Interrupted:        (opts.Context != nil && opts.Context.Err() != nil) || hardStopped(opts.HardStop),
+		BestIdx:            -1,
+	}
+	if len(feasiblePoints) > 0 {
 		res.BestIdx = 0
-		res.BestMerit = points[0].Merit
+		res.BestMerit = feasiblePoints[0].Merit
 	}
 	return res
 }
