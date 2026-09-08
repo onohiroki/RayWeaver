@@ -61,7 +61,6 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 
 	progress := escape.NewProgress()
 	var logFiles []*os.File
-	var logFileHandle *os.File
 	if verbose {
 		progress.AddCompactWriter(os.Stderr)
 	}
@@ -71,7 +70,6 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 			errOut("Error creating log file: %v", err)
 			os.Exit(1)
 		}
-		logFileHandle = f
 		logFiles = append(logFiles, f)
 		progress.AddWriter(f)
 	}
@@ -81,25 +79,11 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 		}
 	}()
 
-	var dlsLogger dls.Logger
-	if verbose {
-		dlsLogger = &jsonLogger{w: os.Stderr}
-	}
-	if logFileHandle != nil {
-		if dlsLogger == nil {
-			dlsLogger = &jsonLogger{w: logFileHandle}
-		} else {
-			dlsLogger = &multiLogger{loggers: []dls.Logger{dlsLogger, &jsonLogger{w: logFileHandle}}}
-		}
-	}
-
-	// Suppress high-frequency DLS events during escape: LogIter (per-iteration)
-	// and LogDamping (adaptive damping) clutter the output without adding value
-	// to the escape-level progress stream. LogFinal and LogModeChange are kept
-	// (mode_change is rare and useful for debugging merit schedule transitions).
-	if dlsLogger != nil {
-		dlsLogger = &noIterLogger{inner: dlsLogger}
-	}
+	// All DLS-internal events (iter / final / adaptive_damping / mode_change)
+	// are suppressed during escape: they clutter the output without adding
+	// value to the escape-level progress stream (cycle events already carry
+	// dls_status and merit). The progress stream is the single output channel.
+	dlsLogger := dls.Logger(&noIterLogger{})
 
 	// Three-stage stop on SIGINT/SIGTERM.
 	//
@@ -1139,24 +1123,19 @@ func parseEscapeExtractFlags(args []string) int {
 	return *index
 }
 
-// noIterLogger wraps a dls.Logger but suppresses everything except rare
-// mode_change diagnostics: LogIter and LogFinal (per-iteration and per-solve
-// reports — escape Progress cycle events already carry dls_status and merit)
-// are no-ops, and LogDamping is never called because the type assertion
-// (opts.Logger.(DampingLogger)) fails. Only LogModeChange is delegated.
-type noIterLogger struct {
-	inner dls.Logger
-}
+// noIterLogger is the silent DLS logger used during escape: LogIter, LogFinal,
+// and LogDamping are no-ops (LogDamping is additionally unreachable because
+// the type assertion opts.Logger.(DampingLogger) fails), and LogModeChange is
+// not implemented, so the optimizer's (o.logger.(dls.ModeChangeLogger))
+// assertion fails too. It keeps cfg.Logger non-nil (all logger call sites are
+// nil-guarded, so nil would behave the same, but an explicit silent logger
+// documents the intent); the escape Progress stream is the single output
+// channel.
+type noIterLogger struct{}
 
 func (n *noIterLogger) LogIter(int, float64, float64, float64, []float64, []dls.ConstraintState) {}
 
 func (n *noIterLogger) LogFinal(int, string, float64, float64, []float64, []dls.ConstraintState) {}
-
-func (n *noIterLogger) LogModeChange(iter int, from, to string, weights map[string]float64, metric float64) {
-	if ml, ok := n.inner.(dls.ModeChangeLogger); ok {
-		ml.LogModeChange(iter, from, to, weights, metric)
-	}
-}
 
 // statusString converts an escape.MinStatus to a types.EscapeMinimumStatus string.
 func statusString(s escape.MinStatus) string {

@@ -31,6 +31,12 @@ rayweave escape extract --index N < escape-output.yaml
 `--power-solve` / `--power-solve-surfaces` / `--glass-color` echo the effective
 `power_solve` config into the output.
 
+DLS-internal events are never emitted during escape: the per-iteration `iter`,
+per-solve `final`, `adaptive_damping` and `mode_change` records that
+`optimize --verbose` produces do not appear in the escape streams (regardless
+of the options). The progress stream is the single output channel — each
+`cycle` event already carries the DLS outcome as `dls_status` and `merit`.
+
 Sub-commands:
 
 - `escape` (default) — run the global optimization loop
