@@ -92,7 +92,7 @@ func TestMultiOptimizerApplySharedVariables(t *testing.T) {
 	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 
 	x := []float64{0.05}
-	configSurfaces, _ := opt.applyVariables(x)
+	configSurfaces, _, _ := opt.applyVariables(x)
 
 	wideSurf := configSurfaces["wide"]
 	teleSurf := configSurfaces["tele"]
@@ -152,7 +152,7 @@ func TestMultiOptimizerApplyLocalVariables(t *testing.T) {
 
 	opt := NewMultiOptimizer(configs, nil, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	x := []float64{75.0}
-	configSurfaces, _ := opt.applyVariables(x)
+	configSurfaces, _, _ := opt.applyVariables(x)
 
 	wideSurf := configSurfaces["wide"]
 	found := false

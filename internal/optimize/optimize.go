@@ -413,7 +413,7 @@ func (o *Optimizer) scheduleMetric(x []float64, iter int) float64 {
 	case "iteration":
 		return float64(iter)
 	case "glass_role":
-		configSurfaces, tempGC := o.applyVariables(x)
+		configSurfaces, tempGC, _ := o.applyVariables(x)
 		gc := effectiveGC(o.gc, tempGC)
 		total := 0.0
 		for ci := range o.configs {
@@ -452,7 +452,7 @@ func (o *Optimizer) spotDiffractionRatio(x []float64) (float64, bool) {
 // (0.61·λ/NA) across all configs and fields.  The second return value reports
 // whether any valid data was found (all configs with at least one traced grid).
 func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 
 	var weightedSum, totalWeight float64
@@ -523,15 +523,11 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 		}
 
 		for _, fe := range fields {
-			pupilZ := cfg.pupilZ
-			if cfg.pupilZs != nil {
-				if z, ok := cfg.pupilZs[fe.angle]; ok {
-					pupilZ = z
-				}
-			}
+			p := pupils[cfg.id]
+			pupilZ := o.gridCentring(cfg, p, fe.angle)
 			points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ,
 				fe.angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays,
-				o.gridRotation, o.gridWorkers(), o.pupilModelDiameter(cfg))
+				o.gridRotation, o.gridWorkers(), p.dia)
 
 			rms := dls.ComputeSpotRMS(points)
 			if rms <= 0 || rms >= 1e6 {
@@ -721,7 +717,7 @@ func fieldDir(dir []float64) (float64, float64, bool) {
 // staying frozen within one iteration so the base-point and Jacobian residual
 // evaluations share the same grid centring.
 func (o *Optimizer) UpdatePupils(x []float64) {
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 	o.updateGlassRoles(configSurfaces, gc)
 	pol := types.NewCircularJones(true)
@@ -734,15 +730,17 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 		surfaces := configSurfaces[cfg.id]
 
 		// Virtual entrance pupil mode: use the model's axial_position/diameter
-		// directly, skip the chief-ray dynamic-pupil iteration.
+		// (with the pupil-model variables applied) directly, skip the
+		// chief-ray dynamic-pupil iteration.
 		if cfg.pupilModel != nil && cfg.pupilModel.Mode == "virtual_entrance_pupil" {
+			p := pupils[cfg.id]
 			if cfg.pupilZs == nil {
 				cfg.pupilZs = make(map[float64]float64)
 			}
 			for _, fd := range cfg.fieldDefs {
-				cfg.pupilZs[fd.Angle] = cfg.pupilModel.AxialPosition
+				cfg.pupilZs[fd.Angle] = p.z
 			}
-			cfg.pupilZ = cfg.pupilModel.AxialPosition
+			cfg.pupilZ = p.z
 			continue
 		}
 
@@ -886,16 +884,6 @@ type regionActiveState struct {
 // place so EnterGlassPhase can re-enable it.
 func (o *Optimizer) SetPowerSolveEnabled(enabled bool) {
 	o.powerSolveEnabled = enabled
-}
-
-// pupilModelDiameter returns the virtual entrance-pupil diameter for cfg when
-// the virtual pupil mode is active, or 0 when it is not (falling back to the
-// standard paraxial-based aperture sizing).
-func (o *Optimizer) pupilModelDiameter(cfg *config) float64 {
-	if cfg.pupilModel != nil && cfg.pupilModel.Mode == "virtual_entrance_pupil" && cfg.pupilModel.Diameter > 0 {
-		return cfg.pupilModel.Diameter
-	}
-	return 0
 }
 
 // SetGlassMerit installs the per-config merit terms used during the glass
@@ -1286,10 +1274,16 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 		if name == "" {
 			name = fmt.Sprintf("local_%d", li)
 		}
+		// Pupil-model variables target the config's virtual entrance pupil
+		// (applyVariables keys on the prefixed param name), not a surface.
+		param := lv.Target.Param
+		if lv.Target.Type == "pupil_model" {
+			param = "pupil_model_" + param
+		}
 		variables = append(variables, Variable{
 			Name:      name,
 			SurfaceID: lv.Target.ID,
-			Param:     lv.Target.Param,
+			Param:     param,
 			Min:       lv.Min,
 			Max:       lv.Max,
 			Config:    lv.Config,
@@ -1517,7 +1511,7 @@ func (o *Optimizer) UpdateRegionActiveSet(x []float64) {
 	if o.regionActiveCfg == nil || len(o.regionActive) == 0 {
 		return
 	}
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 	defaults := constraint.EffectiveDefaults(o.regionActiveCfg)
 
@@ -1531,13 +1525,14 @@ func (o *Optimizer) UpdateRegionActiveSet(x []float64) {
 
 		// Compute violations for each constraint.
 		violations := make([]float64, len(cfg.constraints))
+		p := pupils[cfg.id]
 		for i, c := range cfg.constraints {
 			if !c.Active {
 				violations[i] = 0
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, cfg.pupilZ)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle))
 			err := constraint.ComputeError(c.Kind, value, c)
 			violations[i] = err // raw violation (before weighting)
 		}
@@ -1676,11 +1671,52 @@ func effectiveGC(base, temp *glass.Catalog) *glass.Catalog {
 	return base
 }
 
+// appliedPupil carries the per-evaluation virtual-entrance-pupil values.
+// Pupil-model variables are applied to a per-call copy (applyVariables stays
+// pure, so parallel Jacobian columns never race on shared state); the grid
+// traces read these values instead of the frozen Optimizer state so the
+// pupil position/diameter follow the variables with consistent derivatives.
+type appliedPupil struct {
+	z   float64 // entrance-pupil Z (virtual mode); 0 keeps the frozen centring
+	dia float64 // entrance-pupil diameter EPD override; 0 = standard paraxial sizing
+}
+
+// pupilFromModel extracts the per-call pupil values from a model config.
+func pupilFromModel(m *types.PupilModelConfig) appliedPupil {
+	var p appliedPupil
+	if m != nil && m.Mode == "virtual_entrance_pupil" {
+		p.z = m.AxialPosition
+		if m.Diameter > 0 {
+			p.dia = m.Diameter
+		}
+	}
+	return p
+}
+
+// gridCentring resolves the entrance-pupil Z for one grid trace: the per-call
+// virtual-pupil position when active (it follows the axial_position variable
+// exactly — no dynamic-pupil noise — so derivatives stay consistent), else the
+// frozen per-iteration dynamic pupil (per-field override when resolved).
+func (o *Optimizer) gridCentring(cfg *config, p appliedPupil, angle float64) float64 {
+	if p.z != 0 {
+		return p.z
+	}
+	z := cfg.pupilZ
+	if cfg.pupilZs != nil {
+		if v, ok := cfg.pupilZs[angle]; ok {
+			z = v
+		}
+	}
+	return z
+}
+
 // applyVariables maps the variable vector x onto the surfaces of every config
-// and returns the updated surfaces plus the glass catalog reflecting any
-// in-flight nd/vd overrides (nil when no override is active). It is pure: no
-// Optimizer state is mutated, so the DLS Jacobian loop can be parallelised.
-func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *glass.Catalog) {
+// and returns the updated surfaces, the glass catalog reflecting any in-flight
+// nd/vd overrides (nil when no override is active), and the per-config
+// virtual-entrance-pupil values with the pupil-model variables applied. It is
+// pure: no Optimizer state is mutated, so the DLS Jacobian loop can be
+// parallelised.
+func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *glass.Catalog, map[string]appliedPupil) {
 	configSurfaces := make(map[string][]types.Surface, len(o.configs))
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
@@ -1696,6 +1732,11 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 			s[j] = cp
 		}
 		configSurfaces[cfg.id] = s
+	}
+
+	pupils := make(map[string]appliedPupil, len(o.configs))
+	for ci := range o.configs {
+		pupils[o.configs[ci].id] = pupilFromModel(o.configs[ci].pupilModel)
 	}
 
 	needTempGC := false
@@ -1722,6 +1763,26 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 					scale = 1.0
 				}
 				SetSurfaceParam(&surfaces[idx], b.Param, scale*val+b.Offset)
+			}
+			continue
+		}
+
+		// Virtual-entrance-pupil variables target the config's pupil model,
+		// not a surface (their SurfaceID is unset); apply to the per-call
+		// copy before the surface-index lookup.
+		switch v.Param {
+		case "pupil_model_axial_position":
+			if p, ok := pupils[v.Config]; ok {
+				p.z = val
+				pupils[v.Config] = p
+			}
+			continue
+		case "pupil_model_diameter":
+			if p, ok := pupils[v.Config]; ok {
+				if val > 0 {
+					p.dia = val
+				}
+				pupils[v.Config] = p
 			}
 			continue
 		}
@@ -1781,16 +1842,6 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 				}
 				needTempGC = true
 			}
-		case "pupil_model_axial_position":
-			cfg := o.findConfig(v.Config)
-			if cfg != nil && cfg.pupilModel != nil {
-				cfg.pupilModel.AxialPosition = val
-			}
-		case "pupil_model_diameter":
-			cfg := o.findConfig(v.Config)
-			if cfg != nil && cfg.pupilModel != nil {
-				cfg.pupilModel.Diameter = val
-			}
 		}
 	}
 
@@ -1831,7 +1882,7 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 		surface.Precompute(configSurfaces[cfg.id])
 	}
 
-	return configSurfaces, tempGC
+	return configSurfaces, tempGC, pupils
 }
 
 // applyPowerVariables applies every "power" variable: the element containing
@@ -1957,11 +2008,13 @@ func newEvalGridCache() *evalGridCache {
 }
 
 // gridForTerm returns the cached (or freshly traced) pupil grid for a grid
-// merit term. A nil cache disables caching.
-func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
+// merit term. A nil cache disables caching. p carries the per-call
+// virtual-entrance-pupil values (see applyVariables).
+func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm, p appliedPupil) []dls.IPoint {
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
 	trace := func() []dls.IPoint {
-		points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, cfg.pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), o.pupilModelDiameter(cfg))
+		pupilZ := o.gridCentring(cfg, p, angle)
+		points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), p.dia)
 		return points
 	}
 	if cache == nil {
@@ -1978,8 +2031,8 @@ func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surface
 
 // traceFieldGrid traces the pupil grid for a merit term and returns the spot
 // points.
-func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm) []dls.IPoint {
-	return o.gridForTerm(nil, gc, surfaces, cfg, term)
+func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm, p appliedPupil) []dls.IPoint {
+	return o.gridForTerm(nil, gc, surfaces, cfg, term, p)
 }
 
 // precomputeGrids traces all grid merit terms for cfg in parallel, storing the
@@ -1987,7 +2040,7 @@ func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, 
 // same (field, wavelength) key, and the parallel trace overlaps the CPU-bound
 // ray-tracing across cores. The caller must have already called
 // sizeAutoApertures (which may also populate cache.extents).
-func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) {
+func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) {
 	// Collect unique grid keys from the scheduled terms.
 	type traceJob struct {
 		key   gridKey
@@ -2030,13 +2083,8 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 		go func() {
 			defer wg.Done()
 			for job := range ch {
-				pupilZ := cfg.pupilZ
-				if cfg.pupilZs != nil {
-					if z, ok := cfg.pupilZs[job.angle]; ok {
-						pupilZ = z
-					}
-				}
-				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), o.pupilModelDiameter(cfg))
+				pupilZ := o.gridCentring(cfg, p, job.angle)
+				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), p.dia)
 				mu.Lock()
 				cache.spots[job.key] = points
 				mu.Unlock()
@@ -2064,8 +2112,8 @@ func isGridKind(kind string) bool {
 // the caller. A grid with no valid rays returns the bounded degenerate penalty
 // (o.spotDegenerate) instead of the legacy 1e6 sentinel, so a fully clipped
 // off-axis beam pushes the solver without exploding the merit.
-func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) float64 {
-	points := o.gridForTerm(cache, gc, surfaces, cfg, term)
+func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
+	points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 	var val float64
 	switch term.kind {
 	case dls.MeritSpotRMST:
@@ -2164,7 +2212,7 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 // terms (e.g. wavefront_astigmatism / wavefront_sphere_rms on the corner) would
 // otherwise undersize the apertures to the on-axis beam and clip the off-axis
 // wavefront grid, collapsing the corner fit.
-func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) {
+func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) {
 	extents := make(map[int]float64)
 
 	// The extents are geometric (aperture-clipping skipped), so one
@@ -2197,11 +2245,11 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 			if m, ok := cache.extents[key]; ok {
 				perSurf = m
 			} else {
-				perSurf = o.fieldExtents(cfg, surfaces, gc, &meritTerm{wavelength: wl}, angle)
+				perSurf = o.fieldExtents(cfg, surfaces, gc, &meritTerm{wavelength: wl}, angle, p)
 				cache.extents[key] = perSurf
 			}
 		} else {
-			perSurf = o.fieldExtents(cfg, surfaces, gc, &meritTerm{wavelength: wl}, angle)
+			perSurf = o.fieldExtents(cfg, surfaces, gc, &meritTerm{wavelength: wl}, angle, p)
 		}
 		for id, e := range perSurf {
 			if e > extents[id] {
@@ -2230,14 +2278,11 @@ func (o *Optimizer) fieldSizingAngle(cfg *config, f *types.FieldItem, surfaces [
 }
 
 // fieldExtents traces the per-surface max radial ray extent for one grid merit
-// term, centred on the per-field entrance pupil when one is resolved.
-func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glass.Catalog, term *meritTerm, angle float64) map[int]float64 {
-	pupilZ := cfg.pupilZ
-	if cfg.pupilZs != nil {
-		if z, ok := cfg.pupilZs[angle]; ok {
-			pupilZ = z
-		}
-	}
+// term, centred on the per-field entrance pupil when one is resolved. The
+// measurement ignores aperture clipping (the last TraceFieldGridExtents
+// argument is 0), so the pupil diameter override is not applied here.
+func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glass.Catalog, term *meritTerm, angle float64, p appliedPupil) map[int]float64 {
+	pupilZ := o.gridCentring(cfg, p, angle)
 	return dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.extentRays(256), o.gridRotation, o.gridWorkers(), 0)
 }
 
@@ -2254,7 +2299,7 @@ func (o *Optimizer) extentRays(floor int) int {
 }
 
 func (o *Optimizer) EvaluateMerit(x []float64) float64 {
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 
 	merit := 0.0
@@ -2262,20 +2307,21 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc, cache)
-		o.precomputeGrids(cfg, surfaces, gc, cache)
+		o.sizeAutoApertures(cfg, surfaces, gc, cache, p)
+		o.precomputeGrids(cfg, surfaces, gc, cache, p)
 
 		cfgMerit := 0.0
 		for _, st := range o.scheduledTerms(cfg) {
 			term := st.term
 			if isGridKind(term.kind) {
-				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache)
+				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
 				diff := val - term.target
 				cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			} else {
-				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache)
+				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache, p)
 				diff := val - term.target
 				cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
@@ -2295,7 +2341,7 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 // each merit term (and the objective total), so the value reported by DLS can
 // be reconciled against an external evaluation (e.g. `chief` spot RMS).
 func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 
 	out := make(map[string]float64)
@@ -2304,19 +2350,20 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc, cache)
+		o.sizeAutoApertures(cfg, surfaces, gc, cache, p)
 
 		for _, st := range o.scheduledTerms(cfg) {
 			term := st.term
 			var contrib float64
 			if isGridKind(term.kind) {
-				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache)
+				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
 				diff := val - term.target
 				contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			} else {
-				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache)
+				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache, p)
 				diff := val - term.target
 				contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
@@ -2337,7 +2384,7 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 }
 
 func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 
 	var allR []float64
@@ -2345,19 +2392,20 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc, cache)
-		o.precomputeGrids(cfg, surfaces, gc, cache)
+		o.sizeAutoApertures(cfg, surfaces, gc, cache, p)
+		o.precomputeGrids(cfg, surfaces, gc, cache, p)
 
 		for _, st := range o.scheduledTerms(cfg) {
 			term := st.term
 			w := math.Sqrt(cfg.weight * st.scale * term.weight * term.fieldWeight * term.wavWeight)
 			if isGridKind(term.kind) {
-				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache)
+				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
 				allR = append(allR, w*(val-term.target))
 			} else {
-				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache)
+				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache, p)
 				allR = append(allR, w*(val-term.target))
 			}
 		}
@@ -2372,16 +2420,17 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 }
 
 func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 
 	var allC []float64
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc, nil)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil, p)
 
 		for _, c := range cfg.constraints {
 			if !c.Active {
@@ -2389,7 +2438,7 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, cfg.pupilZ)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle))
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {
@@ -2414,23 +2463,24 @@ type ConstraintViolation struct {
 // FinalConstraintViolations evaluates the active constraints at x and returns
 // those whose weighted residual magnitude exceeds tol.
 func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []ConstraintViolation {
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 
 	var out []ConstraintViolation
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc, nil)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil, p)
 
 		for _, c := range cfg.constraints {
 			if !c.Active {
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, cfg.pupilZ)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle))
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {
@@ -2457,23 +2507,24 @@ func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []Constr
 // ones, so callers (e.g. the optimize command) can record the actual value the
 // constraint reached (for example the final vignetting factor).
 func (o *Optimizer) FinalConstraintMeasurements(x []float64) []types.ConstraintMeasurement {
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 
 	var out []types.ConstraintMeasurement
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.sizeAutoApertures(cfg, surfaces, gc, nil)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil, p)
 
 		for _, c := range cfg.constraints {
 			if !c.Active {
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, cfg.pupilZ)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle))
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {
@@ -2513,7 +2564,7 @@ func (o *Optimizer) Optimize() Result {
 // FinalApertures returns the sized auto_aperture diameters of every config
 // after applying x.
 func (o *Optimizer) FinalApertures(x []float64) map[string]map[int]float64 {
-	configSurfaces, tempGC := o.applyVariables(x)
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	result := make(map[string]map[int]float64)
 
 	for ci := range o.configs {
@@ -2521,7 +2572,7 @@ func (o *Optimizer) FinalApertures(x []float64) map[string]map[int]float64 {
 		surfaces := configSurfaces[cfg.id]
 
 		o.restoreDiameters(cfg, surfaces)
-		o.finalAutoApertures(cfg, surfaces, effectiveGC(o.gc, tempGC))
+		o.finalAutoApertures(cfg, surfaces, effectiveGC(o.gc, tempGC), pupils[cfg.id])
 
 		cfgResult := make(map[int]float64)
 		for i := range surfaces {
@@ -2539,9 +2590,9 @@ func (o *Optimizer) FinalApertures(x []float64) map[string]map[int]float64 {
 // the true beam envelope (fixed apertures included) plus the configured
 // clearance. It runs once per config; the cheaper sizeAutoApertures is used
 // during merit evaluation where exact extents are not required.
-func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog) {
+func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog, p appliedPupil) {
 	if cfg.refSurface <= 0 || len(cfg.fieldDefs) == 0 {
-		o.sizeAutoApertures(cfg, surfaces, gc, nil)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil, p)
 		return
 	}
 	pol := types.NewCircularJones(true)
@@ -2568,9 +2619,35 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 // nd/vd-optimised model glasses materialised (surface materials rewritten to
 // the optimised inline model glass).
 func (o *Optimizer) FinalConfigs(x []float64) (map[string][]types.Surface, []types.Glass) {
-	configSurfaces, _ := o.applyVariables(x)
+	configSurfaces, _, _ := o.applyVariables(x)
 	newGlasses := o.materializeGlasses(configSurfaces, x)
 	return configSurfaces, newGlasses
+}
+
+// FinalPupilModels returns the per-config virtual entrance pupil after
+// applying x: a copy of each config's pupil model with the pupil-model
+// variables' values applied. Entries exist only for configs that carry a
+// pupil model, so callers can write the optimised pupil back into the
+// pipeline output.
+func (o *Optimizer) FinalPupilModels(x []float64) map[string]types.PupilModelConfig {
+	_, _, pupils := o.applyVariables(x)
+	out := make(map[string]types.PupilModelConfig, len(pupils))
+	for id, p := range pupils {
+		var m types.PupilModelConfig
+		if cfg := o.findConfig(id); cfg != nil && cfg.pupilModel != nil {
+			m = *cfg.pupilModel
+		} else {
+			m.Mode = "virtual_entrance_pupil"
+		}
+		if p.z != 0 {
+			m.AxialPosition = p.z
+		}
+		if p.dia > 0 {
+			m.Diameter = p.dia
+		}
+		out[id] = m
+	}
+	return out
 }
 
 // materializeGlasses collects the optimised nd/vd pairs and rewrites the
@@ -2740,6 +2817,21 @@ func (o *Optimizer) getInitialState() []float64 {
 			} else if x[i] > v.Max {
 				x[i] = v.Max
 			}
+		case "pupil_model_axial_position", "pupil_model_diameter":
+			if cfg != nil && cfg.pupilModel != nil {
+				if v.Param == "pupil_model_diameter" {
+					x[i] = cfg.pupilModel.Diameter
+				} else {
+					x[i] = cfg.pupilModel.AxialPosition
+				}
+			} else {
+				x[i] = (v.Min + v.Max) / 2
+			}
+			if x[i] < v.Min {
+				x[i] = v.Min
+			} else if x[i] > v.Max {
+				x[i] = v.Max
+			}
 		default:
 			x[i] = (v.Min + v.Max) / 2
 		}
@@ -2778,7 +2870,15 @@ func (o *Optimizer) buildVariableStates(x []float64) []VariableState {
 			st.SurfaceID = v.SurfaceID
 			st.Param = v.Param
 			st.GlassName = v.GlassName
-			if cfg := findConfigByID(o.configs, v.Config); cfg != nil {
+			if v.Param == "pupil_model_axial_position" || v.Param == "pupil_model_diameter" {
+				if cfg := findConfigByID(o.configs, v.Config); cfg != nil && cfg.pupilModel != nil {
+					if v.Param == "pupil_model_diameter" {
+						st.Before = cfg.pupilModel.Diameter
+					} else {
+						st.Before = cfg.pupilModel.AxialPosition
+					}
+				}
+			} else if cfg := findConfigByID(o.configs, v.Config); cfg != nil {
 				if idx := surfaceIndex(cfg.surfaces, v.SurfaceID); idx >= 0 {
 					if v.Param == "power" {
 						st.Before = paraxial.ElementPowerCurvature(cfg.surfaces, o.gc, v.SurfaceID)

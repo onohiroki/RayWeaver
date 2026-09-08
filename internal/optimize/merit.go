@@ -59,11 +59,12 @@ const (
 // evaluateKindTerm evaluates a non-spot merit term for the given config,
 // returning 0 for unknown kinds. The per-evaluation grid cache is shared with
 // the grid merit kinds so opd_rms and the spot kinds reuse one pupil trace per
-// (field, wavelength); a nil cache disables caching.
-func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) float64 {
+// (field, wavelength); a nil cache disables caching. p carries the per-call
+// virtual-entrance-pupil values (see applyVariables).
+func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
 	switch term.kind {
 	case MeritOPDRMS:
-		points := o.gridForTerm(cache, gc, surfaces, cfg, term)
+		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 		if len(points) == 0 {
 			return o.opdDegenerate
 		}
@@ -73,13 +74,13 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		}
 		return val
 	case MeritFieldAlive:
-		return o.evaluateFieldAliveTerm(cfg, term, surfaces, gc, cache)
+		return o.evaluateFieldAliveTerm(cfg, term, surfaces, gc, cache, p)
 	default:
 		if isGridKind(term.kind) {
-			return o.evaluateGridKind(cfg, term, surfaces, gc, cache)
+			return o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
 		}
 		if isWavefrontKind(term.kind) {
-			return o.evaluateWavefrontTerm(cfg, term, surfaces, gc)
+			return o.evaluateWavefrontTerm(cfg, term, surfaces, gc, p)
 		}
 		// glass_role reads the per-iteration frozen role targets (computed in
 		// UpdatePupils) when available so the DLS base-point and Jacobian
@@ -109,12 +110,13 @@ func isWavefrontKind(kind string) bool {
 // constant), or the reference-sphere residual RMS/PV
 // (wavefront_sphere_rms/pv — piston+tilt+defocus removed, astigmatism
 // retained, the exact quantity psf reports as rms_opd and the direct Strehl
-// determinant). The entrance-pupil grid is centred on the config's frozen
-// per-iteration pupil (dls.pupilZ) so the DLS base point and its Jacobian
-// perturbations share one pupil, keeping the derivative consistent. A
-// degenerate fit (no grid, too few valid rays) returns the bounded degenerate
-// penalty so the solver is pushed away rather than misled.
-func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
+// determinant). The entrance-pupil grid is centred on the per-call virtual
+// pupil position when active (it follows the axial_position variable exactly,
+// so the derivative is consistent) or the config's frozen per-iteration pupil
+// (dls.pupilZ) so the DLS base point and its Jacobian perturbations share one
+// pupil otherwise. A degenerate fit (no grid, too few valid rays) returns the
+// bounded degenerate penalty so the solver is pushed away rather than misled.
+func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, p appliedPupil) float64 {
 	refSurface := cfg.refSurface
 	if refSurface <= 0 || refSurface >= surfaces[len(surfaces)-1].ID {
 		// The wavefront reference surface must lie before the image plane: a
@@ -140,20 +142,16 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 	}
 	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
 
-	// Frozen pupil Z for the term's own field. Stop-free (dynamic-pupil)
-	// systems keep a PER-FIELD entrance pupil, so the config-level pupilZ
-	// (field 0's aperture) is wrong for off-axis terms: a grid frozen at
-	// field 0's pupil plane misses the term field's beam and the sphere fit
-	// inflates the OPD with mis-centred crescent sampling (observed 40x on a
-	// 23deg corner). Mirror evaluateGridKind's per-field lookup, falling back
-	// to the config-level pupilZ when the field has no entry (static stop
-	// path) or the angle is not an exact map key.
-	frozenZ := cfg.pupilZ
-	if cfg.pupilZs != nil {
-		if z, ok := cfg.pupilZs[angle]; ok {
-			frozenZ = z
-		}
-	}
+	// Pupil Z for the term's own field: the per-call virtual-pupil position
+	// when active, else the frozen per-field entrance pupil. Stop-free
+	// (dynamic-pupil) systems keep a PER-FIELD entrance pupil, so the
+	// config-level pupilZ (field 0's aperture) is wrong for off-axis terms: a
+	// grid frozen at field 0's pupil plane misses the term field's beam and
+	// the sphere fit inflates the OPD with mis-centred crescent sampling
+	// (observed 40x on a 23deg corner). Mirror evaluateGridKind's per-field
+	// lookup, falling back to the config-level pupilZ when the field has no
+	// entry (static stop path) or the angle is not an exact map key.
+	frozenZ := o.gridCentring(cfg, p, angle)
 
 	// fit evaluates the term's quantity on the given (frozen or dynamic)
 	// pupil. The closure keeps the frozen→dynamic fallback and the bounded
@@ -269,8 +267,8 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 // the "aliveness deficit": max(0, threshold − nValid/totalRays). A fully dead
 // field (nValid=0) returns threshold; a fully alive field returns 0. The
 // threshold defaults to 0.1 (10% of the grid must survive) when target is 0.
-func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) float64 {
-	points := o.gridForTerm(cache, gc, surfaces, cfg, term)
+func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
+	points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 	totalRays := len(points)
 	if totalRays == 0 {
 		// Grid could not be traced at all — treat as fully dead.

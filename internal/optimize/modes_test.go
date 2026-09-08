@@ -185,7 +185,7 @@ func TestGlassRoleDLSRecoversPositiveFlint(t *testing.T) {
 	for i, vs := range res.Variables {
 		x[i] = vs.After
 	}
-	configSurfaces, tempGC := opt.applyVariables(x)
+	configSurfaces, tempGC, _ := opt.applyVariables(x)
 	effGC := effectiveGC(gc, tempGC)
 	aft := configSurfaces["cfg1"]
 	vd1 := glassVDForSurface(aft, effGC, 1)
@@ -396,7 +396,7 @@ func TestMeritScheduleDLSRecoversGlassRoles(t *testing.T) {
 	for i, vs := range res.Variables {
 		x[i] = vs.After
 	}
-	configSurfaces, tempGC := opt.applyVariables(x)
+	configSurfaces, tempGC, _ := opt.applyVariables(x)
 	effGC := effectiveGC(gc, tempGC)
 	aft := configSurfaces["cfg1"]
 	vd3 := glassVDForSurface(aft, effGC, 3)

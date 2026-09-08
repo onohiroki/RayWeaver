@@ -150,7 +150,7 @@ func TestOptimizerOffAxisGridKinds(t *testing.T) {
 			fieldDirY:  1,
 			wavelength: term.Wavelength,
 			fraction:   term.Fraction,
-		}, opt.primaryConfig().surfaces, gc, nil)
+		}, opt.primaryConfig().surfaces, gc, nil, appliedPupil{})
 		if term.Kind == MeritSpotEERadius && val >= 1e6 {
 			t.Errorf("%s evaluated to the 1e6 degenerate penalty: %v", term.Kind, val)
 		}
@@ -198,8 +198,8 @@ func TestOptimizerGridCache(t *testing.T) {
 	}
 
 	// Two terms of the same (field, wavelength) must share one cached trace.
-	p1 := opt.gridForTerm(cache, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMST, 0.00058756))
-	p2 := opt.gridForTerm(cache, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMSS, 0.00058756))
+	p1 := opt.gridForTerm(cache, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMST, 0.00058756), appliedPupil{})
+	p2 := opt.gridForTerm(cache, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMSS, 0.00058756), appliedPupil{})
 	if len(cache.spots) != 1 {
 		t.Fatalf("grid cache holds %d entries after tracing one (field,wl) twice, want 1", len(cache.spots))
 	}
@@ -211,7 +211,7 @@ func TestOptimizerGridCache(t *testing.T) {
 	}
 
 	// A different wavelength must produce a distinct cache entry.
-	p3 := opt.gridForTerm(cache, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMSWorst, 0.0006563))
+	p3 := opt.gridForTerm(cache, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMSWorst, 0.0006563), appliedPupil{})
 	if len(cache.spots) != 2 {
 		t.Fatalf("grid cache holds %d entries after adding a second wavelength, want 2", len(cache.spots))
 	}
@@ -220,7 +220,7 @@ func TestOptimizerGridCache(t *testing.T) {
 	}
 
 	// A nil cache must not panic and must return fresh traces.
-	p4 := opt.gridForTerm(nil, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMST, 0.00058756))
+	p4 := opt.gridForTerm(nil, gc, ccfg.surfaces, ccfg, mk(MeritSpotRMST, 0.00058756), appliedPupil{})
 	if len(p4) == 0 {
 		t.Fatalf("nil-cache grid trace returned no points")
 	}
@@ -281,7 +281,7 @@ func TestOptimizerDegeneratePenalty(t *testing.T) {
 	// A grid kind on a fully clipped pupil must return the bounded spot
 	// penalty, never the 1e6 sentinel.
 	term := &meritTerm{kind: "", fieldAngle: 89.0, fieldDirX: 0, fieldDirY: 1, wavelength: 0.00058756}
-	val := opt.evaluateGridKind(ccfg, term, ccfg.surfaces, gc, nil)
+	val := opt.evaluateGridKind(ccfg, term, ccfg.surfaces, gc, nil, appliedPupil{})
 	if val != 0.1 {
 		t.Fatalf("degenerate spot kind = %v, want bounded penalty 0.1", val)
 	}
@@ -290,7 +290,7 @@ func TestOptimizerDegeneratePenalty(t *testing.T) {
 	}
 
 	// opd_rms on the same clipped pupil must return the bounded opd penalty.
-	opd := opt.evaluateKindTerm(ccfg, &meritTerm{kind: MeritOPDRMS, fieldAngle: 89.0, wavelength: 0.00058756}, ccfg.surfaces, gc, nil)
+	opd := opt.evaluateKindTerm(ccfg, &meritTerm{kind: MeritOPDRMS, fieldAngle: 89.0, wavelength: 0.00058756}, ccfg.surfaces, gc, nil, appliedPupil{})
 	if opd != 0.01 {
 		t.Fatalf("degenerate opd_rms = %v, want bounded penalty 0.01", opd)
 	}
@@ -305,7 +305,7 @@ func TestOptimizerDegeneratePenalty(t *testing.T) {
 		t.Fatalf("degenerate overrides not applied: %v/%v/%v",
 			opt2.spotDegenerate, opt2.opdDegenerate, opt2.wavefrontDegenerate)
 	}
-	val2 := opt2.evaluateGridKind(opt2.primaryConfig(), term, opt2.primaryConfig().surfaces, gc, nil)
+	val2 := opt2.evaluateGridKind(opt2.primaryConfig(), term, opt2.primaryConfig().surfaces, gc, nil, appliedPupil{})
 	if val2 != 0.5 {
 		t.Fatalf("degenerate spot kind with override = %v, want 0.5", val2)
 	}
@@ -321,7 +321,7 @@ func TestOptimizerDegeneratePenalty(t *testing.T) {
 	// against a plane makes every grid ray miss the system even after the
 	// adaptive pupil probe) must return the bounded wavefront penalty,
 	// never the 1e6 sentinel.
-	wf := opt.evaluateWavefrontTerm(ccfg, &meritTerm{kind: MeritWavefrontAstigmatism, fieldAngle: 89.9, wavelength: 0.00058756}, ccfg.surfaces, gc)
+	wf := opt.evaluateWavefrontTerm(ccfg, &meritTerm{kind: MeritWavefrontAstigmatism, fieldAngle: 89.9, wavelength: 0.00058756}, ccfg.surfaces, gc, appliedPupil{})
 	if wf != 0.001 {
 		t.Fatalf("degenerate wavefront = %v, want bounded penalty 0.001", wf)
 	}
@@ -353,7 +353,7 @@ func TestOptimizerApplyVariablesCurvature(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	surfacesMap, _ := opt.applyVariables([]float64{0.02})
+	surfacesMap, _, _ := opt.applyVariables([]float64{0.02})
 	surfacesAfter := surfacesMap["config1"]
 
 	found := false
@@ -387,7 +387,7 @@ func TestOptimizerApplyVariablesThickness(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	surfacesMap, _ := opt.applyVariables([]float64{50.0})
+	surfacesMap, _, _ := opt.applyVariables([]float64{50.0})
 	surfacesAfter := surfacesMap["config1"]
 
 	found := false
@@ -591,7 +591,7 @@ func TestOptimizerApplyVariablesND(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	configSurfaces, _ := opt.applyVariables([]float64{1.7})
+	configSurfaces, _, _ := opt.applyVariables([]float64{1.7})
 
 	surfaces := configSurfaces["config1"]
 	m := surfaces[0].Material
@@ -618,7 +618,7 @@ func TestOptimizerApplyVariablesVD(t *testing.T) {
 	}
 
 	opt := NewOptimizer(cfg)
-	configSurfaces, _ := opt.applyVariables([]float64{50.0})
+	configSurfaces, _, _ := opt.applyVariables([]float64{50.0})
 
 	surfaces := configSurfaces["config1"]
 	m := surfaces[0].Material
@@ -860,7 +860,7 @@ func TestSizeAutoAperturesCoversAllFields(t *testing.T) {
 	resized := make([]types.Surface, len(surfs))
 	copy(resized, surfs)
 	opt.restoreDiameters(ccfg, resized)
-	opt.sizeAutoApertures(ccfg, resized, gc, nil)
+	opt.sizeAutoApertures(ccfg, resized, gc, nil, appliedPupil{})
 
 	// The corner (14.3°) beam extent at each surface must be covered by the
 	// sized diameter. Measure it directly with the beam-aware extent grid.
@@ -878,7 +878,7 @@ func TestSizeAutoAperturesCoversAllFields(t *testing.T) {
 
 	// The corner wavefront fit must run (real value, not the 0.001 penalty).
 	term := &ccfg.meritTerms[0]
-	val := opt.evaluateWavefrontTerm(ccfg, term, resized, gc)
+	val := opt.evaluateWavefrontTerm(ccfg, term, resized, gc, appliedPupil{})
 	if val == 0.001 {
 		t.Fatalf("corner wavefront fit collapsed to the degenerate penalty after sizing")
 	}
@@ -916,7 +916,7 @@ func TestWavefrontTermFieldVignetting(t *testing.T) {
 	if ccfg.meritTerms[0].fieldIndex != 0 {
 		t.Fatalf("NewOptimizer fieldIndex = %d, want 0", ccfg.meritTerms[0].fieldIndex)
 	}
-	real := opt.evaluateWavefrontTerm(ccfg, &ccfg.meritTerms[0], surfs, gc)
+	real := opt.evaluateWavefrontTerm(ccfg, &ccfg.meritTerms[0], surfs, gc, appliedPupil{})
 	if real >= 1.0 {
 		t.Fatalf("wavefront term without vignetting = %v, want a real value (< 1)", real)
 	}
@@ -934,7 +934,7 @@ func TestWavefrontTermFieldVignetting(t *testing.T) {
 	}
 	optV := NewOptimizer(cfgV)
 	ccfgV := optV.primaryConfig()
-	penalty := optV.evaluateWavefrontTerm(ccfgV, &ccfgV.meritTerms[0], surfs, gc)
+	penalty := optV.evaluateWavefrontTerm(ccfgV, &ccfgV.meritTerms[0], surfs, gc, appliedPupil{})
 	if penalty != 0.001 {
 		t.Fatalf("wavefront term with full-clip vignetting = %v, want the degenerate penalty 0.001", penalty)
 	}
@@ -1217,7 +1217,7 @@ func TestPowerVariable(t *testing.T) {
 	// Applying a power value re-solves the back curvature so the element's
 	// thin-lens power equals the variable value.
 	wantPower := 0.02
-	app, _ := opt.applyVariables([]float64{wantPower})
+	app, _, _ := opt.applyVariables([]float64{wantPower})
 	idx := -1
 	for i, s := range app["config1"] {
 		if s.ID == 2 {
@@ -1244,7 +1244,7 @@ func TestPowerVariable(t *testing.T) {
 	if v.Min != wantPower || v.Max != wantPower {
 		t.Fatalf("glass phase lock = [%v, %v], want [%v, %v]", v.Min, v.Max, wantPower, wantPower)
 	}
-	locked, _ := opt.applyVariables([]float64{wantPower})
+	locked, _, _ := opt.applyVariables([]float64{wantPower})
 	if got := paraxial.ElementPowerCurvature(locked["config1"], gc, 2); math.Abs(got-wantPower) > 1e-12 {
 		t.Fatalf("power during glass phase = %v, want preserved %v", got, wantPower)
 	}
@@ -1253,7 +1253,7 @@ func TestPowerVariable(t *testing.T) {
 		t.Fatalf("ExitGlassPhase did not restore the variable range: [%v, %v]",
 			opt.variables[0].Min, opt.variables[0].Max)
 	}
-	free, _ := opt.applyVariables([]float64{0.03})
+	free, _, _ := opt.applyVariables([]float64{0.03})
 	if got := paraxial.ElementPowerCurvature(free["config1"], gc, 2); math.Abs(got-0.03) > 1e-12 {
 		t.Fatalf("power after ExitGlassPhase = %v, want 0.03", got)
 	}
@@ -1297,7 +1297,7 @@ func TestFieldAliveMerit(t *testing.T) {
 	ccfg := opt.primaryConfig()
 
 	// Evaluate at origin — on-axis fully alive → deficit = 0.
-	val := opt.evaluateFieldAliveTerm(ccfg, &ccfg.meritTerms[0], ccfg.surfaces, gc, nil)
+	val := opt.evaluateFieldAliveTerm(ccfg, &ccfg.meritTerms[0], ccfg.surfaces, gc, nil, appliedPupil{})
 	if val != 0 {
 		t.Fatalf("field_alive on-axis: got %v, want 0 (all rays alive)", val)
 	}
@@ -1319,7 +1319,7 @@ func TestFieldAliveMerit(t *testing.T) {
 	ccfg2 := opt2.primaryConfig()
 	// A plane with diameter=2.0 at 128 rays: some rays should be clipped by
 	// the small aperture, giving a deficit > 0.
-	val2 := opt2.evaluateFieldAliveTerm(ccfg2, &ccfg2.meritTerms[0], ccfg2.surfaces, gc, nil)
+	val2 := opt2.evaluateFieldAliveTerm(ccfg2, &ccfg2.meritTerms[0], ccfg2.surfaces, gc, nil, appliedPupil{})
 	if val2 < 0 {
 		t.Fatalf("field_alive narrow stop: got %v, want >= 0", val2)
 	}

@@ -472,6 +472,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	var bestGlasses []types.Glass
 	if len(res.Minima) > 0 {
 		bestSurfaces, bestGlasses = applyEscapeX(surfaces, variables, res.Minima[res.BestIdx].X, gc)
+		applyPupilVariables(&input, variables, res.Minima[res.BestIdx].X)
 	}
 
 	if len(input.Configs) == 0 {
@@ -803,6 +804,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 				input.Configs[i].Surfaces = s
 			}
 		}
+		applyPupilVariablesMulti(&input, input.Optimization, best.X)
 	}
 
 	// Discard infeasible basins from output unless --keep-infeasible is set.

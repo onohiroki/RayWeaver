@@ -215,6 +215,86 @@ func pupilModelForConfig(input types.Input) *types.PupilModelConfig {
 	return input.Chief.PupilModel
 }
 
+// cloneChiefForOutput deep-copies the chief section (and its pupil model) so
+// write-backs on a materialised pipeline document never mutate the caller's
+// input.
+func cloneChiefForOutput(input types.Input) types.Input {
+	if input.Chief == nil {
+		return input
+	}
+	ch := *input.Chief
+	if input.Chief.PupilModel != nil {
+		pm := *input.Chief.PupilModel
+		ch.PupilModel = &pm
+	}
+	input.Chief = &ch
+	return input
+}
+
+// applyPupilVariables writes the virtual-entrance-pupil variables of x into
+// the input's chief pupil model, so pipeline outputs (escape minima files and
+// final results) carry the optimised pupil position/diameter. Single-config
+// variables come from the flat optimize.Variable list (params
+// pupil_model_axial_position / pupil_model_diameter).
+func applyPupilVariables(input *types.Input, variables []optimize.Variable, x []float64) {
+	for i, v := range variables {
+		if i >= len(x) {
+			return
+		}
+		switch v.Param {
+		case "pupil_model_axial_position", "pupil_model_diameter":
+		default:
+			continue
+		}
+		if input.Chief == nil {
+			input.Chief = &types.ChiefInput{}
+		}
+		if input.Chief.PupilModel == nil {
+			input.Chief.PupilModel = &types.PupilModelConfig{Mode: "virtual_entrance_pupil"}
+		}
+		if v.Param == "pupil_model_axial_position" {
+			input.Chief.PupilModel.AxialPosition = x[i]
+		} else {
+			input.Chief.PupilModel.Diameter = x[i]
+		}
+	}
+}
+
+// applyPupilVariablesMulti writes the pupil-model local variables of the flat
+// multi-config vector x into the shared chief pupil model (the pipeline YAML
+// carries one top-level pupil_model, shared by every config). The index
+// mirrors applyEscapeMulti's active-only ordering (shared variables first,
+// then local variables).
+func applyPupilVariablesMulti(input *types.Input, opt *types.OptimizationConfig, x []float64) {
+	varIdx := 0
+	for _, sv := range opt.SharedVariables {
+		if !sv.Active {
+			continue
+		}
+		varIdx++
+	}
+	for _, lv := range opt.LocalVariables {
+		if !lv.Active {
+			continue
+		}
+		if varIdx < len(x) && lv.Target.Type == "pupil_model" {
+			if input.Chief == nil {
+				input.Chief = &types.ChiefInput{}
+			}
+			if input.Chief.PupilModel == nil {
+				input.Chief.PupilModel = &types.PupilModelConfig{Mode: "virtual_entrance_pupil"}
+			}
+			switch lv.Target.Param {
+			case "axial_position":
+				input.Chief.PupilModel.AxialPosition = x[varIdx]
+			case "diameter":
+				input.Chief.PupilModel.Diameter = x[varIdx]
+			}
+		}
+		varIdx++
+	}
+}
+
 // computePupilZ returns the entrance pupil Z used to centre grid traces for one
 // config's initial surfaces: the explicit stop surface Z, else the dynamic
 // pupil from a chief pass over the initial surfaces, else 0. It seeds the

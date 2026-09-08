@@ -113,7 +113,7 @@ func writeFileAtomic(path string, data []byte) error {
 // original input is not mutated; the glass catalog is only read (never
 // written), so the saver is safe to run while DLS workers share the catalog.
 func materializeSingleInput(input types.Input, surfaces []types.Surface, variables []optimize.Variable, x []float64, gc *glass.Catalog) types.Input {
-	out := input
+	out := cloneChiefForOutput(input)
 	out.Configs = append([]types.Config{}, input.Configs...)
 	if len(out.Configs) == 0 {
 		out.Configs = []types.Config{{
@@ -125,6 +125,7 @@ func materializeSingleInput(input types.Input, surfaces []types.Surface, variabl
 	}
 	surf, newGlasses := applyEscapeX(surfaces, variables, x, gc)
 	out.Configs[0].Surfaces = surf
+	applyPupilVariables(&out, variables, x)
 	if len(newGlasses) > 0 && out.GlassCatalog != nil {
 		gcCopy := *out.GlassCatalog
 		gcCopy.Entries = append(append([]types.Glass{}, out.GlassCatalog.Entries...), newGlasses...)
@@ -136,7 +137,7 @@ func materializeSingleInput(input types.Input, surfaces []types.Surface, variabl
 // materializeMultiInput builds a clean, pipeline-compatible Input for the
 // multi-config system with the variable vector x applied to every config.
 func materializeMultiInput(input types.Input, opt *types.OptimizationConfig, x []float64) types.Input {
-	out := input
+	out := cloneChiefForOutput(input)
 	out.Configs = append([]types.Config{}, input.Configs...)
 	configSurfaces := applyEscapeMulti(input.Configs, opt, x)
 	for i := range out.Configs {
@@ -144,5 +145,6 @@ func materializeMultiInput(input types.Input, opt *types.OptimizationConfig, x [
 			out.Configs[i].Surfaces = s
 		}
 	}
+	applyPupilVariablesMulti(&out, opt, x)
 	return out
 }

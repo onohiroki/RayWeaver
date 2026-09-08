@@ -60,7 +60,7 @@ func TestPowerSolvePreservesElementPowers(t *testing.T) {
 			x[i] = 90.0
 		}
 	}
-	surfMap, tempGC := opt.applyVariables(x)
+	surfMap, tempGC, _ := opt.applyVariables(x)
 	eff := effectiveGC(gc, tempGC)
 	for cid, s := range surfMap {
 		surface.Precompute(s)
@@ -146,7 +146,7 @@ func TestGlassPhaseLocksNonGlassAndPreservesPower(t *testing.T) {
 	}
 
 	// Snapshot expected element powers at the pre-phase state (power-solve off).
-	preSurf, preGC := opt.applyVariables(x)
+	preSurf, preGC, _ := opt.applyVariables(x)
 	eff := effectiveGC(gc, preGC)
 	for _, s := range preSurf {
 		surface.Precompute(s)
@@ -188,7 +188,7 @@ func TestGlassPhaseLocksNonGlassAndPreservesPower(t *testing.T) {
 
 	// With the solve on, element powers must stay at the pre-phase targets even
 	// though the glass optimises.
-	glassSurf, glassGC := opt.applyVariables(x)
+	glassSurf, glassGC, _ := opt.applyVariables(x)
 	effG := effectiveGC(gc, glassGC)
 	if s := glassSurf["config1"]; true {
 		surface.Precompute(s)

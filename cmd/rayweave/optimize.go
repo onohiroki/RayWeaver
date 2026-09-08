@@ -393,6 +393,19 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	// optimised glasses.
 	configSurfaces, newGlasses := opt.FinalConfigs(finalX)
 
+	// Write the optimised virtual entrance pupil back into the chief section
+	// (no-op when no pupil model is in use).
+	pupilModels := opt.FinalPupilModels(finalX)
+	if len(input.Configs) > 0 {
+		if pm, ok := pupilModels[input.Configs[0].ID]; ok {
+			if input.Chief == nil {
+				input.Chief = &types.ChiefInput{}
+			}
+			pmCopy := pm
+			input.Chief.PupilModel = &pmCopy
+		}
+	}
+
 	// Warn about constraints that could not be satisfied (e.g. unreachable
 	// targets). The optimization itself still optimises the objective.
 	if violations := opt.FinalConstraintViolations(finalX, 0.1); len(violations) > 0 {
