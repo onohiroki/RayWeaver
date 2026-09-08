@@ -399,6 +399,7 @@ type ChiefInput struct {
 	Fields           []FieldDef         `yaml:"fields,omitempty"`
 	ReferenceSurface int                `yaml:"reference_surface"`
 	StopSurface      int                `yaml:"stop_surface,omitempty"`
+	PupilModel       *PupilModelConfig  `yaml:"pupil_model,omitempty"`
 	NumRays          int                `yaml:"num_rays"`
 	GridType         GridType           `yaml:"grid_type,omitempty"`
 	DumpMap          bool               `yaml:"dump_map,omitempty"`
@@ -787,6 +788,43 @@ type DampingVarConfig struct {
 	// Min/Max override the global DampingMin/DampingMax for this variable.
 	Min *float64 `yaml:"min,omitempty"`
 	Max *float64 `yaml:"max,omitempty"`
+}
+
+// PupilModelSharing configures whether the virtual entrance pupil is shared
+// across configs or each config has its own.
+type PupilModelSharing struct {
+	PerConfiguration bool `yaml:"per_configuration"` // true = per-config pupil
+	PerField         bool `yaml:"per_field"`         // false = one pupil for all fields (future)
+}
+
+// PupilModelSolve marks which pupil-model parameters are optimization variables.
+type PupilModelSolve struct {
+	AxialPosition bool `yaml:"axial_position"` // true = optimize axial position
+	Diameter      bool `yaml:"diameter"`       // true = optimize diameter
+}
+
+// PupilModelConstraints bounds the pupil-model optimization variables.
+type PupilModelConstraints struct {
+	AxialPositionMin float64 `yaml:"axial_position_min"`
+	AxialPositionMax float64 `yaml:"axial_position_max"`
+	DiameterMin      float64 `yaml:"diameter_min"`
+	DiameterMax      float64 `yaml:"diameter_max"`
+}
+
+// PupilModelConfig defines the virtual entrance pupil: a virtual pupil plane
+// at Z = axial_position (from surface 0 vertex) with the given diameter, used
+// as the primary beam-specification origin. The chief ray of every field
+// passes through its center (0,0). This replaces the dynamic-pupil iteration
+// and the physical stop for initial exploration / escape optimization.
+type PupilModelConfig struct {
+	Mode             string                `yaml:"mode"`                          // "virtual_entrance_pupil"
+	ReferenceSurface int                   `yaml:"reference_surface"`             // chief ray reference surface
+	AxialPosition    float64               `yaml:"axial_position"`                // Z from surface 0 vertex (mm, negative allowed)
+	Diameter         float64               `yaml:"diameter"`                      // entrance pupil diameter (mm)
+	PlaneOrientation string                `yaml:"plane_orientation"`             // "chief_ray_normal" (default) | "optical_axis_normal"
+	Sharing          PupilModelSharing     `yaml:"sharing,omitempty"`
+	Solve            PupilModelSolve       `yaml:"solve,omitempty"`
+	Constraints      PupilModelConstraints `yaml:"constraints,omitempty"`
 }
 
 // PowerSolveConfig configures the power-preserving hard solve: the curvatures
@@ -1290,6 +1328,7 @@ type Input struct {
 	GlassCatalog   *GlassCatalog           `yaml:"glass_catalog,omitempty"`
 	CoatingCatalog *CoatingCatalog         `yaml:"coating_catalog,omitempty"`
 	Configs        []Config                `yaml:"configs,omitempty"`
+	PupilModel     *PupilModelConfig       `yaml:"pupil_model,omitempty"`
 	Vignette       *VignetteConfig         `yaml:"vignette,omitempty"`
 	Plot           *PlotConfig             `yaml:"plot,omitempty"`
 	System         System                  `yaml:"-"`

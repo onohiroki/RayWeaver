@@ -474,6 +474,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			MeritTerms:          meritTerms,
 			MeritModes:          cfg.MeritModes,
 			Constraints:         constraints,
+			PupilModel:          input.Chief.PupilModel,
 		})
 	}
 	if len(configs) == 0 {

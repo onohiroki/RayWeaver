@@ -128,6 +128,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 			MeritTerms:          meritTerms,
 			MeritModes:          cfg.MeritModes,
 			Constraints:         constraints,
+			PupilModel:          pupilModelForConfig(input),
 		})
 	}
 
@@ -145,6 +146,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 			Surfaces:            cfgSurfaces,
 			Fields:              loadFields(input),
 			Constraints:         input.Optimization.Constraints,
+			PupilModel:          pupilModelForConfig(input),
 		}}
 	}
 
@@ -163,6 +165,15 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 			}
 			switch v.Target.Type {
 			case "surface":
+				localVars = append(localVars, types.LocalVariableDef{
+					Name:   v.Name,
+					Config: cfgID,
+					Target: v.Target,
+					Min:    v.Min,
+					Max:    v.Max,
+					Active: true,
+				})
+			case "pupil_model":
 				localVars = append(localVars, types.LocalVariableDef{
 					Name:   v.Name,
 					Config: cfgID,

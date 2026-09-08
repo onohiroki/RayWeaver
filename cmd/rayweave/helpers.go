@@ -206,6 +206,15 @@ func chiefRefSurface(input types.Input) int {
 	return input.Chief.ReferenceSurface
 }
 
+// pupilModelForConfig returns the virtual entrance pupil config from the chief
+// section, or nil when not in use.
+func pupilModelForConfig(input types.Input) *types.PupilModelConfig {
+	if input.Chief == nil {
+		return nil
+	}
+	return input.Chief.PupilModel
+}
+
 // computePupilZ returns the entrance pupil Z used to centre grid traces for one
 // config's initial surfaces: the explicit stop surface Z, else the dynamic
 // pupil from a chief pass over the initial surfaces, else 0. It seeds the
@@ -288,7 +297,7 @@ func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, ref
 	results := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: surfaces},
 		fields, refSurface, numRays, gc, pol,
-		types.DefaultWavelength, false, gridType, passThrough, nil, nil,
+		types.DefaultWavelength, false, gridType, passThrough, nil, nil, nil,
 	)
 	for _, r := range results {
 		if r.EntrancePupil != nil {
@@ -364,6 +373,22 @@ func buildOptimizeVariables(opt *types.OptimizationConfig, gc *glass.Catalog) []
 				Name:      v.Name,
 				SurfaceID: v.Target.ID,
 				Param:     v.Target.Param,
+				Min:       min,
+				Max:       max,
+			})
+		case "pupil_model":
+			var min, max float64 = v.Min, v.Max
+			if min == 0 && max == 0 {
+				switch v.Target.Param {
+				case "axial_position":
+					min, max = -200.0, 50.0
+				case "diameter":
+					min, max = 5.0, 50.0
+				}
+			}
+			variables = append(variables, optimize.Variable{
+				Name:      v.Name,
+				Param:     "pupil_model_" + v.Target.Param,
 				Min:       min,
 				Max:       max,
 			})

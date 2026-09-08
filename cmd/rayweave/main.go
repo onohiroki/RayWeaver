@@ -1434,6 +1434,9 @@ func runChief(data []byte) {
 	wlFlag := fs.Float64("wl", types.DefaultWavelength, "wavelength (mm) for grid ray tracing")
 	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
+	pupilAxialPos := fs.Float64("pupil-model-axial-position", 0, "virtual entrance pupil axial position Z (mm); activates virtual pupil mode")
+	pupilDiameter := fs.Float64("pupil-model-diameter", 0, "virtual entrance pupil diameter (mm); activates virtual pupil mode")
+	pupilMode := fs.String("pupil-model-mode", "virtual_entrance_pupil", "pupil model mode: virtual_entrance_pupil")
 	fs.Parse(expandFanRotationArgs(os.Args[2:]))
 	wlSet := flagWasSet(fs, "wl")
 
@@ -1461,6 +1464,20 @@ func runChief(data []byte) {
 			pt.Surface = *passThrough
 		}
 		input.Chief.StopSurface = *passThrough
+	}
+
+	// Virtual entrance pupil: CLI flags override YAML pupil_model settings.
+	if flagWasSet(fs, "pupil-model-axial-position") || flagWasSet(fs, "pupil-model-diameter") {
+		if input.Chief.PupilModel == nil {
+			input.Chief.PupilModel = &types.PupilModelConfig{}
+		}
+		input.Chief.PupilModel.Mode = *pupilMode
+		if flagWasSet(fs, "pupil-model-axial-position") {
+			input.Chief.PupilModel.AxialPosition = *pupilAxialPos
+		}
+		if flagWasSet(fs, "pupil-model-diameter") {
+			input.Chief.PupilModel.Diameter = *pupilDiameter
+		}
 	}
 
 	// Resolve field definitions
@@ -1526,6 +1543,7 @@ func runChief(data []byte) {
 		pt,
 		fanCfg,
 		configWavelengths,
+		input.Chief.PupilModel,
 	)
 
 	// --- default clear-aperture: size unset-diameter surfaces ---
@@ -1558,6 +1576,7 @@ func runChief(data []byte) {
 			results = chief.DetermineChiefRaysGrid(
 				selectedSys, fields, input.Chief.ReferenceSurface, *clearApertureRays,
 				gc, pol, wavelength, dumpMap, input.Chief.GridType, pt, fanCfg, configWavelengths,
+				input.Chief.PupilModel,
 			)
 		}
 		// The chief grid points already fill the aperture stop, so trace them

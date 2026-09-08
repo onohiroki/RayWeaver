@@ -90,7 +90,7 @@ func TestDetermineChiefRaysAngle(t *testing.T) {
 	fields := []types.FieldDef{
 		{Angle: 0.0, Direction: []float64{0, 1}},
 	}
-	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil)
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
 	}
@@ -105,7 +105,7 @@ func TestDetermineChiefRaysImageHeight(t *testing.T) {
 	fields := []types.FieldDef{
 		{ImageHeight: 5.0, Direction: []float64{0, 1}},
 	}
-	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	results := DetermineChiefRaysGrid(sys, fields, 2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil)
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
 	}
@@ -270,7 +270,7 @@ func TestDetermineChiefRaysImageHeightWithPassThrough(t *testing.T) {
 		{ImageHeight: 5.0, Direction: []float64{0, 1}},
 	}
 	results := DetermineChiefRaysGrid(sys, fields, 3, 16, gc, pol, 0.00058756,
-		false, types.GridPolar, pt, nil, nil)
+		false, types.GridPolar, pt, nil, nil, nil)
 	if len(results) != 2 {
 		t.Fatalf("Expected 2 results, got %d", len(results))
 	}
@@ -304,7 +304,7 @@ func TestFieldExplicitPath(t *testing.T) {
 	fields := []types.FieldDef{
 		{Angle: 0, Direction: []float64{0, 1}, Path: []int{1, 2, 3, 4}},
 	}
-	results := DetermineChiefRaysGrid(sys, fields, 4, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	results := DetermineChiefRaysGrid(sys, fields, 4, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -330,7 +330,7 @@ func TestFieldExplicitPath(t *testing.T) {
 	badFields := []types.FieldDef{
 		{Angle: 0, Direction: []float64{0, 1}, Path: []int{0, 1, 2}},
 	}
-	bad := DetermineChiefRaysGrid(sys, badFields, 4, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	bad := DetermineChiefRaysGrid(sys, badFields, 4, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil)
 	if len(bad) != 1 {
 		t.Fatalf("expected 1 bad result, got %d", len(bad))
 	}
@@ -534,7 +534,7 @@ func TestAngleGridOriginsOnWavefront(t *testing.T) {
 	fields := []types.FieldDef{
 		{Angle: 20.0, Direction: []float64{0, 1}},
 	}
-	results := DetermineChiefRaysGrid(sys, fields, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	results := DetermineChiefRaysGrid(sys, fields, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -588,14 +588,14 @@ func TestVignettingClipsGrid(t *testing.T) {
 	full := []types.FieldDef{
 		{Angle: 0.0, Direction: []float64{0, 1}},
 	}
-	fullRes := DetermineChiefRaysGrid(sys, full, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	fullRes := DetermineChiefRaysGrid(sys, full, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil)
 
 	// Clip the pupil to a small central disk: heavy Y compression.
 	clip := &types.VignettingDef{CompressionX: 0.7, CompressionY: 0.7}
 	vig := []types.FieldDef{
 		{Angle: 0.0, Direction: []float64{0, 1}, Vignetting: clip},
 	}
-	vigRes := DetermineChiefRaysGrid(sys, vig, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	vigRes := DetermineChiefRaysGrid(sys, vig, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil)
 
 	if len(fullRes) != 1 || len(vigRes) != 1 {
 		t.Fatalf("expected 1 result each, got %d/%d", len(fullRes), len(vigRes))
@@ -743,7 +743,7 @@ func TestDetermineChiefRaysGridNegativeAnglePassThrough(t *testing.T) {
 		{Angle: -10, Direction: []float64{0, 1}},
 	}
 	results := DetermineChiefRaysGrid(sys, fields, 3, 64, gc, pol, 0.00058756,
-		false, types.GridPolar, pt, nil, nil)
+		false, types.GridPolar, pt, nil, nil, nil)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
@@ -804,7 +804,7 @@ func TestDetermineChiefRaysGridNegativeImageHeight(t *testing.T) {
 		{ImageHeight: -5, Direction: []float64{0, 1}},
 	}
 	results := DetermineChiefRaysGrid(sys, fields, 3, 64, gc, pol, 0.00058756,
-		false, types.GridPolar, pt, nil, nil)
+		false, types.GridPolar, pt, nil, nil, nil)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
 	}
@@ -870,7 +870,7 @@ func TestProbeAxisCrossing(t *testing.T) {
 
 	// Integration: a lone 1° field drives the grid through the same axis
 	// crossing, so its entrance-pupil Z must match the probe's within tolerance.
-	one := DetermineChiefRaysGrid(sys, []types.FieldDef{{Angle: 1.0, Direction: []float64{0, 1}}}, 2, 64, gc, pol, wl, false, types.GridPolar, nil, nil, nil)
+	one := DetermineChiefRaysGrid(sys, []types.FieldDef{{Angle: 1.0, Direction: []float64{0, 1}}}, 2, 64, gc, pol, wl, false, types.GridPolar, nil, nil, nil, nil)
 	if len(one) != 1 || one[0].EntrancePupil == nil {
 		t.Fatal("1° field produced no result / entrance pupil")
 	}
@@ -885,7 +885,7 @@ func TestProbeAxisCrossing(t *testing.T) {
 func TestSingleFieldEntrancePupilFromProbe(t *testing.T) {
 	sys, gc := singletSystem()
 	pol := types.NewCircularJones(true)
-	results := DetermineChiefRaysGrid(sys, []types.FieldDef{{Angle: 0.0, Direction: []float64{0, 1}}}, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil)
+	results := DetermineChiefRaysGrid(sys, []types.FieldDef{{Angle: 0.0, Direction: []float64{0, 1}}}, 2, 64, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil)
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
@@ -974,7 +974,7 @@ func TestProbeSkippedForFiniteConjugateAndPassThrough(t *testing.T) {
 
 	finite := DetermineChiefRaysGrid(sys, []types.FieldDef{{
 		Height: 1.0, ObjectZ: -100.0, Direction: []float64{0, 1},
-	}}, 2, 64, gc, pol, wl, false, types.GridPolar, nil, nil, nil)
+	}}, 2, 64, gc, pol, wl, false, types.GridPolar, nil, nil, nil, nil)
 	if len(finite) != 1 {
 		t.Fatalf("finite-conjugate run returned %d results, want 1", len(finite))
 	}
@@ -985,7 +985,7 @@ func TestProbeSkippedForFiniteConjugateAndPassThrough(t *testing.T) {
 	passThrough := &types.PassThroughTarget{Surface: 1, Coordinate: types.Vec3{}}
 	constrained := DetermineChiefRaysGrid(sys, []types.FieldDef{{
 		Angle: 0.0, Direction: []float64{0, 1},
-	}}, 2, 64, gc, pol, wl, false, types.GridPolar, passThrough, nil, nil)
+	}}, 2, 64, gc, pol, wl, false, types.GridPolar, passThrough, nil, nil, nil)
 	if len(constrained) != 1 {
 		t.Fatalf("pass-through run returned %d results, want 1", len(constrained))
 	}

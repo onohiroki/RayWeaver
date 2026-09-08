@@ -64,6 +64,8 @@ type Config struct {
 	RegionActive *types.RegionActiveConfig
 	// AdaptiveDamping configures per-variable adaptive damping (nil = built-in defaults).
 	AdaptiveDamping *types.AdaptiveDampingConfig
+	// PupilModel is the virtual entrance pupil configuration (nil when not in use).
+	PupilModel *types.PupilModelConfig
 }
 
 // ConfigInput describes one configuration (zoom position) of a
@@ -82,6 +84,7 @@ type ConfigInput struct {
 	MeritModes          []types.MeritMode
 	Constraints         []types.ConstraintOperand
 	RegionActive        *types.RegionActiveConfig
+	PupilModel          *types.PupilModelConfig
 }
 
 func effectiveReferenceWavelength(wavelength float64) float64 {
@@ -183,6 +186,11 @@ type config struct {
 	// configs[].merit_modes[].num_rays). Nil when no mode declares num_rays.
 	meritModeNumRays map[string]int
 	constraints      []types.ConstraintOperand
+	// pupilModel is the virtual entrance pupil config for this config (nil
+	// when not in use). When set, UpdatePupils uses its axial_position/
+	// diameter instead of running chief, and applyVariables handles
+	// pupil_model type variables targeting it.
+	pupilModel *types.PupilModelConfig
 }
 
 // meritTerm is the unified merit term: weights and (for angle fields) the
@@ -724,10 +732,24 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 			continue
 		}
 		surfaces := configSurfaces[cfg.id]
+
+		// Virtual entrance pupil mode: use the model's axial_position/diameter
+		// directly, skip the chief-ray dynamic-pupil iteration.
+		if cfg.pupilModel != nil && cfg.pupilModel.Mode == "virtual_entrance_pupil" {
+			if cfg.pupilZs == nil {
+				cfg.pupilZs = make(map[float64]float64)
+			}
+			for _, fd := range cfg.fieldDefs {
+				cfg.pupilZs[fd.Angle] = cfg.pupilModel.AxialPosition
+			}
+			cfg.pupilZ = cfg.pupilModel.AxialPosition
+			continue
+		}
+
 		results := chief.DetermineChiefRaysGrid(
 			types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
 			cfg.fieldDefs, cfg.refSurface, o.numRays, gc, pol,
-			effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridPolar, nil, nil, nil,
+			effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridPolar, nil, nil, nil, nil,
 		)
 		for i, r := range results {
 			if r.EntrancePupil == nil {
@@ -844,6 +866,10 @@ type Optimizer struct {
 	// the active/inactive flag and Lagrange multiplier for each constraint.
 	regionActiveCfg *types.RegionActiveConfig
 	regionActive    []*regionActiveState // per-config region-active state
+	// pupilModel is the virtual entrance pupil configuration (nil when not in
+	// use). When set, UpdatePupils writes the model's axial_position/diameter
+	// into the config's pupilZ/aperture instead of running chief.
+	pupilModel *types.PupilModelConfig
 }
 
 // regionActiveState is the per-config mutable state for the Region Active
@@ -1099,6 +1125,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		surfaces:    cfg.Surfaces,
 		fields:      cfg.Fields,
 		constraints: cfg.Constraints,
+		pupilModel:  cfg.PupilModel,
 	}
 	for _, t := range cfg.MeritTerms {
 		dx, dy := 0.0, 1.0
@@ -1202,6 +1229,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			fields:      ci.Fields,
 			wavelengths: ci.Wavelengths,
 			constraints: ci.Constraints,
+			pupilModel:  ci.PupilModel,
 		}
 		if len(ci.MeritModes) > 0 {
 			c.meritModes = make(map[string][]meritTerm, len(ci.MeritModes))
@@ -1440,6 +1468,11 @@ func findConfigByID(configs []config, id string) *config {
 		}
 	}
 	return nil
+}
+
+// findConfig returns the config with the given ID, or nil if not found.
+func (o *Optimizer) findConfig(id string) *config {
+	return findConfigByID(o.configs, id)
 }
 
 // primaryConfig returns the first config, used by the public single-term
@@ -1737,6 +1770,16 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 					g.VD = val
 				}
 				needTempGC = true
+			}
+		case "pupil_model_axial_position":
+			cfg := o.findConfig(v.Config)
+			if cfg != nil && cfg.pupilModel != nil {
+				cfg.pupilModel.AxialPosition = val
+			}
+		case "pupil_model_diameter":
+			cfg := o.findConfig(v.Config)
+			if cfg != nil && cfg.pupilModel != nil {
+				cfg.pupilModel.Diameter = val
 			}
 		}
 	}
@@ -2495,7 +2538,7 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 	results := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
 		cfg.fieldDefs, cfg.refSurface, o.extentRays(512), gc, pol,
-		effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridHex, nil, nil, nil,
+		effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridHex, nil, nil, nil, nil,
 	)
 	engine := ray.NewEngine(gc, nil)
 	surface.Precompute(surfaces)

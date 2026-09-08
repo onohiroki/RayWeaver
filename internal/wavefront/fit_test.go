@@ -41,7 +41,7 @@ func TestFitFieldParaboloidFrozenMatchesDynamic(t *testing.T) {
 	for _, fieldAngle := range []float64{0, 5} {
 		fd := types.FieldDef{Angle: fieldAngle, Direction: []float64{0, 1}}
 		results := chief.DetermineChiefRaysGrid(system, []types.FieldDef{fd}, refSurface, 64,
-			gc, types.NewCircularJones(true), wl, false, types.GridPolar, nil, nil, nil)
+			gc, types.NewCircularJones(true), wl, false, types.GridPolar, nil, nil, nil, nil)
 		if len(results) == 0 || results[0].EntrancePupil == nil {
 			t.Fatalf("field %v: no entrance pupil from chief", fieldAngle)
 		}

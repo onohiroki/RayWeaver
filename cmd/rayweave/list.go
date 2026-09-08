@@ -2003,6 +2003,7 @@ func listFields(input types.Input, format string) {
 		input.Chief.PassThrough,
 		nil,
 		nil,
+		input.Chief.PupilModel,
 	)
 
 	// Build rows.

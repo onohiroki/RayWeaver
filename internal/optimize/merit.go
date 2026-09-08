@@ -3,6 +3,7 @@ package optimize
 import (
 	"math"
 
+	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
@@ -30,14 +31,7 @@ const (
 	MeritSeidelDistortion  = "seidel_distortion"
 	MeritOPDRMS            = "opd_rms"
 
-	// Wavefront paraboloid fit kinds. Each evaluates the least-squares
-	// quadratic fit P(x,y) = a·x² + b·y² + c·xy + d·x + e·y + f of the OPD on
-	// the reference surface (referenced to the best-focus point, exactly like
-	// the `wavefront` command) and targets one coefficient — either the raw
-	// fit coefficients (x2/y2/xy/x/y/constant) or the derived low-order
-	// magnitudes (defocus/astigmatism/tilt/rms_residual). The reference
-	// surface defaults to the last optical surface; the grid follows
-	// optimization.num_rays and optimization.aperture_margin.
+	// Wavefront paraboloid fit kinds.
 	MeritWavefrontDefocus     = "wavefront_defocus"
 	MeritWavefrontAstigmatism = "wavefront_astigmatism"
 	MeritWavefrontTilt        = "wavefront_tilt"
@@ -52,9 +46,14 @@ const (
 	MeritWavefrontConstant    = "wavefront_constant"
 
 	// field_alive penalises a field whose pupil grid has too few valid rays.
-	// The term value is max(0, threshold − nValid/totalRays); a fully dead
-	// field returns threshold (max penalty). Per-field: add one term per field.
 	MeritFieldAlive = "field_alive"
+
+	// Virtual entrance pupil merit kinds.
+	MeritPupilPosition    = "pupil_position"
+	MeritPupilDiameter    = "pupil_diameter"
+	MeritVignetting       = "vignetting"
+	MeritClearAperture    = "clear_aperture"
+	MeritEdgeThickness    = "edge_thickness"
 )
 
 // evaluateKindTerm evaluates a non-spot merit term for the given config,
@@ -251,6 +250,16 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 		return evaluateSeidel(term.fieldAngle, term.wavelength, surfaces, gc).Astigmatism
 	case MeritSeidelDistortion:
 		return evaluateSeidel(term.fieldAngle, term.wavelength, surfaces, gc).Distortion
+	case MeritPupilPosition:
+		return evaluatePupilPosition(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
+	case MeritPupilDiameter:
+		return evaluatePupilDiameter(term.fieldAngle, term.wavelength, surfaces, gc)
+	case MeritVignetting:
+		return evaluateVignetting(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
+	case MeritClearAperture:
+		return evaluateClearAperture(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
+	case MeritEdgeThickness:
+		return evaluateEdgeThickness(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
 	default:
 		return 0
 	}
@@ -437,4 +446,150 @@ func ComputeOPDRMS(points []dls.IPoint) float64 {
 	}
 	mean := sumSq / float64(count)
 	return math.Sqrt(mean)
+}
+
+// evaluatePupilPosition returns the Z coordinate of the entrance pupil center
+// for the given field. Returns 0 when the chief ray cannot be traced.
+func evaluatePupilPosition(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int) float64 {
+	if wavelength == 0 {
+		wavelength = types.DefaultWavelength
+	}
+	fd := types.FieldDef{Angle: fieldAngle, Direction: []float64{0, 1}}
+	results := chief.DetermineChiefRaysGrid(
+		types.System{Surfaces: surfaces},
+		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 16, gc,
+		types.NewCircularJones(true), wavelength, false, types.GridPolar,
+		nil, nil, nil, nil,
+	)
+	if len(results) == 0 || results[0].EntrancePupil == nil {
+		return 0
+	}
+	return results[0].EntrancePupil.Center.Z
+}
+
+// evaluatePupilDiameter returns the entrance pupil diameter for the given field.
+func evaluatePupilDiameter(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	if wavelength == 0 {
+		wavelength = types.DefaultWavelength
+	}
+	fd := types.FieldDef{Angle: fieldAngle, Direction: []float64{0, 1}}
+	results := chief.DetermineChiefRaysGrid(
+		types.System{Surfaces: surfaces},
+		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 16, gc,
+		types.NewCircularJones(true), wavelength, false, types.GridPolar,
+		nil, nil, nil, nil,
+	)
+	if len(results) == 0 || results[0].EntrancePupil == nil {
+		return 0
+	}
+	return results[0].EntrancePupil.Radius * 2.0
+}
+
+// evaluateVignetting returns the vignetting ratio for the given field and
+// surface. surfaceSet[0] is the surface ID. Returns 0 when not computable.
+func evaluateVignetting(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int) float64 {
+	if len(surfaceSet) == 0 {
+		return 0
+	}
+	sid := surfaceSet[0]
+	// Find the surface index and its diameter.
+	var surfIdx = -1
+	var surfDiam float64
+	for i, s := range surfaces {
+		if s.ID == sid {
+			surfIdx = i
+			surfDiam = s.Diameter
+			break
+		}
+	}
+	if surfIdx < 0 || surfDiam <= 0 {
+		return 0
+	}
+	if wavelength == 0 {
+		wavelength = types.DefaultWavelength
+	}
+	fd := types.FieldDef{Angle: fieldAngle, Direction: []float64{0, 1}}
+	results := chief.DetermineChiefRaysGrid(
+		types.System{Surfaces: surfaces},
+		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 64, gc,
+		types.NewCircularJones(true), wavelength, false, types.GridPolar,
+		nil, nil, nil, nil,
+	)
+	if len(results) == 0 {
+		return 0
+	}
+	r := results[0]
+	// Count rays that were vignetted (ImageX/ImageY nil means the ray missed
+	// this surface or was clipped by an aperture).
+	nTotal := 0
+	nVignetted := 0
+	for _, gp := range r.GridPoints {
+		if gp.ImageX == nil {
+			nTotal++
+			nVignetted++
+			continue
+		}
+		nTotal++
+	}
+	if nTotal == 0 {
+		return 0
+	}
+	return float64(nVignetted) / float64(nTotal)
+}
+
+// evaluateClearAperture returns the clear aperture diameter at the given surface
+// for the field's beam envelope. Returns 0 when not computable.
+func evaluateClearAperture(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int) float64 {
+	if len(surfaceSet) == 0 {
+		return 0
+	}
+	sid := surfaceSet[0]
+	if wavelength == 0 {
+		wavelength = types.DefaultWavelength
+	}
+	fd := types.FieldDef{Angle: fieldAngle, Direction: []float64{0, 1}}
+	results := chief.DetermineChiefRaysGrid(
+		types.System{Surfaces: surfaces},
+		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 64, gc,
+		types.NewCircularJones(true), wavelength, false, types.GridPolar,
+		nil, nil, nil, nil,
+	)
+	if len(results) == 0 {
+		return 0
+	}
+	engine := ray.NewEngine(gc, nil)
+	path := dls.BuildPath(surfaces)
+	envelope := chief.BeamEnvelope(results, engine, surfaces, path, wavelength, types.NewCircularJones(true))
+	return envelope[sid]
+}
+
+// evaluateEdgeThickness returns the edge thickness for the element containing
+// the given surface. surfaceSet[0] is the surface ID. Returns 0 when not
+// computable.
+func evaluateEdgeThickness(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int) float64 {
+	if len(surfaceSet) == 0 {
+		return 0
+	}
+	sid := surfaceSet[0]
+	// Find the element containing this surface and compute edge thickness.
+	for i := range surfaces {
+		if surfaces[i].ID != sid {
+			continue
+		}
+		// For a simple approximation, use the min_glass_path/max_glass_path
+		// fields if available.
+		if surfaces[i].MinGlassPath > 0 && surfaces[i].MaxGlassPath > 0 {
+			return surfaces[i].MaxGlassPath - surfaces[i].MinGlassPath
+		}
+		break
+	}
+	return 0
+}
+
+// lastSurfaceID returns the ID of the last surface in the system.
+func lastSurfaceID(surfaces []types.Surface) int {
+	if len(surfaces) == 0 {
+		return 0
+	}
+	return surfaces[len(surfaces)-1].ID
 }

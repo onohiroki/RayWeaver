@@ -432,7 +432,7 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 
 	chiefResults := chief.DetermineChiefRaysGrid(
 		selectedSys, chiefFields, lastID, 128, gc, pol, wavelength,
-		true, types.GridPolar, pt, nil, nil,
+		true, types.GridPolar, pt, nil, nil, nil,
 	)
 
 	path := dls.BuildPath(surfaces)

@@ -83,7 +83,7 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 	last := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: work, StopSurface: opts.StopSurface},
 		opts.Fields, opts.RefSurface, opts.NumRays, gc, pol, opts.Wavelength,
-		true, opts.GridType, nil, nil, nil,
+		true, opts.GridType, nil, nil, nil, nil,
 	)
 
 	used := 1
@@ -92,7 +92,7 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 		results := chief.DetermineChiefRaysGrid(
 			types.System{Surfaces: work, StopSurface: opts.StopSurface},
 			opts.Fields, opts.RefSurface, opts.NumRays, gc, pol, opts.Wavelength,
-			true, opts.GridType, nil, nil, nil,
+			true, opts.GridType, nil, nil, nil, nil,
 		)
 		last = results
 

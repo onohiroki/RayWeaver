@@ -1134,7 +1134,7 @@ func beamEnvelope(t *testing.T, gc *glass.Catalog, surfaces []types.Surface) map
 	res := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: surfaces, StopSurface: 0},
 		fields, 8, 512, gc, pol,
-		types.DefaultWavelength, false, types.GridHex, nil, nil, nil,
+		types.DefaultWavelength, false, types.GridHex, nil, nil, nil, nil,
 	)
 	engine := ray.NewEngine(gc, nil)
 	path := dls.BuildPath(surfaces)

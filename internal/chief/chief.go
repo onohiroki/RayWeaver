@@ -49,11 +49,12 @@ func DetermineChiefRaysGrid(
 	passThrough *types.PassThroughTarget,
 	fanCfg *types.RayFanConfig,
 	wavelengths []float64,
+	pupilModel *types.PupilModelConfig,
 ) []Result {
 	if gridType == "" {
 		gridType = types.GridPolar
 	}
-	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, gridType, passThrough, fanCfg, wavelengths)
+	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, gridType, passThrough, fanCfg, wavelengths, pupilModel)
 }
 
 // maxPupilIterations bounds the dynamic-pupil fixed-point loop. The grid is
@@ -88,43 +89,52 @@ func determineChiefRays(
 	passThrough *types.PassThroughTarget,
 	fanCfg *types.RayFanConfig,
 	wavelengths []float64,
+	pupilModel *types.PupilModelConfig,
 ) []Result {
 	engine := ray.NewEngine(gc, nil)
 
-	// Grid radius: with an explicit stop the paraxial entrance pupil (the
-	// stop's image); without one the beam-aware fixed-aperture cap so the
-	// F-number is preserved while auto_aperture:false surfaces cap the beam.
-	apertureRadius := dls.ApertureRadiusForGrid(system.Surfaces, system.StopSurface, wavelength, gc, 1.0)
-	if apertureRadius <= 0 {
-		return nil
+	// Virtual entrance pupil mode: use the fixed pupil-model position and
+	// diameter directly.  The chief ray of every field passes through the
+	// virtual pupil center (0,0,axial_position); no dynamic-pupil iteration,
+	// no low-angle probe, no stop-based aperture sizing.
+	virtMode := pupilModel != nil && pupilModel.Mode == "virtual_entrance_pupil"
+
+	var apertureRadius float64
+	if virtMode {
+		apertureRadius = pupilModel.Diameter / 2.0
+		if apertureRadius <= 0 {
+			return nil
+		}
+	} else {
+		// Grid radius: with an explicit stop the paraxial entrance pupil (the
+		// stop's image); without one the beam-aware fixed-aperture cap so the
+		// F-number is preserved while auto_aperture:false surfaces cap the beam.
+		apertureRadius = dls.ApertureRadiusForGrid(system.Surfaces, system.StopSurface, wavelength, gc, 1.0)
+		if apertureRadius <= 0 {
+			return nil
+		}
 	}
 
-	// No stop (stop_surface <= 0) → dynamic pupil: per-field entrance pupil Z
-	// from the chief-ray crossings, iterated until it settles. An explicit stop
-	// keeps the traditional stop-centred grid (one pass).
-	pupilZs := seedPupilZs(system, fields)
-	dynamic := system.StopSurface <= 0
+	// Pupil Zs: virtual mode uses the fixed axial_position for every field;
+	// otherwise the traditional dynamic-pupil / stop-based path.
+	pupilZs := make([]float64, len(fields))
+	if virtMode {
+		for i := range pupilZs {
+			pupilZs[i] = pupilModel.AxialPosition
+		}
+	} else {
+		pupilZs = seedPupilZs(system, fields)
+	}
 
-	// Low-angle probe: for stop-free systems a ≈1° grid estimates the aperture
-	// position as the Z where its centroid chief ray crosses the optical axis.
-	// The probe seeds a single-field pupil and backs the dynamic-pupil fixed
-	// point when a chief-ray crossing is ill-conditioned; the per-field crossing
-	// updates remain the primary path, so each field keeps its own entrance
-	// pupil. Skipped for
-	// finite-conjugate-only field sets and when pass_through pins a coordinate.
+	dynamic := !virtMode && system.StopSurface <= 0
+
+	// Low-angle probe: only for stop-free dynamic-pupil systems, not virtual.
 	var probeZ float64
 	probeOK := false
 	if dynamic && passThrough == nil && hasInfiniteConjugateField(fields) {
 		probeZ, probeOK = probePupilZ(system, engine, refSurfaceID, numRays,
 			apertureRadius, pol, wavelength, gridType, pupilZs[0])
 		if probeOK && len(fields) == 1 {
-			// For a single field there is no crossing to perturb, so the grid
-			// aims at the probe's aperture position (the entrance pupil). For
-			// multiple fields the probe only backs crossing failures: the
-			// per-field crossing updates must stay the primary path, since
-			// overriding the seed would move their converged fixed point (and
-			// with it the beam-envelope sizing) in a stale/undersized aperture
-			// state.
 			pupilZs[0] = probeZ
 		}
 	}
