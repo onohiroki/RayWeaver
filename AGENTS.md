@@ -182,6 +182,10 @@ A surface `material` is a structured type, one of:
 
 **Real-glass convex hull is ON by default**: every `optimize`/`escape` run constrains `nd`/`vd` glass variables to the default real-glass convex hull (`glass.NewDefaultConvexHull`, `resolveGlassHull` in `cmd/rayweave/optimize.go`) unless the YAML explicitly sets `optimization.glass_hull.enabled: false`. A nil section or an `enabled: true` section uses the default hull (custom `margin`/`weight` honored). The hull only adds a penalty for actual `nd`/`vd` variables, so curvature-only optimisations are unaffected. This keeps glass variables on real glass (e.g. a pure chromatic merit cannot push `nd`/`vd` to the variable-range corners) — handy with `--glass-color --power-solve`, where the element powers are pinned while the glasses must stay physical.
 
+## Gitignored 文書へのリンク禁止
+
+`.gitignore` でトラックされていないファイル（`GLASS/*.agf`、`design/` 配下、`samples/*-result.yaml` 等）に markdown リンクや明示的なパス参照を書かない．事実の説明としてのインラインコード記述（例: `` `GLASS/*.agf` ``）は可．
+
 ## 日本語の扱い
 
 UTF-8 BOM なし．句読点は「，」「．」．コミットメッセージとソースコードコメントは英語．ドキュメントは英語で，必要なら日本語版も作る．リポジトリ直下の Markdown は `README.md` だけ管理（他は git add しない）．
