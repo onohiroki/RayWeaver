@@ -107,6 +107,7 @@ func runWavefront(data []byte) {
 		Workers:         workers,
 		ZernikeMaxOrder: zOrder,
 		Polarizations:   polLabels,
+		PupilModel:      input.Chief.PupilModel,
 	}
 	opts.BestFocus = resolveBestFocus(input, fs, *bestFocus, *focusWeight, *focusWeights, len(fields))
 

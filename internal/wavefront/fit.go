@@ -24,8 +24,9 @@ import (
 // Jacobian perturbations share one pupil (the optimizer passes its frozen
 // cfg.pupilZ). When nil the chief dynamic pupil is settled as usual.
 func FitFieldParaboloid(system types.System, gc *glass.Catalog, fd types.FieldDef,
-	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64) (Paraboloid, error) {
-	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ)
+	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64,
+	pupilModel *types.PupilModelConfig) (Paraboloid, error) {
+	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel)
 	if err != nil {
 		return Paraboloid{}, err
 	}
@@ -45,8 +46,9 @@ func FitFieldParaboloid(system types.System, gc *glass.Catalog, fd types.FieldDe
 // the psf-reported Strehl directly. The grid, pupil and fallback machinery are
 // shared with FitFieldParaboloid.
 func FitFieldSphereRMS(system types.System, gc *glass.Catalog, fd types.FieldDef,
-	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64) (rms, pv float64, err error) {
-	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ)
+	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64,
+	pupilModel *types.PupilModelConfig) (rms, pv float64, err error) {
+	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -58,7 +60,8 @@ func FitFieldSphereRMS(system types.System, gc *glass.Catalog, fd types.FieldDef
 // returning the paraboloid, reference-sphere and Strehl statistics. It is the
 // shared machinery behind FitFieldParaboloid and FitFieldSphereRMS.
 func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
-	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64) (fieldAnalysis, error) {
+	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64,
+	pupilModel *types.PupilModelConfig) (fieldAnalysis, error) {
 	if refSurface <= 0 {
 		refSurface = psf.DefaultReferenceSurface(system.Surfaces)
 	}
@@ -80,7 +83,7 @@ func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 			return fieldAnalysis{}, err
 		}
 	} else {
-		pg, err := psf.ComputeFieldGrid(system, gc, fd, refSurface, numRays, wavelength, types.GridPolar)
+		pg, err := psf.ComputeFieldGrid(system, gc, fd, refSurface, numRays, wavelength, types.GridPolar, pupilModel)
 		if err != nil {
 			return fieldAnalysis{}, err
 		}

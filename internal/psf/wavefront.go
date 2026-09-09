@@ -46,17 +46,19 @@ type WavefrontStats struct {
 
 // ComputeFieldGrid builds the entrance-pupil grid for one field using the
 // chief command's pupil logic (dynamic pupil, explicit stop, image-height
-// search). GridPoints carry the ray launch Origin/Direction and a non-nil
-// ImageX/ImageY for rays that reached the reference surface.
+// search, or virtual entrance pupil). GridPoints carry the ray launch
+// Origin/Direction and a non-nil ImageX/ImageY for rays that reached the
+// reference surface.
 func ComputeFieldGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
-	refSurface, numRays int, wavelength float64, gridType types.GridType) (*PupilGrid, error) {
+	refSurface, numRays int, wavelength float64, gridType types.GridType,
+	pupilModel *types.PupilModelConfig) (*PupilGrid, error) {
 	if gridType == "" {
 		gridType = types.GridPolar
 	}
 	// The grid itself is polarization-independent; use a reference RCP.
 	pol := types.NewCircularJones(true)
 	results := chief.DetermineChiefRaysGrid(system, []types.FieldDef{fd}, refSurface,
-		numRays, gc, pol, wavelength, false, gridType, nil, nil, nil, nil)
+		numRays, gc, pol, wavelength, false, gridType, nil, nil, nil, pupilModel)
 	if len(results) == 0 {
 		return nil, fmt.Errorf("chief returned no grid for field")
 	}

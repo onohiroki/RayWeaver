@@ -45,6 +45,11 @@ type Options struct {
 	// ConvergeTol is the relative Strehl change threshold used by ConvergeCheck
 	// (default 0.10 = 10%).
 	ConvergeTol float64
+	// PupilModel is the virtual entrance pupil configuration. When non-nil the
+	// entrance-pupil grid is centred on the virtual pupil instead of the
+	// dynamic-pupil / stop-based position, ensuring consistent sampling across
+	// all field angles.
+	PupilModel *types.PupilModelConfig
 }
 
 // Result is one computed PSF with its analysis summary.
@@ -197,7 +202,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 			continue
 		}
 		for _, wl := range wavelengths {
-			pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType)
+			pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel)
 			if err != nil || len(pg.GridPoints) == 0 {
 				continue
 			}
@@ -343,7 +348,7 @@ func applyConvergence(r *Result, engine *ray.Engine, system types.System, gc *gl
 	co := opts
 	co.NumRays = checkRays
 	co.ConvergeCheck = false
-	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType)
+	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType, co.PupilModel)
 	if err != nil || len(pg.GridPoints) == 0 {
 		r.Converged = false
 		r.CheckRays = checkRays
@@ -365,7 +370,7 @@ func applyConvergenceCombined(r *Result, engine *ray.Engine, system types.System
 	co := opts
 	co.NumRays = checkRays
 	co.ConvergeCheck = false
-	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType)
+	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType, co.PupilModel)
 	if err != nil || len(pg.GridPoints) == 0 {
 		r.Converged = false
 		r.CheckRays = checkRays
@@ -448,7 +453,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 		if spdCurve.Weight(wl) <= 0 {
 			continue
 		}
-		pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType)
+		pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel)
 		if err != nil || len(pg.GridPoints) == 0 {
 			continue
 		}

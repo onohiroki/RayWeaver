@@ -206,7 +206,7 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 	fit := func(frozenPupilZ *float64) (float64, error) {
 		switch term.kind {
 		case MeritWavefrontSphereRMS, MeritWavefrontSpherePV:
-			rms, pv, err := wavefront.FitFieldSphereRMS(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ)
+			rms, pv, err := wavefront.FitFieldSphereRMS(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel)
 			if err != nil {
 				return 0, err
 			}
@@ -215,7 +215,7 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 			}
 			return rms, nil
 		default:
-			pab, err := wavefront.FitFieldParaboloid(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ)
+			pab, err := wavefront.FitFieldParaboloid(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel)
 			if err != nil {
 				return 0, err
 			}

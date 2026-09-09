@@ -47,11 +47,11 @@ func TestFitFieldParaboloidFrozenMatchesDynamic(t *testing.T) {
 		}
 		pupilZ := results[0].EntrancePupil.Center.Z
 
-		frozen, err := FitFieldParaboloid(system, gc, fd, refSurface, 64, wl, 1.0, &pupilZ)
+		frozen, err := FitFieldParaboloid(system, gc, fd, refSurface, 64, wl, 1.0, &pupilZ, nil)
 		if err != nil {
 			t.Fatalf("field %v frozen: %v", fieldAngle, err)
 		}
-		dyn, err := FitFieldParaboloid(system, gc, fd, refSurface, 64, wl, 1.0, nil)
+		dyn, err := FitFieldParaboloid(system, gc, fd, refSurface, 64, wl, 1.0, nil, nil)
 		if err != nil {
 			t.Fatalf("field %v dynamic: %v", fieldAngle, err)
 		}
@@ -103,7 +103,7 @@ func TestFitFieldParaboloidMatchesCompute(t *testing.T) {
 	system := wavefrontTestSystem(gc)
 	const wl = 0.00058756
 
-	pab, err := FitFieldParaboloid(system, gc, types.FieldDef{Angle: 0, Direction: []float64{0, 1}}, 2, 64, wl, 1.0, nil)
+	pab, err := FitFieldParaboloid(system, gc, types.FieldDef{Angle: 0, Direction: []float64{0, 1}}, 2, 64, wl, 1.0, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

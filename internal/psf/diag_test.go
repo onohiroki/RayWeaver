@@ -56,7 +56,7 @@ func TestPupilCoverage(t *testing.T) {
 	for _, c := range cases {
 		ref := DefaultReferenceSurface(c.sys.Surfaces)
 		engine := ray.NewEngine(c.gc, nil)
-		fg, err := ComputeFieldGrid(c.sys, c.gc, c.field, ref, 400, types.DefaultWavelength, types.GridPolar)
+		fg, err := ComputeFieldGrid(c.sys, c.gc, c.field, ref, 400, types.DefaultWavelength, types.GridPolar, nil)
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
 		}

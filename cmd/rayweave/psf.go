@@ -136,6 +136,7 @@ func runPSF(data []byte) {
 		Workers:          *psfWorkers,
 		SpectralCurve:    spectralCurve,
 		SpectralEntries:  spectralEntries,
+		PupilModel:       input.Chief.PupilModel,
 	}
 	if input.PSF != nil {
 		opts.ReferenceSurface = intOrYAML(*refSurface, input.PSF.ReferenceSurface)
