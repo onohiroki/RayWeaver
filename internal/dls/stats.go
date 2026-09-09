@@ -16,6 +16,10 @@ type IPoint struct {
 	// Intensity is the mean transmitted s/p intensity of the ray
 	// ((IntensityS+IntensityP)/2), capturing Fresnel/TMM reflection losses.
 	Intensity float64
+	// PupilX/PupilY are the relative pupil coordinates (unit aperture coords
+	// × radius; centre applied to Origin). Used by DCO and pupil-pair merit
+	// kinds for pupil-shift pairing.
+	PupilX, PupilY float64
 }
 
 func Centroid(points []IPoint) (cx, cy float64, count int) {

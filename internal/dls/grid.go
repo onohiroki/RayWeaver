@@ -77,6 +77,8 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 			OK:        true,
 			Area:      s.Area,
 			Intensity: s.Intensity,
+			PupilX:    s.PupilX,
+			PupilY:    s.PupilY,
 		}
 		for _, sr := range s.Surfaces {
 			ax := math.Abs(sr.Position.X)

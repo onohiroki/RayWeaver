@@ -2107,7 +2107,8 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 func isGridKind(kind string) bool {
 	switch kind {
 	case "", dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
-		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius:
+		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius,
+		dls.MeritWavefrontShiftSag, dls.MeritWavefrontShiftTan, dls.MeritWavefrontPairPhase:
 		return true
 	}
 	return false

@@ -101,6 +101,27 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 			return 0
 		}
 		return term.target - tan
+	case dls.MeritWavefrontShiftSag:
+		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+		if len(points) == 0 {
+			return 0
+		}
+		apR := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, term.wavelength, gc, o.apertureMargin, p.dia)
+		return dls.ComputeWavefrontShift(points, term.frequency, term.wavelength, apR, "sag")
+	case dls.MeritWavefrontShiftTan:
+		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+		if len(points) == 0 {
+			return 0
+		}
+		apR := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, term.wavelength, gc, o.apertureMargin, p.dia)
+		return dls.ComputeWavefrontShift(points, term.frequency, term.wavelength, apR, "tan")
+	case dls.MeritWavefrontPairPhase:
+		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+		if len(points) == 0 {
+			return 0
+		}
+		apR := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, term.wavelength, gc, o.apertureMargin, p.dia)
+		return dls.ComputeWavefrontPairPhase(points, apR, term.wavelength)
 	default:
 		if isGridKind(term.kind) {
 			return o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
