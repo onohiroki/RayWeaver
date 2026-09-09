@@ -128,6 +128,7 @@ type MeritTerm struct {
 	Weight      float64
 	Target      float64
 	Fraction    float64
+	Frequency   float64
 	SurfaceSet  []int
 }
 
@@ -221,6 +222,8 @@ type meritTerm struct {
 	fieldIndex int
 	// fraction is the encircled-energy fraction for spot_ee_radius (default 0.8).
 	fraction float64
+	// frequency is the spatial frequency in lp/mm for geometric MTF kinds.
+	frequency float64
 }
 
 // meritSchedule is the compiled optimization.merit_schedule: a smooth blend of
@@ -900,19 +903,20 @@ func (o *Optimizer) SetGlassMerit(configID string, terms []types.MeritTerm) {
 	}
 	mt := make([]meritTerm, 0, len(terms))
 	for _, t := range terms {
-		tm := meritTerm{
-			kind:        t.Kind,
-			fieldDirX:   0,
-			fieldDirY:   1,
-			fieldIndex:  -1,
-			wavelength:  t.Wavelength,
-			wavelength2: t.Wavelength2,
-			weight:      t.Weight,
-			target:      t.Target,
-			fraction:    t.Fraction,
-			fieldWeight: 1.0,
-			wavWeight:   1.0,
-		}
+tm := meritTerm{
+		kind:        t.Kind,
+		fieldDirX:   0,
+		fieldDirY:   1,
+		fieldIndex:  -1,
+		wavelength:  t.Wavelength,
+		wavelength2: t.Wavelength2,
+		weight:      t.Weight,
+		target:      t.Target,
+		fraction:    t.Fraction,
+		frequency:   t.Frequency,
+		fieldWeight: 1.0,
+		wavWeight:   1.0,
+	}
 		// Resolve the term's field angle from the config's fields (angle or
 		// image height), matching buildMeritTermFromTypes.
 		if c := findConfigByID(o.configs, configID); c != nil {
@@ -1143,6 +1147,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 			weight:      t.Weight,
 			target:      t.Target,
 			fraction:    t.Fraction,
+			frequency:   t.Frequency,
 			surfaceSet:  append([]int(nil), t.SurfaceSet...),
 		})
 	}
@@ -1167,21 +1172,22 @@ func NewOptimizer(cfg Config) *Optimizer {
 				if fieldWeight == 0 {
 					fieldWeight = 1.0
 				}
-				terms = append(terms, meritTerm{
-					kind:        t.Kind,
-					fieldAngle:  fieldAngle,
-					fieldDirX:   fieldDirX,
-					fieldDirY:   fieldDirY,
-					fieldIndex:  t.Field,
-					fieldWeight: fieldWeight,
-					wavelength:  t.Wavelength,
-					wavelength2: t.Wavelength2,
-					wavWeight:   1.0,
-					weight:      t.Weight,
-					target:      t.Target,
-					fraction:    t.Fraction,
-					surfaceSet:  append([]int(nil), t.SurfaceSet...),
-				})
+terms = append(terms, meritTerm{
+				kind:        t.Kind,
+				fieldAngle:  fieldAngle,
+				fieldDirX:   fieldDirX,
+				fieldDirY:   fieldDirY,
+				fieldIndex:  t.Field,
+				fieldWeight: fieldWeight,
+				wavelength:  t.Wavelength,
+				wavelength2: t.Wavelength2,
+				wavWeight:   1.0,
+				weight:      t.Weight,
+				target:      t.Target,
+				fraction:    t.Fraction,
+				frequency:   t.Frequency,
+				surfaceSet:  append([]int(nil), t.SurfaceSet...),
+			})
 			}
 			c.meritModes[m.Name] = terms
 		}
@@ -1307,6 +1313,7 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 		weight:      t.Weight,
 		target:      t.Target,
 		fraction:    t.Fraction,
+		frequency:   t.Frequency,
 		surfaceSet:  append([]int(nil), t.SurfaceSet...),
 		fieldDirX:   0,
 		fieldDirY:   1,

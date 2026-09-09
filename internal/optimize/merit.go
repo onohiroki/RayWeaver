@@ -54,6 +54,12 @@ const (
 	MeritVignetting       = "vignetting"
 	MeritClearAperture    = "clear_aperture"
 	MeritEdgeThickness    = "edge_thickness"
+
+	// Geometric MTF merit kinds (Phase 1: direct complex sum).
+	// These evaluate the sagittal/tangential MTF at a specified spatial frequency.
+	// The residual is hinge-style: max(0, target - MTF), so only under-performance is penalized.
+	MeritGeometricMTFSag = "geometric_mtf_sag"
+	MeritGeometricMTFTan = "geometric_mtf_tan"
 )
 
 // evaluateKindTerm evaluates a non-spot merit term for the given config,
@@ -75,6 +81,26 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		return val
 	case MeritFieldAlive:
 		return o.evaluateFieldAliveTerm(cfg, term, surfaces, gc, cache, p)
+	case MeritGeometricMTFSag:
+		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+		if len(points) == 0 {
+			return 0
+		}
+		sag, _ := dls.ComputeGeometricMTF(points, term.frequency)
+		if sag >= term.target {
+			return 0
+		}
+		return term.target - sag
+	case MeritGeometricMTFTan:
+		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+		if len(points) == 0 {
+			return 0
+		}
+		_, tan := dls.ComputeGeometricMTF(points, term.frequency)
+		if tan >= term.target {
+			return 0
+		}
+		return term.target - tan
 	default:
 		if isGridKind(term.kind) {
 			return o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
