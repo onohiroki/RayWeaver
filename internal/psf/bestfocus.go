@@ -15,11 +15,17 @@ func BestFocusShift(samples []WavefrontSample, planeZ float64) float64 {
 	if len(samples) < 4 {
 		return 0
 	}
+	// Reference surface Z: all samples sit on the reference surface.
 	b := math.Max(2*math.Abs(planeZ), 1.0)
+	refZ := samples[0].Position.Z
+	lo := refZ - planeZ + 1e-3
+	if lo < -b {
+		lo = -b
+	}
 	return minimize1D(func(d float64) float64 {
 		_, _, rms := ImagePlaneSpot(samples, planeZ+d)
 		return rms
-	}, -b, b)
+	}, lo, b)
 }
 
 // minimize1D finds the minimizer of f over [lo, hi] by golden-section search.
