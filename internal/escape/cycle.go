@@ -2,6 +2,7 @@ package escape
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -228,6 +229,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		// feeds the clean DLS start; the clean solution is what the store
 		// records, so the escape distance/store stay in the full variable-space
 		// dimension regardless of the phase's reduced active set.
+		escapeMerit := c.wrapper.innerMerit(escapedX)
 		cleanStart := escapedX
 		if c.wrapper.GlassPhaseEnabled() {
 			c.wrapper.SetEscapes(nil)
@@ -242,15 +244,38 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 				break
 			}
 			if c.acceptable(glassRes.Status, glassX) {
-				cleanStart = glassX
-				c.progress.Event("cycle", map[string]any{
-					"cycle":      cyc,
-					"worker":     c.workerID,
-					"phase":      "glass_dls",
-					"status":     "accepted",
-					"dls_status": glassRes.Status,
-					"merit":      c.wrapper.innerMerit(glassX),
-				})
+				// Reject the glass phase if it regressed the layout merit
+				// or failed to improve the colour merit.
+				startMain := c.wrapper.evaluateMainMerit(escapedX)
+				endMain := c.wrapper.evaluateMainMerit(glassX)
+				startGlass := c.wrapper.innerMerit(escapedX) // colour merit during glass phase
+				endGlass := glassRes.AfterMerit
+				mainOK := endMain <= startMain*1.5 || startMain < 1e-10
+				glassImproved := endGlass < startGlass*0.99 || startGlass < 1e-10
+				if mainOK && glassImproved {
+					cleanStart = glassX
+					c.progress.Event("cycle", map[string]any{
+						"cycle":       cyc,
+						"worker":      c.workerID,
+						"phase":       "glass_dls",
+						"status":      "accepted",
+						"dls_status":  glassRes.Status,
+						"merit":       c.wrapper.innerMerit(glassX),
+						"main_before": startMain,
+						"main_after":  endMain,
+						"glass_before": startGlass,
+						"glass_after":  endGlass,
+					})
+				} else {
+					c.progress.Event("cycle", map[string]any{
+						"cycle":      cyc,
+						"worker":     c.workerID,
+						"phase":      "glass_dls",
+						"status":     "rejected",
+						"dls_status": glassRes.Status,
+						"reason":     fmt.Sprintf("mainMerit %.1f→%.1f (x%.2f) glassMerit %.4f→%.4f", startMain, endMain, endMain/startMain, startGlass, endGlass),
+					})
+				}
 			} else {
 				c.progress.Event("cycle", map[string]any{
 					"cycle":      cyc,
@@ -299,6 +324,63 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			"dls_status": cleanRes.Status,
 			"merit":      c.wrapper.innerMerit(trueX),
 		})
+
+		// Post-glass retry: if clean DLS regressed vs the pre-glass escape
+		// merit, retry clean from escapedX (glass result discarded).
+		cleanMerit := c.wrapper.innerMerit(trueX)
+		if cleanMerit > escapeMerit {
+			c.progress.Event("cycle", map[string]any{
+				"cycle":        cyc,
+				"worker":       c.workerID,
+				"phase":        "clean_dls",
+				"status":       "retry",
+				"escape_merit": escapeMerit,
+				"clean_merit":  cleanMerit,
+			})
+			c.wrapper.SetEscapes(nil)
+			retryCopy := make([]float64, len(escapedX))
+			copy(retryCopy, escapedX)
+			c.wrapper.SetStartX(retryCopy)
+			c.wrapper.SetPhase(PhaseClean)
+			c.wrapper.SetStop(c.hardStop)
+			retryRes := dls.Solve(c.wrapper)
+			retryX := extractX(retryRes)
+			if retryRes.Status == dls.StatusInterrupted {
+				c.recordInterrupted(retryRes, cyc, "clean_dls_retry")
+				c.stopped = true
+				break
+			}
+			if c.acceptable(retryRes.Status, retryX) {
+				retryMerit := c.wrapper.innerMerit(retryX)
+				if retryMerit < cleanMerit {
+					trueX = retryX
+					c.progress.Event("cycle", map[string]any{
+						"cycle":      cyc,
+						"worker":     c.workerID,
+						"phase":      "clean_dls_retry",
+						"status":     "accepted",
+						"dls_status": retryRes.Status,
+						"merit":      retryMerit,
+					})
+				} else {
+					c.progress.Event("cycle", map[string]any{
+						"cycle":      cyc,
+						"worker":     c.workerID,
+						"phase":      "clean_dls_retry",
+						"status":     "no_improvement",
+						"merit":      retryMerit,
+					})
+				}
+			} else {
+				c.progress.Event("cycle", map[string]any{
+					"cycle":      cyc,
+					"worker":     c.workerID,
+					"phase":      "clean_dls_retry",
+					"status":     "rejected",
+					"dls_status": retryRes.Status,
+				})
+			}
+		}
 
 		failures = 0
 		c.escaped++

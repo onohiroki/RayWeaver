@@ -353,3 +353,16 @@ func (w *Wrapper) UpdateMeritWeights(x []float64, iter int) {
 func (w *Wrapper) innerMerit(x []float64) float64 {
 	return w.inner.EvaluateMerit(x)
 }
+
+// evaluateMainMerit evaluates the ordinary (non-glass) merit at x even when
+// the glass phase is active.  Returns innerMerit(x) if the inner model does
+// not support EvaluateMainMerit (fallback for non-Optimizer inners).
+func (w *Wrapper) evaluateMainMerit(x []float64) float64 {
+	type mainMeritEvaluator interface {
+		EvaluateMainMerit([]float64) float64
+	}
+	if m, ok := w.inner.(mainMeritEvaluator); ok {
+		return m.EvaluateMainMerit(x)
+	}
+	return w.inner.EvaluateMerit(x)
+}

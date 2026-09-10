@@ -2345,6 +2345,18 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 	return merit
 }
 
+// EvaluateMainMerit evaluates the ordinary (non-glass) merit at x regardless
+// of the current glassMeritActive flag.  Used by the escape cycle to check
+// whether the glass phase regressed the layout merit.
+func (o *Optimizer) EvaluateMainMerit(x []float64) float64 {
+	if !o.glassMeritActive {
+		return o.EvaluateMerit(x)
+	}
+	o.glassMeritActive = false
+	defer func() { o.glassMeritActive = true }()
+	return o.EvaluateMerit(x)
+}
+
 // MeritBreakdown evaluates the merit at x and returns the contribution of
 // each merit term (and the objective total), so the value reported by DLS can
 // be reconciled against an external evaluation (e.g. `chief` spot RMS).
