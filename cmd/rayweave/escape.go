@@ -28,7 +28,7 @@ import (
 // saveBase1.yaml, ... (see escapeFileSaver). SIGINT/SIGTERM stops the search
 // in three escalating stages (graceful cycle boundary → mid-DLS interrupt →
 // force quit), each producing interrupted: true and exit 0 except the last.
-func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassColor bool, keepInfeasible bool) {
+func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassColor bool, keepInfeasible bool, debug bool) {
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
 	if input.Optimization == nil {
@@ -79,11 +79,15 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 		}
 	}()
 
-	// All DLS-internal events (iter / final / adaptive_damping / mode_change)
-	// are suppressed during escape: they clutter the output without adding
-	// value to the escape-level progress stream (cycle events already carry
-	// dls_status and merit). The progress stream is the single output channel.
-	dlsLogger := dls.Logger(&noIterLogger{})
+	// DLS-internal events (iter / final / adaptive_damping / mode_change) are
+	// suppressed during escape unless --debug is set. With --debug, a debugLogger
+	// routes all DLS events through the Progress stream with phase context.
+	var dlsLogger dls.Logger
+	if debug {
+		dlsLogger = &debugLogger{progress: progress}
+	} else {
+		dlsLogger = &noIterLogger{}
+	}
 
 	// Three-stage stop on SIGINT/SIGTERM.
 	//
@@ -125,10 +129,10 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible)
+		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug)
 		return
 	}
-	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible)
+	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug)
 }
 
 // glassPhaseCtx carries the power-preserving glass-phase configuration through
@@ -185,7 +189,7 @@ func buildGlassPhaseContext(input *types.Input) glassPhaseCtx {
 	return ctx
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -397,6 +401,8 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		Context:     ctx,
 		HardStop:    hardStop,
 		GlassPhase:  gctx.enabled,
+		Debug:       debug,
+		NewPhaseLog: newPhaseLog(progress),
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,
@@ -499,7 +505,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	writeEscapeOutput(input, escResult)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -720,6 +726,8 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		Context:     ctx,
 		HardStop:    hardStop,
 		GlassPhase:  gctx.enabled,
+		Debug:       debug,
+		NewPhaseLog: newPhaseLog(progress),
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,
@@ -1177,4 +1185,126 @@ func reasonString(r escape.InvalidReason) string {
 	default:
 		return "unknown"
 	}
+}
+
+// debugLogger routes DLS-internal events through the escape Progress stream
+// with phase context. It implements dls.Logger, dls.ModeChangeLogger, and
+// dls.DampingLogger so the DLS solver emits iter, final, adaptive_damping,
+// and mode_change events during escape runs.
+//
+// Each worker has its own debugLogger instance (created via the factory in
+// runEscapeSingle/runEscapeMulti), so the mutable phase/cycle/worker fields
+// are race-free.
+type debugLogger struct {
+	progress *escape.Progress
+	phase    string
+	cycle    int
+	worker   int
+}
+
+func (d *debugLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
+	fields := map[string]any{
+		"iter":        iter,
+		"merit":       safeF64(merit),
+		"improvement": safeF64(improvement),
+		"step_norm":   safeF64(stepNorm),
+		"variables":   safeVars64(variables),
+		"phase":       d.phase,
+		"cycle":       d.cycle,
+		"worker":      d.worker,
+	}
+	if len(constraints) > 0 {
+		ci := make([]constraintInfo, len(constraints))
+		for i, cs := range constraints {
+			ci[i] = constraintInfo{Residual: cs.Residual}
+		}
+		fields["constraints"] = ci
+	}
+	d.progress.Event("iter", fields)
+}
+
+func (d *debugLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
+	fields := map[string]any{
+		"iter":      iter,
+		"merit":     safeF64(merit),
+		"step_norm": safeF64(stepNorm),
+		"variables": safeVars64(variables),
+		"status":    status,
+		"phase":     d.phase,
+		"cycle":     d.cycle,
+		"worker":    d.worker,
+	}
+	if len(constraints) > 0 {
+		ci := make([]constraintInfo, len(constraints))
+		for i, cs := range constraints {
+			ci[i] = constraintInfo{Residual: cs.Residual}
+		}
+		fields["constraints"] = ci
+	}
+	d.progress.Event("final", fields)
+}
+
+func (d *debugLogger) LogModeChange(iter int, from, to string, weights map[string]float64, metric float64) {
+	d.progress.Event("mode_change", map[string]any{
+		"iter":    iter,
+		"from":    from,
+		"to":      to,
+		"weights": weights,
+		"metric":  safeF64(metric),
+		"phase":   d.phase,
+		"cycle":   d.cycle,
+		"worker":  d.worker,
+	})
+}
+
+func (d *debugLogger) LogDamping(iter int, mu, ref float64, summary dls.DampingSummary) {
+	d.progress.Event("adaptive_damping", map[string]any{
+		"iteration":              iter,
+		"mu":                     safeF64(mu),
+		"sensitivity_reference":  safeF64(ref),
+		"classes":                summary.Classes,
+		"d_min":                  safeF64(summary.DMin),
+		"d_max":                  safeF64(summary.DMax),
+		"d_mean":                 safeF64(summary.DMean),
+		"phase":                  d.phase,
+		"cycle":                  d.cycle,
+		"worker":                 d.worker,
+	})
+}
+
+// SetPhase updates the phase context for subsequent DLS events.
+func (d *debugLogger) SetPhase(phase string, cycle, worker int) {
+	d.phase = phase
+	d.cycle = cycle
+	d.worker = worker
+}
+
+// newPhaseLog is a factory that creates a fresh debugLogger per worker goroutine.
+// Each instance carries its own phase/cycle/worker state so concurrent workers
+// never race on the mutable fields.
+func newPhaseLog(progress *escape.Progress) func() escape.PhaseSetter {
+	return func() escape.PhaseSetter {
+		return &debugLogger{progress: progress}
+	}
+}
+
+// safeF64 sanitises NaN/Inf to 0 for JSON serialisation.
+func safeF64(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
+}
+
+// safeVars64 sanitises a float64 slice element-wise.
+func safeVars64(v []float64) []float64 {
+	s := make([]float64, len(v))
+	for i, x := range v {
+		if math.IsNaN(x) || math.IsInf(x, 0) {
+			s[i] = 0
+		} else {
+			s[i] = x
+		}
+	}
+	return s
 }

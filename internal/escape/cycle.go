@@ -19,6 +19,13 @@ import (
 // escape is strengthened (and its stored X/Merit replaced when the new point
 // is better) and the restart offset grows so the next escape run starts
 // farther from the trap.
+// PhaseSetter is an optional interface that the DLS logger can implement to
+// receive phase context updates before each sub-solve. This lets the logger
+// tag DLS events (iter, final, etc.) with the current escape phase.
+type PhaseSetter interface {
+	SetPhase(phase string, cycle, worker int)
+}
+
 type Cycle struct {
 	wrapper    *Wrapper
 	store      *Store
@@ -32,6 +39,8 @@ type Cycle struct {
 	ctx        context.Context
 	hardStop   <-chan struct{}
 	validateFn func(x []float64, merit float64, inner dls.Model) (MinStatus, InvalidReason)
+	debug      bool
+	failures   int
 	escaped    int
 	recorded   int
 	stopped    bool
@@ -41,8 +50,12 @@ type Cycle struct {
 // progress may be nil to disable verbose reporting. A zero deadline disables
 // the time budget (unlimited runtime); a nil context and a nil hardStop are
 // ignored. validateFn is called after each clean DLS convergence to classify
-// the point; nil treats every converged point as feasible.
-func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time, ctx context.Context, hardStop <-chan struct{}, validateFn func(x []float64, merit float64, inner dls.Model) (MinStatus, InvalidReason)) *Cycle {
+// the point; nil treats every converged point as feasible. When debug is true,
+// cycle events carry additional DLS diagnostics (iterations, before/after
+// merit, escape count, nearest distance, failures). The wrapper's PhaseLog
+// (when set) receives phase context updates before each sub-solve so the DLS
+// logger can tag events with the current escape phase.
+func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time, ctx context.Context, hardStop <-chan struct{}, validateFn func(x []float64, merit float64, inner dls.Model) (MinStatus, InvalidReason), debug bool) *Cycle {
 	return &Cycle{
 		wrapper:    wrapper,
 		store:      store,
@@ -56,6 +69,7 @@ func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed
 		ctx:        ctx,
 		hardStop:   hardStop,
 		validateFn: validateFn,
+		debug:      debug,
 	}
 }
 
@@ -72,6 +86,13 @@ func (c *Cycle) StoppedByTime() bool { return c.stopped && !c.ctxDone() && !hard
 // Interrupted reports whether the shared context was cancelled or the hard
 // stop fired while the cycle ran (SIGINT/SIGTERM handled at the command layer).
 func (c *Cycle) Interrupted() bool { return c.ctxDone() || hardStopped(c.hardStop) }
+
+// setPhase updates the phase context on the DLS logger (when debug is active).
+func (c *Cycle) setPhase(phase string, cyc int) {
+	if c.debug {
+		c.wrapper.SetPhaseCtx(phase, cyc, c.workerID)
+	}
+}
 
 // ctxDone reports whether the shared stop context has been cancelled.
 func (c *Cycle) ctxDone() bool {
@@ -159,6 +180,54 @@ func (c *Cycle) perturb(x []float64, counter int, amplitude float64) []float64 {
 // for the escape to exert a push.
 const restartPerturb = 0.1
 
+// debugCycleFields returns additional diagnostic fields for a cycle event when
+// debug mode is active. Returns nil when debug is off (zero allocation on the
+// hot path).
+func (c *Cycle) debugCycleFields(x []float64, res dls.Result, phase string) map[string]any {
+	if !c.debug {
+		return nil
+	}
+	fields := map[string]any{
+		"dls_iterations": res.Iterations,
+		"before_merit":   safeF(res.BeforeMerit),
+		"after_merit":    safeF(res.AfterMerit),
+		"escape_count":   len(c.store.All()),
+		"failures":       c.failures,
+	}
+	if len(x) > 0 {
+		d, nearest := c.store.FindNearest(x)
+		if nearest >= 0 {
+			fields["nearest_distance"] = safeF(d)
+			fields["nearest_index"] = nearest
+			fields["nearest_merit"] = safeF(c.store.points[nearest].Merit)
+			fields["nearest_h"] = safeF(c.store.points[nearest].H)
+			fields["nearest_w"] = safeF(c.store.points[nearest].W)
+		}
+		if fp := c.store.fingerprint; fp != nil && c.params.DtFp > 0 && nearest >= 0 {
+			fpDist := c.store.FingerprintDistance(x, c.store.points[nearest])
+			if fpDist > 0 && fpDist < 1e10 {
+				fields["fingerprint_distance"] = safeF(fpDist)
+			}
+		}
+	}
+	return fields
+}
+
+// safeF sanitises NaN/Inf to 0 for JSON serialisation.
+func safeF(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0
+	}
+	return v
+}
+
+// enrich merges extra fields into the base map (in-place). nil extra is a no-op.
+func enrich(base, extra map[string]any) {
+	for k, v := range extra {
+		base[k] = v
+	}
+}
+
 // Run performs the escape loop starting from x0. It returns the final point
 // (the last converged minimum) and its unescaped merit.
 func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
@@ -168,7 +237,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 	copy(bestX, x0)
 	bestMerit := c.wrapper.innerMerit(x0)
 
-	failures := 0
+	c.failures = 0
 	repeatStreak := 0
 	restartAmp := restartPerturb
 	for cyc := 0; cyc < c.maxCycles; cyc++ {
@@ -190,6 +259,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		c.wrapper.SetStartX(currentX)
 		c.wrapper.SetPhase(PhaseEscape)
 		c.wrapper.SetStop(c.hardStop)
+		c.setPhase("escape_dls", cyc)
 		escRes := dls.Solve(c.wrapper)
 		escapedX := extractX(escRes)
 		if escRes.Status == dls.StatusInterrupted {
@@ -198,28 +268,32 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			break
 		}
 		if !c.acceptable(escRes.Status, escapedX) {
-			failures++
-			c.progress.Event("cycle", map[string]any{
+			c.failures++
+			fields := map[string]any{
 				"cycle":      cyc,
 				"worker":     c.workerID,
 				"phase":      "escape_dls",
 				"status":     "rejected",
 				"dls_status": escRes.Status,
-			})
-			if failures >= c.maxFail {
+			}
+			enrich(fields, c.debugCycleFields(escapedX, escRes, "escape_dls"))
+			c.progress.Event("cycle", fields)
+			if c.failures >= c.maxFail {
 				break
 			}
 			currentX = c.perturb(currentX, cyc, restartAmp)
 			continue
 		}
-		c.progress.Event("cycle", map[string]any{
+		fields := map[string]any{
 			"cycle":      cyc,
 			"worker":     c.workerID,
 			"phase":      "escape_dls",
 			"status":     "accepted",
 			"dls_status": escRes.Status,
 			"merit":      c.wrapper.innerMerit(escapedX),
-		})
+		}
+		enrich(fields, c.debugCycleFields(escapedX, escRes, "escape_dls"))
+		c.progress.Event("cycle", fields)
 
 		// Step 1.5 (optional): power-preserving glass phase. Lock every variable
 		// except the glass dispersions (via the inner glassPhaseable), switch to
@@ -236,6 +310,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			c.wrapper.SetStartX(escapedX)
 			c.wrapper.SetPhase(PhaseGlassSolve)
 			c.wrapper.SetStop(c.hardStop)
+			c.setPhase("glass_dls", cyc)
 			glassRes := dls.Solve(c.wrapper)
 			glassX := extractX(glassRes)
 			if glassRes.Status == dls.StatusInterrupted {
@@ -252,39 +327,45 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 				endGlass := glassRes.AfterMerit
 				mainOK := endMain <= startMain*1.5 || startMain < 1e-10
 				glassImproved := endGlass < startGlass*0.99 || startGlass < 1e-10
-				if mainOK && glassImproved {
-					cleanStart = glassX
-					c.progress.Event("cycle", map[string]any{
-						"cycle":       cyc,
-						"worker":      c.workerID,
-						"phase":       "glass_dls",
-						"status":      "accepted",
-						"dls_status":  glassRes.Status,
-						"merit":       c.wrapper.innerMerit(glassX),
-						"main_before": startMain,
-						"main_after":  endMain,
-						"glass_before": startGlass,
-						"glass_after":  endGlass,
-					})
-				} else {
-					c.progress.Event("cycle", map[string]any{
-						"cycle":      cyc,
-						"worker":     c.workerID,
-						"phase":      "glass_dls",
-						"status":     "rejected",
-						"dls_status": glassRes.Status,
-						"reason":     fmt.Sprintf("mainMerit %.1f→%.1f (x%.2f) glassMerit %.4f→%.4f", startMain, endMain, endMain/startMain, startGlass, endGlass),
-					})
+			if mainOK && glassImproved {
+				cleanStart = glassX
+				fields := map[string]any{
+					"cycle":        cyc,
+					"worker":       c.workerID,
+					"phase":        "glass_dls",
+					"status":       "accepted",
+					"dls_status":   glassRes.Status,
+					"merit":        c.wrapper.innerMerit(glassX),
+					"main_before":  startMain,
+					"main_after":   endMain,
+					"glass_before": startGlass,
+					"glass_after":  endGlass,
 				}
+				enrich(fields, c.debugCycleFields(glassX, glassRes, "glass_dls"))
+				c.progress.Event("cycle", fields)
 			} else {
-				c.progress.Event("cycle", map[string]any{
+				fields := map[string]any{
 					"cycle":      cyc,
 					"worker":     c.workerID,
 					"phase":      "glass_dls",
 					"status":     "rejected",
 					"dls_status": glassRes.Status,
-				})
+					"reason":     fmt.Sprintf("mainMerit %.1f→%.1f (x%.2f) glassMerit %.4f→%.4f", startMain, endMain, endMain/startMain, startGlass, endGlass),
+				}
+				enrich(fields, c.debugCycleFields(glassX, glassRes, "glass_dls"))
+				c.progress.Event("cycle", fields)
 			}
+		} else {
+			fields := map[string]any{
+				"cycle":      cyc,
+				"worker":     c.workerID,
+				"phase":      "glass_dls",
+				"status":     "rejected",
+				"dls_status": glassRes.Status,
+			}
+			enrich(fields, c.debugCycleFields(nil, glassRes, "glass_dls"))
+			c.progress.Event("cycle", fields)
+		}
 		}
 
 		// Step 2: clean DLS. Remove escapes and converge to the true minimum.
@@ -294,6 +375,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		c.wrapper.SetStartX(cleanStartCopy)
 		c.wrapper.SetPhase(PhaseClean) // leaves the glass phase (restores the variables)
 		c.wrapper.SetStop(c.hardStop)
+		c.setPhase("clean_dls", cyc)
 		cleanRes := dls.Solve(c.wrapper)
 		trueX := extractX(cleanRes)
 		if cleanRes.Status == dls.StatusInterrupted {
@@ -302,47 +384,54 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			break
 		}
 		if !c.acceptable(cleanRes.Status, trueX) {
-			failures++
-			c.progress.Event("cycle", map[string]any{
+			c.failures++
+			fields := map[string]any{
 				"cycle":      cyc,
 				"worker":     c.workerID,
 				"phase":      "clean_dls",
 				"status":     "rejected",
 				"dls_status": cleanRes.Status,
-			})
-			if failures >= c.maxFail {
+			}
+			enrich(fields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
+			c.progress.Event("cycle", fields)
+			if c.failures >= c.maxFail {
 				break
 			}
 			currentX = c.perturb(cleanStart, cyc, restartAmp)
 			continue
 		}
-		c.progress.Event("cycle", map[string]any{
+		fields = map[string]any{
 			"cycle":      cyc,
 			"worker":     c.workerID,
 			"phase":      "clean_dls",
 			"status":     "accepted",
 			"dls_status": cleanRes.Status,
 			"merit":      c.wrapper.innerMerit(trueX),
-		})
+		}
+		enrich(fields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
+		c.progress.Event("cycle", fields)
 
 		// Post-glass retry: if clean DLS regressed vs the pre-glass escape
 		// merit, retry clean from escapedX (glass result discarded).
 		cleanMerit := c.wrapper.innerMerit(trueX)
 		if cleanMerit > escapeMerit {
-			c.progress.Event("cycle", map[string]any{
+			retryFields := map[string]any{
 				"cycle":        cyc,
 				"worker":       c.workerID,
 				"phase":        "clean_dls",
 				"status":       "retry",
 				"escape_merit": escapeMerit,
 				"clean_merit":  cleanMerit,
-			})
+			}
+			enrich(retryFields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
+			c.progress.Event("cycle", retryFields)
 			c.wrapper.SetEscapes(nil)
 			retryCopy := make([]float64, len(escapedX))
 			copy(retryCopy, escapedX)
 			c.wrapper.SetStartX(retryCopy)
 			c.wrapper.SetPhase(PhaseClean)
 			c.wrapper.SetStop(c.hardStop)
+			c.setPhase("clean_dls_retry", cyc)
 			retryRes := dls.Solve(c.wrapper)
 			retryX := extractX(retryRes)
 			if retryRes.Status == dls.StatusInterrupted {
@@ -354,14 +443,16 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 				retryMerit := c.wrapper.innerMerit(retryX)
 				if retryMerit < cleanMerit {
 					trueX = retryX
-					c.progress.Event("cycle", map[string]any{
+					retryAcceptedFields := map[string]any{
 						"cycle":      cyc,
 						"worker":     c.workerID,
 						"phase":      "clean_dls_retry",
 						"status":     "accepted",
 						"dls_status": retryRes.Status,
 						"merit":      retryMerit,
-					})
+					}
+					enrich(retryAcceptedFields, c.debugCycleFields(retryX, retryRes, "clean_dls_retry"))
+					c.progress.Event("cycle", retryAcceptedFields)
 				} else {
 					c.progress.Event("cycle", map[string]any{
 						"cycle":      cyc,
@@ -372,17 +463,19 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 					})
 				}
 			} else {
-				c.progress.Event("cycle", map[string]any{
+				retryRejectedFields := map[string]any{
 					"cycle":      cyc,
 					"worker":     c.workerID,
 					"phase":      "clean_dls_retry",
 					"status":     "rejected",
 					"dls_status": retryRes.Status,
-				})
+				}
+				enrich(retryRejectedFields, c.debugCycleFields(retryX, retryRes, "clean_dls_retry"))
+				c.progress.Event("cycle", retryRejectedFields)
 			}
 		}
 
-		failures = 0
+		c.failures = 0
 		c.escaped++
 
 		trueMerit := c.wrapper.innerMerit(trueX)

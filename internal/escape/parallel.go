@@ -63,6 +63,15 @@ type RunOptions struct {
 	// element powers fixed. The inner model must implement the glassPhaseable
 	// capability (the Optimizer does when power_solve is configured).
 	GlassPhase bool
+	// Debug enables enriched cycle events with DLS diagnostics (iterations,
+	// before/after merit, escape count, nearest distance, failures).
+	Debug bool
+	// NewPhaseLog, when non-nil, is called once per worker goroutine to create
+	// a per-worker PhaseSetter (DLS logger phase context forwarder). The returned
+	// setter is installed on the worker's Wrapper so the DLS logger receives
+	// phase updates before each sub-solve. Each call must return a fresh
+	// instance to avoid data races between workers.
+	NewPhaseLog func() PhaseSetter
 }
 
 // BuildParams derives the escape parameters from the YAML config and the
@@ -188,7 +197,10 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 			}
 			wrapper := NewWrapper(inner, workerParams)
 			wrapper.SetGlassPhase(opts.GlassPhase)
-			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop, opts.ValidateFn)
+			if opts.NewPhaseLog != nil {
+				wrapper.SetPhaseLog(opts.NewPhaseLog())
+			}
+			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop, opts.ValidateFn, opts.Debug)
 
 			x0 := inner.InitialState()
 			if seed != 0 {

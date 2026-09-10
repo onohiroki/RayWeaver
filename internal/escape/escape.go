@@ -135,6 +135,7 @@ type Wrapper struct {
 	stop          <-chan struct{}
 	glassPhase    bool // insert the power-preserving glass phase between escape and clean DLS
 	inGlassPhase  bool // the inner model is currently in the glass phase
+	phaseLog      PhaseSetter // optional DLS logger phase context forwarder
 }
 
 // NewWrapper wraps an inner dls.Model with escape-function support.
@@ -209,6 +210,14 @@ func (w *Wrapper) InitialState() []float64 {
 
 func (w *Wrapper) Options() dls.Options {
 	opts := w.inner.Options()
+	// When a per-worker PhaseSetter (debugLogger) is registered, override the
+	// inner model's logger so the DLS solver emits iter/final/damping events
+	// through the per-worker logger that carries the correct phase context.
+	if w.phaseLog != nil {
+		if l, ok := w.phaseLog.(dls.Logger); ok {
+			opts.Logger = l
+		}
+	}
 	// The escape cycle provides its own escape mechanism; the DLS internal
 	// stall perturbation would fight it.
 	opts.DisableStallEscape = true
@@ -265,6 +274,20 @@ func (w *Wrapper) SetPhase(p Phase) {
 // glassPhaseable for the phase to take effect.
 func (w *Wrapper) SetGlassPhase(enabled bool) {
 	w.glassPhase = enabled
+}
+
+// SetPhaseLog registers the DLS logger that receives phase context updates
+// before each sub-solve. nil disables phase forwarding.
+func (w *Wrapper) SetPhaseLog(ps PhaseSetter) {
+	w.phaseLog = ps
+}
+
+// SetPhase forwards the phase context to the registered PhaseSetter (when
+// non-nil). Called by the Cycle before each dls.Solve.
+func (w *Wrapper) SetPhaseCtx(phase string, cycle, worker int) {
+	if w.phaseLog != nil {
+		w.phaseLog.SetPhase(phase, cycle, worker)
+	}
 }
 
 // GlassPhaseEnabled reports whether the glass phase is enabled on this wrapper.

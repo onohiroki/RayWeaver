@@ -202,7 +202,7 @@ func TestCycleFindsTwoMinima(t *testing.T) {
 	params := BuildParams(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
-	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background(), nil, nil)
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background(), nil, nil, false)
 
 	bestX, bestMerit := cycle.Run([]float64{0.8})
 
@@ -257,7 +257,7 @@ func TestCycleTimeBudgetStopsEarly(t *testing.T) {
 	// A deadline already in the past forces the cycle to stop before the
 	// first DLS run: no escapes recorded, and StoppedByTime is set.
 	deadline := time.Now().Add(-time.Second)
-	cycle := NewCycle(wrapper, store, params, 10, 0, nil, deadline, context.Background(), nil, nil)
+	cycle := NewCycle(wrapper, store, params, 10, 0, nil, deadline, context.Background(), nil, nil, false)
 
 	cycle.Run([]float64{0.8})
 
@@ -284,7 +284,7 @@ func TestCycleNoDeadlineRunsToCompletion(t *testing.T) {
 	params := BuildParams(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
-	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background(), nil, nil)
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background(), nil, nil, false)
 
 	cycle.Run([]float64{0.8})
 
@@ -342,7 +342,7 @@ func TestCycleHardStopInterruptsMidSolve(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	hardStop := make(chan struct{})
-	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, ctx, hardStop, nil)
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, ctx, hardStop, nil, false)
 
 	start := time.Now()
 	done := make(chan struct{}, 1)

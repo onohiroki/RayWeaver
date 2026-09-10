@@ -101,6 +101,7 @@ func main() {
 	optEscapePowerSolveSurfaces := ""
 	optEscapeGlassColor := false
 	optEscapeKeepInfeasible := false
+	optEscapeDebug := false
 	if subcommand == "escape" {
 		if len(args) >= 2 && args[1] == "extract" {
 			escapeExtractMode = true
@@ -115,6 +116,7 @@ func main() {
 			fs.StringVar(&optEscapePowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs whose curvature is recomputed to hold the containing element's thin-lens power (with --power-solve; also enables the glass phase)")
 			fs.BoolVar(&optEscapeGlassColor, "glass-color", false, "with the glass phase, reverse the merit to colour-only axial/lateral chromatic aberration for the glass solve")
 			fs.BoolVar(&optEscapeKeepInfeasible, "keep-infeasible", false, "include infeasible basins in stdout YAML (default: discard)")
+			fs.BoolVar(&optEscapeDebug, "debug", false, "emit all DLS-internal JSONL events (iter, final, adaptive_damping, mode_change) plus enriched cycle diagnostics")
 			fs.Parse(args[1:])
 		}
 	}
@@ -158,7 +160,7 @@ func main() {
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
 		} else {
-			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassColor, optEscapeKeepInfeasible)
+			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassColor, optEscapeKeepInfeasible, optEscapeDebug)
 		}
 	case "import":
 		runImport(data)
@@ -551,6 +553,10 @@ Options:
                    status/signal/timed_out/interrupted omitted)
   --log FILE       write the full JSONL progress stream to FILE (same fields,
                    keys ordered as the compact form)
+  --debug          emit all DLS-internal JSONL events (iter, final,
+                   adaptive_damping, mode_change) plus enriched cycle diagnostics
+                   (iterations, before/after merit, escape count, nearest distance,
+                   failures). Combines with --verbose/--log for full visibility.
   --save FILE      save each discovered local minimum to FILE0.yaml, FILE1.yaml,
                    ... (discovery order). When a minimum is improved, the
                    current FILE N.yaml is renamed to FILE N.<version>.yaml and
