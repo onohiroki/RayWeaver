@@ -26,6 +26,14 @@ type PhaseSetter interface {
 	SetPhase(phase string, cycle, worker int)
 }
 
+// BreakdownProvider is optionally implemented by the inner model (the Optimizer)
+// to provide per-term merit decomposition at a given variable state. The escape
+// cycle calls this after the clean DLS converges so the debug output shows
+// which merit terms (fields, wavelengths) contribute most.
+type BreakdownProvider interface {
+	MeritBreakdown(x []float64) map[string]float64
+}
+
 type Cycle struct {
 	wrapper    *Wrapper
 	store      *Store
@@ -207,6 +215,13 @@ func (c *Cycle) debugCycleFields(x []float64, res dls.Result, phase string) map[
 			fpDist := c.store.FingerprintDistance(x, c.store.points[nearest])
 			if fpDist > 0 && fpDist < 1e10 {
 				fields["fingerprint_distance"] = safeF(fpDist)
+			}
+		}
+		// Per-term merit breakdown for clean phases: shows which fields/terms
+		// contribute most to the total merit after the clean DLS converges.
+		if (phase == "clean_dls" || phase == "clean_dls_retry") {
+			if bp, ok := c.wrapper.inner.(BreakdownProvider); ok {
+				fields["breakdown"] = bp.MeritBreakdown(x)
 			}
 		}
 	}
