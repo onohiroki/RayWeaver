@@ -55,6 +55,9 @@ const (
 	MeritClearAperture    = "clear_aperture"
 	MeritEdgeThickness    = "edge_thickness"
 
+	// System-level EFL merit kind (replaces the constraint-based abs_efl).
+	MeritAbsEFL = "abs_efl"
+
 	// Geometric MTF merit kinds (Phase 1: direct complex sum).
 	// These evaluate the sagittal/tangential MTF at a specified spatial frequency.
 	// The residual is hinge-style: max(0, target - MTF), so only under-performance is penalized.
@@ -305,6 +308,8 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 		return evaluateClearAperture(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
 	case MeritEdgeThickness:
 		return evaluateEdgeThickness(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
+	case MeritAbsEFL:
+		return evaluateAbsEFL(surfaces, gc)
 	default:
 		return 0
 	}
@@ -393,6 +398,15 @@ func evaluateLongitudinalColor(wl1, wl2 float64, surfaces []types.Surface, gc *g
 	pr1 := paraxial.Compute(sys, wl1, gc, 0, nil)
 	pr2 := paraxial.Compute(sys, wl2, gc, 0, nil)
 	return pr2.FocalLength - pr1.FocalLength
+}
+
+// evaluateAbsEFL returns the absolute effective focal length of the system.
+// Used as a merit term with a target value (e.g. 50.0) so the optimizer
+// penalises |EFL − target|².
+func evaluateAbsEFL(surfaces []types.Surface, gc *glass.Catalog) float64 {
+	sys := types.System{Surfaces: surfaces}
+	pr := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
+	return math.Abs(pr.FocalLength)
 }
 
 // glass_role tuning constants: the combined vd/nd residual maps an Abbe-number
