@@ -486,6 +486,70 @@ the built-in default. The contribution is `weight·value²` (e.g. a
 towards a region where the term can be evaluated without exploding the merit.
 Successful terms are unaffected, so existing merit values are unchanged.
 
+### Glass attraction (`optimization.glass_attraction`)
+
+A soft-min potential field that pulls nd/vd glass variables toward the nearest
+real catalog glass during optimisation. The attraction supplements the glass
+hull: the hull prevents unphysical glass, the attraction actively pulls toward
+real glass.
+
+```yaml
+optimization:
+  glass_attraction:
+    enabled: true
+    kernel: distance            # distance (default) | gaussian
+    sigma_nd: 0.03              # gaussian kernel width (normalised)
+    sigma_vd: 0.03
+    weight_from: 0.0            # weight at anchor_from
+    weight_to: 1.0              # weight at anchor_to
+    metric: merit_ratio         # iteration | run_iteration | merit_ratio
+    anchor_from: 1.0            # metric value at t=0
+    anchor_to: 0.2              # metric value at t=1
+    curve: linear               # linear | sigmoid | step
+    sensitivity_weighted: true  # per-glass vd sensitivity weighting (default false)
+    sensitivity_metric: elasticity  # elasticity (only mode currently implemented)
+    sensitivity_ema: 0.6        # EMA smoothing across iterations
+    sensitivity_power: 1.0      # exponent for scale = (s/s_ref)^p
+    sensitivity_ref: mean       # mean | max
+    sensitivity_scale_min: 0.1
+    sensitivity_scale_max: 4.0
+```
+
+**How it works:**
+
+1. At startup, `BuildCatalogField` collects every glass in the catalog with
+   valid nd/vd and normalises them to the default glass range
+   (nd ∈ [1.413, 2.154], vd ∈ [16.48, 101.0]).
+
+2. Each DLS iteration, the attraction weight `w(t)` is interpolated along the
+   curve between `weight_from` (at `anchor_from`) and `weight_to` (at
+   `anchor_to`). The metric is normalised to [0,1] by the anchor range.
+
+3. For each glass variable pair (nd_i, vd_i), the soft-min potential
+   `F = min_j φ_j(r_j)` is computed where `r_j` is the normalised distance
+   to catalog glass j. The `distance` kernel uses `φ = r²`; the `gaussian`
+   kernel uses `φ = 1 − exp(−r²/2σ²)`.
+
+4. The contribution to the merit is `w(t) · scale_i · F` where `scale_i` is
+   the per-glass sensitivity scale (default 1.0 when sensitivity is disabled).
+
+5. **Sensitivity weighting** (when `sensitivity_weighted: true`): the vd
+   elasticity `|∂M_optical/∂vd_i| · vd_i / (M_optical + ε)` is computed via
+   forward finite differences of the optical merit (excluding attraction and
+   hull). EMA-smoothed across iterations, normalised to the mean (or max),
+   and raised to the power `sensitivity_power`. Glasses with higher merit
+   sensitivity to their Abbe number get stronger attraction.
+
+**Escape integration:** glass attraction is active during escape sub-solves.
+The `merit_ratio` metric (default for escape) uses the optical-only merit
+to avoid self-reference. The weight ramp persists per worker across escape
+cycles via `run_iteration` or `merit_ratio`.
+
+**Diagnostics:** `opt_results.glass_attraction` (optimize only) carries
+`weight` (final attraction weight) and per-pair `name`, `nd`, `vd`,
+`nearest_key`, `nearest_nd`, `nearest_vd`, `distance`, `scale`.
+Displayed by `list optimization` when present.
+
 ## Method
 
 The damped least-squares algorithm, Jacobian construction, constraint handling

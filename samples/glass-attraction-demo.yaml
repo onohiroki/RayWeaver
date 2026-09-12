@@ -1,0 +1,237 @@
+metadata:
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
+  notes: |
+    Self-contained Cooke triplet with a 12-glass inline real-glass catalog.
+    S3/S6 nd/vd variables, glass_attraction enabled. 3 fields (0/16/24 deg),
+    d-line only. Input of glass-attraction-demo.bash.
+glass_catalog:
+  entries:
+  - name: "N-BK7"
+    nd: 1.5168
+    vd: 64.17
+  - name: "N-SK16"
+    nd: 1.62041
+    vd: 60.32
+  - name: "SK18"
+    nd: 1.63854
+    vd: 55.42
+  - name: "N-SSK8"
+    nd: 1.61821
+    vd: 49.61
+  - name: "N-BAF10"
+    nd: 1.67003
+    vd: 47.11
+  - name: "N-SF2"
+    nd: 1.64769
+    vd: 33.82
+  - name: "SF12"
+    nd: 1.64831
+    vd: 33.84
+  - name: "N-SF5"
+    nd: 1.67268
+    vd: 32.21
+  - name: "N-SF6"
+    nd: 1.80518
+    vd: 25.43
+  - name: "N-SF8"
+    nd: 1.68893
+    vd: 31.16
+  - name: "F2"
+    nd: 1.62004
+    vd: 36.37
+  - name: "LF5"
+    nd: 1.58144
+    vd: 40.85
+
+# The real US2645157 Cooke triplet, but the negative-power element (S3) carries
+# a crown (SK18 values) and the positive-power element (S6) a flint (SF12
+# values) — the flint/crown arrangement is swapped. S3/S6 are inline model
+# glasses (no catalogue key) so the glass variables touch only their own
+# surfaces.
+chief:
+  stop_surface: 4
+  pass_through:
+    surface: 4
+  fields:
+  - angle: 0.0
+    direction: [ 0, 1 ]
+  - angle: 16.0
+    direction: [ 0, 1 ]
+  - angle: 24.0
+    direction: [ 0, 1 ]
+  reference_surface: 8
+  reference_wavelength: 0.0005876
+  num_rays: 512
+  grid_type: hex
+  dump_map: true
+
+optimization:
+  method: dls
+  max_iter: 300
+  mu: 0.01
+  tol: 1e-4
+  epsilon: 1e-4
+  num_rays: 256
+  mu_con_max: 50.0
+  aperture_margin: 1.0
+  variables:
+  - name: s3_nd
+    target:
+      type: surface
+      id: 3
+      param: nd
+    min: 1.4
+    max: 1.9
+    active: true
+  - name: s3_vd
+    target:
+      type: surface
+      id: 3
+      param: vd
+    min: 20.0
+    max: 80.0
+    active: true
+  - name: s6_nd
+    target:
+      type: surface
+      id: 6
+      param: nd
+    min: 1.4
+    max: 1.9
+    active: true
+  - name: s6_vd
+    target:
+      type: surface
+      id: 6
+      param: vd
+    min: 20.0
+    max: 80.0
+    active: true
+  glass_attraction:
+    enabled: true
+    weight_from: 1.0
+    weight_to: 15.0
+    metric: iteration
+    curve: linear
+    anchor_from: 1
+    anchor_to: 100
+    kernel: distance
+    sigma_nd: 0.1
+    sigma_vd: 10.0
+    sensitivity_weighted: true
+    sensitivity_ema: 0.6
+    sensitivity_power: 1.0
+    sensitivity_ref: mean
+
+configs:
+- id: 0
+  name: nominal
+  active: true
+  fields:
+  - id: 0
+    angle_deg: 0.0
+    weight: 1.0
+  - id: 1
+    angle_deg: 16.0
+    weight: 1.0
+  - id: 2
+    angle_deg: 24.0
+    weight: 0.5
+  wavelengths:
+  - id: 0
+    value: 0.0004358
+    weight: 1.0
+  - id: 1
+    value: 0.0004861
+    weight: 1.0
+  - id: 2
+    value: 0.0005876
+    weight: 1.0
+  - id: 3
+    value: 0.0006563
+    weight: 1.0
+  surfaces:
+  - id: 1
+    type: "sphere"
+    radius: 10.2871491742
+    thickness: 1.524
+    material: { key: N-BK7 }
+    diameter: 10.0
+  - id: 2
+    type: "sphere"
+    radius: -239.3967954752
+    thickness: 2.3368
+    material: AIR
+    diameter: 10.0
+  - id: 3
+    type: "sphere"
+    radius: -12.826987173
+    thickness: 0.508
+    material: { nd: 1.63854, vd: 55.42 }
+    diameter: 6.0
+  - id: 4
+    type: "sphere"
+    radius: 10.5917184406
+    thickness: 1.4986
+    material: AIR
+    diameter: 6.0
+  - id: 5
+    type: "sphere"
+    radius: 0.0
+    thickness: 1.016
+    material: AIR
+    diameter: 3.7825297358
+  - id: 6
+    type: "sphere"
+    radius: 61.8456294200
+    thickness: 1.524
+    material: { nd: 1.64831, vd: 33.84 }
+    diameter: 6.0
+  - id: 7
+    type: "sphere"
+    radius: -10.0074859032
+    thickness: 21.36695183553
+    material: AIR
+    diameter: 6.0
+  - id: 8
+    type: "sphere"
+    radius: 0.0
+    thickness: 0.0
+    material: AIR
+  merit:
+    type: ""
+    terms:
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms
+      field: 1
+      wavelength: 0.0005876
+      weight: 1.0
+    - kind: spot_rms
+      field: 2
+      wavelength: 0.0005876
+      weight: 0.5
+    - kind: lateral_color
+      field: 0
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 1.0
+    - kind: lateral_color
+      field: 1
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 1.0
+    - kind: lateral_color
+      field: 2
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 0.5
+    - kind: longitudinal_color
+      wavelength: 0.0004358
+      wavelength2: 0.0006563
+      weight: 1.0
