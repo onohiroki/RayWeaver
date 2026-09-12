@@ -324,6 +324,7 @@ type OptimizationResultSummary struct {
 	Interrupted      bool               `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
 	Reason           string             `json:"reason,omitempty" yaml:"reason,omitempty"`
 	GlassAttraction  *types.GlassAttractionResult `json:"glass_attraction,omitempty" yaml:"glass_attraction,omitempty"`
+	Snap             *types.SnapResult            `json:"snap,omitempty" yaml:"snap,omitempty"`
 }
 
 // optimizationListOutput is the structured (yaml/json) shape of
@@ -3043,6 +3044,7 @@ func listOptimization(input types.Input, output types.Output, format string) {
 			Interrupted:      or.Interrupted,
 			Reason:           or.Reason,
 			GlassAttraction:  or.GlassAttraction,
+			Snap:             or.Snap,
 		}
 	}
 
@@ -3084,6 +3086,17 @@ func listOptimization(input types.Input, output types.Output, format string) {
 				p = append(p, propRow{
 					Name:  fmt.Sprintf("  %s", pair.Name),
 					Value: fmt.Sprintf("nd=%.5f vd=%.2f → %s (nd=%.5f vd=%.2f, d=%.4f, scale=%.3f)", pair.ND, pair.VD, pair.NearestKey, pair.NearestND, pair.NearestVD, pair.Distance, pair.Scale),
+				})
+			}
+		}
+		if s := optResult.Snap; s != nil {
+			p = append(p, propRow{Name: "Snap Before Merit", Value: fmt.Sprintf("%.6e", s.BeforeMerit)})
+			p = append(p, propRow{Name: "Snap After Merit", Value: fmt.Sprintf("%.6e", s.AfterMerit)})
+			p = append(p, propRow{Name: "Snap Cost", Value: fmt.Sprintf("%+.6e (%.3f%%)", s.Cost, s.CostPct)})
+			for _, pair := range s.Pairs {
+				p = append(p, propRow{
+					Name:  fmt.Sprintf("  S%d", pair.SurfaceID),
+					Value: fmt.Sprintf("nd=%.5f vd=%.3f → %s (nd=%.5f vd=%.3f, d=%.4f)", pair.FromND, pair.FromVD, pair.Name, pair.ToND, pair.ToVD, pair.Distance),
 				})
 			}
 		}

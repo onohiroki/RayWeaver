@@ -1005,6 +1005,29 @@ type GlassAttractionResult struct {
 	Pairs  []GlassAttractionPairResult `yaml:"pairs,omitempty"`
 }
 
+// SnapPairResult reports one nd/vd glass variable snapped to the nearest real
+// catalog glass by `optimize snap`.
+type SnapPairResult struct {
+	SurfaceID int     `yaml:"surface_id"`
+	Name      string  `yaml:"name,omitempty"` // catalog glass name
+	FromND    float64 `yaml:"from_nd"`
+	FromVD    float64 `yaml:"from_vd"`
+	ToND      float64 `yaml:"to_nd"`
+	ToVD      float64 `yaml:"to_vd"`
+	Distance  float64 `yaml:"distance"` // normalised distance before snapping
+}
+
+// SnapResult reports the outcome of `optimize snap`: each declared nd/vd glass
+// variable replaced by its nearest real catalog glass, and the resulting change
+// in the (attraction/hull-excluded) optical merit.
+type SnapResult struct {
+	BeforeMerit float64         `yaml:"before_merit"`
+	AfterMerit  float64         `yaml:"after_merit"`
+	Cost        float64         `yaml:"cost"`     // after - before
+	CostPct     float64         `yaml:"cost_pct"` // 100*(after-before)/before
+	Pairs       []SnapPairResult `yaml:"pairs,omitempty"`
+}
+
 type OptimizationResult struct {
 	Status      string                  `yaml:"status"`
 	Iterations  int                     `yaml:"iterations"`
@@ -1026,6 +1049,9 @@ type OptimizationResult struct {
 	// GlassAttraction reports per-pair nearest real-glass diagnostics
 	// (present only when glass_attraction is enabled).
 	GlassAttraction *GlassAttractionResult `yaml:"glass_attraction,omitempty"`
+	// Snap reports the discrete nd/vd-to-catalog result (present only for
+	// the `optimize snap` subcommand).
+	Snap *SnapResult `yaml:"snap,omitempty"`
 }
 
 // ConstraintMeasurement records the final measured value and residual of one

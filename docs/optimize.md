@@ -7,7 +7,11 @@ updated surface parameters.
 
 ```
 rayweave optimize [--verbose] [--log FILE] [--glass-dir DIR] [--exclude-param LIST] < input.yaml
+rayweave optimize snap [--glass-dir DIR] < optimized.yaml
 ```
+
+`optimize snap` is a sub-subcommand (see [Snap to catalog](#snap-to-catalog-optimize-snap))
+that does not run DLS.
 
 ## Options
 
@@ -25,7 +29,8 @@ rayweave optimize [--verbose] [--log FILE] [--glass-dir DIR] [--exclude-param LI
 (CLI/YAML rule); `--exclude-param` removes the named targets from the echoed
 `optimization.variables`; `--verbose` / `--log` are run-stream flags.
 `--central-diff`, `--bfgs`, `--auto-scale` are written back into the
-output's `optimization` section.
+output's `optimization` section. `optimize snap` accepts only `--glass-dir`
+(the snap settings are read from the input's `optimization`/`glass_catalog`).
 
 ## Input — single-config mode
 
@@ -549,6 +554,54 @@ cycles via `run_iteration` or `merit_ratio`.
 `weight` (final attraction weight) and per-pair `name`, `nd`, `vd`,
 `nearest_key`, `nearest_nd`, `nearest_vd`, `distance`, `scale`.
 Displayed by `list optimization` when present.
+
+## Snap to catalog (`optimize snap`)
+
+```
+rayweave optimize snap [--glass-dir DIR] < optimized.yaml
+```
+
+A sub-subcommand that performs a **discrete** glass selection without running
+DLS. It reads a document (typically the output of `optimize` or of
+`escape extract`), replaces every **declared nd/vd glass variable** with the
+nearest real catalog glass in normalised (nd, vd) space, and reports the
+resulting change in the **optical merit** (the glass-attraction and glass-hull
+penalties are excluded, so the number is the raw cost of discretising the
+glass). It is a pure transform: the DLS solver is never invoked, other
+variables are left at their input values, and the substitution is
+deterministic.
+
+Snap targets are exactly the surfaces carrying a declared `nd`/`vd` variable
+(the same pairs the glass attraction uses) — the command does not touch
+un-declared glass surfaces or non-glass variables. Each snapped surface is
+written back as an inline model glass holding the catalog glass's nd/vd (the
+chosen catalog glass is named in the report).
+
+Output (in addition to the updated surfaces):
+
+```yaml
+opt_results:
+  status: snapped
+  snap:
+    before_merit: 2.088717e-03
+    after_merit: 1.386312e-01
+    cost: 1.365425e-01        # after - before
+    cost_pct: 6537.15          # 100*(after-before)/before
+    pairs:
+      - surface_id: 3
+        name: LF5              # chosen catalog glass
+        from_nd: 1.56049
+        from_vd: 34.630
+        to_nd: 1.58144
+        to_vd: 40.850
+        distance: 0.0788       # normalised distance before snapping
+```
+
+A large `cost_pct` is a warning that the continuous optimum was far from any
+real glass and that snapping would materially degrade the design; a `cost_pct`
+near zero means the glasses were already effectively on the catalog. The
+command exits non-zero when the input declares no nd/vd glass variables or the
+catalog cannot be resolved.
 
 ## Method
 

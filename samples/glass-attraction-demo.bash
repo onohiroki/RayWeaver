@@ -18,15 +18,21 @@ set -uo pipefail
 #   4. chief                    : spot RMS per field, base vs attraction
 #   5. gates                    : roles preserved + glasses near real catalog
 #
+# Option:
+#   --snap    also run `optimize snap` on both results and report the optical
+#             merit cost of discretising each design onto the real catalog
+#
 # Dependencies: rayweave + POSIX shell utilities (sed, grep, tee) only.
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CLEAN=false
+SNAP=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --clean) CLEAN=true; shift ;;
+    --snap) SNAP=true; shift ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
@@ -39,12 +45,16 @@ BASE_LOG="$OUTDIR/glass-attraction-base-log.jsonl"
 ATTR_LOG="$OUTDIR/glass-attraction-attr-log.jsonl"
 RESULT_FILE="$OUTDIR/glass-attraction-demo-result.txt"
 BASE_YAML="$OUTDIR/.glass-attraction-base.yaml"
+BASE_SNAP="$OUTDIR/glass-attraction-base-snap.yaml"
+ATTR_SNAP="$OUTDIR/glass-attraction-attr-snap.yaml"
 
 # Clean-only mode
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
   rm -f "$BASE_RESULT" "$ATTR_RESULT" "$BASE_LOG" "$ATTR_LOG" "$BASE_YAML"
+  rm -f "$BASE_SNAP" "$ATTR_SNAP"
   rm -f "$OUTDIR"/glass-attraction-base-stderr.txt "$OUTDIR"/glass-attraction-attr-stderr.txt
+  rm -f "$OUTDIR"/glass-attraction-base-snap-stderr.txt "$OUTDIR"/glass-attraction-attr-snap-stderr.txt
   rm -f "$OUTDIR"/glass-attraction-init.png "$OUTDIR"/glass-attraction-base.png "$OUTDIR"/glass-attraction-attr.png
   rm -f "$RESULT_FILE"
   echo "  Removed generated files"
@@ -177,7 +187,7 @@ gate_all_near() { $RAYWEAVE query --gate "d < 0.1" --set d="$DIST_S3" < /dev/nul
 gate_rms() { $RAYWEAVE query --gate "a < b" --set a="$RMS_ONAXIS_ATTR" --set b=0.05 < /dev/null > /dev/null 2>&1; }
 
 check_gate "Base S6 is a floating (non-physical) glass (dist=$DIST_BASE_S6 > 0.1)" gate_base_far
-check_gate "Attraction S6 snapped onto a real glass (dist=$DIST_S6 < 0.05)" gate_attr_near
+check_gate "Attraction S6 is near a real glass (dist=$DIST_S6 < 0.05)" gate_attr_near
 check_gate "Attraction S3 is a flint (vd=$VD3_ATTR < 45)" gate_s3_flint
 check_gate "Attraction S6 is a crown (vd=$VD6_ATTR > 45)" gate_s6_crown
 check_gate "Both attracted glasses near real catalog (d3=$DIST_S3, d6=$DIST_S6 < 0.1)" gate_all_near
@@ -189,6 +199,33 @@ if [ "$FAIL" = 1 ]; then
 fi
 echo "  >>> All gates passed" | tee -a "$RESULT_FILE"
 echo
+
+# ── Optional: discrete snap to the real catalog (--snap) ──
+if [ "$SNAP" = true ]; then
+  echo "=== optimize snap (discrete glass selection) ==="
+  $RAYWEAVE optimize snap < "$BASE_RESULT" > "$BASE_SNAP" 2> "$OUTDIR/glass-attraction-base-snap-stderr.txt"
+  $RAYWEAVE optimize snap < "$ATTR_RESULT" > "$ATTR_SNAP" 2> "$OUTDIR/glass-attraction-attr-snap-stderr.txt"
+  snap_field() { $RAYWEAVE query -r "opt_results.snap.$2" < "$1"; }
+  {
+    printf "  %-11s %13s %13s %13s %10s\n" "phase" "before merit" "after merit" "cost" "cost %"
+    printf "  %-11s %13s %13s %13s %10s\n" "-----" "------------" "-----------" "----" "------"
+    for spec in "base:$BASE_RESULT:$BASE_SNAP" "attraction:$ATTR_RESULT:$ATTR_SNAP"; do
+      label="${spec%%:*}"; rest="${spec#*:}"; snap="${rest#*:}"
+      printf "  %-11s %13.6e %13.6e %+13.6e %9.3f%%\n" "$label" \
+        "$(snap_field "$snap" before_merit)" "$(snap_field "$snap" after_merit)" \
+        "$(snap_field "$snap" cost)" "$(snap_field "$snap" cost_pct)"
+    done
+    echo
+  } | tee -a "$RESULT_FILE"
+  echo "  Snap pairs (base):"
+  $RAYWEAVE list optimization --format table < "$BASE_SNAP" 2>/dev/null | grep -A 5 "Snap Before" || true
+  echo "  Snap pairs (attraction):"
+  $RAYWEAVE list optimization --format table < "$ATTR_SNAP" 2>/dev/null | grep -A 5 "Snap Before" || true
+  echo "  Snap replaces each declared glass with its nearest real catalog entry; the"
+  echo "  cost is the (attraction/hull-excluded) optical-merit increase. A large"
+  echo "  cost% means that continuous optimum was far from any real glass."
+  echo
+fi
 
 echo "=== PNG diagrams ==="
 $RAYWEAVE chief --clear-aperture --ray-fan < "$YAML" 2>/dev/null \

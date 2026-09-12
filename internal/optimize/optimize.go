@@ -899,6 +899,54 @@ func (o *Optimizer) GlassAttractionDiagnostics(x []float64) *types.GlassAttracti
 	return res
 }
 
+// OpticalMerit evaluates the merit at x excluding the glass-attraction and
+// glass-hull penalties. Used to compare states on optics alone (e.g. the
+// before/after cost of snapping to real glass).
+func (o *Optimizer) OpticalMerit(x []float64) float64 {
+	return o.evaluateOpticalMerit(x)
+}
+
+// HasGlassPairs reports whether any declared nd/vd glass variable pair exists.
+func (o *Optimizer) HasGlassPairs() bool { return len(o.hullPairs) > 0 }
+
+// SnapVariables replaces each declared nd/vd glass variable in x with the
+// nearest real catalog glass (normalised nd/vd distance) and returns the
+// snapped vector plus a per-pair record. The catalog is taken from the
+// optimizer's glass catalog; x is not mutated.
+func (o *Optimizer) SnapVariables(x []float64) ([]float64, []types.SnapPairResult) {
+	if o.gc == nil || len(o.hullPairs) == 0 {
+		return x, nil
+	}
+	field := glass.BuildCatalogField(o.gc)
+	if field.CatalogFieldCount() == 0 {
+		return x, nil
+	}
+	snapped := make([]float64, len(x))
+	copy(snapped, x)
+	pairs := make([]types.SnapPairResult, 0, len(o.hullPairs))
+	for _, pair := range o.hullPairs {
+		fromND := x[pair.ndIndex]
+		fromVD := x[pair.vdIndex]
+		key, toND, toVD, r2 := glass.NearestNamed(field, fromND, fromVD)
+		snapped[pair.ndIndex] = toND
+		snapped[pair.vdIndex] = toVD
+		sid := 0
+		if pair.ndIndex < len(o.variables) {
+			sid = o.variables[pair.ndIndex].SurfaceID
+		}
+		pairs = append(pairs, types.SnapPairResult{
+			SurfaceID: sid,
+			Name:      key,
+			FromND:    fromND,
+			FromVD:    fromVD,
+			ToND:      toND,
+			ToVD:      toVD,
+			Distance:  math.Sqrt(r2),
+		})
+	}
+	return snapped, pairs
+}
+
 // scheduledTerm is one effective term of a config with the mode weight folded
 // into its scale (1.0 when no schedule is active).
 type scheduledTerm struct {

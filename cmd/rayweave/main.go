@@ -77,17 +77,26 @@ func main() {
 	optGlassColor := false
 	subcommand := args[0]
 	currentCmd = subcommand
+	optSnapMode := false
 	if subcommand == "optimize" {
-		fs := flag.NewFlagSet("optimize", flag.ContinueOnError)
-		fs.BoolVar(&optVerbose, "verbose", false, "print per-iteration progress to stderr")
-		fs.StringVar(&optLogFile, "log", "", "write per-iteration progress to file (JSONL)")
-		fs.StringVar(&optGlassDir, "glass-dir", "", "AGF glass catalog directory")
-		fs.StringVar(&optExcludeParams, "exclude-param", "", "comma-separated target param names to drop from the optimization variables (e.g. conic,a4,a6)")
-		fs.BoolVar(&optPowerSolve, "power-solve", false, "preserve each listed element's thin-lens power (hard solve) while only the glass dispersions are free (implies --glass-color)")
-		fs.StringVar(&optPowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs whose curvature is recomputed to hold the containing element's thin-lens power at its initial value (with --power-solve)")
-		fs.BoolVar(&optGlassColor, "glass-color", false, "glass-only chromatic optimisation: auto-generate nd/vd variables for every refractive element and a merit of only longitudinal_color + lateral_color, optionally with power-solve")
-		fs.Parse(args[1:])
-		args = append([]string{"optimize"}, fs.Args()...)
+		if len(args) >= 2 && args[1] == "snap" {
+			optSnapMode = true
+			fs := flag.NewFlagSet("optimize snap", flag.ContinueOnError)
+			fs.StringVar(&optGlassDir, "glass-dir", "", "AGF glass catalog directory")
+			fs.Parse(args[2:])
+			args = append([]string{"optimize"}, fs.Args()...)
+		} else {
+			fs := flag.NewFlagSet("optimize", flag.ContinueOnError)
+			fs.BoolVar(&optVerbose, "verbose", false, "print per-iteration progress to stderr")
+			fs.StringVar(&optLogFile, "log", "", "write per-iteration progress to file (JSONL)")
+			fs.StringVar(&optGlassDir, "glass-dir", "", "AGF glass catalog directory")
+			fs.StringVar(&optExcludeParams, "exclude-param", "", "comma-separated target param names to drop from the optimization variables (e.g. conic,a4,a6)")
+			fs.BoolVar(&optPowerSolve, "power-solve", false, "preserve each listed element's thin-lens power (hard solve) while only the glass dispersions are free (implies --glass-color)")
+			fs.StringVar(&optPowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs whose curvature is recomputed to hold the containing element's thin-lens power at its initial value (with --power-solve)")
+			fs.BoolVar(&optGlassColor, "glass-color", false, "glass-only chromatic optimisation: auto-generate nd/vd variables for every refractive element and a merit of only longitudinal_color + lateral_color, optionally with power-solve")
+			fs.Parse(args[1:])
+			args = append([]string{"optimize"}, fs.Args()...)
+		}
 	}
 
 	// Escape has two sub-subcommands: run (default) and extract.
@@ -155,7 +164,11 @@ func main() {
 	case "vignette":
 		runVignette(data)
 	case "optimize":
-		runOptimize(data, optVerbose, optLogFile, optGlassDir, optExcludeParams, optPowerSolve, optPowerSolveSurfaces, optGlassColor)
+		if optSnapMode {
+			runOptimizeSnap(data, optGlassDir)
+		} else {
+			runOptimize(data, optVerbose, optLogFile, optGlassDir, optExcludeParams, optPowerSolve, optPowerSolveSurfaces, optGlassColor)
+		}
 	case "escape":
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
@@ -456,8 +469,15 @@ before/after). Pipe into trace then plot:
 `)
 	case "optimize":
 		fmt.Print(`Usage: rayweave optimize [--verbose] [--log FILE] < input.yaml
+       rayweave optimize snap [--glass-dir DIR] < optimized.yaml
 
 DLS (Damped Least Squares) optimization of lens surfaces.
+
+Sub-subcommand:
+  snap             replace every declared nd/vd glass variable with the nearest
+                   real catalog glass (no DLS) and report the optical-merit cost.
+                   Intended for an already-optimized document (e.g. the output
+                   of 'optimize' or 'escape extract').
 
 Options:
   --verbose        print per-iteration progress to stderr (JSONL)
