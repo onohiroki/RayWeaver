@@ -9,11 +9,11 @@
   push to GitHub (`origin`). Work stays on `develop` (gitea `private` unless told
   otherwise).
 - Re-timestamping commits and force-pushing require explicit user approval.
-- **Do not monitor long `escape` runs.** A full escape optimisation is expected
-  to run for hours. Launch it in the background (`nohup ... &`, redirect to a
-  log) and then leave it alone — do not poll the process, tail the log, watch
-  the saved minima, or block on it. Report the launch command / PID / log path
-  and stop, unless the user explicitly asks for status.
+- **Long `escape` runs — do not monitor.** At launch, print a brief summary of
+  the optimisation conditions (merit, variable count, escape cycles, timeout,
+  etc.) plus the PID, save directory and log path. Then leave the process
+  alone — do not poll, tail the log, watch saved minima, or block on it.
+  Report progress or results only when the user explicitly asks.
 
 ## Build & run
 
