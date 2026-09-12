@@ -74,7 +74,7 @@ func main() {
 	optExcludeParams := ""
 	optPowerSolve := false
 	optPowerSolveSurfaces := ""
-	optGlassColor := false
+	optGlassVariables := false
 	subcommand := args[0]
 	currentCmd = subcommand
 	optSnapMode := false
@@ -91,9 +91,9 @@ func main() {
 			fs.StringVar(&optLogFile, "log", "", "write per-iteration progress to file (JSONL)")
 			fs.StringVar(&optGlassDir, "glass-dir", "", "AGF glass catalog directory")
 			fs.StringVar(&optExcludeParams, "exclude-param", "", "comma-separated target param names to drop from the optimization variables (e.g. conic,a4,a6)")
-			fs.BoolVar(&optPowerSolve, "power-solve", false, "preserve each listed element's thin-lens power (hard solve) while only the glass dispersions are free (implies --glass-color)")
+			fs.BoolVar(&optPowerSolve, "power-solve", false, "preserve each listed element's thin-lens power (hard solve) while only the glass dispersions are free")
 			fs.StringVar(&optPowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs whose curvature is recomputed to hold the containing element's thin-lens power at its initial value (with --power-solve)")
-			fs.BoolVar(&optGlassColor, "glass-color", false, "glass-only chromatic optimisation: auto-generate nd/vd variables for every refractive element and a merit of only longitudinal_color + lateral_color, optionally with power-solve")
+			fs.BoolVar(&optGlassVariables, "glass-variables", false, "auto-generate nd/vd optimization variables for every refractive lens element (the merit is left unchanged)")
 			fs.Parse(args[1:])
 			args = append([]string{"optimize"}, fs.Args()...)
 		}
@@ -108,7 +108,7 @@ func main() {
 	optEscapeSaveFile := ""
 	optEscapePowerSolve := false
 	optEscapePowerSolveSurfaces := ""
-	optEscapeGlassColor := false
+	optEscapeGlassVariables := false
 	optEscapeKeepInfeasible := false
 	optEscapeDebug := false
 	if subcommand == "escape" {
@@ -123,7 +123,7 @@ func main() {
 			fs.StringVar(&optEscapeSaveFile, "save", "", "save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...")
 			fs.BoolVar(&optEscapePowerSolve, "power-solve", false, "insert the power-preserving glass phase between each escape and clean DLS (holds element powers fixed while the glasses are rebalanced)")
 			fs.StringVar(&optEscapePowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs whose curvature is recomputed to hold the containing element's thin-lens power (with --power-solve; also enables the glass phase)")
-			fs.BoolVar(&optEscapeGlassColor, "glass-color", false, "with the glass phase, reverse the merit to colour-only axial/lateral chromatic aberration for the glass solve")
+			fs.BoolVar(&optEscapeGlassVariables, "glass-variables", false, "auto-generate nd/vd optimization variables for every refractive lens element (the merit is left unchanged)")
 			fs.BoolVar(&optEscapeKeepInfeasible, "keep-infeasible", false, "include infeasible basins in stdout YAML (default: discard)")
 			fs.BoolVar(&optEscapeDebug, "debug", false, "emit all DLS-internal JSONL events (iter, final, adaptive_damping, mode_change) plus enriched cycle diagnostics")
 			fs.Parse(args[1:])
@@ -167,13 +167,13 @@ func main() {
 		if optSnapMode {
 			runOptimizeSnap(data, optGlassDir)
 		} else {
-			runOptimize(data, optVerbose, optLogFile, optGlassDir, optExcludeParams, optPowerSolve, optPowerSolveSurfaces, optGlassColor)
+			runOptimize(data, optVerbose, optLogFile, optGlassDir, optExcludeParams, optPowerSolve, optPowerSolveSurfaces, optGlassVariables)
 		}
 	case "escape":
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
 		} else {
-			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassColor, optEscapeKeepInfeasible, optEscapeDebug)
+			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassVariables, optEscapeKeepInfeasible, optEscapeDebug)
 		}
 	case "import":
 		runImport(data)

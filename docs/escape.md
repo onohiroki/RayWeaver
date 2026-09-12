@@ -19,16 +19,16 @@ rayweave escape extract --index N < escape-output.yaml
 | `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `escaped`, `recorded`, `best_merit`, `cycles`, `escapes`, `minima`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves) |
 | `--log FILE` | write the **full** JSONL progress stream to `FILE` (same fields as before — full-precision floats, RFC3339 `time`, `elapsed` seconds, `status`/`signal`/`timed_out`/`interrupted` included — with keys in the same fixed order followed by the remaining keys alphabetically) |
 | `--save FILE` | save every discovered local minimum to `FILE0.yaml`, `FILE1.yaml`, … (see [Saving minima](#saving-minima)) |
-| `--power-solve` | insert the power-preserving glass phase between each escape and clean DLS: locks every variable except the glass dispersions, routes the merit to a colour-only objective, and holds the element powers fixed |
+| `--power-solve` | insert the power-preserving glass phase between each escape and clean DLS: locks every variable except the glass dispersions, emphasises the config's chromatic merit terms (scaled by `power_solve.color_scale`), keeps a cheap geometric guardrail, and holds the element powers fixed |
 | `--power-solve-surfaces A,B,…` | surface IDs whose curvature is recomputed to hold the containing element's thin-lens power (with `--power-solve`) |
-| `--glass-color` | with the glass phase, reverse the merit to colour-only axial/lateral chromatic aberration |
+| `--glass-variables` | auto-generate nd/vd variables for every refractive element (the merit is left unchanged) |
 | `--index N` | (with `escape extract`) local minimum index to extract |
 | `--keep-infeasible` | include `escape_result.infeasible_basins[]` in stdout YAML (default: discard; `--save` never includes infeasible basins) |
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`
 (CLI/YAML rule); `--save` records the per-minimum files in
 `escape_result.minima[].file`; `--verbose` / `--log` are run-stream flags;
-`--power-solve` / `--power-solve-surfaces` / `--glass-color` echo the effective
+`--power-solve` / `--power-solve-surfaces` echo the effective
 `power_solve` config into the output.
 
 DLS-internal events are never emitted during escape: the per-iteration `iter`,
@@ -153,14 +153,29 @@ optimization:
 During the `glass_dls` phase the Optimizer (via its optional `glassPhaseable`
 capability, kept decoupled from the escape package) locks **every variable
 except the glass dispersions (nd/vd)** to its current value — DLS keeps a
-`Min == Max` variable fixed — routes the merit to a **colour-only** objective
-(`longitudinal_color` + `lateral_color`, auto-built per active config, with a
-per off-axis-field `lateral_color` term), and enables the **power-preserving
-solve** so each element's thin-lens power (and therefore the nominal focal
-length) stays constant while only the glasses move. This decouples the glass
-gradient from the layout: a glass change no longer drifts focus, so the axial
-and lateral chromatic aberration are corrected by the glass balance itself,
-leaving the escape and clean phases to handle the layout against the full merit.
+`Min == Max` variable fixed — and enables the **power-preserving solve** so each
+element's thin-lens power (and therefore the nominal focal length) stays
+constant while only the glasses move. The phase objective is built from the
+config's **own** terms, never auto-generated: its chromatic terms
+(`longitudinal_color` / `lateral_color`) are scaled by
+`optimization.power_solve.color_scale` (default 100) so colour leads the phase,
+while the config's cheap analytic geometric terms (`seidel_*`, `abs_efl`,
+`distortion_pct`, `glass_role`) are retained at their configured weights as a
+**guardrail**. Expensive grid-trace terms (`spot_rms*`, `geometric_mtf_*`,
+`wavefront_*`, `field_alive`) are excluded so the phase stays cheap. This
+decouples the glass gradient from the layout: a glass change no longer drifts
+focus, so the axial and lateral chromatic aberration are improved by the glass
+balance itself, while the guardrail keeps the colour solve from wandering onto a
+geometrically destructive colour-null. Add the nd/vd variables with
+`--glass-variables` (or declare them) if the input does not already list them.
+
+```yaml
+optimization:
+  power_solve:
+    enabled: true
+    surfaces: [2, 4, 6, 9, 11, 13]  # dependent back surface of each element
+    color_scale: 100                # chromatic-term emphasis during the phase
+```
 
 Because the variable-space **dimension is unchanged** — the non-glass variables
 are locked, not removed — the escape `store`, distance calculation and next-cycle

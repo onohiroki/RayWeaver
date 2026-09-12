@@ -7,11 +7,10 @@ metadata:
     The real US2645157 Cooke triplet with the flint/crown glasses SWAPPED
     (negative element S3 carries a crown, positive element S6 carries a flint)
     — the classic swap that shows strong axial + lateral chromatic aberration.
-    This file deliberately declares NO optimization variables or merit terms:
-    the `glass-color-demo.bash` script drives it with `--glass-color
-    --power-solve`, which auto-generates the nd/vd glass variables, a merit of
-    only longitudinal_color + lateral_color, and pins the element powers via
-    the power-preserving hard solve.
+    This file declares the colour merit EXPLICITLY (longitudinal_color +
+    lateral_color per off-axis field); the `glass-color-demo.bash` script adds
+    the nd/vd glass variables with `--glass-variables` and pins the element
+    powers with `--power-solve`. No merit is auto-generated or rewritten.
 glass_catalog:
   entries:
   - name: "SK18"
@@ -67,6 +66,12 @@ configs:
   - id: 2
     value: 0.0006563
     weight: 1.0
+  merit:
+    type: sum
+    terms:
+    - { kind: longitudinal_color, wavelength: 0.0004358, wavelength2: 0.0006563, weight: 1.0 }
+    - { kind: lateral_color, field: 1, wavelength: 0.0004358, wavelength2: 0.0006563, weight: 1.0 }
+    - { kind: lateral_color, field: 2, wavelength: 0.0004358, wavelength2: 0.0006563, weight: 1.0 }
   surfaces:
   - id: 1
     type: "sphere"

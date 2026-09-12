@@ -28,7 +28,7 @@ import (
 // saveBase1.yaml, ... (see escapeFileSaver). SIGINT/SIGTERM stops the search
 // in three escalating stages (graceful cycle boundary → mid-DLS interrupt →
 // force quit), each producing interrupted: true and exit 0 except the last.
-func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassColor bool, keepInfeasible bool, debug bool) {
+func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassVariables bool, keepInfeasible bool, debug bool) {
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
 	if input.Optimization == nil {
@@ -41,22 +41,21 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	}
 
 	// Resolve the power-preserving glass phase under the CLI/YAML rule (CLI
-	// wins), mirroring optimize. --glass-color additionally auto-generates the
-	// nd/vd variables and the colour-only config merit (used when the escape
-	// does not declare its own glass variables).
+	// wins), mirroring optimize. --glass-variables additionally auto-generates
+	// the nd/vd variables (used when the escape does not declare its own glass
+	// variables).
 	psu := effectivePowerSolve(input, powerSolve, powerSolveSurfaces)
 	input.Optimization.PowerSolve = psu
 
 	gc, _ := loadCatalogs(&input, glassDir)
 	writeBackGlassDir(&input, glassDir)
-	if glassColor {
-		applyGlassColor(&input, gc)
+	if glassVariables {
+		applyGlassVariables(&input, gc)
 	}
 
-	// Build the per-config colour-only glass merit used during the dedicated
-	// glass phase (axial + lateral chromatic aberration), independent of the
-	// --glass-color flag so the double-Gauss declares its own full merit while
-	// still getting a colour-only glass phase.
+	// Build the per-config glass-phase merit from the config's own terms: the
+	// chromatic terms scaled by power_solve.color_scale plus a cheap geometric
+	// guardrail. The config's explicit merit is never replaced.
 	gctx := buildGlassPhaseContext(&input)
 
 	progress := escape.NewProgress()
@@ -135,56 +134,118 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 
 // glassPhaseCtx carries the power-preserving glass-phase configuration through
 // the escape run: whether it is enabled, the solve-surface IDs, and the
-// per-config colour-only glass merit terms used during the glass phase.
+// per-config glass-phase merit terms (the config's chromatic terms scaled by
+// color_scale, plus a cheap geometric guardrail).
 type glassPhaseCtx struct {
 	enabled  bool
 	surfaces []int
 	merit    map[string][]types.MeritTerm
 }
 
+// defaultGlassColorScale is the built-in multiplier applied to a config's
+// chromatic terms during the glass phase when power_solve.color_scale is unset.
+// Large enough that colour leads the phase while the retained geometric terms
+// act as a tie-breaker/guardrail on the colour-null manifold.
+const defaultGlassColorScale = 100.0
+
 // buildGlassPhaseContext derives the glass-phase context from the resolved
-// optimization.power_solve section: enabled when the solve is on and surfaces
-// are listed, with a colour-only (axial + lateral chromatic) merit built per
-// active config.
+// optimization.power_solve section: enabled when the solve is on, surfaces are
+// listed, and at least one nd/vd variable exists. The per-config glass merit is
+// built from the config's own terms (see buildGlassPhaseMerit) rather than an
+// auto-generated colour-only objective, so the caller's merit is never silently
+// replaced.
 func buildGlassPhaseContext(input *types.Input) glassPhaseCtx {
 	ctx := glassPhaseCtx{merit: map[string][]types.MeritTerm{}}
 	if input.Optimization == nil || input.Optimization.PowerSolve == nil || !input.Optimization.PowerSolve.Enabled {
 		return ctx
 	}
 	// The glass phase only moves nd/vd variables (everything else is pinned).
-	// When no glass variable is declared (and --glass-color did not auto-generate
-	// one), the phase has nothing to optimise: skip it instead of running a
-	// no-op DLS. Global determination: one glass variable anywhere enables it.
+	// When no glass variable is declared the phase has nothing to optimise: skip
+	// it instead of running a no-op DLS. Global determination: one glass
+	// variable anywhere enables it.
 	if !hasGlassVariable(input) {
 		return ctx
 	}
 	ctx.enabled = true
 	ctx.surfaces = append([]int(nil), input.Optimization.PowerSolve.Surfaces...)
+
+	colorScale := input.Optimization.PowerSolve.ColorScale
+	if colorScale <= 0 {
+		colorScale = defaultGlassColorScale
+	}
+
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
 			continue
 		}
-		wl1, wl2 := colorEndpoints(cfg.Wavelengths, 0.0004358, 0.0006563)
-		terms := []types.MeritTerm{
-			{Kind: optimize.MeritLongitudinalColor, Wavelength: wl1, Wavelength2: wl2, Weight: 1.0},
-		}
-		fields := cfg.Fields
-		if len(fields) == 0 && input.Chief != nil {
-			for fi, f := range input.Chief.Fields {
-				fields = append(fields, types.FieldItem{ID: fi, AngleDeg: f.Angle, Weight: 1.0})
-			}
-		}
-		for _, f := range fields {
-			if f.AngleDeg == 0 {
-				continue
-			}
-			terms = append(terms, types.MeritTerm{
-				Kind: optimize.MeritLateralColor, Field: f.ID, Wavelength: wl1, Wavelength2: wl2, Weight: 1.0,
-			})
-		}
-		ctx.merit[cfg.ID] = terms
+		ctx.merit[cfg.ID] = buildGlassPhaseMerit(cfg, colorScale)
 	}
 	return ctx
+}
+
+// buildGlassPhaseMerit builds one config's glass-phase objective: its own
+// chromatic terms (longitudinal_color / lateral_color) scaled by colorScale,
+// plus its cheap analytic geometric terms (Seidel / abs_efl / distortion_pct /
+// glass_role) retained at their configured weights as a guardrail. Expensive
+// grid-trace terms (spot_rms, geometric_mtf, wavefront_*, field_alive) are
+// deliberately excluded so the phase stays cheap; the full merit is still used
+// for the post-phase acceptance test.
+func buildGlassPhaseMerit(cfg types.Config, colorScale float64) []types.MeritTerm {
+	var out []types.MeritTerm
+	seen := map[string]bool{}
+	add := func(terms []types.MeritTerm) {
+		for _, t := range terms {
+			key := meritTermKey(t)
+			if seen[key] {
+				continue
+			}
+			switch {
+			case isColorMeritKind(t.Kind):
+				seen[key] = true
+				tt := t
+				if tt.Weight == 0 {
+					tt.Weight = 1.0
+				}
+				tt.Weight *= colorScale
+				out = append(out, tt)
+			case isCheapGuardrailKind(t.Kind):
+				seen[key] = true
+				out = append(out, t)
+			}
+		}
+	}
+	if cfg.Merit != nil {
+		add(cfg.Merit.Terms)
+	}
+	for _, mode := range cfg.MeritModes {
+		add(mode.Terms)
+	}
+	return out
+}
+
+// isColorMeritKind reports whether a merit kind is a chromatic term whose weight
+// the glass phase emphasises.
+func isColorMeritKind(kind string) bool {
+	return kind == optimize.MeritLongitudinalColor || kind == optimize.MeritLateralColor
+}
+
+// isCheapGuardrailKind reports whether a merit kind is an analytic/paraxial
+// geometric term cheap enough to keep in the glass phase as a guardrail.
+func isCheapGuardrailKind(kind string) bool {
+	switch kind {
+	case optimize.MeritSeidelSpherical, optimize.MeritSeidelComa,
+		optimize.MeritSeidelAstigmatism, optimize.MeritSeidelDistortion,
+		optimize.MeritAbsEFL, optimize.MeritDistortionPct, optimize.MeritGlassRole:
+		return true
+	}
+	return false
+}
+
+// meritTermKey identifies a merit term for de-duplication across a config's
+// fixed merit and its merit_modes.
+func meritTermKey(t types.MeritTerm) string {
+	return fmt.Sprintf("%s|%d|%g|%g|%g|%g|%g",
+		t.Kind, t.Field, t.Wavelength, t.Wavelength2, t.Target, t.Fraction, t.Frequency)
 }
 
 func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool) {

@@ -4,12 +4,12 @@ set -euo pipefail
 # =============================================================================
 # glass-color-demo.bash — power-preserving glass chromatic optimisation
 #
-# Purpose: demonstrate `optimize --glass-color --power-solve` on a Cooke
+# Purpose: demonstrate `optimize --glass-variables --power-solve` on a Cooke
 # triplet with the flint/crown glasses SWAPPED (strong axial + lateral colour).
-# The CLI flags auto-generate everything needed for a pure glass-swap colour
-# study:
-#   --glass-color           auto-create nd/vd variables for every element and a
-#                           merit of only longitudinal_color + lateral_color
+# The colour merit is declared EXPLICITLY in glass-color-demo.yaml; the CLI
+# flags add the machinery for a pure glass-swap colour study:
+#   --glass-variables       auto-create nd/vd variables for every element (the
+#                           merit is left unchanged — no colour-only rewrite)
 #   --power-solve           preserve each element's thin-lens power (hard solve:
 #                           a curvature per element becomes dependent so the
 #                           power = initial value while only the glasses move)
@@ -75,14 +75,15 @@ element_powers "$YAML"
 echo
 echo "=== Running power-preserving glass chromatic optimisation ==="
 $RAYWEAVE optimize \
-  --glass-color \
+  --glass-variables \
   --power-solve \
   --power-solve-surfaces "$SOLVE_SURFACES" \
   --log "$LOG" \
   < "$YAML" > "$AFTER"
 
 echo "  Optimised output: $AFTER"
-echo "  Auto-generated variables + merit + power_solve are echoed into the output:"
+echo "  Auto-generated variables + power_solve are echoed into the output"
+echo "  (the explicit merit from the input is preserved):"
 $RAYWEAVE query --yaml "optimization.power_solve" < "$AFTER"
 
 echo

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strconv"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -13,7 +14,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const glassColorTripletYAML = `
+const glassVariablesTripletYAML = `
 metadata:
   tool:
     name: RayWeaver
@@ -46,6 +47,13 @@ configs:
   - {id: 0, angle_deg: 0.0, weight: 1.0}
   - {id: 1, angle_deg: 16.0, weight: 1.0}
   - {id: 2, angle_deg: 24.0, weight: 0.5}
+  merit:
+    type: sum
+    terms:
+    - {kind: spot_rms, field: 0, wavelength: 0.0005876, weight: 1.0}
+    - {kind: longitudinal_color, wavelength: 0.0004861, wavelength2: 0.0006563, weight: 1.0}
+    - {kind: lateral_color, field: 1, wavelength: 0.0004861, wavelength2: 0.0006563, weight: 0.5}
+    - {kind: seidel_astigmatism, field: 1, wavelength: 0.0005876, weight: 5.0, target: 0}
   surfaces:
   - {id: 1, type: sphere, radius: 10.2871491742, thickness: 1.524, material: {key: SK18}, diameter: 10.0}
   - {id: 2, type: sphere, radius: -239.3967954752, thickness: 2.3368, material: AIR, diameter: 10.0}
@@ -57,9 +65,9 @@ configs:
   - {id: 8, type: sphere, radius: 0, thickness: 0, material: AIR, diameter: 44.0}
 `
 
-// captureOptimize runs runOptimize with the given flags and returns the YAML
-// written to stdout plus the parsed output.
-func captureOptimize(t *testing.T, inputYAML string, powerSolve, glassColor bool, solveSurfaces string) types.Input {
+// captureOptimize runs runOptimize with the given flags and returns the parsed
+// output.
+func captureOptimize(t *testing.T, inputYAML string, powerSolve, glassVariables bool, solveSurfaces string) types.Input {
 	t.Helper()
 	old := os.Stdout
 	r, w, _ := os.Pipe()
@@ -82,7 +90,7 @@ func captureOptimize(t *testing.T, inputYAML string, powerSolve, glassColor bool
 		if err != nil {
 			t.Fatalf("yaml.Marshal: %v", err)
 		}
-		runOptimize(outYAML, false, "", "", "", powerSolve, solveSurfaces, glassColor)
+		runOptimize(outYAML, false, "", "", "", powerSolve, solveSurfaces, glassVariables)
 	}()
 	var out bytes.Buffer
 	io.Copy(&out, r)
@@ -94,11 +102,12 @@ func captureOptimize(t *testing.T, inputYAML string, powerSolve, glassColor bool
 	return outInput
 }
 
-// TestGlassColorAutoGeneratesAndWritesBack verifies --glass-color --power-solve
-// auto-generates the nd/vd variables and chromatic merit, writes back the
-// power_solve section, and preserves the element powers.
-func TestGlassColorAutoGeneratesAndWritesBack(t *testing.T) {
-	out := captureOptimize(t, glassColorTripletYAML, true, true, "2,4,7")
+// TestGlassVariablesAutoGenerates verifies --glass-variables --power-solve
+// auto-generates the nd/vd variables, writes back the power_solve section,
+// leaves the config merit unchanged (no colour-only rewrite), and preserves the
+// element powers.
+func TestGlassVariablesAutoGenerates(t *testing.T) {
+	out := captureOptimize(t, glassVariablesTripletYAML, true, true, "2,4,7")
 
 	// Power-solve write-back.
 	ps := out.Optimization.PowerSolve
@@ -115,30 +124,26 @@ func TestGlassColorAutoGeneratesAndWritesBack(t *testing.T) {
 		params[v.Target.Param] = true
 	}
 	if !params["nd"] || !params["vd"] {
-		t.Errorf("glass-color did not generate nd/vd variables, params=%v", params)
+		t.Errorf("glass-variables did not generate nd/vd variables, params=%v", params)
 	}
 
-	// Auto-generated chromatic merit on the config.
-	var hasLCA, hasTCA bool
-	for _, cfg := range out.Configs {
-		if cfg.Merit == nil {
-			continue
-		}
-		for _, term := range cfg.Merit.Terms {
-			if term.Kind == "longitudinal_color" {
-				hasLCA = true
-			}
-			if term.Kind == "lateral_color" {
-				hasTCA = true
-			}
+	// The config merit is preserved: the geometric spot_rms term must survive
+	// (the old --glass-color replaced the merit with a colour-only one).
+	if len(out.Configs) == 0 || out.Configs[0].Merit == nil {
+		t.Fatal("config merit was removed")
+	}
+	hasSpot := false
+	for _, term := range out.Configs[0].Merit.Terms {
+		if term.Kind == "spot_rms" {
+			hasSpot = true
 		}
 	}
-	if !hasLCA || !hasTCA {
-		t.Errorf("glass-color merit missing chromatic terms: lca=%v tca=%v", hasLCA, hasTCA)
+	if !hasSpot {
+		t.Errorf("config merit was rewritten; spot_rms missing: %+v", out.Configs[0].Merit.Terms)
 	}
 
 	// Element powers preserved between input and output.
-	in := mustParseInput(t, glassColorTripletYAML)
+	in := mustParseInput(t, glassVariablesTripletYAML)
 	inGC, _ := loadCatalogs(&in, "")
 	inSurf := in.Configs[0].Surfaces
 	surface.Precompute(inSurf)
@@ -209,14 +214,49 @@ func abs(f float64) float64 {
 	return f
 }
 
+// TestBuildGlassPhaseMerit verifies the glass-phase objective is the config's
+// chromatic terms scaled by color_scale plus the cheap geometric guardrail,
+// with expensive grid-trace terms excluded and terms de-duplicated.
+func TestBuildGlassPhaseMerit(t *testing.T) {
+	in := mustParseInput(t, glassVariablesTripletYAML)
+	cfg := in.Configs[0]
+
+	terms := buildGlassPhaseMerit(cfg, 100.0)
+	byKind := map[string]types.MeritTerm{}
+	for _, tm := range terms {
+		byKind[tm.Kind+"#"+strconv.Itoa(tm.Field)] = tm
+	}
+
+	// Colour terms scaled by color_scale.
+	if lca, ok := byKind["longitudinal_color#0"]; !ok || lca.Weight != 100.0 {
+		t.Errorf("longitudinal_color not scaled: %+v", lca)
+	}
+	if tca, ok := byKind["lateral_color#1"]; !ok || tca.Weight != 50.0 {
+		t.Errorf("lateral_color not scaled: %+v", tca)
+	}
+	// Cheap guardrail retained at its own weight.
+	if sa, ok := byKind["seidel_astigmatism#1"]; !ok || sa.Weight != 5.0 {
+		t.Errorf("seidel_astigmatism guardrail missing/changed: %+v", sa)
+	}
+	// Expensive grid-trace term excluded.
+	if _, ok := byKind["spot_rms#0"]; ok {
+		t.Error("spot_rms should be excluded from the glass phase")
+	}
+
+	// Default scale applies when the argument is the built-in default.
+	if d := buildGlassPhaseMerit(cfg, defaultGlassColorScale); len(d) != len(terms) {
+		t.Errorf("term count differs with default scale: %d vs %d", len(d), len(terms))
+	}
+}
+
 // TestBuildGlassPhaseContext verifies the escape glass-phase context is derived
 // from the resolved optimization.power_solve section: enabled, the solve
-// surfaces, and a colour-only (longitudinal + lateral) glass merit per active
-// config.
+// surfaces, and a per-config merit (colour scaled + cheap guardrail) built from
+// the config's own terms.
 func TestBuildGlassPhaseContext(t *testing.T) {
 	// Enabled when power_solve is on, surfaces are listed, and at least one
 	// nd/vd glass variable is declared (global determination).
-	in := mustParseInput(t, glassColorTripletYAML)
+	in := mustParseInput(t, glassVariablesTripletYAML)
 	in.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}}
 	in.Optimization.Variables = append(in.Optimization.Variables, types.OptimizationVariable{
 		Name: "s1_nd", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "nd"}, Min: 1.4, Max: 2.0, Active: true,
@@ -229,33 +269,49 @@ func TestBuildGlassPhaseContext(t *testing.T) {
 	if len(ctx.surfaces) != 3 || ctx.surfaces[0] != 2 || ctx.surfaces[2] != 7 {
 		t.Errorf("surfaces = %v, want [2 4 7]", ctx.surfaces)
 	}
-	// A colour-only merit should be present for the active config.
 	terms := ctx.merit["0"]
 	if len(terms) == 0 {
 		t.Fatal("no glass merit for config 0")
 	}
-	var hasL, hasT bool
+	var hasL, hasT, hasSeidel bool
 	for _, tm := range terms {
-		if tm.Kind == "longitudinal_color" {
+		switch tm.Kind {
+		case "longitudinal_color":
 			hasL = true
-		}
-		if tm.Kind == "lateral_color" {
+			if tm.Weight != defaultGlassColorScale {
+				t.Errorf("longitudinal_color weight = %v, want %v", tm.Weight, defaultGlassColorScale)
+			}
+		case "lateral_color":
 			hasT = true
+		case "seidel_astigmatism":
+			hasSeidel = true
 		}
 	}
-	if !hasL || !hasT {
-		t.Errorf("glass merit missing chromatic terms: lca=%v tca=%v", hasL, hasT)
+	if !hasL || !hasT || !hasSeidel {
+		t.Errorf("glass merit composition wrong: lca=%v tca=%v seidel=%v", hasL, hasT, hasSeidel)
+	}
+
+	// Explicit color_scale is honored.
+	inScale := mustParseInput(t, glassVariablesTripletYAML)
+	inScale.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}, ColorScale: 7.0}
+	inScale.Optimization.Variables = append(inScale.Optimization.Variables, types.OptimizationVariable{
+		Name: "s1_nd", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "nd"}, Min: 1.4, Max: 2.0, Active: true,
+	})
+	for _, tm := range buildGlassPhaseContext(&inScale).merit["0"] {
+		if tm.Kind == "longitudinal_color" && tm.Weight != 7.0 {
+			t.Errorf("explicit color_scale not honored: weight=%v", tm.Weight)
+		}
 	}
 
 	// Skipped when power_solve is on but no nd/vd variable is declared.
-	in3 := mustParseInput(t, glassColorTripletYAML)
+	in3 := mustParseInput(t, glassVariablesTripletYAML)
 	in3.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}}
 	if ctx3 := buildGlassPhaseContext(&in3); ctx3.enabled {
 		t.Error("context should be skipped when no glass variable is declared")
 	}
 
 	// Enabled via a local (multi-config) vd variable.
-	in4 := mustParseInput(t, glassColorTripletYAML)
+	in4 := mustParseInput(t, glassVariablesTripletYAML)
 	in4.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}}
 	in4.Optimization.LocalVariables = []types.LocalVariableDef{
 		{Name: "s3_vd", Config: "0", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "vd"}, Min: 20, Max: 80, Active: true},
@@ -265,7 +321,7 @@ func TestBuildGlassPhaseContext(t *testing.T) {
 	}
 
 	// Enabled via a shared nd variable binding.
-	in5 := mustParseInput(t, glassColorTripletYAML)
+	in5 := mustParseInput(t, glassVariablesTripletYAML)
 	in5.Optimization.PowerSolve = &types.PowerSolveConfig{Enabled: true, Surfaces: []int{2, 4, 7}}
 	in5.Optimization.SharedVariables = []types.SharedVariable{
 		{Name: "sh_nd", Min: 1.4, Max: 2.0, Active: true, Bindings: []types.SharedVariableBinding{{Config: "0", ID: 1, Param: "nd"}}},
@@ -275,7 +331,7 @@ func TestBuildGlassPhaseContext(t *testing.T) {
 	}
 
 	// Disabled power_solve -> context disabled.
-	in2 := mustParseInput(t, glassColorTripletYAML)
+	in2 := mustParseInput(t, glassVariablesTripletYAML)
 	if ctx2 := buildGlassPhaseContext(&in2); ctx2.enabled {
 		t.Error("context should be disabled when power_solve is absent")
 	}

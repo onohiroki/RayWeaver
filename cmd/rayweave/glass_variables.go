@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/hiroki/rayweaver/internal/glass"
-	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -26,12 +25,16 @@ func effectivePowerSolve(input types.Input, flagPowerSolve bool, flagSurfaces st
 	}
 
 	if flagSurfaces != "" {
-		return &types.PowerSolveConfig{Enabled: true, Surfaces: parseCommaIntList(flagSurfaces, "power-solve-surfaces")}
+		cfg := &types.PowerSolveConfig{Enabled: true, Surfaces: parseCommaIntList(flagSurfaces, "power-solve-surfaces")}
+		if yamlCfg != nil {
+			cfg.ColorScale = yamlCfg.ColorScale
+		}
+		return cfg
 	}
 
 	if flagPowerSolve {
 		if yamlCfg != nil && len(yamlCfg.Surfaces) > 0 {
-			return &types.PowerSolveConfig{Enabled: true, Surfaces: yamlCfg.Surfaces}
+			return &types.PowerSolveConfig{Enabled: true, Surfaces: yamlCfg.Surfaces, ColorScale: yamlCfg.ColorScale}
 		}
 		errOut("Error: --power-solve requires power-solve surfaces (e.g. --power-solve-surfaces 2,5,8 or optimization.power_solve.surfaces)")
 	}
@@ -72,43 +75,23 @@ func hasGlassVariable(input *types.Input) bool {
 	return false
 }
 
-// applyGlassColor auto-generates a glass-only chromatic optimisation inside
-// input: nd/vd variables for every refractive lens element and a per-config
-// merit of only longitudinal_color + lateral_color. It is the convenience layer
-// for `rayweave optimize --glass-color`, so the user concentrates on the glass
-// swap (= colour correction) without handwriting the merit and variable lists.
-func applyGlassColor(input *types.Input, gc *glass.Catalog) {
-	// Color endpoints for the chromatic merit terms, from each config's own
-	// wavelength list (widest separation) with standard g/C defaults as the
-	// fallback (matching the glass-optimize demo).
-	const (
-		defWL1 = 0.0004358 // g
-		defWL2 = 0.0006563 // C
-	)
-
-	vars := buildGlassColorVariables(input, gc)
-	if len(vars) == 0 {
-		errOut("Error: --glass-color found no refractive lens elements to optimize")
-	}
-
+// applyGlassVariables auto-generates nd/vd optimization variables for every
+// refractive lens element (one representative surface each). It is the
+// convenience layer for `rayweave optimize --glass-variables` /
+// `rayweave escape --glass-variables`, so the user can make the glasses
+// optimizable without handwriting the variable list.
+//
+// It deliberately does NOT touch the merit: the escape glass phase derives its
+// objective from the config's own terms (colour scaled by
+// power_solve.color_scale plus a cheap geometric guardrail), so an explicit
+// merit is always preserved instead of being silently replaced.
+func applyGlassVariables(input *types.Input, gc *glass.Catalog) {
 	if len(input.Configs) == 0 {
-		errOut("Error: --glass-color requires at least one config (or chief.fields + surfaces)")
+		errOut("Error: --glass-variables requires at least one config (or chief.fields + surfaces)")
 	}
-
-	for ci := range input.Configs {
-		cfg := &input.Configs[ci]
-		if !cfg.Active {
-			continue
-		}
-		wl1, wl2 := colorEndpoints(cfg.Wavelengths, defWL1, defWL2)
-		fields := cfg.Fields
-		if len(fields) == 0 && input.Chief != nil {
-			for fi, f := range input.Chief.Fields {
-				fields = append(fields, types.FieldItem{ID: fi, AngleDeg: f.Angle, Weight: 1.0})
-			}
-		}
-		merit := buildColorMerit(fields, wl1, wl2)
-		cfg.Merit = &merit
+	vars := buildGlassVariables(input, gc)
+	if len(vars) == 0 {
+		errOut("Error: --glass-variables found no refractive lens elements to optimize")
 	}
 
 	// Single-config YAML expresses variables as optimization.variables; a
@@ -134,10 +117,10 @@ func applyGlassColor(input *types.Input, gc *glass.Catalog) {
 	}
 }
 
-// buildGlassColorVariables returns an nd/vd variable pair per refractive lens
+// buildGlassVariables returns an nd/vd variable pair per refractive lens
 // element (one representative glass surface each), derived from the element
 // grouping shared with paraxial.GlassRoles.
-func buildGlassColorVariables(input *types.Input, gc *glass.Catalog) []types.OptimizationVariable {
+func buildGlassVariables(input *types.Input, gc *glass.Catalog) []types.OptimizationVariable {
 	var out []types.OptimizationVariable
 	for i := range input.Configs {
 		cfg := &input.Configs[i]
@@ -179,45 +162,6 @@ func varsToLocal(vars []types.OptimizationVariable) []types.LocalVariableDef {
 		})
 	}
 	return out
-}
-
-// colorEndpoints returns the widest-separated pair of distinct wavelengths
-// from the config's list (for the F/C or g/C chromatic terms), falling back to
-// defWL1/defWL2 when fewer than two distinct values are present.
-func colorEndpoints(wls []types.WavelengthItem, defWL1, defWL2 float64) (float64, float64) {
-	if len(wls) < 2 {
-		return defWL1, defWL2
-	}
-	lo, hi := wls[0].Value, wls[0].Value
-	for _, w := range wls[1:] {
-		if w.Value < lo {
-			lo = w.Value
-		}
-		if w.Value > hi {
-			hi = w.Value
-		}
-	}
-	if hi-lo < 1e-12 {
-		return defWL1, defWL2
-	}
-	return lo, hi
-}
-
-// buildColorMerit builds a merit function of only longitudinal_color (one,
-// field-independent) and lateral_color (per off-axis field).
-func buildColorMerit(fields []types.FieldItem, wl1, wl2 float64) types.MeritFunction {
-	terms := []types.MeritTerm{
-		{Kind: optimize.MeritLongitudinalColor, Wavelength: wl1, Wavelength2: wl2, Weight: 1.0},
-	}
-	for _, f := range fields {
-		if f.AngleDeg == 0 {
-			continue
-		}
-		terms = append(terms, types.MeritTerm{
-			Kind: optimize.MeritLateralColor, Field: f.ID, Wavelength: wl1, Wavelength2: wl2, Weight: 1.0,
-		})
-	}
-	return types.MeritFunction{Type: "sum", Terms: terms}
 }
 
 func parseCommaIntList(s, what string) []int {

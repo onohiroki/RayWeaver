@@ -47,7 +47,7 @@ type optimizeRun struct {
 // merit terms are fatal (snap only needs the input for its existing surfaces,
 // but shares the same validation for consistency). Returns ok=false when the
 // caller should stop (an error has already been reported).
-func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bool, powerSolveSurfaces string, glassColor, requireMerit bool) (optimizeRun, bool) {
+func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bool, powerSolveSurfaces string, glassVariables, requireMerit bool) (optimizeRun, bool) {
 	var run optimizeRun
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
@@ -87,12 +87,13 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 	gc, _ := loadCatalogs(&input, glassDir)
 	writeBackGlassDir(&input, glassDir)
 
-	// --glass-color auto-generates a glass-only chromatic optimisation: nd/vd
-	// variables for every refractive element and a per-config merit of only
-	// longitudinal_color + lateral_color. It composes with power_solve so the
-	// user can pin the layout while the glasses are the only free variables.
-	if glassColor {
-		applyGlassColor(&input, gc)
+	// --glass-variables auto-generates nd/vd variables for every refractive
+	// element (one representative surface each). The merit is left untouched:
+	// the user's explicit merit is always preserved. It composes with
+	// power_solve so the user can pin the layout while the glasses are the only
+	// free variables.
+	if glassVariables {
+		applyGlassVariables(&input, gc)
 	}
 
 	// Build the per-config optimisation inputs (shared/local variables are
@@ -277,8 +278,8 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 	return run, true
 }
 
-func runOptimize(data []byte, verbose bool, logFile string, glassDir string, excludeParams string, powerSolve bool, powerSolveSurfaces string, glassColor bool) {
-	run, ok := buildOptimizeRun(data, glassDir, excludeParams, powerSolve, powerSolveSurfaces, glassColor, true)
+func runOptimize(data []byte, verbose bool, logFile string, glassDir string, excludeParams string, powerSolve bool, powerSolveSurfaces string, glassVariables bool) {
+	run, ok := buildOptimizeRun(data, glassDir, excludeParams, powerSolve, powerSolveSurfaces, glassVariables, true)
 	if !ok {
 		return
 	}

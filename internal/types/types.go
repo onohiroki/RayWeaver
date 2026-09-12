@@ -897,6 +897,11 @@ type PowerSolveConfig struct {
 	// refractive lens element (an air-separated singlet / the outer surface of
 	// a cemented group); mirrors are skipped.
 	Surfaces []int `yaml:"surfaces,omitempty"`
+	// ColorScale multiplies the config's chromatic merit terms during the
+	// glass phase, so the colour objective dominates while the cheap geometric
+	// terms (Seidel / abs_efl / glass_role) stay in the merit as a guardrail
+	// against layout collapse. Zero or negative uses the built-in default.
+	ColorScale float64 `yaml:"color_scale,omitempty"`
 }
 
 // BackFocusSolveConfig configures the back-focus solve: the thickness of a
