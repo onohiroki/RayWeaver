@@ -106,15 +106,13 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		sig := <-sigCh
-		fmt.Fprintf(os.Stderr, "escape: %v received — stopping after the current DLS run and saving results (press Ctrl-C again to interrupt the running DLS)\n", sig)
 		progress.Event("interrupt", map[string]any{"signal": sig.String()})
 		cancel()
 		sig = <-sigCh
-		fmt.Fprintf(os.Stderr, "escape: %v received — interrupting the running DLS within the next iteration and saving results (press Ctrl-C again to force quit)\n", sig)
 		progress.Event("interrupt_dls", map[string]any{"signal": sig.String()})
 		close(hardStop)
 		<-sigCh
-		fmt.Fprintln(os.Stderr, "escape: force quit")
+		progress.Event("force_quit", nil)
 		os.Exit(1)
 	}()
 
@@ -321,7 +319,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	if saveBase != "" {
 		saver = newEscapeFileSaver(saveBase, func(p escape.Point) types.Input {
 			return materializeSingleInput(input, surfaces, variables, p.X, gc)
-		})
+		}, progress)
 		onRecord = saver.record
 	}
 
@@ -417,7 +415,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		"interrupted": res.Interrupted,
 	})
 	if saver != nil && saver.err != nil {
-		errOut("escape: error saving minima: %v", saver.err)
+		progress.Event("error", map[string]any{"message": saver.err.Error()})
 	}
 
 	// Build the escape_result minima against the pristine original surfaces.
@@ -504,7 +502,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	}
 
 	escResult := assembleEscapeResult(res, minima, infeasibleMinima)
-	reportEscape(res)
+	reportEscape(res, progress)
 	writeEscapeOutput(input, escResult)
 }
 
@@ -640,7 +638,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	if saveBase != "" {
 		saver = newEscapeFileSaver(saveBase, func(p escape.Point) types.Input {
 			return materializeMultiInput(input, input.Optimization, p.X, gc)
-		})
+		}, progress)
 		onRecord = saver.record
 	}
 
@@ -745,7 +743,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		"interrupted": res.Interrupted,
 	})
 	if saver != nil && saver.err != nil {
-		errOut("escape: error saving minima: %v", saver.err)
+		progress.Event("error", map[string]any{"message": saver.err.Error()})
 	}
 
 	var saveStem, saveExt string
@@ -827,7 +825,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	}
 
 	escapeResult := assembleEscapeResult(res, minima, infeasibleMinima)
-	reportEscape(res)
+	reportEscape(res, progress)
 	writeEscapeOutput(input, escapeResult)
 }
 
@@ -1042,33 +1040,45 @@ func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.Esc
 	return states
 }
 
-// reportEscape prints a concise summary to stderr (never stdout, so the YAML
-// pipeline stays intact).
-func reportEscape(res escape.Result) {
-	fmt.Fprintf(os.Stderr, "=== Escape complete ===\n")
-	fmt.Fprintf(os.Stderr, "  Workers:   %d\n", res.Workers)
-	fmt.Fprintf(os.Stderr, "  Cycles:    %d\n", res.Cycles)
-	if res.MaxSeconds > 0 {
-		fmt.Fprintf(os.Stderr, "  Time budget: %.3gs (reached: %v)\n", res.MaxSeconds, res.TimedOut)
-	}
-	if res.Interrupted {
-		fmt.Fprintf(os.Stderr, "  Interrupted: true (signal received; discovered minima saved)\n")
-	}
-	fmt.Fprintf(os.Stderr, "  Escapes:   %d\n", res.Escapes)
-	fmt.Fprintf(os.Stderr, "  Minima:    %d\n", len(res.Minima))
-	if len(res.InfeasibleBasins) > 0 {
-		fmt.Fprintf(os.Stderr, "  Infeasible basins: %d\n", len(res.InfeasibleBasins))
-	}
+// reportEscape emits a single JSONL "escape_complete" event with the full
+// summary to the progress reporter (stderr via compact writer when --verbose).
+func reportEscape(res escape.Result, progress *escape.Progress) {
+	minima := make([]map[string]any, len(res.Minima))
 	for i, p := range res.Minima {
-		mark := " "
-		if i == res.BestIdx {
-			mark = "*"
+		minima[i] = map[string]any{
+			"index": i,
+			"merit": p.Merit,
+			"best":  i == res.BestIdx,
 		}
-		fmt.Fprintf(os.Stderr, "    %s[%d] merit=%.6e\n", mark, i, p.Merit)
 	}
+	infeasible := make([]map[string]any, len(res.InfeasibleBasins))
 	for i, p := range res.InfeasibleBasins {
-		fmt.Fprintf(os.Stderr, "    ![%d] merit=%.6e (%s)\n", i, p.Merit, reasonString(p.InvalidReason))
+		infeasible[i] = map[string]any{
+			"index":  i,
+			"merit":  p.Merit,
+			"reason": reasonString(p.InvalidReason),
+		}
 	}
+	fields := map[string]any{
+		"workers":            res.Workers,
+		"cycles":             res.Cycles,
+		"escapes":            res.Escapes,
+		"minima_count":       len(res.Minima),
+		"best_merit":         safeF(res.BestMerit),
+		"timed_out":          res.TimedOut,
+		"interrupted":        res.Interrupted,
+	}
+	if res.MaxSeconds > 0 {
+		fields["max_seconds"] = res.MaxSeconds
+	}
+	if len(minima) > 0 {
+		fields["minima"] = minima
+	}
+	if len(infeasible) > 0 {
+		fields["infeasible_basins"] = len(infeasible)
+		fields["infeasible"] = infeasible
+	}
+	progress.Event("escape_complete", fields)
 }
 
 // writeEscapeOutput writes the final YAML to stdout.

@@ -24,17 +24,18 @@ import (
 // killed process never leaves a partially-written file: every minimum found so
 // far survives a SIGKILL.
 type escapeFileSaver struct {
-	mu    sync.Mutex
-	stem  string
-	ext   string
-	build func(escape.Point) types.Input
-	err   error
+	mu       sync.Mutex
+	stem     string
+	ext      string
+	build    func(escape.Point) types.Input
+	progress *escape.Progress
+	err      error
 }
 
 // newEscapeFileSaver creates a saver writing to base0.yaml, base1.yaml, ...
-func newEscapeFileSaver(base string, build func(escape.Point) types.Input) *escapeFileSaver {
+func newEscapeFileSaver(base string, build func(escape.Point) types.Input, progress *escape.Progress) *escapeFileSaver {
 	stem, ext := splitSaveBase(base)
-	return &escapeFileSaver{stem: stem, ext: ext, build: build}
+	return &escapeFileSaver{stem: stem, ext: ext, build: build, progress: progress}
 }
 
 // splitSaveBase separates a user-supplied base name into its stem and
@@ -75,7 +76,13 @@ func (s *escapeFileSaver) record(idx int, p escape.Point, isNew bool, version in
 		s.err = fmt.Errorf("escape: write %s: %w", current, err)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "escape: minimum %d saved to %s (merit=%.6e)\n", idx, current, p.Merit)
+	s.progress.Event("minimum_saved", map[string]any{
+		"index":   idx,
+		"file":    current,
+		"merit":   p.Merit,
+		"new":     isNew,
+		"version": version,
+	})
 }
 
 // writeFileAtomic writes data to path via a temp file in the same directory,
