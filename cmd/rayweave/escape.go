@@ -639,7 +639,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	var saver *escapeFileSaver
 	if saveBase != "" {
 		saver = newEscapeFileSaver(saveBase, func(p escape.Point) types.Input {
-			return materializeMultiInput(input, input.Optimization, p.X)
+			return materializeMultiInput(input, input.Optimization, p.X, gc)
 		})
 		onRecord = saver.record
 	}

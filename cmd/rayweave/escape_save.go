@@ -124,6 +124,7 @@ func materializeSingleInput(input types.Input, surfaces []types.Surface, variabl
 		}}
 	}
 	surf, newGlasses := applyEscapeX(surfaces, variables, x, gc)
+	applySavedBackFocusSolve(input, &out.Configs[0], surf, gc)
 	out.Configs[0].Surfaces = surf
 	applyPupilVariables(&out, variables, x)
 	if len(newGlasses) > 0 && out.GlassCatalog != nil {
@@ -136,15 +137,59 @@ func materializeSingleInput(input types.Input, surfaces []types.Surface, variabl
 
 // materializeMultiInput builds a clean, pipeline-compatible Input for the
 // multi-config system with the variable vector x applied to every config.
-func materializeMultiInput(input types.Input, opt *types.OptimizationConfig, x []float64) types.Input {
+func materializeMultiInput(input types.Input, opt *types.OptimizationConfig, x []float64, gc *glass.Catalog) types.Input {
 	out := cloneChiefForOutput(input)
 	out.Configs = append([]types.Config{}, input.Configs...)
 	configSurfaces := applyEscapeMulti(input.Configs, opt, x)
 	for i := range out.Configs {
 		if s, ok := configSurfaces[out.Configs[i].ID]; ok {
+			applySavedBackFocusSolve(input, &out.Configs[i], s, gc)
 			out.Configs[i].Surfaces = s
 		}
 	}
 	applyPupilVariablesMulti(&out, opt, x)
 	return out
+}
+
+// applySavedBackFocusSolve re-applies the configured back-focus hard solve to a
+// materialized minimum so the saved file carries the same image plane the
+// optimizer evaluated (the escape's variable-only materialization would
+// otherwise keep the template thickness). It mirrors the optimizer's solve type
+// selection using the merit schedule's terminal phase (weight_to == 1), so the
+// saved minima land on the wavefront best focus the run ends on.
+func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []types.Surface, gc *glass.Catalog) {
+	if input.Optimization == nil || input.Optimization.BackFocusSolve == nil || !input.Optimization.BackFocusSolve.Enabled {
+		return
+	}
+	if cfg == nil || gc == nil {
+		return
+	}
+	stopSurface, refWavelength := 0, 0.0
+	if input.Chief != nil {
+		stopSurface = input.Chief.StopSurface
+		refWavelength = input.Chief.ReferenceWavelength
+	}
+	bfType := savedBackFocusType(input.Optimization)
+	optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, bfType, stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc)
+}
+
+// savedBackFocusType resolves the focus type to use for a saved minimum: the
+// merit schedule's terminal phase type (the mode whose weight_to == 1) when one
+// is declared, else the fixed back-focus type (default paraxial).
+func savedBackFocusType(opt *types.OptimizationConfig) string {
+	if opt != nil && opt.MeritSchedule != nil {
+		best, bestW := "", 0.0
+		for _, m := range opt.MeritSchedule.Modes {
+			if m.BackFocusType != "" && m.WeightTo >= bestW {
+				best, bestW = m.BackFocusType, m.WeightTo
+			}
+		}
+		if best != "" {
+			return best
+		}
+	}
+	if opt != nil && opt.BackFocusSolve != nil && opt.BackFocusSolve.Type != "" {
+		return opt.BackFocusSolve.Type
+	}
+	return "paraxial"
 }
