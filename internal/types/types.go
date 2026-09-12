@@ -542,6 +542,10 @@ type MeritScheduleMode struct {
 	Name       string  `yaml:"name"`
 	WeightFrom float64 `yaml:"weight_from"`
 	WeightTo   float64 `yaml:"weight_to"`
+	// BackFocusType selects the back-focus solve type when this mode is
+	// dominant (weight >= dominant_threshold). Valid values: "paraxial",
+	// "wavefront", or "" (use the fixed type from back_focus_solve).
+	BackFocusType string `yaml:"back_focus_type,omitempty"`
 }
 
 // MeritScheduleConfig configures the smooth merit blend
@@ -725,6 +729,7 @@ type OptimizationConfig struct {
 	MeritSchedule    *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
 	Degenerate       *DegenerateConfig      `yaml:"degenerate,omitempty"`
 	PowerSolve       *PowerSolveConfig      `yaml:"power_solve,omitempty"`
+	BackFocusSolve   *BackFocusSolveConfig  `yaml:"back_focus_solve,omitempty"`
 	RegionActive     *RegionActiveConfig    `yaml:"region_active,omitempty"`
 	AdaptiveDamping  *AdaptiveDampingConfig `yaml:"adaptive_damping,omitempty"`
 }
@@ -847,6 +852,48 @@ type PowerSolveConfig struct {
 	// refractive lens element (an air-separated singlet / the outer surface of
 	// a cemented group); mirrors are skipped.
 	Surfaces []int `yaml:"surfaces,omitempty"`
+}
+
+// BackFocusSolveConfig configures the back-focus solve: the thickness of a
+// target surface is adjusted after every variable application so the image
+// plane stays at the desired focus position. Two modes are available:
+// paraxial (fast, paraxial trace) and wavefront (accurate, best-focus shift
+// from wavefront analysis). This is analogous to PowerSolveConfig but for
+// the image-plane distance instead of element power.
+type BackFocusSolveConfig struct {
+	Enabled bool `yaml:"enabled,omitempty"`
+	// Surface is the ID of the surface whose thickness will be adjusted.
+	// 0 (default) means auto-detect: the last lens surface before the image
+	// plane (skipping air-gap / filter surfaces).
+	Surface int `yaml:"surface,omitempty"`
+	// Type selects the focus computation method: "paraxial" (default) or
+	// "wavefront".
+	Type string `yaml:"type,omitempty"`
+	// ReferenceSurface for wavefront type (default: last optical surface).
+	ReferenceSurface int `yaml:"reference_surface,omitempty"`
+	// NumRays for wavefront type (default: 200).
+	NumRays int `yaml:"num_rays,omitempty"`
+	// Wavelength for wavefront type (default: d-line).
+	Wavelength float64 `yaml:"wavelength,omitempty"`
+	// WeightType for wavefront type: "on_axis_only" (default, fast),
+	// "uniform" (all fields equal), or "custom" (CustomWeights).
+	WeightType string `yaml:"weight_type,omitempty"`
+	// CustomWeights are the per-field weights when WeightType == "custom".
+	CustomWeights []float64 `yaml:"custom_weights,omitempty"`
+	// Schedule controls dynamic switching between "paraxial" and "wavefront"
+	// types based on the merit schedule's dominant mode. nil disables dynamic
+	// switching (the static Type is used).
+	Schedule *BackFocusScheduleConfig `yaml:"schedule,omitempty"`
+}
+
+// BackFocusScheduleConfig configures dynamic back-focus type switching.
+// When the merit schedule is active and a mode's back_focus_type is set,
+// the back-focus solve switches to that type when the mode's weight exceeds
+// DominantThreshold.
+type BackFocusScheduleConfig struct {
+	// DominantThreshold is the minimum mode weight required to switch the
+	// back-focus type to that mode's BackFocusType. Default: 0.5.
+	DominantThreshold float64 `yaml:"dominant_threshold,omitempty"`
 }
 
 // DegenerateConfig configures the bounded penalty applied when a merit term

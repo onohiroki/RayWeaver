@@ -198,6 +198,7 @@ and Lagrange multiplier management).  Equality constraints are always included.
 | `optimization.bfgs` | false | BFGS-augmented damping |
 | `optimization.adaptive_damping` | nil | per-variable adaptive damping (see §1a) |
 | `optimization.region_active` | nil | Okudaira Region Active Method (see [region-active.md](region-active.md)) |
+| `optimization.back_focus_solve` | nil | hard back-focus solve adjusting the target surface thickness to the paraxial / wavefront best focus (see [optimize.md](../optimize.md#back-focus-solve-optimizationback_focus_solve)); its `schedule` follows the merit schedule's dominant mode |
 
 ## 7. Shared / local variables (multi-config)
 

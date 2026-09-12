@@ -184,6 +184,17 @@ elsewhere. A surface driven by a `power` variable is skipped by `power_solve`'s
 snapshot when both are declared, so the two can coexist (some elements pinned,
 some variable-driven).
 
+### Back-focus solve
+
+The per-config back-focus hard solve (`optimization.back_focus_solve`) is also
+honored by `escape`, which builds its worker Optimizers with the same options as
+`optimize`. When enabled, every merit evaluation (escape, glass and clean phases)
+first re-focuses the image plane, so the search is compared at a common best
+focus instead of drifting with the layout. Its dynamic type switching follows the
+escape's `optimization.merit_schedule` the same way (the dominant mode's
+`back_focus_type` wins). See
+[optimize.md](optimize.md#back-focus-solve-optimizationback_focus_solve).
+
 ### Exploration depth vs. breadth
 
 Two search strategies are useful, and the knobs above map directly onto them.

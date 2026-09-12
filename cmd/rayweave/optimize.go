@@ -279,6 +279,9 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	if input.Optimization.PowerSolve != nil && input.Optimization.PowerSolve.Enabled {
 		opt.SetPowerSolve(input.Optimization.PowerSolve.Surfaces)
 	}
+	if input.Optimization.BackFocusSolve != nil && input.Optimization.BackFocusSolve.Enabled {
+		opt.SetBackFocusSolve(input.Optimization.BackFocusSolve)
+	}
 	applyDegenerate(opt, input.Optimization.Degenerate)
 
 	// Validate the conditional merit schedule and the glass_role kind before

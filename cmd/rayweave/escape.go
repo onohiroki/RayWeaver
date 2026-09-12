@@ -301,6 +301,9 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		// glass phase (EnterGlassPhase) toggles it on per solve and restores it
 		// after, so the escape/clean phases keep full curvature freedom.
 		opt.SetPowerSolveEnabled(false)
+		if input.Optimization.BackFocusSolve != nil && input.Optimization.BackFocusSolve.Enabled {
+			opt.SetBackFocusSolve(input.Optimization.BackFocusSolve)
+		}
 		if input.Optimization.MeritSchedule != nil {
 			opt.SetMeritSchedule(input.Optimization.MeritSchedule)
 		}
@@ -614,6 +617,9 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, dlsLogger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
 		opt.SetApertureMarginMM(apertureMarginMM)
 		applyDegenerate(opt, input.Optimization.Degenerate)
+		if input.Optimization.BackFocusSolve != nil && input.Optimization.BackFocusSolve.Enabled {
+			opt.SetBackFocusSolve(input.Optimization.BackFocusSolve)
+		}
 		if input.Optimization.MeritSchedule != nil {
 			opt.SetMeritSchedule(input.Optimization.MeritSchedule)
 		}

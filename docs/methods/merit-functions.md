@@ -427,6 +427,29 @@ delay switching until the worst field approaches the diffraction limit.
 and in the `{"event":"weights","metric":...}` JSONL record, so you can tune
 the anchors empirically.
 
+### Back-focus type switching (`back_focus_type`)
+
+The same dominant-mode machinery drives the
+[back-focus solve](../optimize.md#back-focus-solve-optimizationback_focus_solve)
+type: a mode may declare `back_focus_type: paraxial|wavefront`, and the
+optimizer switches the hard solve to that type when the mode is dominant (its
+weight reaches `optimization.back_focus_solve.schedule.dominant_threshold`,
+default 0.5). At the top of every DLS iteration `UpdateMeritWeights` recomputes
+the weights and calls `updateBackFocusType`, which finds the largest-weight mode
+and adopts its `back_focus_type`; modes without one, or a weight below the
+threshold, fall back to the static `optimization.back_focus_solve.type`.
+
+Unlike the merit blend, the back-focus switch is a **hard change** (no
+interpolation): a mode is chosen, not mixed. It is evaluated once per iteration
+and frozen together with the mode weights, so every residual and Jacobian
+evaluation in the iteration uses the same solve type. Because this only selects
+*how* the hard solve computes the focus (both `paraxial` and `wavefront` target
+the same image-plane position), it does not change the least-squares identity
+`Σ residual² == merit`. It lets e.g. a `spot_diffraction` schedule track the
+focus cheaply with `paraxial` while the geometric spot dominates, then use the
+accurate `wavefront` best focus once the system approaches the diffraction
+limit.
+
 ### Freezing and convergence
 
 Like the dynamic pupil, the weights are computed once per DLS iteration at the

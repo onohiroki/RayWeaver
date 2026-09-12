@@ -11,10 +11,12 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
+	"github.com/hiroki/rayweaver/internal/psf"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
+	"github.com/hiroki/rayweaver/internal/wavefront"
 )
 
 // Config is the single-configuration optimisation input. It is an adapter
@@ -163,6 +165,12 @@ type powerSolveEntry struct {
 	targetPhi float64
 }
 
+// backFocusSolveEntry binds a surface whose thickness will be adjusted to
+// keep the image plane at the desired focus position.
+type backFocusSolveEntry struct {
+	solveID int // surface ID whose thickness is adjusted
+}
+
 // config is the internal per-configuration state of the unified Optimizer.
 type config struct {
 	id                  string
@@ -192,6 +200,10 @@ type config struct {
 	// diameter instead of running chief, and applyVariables handles
 	// pupil_model type variables targeting it.
 	pupilModel *types.PupilModelConfig
+	// backFocusSolve is the per-config back-focus solve configuration (nil
+	// when not in use). It is set by SetBackFocusSolve and used by
+	// resolveBackFocusTarget.
+	backFocusSolve *types.BackFocusSolveConfig
 }
 
 // meritTerm is the unified merit term: weights and (for angle fields) the
@@ -239,9 +251,10 @@ type meritSchedule struct {
 }
 
 type scheduleMode struct {
-	name       string
-	weightFrom float64
-	weightTo   float64
+	name          string
+	weightFrom    float64
+	weightTo      float64
+	backFocusType string // "paraxial" | "wavefront" | ""
 }
 
 // glassVDForSurface returns the Abbe number of the material on the surface with
@@ -323,10 +336,17 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 	}
 	o.modeWeights = make(map[string]float64, len(s.Modes))
 	for _, m := range s.Modes {
-		ms.modes = append(ms.modes, scheduleMode{name: m.Name, weightFrom: m.WeightFrom, weightTo: m.WeightTo})
+		ms.modes = append(ms.modes, scheduleMode{name: m.Name, weightFrom: m.WeightFrom, weightTo: m.WeightTo, backFocusType: m.BackFocusType})
 		o.modeWeights[m.Name] = 0
 	}
 	o.meritSchedule = ms
+
+	// Initialise the back-focus schedule from the BackFocusSolve config.
+	if o.backFocusSolve != nil && o.backFocusSolve.Schedule != nil {
+		o.backFocusSchedule = o.backFocusSolve.Schedule
+	}
+	// Set the initial back-focus type.
+	o.updateBackFocusType()
 
 	x0 := o.InitialState()
 	// For spot_diffraction, snapshot the initial ratio so subsequent values are
@@ -362,6 +382,48 @@ func (o *Optimizer) UpdateMeritWeights(x []float64, iter int) {
 		}
 	}
 	o.numRays = o.resolveScheduledNumRays()
+	o.updateBackFocusType()
+}
+
+// updateBackFocusType switches the active back-focus solve type based on the
+// merit schedule's dominant mode. When the schedule is active and the dominant
+// mode has a non-empty back_focus_type, the type is switched if the mode's
+// weight exceeds the dominant_threshold. Otherwise the fixed type from
+// back_focus_solve is used.
+func (o *Optimizer) updateBackFocusType() {
+	if o.backFocusSolve == nil {
+		return
+	}
+	// Default to the fixed type.
+	fallback := o.backFocusSolve.Type
+	if fallback == "" {
+		fallback = "paraxial"
+	}
+	if o.backFocusSchedule == nil || o.meritSchedule == nil {
+		o.currentBackFocusType = fallback
+		return
+	}
+	// Find the dominant mode (largest weight).
+	bestMode := ""
+	bestWeight := -1.0
+	for name, w := range o.modeWeights {
+		if w > bestWeight {
+			bestWeight, bestMode = w, name
+		}
+	}
+	threshold := o.backFocusSchedule.DominantThreshold
+	if threshold == 0 {
+		threshold = 0.5
+	}
+	if bestWeight >= threshold {
+		for _, m := range o.meritSchedule.modes {
+			if m.name == bestMode && m.backFocusType != "" {
+				o.currentBackFocusType = m.backFocusType
+				return
+			}
+		}
+	}
+	o.currentBackFocusType = fallback
 }
 
 // setModeWeightsAt evaluates the weight curve at the metric value s and stores
@@ -871,6 +933,20 @@ type Optimizer struct {
 	// use). When set, UpdatePupils writes the model's axial_position/diameter
 	// into the config's pupilZ/aperture instead of running chief.
 	pupilModel *types.PupilModelConfig
+	// backFocusSolve holds the back-focus solve configuration. When set,
+	// applyBackFocusSolve adjusts the target surface thickness after every
+	// variable application so the image plane stays at the desired focus.
+	backFocusSolve *types.BackFocusSolveConfig
+	// backFocusTargets maps config ID to the per-config solve entries.
+	backFocusTargets map[string][]backFocusSolveEntry
+	// backFocusSchedule holds the dynamic switching configuration (nil when
+	// not in use). When set, updateBackFocusType reads the merit schedule's
+	// mode weights and switches currentBackFocusType accordingly.
+	backFocusSchedule *types.BackFocusScheduleConfig
+	// currentBackFocusType is the active back-focus solve type ("paraxial"
+	// or "wavefront"), updated by updateBackFocusType at the top of each
+	// DLS iteration. Defaults to backFocusSolve.Type.
+	currentBackFocusType string
 }
 
 // regionActiveState is the per-config mutable state for the Region Active
@@ -1099,6 +1175,63 @@ func (o *Optimizer) SetPowerSolve(solveSurfaces []int) {
 // built-in class defaults (no YAML configuration needed).
 func (o *Optimizer) SetAdaptiveDamping(cfg *types.AdaptiveDampingConfig) {
 	o.adaptiveDamping = cfg
+}
+
+// SetBackFocusSolve configures the back-focus solve. When enabled, the
+// thickness of the target surface is adjusted after every variable application
+// so the image plane stays at the desired focus position (paraxial or
+// wavefront-based). The target surface defaults to the last lens surface
+// before the image plane (auto-detect); a positive Surface value overrides it.
+func (o *Optimizer) SetBackFocusSolve(cfg *types.BackFocusSolveConfig) {
+	if cfg == nil || !cfg.Enabled {
+		return
+	}
+	o.backFocusSolve = cfg
+
+	targets := make(map[string][]backFocusSolveEntry, len(o.configs))
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		cfg.backFocusSolve = o.backFocusSolve
+		surfaces := cfg.surfaces
+		sid := cfg.resolveBackFocusTarget(surfaces)
+		if sid < 0 {
+			continue
+		}
+		targets[cfg.id] = append(targets[cfg.id], backFocusSolveEntry{solveID: sid})
+	}
+	o.backFocusTargets = targets
+	// Set the initial back-focus type (no schedule yet, just the fixed type).
+	o.updateBackFocusType()
+}
+
+// resolveBackFocusTarget returns the surface ID whose thickness will be
+// adjusted by the back-focus solve. When the user specifies a positive Surface
+// ID it is validated and returned directly; otherwise the last lens surface
+// before the image plane is selected (skipping air-gap / filter surfaces).
+// A return value of -1 means no suitable surface was found.
+func (cfg *config) resolveBackFocusTarget(surfaces []types.Surface) int {
+	if len(surfaces) < 3 {
+		return -1
+	}
+	// user-specified surface ID
+	if cfg.backFocusSolve != nil && cfg.backFocusSolve.Surface > 0 {
+		sid := cfg.backFocusSolve.Surface
+		for _, s := range surfaces {
+			if s.ID == sid {
+				return sid
+			}
+		}
+		return -1
+	}
+	// auto-detect: last lens surface before the image plane
+	imgIdx := len(surfaces) - 1
+	for i := imgIdx - 1; i >= 1; i-- {
+		s := surfaces[i]
+		if !s.Material.IsAir() || s.Reflects() {
+			return s.ID
+		}
+	}
+	return surfaces[imgIdx-1].ID
 }
 
 // powerTargetForSurface returns the current thin-lens power (curvature-based)
@@ -1884,6 +2017,10 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 	// value, so the pure glass chromatic optimisation cannot drift the layout.
 	o.applyPowerSolve(configSurfaces, effectiveGC(o.gc, tempGC))
 
+	// Apply the back-focus solve after the power-preserving solve so the
+	// target surface thickness reflects the final paraxial/wavefront focus.
+	o.applyBackFocusSolve(configSurfaces, effectiveGC(o.gc, tempGC))
+
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surface.Precompute(configSurfaces[cfg.id])
@@ -1952,6 +2089,170 @@ func (o *Optimizer) applyPowerSolve(configSurfaces map[string][]types.Surface, g
 			paraxial.SolveElementPower(surfaces, gc, e.solveID, e.targetPhi)
 		}
 	}
+}
+
+// applyBackFocusSolve adjusts the thickness of the target surface so the image
+// plane stays at the desired focus position. For paraxial type it computes the
+// finite-conjugate image position from the paraxial trace and adjusts the
+// thickness accordingly. For wavefront type it runs a minimal wavefront
+// analysis and applies the best-focus shift. It is called from applyVariables
+// (pure) after applyPowerSolve and before Precompute.
+func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surface, gc *glass.Catalog) {
+	if o.backFocusSolve == nil || len(o.backFocusTargets) == 0 {
+		return
+	}
+	for cid, entries := range o.backFocusTargets {
+		surfaces, ok := configSurfaces[cid]
+		if !ok {
+			continue
+		}
+		cfg := o.findConfig(cid)
+		if cfg == nil {
+			continue
+		}
+		for _, e := range entries {
+			idx := surfaceIndex(surfaces, e.solveID)
+			if idx < 0 {
+				continue
+			}
+			switch o.currentBackFocusType {
+			case "wavefront":
+				shift := o.wavefrontBackFocusShift(cfg, surfaces, gc)
+				surfaces[idx].Thickness += shift
+			default: // "paraxial"
+				shift := o.paraxialBackFocusShift(cfg, surfaces, gc)
+				surfaces[idx].Thickness += shift
+			}
+		}
+	}
+}
+
+// paraxialBackFocusShift computes the image-plane shift needed to bring the
+// image plane to the paraxial focus position. The shift is the difference
+// between the current image-plane distance (from the target surface to the
+// image plane) and the desired distance from the paraxial trace.
+func (o *Optimizer) paraxialBackFocusShift(cfg *config, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	if len(surfaces) < 3 {
+		return 0
+	}
+	wl := effectiveReferenceWavelength(cfg.referenceWavelength)
+	if len(cfg.wavelengths) > 0 {
+		wl = cfg.wavelengths[0].Value
+	}
+	if wl <= 0 {
+		wl = types.DefaultWavelength
+	}
+	// Compute paraxial result (finite conjugate or infinite).
+	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
+	pr := paraxial.Compute(sys, wl, gc, 0, nil)
+
+	// Find the last lens surface (the back-focus solve target or the
+	// surface before the image plane).
+	imgIdx := len(surfaces) - 1
+	targetIdx := imgIdx - 1
+	for i := imgIdx - 1; i >= 1; i-- {
+		if !surfaces[i].Material.IsAir() || surfaces[i].Reflects() {
+			targetIdx = i
+			break
+		}
+	}
+
+	// Physical positions after Precompute (must be refreshed).
+	physZ := surface.PhysicalZ(surfaces)
+	if len(physZ) == 0 {
+		return 0
+	}
+	lastLensVertexZ := physZ[targetIdx]
+
+	// Current image-plane Z (sum of thicknesses from target surface onward
+	// plus the target vertex position).
+	currentImageZ := physZ[imgIdx]
+	// Desired image-plane Z: last lens vertex + paraxial BFL.
+	bfl := pr.SecondPrincipalFocus
+	if bfl == 0 {
+		return 0
+	}
+	desiredImageZ := lastLensVertexZ + bfl
+	return desiredImageZ - currentImageZ
+}
+
+// wavefrontBackFocusShift computes the image-plane shift needed to bring the
+// image plane to the wavefront best-focus position. A minimal wavefront
+// analysis is run with the configured settings (num_rays, weight_type).
+func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	bfs := o.backFocusSolve
+	if len(surfaces) < 2 {
+		return 0
+	}
+	wl := bfs.Wavelength
+	if wl <= 0 {
+		wl = effectiveReferenceWavelength(cfg.referenceWavelength)
+		if len(cfg.wavelengths) > 0 {
+			wl = cfg.wavelengths[0].Value
+		}
+		if wl <= 0 {
+			wl = types.DefaultWavelength
+		}
+	}
+	refSurf := bfs.ReferenceSurface
+	if refSurf <= 0 {
+		refSurf = psf.DefaultReferenceSurface(surfaces)
+	}
+	numRays := bfs.NumRays
+	if numRays <= 0 {
+		numRays = 200
+	}
+
+	// Select fields based on weight_type.
+	fields := o.backFocusFields(cfg)
+
+	focusCfg := wavefront.FocusConfig{WeightType: bfs.WeightType}
+	if bfs.WeightType == "custom" {
+		focusCfg.CustomWeights = bfs.CustomWeights
+	}
+
+	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
+	opts := wavefront.Options{
+		ReferenceSurface: refSurf,
+		NumRays:          numRays,
+		Workers:          1,
+		ZernikeMaxOrder:  0,
+		BestFocus:        &focusCfg,
+	}
+
+	result, err := wavefront.Compute(sys, gc, fields, []float64{wl}, opts)
+	if err != nil || result.BestFocus == nil {
+		return 0
+	}
+	return result.BestFocus.ShiftMM
+}
+
+// backFocusFields returns the fields used by the back-focus wavefront solve.
+func (o *Optimizer) backFocusFields(cfg *config) []types.FieldDef {
+	bfs := o.backFocusSolve
+	if bfs == nil {
+		return nil
+	}
+	switch bfs.WeightType {
+	case "uniform":
+		if len(cfg.fieldDefs) > 0 {
+			return cfg.fieldDefs
+		}
+	case "custom":
+		if len(cfg.fieldDefs) > 0 {
+			return cfg.fieldDefs
+		}
+	default: // "on_axis_only" or empty
+		for _, fd := range cfg.fieldDefs {
+			if fd.Angle == 0 {
+				return []types.FieldDef{fd}
+			}
+		}
+		if len(cfg.fieldDefs) > 0 {
+			return []types.FieldDef{cfg.fieldDefs[0]}
+		}
+	}
+	return cfg.fieldDefs
 }
 
 // restoreDiameters resets auto_aperture surfaces to their initial diameters

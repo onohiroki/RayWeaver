@@ -292,7 +292,7 @@ and the weights are scheduled globally:
 ```yaml
 optimization:
   merit_schedule:
-    metric: merit_ratio        # merit_ratio | iteration | glass_role
+    metric: merit_ratio        # merit_ratio | iteration | glass_role | spot_diffraction
     curve: linear              # linear | sigmoid | step
     anchor_from: 1.0
     anchor_to: 0.05
@@ -317,6 +317,81 @@ per DLS iteration and frozen for it, and `Σ residual² == merit` is preserved v
 per-term `√weight` scaling (see `docs/methods/merit-functions.md`, §5). The
 active mode is reported in the output (`opt_results.active_mode`) and the
 per-iteration weights as JSONL `weights` events.
+
+A mode may also carry a `back_focus_type` (`paraxial` / `wavefront`) so the
+conditional schedule drives the
+[back-focus solve](#back-focus-solve-optimizationback_focus_solve) type — see
+that section for the dynamic switching.
+
+### Back-focus solve (`optimization.back_focus_solve`)
+
+A **hard solve** that keeps the image plane at the desired focus during
+optimization: after every variable application (and after `power_solve`) the
+target surface's thickness is adjusted so the paraxial or wavefront best focus
+coincides with the image plane. It is the back-focus analogue of the `power`
+variable / `power_solve` family, and runs per config, so a multi-config zoom
+pins each config's own back focus.
+
+```yaml
+optimization:
+  back_focus_solve:
+    enabled: true
+    type: paraxial             # paraxial (default) | wavefront
+    surface: 8                 # 0 = auto-detect (last lens surface before image)
+    reference_surface: 0       # wavefront only; 0 = last optical surface
+    num_rays: 200              # wavefront only
+    wavelength: 0.0005876      # wavefront only; default = config reference wavelength
+    weight_type: on_axis_only  # on_axis_only (default) | uniform | custom
+    custom_weights: [1.0, 0.5] # weight_type: custom
+```
+
+`surface: 0` (the default) auto-detects the target: the last lens surface before
+the image plane, skipping air-gap / filter surfaces. An explicit `surface` ID
+must exist; an invalid ID disables the solve.
+
+- `type: paraxial` shifts the image plane to the paraxial second principal focus
+  (`paraxial.Compute`, `SecondPrincipalFocus`) — fast.
+- `type: wavefront` references the wavefront to the **best-focus point**
+  (`wavefront.Compute` with `BestFocus`, sphere center from the spot-RMS
+  minimisation) — accurate but far more expensive.
+
+For the wavefront type, `reference_surface: 0` uses the last optical surface,
+`num_rays` defaults to 200, `wavelength` defaults to the config reference
+wavelength, and `weight_type` selects the fields combined into the focus
+determination (`on_axis_only` default, `uniform`, or `custom` with
+`custom_weights`). The setting is YAML-only (no CLI flag).
+
+#### Dynamic type switching (`back_focus_solve.schedule`)
+
+When a merit schedule is active, the back-focus type can switch between
+`paraxial` and `wavefront` as the optimization progresses — e.g. track the focus
+cheaply with the paraxial solve while aberrations dominate, then switch to the
+wavefront solve near the diffraction limit:
+
+```yaml
+optimization:
+  merit_schedule:
+    metric: spot_diffraction
+    curve: step
+    anchor_from: 3.0
+    anchor_to: 1.0
+    modes:
+      - {name: spot,      weight_from: 1.0, weight_to: 0.0, back_focus_type: paraxial}
+      - {name: wavefront, weight_from: 0.0, weight_to: 1.0, back_focus_type: wavefront}
+  back_focus_solve:
+    enabled: true
+    type: paraxial             # fallback when no dominant mode sets a type
+    schedule:
+      dominant_threshold: 0.5
+```
+
+Each mode may carry a `back_focus_type` (`paraxial` / `wavefront` / unset). At
+the top of every DLS iteration the optimizer finds the dominant mode; if its
+weight reaches `dominant_threshold` (default 0.5) and it declares a
+`back_focus_type`, that type is used, otherwise the static `type` is the
+fallback. The switch is a hard change (no blending) and, like the mode weights,
+is frozen for the iteration. Modes without `back_focus_type` fall back to the
+fixed `type`. A `schedule` section without a merit schedule is inert.
 
 ### Constraints
 
