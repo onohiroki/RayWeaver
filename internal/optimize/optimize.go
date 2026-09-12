@@ -866,9 +866,12 @@ func (o *Optimizer) MeritScheduleState() (string, map[string]float64, int, float
 }
 
 // GlassAttractionDiagnostics returns the final glass-attraction state for
-// reporting. Nil when attraction is inactive.
+// reporting. Nil when attraction is not configured. Reported whenever a
+// catalog field was built (even at weight 0), so a zero-weight run can serve
+// as an unconstrained baseline while still exposing the nearest-glass
+// distances.
 func (o *Optimizer) GlassAttractionDiagnostics(x []float64) *types.GlassAttractionResult {
-	if o.catalogField == nil || o.attractionWeight <= 0 {
+	if o.catalogField == nil {
 		return nil
 	}
 	res := &types.GlassAttractionResult{Weight: o.attractionWeight}

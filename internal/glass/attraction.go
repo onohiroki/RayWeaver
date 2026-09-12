@@ -50,8 +50,17 @@ func BuildCatalogField(catalog *Catalog) *CatalogField {
 			continue
 		}
 		seen[key] = true
+		// Prefer the human-readable glass name over the lookup key (which,
+		// for inline entries, is an nd:vd string) for diagnostics.
+		display := g.Name
+		if display == "" {
+			display = g.Label
+		}
+		if display == "" {
+			display = key
+		}
 		raw = append(raw, Point2D{ND: nd, VD: vd})
-		names = append(names, key)
+		names = append(names, display)
 	}
 
 	norm := make([]Point2D, len(raw))

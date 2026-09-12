@@ -340,6 +340,43 @@ func TestGlassAttraction_Diagnostics(t *testing.T) {
 	}
 }
 
+// Diagnostics are reported whenever attraction is configured, even at zero
+// weight, so a zero-weight run can act as an unconstrained baseline that still
+// exposes the nearest-glass distances.
+func TestGlassAttraction_Diagnostics_ZeroWeight(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 10.0, Material: types.Material{ND: 1.5168, VD: 64.17}, Diameter: 50.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 50.0},
+	}
+	surface.Precompute(surfaces)
+
+	cfg := Config{
+		Surfaces:  surfaces,
+		Variables: []Variable{{Name: "nd1", SurfaceID: 1, Param: "nd", Min: 1.4, Max: 2.0}, {Name: "vd1", SurfaceID: 1, Param: "vd", Min: 20, Max: 100}},
+		MeritTerms: []MeritTerm{{
+			FieldAngle: 0.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1.0,
+		}},
+		GlassCatalog: gc,
+		NumRays:      16,
+	}
+	opt := NewOptimizer(cfg)
+	opt.SetGlassAttraction(&types.GlassAttractionConfig{Enabled: true, WeightFrom: 0, WeightTo: 0}, gc)
+
+	diag := opt.GlassAttractionDiagnostics(opt.getInitialState())
+	if diag == nil {
+		t.Fatal("expected diagnostics at zero weight when attraction is configured")
+	}
+	if diag.Weight != 0 {
+		t.Errorf("expected weight 0, got %f", diag.Weight)
+	}
+	if len(diag.Pairs) != 1 {
+		t.Fatalf("expected 1 pair, got %d", len(diag.Pairs))
+	}
+}
+
 // Inline model glasses carry no catalog key, so every nd/vd pair would collapse
 // onto the same (empty) GlassName. buildHullPairs must key them by their
 // (config, surface) location so each glass gets its own pair.
