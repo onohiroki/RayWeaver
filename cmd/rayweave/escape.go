@@ -405,7 +405,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		HardStop:    hardStop,
 		GlassPhase:  gctx.enabled,
 		Debug:       debug,
-		NewPhaseLog: newPhaseLog(progress),
+		NewPhaseLog: newPhaseLogIfDebug(progress, debug),
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,
@@ -733,7 +733,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		HardStop:    hardStop,
 		GlassPhase:  gctx.enabled,
 		Debug:       debug,
-		NewPhaseLog: newPhaseLog(progress),
+		NewPhaseLog: newPhaseLogIfDebug(progress, debug),
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,
@@ -1292,6 +1292,16 @@ func newPhaseLog(progress *escape.Progress) func() escape.PhaseSetter {
 	return func() escape.PhaseSetter {
 		return &debugLogger{progress: progress}
 	}
+}
+
+// newPhaseLogIfDebug returns a per-worker debugLogger factory only when debug
+// mode is enabled. Returns nil otherwise so the DLS solver keeps its silent
+// noIterLogger and DLS-internal events (iter/final/damping) are suppressed.
+func newPhaseLogIfDebug(progress *escape.Progress, debug bool) func() escape.PhaseSetter {
+	if !debug {
+		return nil
+	}
+	return newPhaseLog(progress)
 }
 
 // safeF64 sanitises NaN/Inf to 0 for JSON serialisation.
