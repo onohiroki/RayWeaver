@@ -282,6 +282,9 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	if input.Optimization.BackFocusSolve != nil && input.Optimization.BackFocusSolve.Enabled {
 		opt.SetBackFocusSolve(input.Optimization.BackFocusSolve)
 	}
+	if input.Optimization.GlassAttraction != nil {
+		opt.SetGlassAttraction(input.Optimization.GlassAttraction, gc)
+	}
 	applyDegenerate(opt, input.Optimization.Degenerate)
 
 	// Validate the conditional merit schedule and the glass_role kind before
@@ -475,6 +478,9 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		if effNumRays > 0 {
 			optResults.EffectiveNumRays = effNumRays
 		}
+	}
+	if ga := opt.GlassAttractionDiagnostics(finalX); ga != nil {
+		optResults.GlassAttraction = ga
 	}
 	output.OptResults = optResults
 

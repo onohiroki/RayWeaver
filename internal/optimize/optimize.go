@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"runtime"
+	"sort"
 	"sync"
 
 	"github.com/hiroki/rayweaver/internal/chief"
@@ -68,6 +69,9 @@ type Config struct {
 	AdaptiveDamping *types.AdaptiveDampingConfig
 	// PupilModel is the virtual entrance pupil configuration (nil when not in use).
 	PupilModel *types.PupilModelConfig
+	// GlassAttraction configures the soft-min potential pulling nd/vd toward
+	// real catalog glasses (nil = disabled).
+	GlassAttraction *types.GlassAttractionConfig
 }
 
 // ConfigInput describes one configuration (zoom position) of a
@@ -361,11 +365,124 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 	o.initialMerit = o.EvaluateMerit(x0)
 }
 
+// SetGlassAttraction configures the soft-min potential pulling nd/vd toward
+// real catalog glasses. Call after NewOptimizer and before SetMeritSchedule
+// (the setter computes initialOpticalMerit which is needed for merit_ratio
+// metric).
+func (o *Optimizer) SetGlassAttraction(cfg *types.GlassAttractionConfig, catalog *glass.Catalog) {
+	if cfg == nil || !cfg.Enabled {
+		return
+	}
+	o.catalogField = glass.BuildCatalogField(catalog)
+	if o.catalogField.CatalogFieldCount() == 0 {
+		return
+	}
+
+	// Resolve defaults.
+	o.attractionKernel = cfg.Kernel
+	if o.attractionKernel == "" {
+		o.attractionKernel = "distance"
+	}
+	o.attractionSigmaND = cfg.SigmaND
+	if o.attractionSigmaND <= 0 {
+		o.attractionSigmaND = 0.03
+	}
+	o.attractionSigmaVD = cfg.SigmaVD
+	if o.attractionSigmaVD <= 0 {
+		o.attractionSigmaVD = 0.03
+	}
+	o.attractionWeight = cfg.WeightFrom
+	o.attractionWeightFrom = cfg.WeightFrom
+	o.attractionWeightTo = cfg.WeightTo
+	o.attractionMetric = cfg.Metric
+	if o.attractionMetric == "" {
+		o.attractionMetric = "merit_ratio"
+	}
+	o.attractionAnchorFrom = cfg.AnchorFrom
+	o.attractionAnchorTo = cfg.AnchorTo
+	if o.attractionAnchorFrom == 0 && o.attractionAnchorTo == 0 {
+		o.attractionAnchorFrom = 1.0
+		o.attractionAnchorTo = 0.2
+	}
+	o.attractionCurve = cfg.Curve
+	if o.attractionCurve == "" {
+		o.attractionCurve = "linear"
+	}
+	o.sensitivityWeighted = cfg.SensitivityWeighted
+	o.sensitivityPower = cfg.SensitivityPower
+	if o.sensitivityPower == 0 {
+		o.sensitivityPower = 1.0
+	}
+	o.sensitivityScaleMin = cfg.SensitivityScaleMin
+	if o.sensitivityScaleMin == 0 {
+		o.sensitivityScaleMin = 0.1
+	}
+	o.sensitivityScaleMax = cfg.SensitivityScaleMax
+	if o.sensitivityScaleMax == 0 {
+		o.sensitivityScaleMax = 4.0
+	}
+	o.sensitivityRef = cfg.SensitivityRef
+	if o.sensitivityRef == "" {
+		o.sensitivityRef = "mean"
+	}
+
+	// Initialise per-pair scales to 1.0.
+	o.attractionScales = make([]float64, len(o.hullPairs))
+	for i := range o.attractionScales {
+		o.attractionScales[i] = 1.0
+	}
+	o.sensitivityEMA = make([]float64, len(o.hullPairs))
+
+	// Compute initialOpticalMerit for merit_ratio metric (exclude attraction
+	// and hull so the ratio is clean).
+	o.initialOpticalMerit = o.evaluateOpticalMerit(o.InitialState())
+}
+
+// evaluateOpticalMerit evaluates the merit excluding glass-attraction and
+// glass-hull penalties. Used for the merit_ratio metric and sensitivity
+// computation.
+func (o *Optimizer) evaluateOpticalMerit(x []float64) float64 {
+	o.skipAttraction = true
+	o.skipHull = true
+	defer func() {
+		o.skipAttraction = false
+		o.skipHull = false
+	}()
+	return o.EvaluateMerit(x)
+}
+
 // UpdateMeritWeights implements dls.MeritScheduleUpdater: recompute the mode
 // weights from the state metric at the current x. Called once per DLS iteration
 // at the current x, so the weights stay frozen within one iteration and the
 // Jacobian matches the merit actually minimised.
 func (o *Optimizer) UpdateMeritWeights(x []float64, iter int) {
+	// Glass attraction weight ramp (runs independently of merit_schedule).
+	if o.catalogField != nil && o.catalogField.CatalogFieldCount() > 0 {
+		if o.attractionMetric == "run_iteration" {
+			o.attractionRunIter++
+		}
+		s := o.attractionScheduleMetric(x, iter)
+		// Normalise metric to [0,1] via anchor range.
+		t := 0.5
+		span := o.attractionAnchorTo - o.attractionAnchorFrom
+		if math.Abs(span) > 1e-15 {
+			t = (s - o.attractionAnchorFrom) / span
+			if t < 0 {
+				t = 0
+			}
+			if t > 1 {
+				t = 1
+			}
+		}
+		f := scheduleCurve(o.attractionCurve, t)
+		o.attractionWeight = o.attractionWeightFrom + (o.attractionWeightTo-o.attractionWeightFrom)*f
+
+		// Sensitivity weighting: per-pair elasticity via finite differences.
+		if o.sensitivityWeighted && len(o.hullPairs) > 0 && len(o.attractionScales) > 0 {
+			o.updateAttractionSensitivity(x)
+		}
+	}
+
 	if o.meritSchedule == nil {
 		return
 	}
@@ -383,6 +500,81 @@ func (o *Optimizer) UpdateMeritWeights(x []float64, iter int) {
 	}
 	o.numRays = o.resolveScheduledNumRays()
 	o.updateBackFocusType()
+}
+
+// attractionScheduleMetric returns the state metric for the attraction weight
+// ramp. The metric is normalised by its initial value (anchor_from=1.0) so the
+// curve maps to [0,1].
+func (o *Optimizer) attractionScheduleMetric(x []float64, iter int) float64 {
+	switch o.attractionMetric {
+	case "iteration":
+		return float64(iter)
+	case "run_iteration":
+		return float64(o.attractionRunIter)
+	default: // merit_ratio
+		if o.initialOpticalMerit <= 0 {
+			return 1.0
+		}
+		return o.evaluateOpticalMerit(x) / o.initialOpticalMerit
+	}
+}
+
+// updateAttractionSensitivity computes the per-pair vd elasticity of the
+// optical merit via forward finite differences and applies EMA smoothing.
+// The result is normalised to a per-pair scale in [scaleMin, scaleMax].
+func (o *Optimizer) updateAttractionSensitivity(x []float64) {
+	if len(o.hullPairs) == 0 || o.catalogField == nil {
+		return
+	}
+	emaCoeff := 0.6
+	base := o.evaluateOpticalMerit(x)
+	if base <= 0 {
+		return
+	}
+	dvd := 0.5 // absolute step in vd units
+	for i, p := range o.hullPairs {
+		xPlus := make([]float64, len(x))
+		copy(xPlus, x)
+		xPlus[p.vdIndex] += dvd
+		mPlus := o.evaluateOpticalMerit(xPlus)
+		s := math.Abs((mPlus - base) / dvd) * x[p.vdIndex] / (base + 1e-30)
+		// EMA smoothing.
+		if len(o.sensitivityEMA) > i {
+			o.sensitivityEMA[i] = emaCoeff*o.sensitivityEMA[i] + (1.0-emaCoeff)*s
+			s = o.sensitivityEMA[i]
+		}
+		o.attractionScales[i] = s
+	}
+	// Normalise: scale_i = clamp((s_i/s_ref)^power, min, max).
+	var sum float64
+	n := len(o.attractionScales)
+	switch o.sensitivityRef {
+	case "max":
+		var maxS float64
+		for _, s := range o.attractionScales {
+			if s > maxS {
+				maxS = s
+			}
+		}
+		sum = maxS
+	default: // mean
+		for _, s := range o.attractionScales {
+			sum += s
+		}
+		sum /= float64(n)
+	}
+	if sum <= 0 {
+		return
+	}
+	for i, s := range o.attractionScales {
+		v := math.Pow(s/sum, o.sensitivityPower)
+		if v < o.sensitivityScaleMin {
+			v = o.sensitivityScaleMin
+		} else if v > o.sensitivityScaleMax {
+			v = o.sensitivityScaleMax
+		}
+		o.attractionScales[i] = v
+	}
 }
 
 // updateBackFocusType switches the active back-focus solve type based on the
@@ -673,6 +865,37 @@ func (o *Optimizer) MeritScheduleState() (string, map[string]float64, int, float
 	return dominantMode(o.modeWeights), copyWeights(o.modeWeights), o.modeChanges, o.lastMetric, o.numRays
 }
 
+// GlassAttractionDiagnostics returns the final glass-attraction state for
+// reporting. Nil when attraction is inactive.
+func (o *Optimizer) GlassAttractionDiagnostics(x []float64) *types.GlassAttractionResult {
+	if o.catalogField == nil || o.attractionWeight <= 0 {
+		return nil
+	}
+	res := &types.GlassAttractionResult{Weight: o.attractionWeight}
+	for i, pair := range o.hullPairs {
+		key, nnd, nvd, r2 := glass.NearestNamed(o.catalogField, x[pair.ndIndex], x[pair.vdIndex])
+		scale := 1.0
+		if i < len(o.attractionScales) {
+			scale = o.attractionScales[i]
+		}
+		name := pair.name
+		if name == "" && pair.ndIndex < len(o.variables) {
+			name = fmt.Sprintf("surface %d", o.variables[pair.ndIndex].SurfaceID)
+		}
+		res.Pairs = append(res.Pairs, types.GlassAttractionPairResult{
+			Name:       name,
+			ND:         x[pair.ndIndex],
+			VD:         x[pair.vdIndex],
+			NearestKey: key,
+			NearestND:  nnd,
+			NearestVD:  nvd,
+			Distance:   math.Sqrt(r2),
+			Scale:      scale,
+		})
+	}
+	return res
+}
+
 // scheduledTerm is one effective term of a config with the mode weight folded
 // into its scale (1.0 when no schedule is active).
 type scheduledTerm struct {
@@ -881,6 +1104,31 @@ type Optimizer struct {
 	hullMargin       float64
 	hullWeight       float64
 	hullPairs        []glassPair
+	// Glass attraction: soft-min potential pulling nd/vd toward catalog glasses.
+	catalogField       *glass.CatalogField
+	attractionWeight   float64   // current run-level weight w(t)
+	attractionWeightFrom float64 // weight at t=0
+	attractionWeightTo   float64 // weight at t=1
+	attractionSigmaND  float64   // gaussian kernel width (normalised units)
+	attractionSigmaVD  float64
+	attractionKernel   string    // "distance" | "gaussian"
+	attractionMetric   string    // "iteration" | "run_iteration" | "merit_ratio"
+	attractionCurve    string    // "linear" | "sigmoid" | "step"
+	attractionAnchorFrom float64
+	attractionAnchorTo   float64
+	attractionRunIter  int       // accumulating counter for run_iteration
+	attractionScales   []float64 // per-pair weight scales (sensitivity)
+	// Sensitivity EMA state (per glass pair, index matches hullPairs).
+	sensitivityEMA  []float64
+	sensitivityWeighted bool
+	sensitivityPower float64
+	sensitivityScaleMin float64
+	sensitivityScaleMax float64
+	sensitivityRef  string    // "mean" | "max"
+	initialOpticalMerit float64
+	// skipAttraction/hull are temporary flags for sensitivity computation.
+	skipAttraction bool
+	skipHull       bool
 	// roleTargets holds the per-config, per-surface glass-role classification
 	// (paraxial.ElementRole) frozen at the top of each DLS iteration by
 	// updateGlassRoles, so the base-point and Jacobian residuals share one role
@@ -1352,6 +1600,9 @@ terms = append(terms, meritTerm{
 	opt.SetApertureMarginMM(cfg.ApertureMarginMM)
 	opt.SetDegenerate(cfg.SpotDegenerate, cfg.OPDDegenerate, cfg.WavefrontDegenerate)
 	opt.SetPowerSolve(cfg.PowerSolveSurfaces)
+	if cfg.GlassAttraction != nil {
+		opt.SetGlassAttraction(cfg.GlassAttraction, cfg.GlassCatalog)
+	}
 	return opt
 }
 
@@ -1525,6 +1776,16 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 	copy(variablesCopy, variables)
 
 	glassOverrides := make(map[string]*types.Glass)
+	// First pass: resolve glass names for all variables before converting
+	// any surfaces, so the nd variable's conversion doesn't prevent the vd
+	// variable on the same surface from finding the catalog key.
+	type glassResolve struct {
+		varIdx     int
+		surfIdx    int
+		key        string
+		glassLabel string
+	}
+	var resolves []glassResolve
 	for i := range variablesCopy {
 		v := &variablesCopy[i]
 		if v.IsShared {
@@ -1539,25 +1800,32 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 			v.GlassName = key
 			if key != "" {
 				if g, ok := gc.Lookup(key); ok {
-					// Strip the key from the surface material: convert the
-					// keyed catalog reference to an inline model glass so
-					// applyVariables uses the direct nd/vd path and the
-					// output YAML carries inline model values.
-					for i := range cfg.surfaces {
-						if cfg.surfaces[i].ID == v.SurfaceID && cfg.surfaces[i].Material.HasKey() {
-							cfg.surfaces[i].Material = types.Material{ND: g.ND, VD: g.VD}
+					for si := range cfg.surfaces {
+						if cfg.surfaces[si].ID == v.SurfaceID && cfg.surfaces[si].Material.HasKey() {
+							resolves = append(resolves, glassResolve{varIdx: i, surfIdx: si, key: key, glassLabel: key})
+							_ = g // lookup again in second pass
 							break
 						}
 					}
-					cp := *g
-					cp.Label = key
-					if cp.Type == types.GlassTypeCatalog {
-						cp.Type = types.GlassTypeModel
-						cp.DispersionFormula = ""
-					}
-					glassOverrides[key] = &cp
 				}
 			}
+		}
+	}
+	// Second pass: convert keyed surfaces to inline model glasses.
+	for _, r := range resolves {
+		cfg := findConfigByID(configs, variablesCopy[r.varIdx].Config)
+		if cfg == nil {
+			continue
+		}
+		if g, ok := gc.Lookup(r.key); ok {
+			cfg.surfaces[r.surfIdx].Material = types.Material{ND: g.ND, VD: g.VD}
+			cp := *g
+			cp.Label = r.key
+			if cp.Type == types.GlassTypeCatalog {
+				cp.Type = types.GlassTypeModel
+				cp.DispersionFormula = ""
+			}
+			glassOverrides[r.key] = &cp
 		}
 	}
 
@@ -2717,9 +2985,18 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 		merit += cfg.weight * cfgMerit
 	}
 
-	if o.hull != nil {
+	if o.hull != nil && !o.skipHull {
 		for _, pair := range o.hullPairs {
 			merit += o.hull.Penalty(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight)
+		}
+	}
+	if o.catalogField != nil && o.catalogField.CatalogFieldCount() > 0 && !o.skipAttraction && o.attractionWeight > 0 {
+		for i, pair := range o.hullPairs {
+			w := o.attractionWeight
+			if i < len(o.attractionScales) {
+				w *= o.attractionScales[i]
+			}
+			merit += glass.Penalty(o.catalogField, x[pair.ndIndex], x[pair.vdIndex], o.attractionSigmaND, o.attractionSigmaVD, 0, w, o.attractionKernel)
 		}
 	}
 	return merit
@@ -2811,9 +3088,18 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 		}
 	}
 
-	if o.hull != nil {
+	if o.hull != nil && !o.skipHull {
 		for _, pair := range o.hullPairs {
 			allR = append(allR, o.hull.Residual(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight))
+		}
+	}
+	if o.catalogField != nil && o.catalogField.CatalogFieldCount() > 0 && !o.skipAttraction && o.attractionWeight > 0 {
+		for i, pair := range o.hullPairs {
+			w := o.attractionWeight
+			if i < len(o.attractionScales) {
+				w *= o.attractionScales[i]
+			}
+			allR = append(allR, glass.Residual(o.catalogField, x[pair.ndIndex], x[pair.vdIndex], o.attractionSigmaND, o.attractionSigmaVD, 0, w, o.attractionKernel))
 		}
 	}
 	return allR
@@ -3033,12 +3319,13 @@ func (o *Optimizer) FinalPupilModels(x []float64) map[string]types.PupilModelCon
 	_, _, pupils := o.applyVariables(x)
 	out := make(map[string]types.PupilModelConfig, len(pupils))
 	for id, p := range pupils {
-		var m types.PupilModelConfig
-		if cfg := o.findConfig(id); cfg != nil && cfg.pupilModel != nil {
-			m = *cfg.pupilModel
-		} else {
-			m.Mode = "virtual_entrance_pupil"
+		cfg := o.findConfig(id)
+		if cfg == nil || cfg.pupilModel == nil {
+			// No virtual entrance pupil in use for this config: writing a
+			// default (all-zero) model back would break a subsequent trace.
+			continue
 		}
+		m := *cfg.pupilModel
 		if p.z != 0 {
 			m.AxialPosition = p.z
 		}
@@ -3313,6 +3600,16 @@ func (o *Optimizer) buildVariableStates(x []float64) []VariableState {
 }
 
 func buildHullPairs(variables []Variable) []glassPair {
+	// Group nd/vd variables by the glass they target: a named catalog glass
+	// may be shared across surfaces, while an inline model glass is
+	// identified by its (config, surface) location. Keying inline models by
+	// an empty GlassName would collapse every pair onto one entry.
+	pairKey := func(v Variable) string {
+		if v.GlassName != "" {
+			return "glass:" + v.GlassName
+		}
+		return fmt.Sprintf("surf:%s:%d", v.Config, v.SurfaceID)
+	}
 	ndMap := make(map[string]int)
 	vdMap := make(map[string]int)
 	for i, v := range variables {
@@ -3321,17 +3618,25 @@ func buildHullPairs(variables []Variable) []glassPair {
 		}
 		switch v.Param {
 		case "nd":
-			ndMap[v.GlassName] = i
+			ndMap[pairKey(v)] = i
 		case "vd":
-			vdMap[v.GlassName] = i
+			vdMap[pairKey(v)] = i
 		}
 	}
 	var pairs []glassPair
-	for name, ndIdx := range ndMap {
-		if vdIdx, ok := vdMap[name]; ok {
-			pairs = append(pairs, glassPair{ndIndex: ndIdx, vdIndex: vdIdx, name: name})
+	for key, ndIdx := range ndMap {
+		if vdIdx, ok := vdMap[key]; ok {
+			pairs = append(pairs, glassPair{ndIndex: ndIdx, vdIndex: vdIdx, name: variables[ndIdx].GlassName})
 		}
 	}
+	// Deterministic order (map iteration is randomised) so diagnostics and
+	// sensitivity scales are reproducible.
+	sort.Slice(pairs, func(i, j int) bool {
+		if pairs[i].ndIndex != pairs[j].ndIndex {
+			return pairs[i].ndIndex < pairs[j].ndIndex
+		}
+		return pairs[i].vdIndex < pairs[j].vdIndex
+	})
 	return pairs
 }
 

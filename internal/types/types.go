@@ -683,6 +683,50 @@ type GlassHullConfig struct {
 	Weight  float64 `yaml:"weight,omitempty"`
 }
 
+// GlassAttractionConfig configures the soft-min potential field that pulls
+// nd/vd glass variables toward the nearest real catalog glass during
+// optimisation. The attraction supplements the glass convex hull: the hull
+// prevents unphysical glass, the attraction actively pulls toward real glass.
+type GlassAttractionConfig struct {
+	Enabled bool   `yaml:"enabled,omitempty"`
+	Catalog string `yaml:"catalog,omitempty"` // catalog key; "" = default catalog
+
+	// Kernel selects the distance potential: "distance" (φ=r², default) or
+	// "gaussian" (φ=1−exp(−r²/2σ²)).
+	Kernel string `yaml:"kernel,omitempty"`
+
+	// Sigma controls the gaussian kernel width. Ignored for distance kernel.
+	SigmaND float64 `yaml:"sigma_nd,omitempty"`
+	SigmaVD float64 `yaml:"sigma_vd,omitempty"`
+
+	// Run-level weight schedule (same as merit_schedule anchors).
+	WeightFrom float64 `yaml:"weight_from,omitempty"`
+	WeightTo   float64 `yaml:"weight_to,omitempty"`
+
+	// Metric drives the run-level weight ramp. "merit_ratio" (default for
+	// escape), "iteration" (plain optimize), "run_iteration" (accumulates
+	// across escape sub-solves).
+	Metric string `yaml:"metric,omitempty"`
+
+	// Anchor interpolation (same semantics as merit_schedule).
+	AnchorFrom float64 `yaml:"anchor_from,omitempty"`
+	AnchorTo   float64 `yaml:"anchor_to,omitempty"`
+	Curve      string  `yaml:"curve,omitempty"` // linear (default) | sigmoid | step
+
+	// Sensitivity-weighted per-glass vd scaling.
+	SensitivityWeighted bool    `yaml:"sensitivity_weighted,omitempty"`
+	SensitivityMetric   string  `yaml:"sensitivity_metric,omitempty"` // elasticity (default) | gradient
+	SensitivityEMA      float64 `yaml:"sensitivity_ema,omitempty"`
+	SensitivityPower    float64 `yaml:"sensitivity_power,omitempty"`
+	SensitivityRef      string  `yaml:"sensitivity_ref,omitempty"` // mean (default) | max
+	SensitivityScaleMin float64 `yaml:"sensitivity_scale_min,omitempty"`
+	SensitivityScaleMax float64 `yaml:"sensitivity_scale_max,omitempty"`
+
+	// Post-escape top-K refinement (integration B).
+	PostRefine    bool `yaml:"post_refine,omitempty"`
+	PostRefineTop int  `yaml:"post_refine_top_k,omitempty"`
+}
+
 // RegionActiveConfig configures the Okudaira Region Active Method: Lagrange
 // multipliers with hysteresis for dynamic active-set management of inequality
 // constraints. Equality constraints are always treated as active regardless
@@ -725,6 +769,7 @@ type OptimizationConfig struct {
 	LocalVariables   []LocalVariableDef     `yaml:"local_variables,omitempty"`
 	Constraints      []ConstraintOperand    `yaml:"constraints,omitempty"`
 	GlassHull        *GlassHullConfig       `yaml:"glass_hull,omitempty"`
+	GlassAttraction  *GlassAttractionConfig `yaml:"glass_attraction,omitempty"`
 	Escape           *EscapeConfig          `yaml:"escape,omitempty"`
 	MeritSchedule    *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
 	Degenerate       *DegenerateConfig      `yaml:"degenerate,omitempty"`
@@ -941,6 +986,25 @@ type MeritBeforeAfter struct {
 	Ratio       float64 `yaml:"ratio,omitempty"`
 }
 
+// GlassAttractionPairResult reports the final glass-attraction state for one
+// nd/vd glass variable pair.
+type GlassAttractionPairResult struct {
+	Name       string  `yaml:"name,omitempty"`
+	ND         float64 `yaml:"nd"`
+	VD         float64 `yaml:"vd"`
+	NearestKey string  `yaml:"nearest_key,omitempty"`
+	NearestND  float64 `yaml:"nearest_nd"`
+	NearestVD  float64 `yaml:"nearest_vd"`
+	Distance   float64 `yaml:"distance"`  // normalised-space distance to nearest
+	Scale      float64 `yaml:"scale"`     // sensitivity weight scale
+}
+
+// GlassAttractionResult reports the final glass-attraction state.
+type GlassAttractionResult struct {
+	Weight float64                     `yaml:"weight"`
+	Pairs  []GlassAttractionPairResult `yaml:"pairs,omitempty"`
+}
+
 type OptimizationResult struct {
 	Status      string                  `yaml:"status"`
 	Iterations  int                     `yaml:"iterations"`
@@ -959,6 +1023,9 @@ type OptimizationResult struct {
 	// schedule (max across configs). Present only with a schedule that
 	// declares per-mode num_rays.
 	EffectiveNumRays int `yaml:"effective_num_rays,omitempty"`
+	// GlassAttraction reports per-pair nearest real-glass diagnostics
+	// (present only when glass_attraction is enabled).
+	GlassAttraction *GlassAttractionResult `yaml:"glass_attraction,omitempty"`
 }
 
 // ConstraintMeasurement records the final measured value and residual of one

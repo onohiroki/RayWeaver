@@ -323,6 +323,7 @@ type OptimizationResultSummary struct {
 	EffectiveNumRays int                `json:"effective_num_rays,omitempty" yaml:"effective_num_rays,omitempty"`
 	Interrupted      bool               `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
 	Reason           string             `json:"reason,omitempty" yaml:"reason,omitempty"`
+	GlassAttraction  *types.GlassAttractionResult `json:"glass_attraction,omitempty" yaml:"glass_attraction,omitempty"`
 }
 
 // optimizationListOutput is the structured (yaml/json) shape of
@@ -2966,6 +2967,22 @@ func listOptimization(input types.Input, output types.Output, format string) {
 			p = appendNumProp(p, "Weight", gh.Weight)
 			subConfigs = append(subConfigs, SubConfigSection{Name: "glass_hull", Settings: p})
 		}
+		if ga := opt.GlassAttraction; ga != nil {
+			var p []propRow
+			p = appendBoolTrueProp(p, "Enabled", ga.Enabled)
+			p = appendStrProp(p, "Kernel", ga.Kernel)
+			p = appendNumProp(p, "Weight From", ga.WeightFrom)
+			p = appendNumProp(p, "Weight To", ga.WeightTo)
+			p = appendStrProp(p, "Metric", ga.Metric)
+			p = appendStrProp(p, "Curve", ga.Curve)
+			p = appendBoolTrueProp(p, "Sensitivity Weighted", ga.SensitivityWeighted)
+			p = appendStrProp(p, "Sensitivity Metric", ga.SensitivityMetric)
+			if ga.PostRefine {
+				p = appendBoolTrueProp(p, "Post Refine", ga.PostRefine)
+				p = appendIntProp(p, "Post Refine Top K", ga.PostRefineTop)
+			}
+			subConfigs = append(subConfigs, SubConfigSection{Name: "glass_attraction", Settings: p})
+		}
 		if dg := opt.Degenerate; dg != nil {
 			var p []propRow
 			p = appendNumProp(p, "Spot Value", dg.SpotValue)
@@ -3025,6 +3042,7 @@ func listOptimization(input types.Input, output types.Output, format string) {
 			EffectiveNumRays: or.EffectiveNumRays,
 			Interrupted:      or.Interrupted,
 			Reason:           or.Reason,
+			GlassAttraction:  or.GlassAttraction,
 		}
 	}
 
@@ -3060,6 +3078,15 @@ func listOptimization(input types.Input, output types.Output, format string) {
 		p = appendIntProp(p, "Effective Num Rays", optResult.EffectiveNumRays)
 		p = appendBoolTrueProp(p, "Interrupted", optResult.Interrupted)
 		p = appendStrProp(p, "Reason", optResult.Reason)
+		if ga := optResult.GlassAttraction; ga != nil {
+			p = append(p, propRow{Name: "Glass Attraction Weight", Value: fmt.Sprintf("%g", ga.Weight)})
+			for _, pair := range ga.Pairs {
+				p = append(p, propRow{
+					Name:  fmt.Sprintf("  %s", pair.Name),
+					Value: fmt.Sprintf("nd=%.5f vd=%.2f → %s (nd=%.5f vd=%.2f, d=%.4f, scale=%.3f)", pair.ND, pair.VD, pair.NearestKey, pair.NearestND, pair.NearestVD, pair.Distance, pair.Scale),
+				})
+			}
+		}
 		return p
 	}
 

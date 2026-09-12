@@ -277,6 +277,9 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		cfg.WavefrontDegenerate = dg.WavefrontValue
 	}
 	cfg.HullMargin, cfg.HullWeight = resolveGlassHull(input.Optimization.GlassHull, &cfg.Hull)
+	if input.Optimization.GlassAttraction != nil {
+		cfg.GlassAttraction = input.Optimization.GlassAttraction
+	}
 	if cfg.Hull != nil {
 		if cfg.HullMargin <= 0 {
 			cfg.HullMargin = 0.02
@@ -629,6 +632,9 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			for cfgID, terms := range gctx.merit {
 				opt.SetGlassMerit(cfgID, terms)
 			}
+		}
+		if input.Optimization.GlassAttraction != nil {
+			opt.SetGlassAttraction(input.Optimization.GlassAttraction, gc)
 		}
 		return opt
 	}
