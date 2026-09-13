@@ -6,7 +6,7 @@ formatted tables by default, not pipeline YAML.
 
 ```
 rayweave list [--format table|yaml|json|csv] [--config ID]
-              [--glass-dir DIR] [--curvature] [--all-glasses] [--roles] [--summary]
+              [--glass-dir DIR] [--curvature] [--auto-aperture] [--all-glasses] [--roles] [--summary]
               [TARGET...] < input.yaml
 ```
 
@@ -73,12 +73,17 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
 | `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
 | `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables, `merit_schedule`, and the sub-configs (`escape`, `glass_hull`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
+| `escape` | Escape-function global optimisation results (requires `escape` output). Shows escape parameters, discovered local minima, per-minimum element powers, and the best solution. |
 
 Default (no target arguments): `surfaces glasses paraxial fields`. The
 explicit keyword `default` expands to this set **in place**, preserving the
 order of the remaining targets — `rayweave list default merit` shows the
 default targets followed by merit, and `rayweave list merit default` shows
-merit first. Duplicate targets (e.g. `default surfaces`) are shown once.
+merit first. The explicit keyword `all` expands to all eight targets
+(`surfaces`, `glasses`, `paraxial`, `fields`, `rays`, `merit`, `optimization`,
+`escape`) and implies `--auto-aperture`, `--all-glasses`, and `--roles` so
+every optional detail is shown without specifying each flag individually.
+Duplicate targets (e.g. `default surfaces`, `all merit`) are shown once.
 
 ```sh
 rayweave list paraxial < lens.yaml            # first-order properties
@@ -87,6 +92,7 @@ rayweave list fields < lens.yaml              # field-of-view definitions
 rayweave list merit < lens.yaml               # merit function definition
 rayweave list default < lens.yaml             # same as the bare invocation
 rayweave list default merit < lens.yaml       # default targets, then merit
+rayweave list all < lens.yaml                 # all targets, implies --auto-aperture --all-glasses --roles
 rayweave list optimization < lens.yaml        # optimizer configuration
 rayweave chief | rayweave trace | rayweave list rays
 rayweave optimize < lens.yaml | rayweave list merit         # + optimization result
