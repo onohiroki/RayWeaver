@@ -41,6 +41,10 @@ func runClean(data []byte) {
 		removed = append(removed, removedEntry{Field: "escape_result", Count: 1})
 		output.EscapeResult = nil
 	}
+	if output.Input.EscapeMinimum != nil {
+		removed = append(removed, removedEntry{Field: "escape_minimum", Count: 1})
+		output.Input.EscapeMinimum = nil
+	}
 	if output.Vignetting != nil {
 		removed = append(removed, removedEntry{Field: "vignetting_result", Count: 1})
 		output.Vignetting = nil

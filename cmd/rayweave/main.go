@@ -558,7 +558,10 @@ the running DLS within one iteration, preserving its best point found so far
 immediately (exit 1).
  `)
 	case "escape":
-		fmt.Print(`Usage: rayweave escape [--verbose] [--log FILE] [--save FILE] [--glass-dir DIR] < input.yaml
+		fmt.Print(`Usage: rayweave escape [--verbose] [--log FILE] [--save FILE]
+                     [--keep-infeasible] [--power-solve]
+                     [--power-solve-surfaces SURFACES]
+                     [--glass-variables] [--glass-dir DIR] < input.yaml
        rayweave escape extract --index N < escape-output.yaml
 
 Escape-function global optimisation (Ishiki-Ono style). DLS repeatedly
@@ -582,6 +585,17 @@ Options:
                    current FILE N.yaml is renamed to FILE N.<version>.yaml and
                    the better point is written as FILE N.yaml. Writes are
                    atomic, so a killed process never loses already-found minima.
+  --keep-infeasible include infeasible basins in stdout YAML and --save files
+                   (default: feasible minima only)
+  --power-solve    insert the power-preserving glass phase between each escape
+                   and clean DLS (holds element powers fixed while the glasses
+                   are rebalanced)
+  --power-solve-surfaces SURFACES
+                   comma-separated surface IDs whose curvature is recomputed
+                   to hold the element thin-lens power (with --power-solve;
+                   also enables the glass phase)
+  --glass-variables auto-generate nd/vd optimization variables for every
+                   refractive lens element (the merit is left unchanged)
   --glass-dir DIR    AGF glass catalog directory
 
 A SIGINT/SIGTERM stops the search in three stages: the first signal waits for
@@ -1122,7 +1136,8 @@ not pipeline YAML.
 Targets (space-separated, flags may appear before or after them;
 default: surfaces, glasses, paraxial and fields — the keyword "default"
 expands to this set in place, e.g. "list default merit" shows the default
-targets followed by merit):
+targets followed by merit; the keyword "all" expands to all eight targets
+and implies --auto-aperture, --all-glasses, and --roles):
   surfaces   surface table of the selected config (object plane 0 excluded)
               With --auto-aperture, also shows the per-surface auto_aperture
               state (auto = resized by vignette/clear-aperture/optimize,

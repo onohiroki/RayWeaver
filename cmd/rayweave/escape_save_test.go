@@ -41,7 +41,7 @@ func TestEscapeFileSaverVersioning(t *testing.T) {
 			}},
 		}
 	}
-	s := newEscapeFileSaver(base, build, nil)
+	s := newEscapeFileSaver(base, build, nil, true)
 
 	s.record(0, escape.Point{X: []float64{1.0}, Merit: 5.0}, true, 0)
 	cur := base + "0.yaml"

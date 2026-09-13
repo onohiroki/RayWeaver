@@ -24,18 +24,19 @@ import (
 // killed process never leaves a partially-written file: every minimum found so
 // far survives a SIGKILL.
 type escapeFileSaver struct {
-	mu       sync.Mutex
-	stem     string
-	ext      string
-	build    func(escape.Point) types.Input
-	progress *escape.Progress
-	err      error
+	mu             sync.Mutex
+	stem           string
+	ext            string
+	build          func(escape.Point) types.Input
+	progress       *escape.Progress
+	keepInfeasible bool
+	err            error
 }
 
 // newEscapeFileSaver creates a saver writing to base0.yaml, base1.yaml, ...
-func newEscapeFileSaver(base string, build func(escape.Point) types.Input, progress *escape.Progress) *escapeFileSaver {
+func newEscapeFileSaver(base string, build func(escape.Point) types.Input, progress *escape.Progress, keepInfeasible bool) *escapeFileSaver {
 	stem, ext := splitSaveBase(base)
-	return &escapeFileSaver{stem: stem, ext: ext, build: build, progress: progress}
+	return &escapeFileSaver{stem: stem, ext: ext, build: build, progress: progress, keepInfeasible: keepInfeasible}
 }
 
 // splitSaveBase separates a user-supplied base name into its stem and
@@ -58,7 +59,16 @@ func (s *escapeFileSaver) record(idx int, p escape.Point, isNew bool, version in
 	if s.err != nil {
 		return
 	}
+	if !s.keepInfeasible && p.Status == escape.MinStatusInfeasibleBasin {
+		return
+	}
 	input := s.build(p)
+	input.EscapeMinimum = &types.EscapeMinimumInfo{
+		Index:         idx,
+		Merit:         p.Merit,
+		Status:        types.EscapeMinimumStatus(statusString(p.Status)),
+		InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
+	}
 	data, err := yaml.Marshal(input)
 	if err != nil {
 		s.err = fmt.Errorf("escape: marshal minimum %d: %w", idx, err)

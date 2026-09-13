@@ -343,10 +343,11 @@ type optimizationListOutput struct {
 
 // EscapeMinimumRow is one local minimum for `list escape`.
 type EscapeMinimumRow struct {
-	Index         int        `json:"index" yaml:"index"`
-	Merit         float64    `json:"merit" yaml:"merit"`
-	File          string     `json:"file,omitempty" yaml:"file,omitempty"`
-	ElementPowers [][]float64 `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
+	Index         int          `json:"index" yaml:"index"`
+	Merit         float64      `json:"merit" yaml:"merit"`
+	Status        string       `json:"status,omitempty" yaml:"status,omitempty"`
+	File          string       `json:"file,omitempty" yaml:"file,omitempty"`
+	ElementPowers [][]float64  `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
 }
 
 // escapeListOutput is the structured (yaml/json) shape of `list escape`.
@@ -391,22 +392,39 @@ func runList(data []byte) {
 	// defaultListTargets is the target set of the bare `list` invocation; the
 	// explicit "default" keyword expands to it in place.
 	defaultListTargets := []string{"surfaces", "glasses", "paraxial", "fields"}
+	// allListTargets is the full target set; the "all" keyword expands to it
+	// and implies --auto-aperture, --all-glasses, and --roles.
+	allListTargets := []string{"surfaces", "glasses", "paraxial", "fields", "rays", "merit", "optimization", "escape"}
 
 	targets := args.positional
 	if len(targets) == 0 {
 		targets = append([]string(nil), defaultListTargets...)
 	} else {
-		// Expand the "default" keyword in place, preserving user order
-		// (e.g. "list default merit" shows the default set, then merit).
-		expanded := make([]string, 0, len(targets)+len(defaultListTargets))
+		// Expand "default" and "all" keywords in place, preserving user
+		// order (e.g. "list default merit" shows the default set, then
+		// merit; "list all merit" shows all targets, then merit).
+		expanded := make([]string, 0, len(targets)+len(allListTargets))
 		for _, t := range targets {
-			if t == "default" {
+			switch t {
+			case "default":
 				expanded = append(expanded, defaultListTargets...)
-			} else {
+			case "all":
+				expanded = append(expanded, allListTargets...)
+			default:
 				expanded = append(expanded, t)
 			}
 		}
 		targets = expanded
+	}
+
+	// "all" implies --auto-aperture, --all-glasses, and --roles.
+	for _, t := range args.positional {
+		if t == "all" {
+			*showAutoAperture = true
+			*showAllGlasses = true
+			*showRoles = true
+			break
+		}
 	}
 
 	needsOutput := false
@@ -457,7 +475,7 @@ func runList(data []byte) {
 		case "escape":
 			listEscape(output, *format)
 		default:
-			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, escape, or \"default\")", target)
+			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, escape, \"default\", or \"all\")", target)
 			os.Exit(1)
 		}
 	}
@@ -1479,21 +1497,23 @@ func listParaxial(data []byte, input types.Input, gc *glass.Catalog, format stri
 		for _, p := range props {
 			fmt.Printf("%s,%s\n", p.Name, p.Value)
 		}
-		if showRoles && len(result.ElementRoles) > 0 {
-			fmt.Println()
-			fmt.Println("Element Roles:")
-			fmt.Println("Surfaces,Phi,W,Role,VD Target,ND Target")
-			for _, r := range result.ElementRoles {
-				sids := fmt.Sprintf("%v", r.SurfaceIDs)
-				fmt.Printf("%s,%s,%s,%s,%s,%s\n",
-					sids,
-					formatTableFloat(r.Phi),
-					formatTableFloat(r.W),
-					r.Role,
-					formatTableFloat(r.VTarget),
-					formatTableFloat(r.NDTarget))
-			}
+	if showRoles && len(result.ElementRoles) > 0 {
+		fmt.Println()
+		fmt.Println("Element Roles:")
+		fmt.Println("Surfaces,Phi,W,Role,nd Target,vd Target,nd Actual,vd Actual")
+		for _, r := range result.ElementRoles {
+			sids := fmt.Sprintf("%v", r.SurfaceIDs)
+			fmt.Printf("%s,%s,%s,%s,%s,%s,%s,%s\n",
+				sids,
+				formatTableFloat(r.Phi),
+				formatTableFloat(r.W),
+				r.Role,
+				formatTableFloat(r.NDTarget),
+				formatTableFloat(r.VTarget),
+				formatTableFloat(r.NDActual),
+				formatTableFloat(r.VActual))
 		}
+	}
 	default: // "table"
 		fmt.Println("Paraxial:")
 		if len(props) == 0 {
@@ -1518,16 +1538,20 @@ func listParaxial(data []byte, input types.Input, gc *glass.Catalog, format stri
 				{header: "Phi", right: true},
 				{header: "W", right: true},
 				{header: "Role"},
-				{header: "VD Target", right: true},
-				{header: "ND Target", right: true},
+				{header: "nd Target", right: true},
+				{header: "vd Target", right: true},
+				{header: "nd Actual", right: true},
+				{header: "vd Actual", right: true},
 			}
 			for _, r := range result.ElementRoles {
 				roleCols[0].cells = append(roleCols[0].cells, fmt.Sprintf("%v", r.SurfaceIDs))
 				roleCols[1].cells = append(roleCols[1].cells, formatTableFloat(r.Phi))
 				roleCols[2].cells = append(roleCols[2].cells, formatTableFloat(r.W))
 				roleCols[3].cells = append(roleCols[3].cells, r.Role)
-				roleCols[4].cells = append(roleCols[4].cells, formatTableFloat(r.VTarget))
-				roleCols[5].cells = append(roleCols[5].cells, formatTableFloat(r.NDTarget))
+				roleCols[4].cells = append(roleCols[4].cells, formatTableFloat(r.NDTarget))
+				roleCols[5].cells = append(roleCols[5].cells, formatTableFloat(r.VTarget))
+				roleCols[6].cells = append(roleCols[6].cells, formatTableFloat(r.NDActual))
+				roleCols[7].cells = append(roleCols[7].cells, formatTableFloat(r.VActual))
 			}
 			fmt.Print(renderTable(roleCols))
 		}
@@ -1547,8 +1571,15 @@ func listRays(output types.Output, summaryOnly bool, format string) {
 		}
 	}
 	if len(results) == 0 {
-		errOut("Error: no ray results found (results[] is empty; run 'trace' or 'trace single' first)")
-		os.Exit(1)
+		switch format {
+		case "yaml":
+			os.Stdout.Write([]byte("summary: []\n"))
+		case "json":
+			fmt.Println(`{"summary":[]}`)
+		default:
+			fmt.Println("Rays: (no ray results)")
+		}
+		return
 	}
 
 	summary := buildRaySummaryRows(results)
@@ -2704,6 +2735,7 @@ func listEscape(output types.Output, format string) {
 		minima = append(minima, EscapeMinimumRow{
 			Index:         m.Index,
 			Merit:         m.Merit,
+			Status:        string(m.Status),
 			File:          fileBase(m.File),
 			ElementPowers: powers,
 		})
@@ -2745,11 +2777,12 @@ func listEscape(output types.Output, format string) {
 		printPropsSection("Escape Parameters:", params)
 		if len(minima) > 0 {
 			fmt.Println("Local Minima:")
-			fmt.Println("index,merit,file")
+			fmt.Println("index,merit,status,file")
 			for _, m := range minima {
 				fmt.Println(strings.Join(quoteCSV([]string{
 					strconv.Itoa(m.Index),
 					strconv.FormatFloat(m.Merit, 'g', -1, 64),
+					m.Status,
 					m.File,
 				}), ","))
 			}
@@ -2804,12 +2837,14 @@ func listEscape(output types.Output, format string) {
 			cols := []tableColumn{
 				{header: "Index", right: true},
 				{header: "Merit", right: true},
+				{header: "Status"},
 				{header: "File"},
 			}
 			for _, m := range minima {
 				cols[0].cells = append(cols[0].cells, strconv.Itoa(m.Index))
 				cols[1].cells = append(cols[1].cells, formatTableFloat(m.Merit))
-				cols[2].cells = append(cols[2].cells, m.File)
+				cols[2].cells = append(cols[2].cells, m.Status)
+				cols[3].cells = append(cols[3].cells, m.File)
 			}
 			fmt.Print(renderTable(cols))
 			fmt.Println()

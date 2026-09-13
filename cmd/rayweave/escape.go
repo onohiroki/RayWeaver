@@ -383,7 +383,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	if saveBase != "" {
 		saver = newEscapeFileSaver(saveBase, func(p escape.Point) types.Input {
 			return materializeSingleInput(input, surfaces, variables, p.X, gc)
-		}, progress)
+		}, progress, keepInfeasible)
 		onRecord = saver.record
 	}
 
@@ -705,7 +705,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	if saveBase != "" {
 		saver = newEscapeFileSaver(saveBase, func(p escape.Point) types.Input {
 			return materializeMultiInput(input, input.Optimization, p.X, gc)
-		}, progress)
+		}, progress, keepInfeasible)
 		onRecord = saver.record
 	}
 

@@ -1190,6 +1190,15 @@ type EscapeVarState struct {
 	After  float64 `yaml:"after"`
 }
 
+// EscapeMinimumInfo records escape-minimum metadata carried in a saved YAML
+// file (--save) so each minimum declares its own feasibility status.
+type EscapeMinimumInfo struct {
+	Index         int                 `yaml:"index"`
+	Merit         float64             `yaml:"merit"`
+	Status        EscapeMinimumStatus `yaml:"status"`
+	InvalidReason InvalidReason       `yaml:"invalid_reason,omitempty"`
+}
+
 // RayweaverTool is the canonical marker written in every pipeline document's
 // metadata.tool.name field, identifying it as RayWeaver-managed YAML.
 const RayweaverTool = "RayWeaver"
@@ -1542,6 +1551,7 @@ type Input struct {
 	PSF            *PSFConfig              `yaml:"psf,omitempty"`
 	Wavefront      *WavefrontConfig        `yaml:"wavefront,omitempty"`
 	Scale          *ScaleConfig            `yaml:"scale,omitempty"`
+	EscapeMinimum  *EscapeMinimumInfo      `yaml:"escape_minimum,omitempty"`
 }
 
 type GridPoint struct {
@@ -1662,8 +1672,10 @@ type ElementRole struct {
 	Y          float64 `yaml:"y"`
 	W          float64 `yaml:"w"`
 	Role       string  `yaml:"role"` // dominant | compensating | neutral
-	VTarget    float64 `yaml:"vd_target"`
 	NDTarget   float64 `yaml:"nd_target"`
+	VTarget    float64 `yaml:"vd_target"`
+	NDActual   float64 `yaml:"nd_actual,omitempty"`
+	VActual    float64 `yaml:"vd_actual,omitempty"`
 }
 
 type ParaxialInput struct {
