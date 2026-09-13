@@ -982,6 +982,10 @@ type EscapeConfig struct {
 	StallRelTol                  float64            `yaml:"stall_rel_tol,omitempty"`
 	StallEarlyStop               *bool              `yaml:"stall_early_stop,omitempty"`
 	InitialPerturb               float64            `yaml:"initial_perturb,omitempty"`
+	// MinThroughputRatio overrides the default minimum fraction of valid rays
+	// required for a converged point to be classified as feasible. Points with
+	// fewer valid rays are marked infeasible. 0 uses the built-in default (0.3).
+	MinThroughputRatio float64 `yaml:"min_throughput_ratio,omitempty"`
 }
 
 type MeritBeforeAfter struct {

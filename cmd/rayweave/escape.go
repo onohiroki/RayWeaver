@@ -398,8 +398,9 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 
 	// ValidateFn classifies each converged DLS point as feasible, infeasible,
 	// or evaluation failure by tracing the pupil grid for every field and
-	// checking that the fraction of valid rays exceeds the threshold (0.3,
-	// matching the field_alive merit term default). The virtual entrance pupil
+	// checking that the fraction of valid rays exceeds the threshold (default
+	// 0.3, matching the field_alive merit term default, overridable via
+	// optimization.escape.min_throughput_ratio). The virtual entrance pupil
 	// model (if configured) is forwarded to the chief ray tracer so the
 	// validation uses the same pupil configuration as the DLS.
 	var validateFn func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason)
@@ -413,6 +414,9 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		wl := effectiveReferenceWavelength(input.Chief)
 		pupilModel := input.Chief.PupilModel
 		throughputThreshold := 0.3
+		if input.Optimization.Escape != nil && input.Optimization.Escape.MinThroughputRatio > 0 {
+			throughputThreshold = input.Optimization.Escape.MinThroughputRatio
+		}
 
 		validateFn = func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
 			surf, newGlasses := applyEscapeX(surfaces, variables, x, gc)
@@ -742,6 +746,9 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		wl := effectiveReferenceWavelength(input.Chief)
 		pupilModel := input.Chief.PupilModel
 		throughputThreshold := 0.3
+		if input.Optimization.Escape != nil && input.Optimization.Escape.MinThroughputRatio > 0 {
+			throughputThreshold = input.Optimization.Escape.MinThroughputRatio
+		}
 		// Use the first config's surfaces as the primary validation target.
 		primarySurfaces := template[0].Surfaces
 		primaryStop := 0
