@@ -57,8 +57,10 @@ type ElementRole struct {
 	Y          float64 `yaml:"y"`
 	W          float64 `yaml:"w"`
 	Role       string  `yaml:"role"` // dominant | compensating | neutral
-	VTarget    float64 `yaml:"vd_target"`
 	NDTarget   float64 `yaml:"nd_target"`
+	VTarget    float64 `yaml:"vd_target"`
+	NDActual   float64 `yaml:"nd_actual,omitempty"`
+	VActual    float64 `yaml:"vd_actual,omitempty"`
 }
 
 // GlassRoles returns the glass-role classification of every lens element in
@@ -129,6 +131,11 @@ func GlassRoles(surfaces []types.Surface, gc *glass.Catalog) []ElementRole {
 			boost = glassRoleNDBoostPos
 		}
 		role.NDTarget = clampF(ndLine(role.VTarget)+boost, glassRoleNDMin, glassRoleNDMax)
+
+		// Resolve the actual nd/vd from the element's first glass surface.
+		if len(role.SurfaceIDs) > 0 {
+			role.NDActual, role.VActual = resolveGlassNDVD(surfaces, gc, role.SurfaceIDs[0])
+		}
 	}
 	return roles
 }
@@ -180,4 +187,26 @@ func clampF(v, lo, hi float64) float64 {
 		return hi
 	}
 	return v
+}
+
+// resolveGlassNDVD returns the nd and vd of the material on the surface with
+// the given ID, resolved through the catalog for keyed materials and read
+// inline for model glasses. Returns (0, 0) for air/unknown.
+func resolveGlassNDVD(surfaces []types.Surface, gc *glass.Catalog, surfaceID int) (nd, vd float64) {
+	for i := range surfaces {
+		if surfaces[i].ID != surfaceID {
+			continue
+		}
+		m := surfaces[i].Material
+		if m.HasModel() && !m.HasKey() {
+			return m.ND, m.VD
+		}
+		if m.HasKey() {
+			if g, ok := gc.Lookup(m.Key); ok {
+				return g.ND, g.VD
+			}
+		}
+		return 0, 0
+	}
+	return 0, 0
 }

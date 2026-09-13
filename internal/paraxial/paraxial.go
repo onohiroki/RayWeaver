@@ -283,8 +283,10 @@ func Compute(
 			Y:          er.Y,
 			W:          er.W,
 			Role:       er.Role,
-			VTarget:    er.VTarget,
 			NDTarget:   er.NDTarget,
+			VTarget:    er.VTarget,
+			NDActual:   er.NDActual,
+			VActual:    er.VActual,
 		})
 	}
 

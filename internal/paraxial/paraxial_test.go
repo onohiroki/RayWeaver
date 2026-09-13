@@ -32,7 +32,8 @@ func TestComputeSingletEFL(t *testing.T) {
 // TestComputeElementRoles verifies that Compute populates the element_roles
 // classification (mapped from GlassRoles) with the Cooke-triplet grouping and
 // a flint-side middle element.
-func TestComputeElementRoles(t *testing.T) {	gc := cookeGC()
+func TestComputeElementRoles(t *testing.T) {
+	gc := cookeGC()
 	s := cookeTripletSurfaces()
 	surface.Precompute(s)
 
@@ -53,8 +54,13 @@ func TestComputeElementRoles(t *testing.T) {	gc := cookeGC()
 	if result.ElementRoles[0].SurfaceIDs[0] != 1 {
 		t.Errorf("front element surface_ids = %v, want first surface 1", result.ElementRoles[0].SurfaceIDs)
 	}
+	// Verify actual nd/vd are populated from the catalog.
+	for i, r := range result.ElementRoles {
+		if r.NDActual == 0 || r.VActual == 0 {
+			t.Errorf("element %d: nd_actual=%v vd_actual=%v, want non-zero", i, r.NDActual, r.VActual)
+		}
+	}
 }
-
 func TestComputeWithObjectHeight(t *testing.T) {
 	sys, gc := singletSystem()
 	result := Compute(sys, 0.00058756, gc, 10.0, nil)
