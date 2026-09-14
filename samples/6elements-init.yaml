@@ -4,11 +4,11 @@ metadata:
     url: https://github.com/onohiroki/RayWeaver
     schema_version: 1
   notes: |
-    6-element symmetric double-Gauss starting point for a 35mm-format 50 mm
+    6-element symmetric air-spaced starting point for a 35mm-format 50 mm
     f/2.8 standard lens (synthesised by an AI agent via curvature-scale search
     to hit EFL ~50 mm). Carries an optimization.escape section so the same file
-    drives escape-demo.bash --lens doublegauss, doublegauss-demo.bash, and the
-    --lens doublegauss mode of psf-mtf-demo.bash and wavefront-demo.bash. The
+    drives escape-demo.bash --lens 6elements and the --lens 6elements mode of
+    psf-mtf-demo.bash and wavefront-demo.bash. The
     escape uses a conditional merit schedule (merit_schedule) that switches from
     a spot_rms-based geometric merit (spot_phase) to a wavefront RMS merit
     (wavefront_phase) via a step curve when the merit ratio drops to 0.1. This

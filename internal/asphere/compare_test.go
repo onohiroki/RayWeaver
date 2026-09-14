@@ -74,7 +74,7 @@ func loadTestInput(t *testing.T, paths ...string) *types.Input {
 // the footprint grids, ready for PreprocessOPD.
 func doubleGaussFootprints(t *testing.T) ([]types.Surface, []FieldFootprintData, *glass.Catalog) {
 	t.Helper()
-	in := loadTestInput(t, "../../samples/doublegauss-init.yaml", "samples/doublegauss-init.yaml")
+	in := loadTestInput(t, "../../samples/6elements-init.yaml", "samples/6elements-init.yaml")
 	var surfaces []types.Surface
 	if len(in.Configs) > 0 {
 		surfaces = in.Configs[0].Surfaces

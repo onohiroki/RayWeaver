@@ -160,8 +160,8 @@ rayweave vignette --iterations 3 --min-glass-path 0.5 < lens.yaml \
 rayweave vignette < lens.yaml | rayweave paraxial
 ```
 
-See `samples/vignette-demo.bash` (double-Gauss, dynamic pupil — no stop) and
-`phase-3` of `samples/doublegauss-demo.bash` for end-to-end demos.
+See `samples/vignette-demo.bash` (6-element lens, dynamic pupil — no stop) and
+`phase-3` of `samples/6elements-optimization-demo.bash` for end-to-end demos.
 
 ## Notes
 

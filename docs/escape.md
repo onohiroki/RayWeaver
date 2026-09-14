@@ -453,9 +453,9 @@ rayweave query --each 'escape_result.minima[]:index,merit' \
 ```
 
 The sample script `samples/escape-demo.bash` runs the same pipeline end to end:
-the default lens is the degraded US2645157 triplet, and `--lens doublegauss`
-switches to `samples/doublegauss-init.yaml` (which carries its own
-`optimization.escape` section). The double-Gauss run is much slower.
+the default lens is the degraded US2645157 triplet, and `--lens 6elements`
+switches to `samples/escape-6elements-init.yaml` (which carries its own
+`optimization.escape` section). The 6-element run is slower (37 variables).
 
 ## Method
 

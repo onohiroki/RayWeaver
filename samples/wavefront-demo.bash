@@ -18,7 +18,7 @@ set -euo pipefail
 #
 # A controlled `--defocus D` shifts the image plane by +D mm first, so the
 # best-focus correction becomes visibly dramatic (defocus D -> ~0, OPD map
-# rings collapse). `--lens doublegauss` analyses the 4-field double-Gauss
+# rings collapse). `--lens 6elements` analyses the 4-field 6-element lens
 # (which starts ~8 mm out of focus).
 #
 # The analysis runs at the d-line (587.56 nm) so each angle field yields
@@ -27,8 +27,8 @@ set -euo pipefail
 # Options
 #   --clean            remove every generated artifact; tracked input YAMLs are
 #                      never touched.
-#   --lens NAME        'triplet' (default, samples/us2645157.yaml), 'doublegauss'
-#                      (samples/doublegauss-init.yaml), or a path to any input
+#   --lens NAME        'triplet' (default, samples/us2645157.yaml), '6elements'
+#                      (samples/6elements-init.yaml), or a path to any input
 #                      YAML with a chief section.
 #   --num-rays N       pupil grid rays (default 400)
 #   --zernike-order N  highest Fringe Zernike index to fit (default 15)
@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
       shift
       LENS="${1:-}"
       if [[ -z "$LENS" ]]; then
-        echo "error: --lens expects 'triplet', 'doublegauss', or a YAML path" >&2
+        echo "error: --lens expects 'triplet', '6elements', or a YAML path" >&2
         exit 1
       fi
       shift
@@ -116,10 +116,10 @@ case "$LENS" in
     STEM="wavefront-demo"
     LENS_NAME="US2645157 Cooke triplet (3 fields)"
     ;;
-  doublegauss)
-    YAML="$SCRIPT_DIR/doublegauss-init.yaml"
-    STEM="wavefront-demo-doublegauss"
-    LENS_NAME="6-element double-Gauss (4 fields)"
+  6elements)
+    YAML="$SCRIPT_DIR/6elements-init.yaml"
+    STEM="wavefront-demo-6elements"
+    LENS_NAME="6-element symmetric lens (4 fields)"
     ;;
   *)
     if [[ -f "$LENS" ]]; then
@@ -127,7 +127,7 @@ case "$LENS" in
       STEM="wavefront-demo"
       LENS_NAME="$(basename "$LENS")"
     else
-      echo "error: --lens must be 'triplet', 'doublegauss', or a path to an input YAML (got '$LENS')" >&2
+      echo "error: --lens must be 'triplet', '6elements', or a path to an input YAML (got '$LENS')" >&2
       exit 1
     fi
     ;;
@@ -148,7 +148,7 @@ AFTER_CSV_BASE="$OUTDIR/$STEM-after"
 # Clean-only mode: remove generated files for every known stem and exit.
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
-  for s in wavefront-demo wavefront-demo-doublegauss; do
+  for s in wavefront-demo wavefront-demo-6elements; do
     rm -f "$OUTDIR/$s"-result.yaml "$OUTDIR/$s"-result.txt "$OUTDIR/$s"-after.yaml
     rm -f "$OUTDIR/$s"-defocused.yaml
     rm -f "$OUTDIR/$s"_*.csv "$OUTDIR/$s"_*.yaml

@@ -363,7 +363,7 @@ rayweave query --gate "rms < 0.1" --set rms="chief_rays[0].spot_stats.rms_r" \
 | Demo script | query usage |
 |---|---|
 | `ghost-demo.bash` | `chief --preserve-rays`, `--each` surface table, `--product` Fresnel intensities |
-| `doublegauss-demo.bash` | scalar extraction, `--set`+expr distortion, `--jsonl` logs, `--gate` |
+| `6elements-optimization-demo.bash` | scalar extraction, `--set`+expr distortion, `--jsonl` logs, `--gate` |
 | `escape-demo.bash` | `--each --printf` minima rows |
 | `simple-zoom-demo.bash` | filters `[field_angle=0]`, `[id=..]`, `--gate` |
 | `scale-demo.bash` | scalar extraction, `--gate abs(...)` |

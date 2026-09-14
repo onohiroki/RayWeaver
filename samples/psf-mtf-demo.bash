@@ -21,7 +21,7 @@ set -euo pipefail
 # (0/16/24 deg) so the center and the peripheral fields are evaluated together
 # (see samples/psf-mtf-demo.yaml). The 16°/24° fields are aberrated — a
 # fixed-plane PSF would be far out of focus and force the image grid to grow
-# enormously — so best-focus is the default (as for doublegauss); pass
+# enormously — so best-focus is the default (as for 6elements); pass
 # --no-best-focus to evaluate on the fixed reference surface. Any other lens
 # YAML with a `chief` section can be substituted with --lens; the MTF frequency
 # cap keeps working via the --max-freq CLI flag (default 200 c/mm) even if that
@@ -34,7 +34,7 @@ set -euo pipefail
 #   --clean       remove every generated artifact; the tracked input YAMLs are
 #                 never touched.
 #   --lens NAME   select the lens: 'triplet' (default, psf-mtf-demo.yaml) or
-#                 'doublegauss' (samples/doublegauss-init.yaml), or a path to
+#                 '6elements' (samples/6elements-init.yaml), or a path to
 #                 any input YAML with a chief section.
 #   --max-freq N  MTF frequency cap in cycles/mm (default 200); passed to
 #                 `rayweave psf` so it works regardless of the lens YAML.
@@ -43,7 +43,7 @@ set -euo pipefail
 #   --best-focus  evaluate each field at its best-focus image plane (removes
 #                 field-curvature defocus; also avoids the image-grid auto-
 #                 enlargement that a defocused fixed-plane PSF triggers).
-#                 Default for both triplet and doublegauss.
+#                 Default for both triplet and 6elements.
 #   --no-best-focus  force fixed-plane evaluation (default for --lens triplet).
 #
 # How to read the output
@@ -55,7 +55,7 @@ set -euo pipefail
 #     FWHM / MTF are lower than the center field. The MTF overlay makes the
 #     sagittal/tangential difference visible at a glance; the radial overlay
 #     shows each field's profile through its peak.
-#   - With --lens doublegauss the 4 fields (0/10/16/23 deg) are all aberrated
+#   - With --lens 6elements the 4 fields (0/10/16/23 deg) are all aberrated
 #     to varying degrees; the same table and charts adapt to their count.
 # =============================================================================
 
@@ -77,7 +77,7 @@ while [[ $# -gt 0 ]]; do
       shift
       LENS="${1:-}"
       if [[ -z "$LENS" ]]; then
-        echo "error: --lens expects 'triplet', 'doublegauss', or a YAML path" >&2
+        echo "error: --lens expects 'triplet', '6elements', or a YAML path" >&2
         exit 1
       fi
       shift
@@ -124,11 +124,11 @@ case "$LENS" in
       BEST_FOCUS="true"
     fi
     ;;
-  doublegauss)
-    YAML="$SCRIPT_DIR/doublegauss-init.yaml"
-    STEM="psf-mtf-demo-doublegauss"
-    LENS_NAME="6-element double-Gauss (f/2.8 50 mm)"
-    # The double-Gauss input starts ~8 mm out of focus: a fixed-plane PSF is
+  6elements)
+    YAML="$SCRIPT_DIR/6elements-init.yaml"
+    STEM="psf-mtf-demo-6elements"
+    LENS_NAME="6-element symmetric lens (f/2.8 50 mm)"
+    # The 6-element input starts ~8 mm out of focus: a fixed-plane PSF is
     # meaningless and its large spot auto-enlarges the image grid to 2048²
     # (very slow). Default to best-focus so the demo is fast and meaningful;
     # --no-best-focus overrides.
@@ -142,7 +142,7 @@ case "$LENS" in
       STEM="psf-mtf-demo"
       LENS_NAME="$(basename "$LENS")"
     else
-      echo "error: --lens must be 'triplet', 'doublegauss', or a path to an input YAML (got '$LENS')" >&2
+      echo "error: --lens must be 'triplet', '6elements', or a path to an input YAML (got '$LENS')" >&2
       exit 1
     fi
     ;;
@@ -161,7 +161,7 @@ MTF_BASE="$OUTDIR/$STEM-mtf"
 # Clean-only mode: remove generated files for every known stem and exit
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
-  for s in psf-mtf-demo psf-mtf-demo-doublegauss; do
+  for s in psf-mtf-demo psf-mtf-demo-6elements; do
     rm -f "$OUTDIR/$s-result.yaml" "$OUTDIR/$s-result.txt"
     rm -f "$OUTDIR/$s"_*.csv "$OUTDIR/$s"_*.yaml
     rm -f "$OUTDIR/$s"-*.png

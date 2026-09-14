@@ -10,10 +10,9 @@ set -euo pipefail
 #
 # Two lenses are supported:
 #   escape-demo.bash                           : degraded US2645157 triplet (default)
-#   escape-demo.bash --lens doublegauss        : 6-element double-Gauss (f/2.8 50 mm)
 #   escape-demo.bash --lens 6elements          : v14 escape-optimised 6-element
-# The double-Gauss run is much slower (36 variables, 256 rays) but uses the
-# same escape section baked into samples/doublegauss-init.yaml.
+# The 6-element run uses the escape section baked into
+# samples/escape-6elements-init.yaml (virtual pupil, 37 variables, 256 rays).
 #
 # Steps
 #   1. escape                  : global search with merit_schedule
@@ -22,7 +21,7 @@ set -euo pipefail
 #   2. PSF verification        : per-field Strehl at best focus (RCP+LCP, d
 #                                line) -> table; the demo gates on every field
 #                                reaching >= 0.5
-#   3. doublegauss --save/--log: every discovered minimum written to a clean
+#   3. 6elements --save/--log: every discovered minimum written to a clean
 #                                <prefix>min1.yaml, <prefix>min2.yaml, ... as
 #                                it is found (interrupt/kill safe), progress
 #                                streamed to <prefix>progress.jsonl
@@ -31,11 +30,11 @@ set -euo pipefail
 #   4. plot                    : diagrams of the initial and best systems
 #   5. element-powers chart    : a PNG showing every local minimum's
 #                                element_powers offset from a merit baseline
-#   The double-Gauss init uses inline model glasses (nd/vd per element) so the
+#   The 6-element init uses inline model glasses (nd/vd per element) so the
 #   escape optimises each element's glass independently; the minima summary
 #   prints the per-element vd (a '.' marks a crown/flint role flip across 45)
 #   and a gate checks that the glass actually changed between minima.
-#   The double-Gauss input also carries an optimization.power_solve section, so
+#   The 6-element input also carries an optimization.power_solve section, so
 #   every escape cycle gains a dedicated power-preserving glass phase: the
 #   non-glass variables are locked and the element thin-lens powers held fixed
 #   while a colour-only merit rebalances the glasses (see the glass-phase note
@@ -63,8 +62,8 @@ while [[ $# -gt 0 ]]; do
     --lens)
       shift
       case "${1:-}" in
-        triplet|doublegauss|6elements) LENS="$1"; shift ;;
-        *) echo "Error: --lens must be 'triplet', 'doublegauss', or '6elements' (got '${1:-}')"; exit 1 ;;
+        triplet|6elements) LENS="$1"; shift ;;
+        *) echo "Error: --lens must be 'triplet' or '6elements' (got '${1:-}')"; exit 1 ;;
       esac
       ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -78,16 +77,6 @@ case "$LENS" in
     LENS_NAME="degraded US2645157 triplet"
     SAVE_BASE=""   # triplet: keep the demo light, no per-minimum save/log
     LOG_FILE=""
-    ;;
-  doublegauss)
-    YAML="$SCRIPT_DIR/doublegauss-init.yaml"
-    PREFIX="escape-demo-doublegauss-"
-    LENS_NAME="6-element double-Gauss f/2.8 (50 mm)"
-    # Long run: save every discovered minimum to a clean lens file (--save) and
-    # stream the JSONL progress to a log (--log), so a killed run never loses
-    # already-found minima and the progress is inspectable afterwards.
-    SAVE_BASE="$OUTDIR/${PREFIX}min"
-    LOG_FILE="$OUTDIR/${PREFIX}progress.jsonl"
     ;;
   6elements)
     YAML="$SCRIPT_DIR/escape-6elements-init.yaml"
@@ -105,20 +94,15 @@ if [ "$CLEAN" = true ]; then
   rm -f "$OUTDIR"/escape-demo-result.yaml "$OUTDIR"/escape-demo-result.txt
   rm -f "$OUTDIR"/escape-demo-init.png "$OUTDIR"/escape-demo-best.png "$OUTDIR"/escape-demo-min1.png "$OUTDIR"/escape-demo-min1.yaml
   rm -f "$OUTDIR"/escape-demo-best.yaml "$OUTDIR"/escape-demo-psf.yaml
-  rm -f "$OUTDIR"/escape-demo-doublegauss-result.yaml "$OUTDIR"/escape-demo-doublegauss-result.txt
-  rm -f "$OUTDIR"/escape-demo-doublegauss-progress.jsonl
-  rm -f "$OUTDIR"/escape-demo-doublegauss-min*.yaml
-  rm -f "$OUTDIR"/escape-demo-doublegauss-init.png "$OUTDIR"/escape-demo-doublegauss-best.png "$OUTDIR"/escape-demo-doublegauss-min1.png
-  rm -f "$OUTDIR"/escape-demo-doublegauss-best.yaml "$OUTDIR"/escape-demo-doublegauss-psf.yaml
-  rm -f "$OUTDIR"/escape-demo-element-powers.png "$OUTDIR"/escape-demo-doublegauss-element-powers.png "$OUTDIR"/escape-demo-6elements-element-powers.png
-  rm -f "$OUTDIR"/escape-demo-element-powers.dat "$OUTDIR"/escape-demo-doublegauss-element-powers.dat "$OUTDIR"/escape-demo-6elements-element-powers.dat
+  rm -f "$OUTDIR"/escape-demo-element-powers.png "$OUTDIR"/escape-demo-6elements-element-powers.png
+  rm -f "$OUTDIR"/escape-demo-element-powers.dat "$OUTDIR"/escape-demo-6elements-element-powers.dat
   rm -f "$OUTDIR"/escape-demo-6elements-result.yaml "$OUTDIR"/escape-demo-6elements-result.txt
   rm -f "$OUTDIR"/escape-demo-6elements-progress.jsonl
   rm -f "$OUTDIR"/escape-demo-6elements-min*.yaml
   rm -f "$OUTDIR"/escape-demo-6elements-init.png "$OUTDIR"/escape-demo-6elements-best.png
   rm -f "$OUTDIR"/escape-demo-6elements-best.yaml "$OUTDIR"/escape-demo-6elements-psf.yaml
   rm -f "$OUTDIR"/escape-powers-*.dat "$OUTDIR"/escape-powers-*.png
-  echo "  Removed: triplet, double-Gauss, and 6elements escape outputs"
+  echo "  Removed: triplet and 6elements escape outputs"
   exit 0
 fi
 
@@ -260,7 +244,7 @@ echo "--- Local minima summary ---"
   # surface of each element carries its nd/vd. Shown as vd per element so the
   # crown/flint arrangement (and any role flips vs the nominal SK18/SF12 start)
   # is visible; a '.' marks a vd that crossed the 45 crown/flint boundary.
-  # The variable names follow the doublegauss-init.yaml convention s<N>_<g>_vd.
+  # The variable names follow the 6elements-init.yaml convention s<N>_<g>_vd.
   if [ "$LENS" = "6elements" ]; then
     GLASS_VARS="s1_vd s3_vd s5_vd s7_vd s9_vd s11_vd"
   else
@@ -295,7 +279,7 @@ echo
 # can change each element's glass independently, so different local minima
 # should carry different glasses. Check that at least two minima differ in the
 # vd of a glass surface (the crown/flint arrangement moves between solutions).
-if [ "$LENS" = "doublegauss" ] || [ "$LENS" = "6elements" ]; then
+if [ "$LENS" = "6elements" ]; then
   echo "--- Power-preserving glass phase (double-Gauss) ---"
   echo "  Each cycle added a glass_dls phase: it locked every variable except the"
   echo "  glass dispersions, reversed the merit to a colour-only (LCA/TCA) objective,"

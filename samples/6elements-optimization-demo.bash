@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # =============================================================================
-# doublegauss-demo.bash — DLS design of a 6-element 50 mm f/2.8 double-Gauss
+# 6elements-optimization-demo.bash — DLS design of a 6-element 50 mm f/2.8
+#                                    symmetric air-spaced lens
 #
 # Purpose: optimise a realistic standard lens (48 variables including glass
 # nd/vd and all surface diameters) from a synthesised starting point and
@@ -42,18 +43,18 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-YAML="$SCRIPT_DIR/doublegauss-init.yaml"
+YAML="$SCRIPT_DIR/6elements-init.yaml"
 OUTDIR="$SCRIPT_DIR"
-OPT_RESULT="$OUTDIR/doublegauss-result.yaml"
-VIGNETTE_RESULT="$OUTDIR/doublegauss-vignette.yaml"
-OPT_LOG="$OUTDIR/doublegauss-log.jsonl"
-RESULT_FILE="$OUTDIR/doublegauss-demo-result.txt"
+OPT_RESULT="$OUTDIR/6elements-result.yaml"
+VIGNETTE_RESULT="$OUTDIR/6elements-vignette.yaml"
+OPT_LOG="$OUTDIR/6elements-log.jsonl"
+RESULT_FILE="$OUTDIR/6elements-optimization-result.txt"
 
 # Clean-only mode
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
   rm -f "$OPT_RESULT" "$VIGNETTE_RESULT" "$OPT_LOG" "$RESULT_FILE"
-  rm -f "$OUTDIR"/doublegauss-init.png "$OUTDIR"/doublegauss-opt.png
+  rm -f "$OUTDIR"/6elements-init.png "$OUTDIR"/6elements-opt.png
   echo "  Removed generated files"
   exit 0
 fi
@@ -91,10 +92,10 @@ EOF
 }
 trap append_interpretation EXIT
 
-echo "=== Double-Gauss optimization demo: 6-element 50 mm f/2.8 standard lens ==="
+echo "=== 6-element optimization demo: 50 mm f/2.8 symmetric lens ==="
 echo
 echo "Optical system:"
-echo "  6-element symmetric double-Gauss (front: crown/flint/meniscus |"
+echo "  6-element symmetric air-spaced lens (front: crown/flint/meniscus |"
 echo "  stop | meniscus/flint/crown). Total 14 surfaces."
 echo "  Fields: 0 deg / 10 deg / 16 deg / 23 deg (35 mm format half-diagonal)"
 echo "  Wavelengths: F (486nm) / d (588nm) / C (656nm)"
@@ -180,7 +181,7 @@ echo
 
 # ── Result file ──
 {
-  echo "=== Double-Gauss 6-element f/2.8 — optimization result ==="
+  echo "=== 6-element f/2.8 symmetric lens — optimization result ==="
   echo
   echo "--- Lens parameters ---"
   printf "  %-12s %12s %12s\n" "Quantity" "before" "after"
@@ -236,14 +237,14 @@ echo "=== Diagrams ==="
 $RAYWEAVE chief --clear-aperture < "$YAML" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
-  | $RAYWEAVE plot -o "$OUTDIR/doublegauss-init.png" >/dev/null 2>&1 || true
-echo "Written: $OUTDIR/doublegauss-init.png"
+  | $RAYWEAVE plot -o "$OUTDIR/6elements-init.png" >/dev/null 2>&1 || true
+echo "Written: $OUTDIR/6elements-init.png"
 
 $RAYWEAVE trace < "$VIGNETTE_RESULT" \
   | $RAYWEAVE chief --marginal-rays \
   | $RAYWEAVE trace \
-  | $RAYWEAVE plot -o "$OUTDIR/doublegauss-opt.png" >/dev/null 2>&1 || true
-echo "Written: $OUTDIR/doublegauss-opt.png"
+  | $RAYWEAVE plot -o "$OUTDIR/6elements-opt.png" >/dev/null 2>&1 || true
+echo "Written: $OUTDIR/6elements-opt.png"
 echo
 
 # ── Threshold check: on-axis RMS < 0.1 mm ──
