@@ -68,6 +68,12 @@ func Precompute(surfaces []types.Surface) {
 			} else {
 				s.ParaxialRadius = 0
 			}
+		case types.PhaseFresnel:
+			if s.Curvature != 0 {
+				s.ParaxialRadius = s.Radius()
+			} else {
+				s.ParaxialRadius = 0
+			}
 		}
 
 		if s.Bends() {

@@ -1,6 +1,7 @@
 package importer
 
 import (
+	"math"
 	"strconv"
 	"strings"
 
@@ -18,16 +19,16 @@ type codeVSurf struct {
 	SurfType  string
 	Coeffs    map[int]float64
 
-	// Decenter-and-return (DAR) state: the surface's decenter components
-	// accumulated from YDE/XDE/ZDE (shifts) and ADE/BDE/CDE (tilts). Only
-	// present when a DAR keyword preceded them on this surface. The DAR
-	// "return" is implicit: the decenter applies to the surface itself and
-	// the axis then continues (scope scope surface), matching CODE V's
-	// decenter-and-return (inverse transform after the surface). REX/REY and
-	// ADY in the same block are rectangular-aperture half-widths and aperture
-	// offsets, not return decenters.
 	Decenter  types.DecenterStep
 	decActive bool
+
+	// Diffractive (DOE) fields
+	DiffractiveType string            // "DOE", "GRT", "HOE", "MET"
+	DiffrOrder      float64           // HOR value
+	DiffrWL         float64           // HWL in nm
+	DiffrSymm       string            // HCT "R" or "N"
+	DiffrBLT        string            // BLT "KIN" etc.
+	DiffrCoeffs     map[int]float64   // HCO Cj → OPD [mm], 1-indexed
 }
 
 func ParseCodeV(input string) (*ParseResult, error) {
@@ -288,14 +289,63 @@ func ParseCodeV(input string) (*ParseResult, error) {
 				case "THC":
 					inAspBlock = false
 					continue
-				case "DAR":
-					// Decenter-and-return: the current surface is shifted/tilted
-					// locally and the axis returns after it. rayweave models this
-					// with a per-surface DecenterStep; the decenter components are
-					// supplied by following YDE/XDE/ZDE/ADE/BDE/CDE statements.
-					getOrCreate(surfMap, lastSurfNum).decActive = true
-					inAspBlock = false
-					continue
+			case "DAR":
+				// Decenter-and-return: the current surface is shifted/tilted
+				// locally and the axis returns after it. rayweave models this
+				// with a per-surface DecenterStep; the decenter components are
+				// supplied by following YDE/XDE/ZDE/ADE/BDE/CDE statements.
+				getOrCreate(surfMap, lastSurfNum).decActive = true
+				inAspBlock = false
+				continue
+			case "DIF":
+				// Diffractive surface type declaration (e.g. "DIF DOE").
+				if len(tokens) >= 2 {
+					getOrCreate(surfMap, lastSurfNum).DiffractiveType = strings.ToUpper(tokens[1])
+				}
+				inAspBlock = false
+				continue
+			case "HOR":
+				if len(tokens) >= 2 {
+					getOrCreate(surfMap, lastSurfNum).DiffrOrder = parseFloat(tokens[1])
+				}
+				inAspBlock = false
+				continue
+			case "HWL":
+				if len(tokens) >= 2 {
+					getOrCreate(surfMap, lastSurfNum).DiffrWL = parseFloat(tokens[1])
+				}
+				inAspBlock = false
+				continue
+			case "HCT":
+				if len(tokens) >= 2 {
+					getOrCreate(surfMap, lastSurfNum).DiffrSymm = strings.ToUpper(tokens[1])
+				}
+				inAspBlock = false
+				continue
+			case "BLT":
+				if len(tokens) >= 2 {
+					getOrCreate(surfMap, lastSurfNum).DiffrBLT = strings.ToUpper(tokens[1])
+				}
+				inAspBlock = false
+				continue
+			case "HCO":
+				// HCO Cj value — j-th phase-polynomial coefficient (OPD in mm).
+				if len(tokens) >= 3 {
+					surf := getOrCreate(surfMap, lastSurfNum)
+					if surf.DiffrCoeffs == nil {
+						surf.DiffrCoeffs = make(map[int]float64)
+					}
+					idx := parseHCOIndex(tokens[1])
+					if idx > 0 {
+						surf.DiffrCoeffs[idx] = parseFloat(tokens[2])
+					}
+				}
+				inAspBlock = false
+				continue
+			case "HCC":
+				// HCC Cj value — optimisation control; ignored for ray tracing.
+				inAspBlock = false
+				continue
 				case "YDE", "XDE", "ZDE", "ADE", "BDE", "CDE":
 					surf := getOrCreate(surfMap, lastSurfNum)
 					surf.decActive = true
@@ -398,6 +448,9 @@ endLoop:
 		if s.SurfType == "ASPHERICAL" || s.SurfType == "ASP" {
 			surfType = types.AspherePolynomial
 		}
+		if s.DiffractiveType == "DOE" {
+			surfType = types.PhaseFresnel
+		}
 
 		t := types.Surface{
 			ID:        id,
@@ -443,6 +496,36 @@ endLoop:
 				}
 				t.Coefficients = coeffs
 			}
+		}
+
+		// Diffractive (DOE) phase coefficients: HCO OPD [mm] → radians.
+		if surfType == types.PhaseFresnel && len(s.DiffrCoeffs) > 0 {
+			lambda0MM := s.DiffrWL / 1e6 // nm → mm
+			if lambda0MM <= 0 {
+				// Fall back to reference wavelength from header.
+				if result.ReferenceWavelengthIdx >= 0 && result.ReferenceWavelengthIdx < len(result.Wavelengths) {
+					lambda0MM = result.Wavelengths[result.ReferenceWavelengthIdx].Value
+				}
+			}
+			if lambda0MM <= 0 {
+				lambda0MM = types.DefaultWavelength
+			}
+			maxIdx := 0
+			for k := range s.DiffrCoeffs {
+				if k > maxIdx {
+					maxIdx = k
+				}
+			}
+			t.PhaseCoefficients = make([]float64, maxIdx)
+			for k, v := range s.DiffrCoeffs {
+				t.PhaseCoefficients[k-1] = v * 2 * math.Pi / lambda0MM
+			}
+			order := int(s.DiffrOrder)
+			if order == 0 {
+				order = 1
+			}
+			t.DiffractionOrder = order
+			t.DesignWavelength = lambda0MM
 		}
 
 		result.Surfaces = append(result.Surfaces, t)
@@ -812,6 +895,20 @@ func isAsphereLetter(s string) bool {
 		return true
 	}
 	return false
+}
+
+// parseHCOIndex extracts the 1-based index from an HCO coefficient label
+// such as "C1" → 1, "C2" → 2. Returns 0 on failure.
+func parseHCOIndex(s string) int {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || (s[0] != 'c' && s[0] != 'C') {
+		return 0
+	}
+	n, err := strconv.Atoi(s[1:])
+	if err != nil || n < 1 {
+		return 0
+	}
+	return n
 }
 
 func parseCodeVSurfNum(s string) int {

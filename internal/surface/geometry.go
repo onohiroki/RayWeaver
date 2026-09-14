@@ -17,6 +17,10 @@ func SagFunc(s types.Surface) func(h float64) float64 {
 		return func(h float64) float64 {
 			return raymath.ZernikeAsphereSag(h, s.Radius(), s.Conic, s.Coefficients, s.NormRadius)
 		}
+	case types.PhaseFresnel:
+		return func(h float64) float64 {
+			return raymath.PolynomialAsphereSag(h, s.Radius(), s.Conic, nil)
+		}
 	default:
 		return func(h float64) float64 {
 			return raymath.PolynomialAsphereSag(h, s.Radius(), s.Conic, nil)
@@ -27,7 +31,7 @@ func SagFunc(s types.Surface) func(h float64) float64 {
 // Normal returns the outward surface normal at point p.
 func Normal(s types.Surface, p types.Vec3) types.Vec3 {
 	switch s.Type {
-	case types.AspherePolynomial, types.AsphereZernike:
+	case types.AspherePolynomial, types.AsphereZernike, types.PhaseFresnel:
 		return raymath.AsphereNormal(p, SagFunc(s))
 	default:
 		if s.Radius() == 0 {
@@ -41,7 +45,7 @@ func Normal(s types.Surface, p types.Vec3) types.Vec3 {
 // intersects the surface, or false on a miss.
 func Intersect(s types.Surface, origin, dir types.Vec3) (float64, bool) {
 	switch s.Type {
-	case types.AspherePolynomial, types.AsphereZernike:
+	case types.AspherePolynomial, types.AsphereZernike, types.PhaseFresnel:
 		return raymath.IntersectAsphere(origin, dir, SagFunc(s), s.Radius(), 50, 1e-12)
 	default:
 		return raymath.IntersectSphere(origin, dir, s.Radius())

@@ -14,6 +14,7 @@ const (
 	Sphere            SurfaceType = "sphere"
 	AspherePolynomial SurfaceType = "asphere_polynomial"
 	AsphereZernike    SurfaceType = "asphere_zernike"
+	PhaseFresnel      SurfaceType = "phase_fresnel"
 )
 
 type GridType string
@@ -163,6 +164,10 @@ type Surface struct {
 	MinGlassPath float64        `yaml:"min_glass_path,omitempty"`
 	MaxGlassPath float64        `yaml:"max_glass_path,omitempty"`
 	Reflect      bool           `yaml:"reflect,omitempty"`
+
+	PhaseCoefficients []float64 `yaml:"phase_coefficients,omitempty"`
+	DesignWavelength  float64   `yaml:"design_wavelength,omitempty"`
+	DiffractionOrder  int       `yaml:"diffraction_order,omitempty"`
 
 	LocalToGlobal  Mat4    `yaml:"-"`
 	GlobalToLocal  Mat4    `yaml:"-"`

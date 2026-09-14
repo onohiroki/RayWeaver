@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -234,6 +235,31 @@ func writeCodeVSurface(b *strings.Builder, s *types.Surface, surfNum int, isImag
 	} else if s.Conic != 0 {
 		// A conic sphere: CON declares the conic surface, K its constant.
 		fmt.Fprintf(b, "  CON\n  K %s\n", num(s.Conic))
+	}
+
+	// Phase Fresnel (DOE kinoform) surface
+	if s.Type == types.PhaseFresnel && len(s.PhaseCoefficients) > 0 {
+		b.WriteString("  DIF DOE\n")
+		order := s.DiffractionOrder
+		if order == 0 {
+			order = 1
+		}
+		fmt.Fprintf(b, "  HOR %d.0\n", order)
+		lambda0MM := s.DesignWavelength
+		if lambda0MM <= 0 {
+			lambda0MM = types.DefaultWavelength
+		}
+		fmt.Fprintf(b, "  HWL %.4f\n", lambda0MM*1e6) // mm → nm
+		b.WriteString("  HCT R\n")
+		b.WriteString("  BLT KIN\n")
+		for i, c := range s.PhaseCoefficients {
+			if c == 0 {
+				continue
+			}
+			cOPD := c * lambda0MM / (2 * math.Pi) // rad → OPD mm
+			fmt.Fprintf(b, "  HCO C%d %s\n", i+1, num(cOPD))
+			fmt.Fprintf(b, "  HCC C%d 0\n", i+1)
+		}
 	}
 
 	steps := codeVDecenterSteps(s, warn)

@@ -154,6 +154,10 @@ type surfaceYAML struct {
 	MinGlassPath float64        `yaml:"min_glass_path,omitempty"`
 	MaxGlassPath float64        `yaml:"max_glass_path,omitempty"`
 	Reflect      bool           `yaml:"reflect,omitempty"`
+
+	PhaseCoefficients []float64 `yaml:"phase_coefficients,omitempty"`
+	DesignWavelength  float64   `yaml:"design_wavelength,omitempty"`
+	DiffractionOrder  int       `yaml:"diffraction_order,omitempty"`
 }
 
 func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
@@ -184,6 +188,12 @@ func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
 	s.MinGlassPath = raw.MinGlassPath
 	s.MaxGlassPath = raw.MaxGlassPath
 	s.Reflect = raw.Reflect
+	s.PhaseCoefficients = raw.PhaseCoefficients
+	s.DesignWavelength = raw.DesignWavelength
+	s.DiffractionOrder = raw.DiffractionOrder
+	if s.DiffractionOrder == 0 {
+		s.DiffractionOrder = 1
+	}
 
 	if raw.Curvature != 0 {
 		s.Curvature = raw.Curvature
@@ -212,6 +222,10 @@ func (s Surface) MarshalYAML() (interface{}, error) {
 		MinGlassPath: s.MinGlassPath,
 		MaxGlassPath: s.MaxGlassPath,
 		Reflect:      s.Reflect,
+
+		PhaseCoefficients: s.PhaseCoefficients,
+		DesignWavelength:  s.DesignWavelength,
+		DiffractionOrder:  s.DiffractionOrder,
 	}
 	if s.radiusUsed {
 		raw.Radius = s.Radius()

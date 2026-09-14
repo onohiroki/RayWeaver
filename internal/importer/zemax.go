@@ -148,6 +148,33 @@ func ParseZemax(input string) (*ParseResult, error) {
 			}
 		}
 
+		if sp.SurfaceType == "BINOPD" || sp.SurfaceType == "BINARY_Z" {
+			s.Type = types.PhaseFresnel
+			// PARM 0 = normalising radius (optional)
+			if nr, ok := sp.Parms[0]; ok && nr > 0 {
+				s.NormRadius = nr
+			}
+			// PARM 2..N = phase polynomial coefficients in waves → convert to radians.
+			maxN := 0
+			for n := range sp.Parms {
+				if n > maxN {
+					maxN = n
+				}
+			}
+			if maxN >= 2 {
+				s.PhaseCoefficients = make([]float64, maxN-1)
+				for n, val := range sp.Parms {
+					if n >= 2 && n-2 < len(s.PhaseCoefficients) {
+						s.PhaseCoefficients[n-2] = val * 2 * math.Pi
+					}
+				}
+			}
+			// Design wavelength: PARM 1 stores the construction wavelength in μm.
+			if wl, ok := sp.Parms[1]; ok && wl > 0 {
+				s.DesignWavelength = wl
+			}
+		}
+
 		mat := strings.TrimSpace(sp.Material)
 		switch {
 		case mat == "" || isAir(mat):

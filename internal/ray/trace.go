@@ -247,9 +247,38 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 					}
 					return result
 				}
-			} else {
-				state.Direction = newDir
+		} else {
+			state.Direction = newDir
+		}
+		}
+
+		var phaseOPL float64
+		var phaseEfficiency float64 = 1.0
+
+		// --- Phase Fresnel diffraction (applied to transmitted rays) ---
+		if currentSurf.Type == types.PhaseFresnel && interaction == types.Transmit {
+			rLocal := math.Sqrt(hitPoint.X*hitPoint.X + hitPoint.Y*hitPoint.Y)
+			normR := currentSurf.NormRadius
+			if normR <= 0 && currentSurf.Diameter > 0 {
+				normR = currentSurf.Diameter / 2
 			}
+			if normR <= 0 {
+				normR = 1
+			}
+			dPhiDr := surface.RadialPhaseGradient(rLocal, currentSurf.PhaseCoefficients, normR)
+			lambda0 := currentSurf.DesignWavelength
+			if lambda0 <= 0 {
+				lambda0 = ray.Wavelength
+			}
+			order := currentSurf.DiffractionOrder
+			if order == 0 {
+				order = 1
+			}
+			thetaInc := math.Acos(math.Abs(cosTheta1))
+			efficiency := surface.DiffractionEfficiency(ray.Wavelength, lambda0, thetaInc, dPhiDr, order)
+			state.Direction = surface.PhaseDeflection(state.Direction, rLocal, dPhiDr, ray.Wavelength, order)
+			phaseOPL = surface.PhaseOPL(rLocal, currentSurf.PhaseCoefficients, normR, order)
+			phaseEfficiency = efficiency
 		}
 
 		globalDir := currentSurf.LocalToGlobal.MultiplyVector(state.Direction).Normalize()
@@ -317,6 +346,14 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 				}
 				coatingApplied = true
 			}
+		}
+
+		// --- Phase diffraction efficiency applied to intensity ---
+		if phaseEfficiency < 1.0 {
+			intensityS *= phaseEfficiency
+			intensityP *= phaseEfficiency
+			ampS *= complex(math.Sqrt(phaseEfficiency), 0)
+			ampP *= complex(math.Sqrt(phaseEfficiency), 0)
 		}
 
 		// --- Polarization propagation ---
@@ -415,6 +452,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 		}
 
 		segmentOPL := math.Abs(t) * n1
+		segmentOPL += phaseOPL
 
 		sr := types.SurfaceResult{
 			SurfaceID:   currentID,
