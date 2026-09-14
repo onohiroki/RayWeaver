@@ -14,7 +14,7 @@ This directory contains sample optical system data and demo scripts for the
 | `ar-coating.yaml` | Single-layer MgF2 anti-reflection coating on N-SK16 glass, quarter-wave at 550 nm. |
 | `dielectric-mirror.yaml` | 9-layer quarter-wave Bragg reflector (SiO2/TiO2) on glass, design wavelength 550 nm. |
 | `glass-optimize-demo.yaml` | 3-lens 7-surface system with glass-model variables (nd/vd) intended for DLS optimisation. 3 fields (0°, 10°, 16°), 4 wavelengths (g/F/d/C). |
-| `multi-config-zoom.yaml` | 3-config zoom demo. Uses `entrance_pupil_diameter` **equality** constraints (now supported), `edge_thickness` with the `surface2` back-surface field, and vignetting constraints. |
+| `multi-config-zoom.yaml` | 3-config zoom demo. Uses `entrance_pupil_diameter` **equality** constraints (now supported), `edge_thickness` with the `back_surface` field, and vignetting constraints. |
 | `simple-zoom.yaml` | 3-config zoom with fuzzy image-height / incident-angle constraints and `ray_paths` (render-only metadata). |
 | `asphere-optimize.yaml` | Singlet whose first surface is `asphere_polynomial`; optimizes `conic` and `a4`/`a6` coefficients (asphere variables). |
 | `6elements-init.yaml` | 6-element symmetric air-spaced starting point for a 35mm-format 50 mm f/2.8 standard lens. The structure was synthesised by an AI agent via curvature-scale search to hit EFL ≈ 50 mm, then handed to DLS optimisation. The optimised result reaches on-axis RMS < 0.1 mm (see `6elements-optimization-demo.bash`). It also carries an `optimization.escape` section so the same file drives the escape-function demo (`escape-demo.bash --lens 6elements`); the normal `6elements-optimization-demo.bash` ignores it. The escape merit is the spot merit (`spot_rms` per field, weights 2.0/1.0/1.0/0.5) plus moderate-weight off-axis spot kinds (`spot_rms_t`/`_s`/`spot_rms_worst` on 10°/16° at 0.3/0.3/0.6, `spot_rms_worst`/`spot_rms_weighted`/`spot_ee_radius` on 23° at 0.2/0.15/0.15), `lateral_color` and `opd_rms` — the full-weight off-axis set collapses the escape landscape to a single basin, but these reduced weights keep ~20 local minima while improving the edge-field (23°) spot RMS. |
@@ -52,8 +52,9 @@ a message and skip those renderings.
   an unreachable target is reported with a WARNING instead of freezing).
 - `optimization.aperture_margin` is clamped to ≥ 1.0 (smaller values stall DLS).
 - `configs[].ray_paths` is render-only metadata; the optimizer ignores it.
-- `edge_thickness` constraints specify the back surface explicitly with
-  `surface2` (the old `target`-as-back-surface usage is gone).
+- `edge_thickness` constraints take the back surface via `back_surface`; when it
+  is omitted the next surface in system order is used (the old
+  `target`-as-back-surface usage is gone).
 - Asphere variables: `conic`, `a4`/`a6`/`a8`/`a10`/`a12` (aliases
   `coefficient_0`…`coefficient_4`).
 - `power` variables (element thin-lens power): the dependent back surface's

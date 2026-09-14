@@ -190,7 +190,8 @@ Notes:
   runs, so a running solve always finishes. The output marks `timed_out: true`
   when the search was cut short.
 - `configs[].ray_paths` is render-only metadata; the optimizer ignores it.
-- `edge_thickness` constraints take the back surface explicitly via `surface2`.
+- `edge_thickness` constraints take the back surface via `back_surface`
+  (default: the next surface in system order).
 - `optimization.escape` enables the escape-function global optimizer (see
   `docs/escape.md` and `docs/methods/escape-function.md`). It wraps the same
   `variables`/`merit` definitions as `optimize`; the best solution is written

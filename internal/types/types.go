@@ -671,8 +671,8 @@ type ConstraintOperand struct {
 	Measure    ConstraintMeasure `yaml:"measure"`
 	Field      int               `yaml:"field,omitempty"`
 	Wavelength float64           `yaml:"wavelength,omitempty"`
-	Surface    int               `yaml:"surface,omitempty"`
-	Surface2   int               `yaml:"surface2,omitempty"`
+	Surface     int               `yaml:"surface,omitempty"`
+	BackSurface int               `yaml:"back_surface,omitempty"`
 	Target     float64           `yaml:"target,omitempty"`
 	Lower      float64           `yaml:"lower,omitempty"`
 	Upper      float64           `yaml:"upper,omitempty"`

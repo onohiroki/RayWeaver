@@ -131,10 +131,10 @@ func TestNewMeasuresInactive(t *testing.T) {
 	}
 }
 
-// TestEdgeThicknessSurface2 is a regression test for the improvement report
+// TestEdgeThicknessBackSurface is a regression test for the improvement report
 // (3.4): the edge_thickness constraint previously reused `target` as the back
-// surface ID. It now uses the explicit `surface2` field.
-func TestEdgeThicknessSurface2(t *testing.T) {
+// surface ID. It now takes it via the explicit `back_surface` field.
+func TestEdgeThicknessBackSurface(t *testing.T) {
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.01, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 20.0},
 		{ID: 2, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 20.0},
@@ -153,16 +153,56 @@ func TestEdgeThicknessSurface2(t *testing.T) {
 	want := 5.0 + sag(-0.01) - sag(0.01)
 
 	op := types.ConstraintOperand{
-		Kind:     types.ConstraintInequalityLower,
-		Measure:  types.MeasureEdgeThickness,
-		Surface:  1,
-		Surface2: 2,
-		Lower:    1.0,
-		Weight:   1.0,
-		Active:   true,
+		Kind:        types.ConstraintInequalityLower,
+		Measure:     types.MeasureEdgeThickness,
+		Surface:     1,
+		BackSurface: 2,
+		Lower:       1.0,
+		Weight:      1.0,
+		Active:      true,
 	}
-	got := evaluateEdgeThickness(surfaces, op.Surface, op.Surface2)
+	got := evaluateEdgeThickness(surfaces, op.Surface, op.BackSurface)
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("evaluateEdgeThickness(s1,s2) = %v, want %v", got, want)
+	}
+}
+
+// TestNextSurfaceID pins the array-order back-surface resolution: the next
+// surface in the slice (not ID+1), and 0 for the last / unknown surface.
+func TestNextSurfaceID(t *testing.T) {
+	surfaces := []types.Surface{{ID: 1}, {ID: 2}, {ID: 4}, {ID: 5}}
+	if got := nextSurfaceID(surfaces, 2); got != 4 {
+		t.Errorf("nextSurfaceID(2) = %d, want 4", got)
+	}
+	if got := nextSurfaceID(surfaces, 5); got != 0 {
+		t.Errorf("nextSurfaceID(last) = %d, want 0", got)
+	}
+	if got := nextSurfaceID(surfaces, 99); got != 0 {
+		t.Errorf("nextSurfaceID(unknown) = %d, want 0", got)
+	}
+}
+
+// TestEdgeThicknessAutoDerivesBackSurface checks that an edge_thickness
+// constraint with no back_surface uses the next surface in array order even
+// when the IDs are non-contiguous (silently returning 0 would be a bug).
+func TestEdgeThicknessAutoDerivesBackSurface(t *testing.T) {
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 5.0, Material: types.Material{}, Diameter: 20.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0.01, Thickness: 5.0, Material: types.Material{}, Diameter: 20.0},
+		{ID: 4, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 20.0},
+		{ID: 5, Type: types.Sphere, Curvature: 0, Thickness: 0.0, Material: types.Material{}, Diameter: 20.0},
+	}
+	want := evaluateEdgeThickness(surfaces, 2, 4)
+	op := types.ConstraintOperand{
+		Kind:    types.ConstraintInequalityLower,
+		Measure: types.MeasureEdgeThickness,
+		Surface: 2,
+		Lower:   1.0,
+		Weight:  1.0,
+		Active:  true,
+	}
+	got := Evaluate(op, surfaces, 0, nil, 0, 0, 0, 0)
+	if math.Abs(got-want) > 1e-12 {
+		t.Errorf("Evaluate(edge_thickness, surface 2) = %v, want %v (auto back surface 4)", got, want)
 	}
 }

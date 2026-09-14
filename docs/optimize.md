@@ -404,8 +404,9 @@ Constraints are defined via `optimization.constraints` (or per config) and
 follow the `ConstraintOperand` format. Kinds: `equality`, `inequality_upper`,
 `inequality_lower`, `band`, `fuzzy`. Multiple `equality` constraints are
 supported (satisfiable targets converge; an unreachable target is reported with
-a warning). `edge_thickness` constraints take the back surface explicitly via
-`surface2`. Constraints are enforced with an augmented-Lagrangian penalty inside
+a warning). `edge_thickness` constraints take the back surface via
+`back_surface`; when it is omitted the next surface in system order is used.
+Constraints are enforced with an augmented-Lagrangian penalty inside
 the DLS solve.
 
 ## Output

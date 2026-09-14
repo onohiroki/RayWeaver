@@ -35,10 +35,11 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 	case types.MeasureDiameter:
 		return evaluateDiameter(surfaces, op.Surface)
 	case types.MeasureEdgeThickness:
-		backID := op.Surface2
+		backID := op.BackSurface
 		if backID == 0 {
-			// fall back to the adjacent surface
-			backID = op.Surface + 1
+			// Auto-derive the back surface: the next surface in system
+			// (slice) order, which is what front.Thickness is measured to.
+			backID = nextSurfaceID(surfaces, op.Surface)
 		}
 		return evaluateEdgeThickness(surfaces, op.Surface, backID)
 	case types.MeasureFNumber:
@@ -259,6 +260,17 @@ func sagitta(curvature, semiDiam float64) float64 {
 		return 0
 	}
 	return R - math.Copysign(math.Sqrt(absR*absR-h*h), R)
+}
+
+// nextSurfaceID returns the ID of the surface immediately after frontID in the
+// system (slice) order, which is the surface front.Thickness is measured to. It
+// returns 0 when frontID is unknown or is the last surface.
+func nextSurfaceID(surfaces []types.Surface, frontID int) int {
+	idx := dls.SurfaceIndex(surfaces, frontID)
+	if idx < 0 || idx+1 >= len(surfaces) {
+		return 0
+	}
+	return surfaces[idx+1].ID
 }
 
 func evaluateEdgeThickness(surfaces []types.Surface, frontID, backID int) float64 {
