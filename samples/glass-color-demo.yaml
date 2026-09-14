@@ -69,9 +69,9 @@ configs:
   merit:
     type: sum
     terms:
-    - { kind: longitudinal_color, wavelength: 0.0004358, wavelength2: 0.0006563, weight: 1.0 }
-    - { kind: lateral_color, field: 1, wavelength: 0.0004358, wavelength2: 0.0006563, weight: 1.0 }
-    - { kind: lateral_color, field: 2, wavelength: 0.0004358, wavelength2: 0.0006563, weight: 1.0 }
+    - { kind: longitudinal_color, wavelength: 0.0004358, comparison_wavelength: 0.0006563, weight: 1.0 }
+    - { kind: lateral_color, field: 1, wavelength: 0.0004358, comparison_wavelength: 0.0006563, weight: 1.0 }
+    - { kind: lateral_color, field: 2, wavelength: 0.0004358, comparison_wavelength: 0.0006563, weight: 1.0 }
   surfaces:
   - id: 1
     type: "sphere"

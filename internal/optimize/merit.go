@@ -282,9 +282,9 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 	case MeritDistortionPct:
 		return evaluateDistortionPct(term.fieldAngle, term.wavelength, surfaces, gc)
 	case MeritLateralColor:
-		return evaluateLateralColor(term.fieldAngle, term.wavelength, term.wavelength2, surfaces, gc)
+		return evaluateLateralColor(term.fieldAngle, term.wavelength, term.comparisonWavelength, surfaces, gc)
 	case MeritLongitudinalColor:
-		return evaluateLongitudinalColor(term.wavelength, term.wavelength2, surfaces, gc)
+		return evaluateLongitudinalColor(term.wavelength, term.comparisonWavelength, surfaces, gc)
 	case MeritGlassRole:
 		if len(term.surfaceSet) == 0 {
 			return 0

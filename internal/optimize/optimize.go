@@ -129,7 +129,7 @@ type MeritTerm struct {
 	// vignetting into the pupil-grid clip.
 	FieldIndex  int
 	Wavelength  float64
-	Wavelength2 float64
+	ComparisonWavelength float64
 	WavWeight   float64
 	Weight      float64
 	Target      float64
@@ -220,7 +220,7 @@ type meritTerm struct {
 	imageHeight    float64
 	fieldWeight    float64
 	wavelength     float64
-	wavelength2    float64
+	comparisonWavelength float64
 	wavWeight      float64
 	weight         float64
 	target         float64
@@ -1284,7 +1284,7 @@ tm := meritTerm{
 		fieldDirY:   1,
 		fieldIndex:  -1,
 		wavelength:  t.Wavelength,
-		wavelength2: t.Wavelength2,
+		comparisonWavelength: t.ComparisonWavelength,
 		weight:      t.Weight,
 		target:      t.Target,
 		fraction:    t.Fraction,
@@ -1580,7 +1580,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 			fieldIndex:  t.FieldIndex,
 			fieldWeight: t.FieldWeight,
 			wavelength:  t.Wavelength,
-			wavelength2: t.Wavelength2,
+			comparisonWavelength: t.ComparisonWavelength,
 			wavWeight:   t.WavWeight,
 			weight:      t.Weight,
 			target:      t.Target,
@@ -1618,7 +1618,7 @@ terms = append(terms, meritTerm{
 				fieldIndex:  t.Field,
 				fieldWeight: fieldWeight,
 				wavelength:  t.Wavelength,
-				wavelength2: t.Wavelength2,
+				comparisonWavelength: t.ComparisonWavelength,
 				wavWeight:   1.0,
 				weight:      t.Weight,
 				target:      t.Target,
@@ -1750,7 +1750,7 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 		kind:        t.Kind,
 		fieldIndex:  -1,
 		wavelength:  t.Wavelength,
-		wavelength2: t.Wavelength2,
+		comparisonWavelength: t.ComparisonWavelength,
 		weight:      t.Weight,
 		target:      t.Target,
 		fraction:    t.Fraction,

@@ -515,7 +515,7 @@ type MeritTerm struct {
 	Kind        string  `yaml:"kind"`
 	Field       int     `yaml:"field"`
 	Wavelength  float64 `yaml:"wavelength"`
-	Wavelength2 float64 `yaml:"wavelength2,omitempty"`
+	ComparisonWavelength float64 `yaml:"comparison_wavelength,omitempty"`
 	Target      float64 `yaml:"target,omitempty"`
 	// Frequency is the spatial frequency in lp/mm for geometric MTF kinds
 	// (geometric_mtf_sag, geometric_mtf_tan).

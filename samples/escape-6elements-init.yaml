@@ -731,31 +731,31 @@ configs:
     - kind: lateral_color
       field: 0
       wavelength: 0.0004861
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 1.0
     - kind: lateral_color
       field: 1
       wavelength: 0.0004861
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 0.5
     - kind: lateral_color
       field: 2
       wavelength: 0.0004861
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 0.5
     - kind: lateral_color
       field: 3
       wavelength: 0.0004861
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 0.3
     - kind: lateral_color
       field: 4
       wavelength: 0.0004861
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 0.3
     - kind: longitudinal_color
       wavelength: 0.0004861
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 1.0
     - kind: field_alive
       field: 0

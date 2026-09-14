@@ -173,7 +173,8 @@ where `y_chief` is the traced chief-ray image height for the field and
 
 ### lateral_color
 
-The difference between the chief-ray image heights at two wavelengths:
+The difference between the chief-ray image heights at two wavelengths
+(`wavelength` = λ₁, `comparison_wavelength` = λ₂):
 
 ```
 lateral_color = y_chief(λ₂) − y_chief(λ₁)
@@ -181,7 +182,8 @@ lateral_color = y_chief(λ₂) − y_chief(λ₁)
 
 ### longitudinal_color
 
-The difference in paraxial EFL between two wavelengths:
+The difference in paraxial EFL between two wavelengths
+(`wavelength` = λ₁, `comparison_wavelength` = λ₂):
 
 ```
 longitudinal_color = EFL(λ₂) − EFL(λ₁)

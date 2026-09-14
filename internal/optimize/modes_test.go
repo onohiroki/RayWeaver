@@ -240,11 +240,11 @@ func modesScheduleConfig(curve string) ([]ConfigInput, *types.MeritScheduleConfi
 		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 		MeritModes: []types.MeritMode{
 			{Name: "color_first", Terms: []types.MeritTerm{
-				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 				{Kind: "glass_role", SurfaceSet: []int{3}, Weight: 1.0},
 			}},
 			{Name: "full", Terms: []types.MeritTerm{
-				{Kind: "longitudinal_color", Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+				{Kind: "longitudinal_color", Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 				{Kind: "glass_role", SurfaceSet: []int{6}, Weight: 1.0},
 			}},
 		},
@@ -354,18 +354,18 @@ func TestMeritScheduleDLSRecoversGlassRoles(t *testing.T) {
 		},
 		MeritModes: []types.MeritMode{
 			{Name: "color_first", Terms: []types.MeritTerm{
-				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
-				{Kind: "lateral_color", Field: 1, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
-				{Kind: "longitudinal_color", Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
+				{Kind: "lateral_color", Field: 1, Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
+				{Kind: "longitudinal_color", Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 				{Kind: "glass_role", SurfaceSet: []int{3}, Weight: 1.0},
 				{Kind: "glass_role", SurfaceSet: []int{6}, Weight: 1.0},
 			}},
 			{Name: "full", Terms: []types.MeritTerm{
 				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
 				{Field: 1, Wavelength: 0.00058756, Weight: 1.0},
-				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
-				{Kind: "lateral_color", Field: 1, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
-				{Kind: "longitudinal_color", Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
+				{Kind: "lateral_color", Field: 1, Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
+				{Kind: "longitudinal_color", Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 				{Kind: "glass_role", SurfaceSet: []int{3}, Weight: 1.0},
 				{Kind: "glass_role", SurfaceSet: []int{6}, Weight: 1.0},
 			}},
@@ -445,7 +445,7 @@ func spotDiffractionConfig(agg string) ([]ConfigInput, *types.MeritScheduleConfi
 				{Kind: "spot_rms", Field: 1, Wavelength: wl, Weight: 1.0},
 			}},
 			{Name: "wavefront", Terms: []types.MeritTerm{
-				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 			}},
 		},
 	}
@@ -530,7 +530,7 @@ func TestSpotDiffractionStepSwitch(t *testing.T) {
 					{Kind: "spot_rms", Field: 0, Wavelength: wl, Weight: 1.0},
 				}},
 				{Name: "wavefront", Terms: []types.MeritTerm{
-					{Kind: "longitudinal_color", Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+					{Kind: "longitudinal_color", Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 				}},
 			},
 		}
@@ -589,10 +589,10 @@ func numRaysScheduleConfig() ([]ConfigInput, *types.MeritScheduleConfig) {
 		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 		MeritModes: []types.MeritMode{
 			{Name: "coarse", NumRays: 16, Terms: []types.MeritTerm{
-				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 			}},
 			{Name: "fine", NumRays: 64, Terms: []types.MeritTerm{
-				{Kind: "longitudinal_color", Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+				{Kind: "longitudinal_color", Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 			}},
 		},
 	}
@@ -651,7 +651,7 @@ func TestMeritScheduleNumRaysMaxAcrossConfigs(t *testing.T) {
 		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 		MeritModes: []types.MeritMode{
 			{Name: "A", NumRays: 16, Terms: []types.MeritTerm{
-				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+				{Kind: "lateral_color", Field: 0, Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 			}},
 		},
 	}
@@ -663,7 +663,7 @@ func TestMeritScheduleNumRaysMaxAcrossConfigs(t *testing.T) {
 		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 		MeritModes: []types.MeritMode{
 			{Name: "A", NumRays: 48, Terms: []types.MeritTerm{
-				{Kind: "longitudinal_color", Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+				{Kind: "longitudinal_color", Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 			}},
 		},
 	}

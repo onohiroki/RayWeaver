@@ -179,21 +179,21 @@ configs:
     - kind: lateral_color
       field: 0
       wavelength: 0.0004358
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 1.0
     - kind: lateral_color
       field: 1
       wavelength: 0.0004358
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 1.0
     - kind: lateral_color
       field: 2
       wavelength: 0.0004358
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 0.5
     - kind: longitudinal_color
       wavelength: 0.0004358
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 1.0
   - name: full
     terms:
@@ -248,19 +248,19 @@ configs:
     - kind: lateral_color
       field: 0
       wavelength: 0.0004358
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 1.0
     - kind: lateral_color
       field: 1
       wavelength: 0.0004358
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 1.0
     - kind: lateral_color
       field: 2
       wavelength: 0.0004358
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 0.5
     - kind: longitudinal_color
       wavelength: 0.0004358
-      wavelength2: 0.0006563
+      comparison_wavelength: 0.0006563
       weight: 1.0

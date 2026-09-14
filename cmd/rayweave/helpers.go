@@ -527,7 +527,7 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 					FieldIndex:  mt.Field,
 					FieldWeight: fieldWeight,
 					Wavelength:  mt.Wavelength,
-					Wavelength2: mt.Wavelength2,
+					ComparisonWavelength: mt.ComparisonWavelength,
 					WavWeight:   wavWeight,
 					Weight:      mt.Weight,
 					Target:      mt.Target,

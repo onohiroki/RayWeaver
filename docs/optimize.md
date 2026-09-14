@@ -270,12 +270,12 @@ configs:
         terms:
           - kind: longitudinal_color
             wavelength: 0.0004358
-            wavelength2: 0.0006563
+            comparison_wavelength: 0.0006563
             weight: 1.0
           - kind: lateral_color
             field: 1
             wavelength: 0.0004358
-            wavelength2: 0.0006563
+            comparison_wavelength: 0.0006563
             weight: 0.5
           - kind: glass_role
             surface_set: [3, 5]
@@ -288,7 +288,7 @@ configs:
             weight: 1.0
           - kind: longitudinal_color
             wavelength: 0.0004358
-            wavelength2: 0.0006563
+            comparison_wavelength: 0.0006563
             weight: 1.0
 ```
 

@@ -186,7 +186,7 @@ type MeritTermRow struct {
 	Kind        string  `json:"kind" yaml:"kind"`
 	Field       int     `json:"field,omitempty" yaml:"field,omitempty"`
 	Wavelength  float64 `json:"wavelength,omitempty" yaml:"wavelength,omitempty"`
-	Wavelength2 float64 `json:"wavelength2,omitempty" yaml:"wavelength2,omitempty"`
+	ComparisonWavelength float64 `json:"comparison_wavelength,omitempty" yaml:"comparison_wavelength,omitempty"`
 	Target      float64 `json:"target,omitempty" yaml:"target,omitempty"`
 	Fraction    float64 `json:"fraction,omitempty" yaml:"fraction,omitempty"`
 	SurfaceSet  []int   `json:"surface_set,omitempty" yaml:"surface_set,omitempty"`
@@ -2229,7 +2229,7 @@ func listMerit(input types.Input, output types.Output, format string) {
 					Kind:        t.Kind,
 					Field:       t.Field,
 					Wavelength:  t.Wavelength,
-					Wavelength2: t.Wavelength2,
+					ComparisonWavelength: t.ComparisonWavelength,
 					Target:      t.Target,
 					Fraction:    t.Fraction,
 					SurfaceSet:  t.SurfaceSet,
@@ -2321,13 +2321,13 @@ func listMerit(input types.Input, output types.Output, format string) {
 	case "csv":
 		if len(terms) > 0 {
 			fmt.Println("Merit Terms:")
-			fmt.Println("config,kind,field,wavelength,wavelength2,target,fraction,surface_set,weight")
+			fmt.Println("config,kind,field,wavelength,comparison_wavelength,target,fraction,surface_set,weight")
 			for _, r := range terms {
 				cells := []string{
 					r.Config, r.Kind,
 					strconv.Itoa(r.Field),
 					strconv.FormatFloat(r.Wavelength, 'g', -1, 64),
-					strconv.FormatFloat(r.Wavelength2, 'g', -1, 64),
+					strconv.FormatFloat(r.ComparisonWavelength, 'g', -1, 64),
 					strconv.FormatFloat(r.Target, 'g', -1, 64),
 					strconv.FormatFloat(r.Fraction, 'g', -1, 64),
 					fmt.Sprintf("%v", r.SurfaceSet),

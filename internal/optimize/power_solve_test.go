@@ -120,7 +120,7 @@ func TestGlassPhaseLocksNonGlassAndPreservesPower(t *testing.T) {
 
 	// Set up a glass (colour-only) merit with one lateral_color term on field 0.
 	opt.SetGlassMerit("config1", []types.MeritTerm{
-		{Kind: MeritLongitudinalColor, Wavelength: 0.0004358, Wavelength2: 0.0006563, Weight: 1.0},
+		{Kind: MeritLongitudinalColor, Wavelength: 0.0004358, ComparisonWavelength: 0.0006563, Weight: 1.0},
 	})
 
 	// Build a realistic current state x where every var is set to a value

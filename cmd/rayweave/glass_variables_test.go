@@ -51,8 +51,8 @@ configs:
     type: sum
     terms:
     - {kind: spot_rms, field: 0, wavelength: 0.0005876, weight: 1.0}
-    - {kind: longitudinal_color, wavelength: 0.0004861, wavelength2: 0.0006563, weight: 1.0}
-    - {kind: lateral_color, field: 1, wavelength: 0.0004861, wavelength2: 0.0006563, weight: 0.5}
+    - {kind: longitudinal_color, wavelength: 0.0004861, comparison_wavelength: 0.0006563, weight: 1.0}
+    - {kind: lateral_color, field: 1, wavelength: 0.0004861, comparison_wavelength: 0.0006563, weight: 0.5}
     - {kind: seidel_astigmatism, field: 1, wavelength: 0.0005876, weight: 5.0, target: 0}
   surfaces:
   - {id: 1, type: sphere, radius: 10.2871491742, thickness: 1.524, material: {key: SK18}, diameter: 10.0}

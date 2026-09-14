@@ -245,7 +245,7 @@ func isCheapGuardrailKind(kind string) bool {
 // fixed merit and its merit_modes.
 func meritTermKey(t types.MeritTerm) string {
 	return fmt.Sprintf("%s|%d|%g|%g|%g|%g|%g",
-		t.Kind, t.Field, t.Wavelength, t.Wavelength2, t.Target, t.Fraction, t.Frequency)
+		t.Kind, t.Field, t.Wavelength, t.ComparisonWavelength, t.Target, t.Fraction, t.Frequency)
 }
 
 func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool) {
