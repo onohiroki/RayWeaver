@@ -1,0 +1,882 @@
+metadata:
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
+  notes: "Escape optimization v14: 6-element double-Gauss, virtual entrance pupil.\n\
+    v13 base with infeasible-threshold relaxation:\n- min_glass_path relaxed:\
+    \ 2.0->0.5 (thin-element oblique rays)\n- min_throughput_ratio: 0.3->0.1\
+    \ (validateFn threshold)\n- all other settings inherited from v13\n8h time\
+    \ budget.\n"
+glass_catalog:
+  entries:
+  - type: model
+    name: SK18
+    nd: 1.63854
+    vd: 55.42
+  - type: model
+    name: SF12
+    nd: 1.64831
+    vd: 33.84
+optimization:
+  method: dls
+  max_iter: 1000
+  tol: 1.0e-07
+  epsilon: 0.0001
+  num_rays: 256
+  aperture_margin: 1.0
+  central_diff: true
+  bfgs: true
+  jacobian_workers: 2
+  power_solve:
+    enabled: true
+    surfaces:
+    - 2
+    - 4
+    - 6
+    - 7
+    - 9
+    - 11
+    color_scale: 100
+  back_focus_solve:
+    enabled: true
+    type: paraxial
+    surface: 12
+    reference_surface: 0
+    num_rays: 64
+    wavelength: 0.0005876
+    weight_type: on_axis_only
+    schedule:
+      dominant_threshold: 0.5
+  escape:
+    max_cycles: 40
+    escape_workers: 8
+    distance_threshold: 0.05
+    h_initial: 2.0
+    w_initial: 1.0
+    h_mult: 2.0
+    w_mult: 1.3
+    escape_iter_frac: 0.45
+    w_span: 4.0
+    initial_perturb: 0.15
+    max_seconds: 28800
+    min_throughput_ratio: 0.1
+  merit_schedule:
+    metric: merit_ratio
+    curve: sigmoid
+    anchor_from: 1.0
+    anchor_to: 0.2
+    modes:
+    - name: geometric
+      weight_from: 1.0
+      weight_to: 0.0
+      back_focus_type: paraxial
+    - name: wavefront
+      weight_from: 0.0
+      weight_to: 1.0
+      back_focus_type: paraxial
+  variables:
+  - name: s1_c
+    target:
+      type: surface
+      id: 1
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s2_c
+    target:
+      type: surface
+      id: 2
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s3_c
+    target:
+      type: surface
+      id: 3
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s4_c
+    target:
+      type: surface
+      id: 4
+      param: curvature
+    min: -0.03
+    max: 0.03
+    active: true
+  - name: s5_c
+    target:
+      type: surface
+      id: 5
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s6_c
+    target:
+      type: surface
+      id: 6
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s7_c
+    target:
+      type: surface
+      id: 7
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s8_c
+    target:
+      type: surface
+      id: 8
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s9_c
+    target:
+      type: surface
+      id: 9
+      param: curvature
+    min: -0.03
+    max: 0.03
+    active: true
+  - name: s10_c
+    target:
+      type: surface
+      id: 10
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s11_c
+    target:
+      type: surface
+      id: 11
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s12_c
+    target:
+      type: surface
+      id: 12
+      param: curvature
+    min: -0.025
+    max: 0.025
+    active: true
+  - name: s1_thk
+    target:
+      type: surface
+      id: 1
+      param: thickness
+    min: 2.0
+    max: 20.0
+    active: true
+  - name: s2_thk
+    target:
+      type: surface
+      id: 2
+      param: thickness
+    min: 0.5
+    max: 20.0
+    active: true
+  - name: s3_thk
+    target:
+      type: surface
+      id: 3
+      param: thickness
+    min: 2.0
+    max: 20.0
+    active: true
+  - name: s4_thk
+    target:
+      type: surface
+      id: 4
+      param: thickness
+    min: 0.5
+    max: 20.0
+    active: true
+  - name: s5_thk
+    target:
+      type: surface
+      id: 5
+      param: thickness
+    min: 1.5
+    max: 20.0
+    active: true
+  - name: s6_thk
+    target:
+      type: surface
+      id: 6
+      param: thickness
+    min: 0.5
+    max: 20.0
+    active: true
+  - name: s7_thk
+    target:
+      type: surface
+      id: 7
+      param: thickness
+    min: 2.0
+    max: 20.0
+    active: true
+  - name: s8_thk
+    target:
+      type: surface
+      id: 8
+      param: thickness
+    min: 0.3
+    max: 20.0
+    active: true
+  - name: s9_thk
+    target:
+      type: surface
+      id: 9
+      param: thickness
+    min: 2.0
+    max: 20.0
+    active: true
+  - name: s11_thk
+    target:
+      type: surface
+      id: 11
+      param: thickness
+    min: 2.0
+    max: 20.0
+    active: true
+  - name: s12_thk
+    target:
+      type: surface
+      id: 12
+      param: thickness
+    min: 36.0
+    max: 52.0
+    active: false
+  - name: s1_dia
+    target:
+      type: surface
+      id: 1
+      param: diameter
+    min: 20.0
+    max: 45.0
+    active: false
+  - name: s2_dia
+    target:
+      type: surface
+      id: 2
+      param: diameter
+    min: 20.0
+    max: 45.0
+    active: false
+  - name: s3_dia
+    target:
+      type: surface
+      id: 3
+      param: diameter
+    min: 18.0
+    max: 40.0
+    active: false
+  - name: s4_dia
+    target:
+      type: surface
+      id: 4
+      param: diameter
+    min: 18.0
+    max: 40.0
+    active: false
+  - name: s5_dia
+    target:
+      type: surface
+      id: 5
+      param: diameter
+    min: 16.0
+    max: 38.0
+    active: false
+  - name: s6_dia
+    target:
+      type: surface
+      id: 6
+      param: diameter
+    min: 16.0
+    max: 38.0
+    active: false
+  - name: s7_dia
+    target:
+      type: surface
+      id: 7
+      param: diameter
+    min: 16.0
+    max: 38.0
+    active: false
+  - name: s8_dia
+    target:
+      type: surface
+      id: 8
+      param: diameter
+    min: 16.0
+    max: 38.0
+    active: false
+  - name: s9_dia
+    target:
+      type: surface
+      id: 9
+      param: diameter
+    min: 18.0
+    max: 40.0
+    active: false
+  - name: s10_dia
+    target:
+      type: surface
+      id: 10
+      param: diameter
+    min: 18.0
+    max: 40.0
+    active: false
+  - name: s11_dia
+    target:
+      type: surface
+      id: 11
+      param: diameter
+    min: 20.0
+    max: 45.0
+    active: false
+  - name: s12_dia
+    target:
+      type: surface
+      id: 12
+      param: diameter
+    min: 20.0
+    max: 45.0
+    active: false
+  - name: s1_nd
+    target:
+      type: surface
+      id: 1
+      param: nd
+    min: 1.4
+    max: 2.0
+    active: true
+  - name: s1_vd
+    target:
+      type: surface
+      id: 1
+      param: vd
+    min: 20
+    max: 80
+    active: true
+  - name: s3_nd
+    target:
+      type: surface
+      id: 3
+      param: nd
+    min: 1.4
+    max: 2.0
+    active: true
+  - name: s3_vd
+    target:
+      type: surface
+      id: 3
+      param: vd
+    min: 20
+    max: 80
+    active: true
+  - name: s5_nd
+    target:
+      type: surface
+      id: 5
+      param: nd
+    min: 1.4
+    max: 2.0
+    active: true
+  - name: s5_vd
+    target:
+      type: surface
+      id: 5
+      param: vd
+    min: 20
+    max: 80
+    active: true
+  - name: s7_nd
+    target:
+      type: surface
+      id: 7
+      param: nd
+    min: 1.4
+    max: 2.0
+    active: true
+  - name: s7_vd
+    target:
+      type: surface
+      id: 7
+      param: vd
+    min: 20
+    max: 80
+    active: true
+  - name: s9_nd
+    target:
+      type: surface
+      id: 9
+      param: nd
+    min: 1.4
+    max: 2.0
+    active: true
+  - name: s9_vd
+    target:
+      type: surface
+      id: 9
+      param: vd
+    min: 20
+    max: 80
+    active: true
+  - name: s11_nd
+    target:
+      type: surface
+      id: 11
+      param: nd
+    min: 1.4
+    max: 2.0
+    active: true
+  - name: s11_vd
+    target:
+      type: surface
+      id: 11
+      param: vd
+    min: 20
+    max: 80
+    active: true
+  - name: vp_dia
+    target:
+      type: pupil_model
+      param: diameter
+    min: 10.0
+    max: 22.0
+    active: true
+  - name: vp_z
+    target:
+      type: pupil_model
+      param: axial_position
+    min: 6.0
+    max: 20.0
+    active: true
+  - name: s10_thk
+    target:
+      type: surface
+      id: 10
+      param: thickness
+    min: 0.3
+    max: 5.0
+    active: true
+configs:
+- id: config0
+  name: nominal
+  active: true
+  fields:
+  - id: 0
+    angle_deg: 0.0
+    weight: 1.0
+  - id: 1
+    angle_deg: 11.5
+    weight: 1.0
+  - id: 2
+    angle_deg: 16.1
+    weight: 1.0
+  - id: 3
+    angle_deg: 19.55
+    weight: 1.0
+  - id: 4
+    angle_deg: 23.0
+    weight: 1.0
+  wavelengths:
+  - id: 0
+    value: 0.0004861
+    weight: 1.0
+  - id: 1
+    value: 0.0005876
+    weight: 1.0
+  - id: 2
+    value: 0.0006563
+    weight: 1.0
+  surfaces:
+  - id: 1
+    type: sphere
+    radius: 60.606061
+    thickness: 3.5
+    material:
+      nd: 1.63854
+      vd: 55.42
+    diameter: 36.0
+    auto_aperture: true
+    min_glass_path: 0.5
+  - id: 2
+    type: sphere
+    radius: -454.545455
+    thickness: 0.5
+    material: AIR
+    diameter: 36.0
+    auto_aperture: true
+  - id: 3
+    type: sphere
+    radius: 121.212121
+    thickness: 1.2
+    material:
+      nd: 1.64831
+      vd: 33.84
+    diameter: 28.0
+    auto_aperture: true
+    min_glass_path: 0.5
+  - id: 4
+    type: sphere
+    radius: 45.454545
+    thickness: 3.0
+    material: AIR
+    diameter: 28.0
+    auto_aperture: true
+  - id: 5
+    type: sphere
+    radius: 54.545455
+    thickness: 2.5
+    material:
+      nd: 1.63854
+      vd: 55.42
+    diameter: 26.0
+    auto_aperture: true
+    min_glass_path: 0.5
+  - id: 6
+    type: sphere
+    radius: 181.818182
+    thickness: 6.0
+    material: AIR
+    diameter: 26.0
+    auto_aperture: true
+  - id: 7
+    type: sphere
+    radius: -181.818182
+    thickness: 2.5
+    material:
+      nd: 1.63854
+      vd: 55.42
+    diameter: 26.0
+    auto_aperture: true
+    min_glass_path: 0.5
+  - id: 8
+    type: sphere
+    radius: -54.545455
+    thickness: 3.0
+    material: AIR
+    diameter: 26.0
+    auto_aperture: true
+  - id: 9
+    type: sphere
+    radius: -45.454545
+    thickness: 1.2
+    material:
+      nd: 1.64831
+      vd: 33.84
+    diameter: 28.0
+    auto_aperture: true
+    min_glass_path: 0.5
+  - id: 10
+    type: sphere
+    radius: -121.212121
+    thickness: 0.5
+    material: AIR
+    diameter: 28.0
+    auto_aperture: true
+  - id: 11
+    type: sphere
+    radius: 454.545455
+    thickness: 3.5
+    material:
+      nd: 1.63854
+      vd: 55.42
+    diameter: 36.0
+    auto_aperture: true
+    min_glass_path: 0.5
+  - id: 12
+    type: sphere
+    radius: -60.606061
+    thickness: 42.0
+    material: AIR
+    diameter: 36.0
+    auto_aperture: true
+  - id: 13
+    type: sphere
+    radius: 0.0
+    thickness: 0.0
+    material: AIR
+    diameter: 44.0
+  merit_modes:
+  - name: geometric
+    terms:
+    - kind: spot_rms
+      field: 0
+      wavelength: 0.0005876
+      weight: 3.0
+    - kind: spot_rms_t
+      field: 1
+      wavelength: 0.0005876
+      weight: 2.0
+    - kind: spot_rms_s
+      field: 1
+      wavelength: 0.0005876
+      weight: 2.0
+    - kind: spot_rms_worst
+      field: 1
+      wavelength: 0.0005876
+      weight: 1.5
+    - kind: spot_rms_t
+      field: 2
+      wavelength: 0.0005876
+      weight: 2.5
+    - kind: spot_rms_s
+      field: 2
+      wavelength: 0.0005876
+      weight: 2.5
+    - kind: spot_rms_worst
+      field: 2
+      wavelength: 0.0005876
+      weight: 2.0
+    - kind: spot_rms_t
+      field: 3
+      wavelength: 0.0005876
+      weight: 3.0
+    - kind: spot_rms_s
+      field: 3
+      wavelength: 0.0005876
+      weight: 3.0
+    - kind: spot_rms_worst
+      field: 3
+      wavelength: 0.0005876
+      weight: 2.5
+    - kind: spot_rms_t
+      field: 4
+      wavelength: 0.0005876
+      weight: 3.5
+    - kind: spot_rms_s
+      field: 4
+      wavelength: 0.0005876
+      weight: 3.5
+    - kind: spot_rms_worst
+      field: 4
+      wavelength: 0.0005876
+      weight: 3.0
+    - kind: spot_ee_radius
+      field: 1
+      wavelength: 0.0005876
+      fraction: 0.8
+      weight: 1.0
+    - kind: spot_ee_radius
+      field: 2
+      wavelength: 0.0005876
+      fraction: 0.8
+      weight: 1.2
+    - kind: spot_ee_radius
+      field: 3
+      wavelength: 0.0005876
+      fraction: 0.8
+      weight: 1.5
+    - kind: spot_ee_radius
+      field: 4
+      wavelength: 0.0005876
+      fraction: 0.8
+      weight: 1.8
+    - kind: seidel_astigmatism
+      field: 1
+      wavelength: 0.0005876
+      weight: 5.0
+      target: 0
+    - kind: seidel_astigmatism
+      field: 2
+      wavelength: 0.0005876
+      weight: 8.0
+      target: 0
+    - kind: seidel_astigmatism
+      field: 3
+      wavelength: 0.0005876
+      weight: 10.0
+      target: 0
+    - kind: seidel_astigmatism
+      field: 4
+      wavelength: 0.0005876
+      weight: 12.0
+      target: 0
+    - kind: seidel_coma
+      field: 1
+      wavelength: 0.0005876
+      weight: 5.0
+      target: 0
+    - kind: seidel_coma
+      field: 2
+      wavelength: 0.0005876
+      weight: 8.0
+      target: 0
+    - kind: seidel_coma
+      field: 3
+      wavelength: 0.0005876
+      weight: 10.0
+      target: 0
+    - kind: seidel_coma
+      field: 4
+      wavelength: 0.0005876
+      weight: 12.0
+      target: 0
+    - kind: lateral_color
+      field: 0
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 1.0
+    - kind: lateral_color
+      field: 1
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 0.5
+    - kind: lateral_color
+      field: 2
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 0.5
+    - kind: lateral_color
+      field: 3
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 0.3
+    - kind: lateral_color
+      field: 4
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 0.3
+    - kind: longitudinal_color
+      wavelength: 0.0004861
+      wavelength2: 0.0006563
+      weight: 1.0
+    - kind: field_alive
+      field: 0
+      weight: 30
+    - kind: field_alive
+      field: 1
+      weight: 30
+    - kind: field_alive
+      field: 2
+      weight: 30
+    - kind: field_alive
+      field: 3
+      weight: 30
+    - kind: field_alive
+      field: 4
+      weight: 30
+    - kind: abs_efl
+      target: 50.0
+      weight: 30
+    - kind: glass_role
+      surface_set:
+      - 1
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 3
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 5
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 7
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 9
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 11
+      weight: 0.01
+  - name: wavefront
+    terms:
+    - kind: wavefront_sphere_rms
+      field: 1
+      wavelength: 0.0005876
+      weight: 4000
+    - kind: wavefront_sphere_rms
+      field: 2
+      wavelength: 0.0005876
+      weight: 6000
+    - kind: wavefront_sphere_rms
+      field: 3
+      wavelength: 0.0005876
+      weight: 10000
+    - kind: wavefront_sphere_rms
+      field: 4
+      wavelength: 0.0005876
+      weight: 15000
+    - kind: wavefront_astigmatism
+      field: 1
+      wavelength: 0.0005876
+      weight: 2000
+      target: 0
+    - kind: wavefront_astigmatism
+      field: 2
+      wavelength: 0.0005876
+      weight: 3000
+      target: 0
+    - kind: wavefront_astigmatism
+      field: 3
+      wavelength: 0.0005876
+      weight: 5000
+      target: 0
+    - kind: wavefront_astigmatism
+      field: 4
+      wavelength: 0.0005876
+      weight: 8000
+      target: 0
+    - kind: wavefront_sphere_rms
+      field: 0
+      wavelength: 0.0005876
+      weight: 1000
+chief:
+  fields:
+  - angle: 0.0
+    direction:
+    - 0
+    - 1
+  - angle: 11.5
+    direction:
+    - 0
+    - 1
+  - angle: 16.1
+    direction:
+    - 0
+    - 1
+  - angle: 19.55
+    direction:
+    - 0
+    - 1
+  - angle: 23.0
+    direction:
+    - 0
+    - 1
+  reference_surface: 13
+  reference_wavelength: 0.0005876
+  num_rays: 256
+  grid_type: hex
+  dump_map: true
+  pupil_model:
+    mode: virtual_entrance_pupil
+    axial_position: 12.5
+    diameter: 12.5
+    solve:
+      axial_position: true
+      diameter: true
+    constraints:
+      axial_position_min: 8.0
+      axial_position_max: 20.0
+      diameter_min: 10.0
+      diameter_max: 22.0

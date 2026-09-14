@@ -9,8 +9,9 @@ set -euo pipefail
 # list of local minima and the best one wins.
 #
 # Two lenses are supported:
-#   escape-demo.bash                     : degraded US2645157 triplet (default)
-#   escape-demo.bash --lens doublegauss  : 6-element double-Gauss (f/2.8 50 mm)
+#   escape-demo.bash                           : degraded US2645157 triplet (default)
+#   escape-demo.bash --lens doublegauss        : 6-element double-Gauss (f/2.8 50 mm)
+#   escape-demo.bash --lens 6elements          : v14 escape-optimised 6-element
 # The double-Gauss run is much slower (36 variables, 256 rays) but uses the
 # same escape section baked into samples/doublegauss-init.yaml.
 #
@@ -62,8 +63,8 @@ while [[ $# -gt 0 ]]; do
     --lens)
       shift
       case "${1:-}" in
-        triplet|doublegauss) LENS="$1"; shift ;;
-        *) echo "Error: --lens must be 'triplet' or 'doublegauss' (got '${1:-}')"; exit 1 ;;
+        triplet|doublegauss|6elements) LENS="$1"; shift ;;
+        *) echo "Error: --lens must be 'triplet', 'doublegauss', or '6elements' (got '${1:-}')"; exit 1 ;;
       esac
       ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -88,6 +89,13 @@ case "$LENS" in
     SAVE_BASE="$OUTDIR/${PREFIX}min"
     LOG_FILE="$OUTDIR/${PREFIX}progress.jsonl"
     ;;
+  6elements)
+    YAML="$SCRIPT_DIR/escape-6elements-init.yaml"
+    PREFIX="escape-demo-6elements-"
+    LENS_NAME="6-element v14 (escape-optimised, virtual pupil)"
+    SAVE_BASE="$OUTDIR/${PREFIX}min"
+    LOG_FILE="$OUTDIR/${PREFIX}progress.jsonl"
+    ;;
 esac
 RESULT="$OUTDIR/${PREFIX}result.yaml"
 RESULT_FILE="$OUTDIR/${PREFIX}result.txt"
@@ -102,10 +110,15 @@ if [ "$CLEAN" = true ]; then
   rm -f "$OUTDIR"/escape-demo-doublegauss-min*.yaml
   rm -f "$OUTDIR"/escape-demo-doublegauss-init.png "$OUTDIR"/escape-demo-doublegauss-best.png "$OUTDIR"/escape-demo-doublegauss-min1.png
   rm -f "$OUTDIR"/escape-demo-doublegauss-best.yaml "$OUTDIR"/escape-demo-doublegauss-psf.yaml
-  rm -f "$OUTDIR"/escape-demo-element-powers.png "$OUTDIR"/escape-demo-doublegauss-element-powers.png
-  rm -f "$OUTDIR"/escape-demo-element-powers.dat "$OUTDIR"/escape-demo-doublegauss-element-powers.dat
+  rm -f "$OUTDIR"/escape-demo-element-powers.png "$OUTDIR"/escape-demo-doublegauss-element-powers.png "$OUTDIR"/escape-demo-6elements-element-powers.png
+  rm -f "$OUTDIR"/escape-demo-element-powers.dat "$OUTDIR"/escape-demo-doublegauss-element-powers.dat "$OUTDIR"/escape-demo-6elements-element-powers.dat
+  rm -f "$OUTDIR"/escape-demo-6elements-result.yaml "$OUTDIR"/escape-demo-6elements-result.txt
+  rm -f "$OUTDIR"/escape-demo-6elements-progress.jsonl
+  rm -f "$OUTDIR"/escape-demo-6elements-min*.yaml
+  rm -f "$OUTDIR"/escape-demo-6elements-init.png "$OUTDIR"/escape-demo-6elements-best.png
+  rm -f "$OUTDIR"/escape-demo-6elements-best.yaml "$OUTDIR"/escape-demo-6elements-psf.yaml
   rm -f "$OUTDIR"/escape-powers-*.dat "$OUTDIR"/escape-powers-*.png
-  echo "  Removed: triplet and double-Gauss escape outputs"
+  echo "  Removed: triplet, double-Gauss, and 6elements escape outputs"
   exit 0
 fi
 
@@ -228,7 +241,7 @@ echo "=== Escape demo: global optimisation of the $LENS_NAME ==="
 echo
 
 echo "--- Running escape-function global optimisation (JSONL progress on stderr) ---"
-ESCAPE_ARGS=(--verbose)
+ESCAPE_ARGS=(--verbose --keep-infeasible)
 if [[ -n "$LOG_FILE" ]]; then
   ESCAPE_ARGS+=(--log "$LOG_FILE")
 fi
@@ -248,7 +261,11 @@ echo "--- Local minima summary ---"
   # crown/flint arrangement (and any role flips vs the nominal SK18/SF12 start)
   # is visible; a '.' marks a vd that crossed the 45 crown/flint boundary.
   # The variable names follow the doublegauss-init.yaml convention s<N>_<g>_vd.
-  GLASS_VARS="s1_sk18_vd s3_sf12_vd s5_sk18_vd s8_sk18_vd s10_sf12_vd s12_sk18_vd"
+  if [ "$LENS" = "6elements" ]; then
+    GLASS_VARS="s1_vd s3_vd s5_vd s7_vd s9_vd s11_vd"
+  else
+    GLASS_VARS="s1_sk18_vd s3_sf12_vd s5_sk18_vd s8_sk18_vd s10_sf12_vd s12_sk18_vd"
+  fi
   $RAYWEAVE query --each 'escape_result.minima[]:index,merit' --printf '%d %.6e' < "$RESULT" \
     | while read -r idx merit; do
         mark=" "
@@ -278,7 +295,7 @@ echo
 # can change each element's glass independently, so different local minima
 # should carry different glasses. Check that at least two minima differ in the
 # vd of a glass surface (the crown/flint arrangement moves between solutions).
-if [ "$LENS" = "doublegauss" ]; then
+if [ "$LENS" = "doublegauss" ] || [ "$LENS" = "6elements" ]; then
   echo "--- Power-preserving glass phase (double-Gauss) ---"
   echo "  Each cycle added a glass_dls phase: it locked every variable except the"
   echo "  glass dispersions, reversed the merit to a colour-only (LCA/TCA) objective,"
@@ -312,8 +329,14 @@ echo "Written: $OUTDIR/${PREFIX}best.yaml (best minimum $BEST_IDX)"
 echo
 
 echo "--- PSF verification (all fields Strehl >= 0.5) ---"
-$RAYWEAVE psf --polarization RCP+LCP --wavelengths 0.0005876 --best-focus \
-  < "$OUTDIR/${PREFIX}best.yaml" > "$OUTDIR/${PREFIX}psf.yaml"
+if [ "$LENS" = "6elements" ]; then
+  $RAYWEAVE chief --clear-aperture < "$OUTDIR/${PREFIX}best.yaml" \
+    | $RAYWEAVE psf --polarization RCP+LCP --wavelengths 0.0005876 --best-focus \
+    > "$OUTDIR/${PREFIX}psf.yaml"
+else
+  $RAYWEAVE psf --polarization RCP+LCP --wavelengths 0.0005876 --best-focus \
+    < "$OUTDIR/${PREFIX}best.yaml" > "$OUTDIR/${PREFIX}psf.yaml"
+fi
 NF=$($RAYWEAVE query --len psf_results < "$OUTDIR/${PREFIX}psf.yaml")
 GATE_OK=true
 for ((i = 0; i < NF; i++)); do
