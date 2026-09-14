@@ -49,7 +49,7 @@ optimization:
     schedule:
       dominant_threshold: 0.5
   escape:
-    max_cycles: 40
+    max_cycles: 3
     escape_workers: 8
     distance_threshold: 0.05
     h_initial: 2.0
@@ -59,7 +59,7 @@ optimization:
     escape_iter_frac: 0.45
     w_span: 4.0
     initial_perturb: 0.15
-    max_seconds: 28800
+    max_seconds: 18000
     min_throughput_ratio: 0.1
   merit_schedule:
     metric: merit_ratio
