@@ -352,6 +352,89 @@ func TestBackFocusSolveScheduleFallback(t *testing.T) {
 	}
 }
 
+// TestBackFocusSolveClampsNegativeThickness verifies that the back-focus solve
+// clamps the target surface thickness to a minimum positive value (0.1 mm)
+// when the computed shift would result in a negative or near-zero thickness.
+func TestBackFocusSolveClampsNegativeThickness(t *testing.T) {
+	gc := tripletGC()
+	surfaces := powerSolveTripletSurfaces()
+	surface.Precompute(surfaces)
+	cfg := Config{
+		Surfaces:     surfaces,
+		GlassCatalog: gc,
+		Variables: []Variable{
+			{Name: "c", SurfaceID: 7, Param: "curvature", Min: -0.1, Max: 0.1, Config: "config1"},
+		},
+	}
+	opt := NewOptimizer(cfg)
+	opt.SetBackFocusSolve(&types.BackFocusSolveConfig{
+		Enabled: true,
+		Type:    "paraxial",
+	})
+
+	// Make the image plane spacing huge so the paraxial BFL (which is
+	// moderate for the triplet) produces a large negative shift, pushing
+	// thickness well below zero.
+	for i := range surfaces {
+		if surfaces[i].ID == 7 {
+			surfaces[i].Thickness = 200.0
+		}
+	}
+
+	x := make([]float64, len(opt.Variables()))
+	x[0] = 0.0
+	surfMap, _, _ := opt.applyVariables(x)
+	s := surfMap["config1"]
+	surface.Precompute(s)
+	for _, sf := range s {
+		if sf.ID == 7 {
+			if sf.Thickness < 0.1 {
+				t.Errorf("surface 7 thickness should be clamped to >= 0.1, got %f", sf.Thickness)
+			}
+			return
+		}
+	}
+	t.Fatal("surface 7 not found in output")
+}
+
+// TestApplyBackFocusSolveClampsNegativeThickness verifies the exported
+// ApplyBackFocusSolve function clamps thickness to 0.1 mm when the computed
+// shift would make it negative.
+func TestApplyBackFocusSolveClampsNegativeThickness(t *testing.T) {
+	gc := tripletGC()
+	surfaces := powerSolveTripletSurfaces()
+	// Make the image plane spacing huge so the paraxial BFL produces a large
+	// negative shift.
+	for i := range surfaces {
+		if surfaces[i].ID == 7 {
+			surfaces[i].Thickness = 200.0
+		}
+	}
+	surface.Precompute(surfaces)
+	fields := []types.FieldItem{
+		{ID: 0, AngleDeg: 0.0},
+	}
+	wavelengths := []types.WavelengthItem{
+		{Value: 0.0005876},
+	}
+	cfg := &types.BackFocusSolveConfig{
+		Enabled:    true,
+		Type:       "paraxial",
+		Surface:    7,
+		Wavelength: 0.0005876,
+	}
+	ApplyBackFocusSolve(surfaces, cfg, "paraxial", 0, 0.0005876, fields, wavelengths, gc)
+	for _, sf := range surfaces {
+		if sf.ID == 7 {
+			if sf.Thickness < 0.1 {
+				t.Errorf("surface 7 thickness should be clamped to >= 0.1, got %f", sf.Thickness)
+			}
+			return
+		}
+	}
+	t.Fatal("surface 7 not found in input")
+}
+
 // TestBackFocusSolveScheduleThreshold verifies that the dominant threshold
 // determines when the switch occurs.
 func TestBackFocusSolveScheduleThreshold(t *testing.T) {

@@ -2445,14 +2445,22 @@ func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surfac
 			if idx < 0 {
 				continue
 			}
-			switch o.currentBackFocusType {
-			case "wavefront":
-				shift := o.wavefrontBackFocusShift(cfg, surfaces, gc)
-				surfaces[idx].Thickness += shift
-			default: // "paraxial"
-				shift := o.paraxialBackFocusShift(cfg, surfaces, gc)
-				surfaces[idx].Thickness += shift
+		switch o.currentBackFocusType {
+		case "wavefront":
+			shift := o.wavefrontBackFocusShift(cfg, surfaces, gc)
+			newThk := surfaces[idx].Thickness + shift
+			if newThk < 0.1 {
+				newThk = 0.1
 			}
+			surfaces[idx].Thickness = newThk
+		default: // "paraxial"
+			shift := o.paraxialBackFocusShift(cfg, surfaces, gc)
+			newThk := surfaces[idx].Thickness + shift
+			if newThk < 0.1 {
+				newThk = 0.1
+			}
+			surfaces[idx].Thickness = newThk
+		}
 		}
 	}
 }
@@ -2650,7 +2658,11 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 	} else {
 		shift = paraxialBackFocusShiftFor(surfaces, stopSurface, refWavelength, wavelengths, cfg.Wavelength, gc)
 	}
-	surfaces[idx].Thickness += shift
+	newThk := surfaces[idx].Thickness + shift
+	if newThk < 0.1 {
+		newThk = 0.1
+	}
+	surfaces[idx].Thickness = newThk
 }
 
 // restoreDiameters resets auto_aperture surfaces to their initial diameters
