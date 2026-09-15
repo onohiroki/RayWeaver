@@ -51,6 +51,14 @@ no `tanθ`, finite up to 90° incidence). `Sample.PupilX/PupilY` are the **relat
 offsets (consistent with `types.GridPoint` semantics); the absolute launch
 offsets are `Centre + PupilX/Y`.
 
+The `pupilZ` supplied to `GridCentre` is the per-field entrance-pupil Z: the
+dynamic-pupil crossing, the physical stop Z, or — when
+`chief.pupil_model.mode` is `virtual_entrance_pupil` — the fixed
+`axial_position` (with `ApertureRadius = diameter / 2`), for which the
+dynamic-pupil iteration and low-angle probe are skipped. The virtual pupil flows
+through `chief.DetermineChiefRaysGrid`, so `chief`, `paraxial`, `psf` and
+`wavefront` all see the same fixed plane.
+
 ## 3. Launch modes
 
 Two ways to launch a parallel angle-field bundle, selected by `OPLMode`; both

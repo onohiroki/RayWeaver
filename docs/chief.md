@@ -25,6 +25,12 @@ rayweave chief [flags] < system.yaml
 | `--ray-fan` | compute ray fan (transverse aberration) for each field (YZ + XZ planes) |
 | `--fan-plane yz\|xz` | compute only the YZ (meridional) or XZ (sagittal) fan (implies `--ray-fan`) |
 | `--fan-rotation DEG` | compute fans in planes rotated by DEG around Z (0 = XZ, 90 = YZ; implies `--ray-fan`; repeatable or space-separated: `--fan-rotation 0 45 90`) |
+| `--epz Z` | shorthand for a virtual entrance pupil at axial position Z (mm); activates `virtual_entrance_pupil` mode |
+| `--epd D` | shorthand for `--pupil-model-diameter` (mm): virtual entrance pupil diameter |
+| `--fnum N` | F-number; sets the virtual entrance pupil diameter to the paraxial EFL / N (mutually exclusive with `--epd`) |
+| `--pupil-model-axial-position Z` | virtual entrance pupil Z (mm; activates virtual pupil mode) |
+| `--pupil-model-diameter D` | virtual entrance pupil diameter (mm) |
+| `--pupil-model-mode MODE` | pupil model mode (default `virtual_entrance_pupil`) |
 | `--glass-dir DIR` | AGF glass catalog directory |
 
 ## Input YAML — `chief` section
@@ -45,6 +51,11 @@ chief:
   pass_through:                # optional: constrain chief ray to pass
     surface: 3                 #   through a specific surface coordinate
     coordinate: [0, 0, 0]      #   (default [0, 0, 0] = surface centre)
+  pupil_model:                 # optional: virtual entrance pupil
+    mode: virtual_entrance_pupil
+    axial_position: 12.5       # pupil Z (mm); chief ray of every field passes
+                               #   through (0,0,axial_position)
+    diameter: 12.5             # entrance pupil diameter (mm)
 ```
 
 `fields` may also be given as `field_angles: [0, 16, 24]`. Field direction is
@@ -59,6 +70,22 @@ spanned by the field vector and the optical axis.
 - **With `pass_through`** — the chief ray is the ray from the field that passes
   through the given coordinate on the given surface (the traditional
   "stop-centre" definition).
+
+### Virtual entrance pupil
+
+With `chief.pupil_model.mode: virtual_entrance_pupil`, the pupil is a fixed
+virtual plane instead of a physical stop or the dynamic pupil: every field's
+chief ray passes through `(0, 0, axial_position)`, the grid radius is
+`diameter / 2`, and the dynamic-pupil iteration and low-angle probe are
+skipped. Use it to specify a beam by entrance-pupil position and diameter (or
+F-number) during initial exploration and escape optimisation.
+
+The CLI shorthands are `--epz Z` (sets `axial_position` and activates virtual
+mode), `--epd D` (sets `diameter`), and `--fnum N` (sets `diameter = |EFL|/N`,
+with the EFL from a one-shot `paraxial` computation); `--epd` and `--fnum` are
+mutually exclusive, and virtual mode requires a positive diameter. The
+`paraxial` command honors the virtual pupil, so its entrance-pupil location,
+diameter and F-number reflect the fixed plane.
 
 Flags override the corresponding YAML values (`--wl` → `chief.reference_wavelength`,
 `--pass-through` → `pass_through.surface`); the effective values are written
@@ -102,6 +129,9 @@ rayweave chief --clear-aperture --clear-aperture-rays 4000 < lens.yaml \
 
 # Stop-centre chief rays
 rayweave chief --pass-through 5 < lens.yaml | rayweave trace
+
+# Virtual entrance pupil at Z=12.5 mm with F/2.5
+rayweave chief --epz 12.5 --fnum 2.5 < lens.yaml | rayweave paraxial
 
 # Ray fans in three planes
 rayweave chief --fan-rotation 0 45 90 < lens.yaml

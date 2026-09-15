@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"runtime"
 	"sort"
@@ -272,6 +273,17 @@ Options:
   --fan-rotation DEG   compute fan(s) in planes rotated by DEG around Z
                          (0 = XZ, 90 = YZ; implies --ray-fan; repeatable or
                          space-separated: --fan-rotation 0 45 90)
+  --epd D              shorthand for --pupil-model-diameter (mm): virtual
+                         entrance pupil diameter
+  --fnum N             F-number; sets the virtual entrance pupil diameter to
+                         the paraxial EFL / N (mutually exclusive with --epd)
+  --epz Z              shorthand for a virtual entrance pupil at axial position
+                         Z (mm); activates virtual_entrance_pupil mode
+  --pupil-model-axial-position Z  virtual entrance pupil Z (mm; activates
+                         virtual pupil mode)
+  --pupil-model-diameter D        virtual entrance pupil diameter (mm)
+  --pupil-model-mode MODE         pupil model mode (default
+                         virtual_entrance_pupil)
 	  --wl 0.00058756      reference wavelength (mm; overrides chief.reference_wavelength)
 
 Input YAML — chief section:
@@ -292,6 +304,14 @@ Input YAML — chief section:
     surface: 3                 #   through a specific surface coordinate
     coordinate: [0, 0, 0]      #   (default [0, 0, 0] = surface centre)
 
+  pupil_model:                 # optional: virtual entrance pupil
+    mode: virtual_entrance_pupil
+    axial_position: 12.5       # pupil Z (mm); chief ray of every field passes
+                               #   through (0,0,axial_position)
+    diameter: 12.5             # entrance pupil diameter (mm)
+                               # CLI shorthand: --epz Z + (--epd D | --fnum N)
+                               #   where --fnum sets diameter = EFL / N
+
 Output: augmented YAML with chief_rays[] section.
   Pipe into "rayweave trace" to trace each chief ray through the system.
 
@@ -302,6 +322,10 @@ Without pass_through, the chief ray passes through the spot centroid on
 With pass_through, the chief ray is defined as the ray from the field
   that passes through the given coordinate on the given surface
   (traditional "stop-centre" definition).
+
+With pupil_model, the pupil is a fixed virtual plane: every field's chief
+  ray passes through its centre, the dynamic-pupil iteration and the
+  low-angle probe are skipped, and the grid radius is diameter/2.
 
 See also: samples/us2645157.yaml
 `)
@@ -1587,6 +1611,9 @@ func runChief(data []byte) {
 	pupilAxialPos := fs.Float64("pupil-model-axial-position", 0, "virtual entrance pupil axial position Z (mm); activates virtual pupil mode")
 	pupilDiameter := fs.Float64("pupil-model-diameter", 0, "virtual entrance pupil diameter (mm); activates virtual pupil mode")
 	pupilMode := fs.String("pupil-model-mode", "virtual_entrance_pupil", "pupil model mode: virtual_entrance_pupil")
+	epd := fs.Float64("epd", 0, "shorthand for --pupil-model-diameter (mm)")
+	fnum := fs.Float64("fnum", 0, "F-number; sets pupil diameter = EFL / FNUM")
+	epz := fs.Float64("epz", 0, "shorthand for virtual entrance pupil at Z mm (activates virtual_entrance_pupil mode)")
 	fs.Parse(expandFanRotationArgs(os.Args[2:]))
 	wlSet := flagWasSet(fs, "wl")
 
@@ -1596,6 +1623,26 @@ func runChief(data []byte) {
 	}
 	if *fanPlane != "" && *fanPlane != "yz" && *fanPlane != "xz" {
 		errOut("Error: --fan-plane must be 'yz' or 'xz' (got %q)", *fanPlane)
+		os.Exit(1)
+	}
+
+	epdSet := flagWasSet(fs, "epd")
+	fnumSet := flagWasSet(fs, "fnum")
+	epzSet := flagWasSet(fs, "epz")
+	if epdSet && flagWasSet(fs, "pupil-model-diameter") {
+		errOut("Error: --epd and --pupil-model-diameter are mutually exclusive")
+		os.Exit(1)
+	}
+	if fnumSet && (epdSet || flagWasSet(fs, "pupil-model-diameter")) {
+		errOut("Error: --fnum and --epd/--pupil-model-diameter are mutually exclusive")
+		os.Exit(1)
+	}
+	if epzSet && flagWasSet(fs, "pupil-model-axial-position") {
+		errOut("Error: --epz and --pupil-model-axial-position are mutually exclusive")
+		os.Exit(1)
+	}
+	if fnumSet && *fnum <= 0 {
+		errOut("Error: --fnum must be positive (got %g)", *fnum)
 		os.Exit(1)
 	}
 
@@ -1614,20 +1661,6 @@ func runChief(data []byte) {
 			pt.Surface = *passThrough
 		}
 		input.Chief.StopSurface = *passThrough
-	}
-
-	// Virtual entrance pupil: CLI flags override YAML pupil_model settings.
-	if flagWasSet(fs, "pupil-model-axial-position") || flagWasSet(fs, "pupil-model-diameter") {
-		if input.Chief.PupilModel == nil {
-			input.Chief.PupilModel = &types.PupilModelConfig{}
-		}
-		input.Chief.PupilModel.Mode = *pupilMode
-		if flagWasSet(fs, "pupil-model-axial-position") {
-			input.Chief.PupilModel.AxialPosition = *pupilAxialPos
-		}
-		if flagWasSet(fs, "pupil-model-diameter") {
-			input.Chief.PupilModel.Diameter = *pupilDiameter
-		}
 	}
 
 	// Resolve field definitions
@@ -1670,6 +1703,44 @@ func runChief(data []byte) {
 	pol := types.NewCircularJones(true)
 	if input.Rays != nil {
 		pol = input.Rays.Polarization
+	}
+
+	// Virtual entrance pupil: CLI flags override YAML pupil_model settings.
+	// --epz sets the axial position and activates virtual mode; --epd sets the
+	// diameter; --fnum sets the diameter from the paraxial EFL (EPD = EFL/N).
+	if epdSet || fnumSet || epzSet ||
+		flagWasSet(fs, "pupil-model-axial-position") || flagWasSet(fs, "pupil-model-diameter") {
+		if input.Chief.PupilModel == nil {
+			input.Chief.PupilModel = &types.PupilModelConfig{}
+		}
+		if epzSet {
+			input.Chief.PupilModel.Mode = "virtual_entrance_pupil"
+			input.Chief.PupilModel.AxialPosition = *epz
+		} else {
+			input.Chief.PupilModel.Mode = *pupilMode
+			if flagWasSet(fs, "pupil-model-axial-position") {
+				input.Chief.PupilModel.AxialPosition = *pupilAxialPos
+			}
+		}
+		switch {
+		case epdSet:
+			input.Chief.PupilModel.Diameter = *epd
+		case fnumSet:
+			pResult := paraxial.Compute(selectedSys, wavelength, gc, 0, nil)
+			if pResult.FocalLength == 0 {
+				errOut("Error: cannot compute EFL for --fnum conversion")
+				os.Exit(1)
+			}
+			input.Chief.PupilModel.Diameter = math.Abs(pResult.FocalLength) / *fnum
+		case flagWasSet(fs, "pupil-model-diameter"):
+			input.Chief.PupilModel.Diameter = *pupilDiameter
+		}
+	}
+	if input.Chief.PupilModel != nil &&
+		input.Chief.PupilModel.Mode == "virtual_entrance_pupil" &&
+		input.Chief.PupilModel.Diameter <= 0 {
+		errOut("Error: virtual entrance pupil requires a positive diameter (use --epd, --fnum, or pupil_model.diameter)")
+		os.Exit(1)
 	}
 
 	fanCfg := resolveRayFanConfig(*rayFan, *fanPlane, fanRotation)

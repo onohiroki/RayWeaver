@@ -310,7 +310,7 @@ func computePupilZ(input types.Input, surfaces []types.Surface, gc *glass.Catalo
 			}
 		}
 	}
-	pupil := dynamicEntrancePupil(surfaces, chiefFieldDefs(input), input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), input.Chief.GridType, input.Chief.PassThrough)
+	pupil := dynamicEntrancePupil(surfaces, chiefFieldDefs(input), input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), input.Chief.GridType, input.Chief.PassThrough, input.Chief.PupilModel)
 	if pupil != nil {
 		return pupil.Center.Z
 	}
@@ -368,8 +368,9 @@ func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {
 // dynamicEntrancePupil runs the dynamic-pupil chief pass over surfaces with the
 // given fields and reference surface and returns the first field's entrance
 // pupil (nil when none is found). It derives the pupil for stop-free systems,
-// which have no aperture stop to trace from.
-func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, refSurface, numRays int, gc *glass.Catalog, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget) *types.Pupil {
+// which have no aperture stop to trace from. A non-nil pupilModel activates the
+// virtual-entrance-pupil path (fixed pupil Z and diameter).
+func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, refSurface, numRays int, gc *glass.Catalog, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget, pupilModel *types.PupilModelConfig) *types.Pupil {
 	if len(fields) == 0 || len(surfaces) == 0 || refSurface <= 0 {
 		return nil
 	}
@@ -377,7 +378,7 @@ func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, ref
 	results := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: surfaces},
 		fields, refSurface, numRays, gc, pol,
-		types.DefaultWavelength, false, gridType, passThrough, nil, nil, nil,
+		types.DefaultWavelength, false, gridType, passThrough, nil, nil, pupilModel,
 	)
 	for _, r := range results {
 		if r.EntrancePupil != nil {
@@ -389,7 +390,8 @@ func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, ref
 
 // dynamicPupilForInput returns the dynamic entrance pupil for the selected
 // system: the per-config fields when --config is set, else the top-level chief
-// fields. Nil when the chief section or a reference surface is absent.
+// fields. Nil when the chief section or a reference surface is absent. A
+// virtual_entrance_pupil model is honored (fixed pupil Z and diameter).
 func dynamicPupilForInput(input types.Input, configFlag *string, surfaces []types.Surface, gc *glass.Catalog) *types.Pupil {
 	if input.Chief == nil || input.Chief.ReferenceSurface <= 0 {
 		return nil
@@ -402,7 +404,7 @@ func dynamicPupilForInput(input types.Input, configFlag *string, surfaces []type
 			}
 		}
 	}
-	return dynamicEntrancePupil(surfaces, fields, input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), types.GridPolar, nil)
+	return dynamicEntrancePupil(surfaces, fields, input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), types.GridPolar, nil, input.Chief.PupilModel)
 }
 
 // writeYAML marshals a value to stdout, exiting on error.
@@ -467,10 +469,10 @@ func buildOptimizeVariables(opt *types.OptimizationConfig, gc *glass.Catalog) []
 				}
 			}
 			variables = append(variables, optimize.Variable{
-				Name:      v.Name,
-				Param:     "pupil_model_" + v.Target.Param,
-				Min:       min,
-				Max:       max,
+				Name:  v.Name,
+				Param: "pupil_model_" + v.Target.Param,
+				Min:   min,
+				Max:   max,
 			})
 		default:
 			continue
@@ -521,18 +523,18 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 				}
 
 				terms = append(terms, optimize.MeritTerm{
-					Kind:        kind,
-					FieldAngle:  fieldAngle,
-					FieldDir:    fieldDir,
-					FieldIndex:  mt.Field,
-					FieldWeight: fieldWeight,
-					Wavelength:  mt.Wavelength,
+					Kind:                 kind,
+					FieldAngle:           fieldAngle,
+					FieldDir:             fieldDir,
+					FieldIndex:           mt.Field,
+					FieldWeight:          fieldWeight,
+					Wavelength:           mt.Wavelength,
 					ComparisonWavelength: mt.ComparisonWavelength,
-					WavWeight:   wavWeight,
-					Weight:      mt.Weight,
-					Target:      mt.Target,
-					Fraction:    mt.Fraction,
-					SurfaceSet:  mt.SurfaceSet,
+					WavWeight:            wavWeight,
+					Weight:               mt.Weight,
+					Target:               mt.Target,
+					Fraction:             mt.Fraction,
+					SurfaceSet:           mt.SurfaceSet,
 				})
 			}
 		}

@@ -57,7 +57,7 @@ func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, 
 	// grid centring hits the new surface (the Optimizer's UpdatePupils only
 	// runs after the first merit evaluation).
 	if refSurface > 0 && len(fields) > 0 {
-		if p := dynamicEntrancePupil(withAsphere, chiefFieldDefsFromItems(fields), refSurface, numRays, gc, pol, gridType, passThrough); p != nil {
+		if p := dynamicEntrancePupil(withAsphere, chiefFieldDefsFromItems(fields), refSurface, numRays, gc, pol, gridType, passThrough, nil); p != nil {
 			pupilZ = p.Center.Z
 		}
 	}

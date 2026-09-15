@@ -44,6 +44,26 @@ field-set-independent estimate of the aperture Z. The probe is used only as a
 The probe is reported per result as `pupil_probe` / `pupil_probe_z`. It is not
 computed for finite-conjugate-only field sets or when `pass_through` is set.
 
+### Virtual entrance pupil
+
+A third mode overrides both of the above: when `chief.pupil_model.mode` is
+`virtual_entrance_pupil`, the pupil is a fixed virtual plane at
+`axial_position` (Z from the surface-0 vertex) with diameter `diameter`. The
+chief ray of **every** field is forced through its centre `(0, 0,
+axial_position)`, the grid radius is `diameter / 2`, and the dynamic-pupil
+iteration, the low-angle probe and the stop-based sizing are all skipped. This
+is the primary beam-specification origin for initial exploration and escape
+optimisation (`samples/escape-6elements-init.yaml`); the optimizer can vary
+`axial_position`/`diameter` as `pupil_model` variables.
+
+The `chief` CLI exposes shorthands for this section: `--epz Z` (sets
+`axial_position` and activates virtual mode), `--epd D` (sets `diameter`) and
+`--fnum N` (sets `diameter = |EFL| / N`, with the EFL from a one-shot
+`paraxial.Compute`). `--fnum` and `--epd` are mutually exclusive. The
+`paraxial` command honors the virtual pupil too: it derives the entrance pupil
+from a virtual-mode chief pass, so `entrance_pupil_location`,
+`entrance_pupil_diameter` and the F-number all reflect the virtual plane.
+
 ## 2. Field definitions
 
 A field is one of:
