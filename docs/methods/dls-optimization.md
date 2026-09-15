@@ -206,6 +206,11 @@ In multi-config mode a **shared variable** binds one normalized component to
 several surface parameters across configs via `scale`/`offset` bindings
 (`param = scale·x + offset`), letting e.g. a group shift move the same group in
 every zoom position. A **local variable** targets one surface parameter of one
-config. All configs' merits are summed (weighted by config `weight`) into a
-single objective, and the Jacobian is computed with respect to the combined
-shared+local variable vector.
+config. A **variable link** defines a dependent variable whose value is computed
+from another variable (shared, local, or another link) via
+`value = scale·source + offset`. Links do not occupy the optimisation vector;
+their values are derived during `applyVariables` after all independent variables
+are applied. Links are processed in definition order so a link can reference
+another link that appears earlier. All configs' merits are summed (weighted by
+config `weight`) into a single objective, and the Jacobian is computed with
+respect to the combined shared+local variable vector.

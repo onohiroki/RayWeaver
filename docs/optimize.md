@@ -132,8 +132,8 @@ multiplier 1.50).
 
 ## Input — multi-config mode
 
-Multi-config mode is auto-detected when `shared_variables`, `local_variables`
-or `configs[].merit` exist.
+Multi-config mode is auto-detected when `shared_variables`, `local_variables`,
+`variable_links`, or `configs[].merit` exist.
 
 ```yaml
 optimization:
@@ -158,6 +158,29 @@ optimization:
         param: thickness
       min: 0.1
       max: 50.0
+      active: true
+  variable_links:
+    # Concave/convex symmetry: surface 5 curvature = -surface 1
+    - name: s5_curvature
+      target:
+        type: surface
+        id: 5
+        param: curvature
+        config: wide
+      source: group2_shift
+      relation:
+        scale: -1.0
+      active: true
+    # Cross-config coupling: tele surface 3 = wide surface 3 * 0.5
+    - name: tele_group2
+      target:
+        type: surface
+        id: 3
+        param: thickness
+        config: tele
+      source: group2_shift
+      relation:
+        scale: 0.5
       active: true
 
 configs:

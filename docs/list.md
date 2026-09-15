@@ -72,7 +72,7 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `fields` | Field-of-view definitions from `chief.fields[]` (or `configs[].fields[]` as fallback). Shows each field's type (`angle`, `image_height`, `height`) with input values from the YAML and computed values (actual angle, image height) from the real-ray chief trace. When input and computed values match, only one is shown; when they differ (e.g. `image_height` mode where the angle is solved iteratively), both are shown as `input (computed)`. |
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
 | `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, comparison_wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
-| `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables, `merit_schedule`, and the sub-configs (`escape`, `glass_hull`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
+| `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables/variable links, `merit_schedule`, and the sub-configs (`escape`, `glass_hull`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
 | `escape` | Escape-function global optimisation results (requires `escape` output). Shows escape parameters, discovered local minima, per-minimum element powers, and the best solution. |
 
 Default (no target arguments): `surfaces glasses paraxial fields`. The
@@ -524,6 +524,7 @@ rayweave optimize < lens.yaml | rayweave list optimization
 | Variables | `optimization.variables[]` | When per-config variables exist |
 | Shared Variables | `optimization.shared_variables[]` | When shared variables exist |
 | Local Variables | `optimization.local_variables[]` | When local variables exist |
+| Variable Links | `optimization.variable_links[]` | When variable links exist |
 | Merit Schedule | `optimization.merit_schedule` | When a schedule is configured |
 | Escape / Glass Hull / Degenerate / Power Solve / Region Active / Adaptive Damping | sub-configs | Each only when present |
 | Optimization Result | `output.opt_results` | Only when piped from optimize |
@@ -573,6 +574,12 @@ shared_variables:
       active: true
       bindings:
         - {config: config0, id: 1, param: curvature}
+variable_links:
+    - name: s5_curvature
+      target: {type: surface, id: 5, param: curvature, config: config0}
+      source: s1_curvature
+      relation: {scale: -1.0}
+      active: true
 merit_schedule:
     metric: merit_ratio
     curve: step
