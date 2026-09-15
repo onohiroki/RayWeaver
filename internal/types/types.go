@@ -637,6 +637,25 @@ type LocalVariableDef struct {
 	Active bool           `yaml:"active"`
 }
 
+// VariableLinkRelation defines how a linked variable is derived from its
+// source: value = scale * source + offset. Defaults: scale=1, offset=0.
+type VariableLinkRelation struct {
+	Scale  float64 `yaml:"scale,omitempty"`
+	Offset float64 `yaml:"offset,omitempty"`
+}
+
+// VariableLink defines a dependent variable whose value is computed from
+// another variable (shared, local, or another link). The link does not
+// contribute to the optimisation vector; its value is derived during
+// applyVariables.
+type VariableLink struct {
+	Name     string               `yaml:"name"`
+	Target   VariableTarget       `yaml:"target"`
+	Source   string               `yaml:"source"`
+	Relation VariableLinkRelation `yaml:"relation,omitempty"`
+	Active   bool                 `yaml:"active"`
+}
+
 type ConstraintKind string
 
 const (
@@ -772,6 +791,7 @@ type OptimizationConfig struct {
 	Variables        []OptimizationVariable `yaml:"variables,omitempty"`
 	SharedVariables  []SharedVariable       `yaml:"shared_variables,omitempty"`
 	LocalVariables   []LocalVariableDef     `yaml:"local_variables,omitempty"`
+	VariableLinks    []VariableLink         `yaml:"variable_links,omitempty"`
 	Constraints      []ConstraintOperand    `yaml:"constraints,omitempty"`
 	GlassHull        *GlassHullConfig       `yaml:"glass_hull,omitempty"`
 	GlassAttraction  *GlassAttractionConfig `yaml:"glass_attraction,omitempty"`

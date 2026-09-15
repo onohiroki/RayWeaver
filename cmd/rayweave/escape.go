@@ -680,7 +680,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	factory := func() dls.Model {
 		configsCopy := make([]optimize.ConfigInput, len(configs))
 		copy(configsCopy, configs)
-		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, dlsLogger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
+		opt := optimize.NewMultiOptimizer(configsCopy, sharedVars, localVars, input.Optimization.VariableLinks, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax, jacobianWorkers, dlsLogger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
 		opt.SetApertureMarginMM(apertureMarginMM)
 		applyDegenerate(opt, input.Optimization.Degenerate)
 		if input.Optimization.BackFocusSolve != nil && input.Optimization.BackFocusSolve.Enabled {
@@ -1070,6 +1070,61 @@ func applyEscapeMulti(configs []types.Config, opt *types.OptimizationConfig, x [
 		optimize.SetSurfaceParam(&surfaces[idx], lv.Target.Param, val)
 	}
 
+	// Apply linked variables: dependent variables computed from independent
+	// variables via scale*source+offset.
+	varNameIndex := make(map[string]int)
+	varIdx = 0
+	for _, sv := range opt.SharedVariables {
+		if !sv.Active {
+			continue
+		}
+		varNameIndex[sv.Name] = varIdx
+		varIdx++
+	}
+	for _, lv := range opt.LocalVariables {
+		if !lv.Active {
+			continue
+		}
+		varNameIndex[lv.Name] = varIdx
+		varIdx++
+	}
+	linkValues := make(map[string]float64, len(opt.VariableLinks))
+	for _, lk := range opt.VariableLinks {
+		if !lk.Active {
+			continue
+		}
+		sourceIdx, ok := varNameIndex[lk.Source]
+		if !ok {
+			continue
+		}
+		var sourceVal float64
+		if sourceIdx < len(x) {
+			sourceVal = x[sourceIdx]
+		} else {
+			for name, idx := range varNameIndex {
+				if idx == sourceIdx {
+					sourceVal = linkValues[name]
+					break
+				}
+			}
+		}
+		scale := lk.Relation.Scale
+		offset := lk.Relation.Offset
+		val := scale*sourceVal + offset
+		linkValues[lk.Name] = val
+
+		surfaces, ok := result[lk.Target.Config]
+		if !ok {
+			continue
+		}
+		idx := dls.SurfaceIndex(surfaces, lk.Target.ID)
+		if idx < 0 {
+			continue
+		}
+		optimize.SetSurfaceParam(&surfaces[idx], lk.Target.Param, val)
+		varNameIndex[lk.Name] = len(x) + len(linkValues) - 1
+	}
+
 	for _, cfg := range configs {
 		if s, ok := result[cfg.ID]; ok {
 			surface.Precompute(s)
@@ -1079,9 +1134,11 @@ func applyEscapeMulti(configs []types.Config, opt *types.OptimizationConfig, x [
 }
 
 // buildMultiVarStates lists variable values at a point for multi-config mode,
-// in the same shared-then-local order as the variable vector.
+// in the same shared-then-local order as the variable vector, followed by
+// linked variable values (computed from independent variables).
 func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.EscapeVarState {
 	var states []types.EscapeVarState
+	varNameIndex := make(map[string]int)
 	var varIdx int
 	for _, sv := range opt.SharedVariables {
 		if !sv.Active {
@@ -1096,6 +1153,7 @@ func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.Esc
 			Param: param,
 			After: x[varIdx],
 		})
+		varNameIndex[sv.Name] = varIdx
 		varIdx++
 	}
 	for _, lv := range opt.LocalVariables {
@@ -1109,6 +1167,40 @@ func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.Esc
 			Param:  lv.Target.Param,
 			After:  x[varIdx],
 		})
+		varNameIndex[lv.Name] = varIdx
+		varIdx++
+	}
+	// Append linked variable values (computed, not in the x vector).
+	linkValues := make(map[string]float64)
+	for _, lk := range opt.VariableLinks {
+		if !lk.Active {
+			continue
+		}
+		sourceIdx, ok := varNameIndex[lk.Source]
+		if !ok {
+			continue
+		}
+		var sourceVal float64
+		if sourceIdx < len(x) {
+			sourceVal = x[sourceIdx]
+		} else {
+			for name, idx := range varNameIndex {
+				if idx == sourceIdx {
+					sourceVal = linkValues[name]
+					break
+				}
+			}
+		}
+		val := lk.Relation.Scale*sourceVal + lk.Relation.Offset
+		linkValues[lk.Name] = val
+		states = append(states, types.EscapeVarState{
+			Name:   lk.Name,
+			Config: lk.Target.Config,
+			Surf:   lk.Target.ID,
+			Param:  lk.Target.Param,
+			After:  val,
+		})
+		varNameIndex[lk.Name] = varIdx
 		varIdx++
 	}
 	return states

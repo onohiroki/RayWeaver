@@ -117,6 +117,19 @@ type Variable struct {
 	Config    string
 }
 
+// LinkedVariable is a dependent variable whose value is computed from
+// another variable during applyVariables. It does not occupy the
+// optimisation vector.
+type LinkedVariable struct {
+	Name        string
+	SurfaceID   int
+	Param       string
+	Config      string
+	SourceIndex int // index into the combined independent+linked variable lookup
+	Scale       float64
+	Offset      float64
+}
+
 // MeritTerm is a pre-resolved single-config merit term (weights and field
 // angle already matched against the fields/wavelengths).
 type MeritTerm struct {
@@ -1246,6 +1259,15 @@ type Optimizer struct {
 	// or "wavefront"), updated by updateBackFocusType at the top of each
 	// DLS iteration. Defaults to backFocusSolve.Type.
 	currentBackFocusType string
+	// linkedVariables holds dependent variables whose values are computed
+	// from other variables during applyVariables. They do not occupy the
+	// optimisation vector.
+	linkedVariables []LinkedVariable
+	// varNameIndex maps variable names (shared, local, and linked) to
+	// their position in the combined lookup: independent variables use
+	// their index in the optimisation vector; linked variables use
+	// len(variables) + their index in linkedVariables.
+	varNameIndex map[string]int
 }
 
 // regionActiveState is the per-config mutable state for the Region Active
@@ -1643,7 +1665,7 @@ terms = append(terms, meritTerm{
 		}
 	}
 	opt := newOptimizer(
-		[]config{c}, variables, cfg.GlassCatalog,
+		[]config{c}, variables, nil, nil, cfg.GlassCatalog,
 		cfg.MaxIter, cfg.Mu, cfg.Tol, cfg.Epsilon, cfg.ApertureMargin, cfg.NumRays,
 		cfg.MuConMax, cfg.Workers, cfg.Logger, cfg.Hull, cfg.HullMargin, cfg.HullWeight,
 		cfg.CentralDiff, cfg.BFGS, cfg.AdaptiveDamping, cfg.RegionActive,
@@ -1658,9 +1680,10 @@ terms = append(terms, meritTerm{
 }
 
 // NewMultiOptimizer builds a unified Optimizer over one or more configs,
-// with shared variables (one x driving many bindings) and local variables
-// (one x driving a single surface of one config).
-func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs bool, adaptiveDamping *types.AdaptiveDampingConfig, raCfg *types.RegionActiveConfig) *Optimizer {
+// with shared variables (one x driving many bindings), local variables
+// (one x driving a single surface of one config), and variable links
+// (dependent variables computed from other variables).
+func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, variableLinks []types.VariableLink, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs bool, adaptiveDamping *types.AdaptiveDampingConfig, raCfg *types.RegionActiveConfig) *Optimizer {
 	internal := make([]config, len(configs))
 	for i, ci := range configs {
 		c := config{
@@ -1737,8 +1760,51 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 		})
 	}
 
+	// Build name→index lookup for independent variables.
+	varNameIndex := make(map[string]int, len(variables))
+	for i, v := range variables {
+		if v.Name != "" {
+			varNameIndex[v.Name] = i
+		}
+	}
+
+	// Process variable links: resolve source references and build
+	// linkedVariables. Links are processed in order so that a link can
+	// reference another link that appears earlier in the list.
+	var linkedVars []LinkedVariable
+	for li, lk := range variableLinks {
+		if !lk.Active {
+			continue
+		}
+		sourceIdx, ok := varNameIndex[lk.Source]
+		if !ok {
+			// Source not found — skip this link (will be caught at
+			// applyVariables time with a zero value).
+			sourceIdx = -1
+		}
+		param := lk.Target.Param
+		if lk.Target.Type == "pupil_model" {
+			param = "pupil_model_" + param
+		}
+		scale := lk.Relation.Scale
+		offset := lk.Relation.Offset
+		linkedVars = append(linkedVars, LinkedVariable{
+			Name:        lk.Name,
+			SurfaceID:   lk.Target.ID,
+			Param:       param,
+			Config:      lk.Target.Config,
+			SourceIndex: sourceIdx,
+			Scale:       scale,
+			Offset:      offset,
+		})
+		// Register in varNameIndex so subsequent links can reference this one.
+		if lk.Name != "" {
+			varNameIndex[lk.Name] = len(variables) + li
+		}
+	}
+
 	return newOptimizer(
-		internal, variables, gc,
+		internal, variables, linkedVars, varNameIndex, gc,
 		maxIter, mu, tol, epsilon, apertureMargin, numRays, muConMax,
 		workers, logger, hull, hullMargin, hullWeight,
 		centralDiff, bfgs, adaptiveDamping, raCfg,
@@ -1790,7 +1856,7 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 	return mt
 }
 
-func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs bool, adaptiveDamping *types.AdaptiveDampingConfig, raCfg *types.RegionActiveConfig) *Optimizer {
+func newOptimizer(configs []config, variables []Variable, linkedVars []LinkedVariable, varNameIndex map[string]int, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs bool, adaptiveDamping *types.AdaptiveDampingConfig, raCfg *types.RegionActiveConfig) *Optimizer {
 	if maxIter <= 0 {
 		maxIter = 100
 	}
@@ -1919,6 +1985,8 @@ func newOptimizer(configs []config, variables []Variable, gc *glass.Catalog, max
 		spotDegenerate:      0.1,
 		opdDegenerate:       0.01,
 		wavefrontDegenerate: 0.001,
+		linkedVariables:     linkedVars,
+		varNameIndex:        varNameIndex,
 	}
 
 	// Build the flattened region-active constraint states (all configs).
@@ -2305,6 +2373,105 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 				case "vd":
 					g.VD = val
 				}
+				needTempGC = true
+			}
+		}
+	}
+
+	// Apply linked variables: dependent variables computed from independent
+	// (or other linked) variables via scale*source+offset. Linked variables
+	// are processed in definition order so that a link can reference another
+	// link that appears earlier.
+	linkValues := make(map[string]float64, len(o.linkedVariables))
+	for _, lk := range o.linkedVariables {
+		if lk.SourceIndex < 0 {
+			continue
+		}
+		var sourceVal float64
+		if lk.SourceIndex < len(x) {
+			sourceVal = x[lk.SourceIndex]
+		} else {
+			// Source is another linked variable — look up its computed value.
+			// Find the source name from varNameIndex.
+			for name, idx := range o.varNameIndex {
+				if idx == lk.SourceIndex {
+					sourceVal = linkValues[name]
+					break
+				}
+			}
+		}
+		val := lk.Scale*sourceVal + lk.Offset
+		linkValues[lk.Name] = val
+
+		// Pupil-model linked variables.
+		switch lk.Param {
+		case "pupil_model_axial_position":
+			if p, ok := pupils[lk.Config]; ok {
+				p.z = val
+				pupils[lk.Config] = p
+			}
+			continue
+		case "pupil_model_diameter":
+			if p, ok := pupils[lk.Config]; ok {
+				if val > 0 {
+					p.dia = val
+				}
+				pupils[lk.Config] = p
+			}
+			continue
+		}
+
+		surfaces, ok := configSurfaces[lk.Config]
+		if !ok {
+			continue
+		}
+		idx := surfaceIndex(surfaces, lk.SurfaceID)
+		if idx < 0 {
+			continue
+		}
+
+		if ai, ok := AsphereCoefIndex(lk.Param); ok {
+			for len(surfaces[idx].Coefficients) <= ai {
+				surfaces[idx].Coefficients = append(surfaces[idx].Coefficients, 0)
+			}
+			surfaces[idx].Coefficients[ai] = val
+			continue
+		}
+		switch lk.Param {
+		case "curvature":
+			surfaces[idx].Curvature = val
+		case "conic":
+			surfaces[idx].Conic = val
+		case "thickness":
+			surfaces[idx].Thickness = val
+		case "diameter":
+			surfaces[idx].Diameter = val
+		case "radius":
+			if val == 0 {
+				surfaces[idx].Curvature = 0
+			} else {
+				surfaces[idx].Curvature = 1.0 / val
+			}
+		case "nd":
+			m := &surfaces[idx].Material
+			if m.HasModel() && !m.HasKey() {
+				m.ND = val
+				continue
+			}
+			key := resolveGlassKeyFromSurface(surfaces, lk.SurfaceID)
+			if g, ok := localOverrides[key]; ok {
+				g.ND = val
+				needTempGC = true
+			}
+		case "vd":
+			m := &surfaces[idx].Material
+			if m.HasModel() && !m.HasKey() {
+				m.VD = val
+				continue
+			}
+			key := resolveGlassKeyFromSurface(surfaces, lk.SurfaceID)
+			if g, ok := localOverrides[key]; ok {
+				g.VD = val
 				needTempGC = true
 			}
 		}

@@ -40,7 +40,7 @@ func TestMultiOptimizerSeidelDistortionKind(t *testing.T) {
 		},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	x := []float64{}
 	merit := opt.EvaluateMerit(x)
 
@@ -89,7 +89,7 @@ func TestMultiOptimizerApplySharedVariables(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 
 	x := []float64{0.05}
 	configSurfaces, _, _ := opt.applyVariables(x)
@@ -150,7 +150,7 @@ func TestMultiOptimizerApplyLocalVariables(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := NewMultiOptimizer(configs, nil, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, localVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	x := []float64{75.0}
 	configSurfaces, _, _ := opt.applyVariables(x)
 
@@ -192,7 +192,7 @@ func TestMultiOptimizerSizeAutoAperturesGeometric(t *testing.T) {
 		},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, nil, gc, 10, 1.0, 1e-6, 1e-6, 1.0, 64, 100.0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, nil, nil, gc, 10, 1.0, 1e-6, 1e-6, 1.0, 64, 100.0, 0, nil, nil, 0, 0, false, false, nil, nil)
 
 	// True geometric beam extent at surface 2 for the extreme (16deg) field,
 	// measured without aperture clipping.
@@ -253,7 +253,7 @@ func TestMultiOptimizerEvaluateMerit(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	x := []float64{0.0}
 	merit := opt.EvaluateMerit(x)
 
@@ -304,7 +304,7 @@ func TestMultiOptimizerGetInitialState(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := NewMultiOptimizer(configs, sharedVars, localVars, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, sharedVars, localVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	x := opt.getInitialState()
 
 	if len(x) != 2 {
@@ -348,7 +348,7 @@ func TestMultiOptimizerBuildVariableStates(t *testing.T) {
 
 	gc := glass.NewCatalog()
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	x := []float64{0.03}
 	states := opt.buildVariableStates(x)
 
@@ -395,7 +395,7 @@ func TestMultiOptimizerNoGlassCatalog(t *testing.T) {
 		},
 	}
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	x := []float64{0.0}
 	merit := opt.EvaluateMerit(x)
 
@@ -436,7 +436,7 @@ func TestMultiOptimizerResultHasExpectedFields(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := NewMultiOptimizer(configs, sharedVars, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, sharedVars, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	result := opt.Optimize()
 
 	if result.Status != "max_iterations" {
@@ -506,7 +506,7 @@ func TestMultiOptimizerSatisfiableEqualityConstraints(t *testing.T) {
 		{Name: "s7_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 7, Param: "curvature"}, Min: -0.2, Max: -0.01, Active: true},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, localVars, nil, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
 	result := opt.Optimize()
 
 	if result.AfterMerit >= result.BeforeMerit {
@@ -543,7 +543,7 @@ func TestMultiOptimizerUnsatisfiableConstraintWarns(t *testing.T) {
 		{Name: "s7_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 7, Param: "curvature"}, Min: -0.2, Max: -0.01, Active: true},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, localVars, nil, tripletGC(), 80, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
 	result := opt.Optimize()
 
 	if result.Status == "converged" {
@@ -582,7 +582,7 @@ func TestMultiOptimizerApertureMarginClamp(t *testing.T) {
 	gc := glass.NewCatalog()
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 
-	opt := NewMultiOptimizer(configs, nil, nil, gc, 10, 0.01, 1e-6, 1e-6, 0.8, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, nil, nil, gc, 10, 0.01, 1e-6, 1e-6, 0.8, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
 	if got := opt.Options().ApertureMargin; got != 1.0 {
 		t.Errorf("ApertureMargin = %v, want 1.0 (clamped)", got)
 	}
@@ -613,7 +613,7 @@ func TestMultiOptimizerAsphereVariables(t *testing.T) {
 		{Name: "s1_coef1", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "coefficient_1"}, Min: -1e-3, Max: 1e-3, Active: true},
 	}
 
-	opt := NewMultiOptimizer(configs, nil, localVars, gc, 5, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, localVars, nil, gc, 5, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
 
 	// Initial state must read the surface values (a4 = 1e-5, coefficient_1 = 0).
 	x := opt.getInitialState()
@@ -644,7 +644,7 @@ func TestMultiOptimizerMeritBreakdown(t *testing.T) {
 		{Name: "s1_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature"}, Min: 0.05, Max: 0.2, Active: true},
 		{Name: "s3_c", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "curvature"}, Min: -0.15, Max: -0.01, Active: true},
 	}
-	opt := NewMultiOptimizer(configs, nil, localVars, tripletGC(), 10, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, localVars, nil, tripletGC(), 10, 0.01, 1e-6, 1e-6, 1.0, 64, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
 
 	x := opt.getInitialState()
 	bd := opt.MeritBreakdown(x)
@@ -686,6 +686,197 @@ func TestTraceFieldGridParallelDeterminism(t *testing.T) {
 	for id, e := range ext1 {
 		if ext4[id] != e {
 			t.Errorf("extent[%d] differs: worker=1 %.15g, worker=4 %.15g", id, e, ext4[id])
+		}
+	}
+}
+
+func TestMultiOptimizerVariableLinks(t *testing.T) {
+	gc := glass.NewCatalog()
+
+	surfaces := singletSurfaces()
+	surface.Precompute(surfaces)
+
+	sharedVars := []types.SharedVariable{
+		{
+			Name:   "s1_c",
+			Min:    -0.1,
+			Max:    0.1,
+			Active: true,
+			Bindings: []types.SharedVariableBinding{
+				{Config: "cfg1", ID: 1, Param: "curvature", Scale: 1.0, Offset: 0.0},
+			},
+		},
+	}
+
+	localVars := []types.LocalVariableDef{
+		{
+			Name:   "cfg2_s1",
+			Config: "cfg2",
+			Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature"},
+			Min:    -0.1,
+			Max:    0.1,
+			Active: true,
+		},
+	}
+
+	variableLinks := []types.VariableLink{
+		// Link 1: cfg1 surface 5 = -s1_c (concave/convex flip)
+		{
+			Name:   "s5_c_cfg1",
+			Target: types.VariableTarget{Type: "surface", ID: 5, Param: "curvature", Config: "cfg1"},
+			Source: "s1_c",
+			Relation: types.VariableLinkRelation{Scale: -1.0},
+			Active: true,
+		},
+		// Link 2: cfg2 surface 5 = cfg2_s1 + 0.01 (offset)
+		{
+			Name:   "s5_c_cfg2",
+			Target: types.VariableTarget{Type: "surface", ID: 5, Param: "curvature", Config: "cfg2"},
+			Source: "cfg2_s1",
+			Relation: types.VariableLinkRelation{Scale: 1.0, Offset: 0.01},
+			Active: true,
+		},
+		// Link 3: cfg2 surface 3 = s5_c_cfg2 * 2 (chained link)
+		{
+			Name:   "s3_c_cfg2",
+			Target: types.VariableTarget{Type: "surface", ID: 3, Param: "curvature", Config: "cfg2"},
+			Source: "s5_c_cfg2",
+			Relation: types.VariableLinkRelation{Scale: 2.0},
+			Active: true,
+		},
+	}
+
+	configs := []ConfigInput{
+		{
+			ID:          "cfg1",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+			MeritTerms: []types.MeritTerm{
+				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
+			},
+		},
+		{
+			ID:          "cfg2",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+			MeritTerms: []types.MeritTerm{
+				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
+			},
+		},
+	}
+
+	opt := NewMultiOptimizer(configs, sharedVars, localVars, variableLinks, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+
+	// x[0] = s1_c = 0.05, x[1] = cfg2_s1 = 0.03
+	x := []float64{0.05, 0.03}
+	configSurfaces, _, _ := opt.applyVariables(x)
+
+	// cfg1: s1_c=0.05, s5 = -0.05 (scale=-1)
+	cfg1Surf := configSurfaces["cfg1"]
+	for _, s := range cfg1Surf {
+		switch s.ID {
+		case 1:
+			if math.Abs(s.Curvature-0.05) > 1e-10 {
+				t.Errorf("cfg1 surface 1 curvature = %v, want 0.05", s.Curvature)
+			}
+		case 5:
+			if math.Abs(s.Curvature-(-0.05)) > 1e-10 {
+				t.Errorf("cfg1 surface 5 curvature = %v, want -0.05", s.Curvature)
+			}
+		}
+	}
+
+	// cfg2: s1=0.03, s5=0.03+0.01=0.04, s3=0.04*2=0.08
+	cfg2Surf := configSurfaces["cfg2"]
+	for _, s := range cfg2Surf {
+		switch s.ID {
+		case 1:
+			if math.Abs(s.Curvature-0.03) > 1e-10 {
+				t.Errorf("cfg2 surface 1 curvature = %v, want 0.03", s.Curvature)
+			}
+		case 3:
+			if math.Abs(s.Curvature-0.08) > 1e-10 {
+				t.Errorf("cfg2 surface 3 curvature = %v, want 0.08", s.Curvature)
+			}
+		case 5:
+			if math.Abs(s.Curvature-0.04) > 1e-10 {
+				t.Errorf("cfg2 surface 5 curvature = %v, want 0.04", s.Curvature)
+			}
+		}
+	}
+}
+
+func TestMultiOptimizerVariableLinksCrossConfig(t *testing.T) {
+	gc := glass.NewCatalog()
+
+	surfaces := singletSurfaces()
+	surface.Precompute(surfaces)
+
+	localVars := []types.LocalVariableDef{
+		{
+			Name:   "cfg1_s1",
+			Config: "cfg1",
+			Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature"},
+			Min:    -0.1,
+			Max:    0.1,
+			Active: true,
+		},
+	}
+
+	// Cross-config link: cfg2 surface 1 = cfg1 surface 1 * 0.5
+	variableLinks := []types.VariableLink{
+		{
+			Name:   "cfg2_s1",
+			Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature", Config: "cfg2"},
+			Source: "cfg1_s1",
+			Relation: types.VariableLinkRelation{Scale: 0.5},
+			Active: true,
+		},
+	}
+
+	configs := []ConfigInput{
+		{
+			ID:          "cfg1",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+			MeritTerms: []types.MeritTerm{
+				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
+			},
+		},
+		{
+			ID:          "cfg2",
+			Weight:      1.0,
+			Surfaces:    singletSurfaces(),
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
+			MeritTerms: []types.MeritTerm{
+				{Field: 0, Wavelength: 0.00058756, Weight: 1.0},
+			},
+		},
+	}
+
+	opt := NewMultiOptimizer(configs, nil, localVars, variableLinks, gc, 1, 0.01, 1e-6, 1e-6, 2.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+
+	x := []float64{0.06} // cfg1_s1 = 0.06
+	configSurfaces, _, _ := opt.applyVariables(x)
+
+	cfg1Surf := configSurfaces["cfg1"]
+	for _, s := range cfg1Surf {
+		if s.ID == 1 && math.Abs(s.Curvature-0.06) > 1e-10 {
+			t.Errorf("cfg1 surface 1 curvature = %v, want 0.06", s.Curvature)
+		}
+	}
+
+	cfg2Surf := configSurfaces["cfg2"]
+	for _, s := range cfg2Surf {
+		if s.ID == 1 && math.Abs(s.Curvature-0.03) > 1e-10 {
+			t.Errorf("cfg2 surface 1 curvature = %v, want 0.03 (0.06*0.5)", s.Curvature)
 		}
 	}
 }

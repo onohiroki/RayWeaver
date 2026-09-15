@@ -327,7 +327,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	var hull *glass.ConvexHull
 	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull)
 
-	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
+	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, input.Optimization.VariableLinks, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
 	opt.SetApertureMarginMM(apertureMarginMM)
 	if input.Optimization.PowerSolve != nil && input.Optimization.PowerSolve.Enabled {
 		opt.SetPowerSolve(input.Optimization.PowerSolve.Surfaces)
@@ -553,7 +553,7 @@ func runOptimizeSnap(data []byte, glassDir string) {
 
 	var hull *glass.ConvexHull
 	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull)
-	opt := optimize.NewMultiOptimizer(run.configs, run.sharedVars, run.localVars, run.gc,
+	opt := optimize.NewMultiOptimizer(run.configs, run.sharedVars, run.localVars, input.Optimization.VariableLinks, run.gc,
 		run.maxIter, run.mu, run.tol, run.epsilon, run.apertureMargin, run.numRays,
 		input.Optimization.MuConMax, input.Optimization.JacobianWorkers, nil,
 		hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS,

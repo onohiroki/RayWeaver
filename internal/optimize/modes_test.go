@@ -178,7 +178,7 @@ func TestGlassRoleDLSRecoversPositiveFlint(t *testing.T) {
 		{Name: "s3_vd", Config: "cfg1", Target: types.VariableTarget{Type: "surface", ID: 3, Param: "vd"}, Min: 20.0, Max: 80.0, Active: true},
 	}
 
-	opt := NewMultiOptimizer([]ConfigInput{cfg}, nil, localVars, gc, 100, 0.01, 1e-6, 1e-4, 1.0, 16, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer([]ConfigInput{cfg}, nil, localVars, nil, gc, 100, 0.01, 1e-6, 1e-4, 1.0, 16, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	res := opt.Optimize()
 
 	x := make([]float64, len(res.Variables))
@@ -266,7 +266,7 @@ func modesScheduleConfig(curve string) ([]ConfigInput, *types.MeritScheduleConfi
 // identity Σ residual² == merit at intermediate blend points.
 func TestMeritScheduleBlendLeastSquares(t *testing.T) {
 	configs, schedule := modesScheduleConfig("linear")
-	opt := NewMultiOptimizer(configs, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	opt.SetMeritSchedule(schedule)
 
 	x := []float64{}
@@ -300,7 +300,7 @@ func TestMeritScheduleBlendLeastSquares(t *testing.T) {
 // mode switch: the blend equals exactly one mode's merit on each side.
 func TestMeritScheduleStepIsHardSwitch(t *testing.T) {
 	configs, schedule := modesScheduleConfig("step")
-	opt := NewMultiOptimizer(configs, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	opt.SetMeritSchedule(schedule)
 
 	x := []float64{}
@@ -318,7 +318,7 @@ func TestMeritScheduleStepIsHardSwitch(t *testing.T) {
 			Wavelengths: src.Wavelengths,
 			MeritTerms:  refs[mode],
 		}
-		return NewMultiOptimizer([]ConfigInput{ref}, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+		return NewMultiOptimizer([]ConfigInput{ref}, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	}
 
 	opt.UpdateMeritWeights(x, 10) // t=0.1 → color_first
@@ -388,7 +388,7 @@ func TestMeritScheduleDLSRecoversGlassRoles(t *testing.T) {
 		},
 	}
 
-	opt := NewMultiOptimizer([]ConfigInput{cfg}, nil, localVars, gc, 120, 0.01, 1e-6, 1e-4, 1.0, 32, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer([]ConfigInput{cfg}, nil, localVars, nil, gc, 120, 0.01, 1e-6, 1e-4, 1.0, 32, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
 	opt.SetMeritSchedule(schedule)
 	res := opt.Optimize()
 
@@ -467,7 +467,7 @@ func spotDiffractionConfig(agg string) ([]ConfigInput, *types.MeritScheduleConfi
 // evaluates to a positive ratio at the initial variable state.
 func TestSpotDiffractionMetricPositive(t *testing.T) {
 	configs, schedule := spotDiffractionConfig("mean")
-	opt := NewMultiOptimizer(configs, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	opt.SetMeritSchedule(schedule)
 
 	x := []float64{}
@@ -490,13 +490,13 @@ func TestSpotDiffractionMetricPositive(t *testing.T) {
 func TestSpotDiffractionMeanVsMax(t *testing.T) {
 	configs, scheduleMean := spotDiffractionConfig("mean")
 
-	optM := NewMultiOptimizer(configs, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	optM := NewMultiOptimizer(configs, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	optM.SetMeritSchedule(scheduleMean)
 	rm, _ := optM.spotDiffractionRatio([]float64{})
 
 	scheduleMaxCopy := *scheduleMean
 	scheduleMaxCopy.MetricAggregation = "max"
-	optX := NewMultiOptimizer(configs, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	optX := NewMultiOptimizer(configs, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	optX.SetMeritSchedule(&scheduleMaxCopy)
 	rx, _ := optX.spotDiffractionRatio([]float64{})
 
@@ -549,7 +549,7 @@ func TestSpotDiffractionStepSwitch(t *testing.T) {
 	}
 
 	cfg := makeCfg()
-	opt := NewMultiOptimizer([]ConfigInput{cfg}, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer([]ConfigInput{cfg}, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 64, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	opt.SetMeritSchedule(schedule)
 
 	// Evaluate the metric at initial state.
@@ -613,7 +613,7 @@ func numRaysScheduleConfig() ([]ConfigInput, *types.MeritScheduleConfig) {
 // merit schedule switches between modes that declare different num_rays.
 func TestMeritScheduleNumRaysSwitches(t *testing.T) {
 	configs, schedule := numRaysScheduleConfig()
-	opt := NewMultiOptimizer(configs, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 8, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 8, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	opt.SetMeritSchedule(schedule)
 
 	x := []float64{}
@@ -677,7 +677,7 @@ func TestMeritScheduleNumRaysMaxAcrossConfigs(t *testing.T) {
 		},
 	}
 
-	opt := NewMultiOptimizer([]ConfigInput{cfg0, cfg1}, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer([]ConfigInput{cfg0, cfg1}, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	opt.SetMeritSchedule(schedule)
 
 	opt.UpdateMeritWeights([]float64{}, 0)
@@ -690,7 +690,7 @@ func TestMeritScheduleNumRaysMaxAcrossConfigs(t *testing.T) {
 // num_rays, the base value is used unchanged.
 func TestMeritScheduleNumRaysFallbackToBase(t *testing.T) {
 	configs, schedule := modesScheduleConfig("step")
-	opt := NewMultiOptimizer(configs, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
+	opt := NewMultiOptimizer(configs, nil, nil, nil, tripletGC(), 1, 0.01, 1e-6, 1e-6, 1.0, 32, 0, 0, nil, nil, 0, 0, false, false, nil, nil)
 	opt.SetMeritSchedule(schedule)
 
 	x := []float64{}
