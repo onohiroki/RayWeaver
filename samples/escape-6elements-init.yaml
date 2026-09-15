@@ -3,11 +3,15 @@ metadata:
     name: RayWeaver
     url: https://github.com/onohiroki/RayWeaver
     schema_version: 1
-  notes: "Escape optimization v14: 6-element double-Gauss, virtual entrance pupil.\n\
-    v13 base with infeasible-threshold relaxation:\n- min_glass_path relaxed:\
-    \ 2.0->0.5 (thin-element oblique rays)\n- min_throughput_ratio: 0.3->0.1\
-    \ (validateFn threshold)\n- all other settings inherited from v13\n8h time\
-    \ budget.\n"
+  notes: "Escape optimization v18: 6-element double-Gauss, virtual entrance pupil.\n\
+    v14-state with v18 merit (wavefront mode guardrails added to prevent EFL degeneracy\
+    \ in step-schedule):\n- step schedule: merit_ratio≈0.6 switches geometric→wavefront\n\
+    - wavefront mode: wavefront_sphere_rms 8000 + wavefront_astigmatism 5000 (uniform)\
+    \ + geometric_mtf_sag/tan 5000 (freq 50) + abs_efl 30 + field_alive×5 30 + longitudinal_color\
+    \ 1.0 + lateral_color×5 0.3–1.0 + glass_role×6 0.01\n- geometric mode: spot_rms\
+    \ + seidel + distortion + glass_role×6 + longitudinal/lateral_color + field_alive×5\
+    \ + abs_efl 30\n- back_focus_solve (paraxial) + power_solve (2,4,6,7,9,11)\n\
+    - 5h time budget.\n"
 glass_catalog:
   entries:
   - type: model
@@ -63,7 +67,7 @@ optimization:
     min_throughput_ratio: 0.1
   merit_schedule:
     metric: merit_ratio
-    curve: sigmoid
+    curve: step
     anchor_from: 1.0
     anchor_to: 0.2
     modes:
@@ -802,30 +806,39 @@ configs:
   - name: wavefront
     terms:
     - kind: wavefront_sphere_rms
+      field: 0
+      wavelength: 0.0005876
+      weight: 8000
+    - kind: wavefront_sphere_rms
       field: 1
       wavelength: 0.0005876
-      weight: 4000
+      weight: 8000
     - kind: wavefront_sphere_rms
       field: 2
       wavelength: 0.0005876
-      weight: 6000
+      weight: 8000
     - kind: wavefront_sphere_rms
       field: 3
       wavelength: 0.0005876
-      weight: 10000
+      weight: 8000
     - kind: wavefront_sphere_rms
       field: 4
       wavelength: 0.0005876
-      weight: 15000
+      weight: 8000
+    - kind: wavefront_astigmatism
+      field: 0
+      wavelength: 0.0005876
+      weight: 5000
+      target: 0
     - kind: wavefront_astigmatism
       field: 1
       wavelength: 0.0005876
-      weight: 2000
+      weight: 5000
       target: 0
     - kind: wavefront_astigmatism
       field: 2
       wavelength: 0.0005876
-      weight: 3000
+      weight: 5000
       target: 0
     - kind: wavefront_astigmatism
       field: 3
@@ -835,12 +848,114 @@ configs:
     - kind: wavefront_astigmatism
       field: 4
       wavelength: 0.0005876
-      weight: 8000
+      weight: 5000
       target: 0
-    - kind: wavefront_sphere_rms
+    - kind: geometric_mtf_sag
       field: 0
       wavelength: 0.0005876
-      weight: 1000
+      frequency: 50
+      target: 0.5
+      weight: 5000
+    - kind: geometric_mtf_tan
+      field: 0
+      wavelength: 0.0005876
+      frequency: 50
+      target: 0.5
+      weight: 5000
+    - kind: geometric_mtf_sag
+      field: 1
+      wavelength: 0.0005876
+      frequency: 50
+      target: 0.2
+      weight: 5000
+    - kind: geometric_mtf_tan
+      field: 1
+      wavelength: 0.0005876
+      frequency: 50
+      target: 0.2
+      weight: 5000
+    - kind: geometric_mtf_sag
+      field: 2
+      wavelength: 0.0005876
+      frequency: 50
+      target: 0.2
+      weight: 5000
+    - kind: geometric_mtf_tan
+      field: 2
+      wavelength: 0.0005876
+      frequency: 50
+      target: 0.2
+      weight: 5000
+    - kind: geometric_mtf_sag
+      field: 3
+      wavelength: 0.0005876
+      frequency: 50
+      target: 0.2
+      weight: 5000
+    - kind: geometric_mtf_tan
+      field: 3
+      wavelength: 0.0005876
+      frequency: 50
+      target: 0.2
+      weight: 5000
+    - kind: geometric_mtf_sag
+      field: 4
+      wavelength: 0.0005876
+      frequency: 50
+      target: 0.2
+      weight: 5000
+    - kind: geometric_mtf_tan
+      field: 4
+      wavelength: 0.0005876
+      frequency: 50
+      target: 0.2
+      weight: 5000
+    - kind: longitudinal_color
+      wavelength: 0.0004861
+      comparison_wavelength: 0.0006563
+      weight: 1.0
+    - kind: field_alive
+      field: 0
+      weight: 30
+    - kind: field_alive
+      field: 1
+      weight: 30
+    - kind: field_alive
+      field: 2
+      weight: 30
+    - kind: field_alive
+      field: 3
+      weight: 30
+    - kind: field_alive
+      field: 4
+      weight: 30
+    - kind: abs_efl
+      target: 50.0
+      weight: 30
+    - kind: glass_role
+      surface_set:
+      - 1
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 3
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 5
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 7
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 9
+      weight: 0.01
+    - kind: glass_role
+      surface_set:
+      - 11
+      weight: 0.01
 chief:
   fields:
   - angle: 0.0
