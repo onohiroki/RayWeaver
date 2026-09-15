@@ -2657,6 +2657,34 @@ func escapeSettings(e *types.EscapeConfig) []propRow {
 	return p
 }
 
+func psoSettings(pso *types.PSOConfig) []propRow {
+	var p []propRow
+	p = appendIntProp(p, "Swarm Size", pso.SwarmSize)
+	p = appendIntProp(p, "PSO Iterations", pso.PsoIterations)
+	p = appendNumProp(p, "Inertia", pso.Inertia)
+	p = appendNumProp(p, "Cognitive", pso.Cognitive)
+	p = appendNumProp(p, "Social", pso.Social)
+	p = appendNumProp(p, "Velocity Clamp", pso.VelocityClamp)
+	p = appendNumProp(p, "Init Spread", pso.InitSpread)
+	p = appendNumProp(p, "Constraint Penalty", pso.ConstraintPenalty)
+	// Escape params are shown via the embedded EscapeConfig sub-section.
+	if esc := &pso.EscapeConfig; esc != nil {
+		// Show a collapsed "escape" row within the PSO section so the user
+		// can see the shared cycle parameters without a separate block.
+		p = append(p, propRow{Name: "escape (shared)", Value: "-"})
+		p = appendIntProp(p, "  Max Cycles", esc.MaxCycles)
+		p = appendIntProp(p, "  Escape Workers", esc.EscapeWorkers)
+		p = appendNumProp(p, "  Max Seconds", esc.MaxSeconds)
+		p = appendNumProp(p, "  Distance Threshold", esc.DistanceThreshold)
+		p = appendNumProp(p, "  H Initial", esc.HInitial)
+		p = appendNumProp(p, "  W Initial", esc.WInitial)
+		p = appendNumProp(p, "  H Mult", esc.HMult)
+		p = appendNumProp(p, "  W Mult", esc.WMult)
+		p = appendNumProp(p, "  Initial Perturb", esc.InitialPerturb)
+	}
+	return p
+}
+
 // escapeParamsSettings flattens the set fields of escape_result.params into
 // key-value rows.
 func escapeParamsSettings(p *types.EscapeParamsInfo) []propRow {
@@ -2995,6 +3023,9 @@ func listOptimization(input types.Input, output types.Output, format string) {
 
 		if esc := opt.Escape; esc != nil {
 			subConfigs = append(subConfigs, SubConfigSection{Name: "escape", Settings: escapeSettings(esc)})
+		}
+		if pso := opt.PSO; pso != nil {
+			subConfigs = append(subConfigs, SubConfigSection{Name: "pso", Settings: psoSettings(pso)})
 		}
 		if gh := opt.GlassHull; gh != nil {
 			var p []propRow

@@ -130,6 +130,41 @@ func main() {
 		}
 	}
 
+	// PSO has two sub-subcommands: run (default) and extract.
+	psoExtractMode := false
+	psoExtractIndex := 0
+	optPSOGlassDir := ""
+	optPSOVerbose := false
+	optPSOLogFile := ""
+	optPSOSaveFile := ""
+	optPSOPowerSolve := false
+	optPSOPowerSolveSurfaces := ""
+	optPSOGlassVariables := false
+	optPSOKeepInfeasible := false
+	optPSOSwarmSize := 0
+	optPSOIterations := 0
+	optPSOConstraintPenalty := 0.0
+	if subcommand == "pso" {
+		if len(args) >= 2 && args[1] == "extract" {
+			psoExtractMode = true
+			psoExtractIndex = parseEscapeExtractFlags(args[2:])
+		} else {
+			fs := flag.NewFlagSet("pso", flag.ContinueOnError)
+			fs.BoolVar(&optPSOVerbose, "verbose", false, "print PSO progress (local minima, parameter changes) to stderr as compact JSONL")
+			fs.StringVar(&optPSOGlassDir, "glass-dir", "", "AGF glass catalog directory")
+			fs.StringVar(&optPSOLogFile, "log", "", "write PSO progress to file (JSONL)")
+			fs.StringVar(&optPSOSaveFile, "save", "", "save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...")
+			fs.BoolVar(&optPSOPowerSolve, "power-solve", false, "insert the power-preserving glass phase between each PSO and clean DLS")
+			fs.StringVar(&optPSOPowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs for the power-preserving solve")
+			fs.BoolVar(&optPSOGlassVariables, "glass-variables", false, "auto-generate nd/vd optimization variables for every refractive lens element")
+			fs.BoolVar(&optPSOKeepInfeasible, "keep-infeasible", false, "include infeasible basins in stdout YAML (default: discard)")
+			fs.IntVar(&optPSOSwarmSize, "swarm-size", 0, "number of particles per worker (overrides optimization.pso.swarm_size)")
+			fs.IntVar(&optPSOIterations, "pso-iterations", 0, "PSO iterations per cycle (overrides optimization.pso.pso_iterations)")
+			fs.Float64Var(&optPSOConstraintPenalty, "constraint-penalty", 0, "constraint penalty weight (overrides optimization.pso.constraint_penalty)")
+			fs.Parse(args[1:])
+		}
+	}
+
 	// Trace has a sub-subcommand: single (CLI one-ray trace).
 	traceSingleMode := false
 	if subcommand == "trace" {
@@ -173,7 +208,13 @@ func main() {
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex)
 		} else {
-			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassVariables, optEscapeKeepInfeasible, optEscapeDebug)
+			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassVariables, optEscapeKeepInfeasible, optEscapeDebug, nil)
+		}
+	case "pso":
+		if psoExtractMode {
+			runEscapeExtract(data, psoExtractIndex)
+		} else {
+			runPSO(data, optPSOGlassDir, optPSOVerbose, optPSOLogFile, optPSOSaveFile, optPSOPowerSolve, optPSOPowerSolveSurfaces, optPSOGlassVariables, optPSOKeepInfeasible, optPSOSwarmSize, optPSOIterations, optPSOConstraintPenalty)
 		}
 	case "import":
 		runImport(data)
@@ -658,6 +699,72 @@ every discovered local minimum with its full surfaces.
 
   rayweave escape < input.yaml | rayweave trace | rayweave plot
   rayweave escape extract --index 1 < escape-output.yaml > min1.yaml
+ `)
+	case "pso":
+		fmt.Print(`Usage: rayweave pso [--verbose] [--log FILE] [--save FILE]
+                     [--keep-infeasible] [--power-solve]
+                     [--power-solve-surfaces SURFACES]
+                     [--glass-variables] [--glass-dir DIR]
+                     [--swarm-size N] [--pso-iterations N]
+                     [--constraint-penalty W] < input.yaml
+       rayweave pso extract --index N < pso-output.yaml
+
+PSO escape-function global optimisation. Identical three-phase cycle to
+"escape" (exploration -> glass -> clean DLS), but the first phase uses a
+Particle Swarm Optimizer instead of DLS. The PSO swarm operates in normalized
+variable space with a static penalty for constraint violations.
+
+Options:
+  --verbose        print PSO progress to stderr as compact JSONL
+  --log FILE       write the full JSONL progress stream to FILE
+  --save FILE      save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...
+  --keep-infeasible include infeasible basins in stdout YAML (default: discard)
+  --power-solve    insert the power-preserving glass phase between each PSO and clean DLS
+  --power-solve-surfaces SURFACES
+                   comma-separated surface IDs for the power-preserving solve
+  --glass-variables auto-generate nd/vd optimization variables for every
+                   refractive lens element
+  --glass-dir DIR    AGF glass catalog directory
+  --swarm-size N     number of particles per worker (overrides optimization.pso.swarm_size)
+  --pso-iterations N PSO iterations per cycle (overrides optimization.pso.pso_iterations)
+  --constraint-penalty W constraint penalty weight (overrides optimization.pso.constraint_penalty)
+
+Sub-commands:
+  pso (default)       run the PSO global optimisation loop
+  pso extract --index N   extract local minimum N as a clean lens YAML
+
+Input YAML — optimization.pso section:
+   optimization:
+     method: dls
+     variables: [...]          # same variable definitions as 'optimize'
+     pso:
+       max_cycles: 10          # cycles per worker
+       escape_workers: 4       # top-level parallel goroutines (default 4)
+       max_seconds: 0          # soft shared wall-clock budget in seconds (0 = unlimited)
+       distance_threshold: 0.1
+       h_initial: 0.1
+       w_initial: 0.5
+       h_mult: 2.0
+       w_mult: 1.3
+       variable_weights:
+         curvature: 1000
+         thickness: 1
+       initial_perturb: 0.05
+       swarm_size: 30          # particles per worker
+       pso_iterations: 40      # PSO iterations per cycle
+       inertia: 0.729          # velocity inertia (linear decay 0.9->0.4)
+       cognitive: 1.494        # personal-best coefficient (c1)
+       social: 1.494           # global-best coefficient (c2)
+       velocity_clamp: 0.2     # max velocity as fraction of range
+       init_spread: 0.1        # initial swarm spread as fraction of range
+       constraint_penalty: 1000
+
+Output: best solution in configs[].surfaces (pipeline-compatible with
+"rayweave trace"/"rayweave plot"), plus an escape_result section listing
+every discovered local minimum with its full surfaces.
+
+  rayweave pso < input.yaml | rayweave trace | rayweave plot
+  rayweave pso extract --index 1 < pso-output.yaml > min1.yaml
  `)
 	case "import":
 		fmt.Print(`Usage: rayweave import --format zemax < lens.zmx > system.yaml

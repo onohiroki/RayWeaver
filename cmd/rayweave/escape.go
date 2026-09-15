@@ -28,7 +28,7 @@ import (
 // saveBase1.yaml, ... (see escapeFileSaver). SIGINT/SIGTERM stops the search
 // in three escalating stages (graceful cycle boundary → mid-DLS interrupt →
 // force quit), each producing interrupted: true and exit 0 except the last.
-func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassVariables bool, keepInfeasible bool, debug bool) {
+func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassVariables bool, keepInfeasible bool, debug bool, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
 	if input.Optimization == nil {
@@ -53,6 +53,14 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 		applyGlassVariables(&input, gc)
 	}
 
+	runEscapeCore(input, gc, verbose, logFile, saveBase, keepInfeasible, debug, newExplorer)
+}
+
+// runEscapeCore is the shared escape/PSO execution path. It accepts an
+// already-parsed input (so callers like runPSO can modify it first) plus the
+// loaded glass catalog, and handles progress logging, signal handling, single/
+// multi-config dispatch, output, and result validation.
+func runEscapeCore(input types.Input, gc *glass.Catalog, verbose bool, logFile string, saveBase string, keepInfeasible bool, debug bool, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	// Build the per-config glass-phase merit from the config's own terms: the
 	// chromatic terms scaled by power_solve.color_scale plus a cheap geometric
 	// guardrail. The config's explicit merit is never replaced.
@@ -126,10 +134,10 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug)
+		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, newExplorer)
 		return
 	}
-	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug)
+	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, newExplorer)
 }
 
 // glassPhaseCtx carries the power-preserving glass-phase configuration through
@@ -248,7 +256,7 @@ func meritTermKey(t types.MeritTerm) string {
 		t.Kind, t.Field, t.Wavelength, t.ComparisonWavelength, t.Target, t.Fraction, t.Frequency)
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -472,6 +480,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		GlassPhase:  gctx.enabled,
 		Debug:       debug,
 		NewPhaseLog: newPhaseLogIfDebug(progress, debug),
+		NewExplorer: newExplorer,
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,
@@ -574,7 +583,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	writeEscapeOutput(input, escResult)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -806,6 +815,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		GlassPhase:  gctx.enabled,
 		Debug:       debug,
 		NewPhaseLog: newPhaseLogIfDebug(progress, debug),
+		NewExplorer: newExplorer,
 	})
 	progress.Event("done", map[string]any{
 		"workers":     res.Workers,

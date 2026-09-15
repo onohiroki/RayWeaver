@@ -796,6 +796,7 @@ type OptimizationConfig struct {
 	GlassHull        *GlassHullConfig       `yaml:"glass_hull,omitempty"`
 	GlassAttraction  *GlassAttractionConfig `yaml:"glass_attraction,omitempty"`
 	Escape           *EscapeConfig          `yaml:"escape,omitempty"`
+	PSO              *PSOConfig             `yaml:"pso,omitempty"`
 	MeritSchedule    *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
 	Degenerate       *DegenerateConfig      `yaml:"degenerate,omitempty"`
 	PowerSolve       *PowerSolveConfig      `yaml:"power_solve,omitempty"`
@@ -1011,6 +1012,32 @@ type EscapeConfig struct {
 	// required for a converged point to be classified as feasible. Points with
 	// fewer valid rays are marked infeasible. 0 uses the built-in default (0.3).
 	MinThroughputRatio float64 `yaml:"min_throughput_ratio,omitempty"`
+}
+
+// PSOConfig configures the Particle Swarm Optimization escape-function
+// global optimiser. Escape-function parameters are embedded inline; PSO-specific
+// fields control the swarm behaviour.
+type PSOConfig struct {
+	EscapeConfig `yaml:",inline"`
+
+	// SwarmSize is the number of particles per escape worker (default 30).
+	SwarmSize int `yaml:"swarm_size,omitempty"`
+	// PsoIterations is the number of PSO iterations per cycle (default 40).
+	// Replaces the DLS escape-phase budget (EscapeIterFrac is unused in PSO mode).
+	PsoIterations int `yaml:"pso_iterations,omitempty"`
+	// Inertia is the velocity inertia weight. Linearly decays from 0.9 to 0.4
+	// over the iteration budget. Default 0.729.
+	Inertia float64 `yaml:"inertia,omitempty"`
+	// Cognitive is the personal-best attraction coefficient c1 (default 1.494).
+	Cognitive float64 `yaml:"cognitive,omitempty"`
+	// Social is the global-best attraction coefficient c2 (default 1.494).
+	Social float64 `yaml:"social,omitempty"`
+	// VelocityClamp is the max velocity as a fraction of variable range (default 0.2).
+	VelocityClamp float64 `yaml:"velocity_clamp,omitempty"`
+	// InitSpread is the initial swarm spread as a fraction of variable range (default 0.1).
+	InitSpread float64 `yaml:"init_spread,omitempty"`
+	// ConstraintPenalty is the penalty weight for constraint violations (default 1000).
+	ConstraintPenalty float64 `yaml:"constraint_penalty,omitempty"`
 }
 
 type MeritBeforeAfter struct {

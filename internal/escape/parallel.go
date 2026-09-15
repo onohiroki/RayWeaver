@@ -72,6 +72,13 @@ type RunOptions struct {
 	// phase updates before each sub-solve. Each call must return a fresh
 	// instance to avoid data races between workers.
 	NewPhaseLog func() PhaseSetter
+	// NewExplorer, when non-nil, is called once per worker goroutine to create
+	// a pluggable exploration engine for Phase 1. When set, the escape cycle
+	// uses the returned Explorer instead of the default DLS. Each call receives
+	// the shared Progress instance so PSO-internal events flow through the same
+	// writers. Each call must return a fresh instance to avoid data races
+	// between workers. nil uses the default DLS escape phase.
+	NewExplorer func(progress *Progress, seed int64) Explorer
 }
 
 // BuildParams derives the escape parameters from the YAML config and the
@@ -200,7 +207,11 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 			if opts.NewPhaseLog != nil {
 				wrapper.SetPhaseLog(opts.NewPhaseLog())
 			}
-			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop, opts.ValidateFn, opts.Debug)
+			var explorer Explorer
+			if opts.NewExplorer != nil {
+				explorer = opts.NewExplorer(progress, seed)
+			}
+			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop, opts.ValidateFn, explorer, opts.Debug)
 
 			x0 := inner.InitialState()
 			if seed != 0 {

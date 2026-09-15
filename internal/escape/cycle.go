@@ -47,6 +47,7 @@ type Cycle struct {
 	ctx        context.Context
 	hardStop   <-chan struct{}
 	validateFn func(x []float64, merit float64, inner dls.Model) (MinStatus, InvalidReason)
+	explorer   Explorer
 	debug      bool
 	failures   int
 	escaped    int
@@ -63,7 +64,7 @@ type Cycle struct {
 // merit, escape count, nearest distance, failures). The wrapper's PhaseLog
 // (when set) receives phase context updates before each sub-solve so the DLS
 // logger can tag events with the current escape phase.
-func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time, ctx context.Context, hardStop <-chan struct{}, validateFn func(x []float64, merit float64, inner dls.Model) (MinStatus, InvalidReason), debug bool) *Cycle {
+func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed int64, progress *Progress, deadline time.Time, ctx context.Context, hardStop <-chan struct{}, validateFn func(x []float64, merit float64, inner dls.Model) (MinStatus, InvalidReason), explorer Explorer, debug bool) *Cycle {
 	return &Cycle{
 		wrapper:    wrapper,
 		store:      store,
@@ -77,6 +78,7 @@ func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed
 		ctx:        ctx,
 		hardStop:   hardStop,
 		validateFn: validateFn,
+		explorer:   explorer,
 		debug:      debug,
 	}
 }
@@ -269,16 +271,24 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			c.stopped = true
 			break
 		}
-		// Step 1: escape DLS. Push away from every recorded minimum.
+		// Step 1: escape exploration. Push away from every recorded minimum.
 		c.wrapper.SetEscapes(c.store.All())
 		c.wrapper.SetStartX(currentX)
 		c.wrapper.SetPhase(PhaseEscape)
 		c.wrapper.SetStop(c.hardStop)
-		c.setPhase("escape_dls", cyc)
-		escRes := dls.Solve(c.wrapper)
+		phaseName := "escape_dls"
+		var escRes dls.Result
+		if c.explorer != nil {
+			phaseName = "pso"
+			c.setPhase("pso", cyc)
+			escRes = c.explorer.Explore(c.wrapper, currentX)
+		} else {
+			c.setPhase("escape_dls", cyc)
+			escRes = dls.Solve(c.wrapper)
+		}
 		escapedX := extractX(escRes)
 		if escRes.Status == dls.StatusInterrupted {
-			c.recordInterrupted(escRes, cyc, "escape_dls")
+			c.recordInterrupted(escRes, cyc, phaseName)
 			c.stopped = true
 			break
 		}
@@ -287,11 +297,11 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			fields := map[string]any{
 				"cycle":      cyc,
 				"worker":     c.workerID,
-				"phase":      "escape_dls",
+				"phase":      phaseName,
 				"status":     "rejected",
 				"dls_status": escRes.Status,
 			}
-			enrich(fields, c.debugCycleFields(escapedX, escRes, "escape_dls"))
+			enrich(fields, c.debugCycleFields(escapedX, escRes, phaseName))
 			c.progress.Event("cycle", fields)
 			if c.failures >= c.maxFail {
 				break
@@ -302,12 +312,12 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		fields := map[string]any{
 			"cycle":      cyc,
 			"worker":     c.workerID,
-			"phase":      "escape_dls",
+			"phase":      phaseName,
 			"status":     "accepted",
 			"dls_status": escRes.Status,
 			"merit":      c.wrapper.innerMerit(escapedX),
 		}
-		enrich(fields, c.debugCycleFields(escapedX, escRes, "escape_dls"))
+		enrich(fields, c.debugCycleFields(escapedX, escRes, phaseName))
 		c.progress.Event("cycle", fields)
 
 		// Step 1.5 (optional): power-preserving glass phase. Lock every variable

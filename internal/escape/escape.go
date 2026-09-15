@@ -112,6 +112,18 @@ const (
 	PhaseGlassSolve
 )
 
+// Explorer is an optional pluggable exploration engine for Phase 1 (escape
+// exploration). When set on a Cycle, it replaces the default DLS-based escape
+// phase. The PSO package provides an implementation via pso.NewExplorer.
+type Explorer interface {
+	// Explore minimises the escape-augmented merit (the model already has
+	// escapes set) starting from x0 and returns the result. The returned
+	// dls.Result must have Variables populated (After field) in the same
+	// order as model.Variables(), a finite AfterMerit, and a Status of
+	// "converged", "max_iterations", or "interrupted".
+	Explore(model dls.Model, x0 []float64) dls.Result
+}
+
 // glassPhaseable is the optional capability an inner dls.Model may implement
 // to enter/exit the power-preserving glass phase: lock every variable except
 // the glass dispersions, route the merit to the colour-only glass terms, and
