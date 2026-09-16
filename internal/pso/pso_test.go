@@ -146,3 +146,104 @@ func TestExplorerCallback(t *testing.T) {
 		t.Error("expected at least one progress event")
 	}
 }
+
+// --- Stall sliding window test ---
+
+func TestStallSlidingWindow(t *testing.T) {
+	// With stallWindow=5 and a model that converges quickly, the PSO should
+	// NOT stall at iter 5 (old 1-iteration window bug) but only after two
+	// full windows (iter 5 + 5 = 10).
+	cfg := DefaultConfig()
+	cfg.SwarmSize = 10
+	cfg.PsoIterations = 20
+	cfg.StallWindowFrac = 0.25 // stallWindow = 5
+	cfg.StallRelTol = 1e-4
+	cfg.InitSpread = 0.5
+
+	model := sphere1D{cx: 0.0}
+	x0 := []float64{1.0}
+
+	var stallIter int = -1
+	cb := func(event string, fields map[string]any) {
+		if event == "pso_stall" {
+			stallIter = fields["iter"].(int)
+		}
+	}
+
+	ex := NewExplorer(cfg, 42, cb)
+	result := ex.Explore(model, x0)
+
+	// The stall should fire at iter 5 or 10, never at iter 1-4.
+	if stallIter >= 0 && stallIter < 5 {
+		t.Errorf("stall fired too early at iter %d (stallWindow=5)", stallIter)
+	}
+	t.Logf("stallIter=%d status=%s iterations=%d", stallIter, result.Status, result.Iterations)
+}
+
+// --- True merit gbest selection test ---
+
+// escapedSphere wraps a sphere merit and adds a Gaussian bump at a known
+// minimum. InnerMerit returns only the true sphere merit (no bump).
+type escapedSphere struct {
+	cx      float64  // true minimum
+	bumpAt  float64  // bump center (known minimum to avoid)
+	bumpH   float64  // bump height
+	bumpW   float64  // bump width
+}
+
+func (m escapedSphere) Variables() []dls.VariableInfo {
+	return []dls.VariableInfo{{Name: "x", Param: "x", Min: -2, Max: 2}}
+}
+func (m escapedSphere) InitialState() []float64 { return []float64{0} }
+func (m escapedSphere) Options() dls.Options {
+	return dls.Options{MaxIter: 200, Mu: 0.1, Tol: 1e-8, Epsilon: 1e-7}
+}
+func (m escapedSphere) EvaluateMerit(x []float64) float64 {
+	d := x[0] - m.cx
+	trueMerit := d * d
+	dBump := x[0] - m.bumpAt
+	bump := m.bumpH * math.Exp(-dBump*dBump/(m.bumpW*m.bumpW))
+	return trueMerit + bump
+}
+func (m escapedSphere) InnerMerit(x []float64) float64 {
+	d := x[0] - m.cx
+	return d * d
+}
+func (m escapedSphere) ComputeResiduals(x []float64) []float64 {
+	return []float64{x[0] - m.cx}
+}
+func (m escapedSphere) ComputeConstraints(x []float64) []float64 { return nil }
+
+func TestGBestUsesTrueMerit(t *testing.T) {
+	// True minimum at x=0.0. Bump at x=0.5 (height 100, width 0.1).
+	// If gbest were selected by escaped merit, the bump would dominate
+	// and the swarm would avoid x=0.0. With true merit, gbest tracks the
+	// true minimum.
+	model := escapedSphere{
+		cx:     0.0,
+		bumpAt: 0.5,
+		bumpH:  100.0,
+		bumpW:  0.1,
+	}
+
+	cfg := DefaultConfig()
+	cfg.SwarmSize = 30
+	cfg.PsoIterations = 60
+	cfg.InitSpread = 0.8 // wide spread to reach both sides of bump
+	cfg.StallWindowFrac = 0.5
+	cfg.StallRelTol = 1e-3
+
+	x0 := []float64{0.8} // start on the far side of the bump
+
+	ex := NewExplorer(cfg, 42, nil)
+	result := ex.Explore(model, x0)
+
+	finalX := result.Variables[0].After
+	// The swarm should converge near x=0.0 (true minimum), not be repelled
+	// by the bump at x=0.5.
+	if math.Abs(finalX-0.0) > 0.3 {
+		t.Errorf("expected x≈0.0 (true minimum), got %f — bump may be repelling gbest", finalX)
+	}
+	t.Logf("escapedSphere: x=%.6f merit=%.6e iterations=%d status=%s",
+		finalX, result.AfterMerit, result.Iterations, result.Status)
+}

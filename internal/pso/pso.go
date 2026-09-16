@@ -152,6 +152,14 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		copy(pbestPos[i], pos[i])
 	}
 
+	// Detect InnerMerit: when the model (escape Wrapper) exposes the true
+	// (unescaped) merit, gbest is selected by true merit so known minima
+	// with escape bumps are excluded from the global-best pool.
+	innerMeritFn := model.EvaluateMerit // fallback: use escaped merit
+	if ime, ok := model.(interface{ InnerMerit([]float64) float64 }); ok {
+		innerMeritFn = ime.InnerMerit
+	}
+
 	// Evaluate initial swarm.
 	// Update pupil at x0 first.
 	if pu, ok := model.(dls.PupilUpdater); ok {
@@ -159,21 +167,26 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 	}
 
 	gbestFit := math.MaxFloat64
+	gbestTrueFit := math.MaxFloat64
 	gbestPos := make([]float64, nVars)
 	copy(gbestPos, x0Norm)
 
 	for i := 0; i < swarmSize; i++ {
 		xPhys := denormalize(pos[i], variables, scales)
 		f := e.fitness(model, xPhys)
+		tf := innerMeritFn(xPhys)
 		pbestFit[i] = f
-		if f < gbestFit {
+		if tf < gbestTrueFit {
+			gbestTrueFit = tf
 			gbestFit = f
 			copy(gbestPos, pos[i])
 		}
 	}
 
-	// Stall detection state.
+	// Stall detection state (sliding window: compare gbest every stallWindow
+	// iterations, not every iteration — matching the DLS solver's pattern).
 	bestFitWindowAgo := gbestFit
+	lastCheckIter := 0
 	stallWindow := int(float64(maxIter) * e.cfg.StallWindowFrac)
 	if stallWindow < 2 {
 		stallWindow = 2
@@ -236,36 +249,43 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 			// Evaluate.
 			xPhys := denormalize(pos[i], variables, scales)
 			f := e.fitness(model, xPhys)
+			tf := innerMeritFn(xPhys)
 
-			// Update personal best.
+			// Update personal best (escaped merit — drives particle movement).
 			if f < pbestFit[i] {
 				pbestFit[i] = f
 				copy(pbestPos[i], pos[i])
 			}
 
-			// Update global best.
-			if f < gbestFit {
+			// Update global best (true merit — excludes bump locations).
+			if tf < gbestTrueFit {
+				gbestTrueFit = tf
 				gbestFit = f
 				copy(gbestPos, pos[i])
 			}
 		}
 
-		// Stall detection.
-		if iter >= stallWindow {
-			relImprove := (bestFitWindowAgo - gbestFit) / (math.Abs(bestFitWindowAgo) + 1e-12)
-			if relImprove < e.cfg.StallRelTol {
-				if e.progress != nil {
-					e.progress("pso_stall", map[string]any{
-						"iter":    iter,
-						"merit":   gbestFit,
-						"improve": relImprove,
-					})
+		// Stall detection (sliding window: check every stallWindow iterations).
+		if iter-lastCheckIter >= stallWindow {
+			if lastCheckIter > 0 {
+				denom := math.Abs(bestFitWindowAgo)
+				if denom < 1e-10 {
+					denom = 1e-10
 				}
-				return e.buildResult(model, variables, scales, gbestPos, gbestFit, iter+1, "converged")
+				relImprove := (bestFitWindowAgo - gbestFit) / denom
+				if relImprove < e.cfg.StallRelTol {
+					if e.progress != nil {
+						e.progress("pso_stall", map[string]any{
+							"iter":    iter,
+							"merit":   gbestFit,
+							"improve": relImprove,
+						})
+					}
+					return e.buildResult(model, variables, scales, gbestPos, gbestFit, iter+1, "converged")
+				}
 			}
 			bestFitWindowAgo = gbestFit
-		} else if iter == stallWindow-1 {
-			bestFitWindowAgo = gbestFit
+			lastCheckIter = iter
 		}
 	}
 

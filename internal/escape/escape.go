@@ -384,8 +384,10 @@ func (w *Wrapper) UpdateMeritWeights(x []float64, iter int) {
 	}
 }
 
-// innerMerit evaluates the real (unescaped) merit at x.
-func (w *Wrapper) innerMerit(x []float64) float64 {
+// InnerMerit evaluates the real (unescaped) merit at x, bypassing the
+// escape-function bumps. Used by the PSO explorer to select gbest based
+// on true merit rather than escape-augmented merit.
+func (w *Wrapper) InnerMerit(x []float64) float64 {
 	return w.inner.EvaluateMerit(x)
 }
 

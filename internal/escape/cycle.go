@@ -148,7 +148,7 @@ func (c *Cycle) acceptable(status string, x []float64) bool {
 	if !(isConverged(status) || status == "max_iterations") {
 		return false
 	}
-	m := c.wrapper.innerMerit(x)
+	m := c.wrapper.InnerMerit(x)
 	return !math.IsNaN(m) && !math.IsInf(m, 0) && m < 1e12
 }
 
@@ -252,7 +252,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 	copy(currentX, x0)
 	bestX := make([]float64, len(x0))
 	copy(bestX, x0)
-	bestMerit := c.wrapper.innerMerit(x0)
+	bestMerit := c.wrapper.InnerMerit(x0)
 
 	c.failures = 0
 	repeatStreak := 0
@@ -315,7 +315,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			"phase":      phaseName,
 			"status":     "accepted",
 			"dls_status": escRes.Status,
-			"merit":      c.wrapper.innerMerit(escapedX),
+			"merit":      c.wrapper.InnerMerit(escapedX),
 		}
 		enrich(fields, c.debugCycleFields(escapedX, escRes, phaseName))
 		c.progress.Event("cycle", fields)
@@ -328,7 +328,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		// feeds the clean DLS start; the clean solution is what the store
 		// records, so the escape distance/store stay in the full variable-space
 		// dimension regardless of the phase's reduced active set.
-		escapeMerit := c.wrapper.innerMerit(escapedX)
+		escapeMerit := c.wrapper.InnerMerit(escapedX)
 		cleanStart := escapedX
 		if c.wrapper.GlassPhaseEnabled() {
 			c.wrapper.SetEscapes(nil)
@@ -348,7 +348,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 				// or failed to improve the colour merit.
 				startMain := c.wrapper.evaluateMainMerit(escapedX)
 				endMain := c.wrapper.evaluateMainMerit(glassX)
-				startGlass := c.wrapper.innerMerit(escapedX) // colour merit during glass phase
+				startGlass := c.wrapper.InnerMerit(escapedX) // colour merit during glass phase
 				endGlass := glassRes.AfterMerit
 				mainOK := endMain <= startMain*1.5 || startMain < 1e-10
 				glassImproved := endGlass < startGlass*0.99 || startGlass < 1e-10
@@ -360,7 +360,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 					"phase":        "glass_dls",
 					"status":       "accepted",
 					"dls_status":   glassRes.Status,
-					"merit":        c.wrapper.innerMerit(glassX),
+					"merit":        c.wrapper.InnerMerit(glassX),
 					"main_before":  startMain,
 					"main_after":   endMain,
 					"glass_before": startGlass,
@@ -431,14 +431,14 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			"phase":      "clean_dls",
 			"status":     "accepted",
 			"dls_status": cleanRes.Status,
-			"merit":      c.wrapper.innerMerit(trueX),
+			"merit":      c.wrapper.InnerMerit(trueX),
 		}
 		enrich(fields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
 		c.progress.Event("cycle", fields)
 
 		// Post-glass retry: if clean DLS regressed vs the pre-glass escape
 		// merit, retry clean from escapedX (glass result discarded).
-		cleanMerit := c.wrapper.innerMerit(trueX)
+		cleanMerit := c.wrapper.InnerMerit(trueX)
 		if cleanMerit > escapeMerit {
 			retryFields := map[string]any{
 				"cycle":        cyc,
@@ -465,7 +465,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 				break
 			}
 			if c.acceptable(retryRes.Status, retryX) {
-				retryMerit := c.wrapper.innerMerit(retryX)
+				retryMerit := c.wrapper.InnerMerit(retryX)
 				if retryMerit < cleanMerit {
 					trueX = retryX
 					retryAcceptedFields := map[string]any{
@@ -503,7 +503,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		c.failures = 0
 		c.escaped++
 
-		trueMerit := c.wrapper.innerMerit(trueX)
+		trueMerit := c.wrapper.InnerMerit(trueX)
 
 		// Validate the converged point: classify as feasible, infeasible, or
 		// evaluation failure. When validateFn is nil, every point is feasible.
@@ -611,7 +611,7 @@ func (c *Cycle) recordInterrupted(res dls.Result, cyc int, phase string) {
 		return
 	}
 	x := extractX(res)
-	m := c.wrapper.innerMerit(x)
+	m := c.wrapper.InnerMerit(x)
 	if math.IsNaN(m) || math.IsInf(m, 0) || m >= 1e12 {
 		return
 	}
