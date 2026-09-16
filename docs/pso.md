@@ -62,7 +62,7 @@ optimization:
     # PSO-specific parameters
     swarm_size: 30            # particles per worker
     pso_iterations: 40        # PSO iterations per cycle
-    inertia: 0.729             # velocity inertia weight (linear decay: 0.9 -> 0.4)
+    inertia: 0.9               # starting inertia weight (linear decay: inertia -> 0.4; 0 = 0.9)
     cognitive: 1.494           # personal-best attraction coefficient (c1)
     social: 1.494              # global-best attraction coefficient (c2)
     velocity_clamp: 0.2        # max velocity as fraction of variable range
@@ -88,7 +88,7 @@ description.
 |---|---|---|
 | `swarm_size` | 30 | number of particles per escape worker |
 | `pso_iterations` | 40 | PSO iterations per cycle (replaces DLS escape-phase budget) |
-| `inertia` | 0.729 | velocity inertia weight; linearly decays from 0.9 to 0.4 |
+| `inertia` | 0 (0.9) | starting velocity inertia weight; linearly decays from `inertia` (or 0.9 when unset) to 0.4 |
 | `cognitive` | 1.494 | personal-best attraction coefficient (c1) |
 | `social` | 1.494 | global-best attraction coefficient (c2) |
 | `velocity_clamp` | 0.2 | max velocity as fraction of variable range (0 = unclamped) |

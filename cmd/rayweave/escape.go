@@ -53,14 +53,14 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 		applyGlassVariables(&input, gc)
 	}
 
-	runEscapeCore(input, gc, verbose, logFile, saveBase, keepInfeasible, debug, newExplorer)
+	runEscapeCore(input, gc, verbose, logFile, saveBase, keepInfeasible, debug, "escape", newExplorer)
 }
 
 // runEscapeCore is the shared escape/PSO execution path. It accepts an
 // already-parsed input (so callers like runPSO can modify it first) plus the
 // loaded glass catalog, and handles progress logging, signal handling, single/
 // multi-config dispatch, output, and result validation.
-func runEscapeCore(input types.Input, gc *glass.Catalog, verbose bool, logFile string, saveBase string, keepInfeasible bool, debug bool, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
+func runEscapeCore(input types.Input, gc *glass.Catalog, verbose bool, logFile string, saveBase string, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	// Build the per-config glass-phase merit from the config's own terms: the
 	// chromatic terms scaled by power_solve.color_scale plus a cheap geometric
 	// guardrail. The config's explicit merit is never replaced.
@@ -134,10 +134,10 @@ func runEscapeCore(input types.Input, gc *glass.Catalog, verbose bool, logFile s
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, newExplorer)
+		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, command, newExplorer)
 		return
 	}
-	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, newExplorer)
+	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, command, newExplorer)
 }
 
 // glassPhaseCtx carries the power-preserving glass-phase configuration through
@@ -256,7 +256,7 @@ func meritTermKey(t types.MeritTerm) string {
 		t.Kind, t.Field, t.Wavelength, t.ComparisonWavelength, t.Target, t.Fraction, t.Frequency)
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -580,10 +580,10 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 
 	escResult := assembleEscapeResult(res, minima, infeasibleMinima)
 	reportEscape(res, progress)
-	writeEscapeOutput(input, escResult)
+	writeEscapeOutput(input, escResult, command)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -910,7 +910,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 
 	escapeResult := assembleEscapeResult(res, minima, infeasibleMinima)
 	reportEscape(res, progress)
-	writeEscapeOutput(input, escapeResult)
+	writeEscapeOutput(input, escapeResult, command)
 }
 
 // assembleEscapeResult wraps the minima list with the report metadata.
@@ -1257,9 +1257,10 @@ func reportEscape(res escape.Result, progress *escape.Progress) {
 	progress.Event("escape_complete", fields)
 }
 
-// writeEscapeOutput writes the final YAML to stdout.
-func writeEscapeOutput(input types.Input, escResult *types.EscapeResult) {
-	withOutputMetadata(&input, "escape", subcmdArgs())
+// writeEscapeOutput writes the final YAML to stdout. The command name is
+// stamped into metadata.tool.command ("escape" or "pso").
+func writeEscapeOutput(input types.Input, escResult *types.EscapeResult, command string) {
+	withOutputMetadata(&input, command, subcmdArgs())
 	output := types.Output{
 		Input:        input,
 		EscapeResult: escResult,
@@ -1267,12 +1268,13 @@ func writeEscapeOutput(input types.Input, escResult *types.EscapeResult) {
 	writeYAML(&output)
 }
 
-// runEscapeExtract pulls one local minimum out of a previous escape output
-// and emits a clean lens YAML with that minimum as the top-level solution.
-func runEscapeExtract(data []byte, index int) {
+// runEscapeExtract pulls one local minimum out of a previous escape/PSO output
+// and emits a clean lens YAML with that minimum as the top-level solution. The
+// command name is stamped into metadata.tool.command.
+func runEscapeExtract(data []byte, index int, command string) {
 	output := parseYAML[types.Output](data)
 	if output.EscapeResult == nil {
-		errOut("Error: input has no 'escape_result' section (was it produced by 'rayweave escape'?)")
+		errOut("Error: input has no 'escape_result' section (was it produced by 'rayweave escape' or 'rayweave pso'?)")
 		os.Exit(1)
 	}
 	if index < 0 || index >= len(output.EscapeResult.Minima) {
@@ -1304,7 +1306,7 @@ func runEscapeExtract(data []byte, index int) {
 		os.Exit(1)
 	}
 
-	withOutputMetadata(&output.Input, "escape extract", subcmdArgs())
+	withOutputMetadata(&output.Input, command, subcmdArgs())
 	writeYAML(&output)
 }
 

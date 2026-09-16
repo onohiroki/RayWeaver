@@ -12,31 +12,41 @@ import (
 
 // Config holds PSO hyperparameters.
 type Config struct {
-	SwarmSize        int
-	PsoIterations    int
-	Inertia          float64
-	Cognitive        float64
-	Social           float64
-	VelocityClamp    float64
-	InitSpread       float64
+	SwarmSize         int
+	PsoIterations     int
+	Inertia           float64
+	Cognitive         float64
+	Social            float64
+	VelocityClamp     float64
+	InitSpread        float64
 	ConstraintPenalty float64
-	StallWindowFrac  float64
-	StallRelTol      float64
+	StallWindowFrac   float64
+	StallRelTol       float64
 }
+
+// Inertia decay bounds. The inertia weight decays linearly from the configured
+// (or default) high value down to InertiaLow over the iteration budget.
+const (
+	// DefaultInertiaHigh is the built-in starting inertia used when the config
+	// leaves Inertia unset (0).
+	DefaultInertiaHigh = 0.9
+	// InertiaLow is the floor of the inertia decay.
+	InertiaLow = 0.4
+)
 
 // DefaultConfig returns the recommended starting values.
 func DefaultConfig() Config {
 	return Config{
-		SwarmSize:        30,
-		PsoIterations:    40,
-		Inertia:          0.729,
-		Cognitive:        1.494,
-		Social:           1.494,
-		VelocityClamp:    0.2,
-		InitSpread:       0.1,
+		SwarmSize:         30,
+		PsoIterations:     40,
+		Inertia:           0, // 0 = built-in DefaultInertiaHigh (0.9) -> InertiaLow decay
+		Cognitive:         1.494,
+		Social:            1.494,
+		VelocityClamp:     0.2,
+		InitSpread:        0.1,
 		ConstraintPenalty: 1000,
-		StallWindowFrac:  0.2,
-		StallRelTol:      1e-4,
+		StallWindowFrac:   0.2,
+		StallRelTol:       1e-4,
 	}
 }
 
@@ -57,9 +67,8 @@ func NewExplorer(cfg Config, seed int64, progress func(event string, fields map[
 	if cfg.PsoIterations <= 0 {
 		cfg.PsoIterations = 40
 	}
-	if cfg.Inertia <= 0 {
-		cfg.Inertia = 0.729
-	}
+	// Inertia is intentionally left at 0 when unset: the explorer then uses the
+	// built-in DefaultInertiaHigh (0.9) -> InertiaLow (0.4) decay.
 	if cfg.Cognitive <= 0 {
 		cfg.Cognitive = 1.494
 	}
@@ -186,13 +195,15 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 			msu.UpdateMeritWeights(denormalize(gbestPos, variables, scales), iter)
 		}
 
-		// Inertia weight linearly decays from 0.9 to 0.4.
-		w := 0.9 - 0.5*float64(iter)/float64(maxIter)
-		if e.cfg.Inertia > 0 {
-			w = e.cfg.Inertia * (0.9 - 0.4) / 0.729 * (0.9 - 0.5*float64(iter)/float64(maxIter))
-			if w < 0.4 {
-				w = 0.4
-			}
+		// Inertia weight decays linearly from the configured starting value
+		// (default DefaultInertiaHigh = 0.9) down to InertiaLow = 0.4.
+		inertiaHigh := e.cfg.Inertia
+		if inertiaHigh <= 0 {
+			inertiaHigh = DefaultInertiaHigh
+		}
+		w := inertiaHigh - (inertiaHigh-InertiaLow)*float64(iter)/float64(maxIter)
+		if w < InertiaLow {
+			w = InertiaLow
 		}
 
 		for i := 0; i < swarmSize; i++ {

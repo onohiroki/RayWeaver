@@ -207,13 +207,13 @@ func main() {
 		}
 	case "escape":
 		if escapeExtractMode {
-			runEscapeExtract(data, escapeExtractIndex)
+			runEscapeExtract(data, escapeExtractIndex, "escape extract")
 		} else {
 			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassVariables, optEscapeKeepInfeasible, optEscapeDebug, nil)
 		}
 	case "pso":
 		if psoExtractMode {
-			runEscapeExtract(data, psoExtractIndex)
+			runEscapeExtract(data, psoExtractIndex, "pso extract")
 		} else {
 			runPSO(data, optPSOGlassDir, optPSOVerbose, optPSOLogFile, optPSOSaveFile, optPSOPowerSolve, optPSOPowerSolveSurfaces, optPSOGlassVariables, optPSOKeepInfeasible, optPSOSwarmSize, optPSOIterations, optPSOConstraintPenalty)
 		}
@@ -776,7 +776,7 @@ Input YAML — optimization.pso section:
        initial_perturb: 0.05
        swarm_size: 30          # particles per worker
        pso_iterations: 40      # PSO iterations per cycle
-       inertia: 0.729          # velocity inertia (linear decay 0.9->0.4)
+       inertia: 0.9            # starting velocity inertia (linear decay inertia->0.4; 0 = 0.9)
        cognitive: 1.494        # personal-best coefficient (c1)
        social: 1.494           # global-best coefficient (c2)
        velocity_clamp: 0.2     # max velocity as fraction of range
@@ -1243,6 +1243,7 @@ Subcommands:
   plot       Generate SVG cross-section drawing
   optimize   DLS optimization of lens surfaces
   escape     Escape-function global optimization (multiple local minima)
+  pso        PSO escape-function global optimization (particle swarm)
   scale      Scale a system so its EFL equals --efl TARGET
   asphere    Rank surfaces for asphere introduction, estimate initial coefficients
   psf        Point-spread function via direct vector Huygens integration

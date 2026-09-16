@@ -64,8 +64,9 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 		return pso.NewExplorer(psoCfg, seed, psoProgress)
 	}
 
-	// Delegate to the shared escape core with the PSO explorer factory.
-	runEscapeCore(input, gc, verbose, logFile, saveBase, keepInfeasible, false, newExplorer)
+	// Delegate to the shared escape core with the PSO explorer factory. The
+	// command name is stamped into the output metadata as "pso".
+	runEscapeCore(input, gc, verbose, logFile, saveBase, keepInfeasible, false, "pso", newExplorer)
 }
 
 // buildPSOConfig translates the PSOConfig (with CLI overrides already applied)
@@ -96,8 +97,13 @@ func buildPSOConfig(cfg *types.PSOConfig) pso.Config {
 	if cfg.ConstraintPenalty > 0 {
 		c.ConstraintPenalty = cfg.ConstraintPenalty
 	}
-	// Stall params use escape defaults (not from EscapeConfig).
-	c.StallWindowFrac = 0.2
-	c.StallRelTol = 1e-4
+	// Stall params come from the embedded EscapeConfig (YAML-specifiable); the
+	// pso.Config defaults apply when unset.
+	if cfg.StallWindowFrac > 0 {
+		c.StallWindowFrac = cfg.StallWindowFrac
+	}
+	if cfg.StallRelTol > 0 {
+		c.StallRelTol = cfg.StallRelTol
+	}
 	return c
 }

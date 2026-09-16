@@ -1025,8 +1025,9 @@ type PSOConfig struct {
 	// PsoIterations is the number of PSO iterations per cycle (default 40).
 	// Replaces the DLS escape-phase budget (EscapeIterFrac is unused in PSO mode).
 	PsoIterations int `yaml:"pso_iterations,omitempty"`
-	// Inertia is the velocity inertia weight. Linearly decays from 0.9 to 0.4
-	// over the iteration budget. Default 0.729.
+	// Inertia is the starting velocity inertia weight. Linearly decays from
+	// Inertia down to 0.4 over the iteration budget. 0 uses the built-in
+	// starting value 0.9.
 	Inertia float64 `yaml:"inertia,omitempty"`
 	// Cognitive is the personal-best attraction coefficient c1 (default 1.494).
 	Cognitive float64 `yaml:"cognitive,omitempty"`
