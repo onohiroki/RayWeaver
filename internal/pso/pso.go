@@ -6,9 +6,48 @@ package pso
 import (
 	"math"
 	"math/rand"
+	"runtime"
+	"sync"
 
 	"github.com/hiroki/rayweaver/internal/dls"
 )
+
+// particleResult holds the per-particle evaluation output.
+type particleResult struct {
+	f  float64 // escaped merit (fitness)
+	tf float64 // true merit (for gbest selection)
+}
+
+// evalSwarm evaluates all particles in parallel using GOMAXPROCS goroutines.
+// The model's EvaluateMerit is goroutine-safe (applyVariables deep-copies surfaces
+// and creates a local cache each call).
+func (e *Explorer) evalSwarm(model dls.Model, pos [][]float64, variables []dls.VariableInfo, scales []float64, innerMeritFn func([]float64) float64) []particleResult {
+	swarmSize := len(pos)
+	results := make([]particleResult, swarmSize)
+
+	nw := runtime.GOMAXPROCS(0)
+	if nw < 1 {
+		nw = 1
+	}
+
+	sem := make(chan struct{}, nw)
+	var wg sync.WaitGroup
+
+	for i := 0; i < swarmSize; i++ {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			xPhys := denormalize(pos[i], variables, scales)
+			results[i].f = e.fitness(model, xPhys)
+			results[i].tf = innerMeritFn(xPhys)
+		}(i)
+	}
+	wg.Wait()
+
+	return results
+}
 
 // Config holds PSO hyperparameters.
 type Config struct {
@@ -171,14 +210,12 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 	gbestPos := make([]float64, nVars)
 	copy(gbestPos, x0Norm)
 
+	results := e.evalSwarm(model, pos, variables, scales, innerMeritFn)
 	for i := 0; i < swarmSize; i++ {
-		xPhys := denormalize(pos[i], variables, scales)
-		f := e.fitness(model, xPhys)
-		tf := innerMeritFn(xPhys)
-		pbestFit[i] = f
-		if tf < gbestTrueFit {
-			gbestTrueFit = tf
-			gbestFit = f
+		pbestFit[i] = results[i].f
+		if results[i].tf < gbestTrueFit {
+			gbestTrueFit = results[i].tf
+			gbestFit = results[i].f
 			copy(gbestPos, pos[i])
 		}
 	}
@@ -219,6 +256,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 			w = InertiaLow
 		}
 
+		// Phase 1: velocity update + position update (sequential, O(nVars) per particle).
 		for i := 0; i < swarmSize; i++ {
 			r1 := rng.Float64()
 			r2 := rng.Float64()
@@ -228,7 +266,6 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 					e.cfg.Cognitive*r1*(pbestPos[i][j]-pos[i][j]) +
 					e.cfg.Social*r2*(gbestPos[j]-pos[i][j])
 
-				// Clamp velocity.
 				vmax := e.cfg.VelocityClamp
 				if vel[i][j] > vmax {
 					vel[i][j] = vmax
@@ -237,30 +274,26 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 				}
 
 				pos[i][j] += vel[i][j]
-
-				// Clamp position to [0, 1].
 				if pos[i][j] < 0 {
 					pos[i][j] = 0
 				} else if pos[i][j] > 1 {
 					pos[i][j] = 1
 				}
 			}
+		}
 
-			// Evaluate.
-			xPhys := denormalize(pos[i], variables, scales)
-			f := e.fitness(model, xPhys)
-			tf := innerMeritFn(xPhys)
+		// Phase 2: evaluate all particles in parallel (dominant cost).
+		results := e.evalSwarm(model, pos, variables, scales, innerMeritFn)
 
-			// Update personal best (escaped merit — drives particle movement).
-			if f < pbestFit[i] {
-				pbestFit[i] = f
+		// Phase 3: update personal and global bests (sequential, lightweight).
+		for i := 0; i < swarmSize; i++ {
+			if results[i].f < pbestFit[i] {
+				pbestFit[i] = results[i].f
 				copy(pbestPos[i], pos[i])
 			}
-
-			// Update global best (true merit — excludes bump locations).
-			if tf < gbestTrueFit {
-				gbestTrueFit = tf
-				gbestFit = f
+			if results[i].tf < gbestTrueFit {
+				gbestTrueFit = results[i].tf
+				gbestFit = results[i].f
 				copy(gbestPos, pos[i])
 			}
 		}
