@@ -377,10 +377,30 @@ func (w *Wrapper) UpdatePupils(x []float64) {
 // UpdateMeritWeights implements dls.MeritScheduleUpdater by forwarding to the
 // inner model (the Optimizer), so the conditional merit schedule weights are
 // recomputed at the current variable state during each DLS iteration inside
-// escape.
+// escape.  It also forwards the current escape-cycle phase so the "phase"
+// schedule metric can switch mode weights at phase boundaries.
 func (w *Wrapper) UpdateMeritWeights(x []float64, iter int) {
+	if pe, ok := w.inner.(interface{ SetEscapePhase(float64) }); ok {
+		pe.SetEscapePhase(w.phaseMetric())
+	}
 	if msu, ok := w.inner.(dls.MeritScheduleUpdater); ok {
 		msu.UpdateMeritWeights(x, iter)
+	}
+}
+
+// phaseMetric maps the current escape-cycle phase to a numeric value on [0,1]
+// for the "phase" schedule metric: PhaseEscape=0, PhaseGlassSolve=0.5,
+// PhaseClean=1.
+func (w *Wrapper) phaseMetric() float64 {
+	switch w.phase {
+	case PhaseEscape:
+		return 0.0
+	case PhaseGlassSolve:
+		return 0.5
+	case PhaseClean:
+		return 1.0
+	default:
+		return 0.0
 	}
 }
 

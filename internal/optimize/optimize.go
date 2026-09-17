@@ -378,6 +378,12 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 	o.initialMerit = o.EvaluateMerit(x0)
 }
 
+// SetEscapePhase sets the numeric phase metric used by the "phase" schedule
+// metric.  The escape.Wrapper forwards the current escape-cycle phase
+// (PhaseEscape=0, PhaseGlassSolve=0.5, PhaseClean=1) through this setter so
+// the merit schedule can switch mode weights at phase boundaries.
+func (o *Optimizer) SetEscapePhase(p float64) { o.phase = p }
+
 // SetGlassAttraction configures the soft-min potential pulling nd/vd toward
 // real catalog glasses. Call after NewOptimizer and before SetMeritSchedule
 // (the setter computes initialOpticalMerit which is needed for merit_ratio
@@ -682,6 +688,8 @@ func (o *Optimizer) scheduleMetric(x []float64, iter int) float64 {
 	switch o.meritSchedule.metric {
 	case "iteration":
 		return float64(iter)
+	case "phase":
+		return o.phase
 	case "glass_role":
 		configSurfaces, tempGC, _ := o.applyVariables(x)
 		gc := effectiveGC(o.gc, tempGC)
@@ -1208,6 +1216,9 @@ type Optimizer struct {
 	// weights recomputed at the top of every DLS iteration.
 	meritSchedule *meritSchedule
 	modeWeights   map[string]float64
+	// phase holds the current escape-cycle phase metric (0=escape, 0.5=glass,
+	// 1=clean), forwarded by the escape.Wrapper for the "phase" schedule metric.
+	phase float64
 	initialMerit    float64
 	initialSpotRatio float64 // initial spot_diffraction ratio for normalisation
 	modeChanges     int
