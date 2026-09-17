@@ -270,6 +270,7 @@ func runImport(data []byte) {
 			nil,
 			nil,
 			nil,
+			0, 0,
 		)
 
 		outputOut.ChiefRays = make([]types.ChiefRayResult, len(chiefResults))

@@ -518,7 +518,7 @@ func evaluatePupilPosition(fieldAngle, wavelength float64, surfaces []types.Surf
 		types.System{Surfaces: surfaces},
 		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 16, gc,
 		types.NewCircularJones(true), wavelength, false, types.GridPolar,
-		nil, nil, nil, nil,
+		nil, nil, nil, nil, 0, 0,
 	)
 	if len(results) == 0 || results[0].EntrancePupil == nil {
 		return 0
@@ -536,7 +536,7 @@ func evaluatePupilDiameter(fieldAngle, wavelength float64, surfaces []types.Surf
 		types.System{Surfaces: surfaces},
 		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 16, gc,
 		types.NewCircularJones(true), wavelength, false, types.GridPolar,
-		nil, nil, nil, nil,
+		nil, nil, nil, nil, 0, 0,
 	)
 	if len(results) == 0 || results[0].EntrancePupil == nil {
 		return 0
@@ -572,7 +572,7 @@ func evaluateVignetting(fieldAngle, wavelength float64, surfaces []types.Surface
 		types.System{Surfaces: surfaces},
 		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 64, gc,
 		types.NewCircularJones(true), wavelength, false, types.GridPolar,
-		nil, nil, nil, nil,
+		nil, nil, nil, nil, 0, 0,
 	)
 	if len(results) == 0 {
 		return 0
@@ -611,7 +611,7 @@ func evaluateClearAperture(fieldAngle, wavelength float64, surfaces []types.Surf
 		types.System{Surfaces: surfaces},
 		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 64, gc,
 		types.NewCircularJones(true), wavelength, false, types.GridPolar,
-		nil, nil, nil, nil,
+		nil, nil, nil, nil, 0, 0,
 	)
 	if len(results) == 0 {
 		return 0

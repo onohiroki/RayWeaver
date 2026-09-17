@@ -448,7 +448,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 			results := chief.DetermineChiefRaysGrid(
 				sys, fieldDefs, refSurf, numRays, gc,
 				types.NewCircularJones(true), wl,
-				false, types.GridPolar, nil, nil, nil, pupilModel,
+				false, types.GridPolar, nil, nil, nil, pupilModel, 0, 0,
 			)
 			for _, r := range results {
 				total := len(r.GridPoints)
@@ -783,7 +783,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			results := chief.DetermineChiefRaysGrid(
 				sys, fieldDefs, refSurf, numRays, gc,
 				types.NewCircularJones(true), wl,
-				false, types.GridPolar, nil, nil, nil, pupilModel,
+				false, types.GridPolar, nil, nil, nil, pupilModel, 0, 0,
 			)
 			for _, r := range results {
 				total := len(r.GridPoints)

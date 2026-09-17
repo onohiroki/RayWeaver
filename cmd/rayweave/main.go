@@ -1766,6 +1766,7 @@ func runChief(data []byte) {
 		fanCfg,
 		configWavelengths,
 		input.Chief.PupilModel,
+		input.Chief.NumRings, input.Chief.NumSpokes,
 	)
 
 	// --- default clear-aperture: size unset-diameter surfaces ---
@@ -1798,7 +1799,7 @@ func runChief(data []byte) {
 			results = chief.DetermineChiefRaysGrid(
 				selectedSys, fields, input.Chief.ReferenceSurface, *clearApertureRays,
 				gc, pol, wavelength, dumpMap, input.Chief.GridType, pt, fanCfg, configWavelengths,
-				input.Chief.PupilModel,
+				input.Chief.PupilModel, input.Chief.NumRings, input.Chief.NumSpokes,
 			)
 		}
 		// The chief grid points already fill the aperture stop, so trace them

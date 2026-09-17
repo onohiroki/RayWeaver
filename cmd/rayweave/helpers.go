@@ -378,7 +378,7 @@ func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, ref
 	results := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: surfaces},
 		fields, refSurface, numRays, gc, pol,
-		types.DefaultWavelength, false, gridType, passThrough, nil, nil, pupilModel,
+		types.DefaultWavelength, false, gridType, passThrough, nil, nil, pupilModel, 0, 0,
 	)
 	for _, r := range results {
 		if r.EntrancePupil != nil {

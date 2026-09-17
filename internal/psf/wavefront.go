@@ -58,7 +58,7 @@ func ComputeFieldGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	// The grid itself is polarization-independent; use a reference RCP.
 	pol := types.NewCircularJones(true)
 	results := chief.DetermineChiefRaysGrid(system, []types.FieldDef{fd}, refSurface,
-		numRays, gc, pol, wavelength, false, gridType, nil, nil, nil, pupilModel)
+		numRays, gc, pol, wavelength, false, gridType, nil, nil, nil, pupilModel, 0, 0)
 	if len(results) == 0 {
 		return nil, fmt.Errorf("chief returned no grid for field")
 	}

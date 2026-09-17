@@ -2037,6 +2037,7 @@ func listFields(input types.Input, format string) {
 		nil,
 		nil,
 		input.Chief.PupilModel,
+		input.Chief.NumRings, input.Chief.NumSpokes,
 	)
 
 	// Build rows.

@@ -406,6 +406,8 @@ type ChiefInput struct {
 	StopSurface      int                `yaml:"stop_surface,omitempty"`
 	PupilModel       *PupilModelConfig  `yaml:"pupil_model,omitempty"`
 	NumRays          int                `yaml:"num_rays"`
+	NumRings         int                `yaml:"num_rings,omitempty"`
+	NumSpokes        int                `yaml:"num_spokes,omitempty"`
 	GridType         GridType           `yaml:"grid_type,omitempty"`
 	DumpMap          bool               `yaml:"dump_map,omitempty"`
 	PassThrough      *PassThroughTarget `yaml:"pass_through,omitempty"`
@@ -782,6 +784,8 @@ type OptimizationConfig struct {
 	Tol              float64                `yaml:"tol,omitempty"`
 	Epsilon          float64                `yaml:"epsilon,omitempty"`
 	NumRays          int                    `yaml:"num_rays,omitempty"`
+	NumRings         int                    `yaml:"num_rings,omitempty"`
+	NumSpokes        int                    `yaml:"num_spokes,omitempty"`
 	MuConMax         float64                `yaml:"mu_con_max,omitempty"`
 	ApertureMargin   float64                `yaml:"aperture_margin,omitempty"`
 	ApertureMarginMM float64                `yaml:"aperture_margin_mm,omitempty"`
@@ -1889,6 +1893,8 @@ type PSFConfig struct {
 	GridSize         int       `yaml:"grid_size,omitempty"`
 	HalfWidth        float64   `yaml:"half_width,omitempty"`
 	NumRays          int       `yaml:"num_rays,omitempty"`
+	NumRings         int       `yaml:"num_rings,omitempty"`
+	NumSpokes        int       `yaml:"num_spokes,omitempty"`
 	Fields           []int     `yaml:"fields,omitempty"`
 	Wavelengths      []float64 `yaml:"wavelengths,omitempty"`
 	Polarization     string    `yaml:"polarization,omitempty"`
@@ -1929,6 +1935,10 @@ type WavefrontConfig struct {
 	ReferenceSurface int `yaml:"reference_surface,omitempty"`
 	// NumRays is the entrance-pupil grid ray count per field (default 400).
 	NumRays int `yaml:"num_rays,omitempty"`
+	// NumRings overrides the polar-grid ring count (0 = derive from NumRays).
+	NumRings int `yaml:"num_rings,omitempty"`
+	// NumSpokes overrides the polar-grid spoke count (0 = derive from NumRays).
+	NumSpokes int `yaml:"num_spokes,omitempty"`
 	// Fields selects which chief field indices to analyse (default: all).
 	Fields []int `yaml:"fields,omitempty"`
 	// Wavelengths in mm (default: chief wavelengths, else 587.56 nm).

@@ -59,26 +59,56 @@ type GridPoint struct {
 	Area float64
 }
 
+// ResolvePolarDims resolves the effective ring and spoke counts for a polar
+// grid from the total ray count and optional overrides.  When both numRings
+// and numSpokes are zero the legacy sqrt convention applies (n = sqrt(numRays),
+// rings = spokes = n).  The centre point (chief ray) is always included, so
+// the total number of rays is rings×spokes + 1.
+func ResolvePolarDims(numRays, numRings, numSpokes int) (rings, spokes int) {
+	if numRings > 0 && numSpokes > 0 {
+		return numRings, numSpokes
+	}
+	if numRings > 0 {
+		sp := (numRays - 1) / numRings
+		if sp < 2 {
+			sp = 2
+		}
+		return numRings, sp
+	}
+	if numSpokes > 0 {
+		r := (numRays - 1) / numSpokes
+		if r < 1 {
+			r = 1
+		}
+		return r, numSpokes
+	}
+	// Legacy: sqrt convention (numRays includes the centre).
+	n := int(math.Sqrt(float64(numRays)))
+	if n < 2 {
+		n = 2
+	}
+	return n, n
+}
+
 // PupilGrid distributes sample coordinates within the disk of apertureRadius.
 // Supported patterns: GridSquare (uniform n×n, rim-trimmed), GridHex (dense
 // hex covering the full disk rim, as used by the clear-aperture/beam-envelope
-// measurements) and GridPolar (n rings × n sectors, linearly spaced in radius,
-// rotated by rotationOffset). Square/hex samples carry area 1; polar samples
-// carry the rotational weight r/apertureRadius so area-weighted sums recover
-// the disk area.
-func PupilGrid(numRays int, apertureRadius float64, gridType types.GridType, rotationOffset float64) []GridPoint {
-	numRays = int(math.Sqrt(float64(numRays)))
-	if numRays < 2 {
-		numRays = 2
-	}
-
+// measurements) and GridPolar (rings×spokes sectors plus a centre point,
+// linearly spaced in radius, rotated by rotationOffset).  Square/hex samples
+// carry area 1; polar samples carry the rotational weight r/apertureRadius
+// so area-weighted sums recover the disk area.  The centre point has area 0.
+func PupilGrid(numRays int, apertureRadius float64, gridType types.GridType, rotationOffset float64, rings, spokes int) []GridPoint {
 	switch gridType {
 	case types.GridSquare:
+		n := int(math.Sqrt(float64(numRays)))
+		if n < 2 {
+			n = 2
+		}
 		var out []GridPoint
-		for i := 0; i < numRays; i++ {
-			for j := 0; j < numRays; j++ {
-				x := (float64(i)+0.5)/float64(numRays)*2 - 1
-				y := (float64(j)+0.5)/float64(numRays)*2 - 1
+		for i := 0; i < n; i++ {
+			for j := 0; j < n; j++ {
+				x := (float64(i)+0.5)/float64(n)*2 - 1
+				y := (float64(j)+0.5)/float64(n)*2 - 1
 				if x*x+y*y <= 1 {
 					out = append(out, GridPoint{X: x * apertureRadius, Y: y * apertureRadius, Area: 1})
 				}
@@ -87,7 +117,7 @@ func PupilGrid(numRays int, apertureRadius float64, gridType types.GridType, rot
 		return out
 
 	case types.GridHex:
-		n := numRays + 1
+		n := int(math.Sqrt(float64(numRays))) + 1
 		dy := apertureRadius * 2 / float64(n)
 		dx := dy * math.Sqrt(3) / 2
 		var out []GridPoint
@@ -111,13 +141,29 @@ func PupilGrid(numRays int, apertureRadius float64, gridType types.GridType, rot
 		return out
 
 	default: // GridPolar
+		explicitRings := rings > 0 || spokes > 0
+		if rings <= 0 || spokes <= 0 {
+			rings, spokes = ResolvePolarDims(numRays, rings, spokes)
+		}
 		var out []GridPoint
-		for i := 0; i < numRays; i++ {
-			r := (float64(i) + 0.5) / float64(numRays) * apertureRadius
-			area := r / apertureRadius
-			for j := 0; j < numRays; j++ {
-				theta := 2*math.Pi*(float64(j)+0.5)/float64(numRays) + rotationOffset
-				out = append(out, GridPoint{X: r * math.Cos(theta), Y: r * math.Sin(theta), Area: area})
+		if explicitRings {
+			out = append(out, GridPoint{X: 0, Y: 0, Area: 0}) // centre (chief ray)
+			for i := 0; i < rings; i++ {
+				r := (float64(i) + 1) / float64(rings+1) * apertureRadius
+				area := r / apertureRadius
+				for j := 0; j < spokes; j++ {
+					theta := 2*math.Pi*float64(j)/float64(spokes) + rotationOffset
+					out = append(out, GridPoint{X: r * math.Cos(theta), Y: r * math.Sin(theta), Area: area})
+				}
+			}
+		} else {
+			for i := 0; i < rings; i++ {
+				r := (float64(i) + 0.5) / float64(rings) * apertureRadius
+				area := r / apertureRadius
+				for j := 0; j < spokes; j++ {
+					theta := 2*math.Pi*(float64(j)+0.5)/float64(spokes) + rotationOffset
+					out = append(out, GridPoint{X: r * math.Cos(theta), Y: r * math.Sin(theta), Area: area})
+				}
 			}
 		}
 		return out

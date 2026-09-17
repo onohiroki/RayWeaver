@@ -36,6 +36,8 @@ const (
 // chief/DLS/wavefront/asphere paths already build them, so a bundle stays
 // consistent across every consumer of this package.
 type LaunchSpec struct {
+	NumRings  int // 0 = derive from NumRays via ResolvePolarDims
+	NumSpokes int // 0 = derive from NumRays or NumRings
 	NumRays           int
 	GridType          types.GridType
 	RotationOffset    float64
@@ -88,7 +90,7 @@ func GridCentre(rayDir types.Vec3, pupilZ, zStart float64) (x, y float64) {
 // applying the vignetting clip and the OPL normalization selection. It does
 // not trace anything. The returned samples are in a deterministic order.
 func Launch(spec LaunchSpec) []Sample {
-	pts := raymath.PupilGrid(spec.NumRays, spec.ApertureRadius, spec.GridType, spec.RotationOffset)
+	pts := raymath.PupilGrid(spec.NumRays, spec.ApertureRadius, spec.GridType, spec.RotationOffset, spec.NumRings, spec.NumSpokes)
 	wavefrontC := types.Vec3{X: spec.CentreX, Y: spec.CentreY, Z: spec.ZStart}
 
 	var out []Sample

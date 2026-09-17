@@ -539,7 +539,7 @@ func computePupilZs(surfaces []types.Surface, fields []Field, gc *glass.Catalog,
 		types.System{Surfaces: surfaces},
 		fdefs, refSurface, 200, gc,
 		types.NewCircularJones(true), types.DefaultWavelength, false,
-		types.GridPolar, nil, nil, nil, nil,
+		types.GridPolar, nil, nil, nil, nil, 0, 0,
 	)
 	anyPupil := false
 	for i, r := range results {

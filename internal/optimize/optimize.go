@@ -1107,7 +1107,7 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 		results := chief.DetermineChiefRaysGrid(
 			types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
 			cfg.fieldDefs, cfg.refSurface, o.numRays, gc, pol,
-			effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridPolar, nil, nil, nil, nil,
+			effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridPolar, nil, nil, nil, nil, 0, 0,
 		)
 		for i, r := range results {
 			if r.EntrancePupil == nil {
@@ -3526,7 +3526,7 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 	results := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
 		cfg.fieldDefs, cfg.refSurface, o.extentRays(512), gc, pol,
-		effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridHex, nil, nil, nil, nil,
+		effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridHex, nil, nil, nil, nil, 0, 0,
 	)
 	engine := ray.NewEngine(gc, nil)
 	surface.Precompute(surfaces)
