@@ -87,7 +87,17 @@ func (p *Progress) Event(name string, fields map[string]any) {
 
 // eventKeyOrder is the fixed key presentation order shared by the full and
 // compact streams.
-var eventKeyOrder = []string{"cycle", "elapsed", "time", "event", "merit", "worker", "index", "kind", "dls_status", "phase", "distance_threshold", "h", "h_mult", "w", "w_mult", "max_cycles", "max_seconds", "workers", "escaped", "recorded", "best_merit", "cycles", "escapes", "minima"}
+var eventKeyOrder = []string{
+	"cycle", "elapsed", "time", "event", "merit", "worker", "index", "kind",
+	"dls_status", "phase", "distance_threshold", "h", "h_mult", "w", "w_mult",
+	"max_cycles", "max_seconds", "workers", "escaped", "recorded", "best_merit",
+	"cycles", "escapes", "minima",
+	// PSO-specific keys.
+	"iter", "improve", "restarts", "gbest_merit", "gbest_true",
+	"swarm_mean", "swarm_min", "swarm_max",
+	"swarm_size", "n_vars", "pso_iterations", "inertia",
+	"has_both_fn", "skip_constraints", "light_aperture", "reinitialized",
+}
 
 func inEventKeyOrder(k string) bool {
 	for _, kk := range eventKeyOrder {

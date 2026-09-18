@@ -263,6 +263,19 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		}
 	}
 
+	// Emit pso_init: configuration snapshot at the start of the PSO phase.
+	if e.progress != nil {
+		e.progress("pso_init", map[string]any{
+			"swarm_size":       swarmSize,
+			"n_vars":           nVars,
+			"pso_iterations":   maxIter,
+			"inertia":          e.cfg.Inertia,
+			"has_both_fn":      bothFn != nil,
+			"skip_constraints": skipConstraints,
+			"light_aperture":   true,
+		})
+	}
+
 	// Stall detection state (sliding window: compare gbest every stallWindow
 	// iterations, not every iteration — matching the DLS solver's pattern).
 	bestFitWindowAgo := gbestFit
@@ -330,6 +343,9 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		results := e.evalSwarm(model, pos, variables, scales, innerMeritFn, bothFn, skipConstraints)
 
 		// Phase 3: update personal and global bests (sequential, lightweight).
+		swarmSum := 0.0
+		swarmMin := math.MaxFloat64
+		swarmMax := -math.MaxFloat64
 		for i := 0; i < swarmSize; i++ {
 			if results[i].f < pbestFit[i] {
 				pbestFit[i] = results[i].f
@@ -340,6 +356,27 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 				gbestFit = results[i].f
 				copy(gbestPos, pos[i])
 			}
+			swarmSum += results[i].f
+			if results[i].f < swarmMin {
+				swarmMin = results[i].f
+			}
+			if results[i].f > swarmMax {
+				swarmMax = results[i].f
+			}
+		}
+
+		// Emit pso_iter every 10 iterations for progress tracking.
+		if e.progress != nil && (iter+1)%10 == 0 {
+			e.progress("pso_iter", map[string]any{
+				"iter":         iter + 1,
+				"gbest_merit":  gbestFit,
+				"gbest_true":   gbestTrueFit,
+				"swarm_mean":   swarmSum / float64(swarmSize),
+				"swarm_min":    swarmMin,
+				"swarm_max":    swarmMax,
+				"restarts":     restarts,
+				"phase":        "pso",
+			})
 		}
 
 		// Stall detection (sliding window: check every stallWindow iterations).
@@ -404,6 +441,15 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 						}
 					}
 					restarts++
+					// Emit pso_restart event.
+					if e.progress != nil {
+						e.progress("pso_restart", map[string]any{
+							"iter":          iter,
+							"restarts":      restarts,
+							"gbest_merit":   gbestFit,
+							"reinitialized": half,
+						})
+					}
 					// Reset stall window.
 					bestFitWindowAgo = gbestFit
 					lastCheckIter = iter
