@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/rand"
 	"runtime"
+	"sort"
 	"sync"
 
 	"github.com/hiroki/rayweaver/internal/dls"
@@ -224,6 +225,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 	// iterations, not every iteration — matching the DLS solver's pattern).
 	bestFitWindowAgo := gbestFit
 	lastCheckIter := 0
+	restarts := 0
 	stallWindow := int(float64(maxIter) * e.cfg.StallWindowFrac)
 	if stallWindow < 2 {
 		stallWindow = 2
@@ -299,6 +301,8 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		}
 
 		// Stall detection (sliding window: check every stallWindow iterations).
+		// On stall, reinitialize the worst 50% of the swarm around gbest
+		// and continue exploring instead of returning early.
 		if iter-lastCheckIter >= stallWindow {
 			if lastCheckIter > 0 {
 				denom := math.Abs(bestFitWindowAgo)
@@ -309,12 +313,59 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 				if relImprove < e.cfg.StallRelTol {
 					if e.progress != nil {
 						e.progress("pso_stall", map[string]any{
-							"iter":    iter,
-							"merit":   gbestFit,
-							"improve": relImprove,
+							"iter":     iter,
+							"merit":    gbestFit,
+							"improve":  relImprove,
+							"restarts": restarts,
 						})
 					}
-					return e.buildResult(model, variables, scales, gbestPos, gbestFit, iter+1, "converged")
+					// Reinitialize worst 50% of swarm around gbest.
+					half := swarmSize / 2
+					if half < 1 {
+						half = 1
+					}
+					// Build index list sorted by fitness (worst first).
+					idx := make([]int, swarmSize)
+					for i := range idx {
+						idx[i] = i
+					}
+					sort.Slice(idx, func(a, b int) bool {
+						return results[idx[a]].f > results[idx[b]].f
+					})
+					restartSpread := e.cfg.InitSpread * 2
+					if restartSpread > 0.3 {
+						restartSpread = 0.3
+					}
+					for k := 0; k < half; k++ {
+						i := idx[k]
+						for j := 0; j < nVars; j++ {
+							pos[i][j] = gbestPos[j] + (rng.Float64()*2-1)*restartSpread
+							if pos[i][j] < 0 {
+								pos[i][j] = 0
+							} else if pos[i][j] > 1 {
+								pos[i][j] = 1
+							}
+							vel[i][j] = 0
+							pbestPos[i][j] = pos[i][j]
+						}
+					}
+					// Re-evaluate reinitialized particles.
+					reResults := e.evalSwarm(model, pos, variables, scales, innerMeritFn)
+					for k := 0; k < half; k++ {
+						i := idx[k]
+						results[i] = reResults[i]
+						pbestFit[i] = reResults[i].f
+						if reResults[i].tf < gbestTrueFit {
+							gbestTrueFit = reResults[i].tf
+							gbestFit = reResults[i].f
+							copy(gbestPos, pos[i])
+						}
+					}
+					restarts++
+					// Reset stall window.
+					bestFitWindowAgo = gbestFit
+					lastCheckIter = iter
+					continue
 				}
 			}
 			bestFitWindowAgo = gbestFit

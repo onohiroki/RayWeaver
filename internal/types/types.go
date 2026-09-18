@@ -1016,6 +1016,12 @@ type EscapeConfig struct {
 	// required for a converged point to be classified as feasible. Points with
 	// fewer valid rays are marked infeasible. 0 uses the built-in default (0.3).
 	MinThroughputRatio float64 `yaml:"min_throughput_ratio,omitempty"`
+	// ValidationNumRays overrides the pupil-grid ray count used by the
+	// post-DLS feasibility validation. When unset (0), the validation uses
+	// optimization.num_rays (the same resolution as the DLS merit grid).
+	// A higher value (e.g. 64) checks throughput at finer sampling, preventing
+	// valid low-ray-count solutions from being rejected as infeasible.
+	ValidationNumRays int `yaml:"validation_num_rays,omitempty"`
 }
 
 // PSOConfig configures the Particle Swarm Optimization escape-function

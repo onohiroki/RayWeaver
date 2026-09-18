@@ -419,6 +419,14 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		if numRays <= 0 {
 			numRays = 64
 		}
+		// ValidationNumRays overrides the ray count for the feasibility
+		// validation grid. A higher value (e.g. 64) prevents valid
+		// low-ray-count solutions from being rejected as infeasible due
+		// to statistical grid sampling at the DLS ray count.
+		validationNumRays := numRays
+		if input.Optimization.Escape != nil && input.Optimization.Escape.ValidationNumRays > 0 {
+			validationNumRays = input.Optimization.Escape.ValidationNumRays
+		}
 		wl := effectiveReferenceWavelength(input.Chief)
 		pupilModel := input.Chief.PupilModel
 		throughputThreshold := 0.3
@@ -446,7 +454,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 			// Trace pupil grids for each field and count valid rays.
 			sys := types.System{Surfaces: surf, StopSurface: stopSurface}
 			results := chief.DetermineChiefRaysGrid(
-				sys, fieldDefs, refSurf, numRays, gc,
+				sys, fieldDefs, refSurf, validationNumRays, gc,
 				types.NewCircularJones(true), wl,
 				false, types.GridPolar, nil, nil, nil, pupilModel, 0, 0,
 			)
@@ -752,6 +760,10 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		if numRays <= 0 {
 			numRays = 64
 		}
+		validationNumRays := numRays
+		if input.Optimization.Escape != nil && input.Optimization.Escape.ValidationNumRays > 0 {
+			validationNumRays = input.Optimization.Escape.ValidationNumRays
+		}
 		wl := effectiveReferenceWavelength(input.Chief)
 		pupilModel := input.Chief.PupilModel
 		throughputThreshold := 0.3
@@ -781,7 +793,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			}
 			sys := types.System{Surfaces: surf, StopSurface: primaryStop}
 			results := chief.DetermineChiefRaysGrid(
-				sys, fieldDefs, refSurf, numRays, gc,
+				sys, fieldDefs, refSurf, validationNumRays, gc,
 				types.NewCircularJones(true), wl,
 				false, types.GridPolar, nil, nil, nil, pupilModel, 0, 0,
 			)
