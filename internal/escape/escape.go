@@ -307,6 +307,19 @@ func (w *Wrapper) GlassPhaseEnabled() bool {
 	return w.glassPhase
 }
 
+// SetLightApertureSizing enables or disables the light aperture sizing mode
+// on the inner Optimizer. When enabled, the hex-grid ray count for
+// auto-aperture beam-extent measurement is reduced from max(numRays, 256)
+// to numRays, trading aperture precision for speed during PSO exploration.
+func (w *Wrapper) SetLightApertureSizing(on bool) {
+	type setter interface {
+		SetLightApertureSizing(bool)
+	}
+	if s, ok := w.inner.(setter); ok {
+		s.SetLightApertureSizing(on)
+	}
+}
+
 // EvaluateMerit returns the inner merit plus all escape terms.
 func (w *Wrapper) EvaluateMerit(x []float64) float64 {
 	return w.inner.EvaluateMerit(x) + w.EscapeMerit(x)
@@ -327,6 +340,19 @@ func (w *Wrapper) ComputeResiduals(x []float64) []float64 {
 
 func (w *Wrapper) ComputeConstraints(x []float64) []float64 {
 	return w.inner.ComputeConstraints(x)
+}
+
+// HasConstraints reports whether the inner model has any active constraints.
+// When false, the PSO fitness evaluator can skip the redundant
+// ComputeConstraints call (which re-runs applyVariables + sizeAutoApertures).
+func (w *Wrapper) HasConstraints() bool {
+	type constraintChecker interface {
+		HasConstraints() bool
+	}
+	if cc, ok := w.inner.(constraintChecker); ok {
+		return cc.HasConstraints()
+	}
+	return true // conservative: assume constraints exist
 }
 
 // UpdateRegionActiveSet implements dls.RegionActiveUpdater by forwarding to
@@ -409,6 +435,18 @@ func (w *Wrapper) phaseMetric() float64 {
 // on true merit rather than escape-augmented merit.
 func (w *Wrapper) InnerMerit(x []float64) float64 {
 	return w.inner.EvaluateMerit(x)
+}
+
+// EvaluateMeritBoth evaluates both the escaped merit (inner + escape bumps)
+// and the inner merit (without bumps) in a single call. The inner model's
+// EvaluateMerit is called once; the escape bumps are added separately.
+// Used by the PSO explorer to avoid the 2× ray-trace cost of calling
+// EvaluateMerit and InnerMerit independently.
+func (w *Wrapper) EvaluateMeritBoth(x []float64) (escapedMerit, innerMerit float64) {
+	inner := w.inner.EvaluateMerit(x)
+	escapedMerit = inner + w.EscapeMerit(x)
+	innerMerit = inner
+	return
 }
 
 // evaluateMainMerit evaluates the ordinary (non-glass) merit at x even when

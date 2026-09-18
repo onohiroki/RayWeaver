@@ -22,7 +22,15 @@ type particleResult struct {
 // evalSwarm evaluates all particles in parallel using GOMAXPROCS goroutines.
 // The model's EvaluateMerit is goroutine-safe (applyVariables deep-copies surfaces
 // and creates a local cache each call).
-func (e *Explorer) evalSwarm(model dls.Model, pos [][]float64, variables []dls.VariableInfo, scales []float64, innerMeritFn func([]float64) float64) []particleResult {
+//
+// When bothFn is non-nil, it is used instead of fitness+innerMeritFn: the
+// combined function returns (escapedMerit, innerMerit) in a single ray-trace
+// pass, avoiding the 2× EvaluateMerit cost.
+//
+// When skipConstraints is true, ComputeConstraints is skipped entirely (the
+// inner model has no active constraints, so the call would be a no-op that
+// still pays for applyVariables + sizeAutoApertures with a nil cache).
+func (e *Explorer) evalSwarm(model dls.Model, pos [][]float64, variables []dls.VariableInfo, scales []float64, innerMeritFn func([]float64) float64, bothFn func([]float64) (float64, float64), skipConstraints bool) []particleResult {
 	swarmSize := len(pos)
 	results := make([]particleResult, swarmSize)
 
@@ -41,8 +49,22 @@ func (e *Explorer) evalSwarm(model dls.Model, pos [][]float64, variables []dls.V
 			defer wg.Done()
 			defer func() { <-sem }()
 			xPhys := denormalize(pos[i], variables, scales)
-			results[i].f = e.fitness(model, xPhys)
-			results[i].tf = innerMeritFn(xPhys)
+			if bothFn != nil {
+				// ① Single ray-trace pass for both escaped and inner merit.
+				escaped, inner := bothFn(xPhys)
+				// Add constraint penalty if applicable.
+				if !skipConstraints && e.cfg.ConstraintPenalty > 0 {
+					constraints := model.ComputeConstraints(xPhys)
+					for _, c := range constraints {
+						escaped += e.cfg.ConstraintPenalty * c * c
+					}
+				}
+				results[i].f = escaped
+				results[i].tf = inner
+			} else {
+				results[i].f = e.fitness(model, xPhys)
+				results[i].tf = innerMeritFn(xPhys)
+			}
 		}(i)
 	}
 	wg.Wait()
@@ -141,6 +163,13 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 	swarmSize := e.cfg.SwarmSize
 	maxIter := e.cfg.PsoIterations
 
+	// ③ Enable light aperture sizing: reduce hex-grid rays from 256 to
+	// numRays for faster PSO exploration.
+	if las, ok := model.(interface{ SetLightApertureSizing(bool) }); ok {
+		las.SetLightApertureSizing(true)
+		defer las.SetLightApertureSizing(false)
+	}
+
 	// Compute scales (max-min) for normalization.
 	scales := make([]float64, nVars)
 	for i, v := range variables {
@@ -200,6 +229,19 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		innerMeritFn = ime.InnerMerit
 	}
 
+	// ① Detect EvaluateMeritBoth: single ray-trace pass for escaped + inner merit.
+	var bothFn func([]float64) (float64, float64)
+	if bfn, ok := model.(interface{ EvaluateMeritBoth([]float64) (float64, float64) }); ok {
+		bothFn = bfn.EvaluateMeritBoth
+	}
+
+	// ② Detect HasConstraints: skip redundant ComputeConstraints when the
+	// inner model has no active constraints.
+	skipConstraints := false
+	if hc, ok := model.(interface{ HasConstraints() bool }); ok {
+		skipConstraints = !hc.HasConstraints()
+	}
+
 	// Evaluate initial swarm.
 	// Update pupil at x0 first.
 	if pu, ok := model.(dls.PupilUpdater); ok {
@@ -211,7 +253,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 	gbestPos := make([]float64, nVars)
 	copy(gbestPos, x0Norm)
 
-	results := e.evalSwarm(model, pos, variables, scales, innerMeritFn)
+	results := e.evalSwarm(model, pos, variables, scales, innerMeritFn, bothFn, skipConstraints)
 	for i := 0; i < swarmSize; i++ {
 		pbestFit[i] = results[i].f
 		if results[i].tf < gbestTrueFit {
@@ -285,7 +327,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		}
 
 		// Phase 2: evaluate all particles in parallel (dominant cost).
-		results := e.evalSwarm(model, pos, variables, scales, innerMeritFn)
+		results := e.evalSwarm(model, pos, variables, scales, innerMeritFn, bothFn, skipConstraints)
 
 		// Phase 3: update personal and global bests (sequential, lightweight).
 		for i := 0; i < swarmSize; i++ {
@@ -350,7 +392,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 						}
 					}
 					// Re-evaluate reinitialized particles.
-					reResults := e.evalSwarm(model, pos, variables, scales, innerMeritFn)
+					reResults := e.evalSwarm(model, pos, variables, scales, innerMeritFn, bothFn, skipConstraints)
 					for k := 0; k < half; k++ {
 						i := idx[k]
 						results[i] = reResults[i]

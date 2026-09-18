@@ -1201,6 +1201,10 @@ type Optimizer struct {
 	// skipAttraction/hull are temporary flags for sensitivity computation.
 	skipAttraction bool
 	skipHull       bool
+	// lightApertureSizing reduces the hex-grid ray count for auto-aperture
+	// beam-extent measurement from max(numRays, 256) to numRays. Used by the
+	// PSO explorer where speed matters more than aperture precision.
+	lightApertureSizing bool
 	// roleTargets holds the per-config, per-surface glass-role classification
 	// (paraxial.ElementRole) frozen at the top of each DLS iteration by
 	// updateGlassRoles, so the base-point and Jacobian residuals share one role
@@ -1417,6 +1421,14 @@ func isGlassParam(param string) bool {
 // search) and return its best-so-far state instead of a converged result.
 func (o *Optimizer) SetStop(stop <-chan struct{}) {
 	o.stop = stop
+}
+
+// SetLightApertureSizing enables or disables the light aperture sizing mode.
+// When enabled, the hex-grid ray count for auto-aperture beam-extent
+// measurement is reduced from max(numRays, 256) to numRays, trading
+// aperture precision for speed during PSO exploration.
+func (o *Optimizer) SetLightApertureSizing(on bool) {
+	o.lightApertureSizing = on
 }
 
 // SetApertureMarginMM sets the physical clearance (mm) added to each
@@ -3187,8 +3199,12 @@ func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glas
 // grid must resolve the beam edge well enough that the sized auto_aperture
 // diameters cover the true bundle (a coarse grid under-measures off-axis
 // extents and the resulting lens vignettes the beam). floor raises a low
-// numRays grid to the requested minimum density.
+// numRays grid to the requested minimum density. When lightApertureSizing is
+// set, the floor is skipped (PSO trades aperture precision for speed).
 func (o *Optimizer) extentRays(floor int) int {
+	if o.lightApertureSizing {
+		return o.numRays
+	}
 	if o.numRays >= floor {
 		return o.numRays
 	}
@@ -3375,6 +3391,19 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 		}
 	}
 	return allC
+}
+
+// HasConstraints reports whether any config has active constraints. When false,
+// ComputeConstraints can be skipped (it would return an empty slice anyway).
+func (o *Optimizer) HasConstraints() bool {
+	for ci := range o.configs {
+		for _, c := range o.configs[ci].constraints {
+			if c.Active {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ConstraintViolation reports an active constraint whose weighted residual
