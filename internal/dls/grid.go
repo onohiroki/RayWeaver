@@ -28,6 +28,78 @@ func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurf
 	return perSurfMax
 }
 
+// TraceFieldExtents4Rays measures the per-surface max radial ray extent for
+// one field using 8 rays from the entrance pupil: 4 cardinal
+// (top/bottom/left/right) and 4 diagonal (45°). The entrance pupil position
+// (dynamic pupil Z) and diameter (paraxial EPD) fully determine the ray
+// origins and directions. Aperture and glass-path checks are disabled so the
+// true geometric beam envelope is measured independent of surface clipping.
+func TraceFieldExtents4Rays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, workers int) map[int]float64 {
+	engine := ray.NewEngine(gc, nil)
+	p := BuildPath(surfaces)
+
+	rayDir := raymath.DirectionFromField(fieldAngle, fieldDir)
+
+	apertureRadius := ApertureRadiusForGrid(surfaces, stopSurface, wavelength, gc, apertureMargin, 0)
+	if apertureRadius <= 0 {
+		return nil
+	}
+
+	zStart := -100.0
+	cx, cy := pupil.GridCentre(rayDir, pupilZ, zStart)
+	wavefrontC := types.Vec3{X: cx, Y: cy, Z: zStart}
+
+	r := apertureRadius
+	d := r * math.Sqrt(2) / 2
+	type card struct{ px, py float64 }
+	cards := [8]card{
+		{0, +r},
+		{0, -r},
+		{+r, 0},
+		{-r, 0},
+		{+d, +d},
+		{-d, +d},
+		{+d, -d},
+		{-d, -d},
+	}
+
+	samples := make([]pupil.Sample, 8)
+	for i, c := range cards {
+		origin := types.Vec3{X: cx + c.px, Y: cy + c.py, Z: zStart}
+		samples[i] = pupil.Sample{
+			PupilX:             c.px,
+			PupilY:             c.py,
+			Area:               r,
+			Origin:             origin,
+			Dir:                rayDir,
+			OPLDelta:           wavefrontC.Subtract(origin).Dot(rayDir),
+			SkipApertureCheck:  true,
+			SkipGlassPathCheck: true,
+		}
+	}
+
+	pupil.Trace(engine, p, surfaces, samples, wavelength, types.NewCircularJones(true), workers)
+
+	perSurfMax := make(map[int]float64)
+	for _, s := range samples {
+		if !s.OK {
+			continue
+		}
+		for _, sr := range s.Surfaces {
+			ax := math.Abs(sr.Position.X)
+			ay := math.Abs(sr.Position.Y)
+			e := ax
+			if ay > e {
+				e = ay
+			}
+			if e > perSurfMax[sr.SurfaceID] {
+				perSurfMax[sr.SurfaceID] = e
+			}
+		}
+	}
+	return perSurfMax
+}
+
 func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int, gridType types.GridType, epdOverride float64) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)

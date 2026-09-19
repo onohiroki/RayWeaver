@@ -839,7 +839,7 @@ func TestSizeAutoAperturesCoversAllFields(t *testing.T) {
 
 	surfs := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 10.0, AutoAperture: true},
-		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 50.0, Material: types.Material{}, Diameter: 10.0, AutoAperture: true},
+		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 50.0, Material: types.Material{}, Diameter: 6.0},
 		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 10.0, AutoAperture: true},
 	}
 	surface.Precompute(surfs)

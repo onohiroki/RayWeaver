@@ -3192,7 +3192,7 @@ func (o *Optimizer) fieldSizingAngle(cfg *config, f *types.FieldItem, surfaces [
 // argument is 0), so the pupil diameter override is not applied here.
 func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glass.Catalog, term *meritTerm, angle float64, p appliedPupil) map[int]float64 {
 	pupilZ := o.gridCentring(cfg, p, angle)
-	return dls.TraceFieldGridExtents(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.extentRays(256), o.gridRotation, o.gridWorkers(), 0)
+	return dls.TraceFieldExtents4Rays(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.gridWorkers())
 }
 
 // extentRays returns the ray count for a beam-extent measurement. The extent
