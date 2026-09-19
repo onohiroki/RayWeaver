@@ -28,13 +28,13 @@ func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurf
 	return perSurfMax
 }
 
-// TraceFieldExtents4Rays measures the per-surface max radial ray extent for
+// TraceFieldExtents8Rays measures the per-surface max radial ray extent for
 // one field using 8 rays from the entrance pupil: 4 cardinal
 // (top/bottom/left/right) and 4 diagonal (45°). The entrance pupil position
 // (dynamic pupil Z) and diameter (paraxial EPD) fully determine the ray
 // origins and directions. Aperture and glass-path checks are disabled so the
 // true geometric beam envelope is measured independent of surface clipping.
-func TraceFieldExtents4Rays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, workers int) map[int]float64 {
+func TraceFieldExtents8Rays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, workers int) map[int]float64 {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
