@@ -56,9 +56,12 @@ func Solve(m Model) Result {
 		xNorm[i] = (xPhys0[i] - variables[i].Min) / scales[i]
 	}
 
-	c0 := m.ComputeConstraints(xPhys0)
+	hasConstraints := hasModelConstraints(m)
+	var c0 []float64
+	if hasConstraints {
+		c0 = m.ComputeConstraints(xPhys0)
+	}
 	nCon := len(c0)
-	hasConstraints := nCon > 0
 
 	lambdas := make([]float64, nCon)
 	cPrev := make([]float64, nCon)
@@ -658,7 +661,11 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 	r0 := m.ComputeResiduals(xPhys)
 	nOpt := len(r0)
 
-	c0 := m.ComputeConstraints(xPhys)
+	skipCon := !hasModelConstraints(m)
+	var c0 []float64
+	if !skipCon {
+		c0 = m.ComputeConstraints(xPhys)
+	}
 	nCon := len(c0)
 
 	J_opt := make([][]float64, nOpt)
@@ -681,9 +688,13 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 			xMinus[j] -= epsilon * scales[j]
 
 			rPlus := m.ComputeResiduals(xPlus)
-			cPlus := m.ComputeConstraints(xPlus)
 			rMinus := m.ComputeResiduals(xMinus)
-			cMinus := m.ComputeConstraints(xMinus)
+
+			var cPlus, cMinus []float64
+			if !skipCon {
+				cPlus = m.ComputeConstraints(xPlus)
+				cMinus = m.ComputeConstraints(xMinus)
+			}
 
 			twoEps := 2.0 * epsilon
 			for i := 0; i < nOpt; i++ {
@@ -708,7 +719,11 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 			xPert[j] += epsilon * scales[j]
 
 			rPert := m.ComputeResiduals(xPert)
-			cPert := m.ComputeConstraints(xPert)
+
+			var cPert []float64
+			if !skipCon {
+				cPert = m.ComputeConstraints(xPert)
+			}
 
 			for i := 0; i < nOpt; i++ {
 				diff := rPert[i] - r0[i]

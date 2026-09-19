@@ -130,7 +130,7 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 			return o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
 		}
 		if isWavefrontKind(term.kind) {
-			return o.evaluateWavefrontTerm(cfg, term, surfaces, gc, p)
+			return o.evaluateWavefrontTerm(cfg, term, surfaces, gc, cache, p)
 		}
 		// glass_role reads the per-iteration frozen role targets (computed in
 		// UpdatePupils) when available so the DLS base-point and Jacobian
@@ -166,7 +166,7 @@ func isWavefrontKind(kind string) bool {
 // (dls.pupilZ) so the DLS base point and its Jacobian perturbations share one
 // pupil otherwise. A degenerate fit (no grid, too few valid rays) returns the
 // bounded degenerate penalty so the solver is pushed away rather than misled.
-func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, p appliedPupil) float64 {
+func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
 	refSurface := cfg.refSurface
 	if refSurface <= 0 || refSurface >= surfaces[len(surfaces)-1].ID {
 		// The wavefront reference surface must lie before the image plane: a
@@ -203,38 +203,41 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 	// entry (static stop path) or the angle is not an exact map key.
 	frozenZ := o.gridCentring(cfg, p, angle)
 
-	// fit evaluates the term's quantity on the given (frozen or dynamic)
-	// pupil. The closure keeps the frozen→dynamic fallback and the bounded
-	// degenerate penalty shared by both the paraboloid and sphere kinds.
-	fit := func(frozenPupilZ *float64) (float64, error) {
-		switch term.kind {
-		case MeritWavefrontSphereRMS, MeritWavefrontSpherePV:
-			rms, pv, err := wavefront.FitFieldSphereRMS(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel)
-			if err != nil {
-				return 0, err
-			}
-			if term.kind == MeritWavefrontSpherePV {
-				return pv, nil
-			}
-			return rms, nil
-		default:
-			pab, err := wavefront.FitFieldParaboloid(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel)
-			if err != nil {
-				return 0, err
-			}
-			return wavefrontCoeff(term.kind, pab), nil
+	// lookup returns the cached wavefront entry for the given pupil mode,
+	// computing and caching it on miss. The frozen→dynamic fallback is
+	// handled by the caller: a frozen failure is cached so the same frozen
+	// key is not retried within the same eval.
+	lookup := func(frozen bool, frozenPupilZ *float64) wavefront.Entry {
+		if cache == nil {
+			// No cache: compute directly.
+			entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel)
+			return entry
 		}
+		fz := 0.0
+		if frozenPupilZ != nil {
+			fz = *frozenPupilZ
+		}
+		key := wfKey{
+			configID:   cfg.id,
+			angle:      angle,
+			wavelength: term.wavelength,
+			refSurface: refSurface,
+			frozen:     frozen,
+			frozenZ:    fz,
+		}
+		if e, ok := cache.wavefront[key]; ok {
+			return *e
+		}
+		entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel)
+		cache.wavefront[key] = &entry
+		return entry
 	}
 
-	val, err := fit(&frozenZ)
-	if err != nil {
-		// Fall back to the dynamic pupil (chief resolves the entrance pupil
-		// itself). The frozen grid does not apply the fixed-surface vignetting
-		// cut, so a strongly off-axis field whose beam clips a fixed aperture
-		// ends up with too few valid rays; the chief-derived grid clips
-		// correctly and matches the standalone `wavefront` command exactly.
-		val, err = fit(nil)
-		if err != nil {
+	// Try frozen pupil first, fall back to dynamic pupil on failure.
+	entry := lookup(true, &frozenZ)
+	if entry.Failed {
+		entry = lookup(false, nil)
+		if entry.Failed {
 			// A wavefront fit that fails even with the dynamic pupil (e.g. a
 			// strongly off-axis field whose beam is fully clipped) returns the
 			// bounded degenerate penalty instead of the legacy 1e6 sentinel,
@@ -243,7 +246,16 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 			return o.wavefrontDegenerate
 		}
 	}
-	return val
+
+	// Derive the term value from the cached entry.
+	switch term.kind {
+	case MeritWavefrontSphereRMS:
+		return entry.Statistics.RMS
+	case MeritWavefrontSpherePV:
+		return entry.Statistics.PV
+	default:
+		return wavefrontCoeff(term.kind, entry.Paraboloid)
+	}
 }
 
 // wavefrontCoeff returns the paraboloid coefficient a wavefront merit kind

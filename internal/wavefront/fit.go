@@ -146,3 +146,32 @@ func frozenPupilGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 		EntrancePupil: &types.Pupil{Center: types.Vec3{X: pupilOffsetX, Y: pupilOffsetY, Z: pupilZ}},
 	}, nil
 }
+
+// Entry is the cached result of a wavefront analysis for one (field,
+// wavelength). It holds the paraboloid fit and reference-sphere statistics so
+// that multiple wavefront merit terms (astigmatism, sphere_rms, etc.) on the
+// same field can share a single expensive trace+fit.
+type Entry struct {
+	Paraboloid Paraboloid
+	Statistics Statistics
+	Failed     bool
+}
+
+// AnalyzeField traces the wavefront for one (field, wavelength) on the
+// reference surface and returns the paraboloid + reference-sphere statistics.
+// It is the exported, cache-friendly counterpart of FitFieldParaboloid /
+// FitFieldSphereRMS that returns both results so multiple merit terms can
+// share a single trace. When frozenPupilZ is non-nil the grid is centred on
+// the given pupil Z (frozen pupil); when nil the dynamic pupil is settled.
+func AnalyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
+	refSurface, numRays int, wavelength float64, apertureMargin float64,
+	frozenPupilZ *float64, pupilModel *types.PupilModelConfig) (Entry, error) {
+	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel)
+	if err != nil {
+		return Entry{Failed: true}, err
+	}
+	return Entry{
+		Paraboloid: an.Paraboloid,
+		Statistics: an.Statistics,
+	}, nil
+}

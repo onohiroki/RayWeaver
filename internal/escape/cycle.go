@@ -309,13 +309,14 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			currentX = c.perturb(currentX, cyc, restartAmp)
 			continue
 		}
+		escapeMerit := c.wrapper.InnerMerit(escapedX)
 		fields := map[string]any{
 			"cycle":      cyc,
 			"worker":     c.workerID,
 			"phase":      phaseName,
 			"status":     "accepted",
 			"dls_status": escRes.Status,
-			"merit":      c.wrapper.InnerMerit(escapedX),
+			"merit":      escapeMerit,
 		}
 		enrich(fields, c.debugCycleFields(escapedX, escRes, phaseName))
 		c.progress.Event("cycle", fields)
@@ -328,7 +329,6 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		// feeds the clean DLS start; the clean solution is what the store
 		// records, so the escape distance/store stay in the full variable-space
 		// dimension regardless of the phase's reduced active set.
-		escapeMerit := c.wrapper.InnerMerit(escapedX)
 		cleanStart := escapedX
 		if c.wrapper.GlassPhaseEnabled() {
 			c.wrapper.SetEscapes(nil)

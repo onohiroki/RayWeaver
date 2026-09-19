@@ -131,7 +131,7 @@ func (s *Store) sameAs(x []float64, p Point) bool {
 func (s *Store) Add(p Point) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.fingerprint != nil {
+	if s.fingerprint != nil && s.params.DtFp > 0 {
 		p.Fingerprint = s.fingerprint(p.X)
 	}
 	p.H = s.params.H
@@ -163,7 +163,7 @@ func (s *Store) Replace(idx int, p Point) (Point, bool) {
 	}
 	cur.X = p.X
 	cur.Merit = p.Merit
-	if s.fingerprint != nil {
+	if s.fingerprint != nil && s.params.DtFp > 0 {
 		cur.Fingerprint = s.fingerprint(p.X)
 	}
 	s.versions[idx]++

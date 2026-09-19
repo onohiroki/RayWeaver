@@ -321,7 +321,7 @@ func TestOptimizerDegeneratePenalty(t *testing.T) {
 	// against a plane makes every grid ray miss the system even after the
 	// adaptive pupil probe) must return the bounded wavefront penalty,
 	// never the 1e6 sentinel.
-	wf := opt.evaluateWavefrontTerm(ccfg, &meritTerm{kind: MeritWavefrontAstigmatism, fieldAngle: 89.9, wavelength: 0.00058756}, ccfg.surfaces, gc, appliedPupil{})
+	wf := opt.evaluateWavefrontTerm(ccfg, &meritTerm{kind: MeritWavefrontAstigmatism, fieldAngle: 89.9, wavelength: 0.00058756}, ccfg.surfaces, gc, nil, appliedPupil{})
 	if wf != 0.001 {
 		t.Fatalf("degenerate wavefront = %v, want bounded penalty 0.001", wf)
 	}
@@ -878,7 +878,7 @@ func TestSizeAutoAperturesCoversAllFields(t *testing.T) {
 
 	// The corner wavefront fit must run (real value, not the 0.001 penalty).
 	term := &ccfg.meritTerms[0]
-	val := opt.evaluateWavefrontTerm(ccfg, term, resized, gc, appliedPupil{})
+	val := opt.evaluateWavefrontTerm(ccfg, term, resized, gc, nil, appliedPupil{})
 	if val == 0.001 {
 		t.Fatalf("corner wavefront fit collapsed to the degenerate penalty after sizing")
 	}
@@ -916,7 +916,7 @@ func TestWavefrontTermFieldVignetting(t *testing.T) {
 	if ccfg.meritTerms[0].fieldIndex != 0 {
 		t.Fatalf("NewOptimizer fieldIndex = %d, want 0", ccfg.meritTerms[0].fieldIndex)
 	}
-	real := opt.evaluateWavefrontTerm(ccfg, &ccfg.meritTerms[0], surfs, gc, appliedPupil{})
+	real := opt.evaluateWavefrontTerm(ccfg, &ccfg.meritTerms[0], surfs, gc, nil, appliedPupil{})
 	if real >= 1.0 {
 		t.Fatalf("wavefront term without vignetting = %v, want a real value (< 1)", real)
 	}
@@ -934,7 +934,7 @@ func TestWavefrontTermFieldVignetting(t *testing.T) {
 	}
 	optV := NewOptimizer(cfgV)
 	ccfgV := optV.primaryConfig()
-	penalty := optV.evaluateWavefrontTerm(ccfgV, &ccfgV.meritTerms[0], surfs, gc, appliedPupil{})
+	penalty := optV.evaluateWavefrontTerm(ccfgV, &ccfgV.meritTerms[0], surfs, gc, nil, appliedPupil{})
 	if penalty != 0.001 {
 		t.Fatalf("wavefront term with full-clip vignetting = %v, want the degenerate penalty 0.001", penalty)
 	}

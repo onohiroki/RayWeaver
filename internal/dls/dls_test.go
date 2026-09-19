@@ -200,6 +200,57 @@ func TestComputeJacobiansParallelDeterminism(t *testing.T) {
 	}
 }
 
+// noConstraintModel is a polyModel that claims to have no constraints via
+// ConstraintChecker. ComputeConstraints is never expected to be called.
+type noConstraintModel struct {
+	polyModel
+	constraintCalls int
+}
+
+func (m *noConstraintModel) HasConstraints() bool { return false }
+
+func (m *noConstraintModel) ComputeConstraints(x []float64) []float64 {
+	m.constraintCalls++
+	panic("ComputeConstraints called despite HasConstraints()=false")
+}
+
+// TestSolveSkipsConstraintsWhenNone verifies that when the model reports
+// HasConstraints()=false, the solver never calls ComputeConstraints during
+// the entire solve (initial eval, Jacobian base, and every Jacobian column).
+func TestSolveSkipsConstraintsWhenNone(t *testing.T) {
+	m := &noConstraintModel{polyModel: polyModel{n: 3}}
+	_ = Solve(m)
+	if m.constraintCalls != 0 {
+		t.Errorf("ComputeConstraints called %d times, want 0", m.constraintCalls)
+	}
+}
+
+// TestComputeJacobiansSkipsConstraints verifies computeJacobians does not
+// call ComputeConstraints when the model reports no constraints.
+func TestComputeJacobiansSkipsConstraints(t *testing.T) {
+	m := &noConstraintModel{polyModel: polyModel{n: 3}}
+	xNorm := []float64{0.3, 0.5, 0.7}
+	variables := m.Variables()
+	scales := make([]float64, len(variables))
+	for i, v := range variables {
+		scales[i] = v.Max - v.Min
+	}
+	J_opt, r, J_con, c := computeJacobians(m, xNorm, variables, scales, 1e-6, false, 1, nil)
+	if m.constraintCalls != 0 {
+		t.Errorf("ComputeConstraints called %d times, want 0", m.constraintCalls)
+	}
+	if len(c) != 0 {
+		t.Errorf("constraint baseline len = %d, want 0", len(c))
+	}
+	if len(J_con) != 0 {
+		t.Errorf("constraint Jacobian len = %d, want 0", len(J_con))
+	}
+	if len(J_opt) == 0 {
+		t.Error("residual Jacobian is empty")
+	}
+	_ = r
+}
+
 func equalFloats(a, b []float64) bool {
 	if len(a) != len(b) {
 		return false

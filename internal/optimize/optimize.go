@@ -2904,14 +2904,28 @@ type gridKey struct {
 // on the Optimizer) to stay race-free; the cached traces are pure functions of
 // the evaluation's surfaces and frozen pupil.
 type evalGridCache struct {
-	spots   map[gridKey][]dls.IPoint
-	extents map[gridKey]map[int]float64
+	spots     map[gridKey][]dls.IPoint
+	extents   map[gridKey]map[int]float64
+	wavefront map[wfKey]*wavefront.Entry
+}
+
+// wfKey identifies a wavefront analysis within a single merit evaluation.
+// Two wavefront terms on the same (field, wavelength, refSurface) share the
+// underlying trace when their frozen/dynamic pupil state matches.
+type wfKey struct {
+	configID   string
+	angle      float64
+	wavelength float64
+	refSurface int
+	frozen     bool
+	frozenZ    float64
 }
 
 func newEvalGridCache() *evalGridCache {
 	return &evalGridCache{
-		spots:   make(map[gridKey][]dls.IPoint),
-		extents: make(map[gridKey]map[int]float64),
+		spots:     make(map[gridKey][]dls.IPoint),
+		extents:   make(map[gridKey]map[int]float64),
+		wavefront: make(map[wfKey]*wavefront.Entry),
 	}
 }
 
@@ -3122,6 +3136,9 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 // otherwise undersize the apertures to the on-axis beam and clip the off-axis
 // wavefront grid, collapsing the corner fit.
 func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) {
+	if len(o.initialDiameters) == 0 {
+		return
+	}
 	extents := make(map[int]float64)
 
 	// The extents are geometric (aperture-clipping skipped), so one

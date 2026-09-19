@@ -114,6 +114,24 @@ type ModeChangeLogger interface {
 	LogModeChange(iter int, from, to string, weights map[string]float64, metric float64)
 }
 
+// ConstraintChecker is an optional Model capability: report whether the model
+// has any active constraints. When false the solver can skip
+// ComputeConstraints entirely, avoiding a full applyVariables + surface sizing
+// pass per variable per Jacobian iteration.
+type ConstraintChecker interface {
+	HasConstraints() bool
+}
+
+// hasModelConstraints reports whether the model has active constraints.
+// When the model does not implement ConstraintChecker, the function returns
+// true (conservative: assume constraints exist).
+func hasModelConstraints(m Model) bool {
+	if cc, ok := m.(ConstraintChecker); ok {
+		return cc.HasConstraints()
+	}
+	return true
+}
+
 type Model interface {
 	Variables() []VariableInfo
 	InitialState() []float64

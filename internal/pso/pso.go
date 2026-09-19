@@ -291,7 +291,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		// Check stop channel (via model.Options().Stop).
 		opts := model.Options()
 		if stopped(opts.Stop) {
-			return e.buildResult(model, variables, scales, gbestPos, gbestFit, iter, "interrupted")
+			return e.buildResult(model, variables, scales, gbestPos, gbestFit, gbestTrueFit, iter, "interrupted")
 		}
 
 		// Update pupil at global best.
@@ -461,7 +461,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		}
 	}
 
-	return e.buildResult(model, variables, scales, gbestPos, gbestFit, maxIter, "max_iterations")
+	return e.buildResult(model, variables, scales, gbestPos, gbestFit, gbestTrueFit, maxIter, "max_iterations")
 }
 
 // fitness computes the penalized fitness: merit + penalty * sum(c_j^2).
@@ -477,10 +477,8 @@ func (e *Explorer) fitness(model dls.Model, xPhys []float64) float64 {
 }
 
 // buildResult constructs a dls.Result from the global best.
-func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, scales, gbestNorm []float64, gbestFit float64, iterations int, status string) dls.Result {
+func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, scales, gbestNorm []float64, gbestFit, gbestTrueFit float64, iterations int, status string) dls.Result {
 	gbestPhys := denormalize(gbestNorm, variables, scales)
-	// Compute inner merit (without constraints) for AfterMerit.
-	afterMerit := model.EvaluateMerit(gbestPhys)
 
 	vars := make([]dls.VariableState, len(variables))
 	for i, v := range variables {
@@ -495,7 +493,7 @@ func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, sc
 
 	return dls.Result{
 		BeforeMerit: gbestFit,
-		AfterMerit:  afterMerit,
+		AfterMerit:  gbestTrueFit,
 		Iterations:  iterations,
 		Status:      status,
 		Variables:   vars,
