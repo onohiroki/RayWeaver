@@ -34,13 +34,13 @@ func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurf
 // (dynamic pupil Z) and diameter (paraxial EPD) fully determine the ray
 // origins and directions. Aperture and glass-path checks are disabled so the
 // true geometric beam envelope is measured independent of surface clipping.
-func TraceFieldExtents8Rays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, workers int) map[int]float64 {
+func TraceFieldExtents8Rays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, workers int, epdOverride float64) map[int]float64 {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
 	rayDir := raymath.DirectionFromField(fieldAngle, fieldDir)
 
-	apertureRadius := ApertureRadiusForGrid(surfaces, stopSurface, wavelength, gc, apertureMargin, 0)
+	apertureRadius := ApertureRadiusForGrid(surfaces, stopSurface, wavelength, gc, apertureMargin, epdOverride)
 	if apertureRadius <= 0 {
 		return nil
 	}
@@ -193,23 +193,13 @@ func ApertureRadiusForGrid(surfaces []types.Surface, stopSurface int, wavelength
 	if epdOverride > 0 {
 		return (epdOverride / 2) * margin
 	}
-	sys := types.System{Surfaces: surfaces, StopSurface: stopSurface}
-	res := paraxial.Compute(sys, wavelength, gc, 0, nil)
-	rPar := 0.0
-	if res.EntrancePupilDiameter > 0 {
-		rPar = (res.EntrancePupilDiameter / 2) * margin
-	}
+	rPar := paraxial.EntrancePupilRadius(surfaces, stopSurface, wavelength, gc) * margin
 	if stopSurface > 0 && rPar > 0 {
 		return rPar
 	}
-	// Stop-free: paraxial.Compute infers EPD via EntrancePupilRadiusStopFree,
-	// so rPar is the beam-aware radius (margin-scaled).
 	if rPar > 0 {
 		return rPar
 	}
-	// Fallback: estimate from the first glass/mirror surface radius.
-	// This covers the case where paraxial.Compute returns EPD=0 (e.g.
-	// surfaces not yet precomputed or a degenerate system).
 	rFixed := paraxial.EntrancePupilRadiusStopFree(surfaces, wavelength, gc)
 	if rFixed > 0 {
 		return rFixed

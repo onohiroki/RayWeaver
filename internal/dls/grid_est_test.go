@@ -224,3 +224,38 @@ func TestApertureRadiusConsistentWithParaxial(t *testing.T) {
 		t.Errorf("paraxial.Compute EPD=%v != 2*ApertureRadiusForGrid=%v", pr.EntrancePupilDiameter, epFromGrid)
 	}
 }
+
+func TestEntrancePupilRadiusMatchesCompute(t *testing.T) {
+	// Stopped doublet: Surface 2 is the stop with a fixed aperture.
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 1.0 / 60.0, Thickness: 3.0, Material: types.Material{ND: 1.64, VD: 55.0}, Diameter: 36.0, AutoAperture: true},
+		{ID: 2, Type: types.Sphere, Curvature: 0.0, Thickness: 10.0, Material: types.Material{}, Diameter: 15.8},
+		{ID: 3, Type: types.Sphere, Curvature: -1.0 / 60.0, Thickness: 0.5, Material: types.Material{}, Diameter: 36.0, AutoAperture: true},
+	}
+	surface.Precompute(surfaces)
+	gc := glass.NewCatalog()
+	wl := 0.00058756
+
+	// Test with explicit stop on Surface 2.
+	sys := types.System{Surfaces: surfaces, StopSurface: 2}
+	pr := paraxial.Compute(sys, wl, gc, 0, nil)
+	if pr.EntrancePupilDiameter <= 0 {
+		t.Fatalf("paraxial.Compute EPD = %v, want > 0 for stopped system", pr.EntrancePupilDiameter)
+	}
+
+	rEPD := paraxial.EntrancePupilRadius(surfaces, 2, wl, gc)
+	t.Logf("EntrancePupilRadius (stop) = %v, Compute EPD/2 = %v", rEPD, pr.EntrancePupilDiameter/2)
+
+	if math.Abs(rEPD-pr.EntrancePupilDiameter/2) > 1e-9 {
+		t.Errorf("EntrancePupilRadius=%v != Compute EPD/2=%v", rEPD, pr.EntrancePupilDiameter/2)
+	}
+
+	// Test without stop (stop-free path).
+	rStopFree := paraxial.EntrancePupilRadius(surfaces, 0, wl, gc)
+	prStopFree := paraxial.Compute(types.System{Surfaces: surfaces}, wl, gc, 0, nil)
+	if prStopFree.EntrancePupilDiameter > 0 {
+		if math.Abs(rStopFree-prStopFree.EntrancePupilDiameter/2) > 1e-9 {
+			t.Errorf("EntrancePupilRadius(stop-free)=%v != Compute EPD/2=%v", rStopFree, prStopFree.EntrancePupilDiameter/2)
+		}
+	}
+}

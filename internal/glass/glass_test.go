@@ -1020,7 +1020,7 @@ func TestCatalogRefractiveIndexCache(t *testing.T) {
 	}
 }
 
-// TestCatalogRefractiveIndexCacheConcurrent exercises the sync.Map cache from
+// TestCatalogRefractiveIndexCacheConcurrent exercises the refractive-index cache from
 // multiple goroutines to confirm no races or corrupt values.
 func TestCatalogRefractiveIndexCacheConcurrent(t *testing.T) {
 	c := NewCatalog()

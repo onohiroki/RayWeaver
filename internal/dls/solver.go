@@ -658,6 +658,14 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 		xPhys[j] = sanitize(xPhys[j])
 	}
 
+	// Bracket the Jacobian sweep so the model can cache per-iteration work
+	// (e.g. auto-aperture sizing) at the base point. EndJacobian runs via
+	// defer so an early return or panic never leaves the cache active.
+	if js, ok := m.(JacobianScoper); ok {
+		js.BeginJacobian(xPhys)
+		defer js.EndJacobian()
+	}
+
 	r0 := m.ComputeResiduals(xPhys)
 	nOpt := len(r0)
 

@@ -7,6 +7,8 @@ import (
 	"math"
 	"os"
 	"runtime"
+	"runtime/debug"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,6 +78,10 @@ func main() {
 	optPowerSolve := false
 	optPowerSolveSurfaces := ""
 	optGlassVariables := false
+	optOptimizeCPUProfile := ""
+	optOptimizeMemProfile := ""
+	optOptimizeGorProfile := ""
+	optOptimizeGOGC := 0
 	subcommand := args[0]
 	currentCmd = subcommand
 	optSnapMode := false
@@ -95,6 +101,10 @@ func main() {
 			fs.BoolVar(&optPowerSolve, "power-solve", false, "preserve each listed element's thin-lens power (hard solve) while only the glass dispersions are free")
 			fs.StringVar(&optPowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs whose curvature is recomputed to hold the containing element's thin-lens power at its initial value (with --power-solve)")
 			fs.BoolVar(&optGlassVariables, "glass-variables", false, "auto-generate nd/vd optimization variables for every refractive lens element (the merit is left unchanged)")
+			fs.StringVar(&optOptimizeCPUProfile, "cpuprofile", "", "write a CPU profile (pprof) to FILE")
+			fs.StringVar(&optOptimizeMemProfile, "memprofile", "", "write a heap profile (pprof) to FILE at exit")
+			fs.StringVar(&optOptimizeGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
+			fs.IntVar(&optOptimizeGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
 			fs.Parse(args[1:])
 			args = append([]string{"optimize"}, fs.Args()...)
 		}
@@ -112,6 +122,10 @@ func main() {
 	optEscapeGlassVariables := false
 	optEscapeKeepInfeasible := false
 	optEscapeDebug := false
+	optEscapeCPUProfile := ""
+	optEscapeMemProfile := ""
+	optEscapeGorProfile := ""
+	optEscapeGOGC := 0
 	if subcommand == "escape" {
 		if len(args) >= 2 && args[1] == "extract" {
 			escapeExtractMode = true
@@ -127,6 +141,10 @@ func main() {
 			fs.BoolVar(&optEscapeGlassVariables, "glass-variables", false, "auto-generate nd/vd optimization variables for every refractive lens element (the merit is left unchanged)")
 			fs.BoolVar(&optEscapeKeepInfeasible, "keep-infeasible", false, "include infeasible basins in stdout YAML (default: discard)")
 			fs.BoolVar(&optEscapeDebug, "debug", false, "emit all DLS-internal JSONL events (iter, final, adaptive_damping, mode_change) plus enriched cycle diagnostics")
+			fs.StringVar(&optEscapeCPUProfile, "cpuprofile", "", "write a CPU profile (pprof) to FILE")
+			fs.StringVar(&optEscapeMemProfile, "memprofile", "", "write a heap profile (pprof) to FILE at exit")
+			fs.StringVar(&optEscapeGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
+			fs.IntVar(&optEscapeGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
 			fs.Parse(args[1:])
 		}
 	}
@@ -145,6 +163,10 @@ func main() {
 	optPSOSwarmSize := 0
 	optPSOIterations := 0
 	optPSOConstraintPenalty := 0.0
+	optPSOCPUProfile := ""
+	optPSOMemProfile := ""
+	optPSOGorProfile := ""
+	optPSOGOGC := 0
 	if subcommand == "pso" {
 		if len(args) >= 2 && args[1] == "extract" {
 			psoExtractMode = true
@@ -162,6 +184,10 @@ func main() {
 			fs.IntVar(&optPSOSwarmSize, "swarm-size", 0, "number of particles per worker (overrides optimization.pso.swarm_size)")
 			fs.IntVar(&optPSOIterations, "pso-iterations", 0, "PSO iterations per cycle (overrides optimization.pso.pso_iterations)")
 			fs.Float64Var(&optPSOConstraintPenalty, "constraint-penalty", 0, "constraint penalty weight (overrides optimization.pso.constraint_penalty)")
+			fs.StringVar(&optPSOCPUProfile, "cpuprofile", "", "write a CPU profile (pprof) to FILE")
+			fs.StringVar(&optPSOMemProfile, "memprofile", "", "write a heap profile (pprof) to FILE at exit")
+			fs.StringVar(&optPSOGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
+			fs.IntVar(&optPSOGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
 			fs.Parse(args[1:])
 		}
 	}
@@ -203,19 +229,31 @@ func main() {
 		if optSnapMode {
 			runOptimizeSnap(data, optGlassDir)
 		} else {
+			applyGCPercent(optOptimizeGOGC)
+			stop := startCPUProfile(optOptimizeCPUProfile)
 			runOptimize(data, optVerbose, optLogFile, optGlassDir, optExcludeParams, optPowerSolve, optPowerSolveSurfaces, optGlassVariables)
+			stop()
+			writeMemGorProfiles(optOptimizeMemProfile, optOptimizeGorProfile)
 		}
 	case "escape":
 		if escapeExtractMode {
 			runEscapeExtract(data, escapeExtractIndex, "escape extract")
 		} else {
+			applyGCPercent(optEscapeGOGC)
+			stop := startCPUProfile(optEscapeCPUProfile)
 			runEscape(data, optEscapeGlassDir, optEscapeVerbose, optEscapeLogFile, optEscapeSaveFile, optEscapePowerSolve, optEscapePowerSolveSurfaces, optEscapeGlassVariables, optEscapeKeepInfeasible, optEscapeDebug, nil)
+			stop()
+			writeMemGorProfiles(optEscapeMemProfile, optEscapeGorProfile)
 		}
 	case "pso":
 		if psoExtractMode {
 			runEscapeExtract(data, psoExtractIndex, "pso extract")
 		} else {
+			applyGCPercent(optPSOGOGC)
+			stop := startCPUProfile(optPSOCPUProfile)
 			runPSO(data, optPSOGlassDir, optPSOVerbose, optPSOLogFile, optPSOSaveFile, optPSOPowerSolve, optPSOPowerSolveSurfaces, optPSOGlassVariables, optPSOKeepInfeasible, optPSOSwarmSize, optPSOIterations, optPSOConstraintPenalty)
+			stop()
+			writeMemGorProfiles(optPSOMemProfile, optPSOGorProfile)
 		}
 	case "import":
 		runImport(data)
@@ -246,6 +284,68 @@ func main() {
 // printf check does not mistake format directives in the text for a Printf).
 func printHelpText(s string) {
 	fmt.Print(s)
+}
+
+// startCPUProfile begins a pprof CPU profile writing to path and returns a stop
+// function that flushes and closes it. A no-op is returned when path is empty.
+// Used to wrap the long-running subcommands (escape/optimize/pso).
+func startCPUProfile(path string) func() {
+	if path == "" {
+		return func() {}
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		errOut("Error: --cpuprofile: %v", err)
+		os.Exit(1)
+	}
+	if err := pprof.StartCPUProfile(f); err != nil {
+		errOut("Error: --cpuprofile: %v", err)
+		os.Exit(1)
+	}
+	return func() {
+		pprof.StopCPUProfile()
+		f.Close()
+	}
+}
+
+// applyGCPercent sets the GC target for the compute-heavy commands
+// (escape/optimize/pso). An explicit --gogc wins; otherwise a higher target
+// (400) trades a little memory for a large reduction in GC, scavenger (madvise)
+// and allocator overhead. The GOGC environment variable, when set, is respected.
+func applyGCPercent(gogc int) {
+	if gogc > 0 {
+		debug.SetGCPercent(gogc)
+		return
+	}
+	if os.Getenv("GOGC") == "" {
+		debug.SetGCPercent(400)
+	}
+}
+
+// writeMemGorProfiles writes the heap and goroutine profiles to the given paths
+// (skipping empty ones). Called after the CPU profile has been stopped.
+func writeMemGorProfiles(memPath, gorPath string) {
+	if memPath != "" {
+		f, err := os.Create(memPath)
+		if err != nil {
+			errOut("Error: --memprofile: %v", err)
+			os.Exit(1)
+		}
+		runtime.GC()
+		pprof.WriteHeapProfile(f)
+		f.Close()
+	}
+	if gorPath != "" {
+		f, err := os.Create(gorPath)
+		if err != nil {
+			errOut("Error: --gorprofile: %v", err)
+			os.Exit(1)
+		}
+		if p := pprof.Lookup("goroutine"); p != nil {
+			p.WriteTo(f, 1)
+		}
+		f.Close()
+	}
 }
 
 func printHelp(cmd string) {
@@ -547,6 +647,10 @@ Sub-subcommand:
 Options:
   --verbose        print per-iteration progress to stderr (JSONL)
   --log FILE       write per-iteration progress to FILE (JSONL)
+  --cpuprofile FILE  write a CPU profile (pprof) to FILE
+  --memprofile FILE  write a heap profile (pprof) to FILE at exit
+  --gorprofile FILE  write a goroutine profile to FILE at exit
+  --gogc N           GC target percentage (0 = 400 for compute commands)
 
 Input YAML — optimization section:
 
@@ -662,6 +766,10 @@ Options:
   --glass-variables auto-generate nd/vd optimization variables for every
                    refractive lens element (the merit is left unchanged)
   --glass-dir DIR    AGF glass catalog directory
+  --cpuprofile FILE  write a CPU profile (pprof) to FILE
+  --memprofile FILE  write a heap profile (pprof) to FILE at exit
+  --gorprofile FILE  write a goroutine profile to FILE at exit
+  --gogc N           GC target percentage (0 = 400 for compute commands)
 
 A SIGINT/SIGTERM stops the search in three stages: the first signal waits for
 the current DLS run to finish (everything saved, interrupted: true, exit 0); the
@@ -752,6 +860,10 @@ Options:
   --swarm-size N     number of particles per worker (overrides optimization.pso.swarm_size)
   --pso-iterations N PSO iterations per cycle (overrides optimization.pso.pso_iterations)
   --constraint-penalty W constraint penalty weight (overrides optimization.pso.constraint_penalty)
+  --cpuprofile FILE  write a CPU profile (pprof) to FILE
+  --memprofile FILE  write a heap profile (pprof) to FILE at exit
+  --gorprofile FILE  write a goroutine profile to FILE at exit
+  --gogc N           GC target percentage (0 = 400 for compute commands)
 
 Sub-commands:
   pso (default)       run the PSO global optimisation loop

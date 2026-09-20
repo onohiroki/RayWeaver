@@ -229,9 +229,14 @@ type Ray struct {
 	Jones       JonesVector        `yaml:"-"`
 	// InitialField optionally overrides the 3D input electric field. When nil,
 	// the field is initialised from Jones as (Ex, Ey, 0) in global coordinates.
-	InitialField       *Vec3C `yaml:"-"`
-	SkipGlassPathCheck bool   `yaml:"-"`
-	SkipApertureCheck  bool   `yaml:"-"`
+	InitialField *Vec3C `yaml:"-"`
+	// IndexByMaterial, when non-nil, is a read-only map from a surface material
+	// to its refractive index at Wavelength, shared by every ray of one trace so
+	// TraceRay need not hit the catalog's locked index cache per surface per
+	// ray. Callers tracing many rays through the same system should fill it once.
+	IndexByMaterial    map[Material]float64 `yaml:"-"`
+	SkipGlassPathCheck bool                 `yaml:"-"`
+	SkipApertureCheck  bool                 `yaml:"-"`
 	// SkipAutoApertureCheck skips the aperture check on auto_aperture surfaces
 	// only, so their diameter can be measured from the true beam extent rather
 	// than from a self-clipped set of rays. Fixed (auto_aperture: false)
@@ -514,14 +519,14 @@ type RayPath struct {
 }
 
 type MeritTerm struct {
-	Kind        string  `yaml:"kind"`
-	Field       int     `yaml:"field"`
-	Wavelength  float64 `yaml:"wavelength"`
+	Kind                 string  `yaml:"kind"`
+	Field                int     `yaml:"field"`
+	Wavelength           float64 `yaml:"wavelength"`
 	ComparisonWavelength float64 `yaml:"comparison_wavelength,omitempty"`
-	Target      float64 `yaml:"target,omitempty"`
+	Target               float64 `yaml:"target,omitempty"`
 	// Frequency is the spatial frequency in lp/mm for geometric MTF kinds
 	// (geometric_mtf_sag, geometric_mtf_tan).
-	Frequency  float64 `yaml:"frequency,omitempty"`
+	Frequency float64 `yaml:"frequency,omitempty"`
 	// Fraction is the encircled-energy fraction for the spot_ee_radius kind
 	// (0..1, default 0.8 = EE80). Ignored by other kinds.
 	Fraction   float64 `yaml:"fraction,omitempty"`
@@ -580,8 +585,8 @@ type MeritScheduleConfig struct {
 	// MetricAggregation combines the per-field spot/Airy ratios into one
 	// scalar for the spot_diffraction metric: mean (config×field weighted
 	// average, default) or max (worst field).
-	MetricAggregation string               `yaml:"metric_aggregation,omitempty"`
-	Modes             []MeritScheduleMode  `yaml:"modes"`
+	MetricAggregation string              `yaml:"metric_aggregation,omitempty"`
+	Modes             []MeritScheduleMode `yaml:"modes"`
 }
 
 type Config struct {
@@ -687,20 +692,20 @@ const (
 )
 
 type ConstraintOperand struct {
-	ID         string            `yaml:"id"`
-	Kind       ConstraintKind    `yaml:"kind"`
-	Measure    ConstraintMeasure `yaml:"measure"`
-	Field      int               `yaml:"field,omitempty"`
-	Wavelength float64           `yaml:"wavelength,omitempty"`
+	ID          string            `yaml:"id"`
+	Kind        ConstraintKind    `yaml:"kind"`
+	Measure     ConstraintMeasure `yaml:"measure"`
+	Field       int               `yaml:"field,omitempty"`
+	Wavelength  float64           `yaml:"wavelength,omitempty"`
 	Surface     int               `yaml:"surface,omitempty"`
 	BackSurface int               `yaml:"back_surface,omitempty"`
-	Target     float64           `yaml:"target,omitempty"`
-	Lower      float64           `yaml:"lower,omitempty"`
-	Upper      float64           `yaml:"upper,omitempty"`
-	BandWidth  float64           `yaml:"band_width,omitempty"`
-	Softness   float64           `yaml:"softness,omitempty"`
-	Weight     float64           `yaml:"weight"`
-	Active     bool              `yaml:"active"`
+	Target      float64           `yaml:"target,omitempty"`
+	Lower       float64           `yaml:"lower,omitempty"`
+	Upper       float64           `yaml:"upper,omitempty"`
+	BandWidth   float64           `yaml:"band_width,omitempty"`
+	Softness    float64           `yaml:"softness,omitempty"`
+	Weight      float64           `yaml:"weight"`
+	Active      bool              `yaml:"active"`
 }
 
 type GlassHullConfig struct {
@@ -900,11 +905,11 @@ type PupilModelConstraints struct {
 // passes through its center (0,0). This replaces the dynamic-pupil iteration
 // and the physical stop for initial exploration / escape optimization.
 type PupilModelConfig struct {
-	Mode             string                `yaml:"mode"`                          // "virtual_entrance_pupil"
-	ReferenceSurface int                   `yaml:"reference_surface"`             // chief ray reference surface
-	AxialPosition    float64               `yaml:"axial_position"`                // Z from surface 0 vertex (mm, negative allowed)
-	Diameter         float64               `yaml:"diameter"`                      // entrance pupil diameter (mm)
-	PlaneOrientation string                `yaml:"plane_orientation"`             // "chief_ray_normal" (default) | "optical_axis_normal"
+	Mode             string                `yaml:"mode"`              // "virtual_entrance_pupil"
+	ReferenceSurface int                   `yaml:"reference_surface"` // chief ray reference surface
+	AxialPosition    float64               `yaml:"axial_position"`    // Z from surface 0 vertex (mm, negative allowed)
+	Diameter         float64               `yaml:"diameter"`          // entrance pupil diameter (mm)
+	PlaneOrientation string                `yaml:"plane_orientation"` // "chief_ray_normal" (default) | "optical_axis_normal"
 	Sharing          PupilModelSharing     `yaml:"sharing,omitempty"`
 	Solve            PupilModelSolve       `yaml:"solve,omitempty"`
 	Constraints      PupilModelConstraints `yaml:"constraints,omitempty"`
@@ -1067,8 +1072,8 @@ type GlassAttractionPairResult struct {
 	NearestKey string  `yaml:"nearest_key,omitempty"`
 	NearestND  float64 `yaml:"nearest_nd"`
 	NearestVD  float64 `yaml:"nearest_vd"`
-	Distance   float64 `yaml:"distance"`  // normalised-space distance to nearest
-	Scale      float64 `yaml:"scale"`     // sensitivity weight scale
+	Distance   float64 `yaml:"distance"` // normalised-space distance to nearest
+	Scale      float64 `yaml:"scale"`    // sensitivity weight scale
 }
 
 // GlassAttractionResult reports the final glass-attraction state.
@@ -1093,10 +1098,10 @@ type SnapPairResult struct {
 // variable replaced by its nearest real catalog glass, and the resulting change
 // in the (attraction/hull-excluded) optical merit.
 type SnapResult struct {
-	BeforeMerit float64         `yaml:"before_merit"`
-	AfterMerit  float64         `yaml:"after_merit"`
-	Cost        float64         `yaml:"cost"`     // after - before
-	CostPct     float64         `yaml:"cost_pct"` // 100*(after-before)/before
+	BeforeMerit float64          `yaml:"before_merit"`
+	AfterMerit  float64          `yaml:"after_merit"`
+	Cost        float64          `yaml:"cost"`     // after - before
+	CostPct     float64          `yaml:"cost_pct"` // 100*(after-before)/before
 	Pairs       []SnapPairResult `yaml:"pairs,omitempty"`
 }
 
@@ -1237,15 +1242,15 @@ type ConfigFeatures struct {
 // Surfaces; multi-config runs populate Configs. Features lists the fingerprint
 // of each config; Merit stays at the minimum level as the objective scalar.
 type EscapeMinimum struct {
-	Index         int                  `yaml:"index"`
-	Merit         float64              `yaml:"merit"`
-	Status        EscapeMinimumStatus  `yaml:"status,omitempty"`
-	InvalidReason InvalidReason        `yaml:"invalid_reason,omitempty"`
-	File          string               `yaml:"file,omitempty"`
-	Configs       []Config             `yaml:"configs,omitempty"`
-	Surfaces      []Surface            `yaml:"surfaces,omitempty"`
-	Variables     []EscapeVarState     `yaml:"variables"`
-	Features      []ConfigFeatures     `yaml:"features,omitempty"`
+	Index         int                 `yaml:"index"`
+	Merit         float64             `yaml:"merit"`
+	Status        EscapeMinimumStatus `yaml:"status,omitempty"`
+	InvalidReason InvalidReason       `yaml:"invalid_reason,omitempty"`
+	File          string              `yaml:"file,omitempty"`
+	Configs       []Config            `yaml:"configs,omitempty"`
+	Surfaces      []Surface           `yaml:"surfaces,omitempty"`
+	Variables     []EscapeVarState    `yaml:"variables"`
+	Features      []ConfigFeatures    `yaml:"features,omitempty"`
 }
 
 // EscapeVarState records the variable values at a local minimum.
@@ -1877,19 +1882,19 @@ type PSFMTFAxis struct {
 // WavelengthMTF holds per-wavelength MTF threshold crossings and evaluated
 // points for polychromatic MTF results. Curve is omitted to keep output compact.
 type WavelengthMTF struct {
-	Wavelength      float64    `yaml:"wavelength"`       // mm
-	SpectralWeight  float64    `yaml:"spectral_weight"`  // SPD weight × transmittance × Δλ
-	Sagittal        PSFMTFAxis `yaml:"sagittal"`         // Thresholds, Evaluated only
-	Tangential      PSFMTFAxis `yaml:"tangential"`       // Thresholds, Evaluated only
+	Wavelength     float64    `yaml:"wavelength"`      // mm
+	SpectralWeight float64    `yaml:"spectral_weight"` // SPD weight × transmittance × Δλ
+	Sagittal       PSFMTFAxis `yaml:"sagittal"`        // Thresholds, Evaluated only
+	Tangential     PSFMTFAxis `yaml:"tangential"`      // Thresholds, Evaluated only
 }
 
 // PSFMTFSummary is the MTF/OTF summary of one PSF result.
 type PSFMTFSummary struct {
-	Sagittal           PSFMTFAxis     `yaml:"sagittal"`
-	Tangential         PSFMTFAxis     `yaml:"tangential"`
-	SpectralCurve      string         `yaml:"spectral_curve,omitempty"`
-	CombinationMethod  string         `yaml:"combination_method,omitempty"`
-	WavelengthMTFs     []WavelengthMTF `yaml:"wavelength_mtfs,omitempty"`
+	Sagittal          PSFMTFAxis      `yaml:"sagittal"`
+	Tangential        PSFMTFAxis      `yaml:"tangential"`
+	SpectralCurve     string          `yaml:"spectral_curve,omitempty"`
+	CombinationMethod string          `yaml:"combination_method,omitempty"`
+	WavelengthMTFs    []WavelengthMTF `yaml:"wavelength_mtfs,omitempty"`
 }
 
 // PSFConfig configures the `psf` subcommand (the `psf:` YAML section).

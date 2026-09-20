@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/dls"
@@ -18,14 +19,14 @@ import (
 // WavefrontSample is one ray's coherent contribution to the reference
 // wavefront used by the Huygens integration.
 type WavefrontSample struct {
-	Position  types.Vec3   // global position on the reference surface
-	Direction types.Vec3   // emergent direction (unit)
-	OPL       float64      // optical path length object → reference surface
-	Field     types.Vec3C  // global complex electric field at the surface
-	Area      float64      // reference-surface area element (mm²)
-	Intensity float64      // |E|² at the surface
-	launchX   float64      // entrance-pupil launch X (deterministic sort key)
-	launchY   float64      // entrance-pupil launch Y (deterministic sort key)
+	Position  types.Vec3  // global position on the reference surface
+	Direction types.Vec3  // emergent direction (unit)
+	OPL       float64     // optical path length object → reference surface
+	Field     types.Vec3C // global complex electric field at the surface
+	Area      float64     // reference-surface area element (mm²)
+	Intensity float64     // |E|² at the surface
+	launchX   float64     // entrance-pupil launch X (deterministic sort key)
+	launchY   float64     // entrance-pupil launch Y (deterministic sort key)
 }
 
 // PupilGrid is the per-field entrance-pupil sampling shared across
@@ -99,7 +100,9 @@ func TraceWavefront(system types.System, engine *ray.Engine, fg *PupilGrid,
 	field0 := polarization.TransverseField(u, v, pol)
 
 	stats := WavefrontStats{Total: len(fg.GridPoints)}
-	samples := make([]WavefrontSample, 0, len(fg.GridPoints))
+	nPts := len(fg.GridPoints)
+	results := make([]WavefrontSample, nPts)
+	valid := make([]bool, nPts)
 
 	if workers <= 0 {
 		workers = runtime.NumCPU()
@@ -107,54 +110,93 @@ func TraceWavefront(system types.System, engine *ray.Engine, fg *PupilGrid,
 	if workers < 1 {
 		workers = 1
 	}
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, workers)
+	if workers > nPts {
+		workers = nPts
+	}
 
-	for _, gp := range fg.GridPoints {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(gp types.GridPoint) {
-			defer wg.Done()
-			defer func() { <-sem }()
+	// Pre-allocate a single slab for all per-surface results (same pattern as
+	// pupil.Trace) to eliminate the per-ray allocation on the hot path.
+	pathLen := len(path)
+	slab := make([]types.SurfaceResult, nPts*pathLen)
+	surfacesBufs := make([][]types.SurfaceResult, nPts)
+	for i := range surfacesBufs {
+		surfacesBufs[i] = slab[i*pathLen : i*pathLen : (i+1)*pathLen]
+	}
 
-			r := types.Ray{
-				Wavelength:   wavelength,
-				Initial:      types.RayState{Origin: gp.Origin, Direction: gp.Direction},
-				Path:         path,
-				Jones:        pol,
-				InitialField: &field0,
-			}
-			tr := engine.TraceRay(r, system.Surfaces, false)
-			var sr *types.SurfaceResult
-			if tr.Error == "" {
-				for i := range tr.Surfaces {
-					if tr.Surfaces[i].SurfaceID == refSurface {
-						sr = &tr.Surfaces[i]
-						break
-					}
+	// traceOne writes only its own slot (results[i]/valid[i]), so the result is
+	// independent of the worker schedule.
+	traceOne := func(i int) {
+		gp := fg.GridPoints[i]
+		r := types.Ray{
+			Wavelength:   wavelength,
+			Initial:      types.RayState{Origin: gp.Origin, Direction: gp.Direction},
+			Path:         path,
+			Jones:        pol,
+			InitialField: &field0,
+		}
+		tr, _ := engine.TraceRayInto(r, system.Surfaces, false, surfacesBufs[i])
+		var sr *types.SurfaceResult
+		if len(tr) > 0 && tr[len(tr)-1].ErrorCode == "" {
+			for j := range tr {
+				if tr[j].SurfaceID == refSurface {
+					sr = &tr[j]
+					break
 				}
 			}
-			mu.Lock()
-			defer mu.Unlock()
-			if sr == nil {
-				stats.Missed++
-				return
-			}
-			stats.Valid++
-			samples = append(samples, WavefrontSample{
-				Position:  sr.Position,
-				Direction: sr.Direction,
-				OPL:       sr.OPL,
-				Field:     sr.Field,
-				Intensity: sr.Field.AbsSq(),
-				launchX:   gp.Origin.X,
-				launchY:   gp.Origin.Y,
-			})
-		}(gp)
+		}
+		if sr == nil {
+			return
+		}
+		valid[i] = true
+		results[i] = WavefrontSample{
+			Position:  sr.Position,
+			Direction: sr.Direction,
+			OPL:       sr.OPL,
+			Field:     sr.Field,
+			Intensity: sr.Field.AbsSq(),
+			launchX:   gp.Origin.X,
+			launchY:   gp.Origin.Y,
+		}
 	}
-	wg.Wait()
-	close(sem)
+
+	// Fixed worker pool: a constant number of goroutines pull grid-point indices
+	// from a shared counter, instead of spawning one goroutine per point (the
+	// per-point spawn made the runtime scheduler work-stealing/spinning a
+	// dominant profile cost).
+	if workers <= 1 {
+		for i := 0; i < nPts; i++ {
+			traceOne(i)
+		}
+	} else {
+		var next int64
+		var wg sync.WaitGroup
+		wg.Add(workers)
+		for w := 0; w < workers; w++ {
+			go func() {
+				defer wg.Done()
+				for {
+					i := int(atomic.AddInt64(&next, 1)) - 1
+					if i >= nPts {
+						return
+					}
+					traceOne(i)
+				}
+			}()
+		}
+		wg.Wait()
+	}
+
+	// Collect in grid-point order so the sample slice (and the tiebreaker below)
+	// is deterministic. Grid points have distinct launch coordinates, so the
+	// launch-coordinate sort that follows is unaffected.
+	samples := make([]WavefrontSample, 0, nPts)
+	for i := 0; i < nPts; i++ {
+		if valid[i] {
+			samples = append(samples, results[i])
+		}
+	}
+	stats.Valid = len(samples)
+	stats.Missed = stats.Total - stats.Valid
 
 	// The parallel trace appends samples in completion order; sort by the
 	// intrinsic entrance-pupil launch coordinates so the Huygens summation

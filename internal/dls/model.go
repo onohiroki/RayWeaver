@@ -122,6 +122,17 @@ type ConstraintChecker interface {
 	HasConstraints() bool
 }
 
+// JacobianScoper is an optional Model capability: bracket a Jacobian sweep.
+// BeginJacobian is called once with the base physical x before the base
+// residual and all finite-difference columns; EndJacobian is called once after
+// the sweep completes. Models that implement it can cache per-iteration work
+// (e.g. auto-aperture sizing) done at the base point and skip it during the
+// expensive column evaluations.
+type JacobianScoper interface {
+	BeginJacobian(x []float64)
+	EndJacobian()
+}
+
 // hasModelConstraints reports whether the model has active constraints.
 // When the model does not implement ConstraintChecker, the function returns
 // true (conservative: assume constraints exist).

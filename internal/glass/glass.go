@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -51,15 +50,28 @@ func NDVD(g *types.Glass) (nd, vd float64, ok bool) {
 	return nd, (nd - 1) / (nF - nC), true
 }
 
+// indexKey identifies a cached refractive index. A catalog reference is keyed
+// by its *types.Glass pointer plus its nd/vd, so an in-flight nd/vd override
+// (which mutates the glass in place) invalidates the entry; an inline model
+// glass is keyed by its nd/vd. Using a comparable struct key avoids building an
+// allocation-heavy string key on every lookup.
+type indexKey struct {
+	glass      *types.Glass
+	nd, vd     float64
+	wavelength float64
+}
+
 type Catalog struct {
 	ByName map[string]*types.Glass
 
-	indexCache sync.Map
+	indexMu    sync.RWMutex
+	indexCache map[indexKey]float64
 }
 
 func NewCatalog() *Catalog {
 	return &Catalog{
-		ByName: make(map[string]*types.Glass),
+		ByName:     make(map[string]*types.Glass),
+		indexCache: make(map[indexKey]float64),
 	}
 }
 
@@ -172,45 +184,37 @@ func (c *Catalog) RefractiveIndex(mat types.Material, wavelength float64) (float
 		if !ok {
 			return 0, fmt.Errorf("glass not found: %s", mat.Key)
 		}
-		key := c.cacheKey(g, mat.String(), wavelength)
-		if v, ok := c.indexCache.Load(key); ok {
-			return v.(float64), nil
-		}
-		n, err := CalcRefractiveIndex(g, wavelength)
-		if err != nil {
-			return 0, err
-		}
-		c.indexCache.Store(key, n)
-		return n, nil
+		return c.indexFor(indexKey{glass: g, nd: g.ND, vd: g.VD, wavelength: wavelength}, func() (float64, error) {
+			return CalcRefractiveIndex(g, wavelength)
+		})
 	}
 
 	// Self-contained model glass: nd/vd live directly on the material.
 	if mat.HasModel() {
-		key := "model|" + strconv.FormatFloat(mat.ND, 'g', -1, 64) + ":" + strconv.FormatFloat(mat.VD, 'g', -1, 64) + "|" + strconv.FormatFloat(wavelength, 'g', -1, 64)
-		if v, ok := c.indexCache.Load(key); ok {
-			return v.(float64), nil
-		}
-		n, err := RefractiveIndexFromNDVD(mat.ND, mat.VD, wavelength)
-		if err != nil {
-			return 0, err
-		}
-		c.indexCache.Store(key, n)
-		return n, nil
+		return c.indexFor(indexKey{nd: mat.ND, vd: mat.VD, wavelength: wavelength}, func() (float64, error) {
+			return RefractiveIndexFromNDVD(mat.ND, mat.VD, wavelength)
+		})
 	}
 
 	return 1.0, nil
 }
 
-func (c *Catalog) cacheKey(g *types.Glass, material string, wavelength float64) string {
-	var sb strings.Builder
-	sb.WriteString(material)
-	sb.WriteByte('|')
-	sb.WriteString(strconv.FormatFloat(g.ND, 'g', -1, 64))
-	sb.WriteByte('|')
-	sb.WriteString(strconv.FormatFloat(g.VD, 'g', -1, 64))
-	sb.WriteByte('|')
-	sb.WriteString(strconv.FormatFloat(wavelength, 'g', -1, 64))
-	return sb.String()
+// indexFor returns the cached index for key, computing and storing it on a miss.
+func (c *Catalog) indexFor(key indexKey, compute func() (float64, error)) (float64, error) {
+	c.indexMu.RLock()
+	v, ok := c.indexCache[key]
+	c.indexMu.RUnlock()
+	if ok {
+		return v, nil
+	}
+	n, err := compute()
+	if err != nil {
+		return 0, err
+	}
+	c.indexMu.Lock()
+	c.indexCache[key] = n
+	c.indexMu.Unlock()
+	return n, nil
 }
 
 // CalcRefractiveIndex computes the refractive index of g at the given

@@ -391,6 +391,20 @@ func (w *Wrapper) SetConstraintMultipliers(lambdas []float64) {
 	}
 }
 
+// BeginJacobian implements dls.JacobianScoper by forwarding to the inner model.
+func (w *Wrapper) BeginJacobian(x []float64) {
+	if js, ok := w.inner.(dls.JacobianScoper); ok {
+		js.BeginJacobian(x)
+	}
+}
+
+// EndJacobian implements dls.JacobianScoper by forwarding to the inner model.
+func (w *Wrapper) EndJacobian() {
+	if js, ok := w.inner.(dls.JacobianScoper); ok {
+		js.EndJacobian()
+	}
+}
+
 // UpdatePupils implements dls.PupilUpdater by forwarding to the inner model
 // (the Optimizer), so the dynamic pupil grid is recomputed at the current
 // variable state during each DLS iteration inside escape.

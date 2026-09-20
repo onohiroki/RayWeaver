@@ -1205,6 +1205,16 @@ type Optimizer struct {
 	// beam-extent measurement from max(numRays, 256) to numRays. Used by the
 	// PSO explorer where speed matters more than aperture precision.
 	lightApertureSizing bool
+	// jacobianActive signals that sizeAutoApertures should reuse the
+	// diameters cached by the most recent BeginJacobian call instead of
+	// re-tracing beam extents. The Jacobian sweep bracket (BeginJacobian /
+	// EndJacobian) sets this flag; concurrent column goroutines read it
+	// without writing.
+	jacobianActive bool
+	// reuseDiameters holds the per-config, per-surface auto-aperture
+	// diameters computed at the Jacobian base point. Keyed by config ID
+	// and surface ID.
+	reuseDiameters map[string]map[int]float64
 	// roleTargets holds the per-config, per-surface glass-role classification
 	// (paraxial.ElementRole) frozen at the top of each DLS iteration by
 	// updateGlassRoles, so the base-point and Jacobian residuals share one role
@@ -3006,7 +3016,7 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 			defer wg.Done()
 			for job := range ch {
 				pupilZ := o.gridCentring(cfg, p, job.angle)
-				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), p.dia)
+				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, 1, p.dia)
 				mu.Lock()
 				cache.spots[job.key] = points
 				mu.Unlock()
@@ -3074,6 +3084,40 @@ func (o *Optimizer) gridWorkers() int {
 	return w
 }
 
+// BeginJacobian computes the auto-aperture sizing once at the base variable
+// state so that the expensive column evaluations reuse the cached diameters
+// instead of re-tracing beam extents. The model calls this with the physical
+// (denormalised) variable vector before ComputeResiduals(x).
+func (o *Optimizer) BeginJacobian(x []float64) {
+	if len(o.initialDiameters) == 0 {
+		return
+	}
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+	o.reuseDiameters = make(map[string]map[int]float64, len(o.configs))
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil, p)
+		m := make(map[int]float64)
+		for i := range surfaces {
+			if surfaces[i].AutoAperture {
+				m[surfaces[i].ID] = surfaces[i].Diameter
+			}
+		}
+		o.reuseDiameters[cfg.id] = m
+	}
+	o.jacobianActive = true
+}
+
+// EndJacobian releases the cached auto-aperture diameters and resets the flag.
+func (o *Optimizer) EndJacobian() {
+	o.jacobianActive = false
+	o.reuseDiameters = nil
+}
+
 // imageHeightToFieldAngle finds the field angle that lands the chief ray at
 // the target image height, via bisection on the image-plane intersection.
 func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surface, targetHeight, wavelength float64, gc *glass.Catalog) float64 {
@@ -3137,6 +3181,20 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 // wavefront grid, collapsing the corner fit.
 func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) {
 	if len(o.initialDiameters) == 0 {
+		return
+	}
+	// During a Jacobian sweep, reuse the diameters cached by BeginJacobian
+	// instead of re-tracing beam extents.
+	if o.jacobianActive {
+		if m := o.reuseDiameters[cfg.id]; m != nil {
+			for i := range surfaces {
+				if surfaces[i].AutoAperture {
+					if d, ok := m[surfaces[i].ID]; ok {
+						surfaces[i].Diameter = d
+					}
+				}
+			}
+		}
 		return
 	}
 	extents := make(map[int]float64)
@@ -3204,12 +3262,12 @@ func (o *Optimizer) fieldSizingAngle(cfg *config, f *types.FieldItem, surfaces [
 }
 
 // fieldExtents traces the per-surface max radial ray extent for one grid merit
-// term, centred on the per-field entrance pupil when one is resolved. The
-// measurement ignores aperture clipping (the last TraceFieldGridExtents
-// argument is 0), so the pupil diameter override is not applied here.
+// term, centred on the per-field entrance pupil when one is resolved. When a
+// virtual entrance pupil is active (p.dia > 0), the override is forwarded so
+// the beam envelope matches the merit grid.
 func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glass.Catalog, term *meritTerm, angle float64, p appliedPupil) map[int]float64 {
 	pupilZ := o.gridCentring(cfg, p, angle)
-	return dls.TraceFieldExtents8Rays(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.gridWorkers())
+	return dls.TraceFieldExtents8Rays(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.gridWorkers(), p.dia)
 }
 
 // extentRays returns the ray count for a beam-extent measurement. The extent

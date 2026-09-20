@@ -435,6 +435,32 @@ func Compute(
 	return r
 }
 
+// EntrancePupilRadius returns the paraxial entrance-pupil radius for a system,
+// replicating Compute's entrance-pupil section without the glass-role
+// classification, EFL/BFL, exit-pupil, or magnification passes. This makes it
+// suitable for aperture-radius queries in the DLS hot path where only the EPD
+// is needed. The returned radius is at margin 1.0 (no extra safety margin).
+func EntrancePupilRadius(surfaces []types.Surface, stopSurface int, wavelength float64, gc *glass.Catalog) float64 {
+	nIndex := resolveIndices(surfaces, wavelength, gc)
+	stopIdx := stopSurfaceIndex(surfaces, stopSurface)
+
+	// Explicit stop: back-trace the chief and marginal rays from the stop.
+	if stopIdx >= 0 {
+		stopR := surfaces[stopIdx].Diameter / 2.0
+		if stopR > 0 {
+			pupilRay := tracePupilBackward(surfaces, nIndex, stopIdx, 0, 1.0)
+			if math.Abs(pupilRay.U) > 1e-15 {
+				epLoc := -pupilRay.Y / pupilRay.U
+				eRay := tracePupilBackward(surfaces, nIndex, stopIdx, stopR, 0)
+				return math.Abs(eRay.Y + eRay.U*epLoc)
+			}
+		}
+	}
+
+	// Stop-free: beam-aware fixed-aperture cap or first-surface estimate.
+	return EntrancePupilRadiusStopFree(surfaces, wavelength, gc)
+}
+
 // --- Stop-free entrance-pupil estimation ---
 
 const (

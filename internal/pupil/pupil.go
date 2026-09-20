@@ -3,6 +3,7 @@ package pupil
 import (
 	"runtime"
 	"sync"
+	"sync/atomic"
 
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
@@ -36,8 +37,8 @@ const (
 // chief/DLS/wavefront/asphere paths already build them, so a bundle stays
 // consistent across every consumer of this package.
 type LaunchSpec struct {
-	NumRings  int // 0 = derive from NumRays via ResolvePolarDims
-	NumSpokes int // 0 = derive from NumRays or NumRings
+	NumRings          int // 0 = derive from NumRays via ResolvePolarDims
+	NumSpokes         int // 0 = derive from NumRays or NumRings
 	NumRays           int
 	GridType          types.GridType
 	RotationOffset    float64
@@ -71,10 +72,14 @@ type Sample struct {
 	// Filled by Trace.
 	OK        bool
 	Err       string
-	ErrorCode string // trace error code (empty when OK)
+	ErrorCode string  // trace error code (empty when OK)
 	OPL       float64 // OPLTotal - OPLDelta
 	Intensity float64 // (IntensityS + IntensityP) / 2 at the last surface
 	Surfaces  []types.SurfaceResult
+	// Slab, when non-nil, is the shared backing array from which Surfaces was
+	// sliced (set by Trace when the slab allocator is active). The GC collects
+	// the slab once all samples and any downstream references are freed.
+	Slab []types.SurfaceResult
 }
 
 // GridCentre returns the grid centre on the zStart plane whose ray in the
@@ -102,11 +107,11 @@ func Launch(spec LaunchSpec) []Sample {
 		py := spec.CentreY + p.Y
 
 		s := Sample{
-			PupilX:               p.X,
-			PupilY:               p.Y,
-			Area:                 p.Area,
-			SkipApertureCheck:    spec.SkipApertureCheck,
-			SkipGlassPathCheck:   spec.SkipGlassPath,
+			PupilX:             p.X,
+			PupilY:             p.Y,
+			Area:               p.Area,
+			SkipApertureCheck:  spec.SkipApertureCheck,
+			SkipGlassPathCheck: spec.SkipGlassPath,
 		}
 		if spec.HeightOrigin != nil {
 			s.Origin = *spec.HeightOrigin
@@ -133,46 +138,124 @@ func Launch(spec LaunchSpec) []Sample {
 	return out
 }
 
+// indexByMaterial precomputes the refractive index of every distinct surface
+// material at wavelength. The returned map is read-only during the parallel
+// trace, so concurrent readers need no lock. Returns nil when the engine has no
+// glass catalog, in which case TraceRay falls back to a per-call lookup.
+func indexByMaterial(engine *ray.Engine, surfaces []types.Surface, wavelength float64) map[types.Material]float64 {
+	if engine == nil || engine.Glass == nil || len(surfaces) == 0 {
+		return nil
+	}
+	m := make(map[types.Material]float64, len(surfaces))
+	for i := range surfaces {
+		mat := surfaces[i].Material
+		if _, ok := m[mat]; ok {
+			continue
+		}
+		n, err := engine.Glass.RefractiveIndex(mat, wavelength)
+		if err != nil {
+			continue
+		}
+		m[mat] = n
+	}
+	return m
+}
+
 // Trace traces every sample in parallel over `workers` goroutines, writing the
 // per-surface results, OPL (with the sample's launch-tilt delta removed) and
 // the last-surface intensity back into the slice by index, so the outcome is
 // deterministic regardless of worker count.
 func Trace(engine *ray.Engine, path []int, surfaces []types.Surface,
 	samples []Sample, wavelength float64, pol types.JonesVector, workers int) {
+	n := len(samples)
+	if n == 0 {
+		return
+	}
 	if workers < 1 {
 		workers = runtime.NumCPU()
 	}
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, workers)
+	if workers > n {
+		workers = n
+	}
+
+	// Resolve each distinct surface material's refractive index once, then share
+	// the read-only map with every ray so TraceRay skips the catalog's locked
+	// index cache on the per-surface, per-ray hot path.
+	idxByMat := indexByMaterial(engine, surfaces, wavelength)
+
+	// Pre-allocate a single slab for all per-surface results and hand out
+	// sub-slices, one per ray.  This eliminates the per-ray allocation that
+	// previously dominated the heap profile (1.17 TB over a full escape run).
+	pathLen := len(path)
+	slab := make([]types.SurfaceResult, n*pathLen)
 	for i := range samples {
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(i int) {
+		samples[i].Surfaces = slab[i*pathLen : i*pathLen : (i+1)*pathLen]
+	}
+	samples[0].Slab = slab // keep the backing array alive through the samples
+
+	// traceOne writes only its own slot, so the result is independent of the
+	// worker schedule (deterministic for any worker count).
+	traceOne := func(i int) {
+		s := &samples[i]
+		r := types.Ray{
+			Wavelength:         wavelength,
+			Initial:            types.RayState{Origin: s.Origin, Direction: s.Dir},
+			Path:               path,
+			Jones:              pol,
+			IndexByMaterial:    idxByMat,
+			SkipApertureCheck:  s.SkipApertureCheck,
+			SkipGlassPathCheck: s.SkipGlassPathCheck,
+		}
+		s.Surfaces, s.ErrorCode = engine.TraceRayInto(r, surfaces, false, s.Surfaces)
+
+		if s.ErrorCode != "" {
+			switch s.ErrorCode {
+			case string(ray.ErrMissedSurface):
+				s.Err = "ray missed surface"
+			case string(ray.ErrApertureStop):
+				s.Err = "ray missed surface (aperture stop)"
+			case string(ray.ErrTIR):
+				s.Err = "total internal reflection"
+			case string(ray.ErrGlassPathShort):
+				s.Err = "ray missed surface (glass path too short)"
+			case string(ray.ErrGlassPathLong):
+				s.Err = "ray missed surface (glass path too long)"
+			default:
+				s.Err = s.ErrorCode
+			}
+			return
+		}
+		last := s.Surfaces[len(s.Surfaces)-1]
+		s.OK = true
+		s.Intensity = (last.IntensityS + last.IntensityP) / 2
+		s.OPL = last.OPL - s.OPLDelta
+	}
+
+	if workers <= 1 {
+		for i := 0; i < n; i++ {
+			traceOne(i)
+		}
+		return
+	}
+
+	// Fixed worker pool: a constant number of goroutines pull ray indices from a
+	// shared counter, instead of spawning one goroutine per ray. The per-ray
+	// goroutine spawn made the runtime scheduler's work-stealing/spinning a
+	// dominant profile cost; the pool keeps the goroutine count constant.
+	var next int64
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for w := 0; w < workers; w++ {
+		go func() {
 			defer wg.Done()
-			defer func() { <-sem }()
-			s := &samples[i]
-			r := types.Ray{
-				Wavelength:         wavelength,
-				Initial:            types.RayState{Origin: s.Origin, Direction: s.Dir},
-				Path:               path,
-				Jones:              pol,
-				SkipApertureCheck:  s.SkipApertureCheck,
-				SkipGlassPathCheck: s.SkipGlassPathCheck,
+			for {
+				i := int(atomic.AddInt64(&next, 1)) - 1
+				if i >= n {
+					return
+				}
+				traceOne(i)
 			}
-			res := engine.TraceRay(r, surfaces, false)
-			if res.Error != "" {
-				s.Err = res.Error
-				s.ErrorCode = res.ErrorCode
-				return
-			}
-			s.OK = true
-			s.Surfaces = res.Surfaces
-			if len(res.Surfaces) > 0 {
-				last := res.Surfaces[len(res.Surfaces)-1]
-				s.Intensity = (last.IntensityS + last.IntensityP) / 2
-			}
-			s.OPL = res.OPLTotal - s.OPLDelta
-		}(i)
+		}()
 	}
 	wg.Wait()
 }

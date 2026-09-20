@@ -174,6 +174,75 @@ func TestSolveCallsPupilUpdaterPerIteration(t *testing.T) {
 	}
 }
 
+// jacobianScopeRecordingModel implements JacobianScoper to verify the solver
+// brackets the Jacobian sweep exactly once, and that bracketing does not
+// perturb the computed Jacobian or base residuals.
+type jacobianScopeRecordingModel struct {
+	polyModel
+	begins int
+	ends   int
+	lastX  []float64
+}
+
+func (m *jacobianScopeRecordingModel) BeginJacobian(x []float64) {
+	m.begins++
+	m.lastX = append([]float64{}, x...)
+}
+
+func (m *jacobianScopeRecordingModel) EndJacobian() {
+	m.ends++
+}
+
+func TestComputeJacobiansScopesSweepOnce(t *testing.T) {
+	plain := polyModel{n: 4}
+	scoped := &jacobianScopeRecordingModel{polyModel: polyModel{n: 4}}
+
+	xNorm := []float64{0.1, 0.4, 0.7, 0.9}
+	variables := plain.Variables()
+	scales := make([]float64, len(variables))
+	for i, v := range variables {
+		scales[i] = v.Max - v.Min
+	}
+
+	JPlain, r0Plain, _, _ := computeJacobians(plain, xNorm, variables, scales, 1e-6, true, 1, nil)
+	JScoped, r0Scoped, _, _ := computeJacobians(scoped, xNorm, variables, scales, 1e-6, true, 1, nil)
+
+	if scoped.begins != 1 {
+		t.Errorf("BeginJacobian called %d times, want 1", scoped.begins)
+	}
+	if scoped.ends != 1 {
+		t.Errorf("EndJacobian called %d times, want 1", scoped.ends)
+	}
+
+	// BeginJacobian receives the physical (denormalised) variable vector.
+	wantX := denormalize(xNorm, variables, scales)
+	for i := range wantX {
+		wantX[i] = sanitize(wantX[i])
+	}
+	for i := range wantX {
+		if math.Abs(scoped.lastX[i]-wantX[i]) > 1e-12 {
+			t.Errorf("BeginJacobian x[%d] = %v, want physical %v", i, scoped.lastX[i], wantX[i])
+		}
+	}
+
+	// The bracket must not change the Jacobian or the base residuals.
+	if len(JPlain) != len(JScoped) {
+		t.Fatalf("Jacobian row count mismatch: %d vs %d", len(JPlain), len(JScoped))
+	}
+	for i := range JPlain {
+		for j := range JPlain[i] {
+			if math.Abs(JPlain[i][j]-JScoped[i][j]) > 1e-12 {
+				t.Errorf("J[%d][%d] = %v (plain) vs %v (scoped)", i, j, JPlain[i][j], JScoped[i][j])
+			}
+		}
+	}
+	for i := range r0Plain {
+		if math.Abs(r0Plain[i]-r0Scoped[i]) > 1e-12 {
+			t.Errorf("r0[%d] = %v (plain) vs %v (scoped)", i, r0Plain[i], r0Scoped[i])
+		}
+	}
+}
+
 func TestComputeJacobiansParallelDeterminism(t *testing.T) {
 	m := polyModel{n: 6}
 	xNorm := []float64{0.1, 0.4, 0.7, 0.9, 0.2, 0.5}

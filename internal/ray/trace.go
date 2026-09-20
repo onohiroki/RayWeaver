@@ -1,7 +1,6 @@
 package ray
 
 import (
-	"fmt"
 	"math"
 
 	"github.com/hiroki/rayweaver/internal/coating"
@@ -35,10 +34,97 @@ func NewEngine(gc *glass.Catalog, cc *coating.Catalog) *Engine {
 	}
 }
 
+// TraceRayInto is like TraceRay but appends per-surface results into dst and
+// returns the extended slice. When dst is nil a new slice is allocated (same as
+// TraceRay). Callers that trace many rays through the same system can pre-
+// allocate a shared slab and hand out sub-slices, eliminating the per-ray
+// allocation that previously dominated the heap profile.
 func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) types.RayResult {
+	surfs, errCode := e.TraceRayInto(ray, surfaces, detail, nil)
+
 	result := types.RayResult{
 		ID:         ray.ID,
 		Wavelength: ray.Wavelength,
+		Surfaces:   surfs,
+	}
+
+	if errCode != "" {
+		result.ErrorCode = errCode
+		// When the caller did not ask for error surfaces, remove the one
+		// that TraceRayInto appended into the slab.
+		if !ray.IncludeErrorSurfaces && len(surfs) > 0 {
+			surfs = surfs[:len(surfs)-1]
+			result.Surfaces = surfs
+		}
+		switch errCode {
+		case string(ErrMissedSurface):
+			result.Error = "ray missed surface"
+		case string(ErrApertureStop):
+			result.Error = "ray missed surface (aperture stop)"
+		case string(ErrTIR):
+			result.Error = "total internal reflection"
+		case string(ErrGlassPathShort):
+			result.Error = "ray missed surface (glass path too short)"
+		case string(ErrGlassPathLong):
+			result.Error = "ray missed surface (glass path too long)"
+		default:
+			result.Error = errCode
+		}
+		return result
+	}
+
+	last := surfs[len(surfs)-1]
+	result.OPLTotal = last.OPL
+	result.IntensityS = last.IntensityS
+	result.IntensityP = last.IntensityP
+	return result
+}
+
+// TraceRayInto is like TraceRay but appends per-surface results into dst and
+// returns the extended slice plus an error code (empty on success). When dst
+// is nil a new slice is allocated (same as TraceRay). Callers that trace many
+// rays through the same system can pre-allocate a shared slab and hand out
+// sub-slices, eliminating the per-ray allocation that previously dominated the
+// heap profile.
+//
+// On error (surface not found, TIR, aperture stop, etc.) TraceRayInto appends
+// an error surface into the slab and returns the error code. Callers that do
+// not want the error surface (e.g. TraceRay with IncludeErrorSurfaces=false)
+// truncate the last element.
+func (e *Engine) TraceRayInto(ray types.Ray, surfaces []types.Surface, detail bool, dst []types.SurfaceResult) ([]types.SurfaceResult, string) {
+	surfs := dst
+
+	// errAppend appends an error surface into the slab for the given surface
+	// ID and returns the extended slab. Used by error return paths so the
+	// caller always gets at least one entry for extent calculations.
+	errAppend := func(errCode string, surfID int) []types.SurfaceResult {
+		sr := types.SurfaceResult{
+			SurfaceID:   surfID,
+			Interaction: types.Missed,
+			OPL:         0,
+			ErrorCode:   errCode,
+		}
+		if n := len(surfs); n > 0 {
+			last := &surfs[n-1]
+			sr.OPL = last.OPL
+			sr.Position = last.Position
+			sr.Direction = last.Direction
+			sr.Thickness = last.Thickness
+		}
+		return append(surfs, sr)
+	}
+
+	// Fast path: use the previous surface's OPL as the base for cumulative OPL.
+	prevOPL := func() float64 {
+		if n := len(surfs); n > 0 {
+			return surfs[n-1].OPL
+		}
+		return 0
+	}
+
+	// record is a shorthand that appends a SurfaceResult.
+	record := func(sr types.SurfaceResult) {
+		surfs = append(surfs, sr)
 	}
 
 	state := ray.Initial
@@ -73,17 +159,13 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 				Direction:   state.Direction.Normalize(),
 				Interaction: types.Transmit,
 				Thickness:   0,
-				OPL:         0,
+				OPL:         prevOPL(),
 				Jones:       jones,
 				Field:       field,
 				IntensityS:  1.0,
 				IntensityP:  1.0,
 			}
-			if len(result.Surfaces) > 0 {
-				prev := &result.Surfaces[len(result.Surfaces)-1]
-				sr.OPL = prev.OPL
-			}
-			result.Surfaces = append(result.Surfaces, sr)
+			record(sr)
 			continue
 		}
 
@@ -94,12 +176,7 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 
 		currentSurf := findSurface(surfaces, currentID)
 		if currentSurf == nil {
-			result.Error = fmt.Sprintf("surface %d not found", currentID)
-			result.ErrorCode = string(ErrSurfaceNotFound)
-			if ray.IncludeErrorSurfaces {
-				appendErrorSurface(&result, currentID, state.Origin, state.Direction, 0, string(ErrSurfaceNotFound))
-			}
-			return result
+			return errAppend(string(ErrSurfaceNotFound), currentID), string(ErrSurfaceNotFound)
 		}
 
 		localOrigin := currentSurf.GlobalToLocal.MultiplyPoint(state.Origin)
@@ -118,23 +195,14 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 					Direction:   state.Direction,
 					Interaction: types.Missed,
 					Thickness:   0,
-					OPL:         0,
+					OPL:         prevOPL(),
 					Jones:       jones,
 					ErrorCode:   string(ErrMissedSurface),
 				}
-				if len(result.Surfaces) > 0 {
-					prev := &result.Surfaces[len(result.Surfaces)-1]
-					sr.OPL = prev.OPL
-				}
-				result.Surfaces = append(result.Surfaces, sr)
+				record(sr)
 				continue
 			}
-			result.Error = "ray missed surface"
-			result.ErrorCode = string(ErrMissedSurface)
-			if ray.IncludeErrorSurfaces {
-				appendErrorSurface(&result, currentID, state.Origin, state.Direction, 0, string(ErrMissedSurface))
-			}
-			return result
+			return errAppend(string(ErrMissedSurface), currentID), string(ErrMissedSurface)
 		}
 		if i == 0 && t < 1e-12 {
 			if ray.Lenient {
@@ -144,23 +212,14 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 					Direction:   state.Direction,
 					Interaction: types.Missed,
 					Thickness:   t,
-					OPL:         0,
+					OPL:         prevOPL(),
 					Jones:       jones,
 					ErrorCode:   string(ErrMissedSurface),
 				}
-				if len(result.Surfaces) > 0 {
-					prev := &result.Surfaces[len(result.Surfaces)-1]
-					sr.OPL = prev.OPL
-				}
-				result.Surfaces = append(result.Surfaces, sr)
+				record(sr)
 				continue
 			}
-			result.Error = fmt.Sprintf("ray missed surface (t=%.6e < 0 on first lens surface)", t)
-			result.ErrorCode = string(ErrMissedSurface)
-			if ray.IncludeErrorSurfaces {
-				appendErrorSurface(&result, currentID, state.Origin, state.Direction, t, string(ErrMissedSurface))
-			}
-			return result
+			return errAppend(string(ErrMissedSurface), currentID), string(ErrMissedSurface)
 		}
 
 		hitPoint := types.Vec3{
@@ -179,23 +238,14 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 						Direction:   state.Direction,
 						Interaction: types.Missed,
 						Thickness:   t,
-						OPL:         0,
+						OPL:         prevOPL(),
 						Jones:       jones,
 						ErrorCode:   string(ErrApertureStop),
 					}
-					if len(result.Surfaces) > 0 {
-						prev := &result.Surfaces[len(result.Surfaces)-1]
-						sr.OPL = prev.OPL
-					}
-					result.Surfaces = append(result.Surfaces, sr)
+					record(sr)
 					continue
 				}
-				result.Error = "ray missed surface (aperture stop)"
-				result.ErrorCode = string(ErrApertureStop)
-				if ray.IncludeErrorSurfaces {
-					appendErrorSurface(&result, currentID, currentSurf.LocalToGlobal.MultiplyPoint(hitPoint), state.Direction, t, string(ErrApertureStop))
-				}
-				return result
+				return errAppend(string(ErrApertureStop), currentID), string(ErrApertureStop)
 			}
 		}
 
@@ -226,8 +276,8 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 		if localDir.Z < 0 {
 			n1mat, n2mat = n2mat, n1mat
 		}
-		n1, _ := e.Glass.RefractiveIndex(n1mat, ray.Wavelength)
-		n2, _ := e.Glass.RefractiveIndex(n2mat, ray.Wavelength)
+		n1 := e.indexOf(ray, n1mat)
+		n2 := e.indexOf(ray, n2mat)
 
 		tir := false
 		if interaction == types.Reflect {
@@ -240,16 +290,11 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 					interaction = types.Reflect
 					state.Direction = raymath.Reflect(localDir, normal)
 				} else {
-					result.Error = "total internal reflection"
-					result.ErrorCode = string(ErrTIR)
-					if ray.IncludeErrorSurfaces {
-						appendErrorSurface(&result, currentID, currentSurf.LocalToGlobal.MultiplyPoint(hitPoint), state.Direction, t, string(ErrTIR))
-					}
-					return result
+					return errAppend(string(ErrTIR), currentID), string(ErrTIR)
 				}
-		} else {
-			state.Direction = newDir
-		}
+			} else {
+				state.Direction = newDir
+			}
 		}
 
 		var phaseOPL float64
@@ -392,25 +437,16 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 							Direction:   globalDir,
 							Interaction: interaction,
 							Thickness:   t,
-							OPL:         0,
+							OPL:         prevOPL(),
 							Jones:       jones,
 							ErrorCode:   string(ErrGlassPathShort),
 						}
-						if len(result.Surfaces) > 0 {
-							prev := &result.Surfaces[len(result.Surfaces)-1]
-							sr.OPL = prev.OPL
-						}
-						result.Surfaces = append(result.Surfaces, sr)
+						record(sr)
 						state.Origin = globalPos
 						glassEntrySurfaceID = 0
 						continue
 					}
-					result.Error = "ray missed surface (glass path too short)"
-					result.ErrorCode = string(ErrGlassPathShort)
-					if ray.IncludeErrorSurfaces {
-						appendErrorSurface(&result, currentID, globalPos, globalDir, t, string(ErrGlassPathShort))
-					}
-					return result
+					return errAppend(string(ErrGlassPathShort), currentID), string(ErrGlassPathShort)
 				}
 				if entrySurf.MaxGlassPath > 0 && path > entrySurf.MaxGlassPath {
 					if ray.Lenient {
@@ -420,25 +456,16 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 							Direction:   globalDir,
 							Interaction: interaction,
 							Thickness:   t,
-							OPL:         0,
+							OPL:         prevOPL(),
 							Jones:       jones,
 							ErrorCode:   string(ErrGlassPathLong),
 						}
-						if len(result.Surfaces) > 0 {
-							prev := &result.Surfaces[len(result.Surfaces)-1]
-							sr.OPL = prev.OPL
-						}
-						result.Surfaces = append(result.Surfaces, sr)
+						record(sr)
 						state.Origin = globalPos
 						glassEntrySurfaceID = 0
 						continue
 					}
-					result.Error = "ray missed surface (glass path too long)"
-					result.ErrorCode = string(ErrGlassPathLong)
-					if ray.IncludeErrorSurfaces {
-						appendErrorSurface(&result, currentID, globalPos, globalDir, t, string(ErrGlassPathLong))
-					}
-					return result
+					return errAppend(string(ErrGlassPathLong), currentID), string(ErrGlassPathLong)
 				}
 			}
 		}
@@ -490,44 +517,16 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 			sr.ErrorCode = string(ErrTIR)
 		}
 
-		if len(result.Surfaces) > 0 {
-			prev := &result.Surfaces[len(result.Surfaces)-1]
+		if len(surfs) > 0 {
+			prev := &surfs[len(surfs)-1]
 			sr.OPL = prev.OPL + segmentOPL
 		}
 
-		result.Surfaces = append(result.Surfaces, sr)
+		record(sr)
 		state.Origin = globalPos
 	}
 
-	if len(result.Surfaces) > 0 {
-		last := result.Surfaces[len(result.Surfaces)-1]
-		result.OPLTotal = last.OPL
-		result.IntensityS = last.IntensityS
-		result.IntensityP = last.IntensityP
-	}
-
-	return result
-}
-
-// appendErrorSurface records a MISSED SurfaceResult for the surface where a
-// non-lenient trace stopped, when ray.IncludeErrorSurfaces is set. It carries
-// the error code and carries the OPL over from the previous surface so the
-// partial result stays monotonic; the detail fields are left empty.
-func appendErrorSurface(result *types.RayResult, id int, pos, dir types.Vec3, t float64, errCode string) {
-	sr := types.SurfaceResult{
-		SurfaceID:   id,
-		Position:    pos,
-		Direction:   dir,
-		Interaction: types.Missed,
-		Thickness:   t,
-		OPL:         0,
-		ErrorCode:   errCode,
-	}
-	if len(result.Surfaces) > 0 {
-		prev := &result.Surfaces[len(result.Surfaces)-1]
-		sr.OPL = prev.OPL
-	}
-	result.Surfaces = append(result.Surfaces, sr)
+	return surfs, ""
 }
 
 func findSurface(surfaces []types.Surface, id int) *types.Surface {
@@ -544,6 +543,23 @@ func findSurface(surfaces []types.Surface, id int) *types.Surface {
 // intervening fold mirrors (which do not separate media). It is the region a
 // forward-travelling ray is in just before hitting the surface, and the region
 // a backward-travelling (ghost) ray leaves when crossing the surface.
+// indexOf resolves a material's refractive index, preferring the ray's
+// precomputed per-trace map (read-only, so concurrent traces need no lock) over
+// the catalog's locked index cache. Errors fall back to 1.0, matching the
+// previous best-effort behaviour.
+func (e *Engine) indexOf(ray types.Ray, mat types.Material) float64 {
+	if ray.IndexByMaterial != nil {
+		if n, ok := ray.IndexByMaterial[mat]; ok {
+			return n
+		}
+	}
+	if e.Glass == nil {
+		return 1.0
+	}
+	n, _ := e.Glass.RefractiveIndex(mat, ray.Wavelength)
+	return n
+}
+
 func materialBefore(surfaces []types.Surface, id int) types.Material {
 	idx := indexOfSurface(surfaces, id)
 	if idx <= 0 {
