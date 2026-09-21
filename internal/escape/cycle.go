@@ -698,6 +698,8 @@ func reasonString(r InvalidReason) string {
 		return "geometry_violation"
 	case ReasonNumericalFailure:
 		return "numerical_failure"
+	case ReasonGlassHullViolation:
+		return "glass_hull_violation"
 	default:
 		return "unknown"
 	}
