@@ -49,11 +49,11 @@ const (
 	MeritFieldAlive = "field_alive"
 
 	// Virtual entrance pupil merit kinds.
-	MeritPupilPosition    = "pupil_position"
-	MeritPupilDiameter    = "pupil_diameter"
-	MeritVignetting       = "vignetting"
-	MeritClearAperture    = "clear_aperture"
-	MeritEdgeThickness    = "edge_thickness"
+	MeritPupilPosition = "pupil_position"
+	MeritPupilDiameter = "pupil_diameter"
+	MeritVignetting    = "vignetting"
+	MeritClearAperture = "clear_aperture"
+	MeritEdgeThickness = "edge_thickness"
 
 	// System-level EFL merit kind (replaces the constraint-based abs_efl).
 	MeritAbsEFL = "abs_efl"
@@ -90,10 +90,12 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 			return 0
 		}
 		sag, _ := dls.ComputeGeometricMTF(points, term.frequency)
+		// Clamp metric to target so (val-target)^2 = max(0, target-MTF)^2:
+		// a one-sided floor that only penalises under-performance.
 		if sag >= term.target {
-			return 0
+			return term.target
 		}
-		return term.target - sag
+		return sag
 	case MeritGeometricMTFTan:
 		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 		if len(points) == 0 {
@@ -101,9 +103,9 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		}
 		_, tan := dls.ComputeGeometricMTF(points, term.frequency)
 		if tan >= term.target {
-			return 0
+			return term.target
 		}
-		return term.target - tan
+		return tan
 	case dls.MeritWavefrontShiftSag:
 		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 		if len(points) == 0 {
@@ -353,7 +355,7 @@ func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surface
 	if threshold <= 0 {
 		threshold = 0.3
 	}
- deficit := threshold - ratio
+	deficit := threshold - ratio
 	if deficit <= 0 {
 		return 0
 	}
@@ -412,13 +414,14 @@ func evaluateLongitudinalColor(wl1, wl2 float64, surfaces []types.Surface, gc *g
 	return pr2.FocalLength - pr1.FocalLength
 }
 
-// evaluateAbsEFL returns the absolute effective focal length of the system.
+// evaluateAbsEFL returns the effective focal length of the system.
 // Used as a merit term with a target value (e.g. 50.0) so the optimizer
-// penalises |EFL − target|².
+// penalises (EFL − target)².  The sign is preserved so that a system with
+// flipped EFL (negative focal length) receives a large penalty.
 func evaluateAbsEFL(surfaces []types.Surface, gc *glass.Catalog) float64 {
 	sys := types.System{Surfaces: surfaces}
 	pr := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
-	return math.Abs(pr.FocalLength)
+	return pr.FocalLength
 }
 
 // glass_role tuning constants: the combined vd/nd residual maps an Abbe-number
