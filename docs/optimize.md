@@ -492,7 +492,12 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   evaluation are now parallelised across CPU cores.
 - `configs[].ray_paths` is render-only metadata; the optimizer ignores it.
 - Glass variables (nd/vd) are constrained to stay inside the glass hull when
-  `optimization.glass_hull.enabled: true`.
+  `optimization.glass_hull.enabled: true`. The region is chosen by
+  `optimization.glass_hull.source` — `union` (default; built-in real-glass region
+  ∪ the loaded catalogue/AGF), `builtin` (built-in region only), `catalog` (the
+  loaded catalogue only) or `explicit` (an explicit `glasses:` `{nd, vd}` list,
+  ≥3 points). `catalog`/`explicit` fall back to `builtin` when they cannot form
+  a hull.
 - A `SIGINT`/`SIGTERM` stops the solve gracefully (`interrupted: true`, exit 0):
   the first signal interrupts the running DLS within one iteration and writes
   the best point found so far to stdout; the second force-quits (exit 1).

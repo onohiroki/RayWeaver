@@ -72,6 +72,13 @@ const hullBoundaryOffset = 0.05
 // that selects the kinds; 0 means all kinds. Negative kinds select by
 // absolute value with kinds in reverse order.
 func NewConvexHull(cat *Catalog, kinds []int) *ConvexHull {
+	p, refs := catalogPoints(cat, kinds)
+	return buildConvexHull(p, refs)
+}
+
+// catalogPoints collects the (nd, vd) points and diagnostic references of a
+// catalogue restricted to the given glass kinds.
+func catalogPoints(cat *Catalog, kinds []int) ([]ndvdPoint, []HullReference) {
 	p := make([]ndvdPoint, 0, len(cat.ByName))
 	refs := make([]HullReference, 0)
 	seen := make(map[string]bool)
@@ -105,6 +112,14 @@ func NewConvexHull(cat *Catalog, kinds []int) *ConvexHull {
 			})
 		}
 	}
+	return p, refs
+}
+
+// buildConvexHull constructs a ConvexHull from the given points (unsorted, may
+// contain duplicates). It always returns a non-nil hull; when fewer than 3
+// distinct non-collinear points remain the hull is degenerate (len(h.hull) < 3)
+// and the caller decides whether to fall back to the built-in real-glass hull.
+func buildConvexHull(p []ndvdPoint, refs []HullReference) *ConvexHull {
 	if len(p) < 3 {
 		return &ConvexHull{
 			points:     p,
@@ -186,12 +201,69 @@ func NewConvexHull(cat *Catalog, kinds []int) *ConvexHull {
 	}
 }
 
+// NewConvexHullFromPoints builds a hull directly from an explicit list of
+// (nd, vd) points (the "explicit" glass_hull source). Points with nd <= 0 or
+// vd <= 0 are dropped. The result is nil when fewer than 3 distinct
+// non-collinear points remain, so the caller can fall back to the built-in
+// real-glass hull.
+func NewConvexHullFromPoints(pts []Point2D) *ConvexHull {
+	p := make([]ndvdPoint, 0, len(pts))
+	refs := make([]HullReference, 0, len(pts))
+	for i, pt := range pts {
+		if pt.ND <= 0 || pt.VD <= 0 {
+			continue
+		}
+		label := fmt.Sprintf("EXPLICIT%d", i)
+		p = append(p, ndvdPoint{nd: pt.ND, vd: pt.VD, label: label})
+		refs = append(refs, HullReference{Name: label, Kind: "EXPLICIT", ND: pt.ND, VD: pt.VD})
+	}
+	h := buildConvexHull(p, refs)
+	if len(h.hull) < 3 {
+		return nil
+	}
+	return h
+}
+
+// NewUnionConvexHull builds the union of the built-in full real-glass hull and
+// the loaded catalogue's glasses (the "union" glass_hull source, the default).
+// The constraint is never tighter than the built-in real-glass region, while a
+// catalogue glass lying outside it (an unusual inline entry or AGF glass loaded
+// via --glass-dir) is admitted too.
+func NewUnionConvexHull(cat *Catalog) *ConvexHull {
+	pts := newDefaultHullVertices()
+	refs := make([]HullReference, 0, len(pts))
+	for _, p := range pts {
+		refs = append(refs, HullReference{Name: p.label, Kind: "DEFAULT", ND: p.nd, VD: p.vd})
+	}
+	if cat != nil {
+		for key, g := range cat.ByName {
+			if g == nil {
+				continue
+			}
+			nd, vd, ok := NDVD(g)
+			if !ok || nd <= 0 || vd <= 0 {
+				continue
+			}
+			display := g.Name
+			if display == "" {
+				display = g.Label
+			}
+			if display == "" {
+				display = key
+			}
+			pts = append(pts, ndvdPoint{nd: nd, vd: vd, label: display})
+			refs = append(refs, HullReference{Name: display, Kind: "CATALOG", ND: nd, VD: vd})
+		}
+	}
+	return buildConvexHull(pts, refs)
+}
+
 // NewDefaultConvexHull builds a hull from the loaded catalogue using the
-// catalogue's manufacturer kind order. When the catalogue is too small to form
-// a real hull (fewer than 3 vertices — e.g. an input that declares only a
-// couple of inline model glasses and no AGF directory), it falls back to the
-// built-in full real-glass hull (DefaultHullVertices) so the constraint never
-// silently disappears.
+// catalogue's manufacturer kind order. It backs the "catalog" glass_hull
+// source. When the catalogue is too small to form a real hull (fewer than 3
+// vertices — e.g. an input that declares only a couple of inline model glasses
+// and no AGF directory), it falls back to the built-in full real-glass hull
+// (DefaultHullVertices) so the constraint never silently disappears.
 func NewDefaultConvexHull(cat *Catalog) *ConvexHull {
 	if cat == nil {
 		return newDefaultConvexHull()
@@ -205,6 +277,13 @@ func NewDefaultConvexHull(cat *Catalog) *ConvexHull {
 		return newDefaultConvexHull()
 	}
 	return h
+}
+
+// NewBuiltinConvexHull returns the built-in full real-glass hull
+// (DefaultHullVertices). It is the "builtin" glass_hull source and the fallback
+// target for "catalog"/"explicit" when their point set is too small.
+func NewBuiltinConvexHull() *ConvexHull {
+	return newDefaultConvexHull()
 }
 
 // newDefaultConvexHull builds the hull from the built-in DefaultHullVertices.

@@ -708,10 +708,25 @@ type ConstraintOperand struct {
 	Active      bool              `yaml:"active"`
 }
 
+// GlassHullConfig selects the (nd, vd) region the glass variables are
+// constrained to. Source chooses the geometry: "union" (default) unions the
+// built-in full real-glass hull with every loaded catalogue glass (inline
+// entries and AGF from --glass-dir); "builtin" uses the built-in hull only;
+// "catalog" uses the loaded catalogue only; "explicit" uses the Glasses list
+// only (>= 3 points required; falls back to "builtin" otherwise). The hull
+// applies only when Enabled is true (a nil section is treated as enabled).
 type GlassHullConfig struct {
-	Enabled bool    `yaml:"enabled,omitempty"`
-	Margin  float64 `yaml:"margin,omitempty"`
-	Weight  float64 `yaml:"weight,omitempty"`
+	Enabled bool              `yaml:"enabled,omitempty"`
+	Margin  float64           `yaml:"margin,omitempty"`
+	Weight  float64           `yaml:"weight,omitempty"`
+	Source  string            `yaml:"source,omitempty"`  // union (default) | builtin | catalog | explicit
+	Glasses []GlassHullVertex `yaml:"glasses,omitempty"` // explicit mode: >= 3 required
+}
+
+// GlassHullVertex is an explicit (nd, vd) point for the hull.
+type GlassHullVertex struct {
+	ND float64 `yaml:"nd"`
+	VD float64 `yaml:"vd"`
 }
 
 // GlassAttractionConfig configures the soft-min potential field that pulls

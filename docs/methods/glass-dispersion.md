@@ -77,14 +77,46 @@ the grid traces inside a single merit evaluation fast.
 
 ## 6. The glass hull
 
-The **glass hull** is the convex hull of the glasses in the loaded catalogue in
-`(nd, vd)` space. It is built **at runtime** by `glass.NewDefaultConvexHull(cat)`
-from `glass.Catalog.ByName` using Andrew's monotone chain — there is no
-pre-generated vertex table. Catalogue entries are filtered to the manufacturer
-kinds present in the catalogue, ordered by `DefaultGlassKindOrder`
-(`SCHOTT → OHARA → HOYA → CDGM`), so only the highest-priority manufacturer's
-entries for a shared name enter the hull. The hull stores its vertices (CCW),
-the nd/vd bounds, and a barycentric-coordinate cache.
+The **glass hull** restricts the `(nd, vd)` glass variables to a region of
+commercially realizable glass. It is built **at runtime** using Andrew's
+monotone chain — there is no pre-generated vertex table. The region is selected
+by `optimization.glass_hull.source`:
+
+| `source` | Hull geometry | AGF (`--glass-dir`) |
+|---|---|---|
+| **`union`** (default, or empty) | built-in `DefaultHullVertices` (the full real-glass region) **∪** every loaded catalogue glass | included |
+| `builtin` | built-in `DefaultHullVertices` only (catalogue ignored) | ignored |
+| `catalog` | the loaded catalogue only; entries are filtered to the manufacturer kinds present, ordered by `DefaultGlassKindOrder` (`SCHOTT → OHARA → HOYA → CDGM`) so only the highest-priority manufacturer's entry for a shared name enters the hull | included |
+| `explicit` | the configured `glasses:` `(nd, vd)` points only | irrelevant |
+
+Every source except `explicit`/`catalog` can always form a hull
+(`DefaultHullVertices` has 13 vertices). `catalog` falls back to `builtin` when
+the catalogue yields fewer than 3 hull vertices; `explicit` requires at least 3
+valid points and falls back to `builtin` (with a warning) otherwise — so the
+constraint never silently disappears:
+
+```yaml
+optimization:
+  glass_hull:
+    enabled: true
+    source: explicit      # union (default) | builtin | catalog | explicit
+    margin: 0.02
+    weight: 1.0
+    glasses:              # source: explicit only, >= 3 required
+      - {nd: 1.51, vd: 64.0}
+      - {nd: 1.62, vd: 36.0}
+      - {nd: 1.69, vd: 49.0}
+```
+
+An **enabled** section is required for the hull to apply: a `glass_hull:`
+section whose `enabled` is omitted (false) is treated as an explicit disable,
+matching the previous behaviour. With `source: union` (the default) the
+constraint is never tighter than the built-in real-glass region, while any
+catalogue glass (inline entry or AGF loaded via `--glass-dir`) that lies outside
+it is admitted too.
+
+The hull stores its vertices (CCW), the nd/vd bounds, and a barycentric-
+coordinate cache.
 
 When `optimization.glass_hull.enabled: true`, the hull constrains model-glass
 `(nd, vd)` points in two layers:

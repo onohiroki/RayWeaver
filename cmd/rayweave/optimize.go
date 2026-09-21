@@ -637,15 +637,51 @@ func runOptimizeSnap(data []byte, glassDir string) {
 
 // "default on" rule: the real-glass convex hull is applied unless the user sets
 // optimization.glass_hull.enabled: false explicitly. A nil or enabled config
-// yields the default hull (out is set), with margin/weight falling back to
-// their defaults when unset; an explicit disabled config yields no hull (out
-// stays nil). The hull only constrains nd/vd glass variables (hullPairs), so a
-// run without glass variables is unaffected even with the hull active.
+// yields a hull (out is set), with margin/weight falling back to their defaults
+// when unset; an explicit disabled config yields no hull (out stays nil). The
+// hull only constrains nd/vd glass variables (hullPairs), so a run without
+// glass variables is unaffected even with the hull active.
+//
+// The geometry is selected by glass_hull.source:
+//
+//   - "union" (default, or empty): the built-in full real-glass hull unioned
+//     with every loaded catalogue glass (inline entries and AGF from
+//     --glass-dir). The constraint is never tighter than the real-glass region.
+//   - "builtin": the built-in full real-glass hull only (catalogue ignored).
+//   - "catalog": the loaded catalogue's hull only, falling back to "builtin"
+//     when fewer than 3 hull vertices result.
+//   - "explicit": the configured (nd, vd) points only, falling back to
+//     "builtin" (with a warning) when fewer than 3 valid points are given.
 func resolveGlassHull(cfg *types.GlassHullConfig, out **glass.ConvexHull, gc *glass.Catalog) (margin, weight float64) {
 	if cfg != nil && !cfg.Enabled {
 		return 0, 0
 	}
-	*out = glass.NewDefaultConvexHull(gc)
+	source := "union"
+	if cfg != nil && strings.TrimSpace(cfg.Source) != "" {
+		source = strings.ToLower(strings.TrimSpace(cfg.Source))
+	}
+	switch source {
+	case "builtin":
+		*out = glass.NewBuiltinConvexHull()
+	case "catalog":
+		*out = glass.NewDefaultConvexHull(gc)
+	case "explicit":
+		pts := make([]glass.Point2D, 0, len(cfg.Glasses))
+		for _, g := range cfg.Glasses {
+			pts = append(pts, glass.Point2D{ND: g.ND, VD: g.VD})
+		}
+		if h := glass.NewConvexHullFromPoints(pts); h != nil {
+			*out = h
+		} else {
+			errOut("Warning: glass_hull source 'explicit' needs at least 3 valid (nd, vd) glasses; falling back to 'builtin'")
+			*out = glass.NewBuiltinConvexHull()
+		}
+	case "union":
+		*out = glass.NewUnionConvexHull(gc)
+	default:
+		errOut("Warning: unknown glass_hull source %q; using 'union'", cfg.Source)
+		*out = glass.NewUnionConvexHull(gc)
+	}
 	margin = 0.02
 	weight = 1.0
 	if cfg != nil {

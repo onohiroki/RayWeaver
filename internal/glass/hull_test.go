@@ -178,6 +178,71 @@ func TestNewDefaultConvexHullFallback(t *testing.T) {
 	}
 }
 
+func TestNewBuiltinConvexHull(t *testing.T) {
+	h := NewBuiltinConvexHull()
+	if h == nil || !h.Enabled() || len(h.hull) < 3 {
+		t.Fatal("expected the built-in full real-glass hull")
+	}
+	if !h.Contains(1.60, 48.0) {
+		t.Error("expected a mid-range glass to be contained")
+	}
+	if h.Contains(2.9, 5.0) {
+		t.Error("expected an unphysical glass to be outside")
+	}
+}
+
+func TestNewUnionConvexHull(t *testing.T) {
+	// A catalogue glass inside the built-in region does not change the hull.
+	inside := makeTestCatalog([]types.Glass{{Key: "N-BK7", ND: 1.5168, VD: 64.17}})
+	h := NewUnionConvexHull(inside)
+	if h == nil || len(h.hull) < 3 {
+		t.Fatal("expected a union hull even with a tiny catalogue")
+	}
+	if !h.Contains(1.60, 48.0) {
+		t.Error("union: expected a mid-range glass to be contained")
+	}
+
+	// A catalogue glass outside the built-in region widens the hull.
+	// (nd > DefaultHullNDMax, so it must be a new vertex.)
+	outside := makeTestCatalog([]types.Glass{{Key: "X-OUT", ND: 2.35, VD: 40.0}})
+	h2 := NewUnionConvexHull(outside)
+	if h2 == nil {
+		t.Fatal("expected a union hull")
+	}
+	if !h2.Contains(2.35, 40.0) {
+		t.Error("union: expected an outside catalogue glass to be admitted")
+	}
+
+	// A nil catalogue still yields the built-in region.
+	if h3 := NewUnionConvexHull(nil); h3 == nil || !h3.Contains(1.60, 48.0) {
+		t.Error("union: nil catalogue should yield the built-in region")
+	}
+}
+
+func TestNewConvexHullFromPoints(t *testing.T) {
+	tri := []Point2D{{1.45, 70.0}, {1.75, 70.0}, {1.60, 30.0}}
+	h := NewConvexHullFromPoints(tri)
+	if h == nil {
+		t.Fatal("expected a hull from 3 points")
+	}
+	if !h.Contains(1.60, 50.0) {
+		t.Error("expected the triangle's interior point to be contained")
+	}
+	if h.Contains(1.42, 100.0) {
+		t.Error("expected a far point to be outside the triangle")
+	}
+
+	// Invalid (non-positive) points are dropped; too few remain -> nil.
+	if h := NewConvexHullFromPoints([]Point2D{{-1, 60}, {1.6, -2}}); h != nil {
+		t.Error("expected nil when fewer than 3 valid points remain")
+	}
+	// Collinear points cannot form a hull -> nil. (Same vd keeps the cross
+	// product exactly zero, so the degeneracy is not a floating-point artifact.)
+	if h := NewConvexHullFromPoints([]Point2D{{1.5, 60}, {1.6, 60}, {1.7, 60}}); h != nil {
+		t.Error("expected nil for collinear points")
+	}
+}
+
 func TestConvexHullZeroWeight(t *testing.T) {
 	cat := makeTestCatalog([]types.Glass{
 		{Key: "N-BK7", ND: 1.5168, VD: 64.17},

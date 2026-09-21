@@ -3031,8 +3031,16 @@ func listOptimization(input types.Input, output types.Output, format string) {
 		if gh := opt.GlassHull; gh != nil {
 			var p []propRow
 			p = appendBoolTrueProp(p, "Enabled", gh.Enabled)
+			source := gh.Source
+			if source == "" {
+				source = "union"
+			}
+			p = appendStrProp(p, "Source", source)
 			p = appendNumProp(p, "Margin", gh.Margin)
 			p = appendNumProp(p, "Weight", gh.Weight)
+			if len(gh.Glasses) > 0 {
+				p = appendIntProp(p, "Glasses", len(gh.Glasses))
+			}
 			subConfigs = append(subConfigs, SubConfigSection{Name: "glass_hull", Settings: p})
 		}
 		if ga := opt.GlassAttraction; ga != nil {

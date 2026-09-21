@@ -1,13 +1,13 @@
 package glass
 
 // DefaultHullVertices is the built-in full real-glass convex hull in (nd, vd)
-// space, used as a fallback when the loaded catalogue is too small to form a
-// meaningful hull (e.g. an input that declares only a few inline model glasses
-// and no AGF directory). It spans the commercially realizable glass region so
-// the hull constraint never silently disappears. When a richer catalogue is
-// loaded, the hull is built from that catalogue instead (see
-// NewConvexHull), which can be tighter but is always contained in — or very
-// close to — this default region.
+// space. It spans the commercially realizable glass region so the hull
+// constraint never silently disappears. It backs the "builtin" glass_hull
+// source, is unioned with the loaded catalogue by the default "union" source
+// (see NewUnionConvexHull), and is the fallback target of the "catalog" and
+// "explicit" sources when they cannot form a hull. The "catalog" source builds
+// a hull from the loaded catalogue instead (see NewConvexHull), which can be
+// tighter but is always contained in — or very close to — this default region.
 //
 // The list is the convex hull of the reference glass map (nd 1.41268..2.154,
 // vd 16.48..101.0). It is hand-maintained: the former generator

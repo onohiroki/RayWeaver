@@ -172,15 +172,19 @@ func mustParseInput(t *testing.T, yamlData string) types.Input {
 	return in
 }
 
-// TestResolveGlassHullDefaultOn verifies the convex-hull is enabled by default
-// (real-glass region), honoring an explicit disabled config, and carrying the
-// custom margin/weight when enabled.
-func TestResolveGlassHullDefaultOn(t *testing.T) {
+// TestResolveGlassHullSourceModes verifies the glass_hull.source dispatch:
+// union (default) admits the built-in real-glass region, builtin ignores the
+// catalogue, catalog uses only the catalogue (falling back to builtin when it
+// is too small), and explicit uses only the configured points (falling back to
+// builtin when fewer than 3 valid points are given). It also checks the
+// enabled/margin/weight handling.
+func TestResolveGlassHullSourceModes(t *testing.T) {
+	// A catalogue with only two glasses: too small for a catalogue hull.
 	testCat := glass.NewCatalog()
 	testCat.Add(types.Glass{Key: "N-BK7", ND: 1.5168, VD: 64.17})
 	testCat.Add(types.Glass{Key: "N-SF2", ND: 1.64769, VD: 33.82})
-	testCat.Add(types.Glass{Key: "N-LAK9", ND: 1.691, VD: 54.71})
 
+	// Default (nil config) is union: admits a broad real-glass point.
 	var hull *glass.ConvexHull
 	m, w := resolveGlassHull(nil, &hull, testCat)
 	if hull == nil {
@@ -188,6 +192,9 @@ func TestResolveGlassHullDefaultOn(t *testing.T) {
 	}
 	if m != 0.02 || w != 1.0 {
 		t.Errorf("default margin/weight = %v/%v, want 0.02/1.0", m, w)
+	}
+	if !hull.Contains(1.60, 48.0) {
+		t.Error("union: expected a mid-range real glass to be contained")
 	}
 
 	// Explicitly disabled -> no hull.
@@ -209,6 +216,48 @@ func TestResolveGlassHullDefaultOn(t *testing.T) {
 	}
 	if m3 != 0.05 || w3 != 2.0 {
 		t.Errorf("custom margin/weight = %v/%v, want 0.05/2.0", m3, w3)
+	}
+
+	// builtin: ignores the catalogue, spans the real-glass region.
+	var hBuiltin *glass.ConvexHull
+	resolveGlassHull(&types.GlassHullConfig{Enabled: true, Source: "builtin"}, &hBuiltin, testCat)
+	if hBuiltin == nil || !hBuiltin.Contains(1.60, 48.0) {
+		t.Fatal("builtin: expected the full real-glass hull")
+	}
+
+	// catalog with a tiny catalogue falls back to builtin.
+	var hCatalog *glass.ConvexHull
+	resolveGlassHull(&types.GlassHullConfig{Enabled: true, Source: "catalog"}, &hCatalog, testCat)
+	if hCatalog == nil || !hCatalog.Contains(1.60, 48.0) {
+		t.Fatal("catalog with a tiny catalogue should fall back to builtin")
+	}
+
+	// explicit with 3 points: a tight triangle containing only its own region.
+	explicit := &types.GlassHullConfig{Enabled: true, Source: "explicit", Glasses: []types.GlassHullVertex{
+		{ND: 1.45, VD: 70.0},
+		{ND: 1.75, VD: 70.0},
+		{ND: 1.60, VD: 30.0},
+	}}
+	var hExplicit *glass.ConvexHull
+	resolveGlassHull(explicit, &hExplicit, testCat)
+	if hExplicit == nil {
+		t.Fatal("explicit: expected a hull from 3 points")
+	}
+	if !hExplicit.Contains(1.60, 50.0) {
+		t.Error("explicit: expected its own triangle to contain an interior point")
+	}
+	if hExplicit.Contains(1.42, 100.0) {
+		t.Error("explicit: expected a far real-glass point to be outside the triangle")
+	}
+
+	// explicit with < 3 points falls back to builtin.
+	var hFew *glass.ConvexHull
+	resolveGlassHull(&types.GlassHullConfig{Enabled: true, Source: "explicit", Glasses: []types.GlassHullVertex{
+		{ND: 1.50, VD: 60.0},
+		{ND: 1.60, VD: 40.0},
+	}}, &hFew, testCat)
+	if hFew == nil || !hFew.Contains(1.60, 48.0) {
+		t.Fatal("explicit with < 3 points should fall back to builtin")
 	}
 }
 
