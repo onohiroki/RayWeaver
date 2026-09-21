@@ -22,6 +22,13 @@ go build -o rayweave ./cmd/rayweave/
 ./rayweave <subcommand> < input.yaml
 ```
 
+- **Never use `2>&1` or `|&` when running rayweave.** stdout carries the
+  pipeline YAML result while stderr carries diagnostic/log output (verbose
+  JSONL, progress messages, etc.). Merging the two streams makes them
+  inseparable — the YAML becomes unparseable and the log data is lost.
+  Keep stdout and stderr separate; if you need to capture both, write them
+  to distinct files (e.g. `rayweave escape ... >out.yaml 2>log.jsonl`).
+
 Tests: `go test ./...` (13 test files across all packages, no CI).
 
 ## Dependencies
