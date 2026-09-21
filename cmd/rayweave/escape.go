@@ -339,6 +339,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		BFGS:               input.Optimization.BFGS,
 		AdaptiveDamping:    input.Optimization.AdaptiveDamping,
 		PowerSolveSurfaces: gctx.surfaces,
+		Normalization:      input.Optimization.MeritNormalization,
 	}
 	if dg := input.Optimization.Degenerate; dg != nil {
 		cfg.SpotDegenerate = dg.SpotValue
@@ -658,6 +659,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			MeritModes:          cfg.MeritModes,
 			Constraints:         constraints,
 			PupilModel:          input.Chief.PupilModel,
+			Normalization:       input.Optimization.MeritNormalization,
 		})
 	}
 	if len(configs) == 0 {

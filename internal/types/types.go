@@ -532,6 +532,29 @@ type MeritTerm struct {
 	Fraction   float64 `yaml:"fraction,omitempty"`
 	SurfaceSet []int   `yaml:"surface_set"`
 	Weight     float64 `yaml:"weight"`
+	// Scale is an explicit normalization denominator for this term: the
+	// residual becomes (value - target) / Scale before weighting. 0 = use the
+	// automatic per-kind scale when optimization.merit_normalization is
+	// enabled, else 1 (no normalization). Use it to make the weight
+	// independent of the term's physical units (e.g. Scale = lambda for a
+	// wavefront RMS, the Airy radius for a spot RMS).
+	Scale float64 `yaml:"scale,omitempty"`
+}
+
+// MeritNormalizationConfig enables automatic per-term scale normalization so
+// the merit weights are comparable across term kinds: each term's residual is
+// divided by a characteristic scale before weighting, so weight 1 means "a
+// residual of one characteristic unit". Length-valued aberration kinds
+// (spot_*, wavefront_* in mm, opd_rms, longitudinal/lateral_color) use the
+// term's wavelength (mm) as the scale, i.e. the residual is measured in waves;
+// kinds with no natural length scale (MTF, focal_length in mm, field_alive,
+// ...) keep scale 1. Per-kind overrides and per-term scale= fields take
+// precedence. Disabled by default (weights keep their raw units).
+type MeritNormalizationConfig struct {
+	Enabled bool `yaml:"enabled,omitempty"`
+	// Scales overrides the automatic per-kind scale by merit kind
+	// (e.g. spot_rms: 0.003, wavefront_rms_residual: 0.0005876).
+	Scales map[string]float64 `yaml:"scales,omitempty"`
 }
 
 type MeritFunction struct {
@@ -797,36 +820,37 @@ type RegionActiveConfig struct {
 }
 
 type OptimizationConfig struct {
-	Method           string                 `yaml:"method"`
-	Aggregate        string                 `yaml:"aggregate,omitempty"`
-	Mu               float64                `yaml:"mu,omitempty"`
-	MaxIter          int                    `yaml:"max_iter,omitempty"`
-	Tol              float64                `yaml:"tol,omitempty"`
-	Epsilon          float64                `yaml:"epsilon,omitempty"`
-	NumRays          int                    `yaml:"num_rays,omitempty"`
-	NumRings         int                    `yaml:"num_rings,omitempty"`
-	NumSpokes        int                    `yaml:"num_spokes,omitempty"`
-	MuConMax         float64                `yaml:"mu_con_max,omitempty"`
-	ApertureMargin   float64                `yaml:"aperture_margin,omitempty"`
-	ApertureMarginMM float64                `yaml:"aperture_margin_mm,omitempty"`
-	JacobianWorkers  int                    `yaml:"jacobian_workers,omitempty"`
-	CentralDiff      bool                   `yaml:"central_diff,omitempty"`
-	BFGS             bool                   `yaml:"bfgs,omitempty"`
-	Variables        []OptimizationVariable `yaml:"variables,omitempty"`
-	SharedVariables  []SharedVariable       `yaml:"shared_variables,omitempty"`
-	LocalVariables   []LocalVariableDef     `yaml:"local_variables,omitempty"`
-	VariableLinks    []VariableLink         `yaml:"variable_links,omitempty"`
-	Constraints      []ConstraintOperand    `yaml:"constraints,omitempty"`
-	GlassHull        *GlassHullConfig       `yaml:"glass_hull,omitempty"`
-	GlassAttraction  *GlassAttractionConfig `yaml:"glass_attraction,omitempty"`
-	Escape           *EscapeConfig          `yaml:"escape,omitempty"`
-	PSO              *PSOConfig             `yaml:"pso,omitempty"`
-	MeritSchedule    *MeritScheduleConfig   `yaml:"merit_schedule,omitempty"`
-	Degenerate       *DegenerateConfig      `yaml:"degenerate,omitempty"`
-	PowerSolve       *PowerSolveConfig      `yaml:"power_solve,omitempty"`
-	BackFocusSolve   *BackFocusSolveConfig  `yaml:"back_focus_solve,omitempty"`
-	RegionActive     *RegionActiveConfig    `yaml:"region_active,omitempty"`
-	AdaptiveDamping  *AdaptiveDampingConfig `yaml:"adaptive_damping,omitempty"`
+	Method             string                    `yaml:"method"`
+	Aggregate          string                    `yaml:"aggregate,omitempty"`
+	Mu                 float64                   `yaml:"mu,omitempty"`
+	MaxIter            int                       `yaml:"max_iter,omitempty"`
+	Tol                float64                   `yaml:"tol,omitempty"`
+	Epsilon            float64                   `yaml:"epsilon,omitempty"`
+	NumRays            int                       `yaml:"num_rays,omitempty"`
+	NumRings           int                       `yaml:"num_rings,omitempty"`
+	NumSpokes          int                       `yaml:"num_spokes,omitempty"`
+	MuConMax           float64                   `yaml:"mu_con_max,omitempty"`
+	ApertureMargin     float64                   `yaml:"aperture_margin,omitempty"`
+	ApertureMarginMM   float64                   `yaml:"aperture_margin_mm,omitempty"`
+	JacobianWorkers    int                       `yaml:"jacobian_workers,omitempty"`
+	CentralDiff        bool                      `yaml:"central_diff,omitempty"`
+	BFGS               bool                      `yaml:"bfgs,omitempty"`
+	Variables          []OptimizationVariable    `yaml:"variables,omitempty"`
+	SharedVariables    []SharedVariable          `yaml:"shared_variables,omitempty"`
+	LocalVariables     []LocalVariableDef        `yaml:"local_variables,omitempty"`
+	VariableLinks      []VariableLink            `yaml:"variable_links,omitempty"`
+	Constraints        []ConstraintOperand       `yaml:"constraints,omitempty"`
+	GlassHull          *GlassHullConfig          `yaml:"glass_hull,omitempty"`
+	GlassAttraction    *GlassAttractionConfig    `yaml:"glass_attraction,omitempty"`
+	Escape             *EscapeConfig             `yaml:"escape,omitempty"`
+	PSO                *PSOConfig                `yaml:"pso,omitempty"`
+	MeritSchedule      *MeritScheduleConfig      `yaml:"merit_schedule,omitempty"`
+	MeritNormalization *MeritNormalizationConfig `yaml:"merit_normalization,omitempty"`
+	Degenerate         *DegenerateConfig         `yaml:"degenerate,omitempty"`
+	PowerSolve         *PowerSolveConfig         `yaml:"power_solve,omitempty"`
+	BackFocusSolve     *BackFocusSolveConfig     `yaml:"back_focus_solve,omitempty"`
+	RegionActive       *RegionActiveConfig       `yaml:"region_active,omitempty"`
+	AdaptiveDamping    *AdaptiveDampingConfig    `yaml:"adaptive_damping,omitempty"`
 }
 
 // AdaptiveDampingConfig configures per-variable adaptive damping for the DLS

@@ -356,6 +356,43 @@ conditional schedule drives the
 [back-focus solve](#back-focus-solve-optimizationback_focus_solve) type — see
 that section for the dynamic switching.
 
+### Merit weight normalization (`optimization.merit_normalization`)
+
+The merit is `Σ weight·((value−target)/scale)²`. Because the term kinds carry
+very different units (spot RMS and focal length in mm, wavefront in mm, MTF
+dimensionless), a weight that is large for one kind can be negligible for
+another: a `spot_rms` of 1 µm with weight 3000 contributes ~3e-3, while a
+0.3 mm `focal_length` error with weight 5000 contributes ~450. Enabling
+
+```yaml
+optimization:
+  merit_normalization:
+    enabled: true
+    scales:                 # optional per-kind overrides (denominator)
+      spot_rms: 0.003
+      wavefront_rms_residual: 0.0005876
+```
+
+divides each term's residual by a characteristic scale so the weights become
+comparable:
+
+- **Wave-scaled kinds** use the term's wavelength (mm), i.e. the residual is
+  measured in **waves**: `spot_rms` / `spot_rms_t` / `spot_rms_s` /
+  `spot_rms_worst` / `spot_rms_weighted` / `spot_ee_radius`,
+  `wavefront_rms_residual` / `wavefront_sphere_rms` / `wavefront_sphere_pv`,
+  `opd_rms`, `longitudinal_color` / `lateral_color`.
+- **Kinds with no natural wave scale** (geometric MTF, `focal_length` in mm,
+  `field_alive`, `distortion_pct`, `glass_role`, ...) keep scale 1.
+
+A per-term `scale:` on a merit term overrides both the automatic scale and the
+per-kind map, and works even when normalization is disabled. Normalization is
+**off by default** (weights keep their raw units). The effective configuration
+round-trips through the pipeline; `list optimization` shows the section.
+
+To recalibrate weights, measure the actual per-term magnitudes first:
+`optimize --verbose` emits a `{"event":"breakdown", ...}` JSONL line with each
+term's contribution at the final point (see [Logs and `query`](#logs-and-query)).
+
 ### Back-focus solve (`optimization.back_focus_solve`)
 
 A **hard solve** that keeps the image plane at the desired focus during

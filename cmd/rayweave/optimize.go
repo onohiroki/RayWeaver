@@ -155,6 +155,7 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 			MeritModes:          cfg.MeritModes,
 			Constraints:         constraints,
 			PupilModel:          pupilModelForConfig(input),
+			Normalization:       input.Optimization.MeritNormalization,
 		})
 	}
 

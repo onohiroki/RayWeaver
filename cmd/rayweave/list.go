@@ -3043,6 +3043,14 @@ func listOptimization(input types.Input, output types.Output, format string) {
 			}
 			subConfigs = append(subConfigs, SubConfigSection{Name: "glass_hull", Settings: p})
 		}
+		if mn := opt.MeritNormalization; mn != nil {
+			var p []propRow
+			p = appendBoolTrueProp(p, "Enabled", mn.Enabled)
+			if len(mn.Scales) > 0 {
+				p = appendIntProp(p, "Scale Overrides", len(mn.Scales))
+			}
+			subConfigs = append(subConfigs, SubConfigSection{Name: "merit_normalization", Settings: p})
+		}
 		if ga := opt.GlassAttraction; ga != nil {
 			var p []propRow
 			p = appendBoolTrueProp(p, "Enabled", ga.Enabled)

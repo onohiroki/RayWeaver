@@ -49,6 +49,9 @@ type Config struct {
 	Hull             *glass.ConvexHull
 	HullMargin       float64
 	HullWeight       float64
+	// Normalization enables automatic per-term scale normalization (nil =
+	// disabled; residuals keep their raw units).
+	Normalization *types.MeritNormalizationConfig
 	// Bounded penalties for merit terms that cannot be evaluated (a pupil
 	// grid with no valid rays, or a failed wavefront fit). Defaults:
 	// spot 0.1, opd 0.01, wavefront 0.001 (mm). The legacy 1e6 sentinel
@@ -91,6 +94,7 @@ type ConfigInput struct {
 	Constraints         []types.ConstraintOperand
 	RegionActive        *types.RegionActiveConfig
 	PupilModel          *types.PupilModelConfig
+	Normalization       *types.MeritNormalizationConfig
 }
 
 func effectiveReferenceWavelength(wavelength float64) float64 {
@@ -151,6 +155,9 @@ type MeritTerm struct {
 	Fraction             float64
 	Frequency            float64
 	SurfaceSet           []int
+	// Scale is an explicit normalization denominator (0 = automatic when
+	// optimization.merit_normalization is enabled, else no normalization).
+	Scale float64
 }
 
 type Result struct {
@@ -255,6 +262,19 @@ type meritTerm struct {
 	fraction float64
 	// frequency is the spatial frequency in lp/mm for geometric MTF kinds.
 	frequency float64
+	// normScale is the normalization denominator applied to the residual
+	// (value - target) / normScale before weighting. 1 = no normalization.
+	normScale float64
+}
+
+// normDivisor returns the normalization denominator, treating a zero value as
+// 1 so a meritTerm built without an explicit normalization (e.g. in tests or by
+// a caller that bypasses buildMeritTermFromTypes) is left unnormalized.
+func (t meritTerm) normDivisor() float64 {
+	if t.normScale > 0 {
+		return t.normScale
+	}
+	return 1.0
 }
 
 // meritSchedule is the compiled optimization.merit_schedule: a smooth blend of
@@ -1703,6 +1723,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 			fraction:             t.Fraction,
 			frequency:            t.Frequency,
 			surfaceSet:           append([]int(nil), t.SurfaceSet...),
+			normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, cfg.Normalization),
 		})
 	}
 	if len(cfg.MeritModes) > 0 {
@@ -1741,6 +1762,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 					fraction:             t.Fraction,
 					frequency:            t.Frequency,
 					surfaceSet:           append([]int(nil), t.SurfaceSet...),
+					normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, cfg.Normalization),
 				})
 			}
 			c.meritModes[m.Name] = terms
@@ -1962,7 +1984,72 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 			break
 		}
 	}
+	mt.normScale = resolveNormScale(t, ci)
 	return mt
+}
+
+// resolveNormScale resolves a merit term's normalization denominator from the
+// multi-config input (see normScaleFor).
+func resolveNormScale(t types.MeritTerm, ci ConfigInput) float64 {
+	wl := t.Wavelength
+	if wl <= 0 {
+		wl = ci.ReferenceWavelength
+	}
+	return normScaleFor(t.Kind, t.Scale, wl, ci.Normalization)
+}
+
+// normScaleFor resolves a merit term's normalization denominator:
+//  1. an explicit term scale (Scale field), else
+//  2. the per-kind override / automatic scale when normalization is enabled,
+//     else
+//  3. 1 (no normalization).
+func normScaleFor(kind string, explicitScale, wavelength float64, norm *types.MeritNormalizationConfig) float64 {
+	if explicitScale > 0 {
+		return explicitScale
+	}
+	if norm == nil || !norm.Enabled {
+		return 1.0
+	}
+	if wavelength <= 0 {
+		wavelength = types.DefaultWavelength
+	}
+	return normalizationScale(kind, wavelength, norm.Scales)
+}
+
+// normalizationScale returns the automatic normalization denominator for a
+// merit kind. Length-valued aberration kinds (spot sizes, wavefront RMS/PV,
+// OPD RMS, chromatic focal/image shift) are measured in waves: the scale is the
+// term's wavelength in mm, so a value equal to one wavelength normalizes to 1.
+// A per-kind override in scales takes precedence; other kinds keep scale 1
+// (their value is already dimensionless, a length without a natural wave
+// scale, or a fraction). The legacy empty kind means spot_rms.
+func normalizationScale(kind string, wavelengthMM float64, scales map[string]float64) float64 {
+	if s, ok := scales[kind]; ok && s > 0 {
+		return s
+	}
+	if kind == "" {
+		kind = dls.MeritSpotRMS
+	}
+	if s, ok := scales[kind]; ok && s > 0 {
+		return s
+	}
+	if isWaveScaledKind(kind) && wavelengthMM > 0 {
+		return wavelengthMM
+	}
+	return 1.0
+}
+
+// isWaveScaledKind reports whether a merit kind's value is an OPD/length in mm
+// whose natural normalization is the wavelength (so value/scale is in waves).
+func isWaveScaledKind(kind string) bool {
+	switch kind {
+	case dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
+		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius,
+		MeritOPDRMS, MeritWavefrontRMSResidual, MeritWavefrontSphereRMS,
+		MeritWavefrontSpherePV, MeritLongitudinalColor, MeritLateralColor:
+		return true
+	}
+	return false
 }
 
 func newOptimizer(configs []config, variables []Variable, linkedVars []LinkedVariable, varNameIndex map[string]int, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs bool, adaptiveDamping *types.AdaptiveDampingConfig, raCfg *types.RegionActiveConfig) *Optimizer {
@@ -3382,11 +3469,11 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 			term := st.term
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
-				diff := val - term.target
+				diff := (val - term.target) / term.normDivisor()
 				cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache, p)
-				diff := val - term.target
+				diff := (val - term.target) / term.normDivisor()
 				cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
 		}
@@ -3445,11 +3532,11 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 			var contrib float64
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
-				diff := val - term.target
+				diff := (val - term.target) / term.normDivisor()
 				contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache, p)
-				diff := val - term.target
+				diff := (val - term.target) / term.normDivisor()
 				contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
 			kind := term.kind
@@ -3485,7 +3572,7 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 
 		for _, st := range o.scheduledTerms(cfg) {
 			term := st.term
-			w := math.Sqrt(cfg.weight * st.scale * term.weight * term.fieldWeight * term.wavWeight)
+			w := math.Sqrt(cfg.weight*st.scale*term.weight*term.fieldWeight*term.wavWeight) / term.normDivisor()
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
 				allR = append(allR, w*(val-term.target))
