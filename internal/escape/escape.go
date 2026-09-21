@@ -43,6 +43,9 @@ const (
 	ReasonRayTraceFailure
 	ReasonGeometryViolation
 	ReasonNumericalFailure
+	// ReasonGlassHullViolation marks a converged point whose nd/vd glass lies
+	// outside the real-glass convex hull (the hull is a core constraint).
+	ReasonGlassHullViolation
 )
 
 // Params holds the escape-function parameters. H controls the bump height
@@ -93,12 +96,12 @@ func DefaultParams() Params {
 // the same minimum. Fingerprint is the optional design descriptor (e.g. the
 // thin-lens element powers) used as an additional "distinct minimum" criterion.
 type Point struct {
-	X            []float64
-	Merit        float64
-	H            float64
-	W            float64
-	Fingerprint  []float64
-	Status       MinStatus
+	X             []float64
+	Merit         float64
+	H             float64
+	W             float64
+	Fingerprint   []float64
+	Status        MinStatus
 	InvalidReason InvalidReason
 }
 
@@ -139,15 +142,15 @@ type glassPhaseable interface {
 // empty escape list makes the wrapper behave exactly like the inner model
 // (used for the clean re-optimisation step of the cycle).
 type Wrapper struct {
-	inner         dls.Model
-	escapes       []Point
-	params        Params
-	startX        []float64
-	phase         Phase
-	stop          <-chan struct{}
-	glassPhase    bool // insert the power-preserving glass phase between escape and clean DLS
-	inGlassPhase  bool // the inner model is currently in the glass phase
-	phaseLog      PhaseSetter // optional DLS logger phase context forwarder
+	inner        dls.Model
+	escapes      []Point
+	params       Params
+	startX       []float64
+	phase        Phase
+	stop         <-chan struct{}
+	glassPhase   bool        // insert the power-preserving glass phase between escape and clean DLS
+	inGlassPhase bool        // the inner model is currently in the glass phase
+	phaseLog     PhaseSetter // optional DLS logger phase context forwarder
 }
 
 // NewWrapper wraps an inner dls.Model with escape-function support.
@@ -441,6 +444,24 @@ func (w *Wrapper) phaseMetric() float64 {
 		return 1.0
 	default:
 		return 0.0
+	}
+}
+
+// ensurePhaseWeights installs the mode weights for the current escape-cycle
+// phase at startX, so the DLS solver's beforeMerit and bestMerit are computed
+// with the correct (not stale) weight vector.  Called before each dls.Solve
+// in Cycle.Run to prevent cross-phase merit mismatches when the schedule
+// metric changes between phases (e.g. metric: phase).
+func (w *Wrapper) ensurePhaseWeights() {
+	if pe, ok := w.inner.(interface{ SetEscapePhase(float64) }); ok {
+		pe.SetEscapePhase(w.phaseMetric())
+	}
+	if msu, ok := w.inner.(dls.MeritScheduleUpdater); ok {
+		x := w.startX
+		if x == nil {
+			x = w.inner.InitialState()
+		}
+		msu.UpdateMeritWeights(x, 0)
 	}
 }
 

@@ -77,23 +77,27 @@ the grid traces inside a single merit evaluation fast.
 
 ## 6. The glass hull
 
-The **glass hull** is the convex hull of all glasses in the reference catalog
-in `(nd, vd)` space (computed by `cmd/hullgen` from `GLASS/glass_nd_vd_data.yaml`
-using Andrew's monotone chain, and baked into `internal/glass/hull_data.go`).
+The **glass hull** is the convex hull of the glasses in the loaded catalogue in
+`(nd, vd)` space. It is built **at runtime** by `glass.NewDefaultConvexHull(cat)`
+from `glass.Catalog.ByName` using Andrew's monotone chain — there is no
+pre-generated vertex table. Catalogue entries are filtered to the manufacturer
+kinds present in the catalogue, ordered by `DefaultGlassKindOrder`
+(`SCHOTT → OHARA → HOYA → CDGM`), so only the highest-priority manufacturer's
+entries for a shared name enter the hull. The hull stores its vertices (CCW),
+the nd/vd bounds, and a barycentric-coordinate cache.
 
-When `optimization.glass_hull.enabled: true`, the optimizer adds a merit term
-that penalizes model-glass `(nd, vd)` points **outside** the hull (by a margin
-`glass_hull.margin` with weight `glass_hull.weight`). This keeps optimized
-glasses inside the region of commercially realizable glasses. The interior
-point test uses the precomputed hull vertices and its nd/vd bounds.
+When `optimization.glass_hull.enabled: true`, the hull constrains model-glass
+`(nd, vd)` points in two layers:
 
-### Regenerating the hull
+- **Smooth interior penalty** (`ConvexHull.Penalty`): near-zero well inside the
+  hull, ramping smoothly to a hard `1e6` beyond the boundary (scaled by
+  `glass_hull.margin` and `glass_hull.weight`). This steers the DLS interior.
+- **Core-constraint check** (`ConvexHull.Contains` + `Optimizer.GlassHullViolations`):
+  an O(n_vertices) barycentric point-in-hull test. During `escape`, a converged
+  point whose nd/vd lies outside the hull is classified as an
+  `infeasible_basin` (reason `glass_hull_violation`) and is never recorded as a
+  minimum. The offending element's glass surfaces (from `Variable.SurfaceSet`)
+  are reported.
 
-The hull data is auto-generated and marked `DO NOT EDIT`:
-
-```sh
-go run ./cmd/hullgen/
-```
-
-This reads `GLASS/glass_nd_vd_data.yaml` and rewrites
-`internal/glass/hull_data.go`. See also `GLASS/GLASS_README.md`.
+This keeps optimized glasses inside the region of commercially realizable
+glasses.

@@ -159,7 +159,7 @@ constant while only the glasses move. The phase objective is built from the
 config's **own** terms, never auto-generated: its chromatic terms
 (`longitudinal_color` / `lateral_color`) are scaled by
 `optimization.power_solve.color_scale` (default 100) so colour leads the phase,
-while the config's cheap analytic geometric terms (`seidel_*`, `abs_efl`,
+while the config's cheap analytic geometric terms (`seidel_*`, `focal_length`,
 `distortion_pct`, `glass_role`) are retained at their configured weights as a
 **guardrail**. Expensive grid-trace terms (`spot_rms*`, `geometric_mtf_*`,
 `wavefront_*`, `field_alive`) are excluded so the phase stays cheap. This

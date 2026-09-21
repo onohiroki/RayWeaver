@@ -320,7 +320,7 @@ and the weights are scheduled globally:
 ```yaml
 optimization:
   merit_schedule:
-    metric: merit_ratio        # merit_ratio | iteration | glass_role | spot_diffraction
+    metric: merit_ratio        # merit_ratio | iteration | glass_role | spot_diffraction | phase
     curve: linear              # linear | sigmoid | step
     anchor_from: 1.0
     anchor_to: 0.05
@@ -339,11 +339,16 @@ optimization:
 a `merit_schedule` evaluates the config's fixed `merit`** (empty when
 undefined) — the mode terms are ignored and the objective stays 0, so a
 schedule is required for the modes to run. The schedule's weights
-are continuous functions of the state metric (`merit_ratio`, `iteration`, or
-the `glass_role` residual aggregated over `glass_surfaces`), are recomputed once
-per DLS iteration and frozen for it, and `Σ residual² == merit` is preserved via
-per-term `√weight` scaling (see `docs/methods/merit-functions.md`, §5). The
-active mode is reported in the output (`opt_results.active_mode`) and the
+are continuous functions of the state metric (`merit_ratio`, `iteration`,
+the `glass_role` residual aggregated over `glass_surfaces`, or `phase`),
+are recomputed once per DLS iteration and frozen for it, and
+`Σ residual² == merit` is preserved via per-term `√weight` scaling (see
+`docs/methods/merit-functions.md`, §5). The `phase` metric (escape-only)
+maps the escape-cycle phase to a numeric value on [0,1] (`PhaseEscape`→0,
+`PhaseGlassSolve`→0.5, `PhaseClean`→1), enabling hard mode switches at
+phase boundaries (e.g. an exploration mode with few terms during the
+escape phase and a full local mode during the clean phase). The active
+mode is reported in the output (`opt_results.active_mode`) and the
 per-iteration weights as JSONL `weights` events.
 
 A mode may also carry a `back_focus_type` (`paraxial` / `wavefront`) so the

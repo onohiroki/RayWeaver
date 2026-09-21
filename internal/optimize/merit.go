@@ -55,8 +55,8 @@ const (
 	MeritClearAperture = "clear_aperture"
 	MeritEdgeThickness = "edge_thickness"
 
-	// System-level EFL merit kind (replaces the constraint-based abs_efl).
-	MeritAbsEFL = "abs_efl"
+	// System-level EFL merit kind (replaces the constraint-based focal_length).
+	MeritFocalLength = "focal_length"
 
 	// Geometric MTF merit kinds (Phase 1: direct complex sum).
 	// These evaluate the sagittal/tangential MTF at a specified spatial frequency.
@@ -322,8 +322,8 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 		return evaluateClearAperture(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
 	case MeritEdgeThickness:
 		return evaluateEdgeThickness(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
-	case MeritAbsEFL:
-		return evaluateAbsEFL(surfaces, gc)
+	case MeritFocalLength:
+		return evaluateFocalLength(surfaces, gc)
 	default:
 		return 0
 	}
@@ -414,11 +414,11 @@ func evaluateLongitudinalColor(wl1, wl2 float64, surfaces []types.Surface, gc *g
 	return pr2.FocalLength - pr1.FocalLength
 }
 
-// evaluateAbsEFL returns the effective focal length of the system.
+// evaluateFocalLength returns the effective focal length of the system.
 // Used as a merit term with a target value (e.g. 50.0) so the optimizer
 // penalises (EFL − target)².  The sign is preserved so that a system with
 // flipped EFL (negative focal length) receives a large penalty.
-func evaluateAbsEFL(surfaces []types.Surface, gc *glass.Catalog) float64 {
+func evaluateFocalLength(surfaces []types.Surface, gc *glass.Catalog) float64 {
 	sys := types.System{Surfaces: surfaces}
 	pr := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
 	return pr.FocalLength

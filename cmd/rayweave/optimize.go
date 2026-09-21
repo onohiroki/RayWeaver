@@ -325,7 +325,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	}
 
 	var hull *glass.ConvexHull
-	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull)
+	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull, gc)
 
 	opt := optimize.NewMultiOptimizer(configs, sharedVars, localVars, input.Optimization.VariableLinks, gc, maxIter, mu, tol, epsilon, apertureMargin, numRays, input.Optimization.MuConMax, input.Optimization.JacobianWorkers, logger, hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS, input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
 	opt.SetApertureMarginMM(apertureMarginMM)
@@ -552,7 +552,7 @@ func runOptimizeSnap(data []byte, glassDir string) {
 	input := run.input
 
 	var hull *glass.ConvexHull
-	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull)
+	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull, run.gc)
 	opt := optimize.NewMultiOptimizer(run.configs, run.sharedVars, run.localVars, input.Optimization.VariableLinks, run.gc,
 		run.maxIter, run.mu, run.tol, run.epsilon, run.apertureMargin, run.numRays,
 		input.Optimization.MuConMax, input.Optimization.JacobianWorkers, nil,
@@ -635,18 +635,17 @@ func runOptimizeSnap(data []byte, glassDir string) {
 	writeYAML(&output)
 }
 
-
 // "default on" rule: the real-glass convex hull is applied unless the user sets
 // optimization.glass_hull.enabled: false explicitly. A nil or enabled config
 // yields the default hull (out is set), with margin/weight falling back to
 // their defaults when unset; an explicit disabled config yields no hull (out
 // stays nil). The hull only constrains nd/vd glass variables (hullPairs), so a
 // run without glass variables is unaffected even with the hull active.
-func resolveGlassHull(cfg *types.GlassHullConfig, out **glass.ConvexHull) (margin, weight float64) {
+func resolveGlassHull(cfg *types.GlassHullConfig, out **glass.ConvexHull, gc *glass.Catalog) (margin, weight float64) {
 	if cfg != nil && !cfg.Enabled {
 		return 0, 0
 	}
-	*out = glass.NewDefaultConvexHull()
+	*out = glass.NewDefaultConvexHull(gc)
 	margin = 0.02
 	weight = 1.0
 	if cfg != nil {
@@ -843,14 +842,14 @@ type modeChangeLog struct {
 }
 
 type dampingLog struct {
-	Event   string                         `json:"event"`
-	Iter    int                            `json:"iteration"`
-	Mu      float64                        `json:"mu"`
-	Ref     float64                        `json:"sensitivity_reference"`
+	Event   string                           `json:"event"`
+	Iter    int                              `json:"iteration"`
+	Mu      float64                          `json:"mu"`
+	Ref     float64                          `json:"sensitivity_reference"`
 	Classes map[string]dls.DampingClassStats `json:"classes"`
-	DMin    float64                        `json:"d_min"`
-	DMax    float64                        `json:"d_max"`
-	DMean   float64                        `json:"d_mean"`
+	DMin    float64                          `json:"d_min"`
+	DMax    float64                          `json:"d_max"`
+	DMean   float64                          `json:"d_mean"`
 }
 
 type iterLog struct {

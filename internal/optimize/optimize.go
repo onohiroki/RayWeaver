@@ -106,15 +106,17 @@ func effectiveReferenceWavelength(wavelength float64) float64 {
 //   - many surface parameters across configs via scale/offset bindings
 //     (IsShared + Bindings).
 type Variable struct {
-	Name      string
-	SurfaceID int
-	GlassName string
-	Param     string
-	Min       float64
-	Max       float64
-	IsShared  bool
-	Bindings  []types.SharedVariableBinding
-	Config    string
+	Name         string
+	SurfaceID    int // primary surface (for display, snap, etc.)
+	GlassName    string
+	Param        string
+	Min          float64
+	Max          float64
+	IsShared     bool
+	Bindings     []types.SharedVariableBinding
+	Config       string
+	SurfaceSet   []int   // all surfaces to apply to (for attr/hull); nil → []int{SurfaceID}
+	CurrentValue float64 // snapshot of current value for sensitivity tracking
 }
 
 // LinkedVariable is a dependent variable whose value is computed from
@@ -140,15 +142,15 @@ type MeritTerm struct {
 	// FieldIndex is the term's field index in the config's field list
 	// (-1 = unset). The wavefront kinds use it to carry the field's declared
 	// vignetting into the pupil-grid clip.
-	FieldIndex  int
-	Wavelength  float64
+	FieldIndex           int
+	Wavelength           float64
 	ComparisonWavelength float64
-	WavWeight   float64
-	Weight      float64
-	Target      float64
-	Fraction    float64
-	Frequency   float64
-	SurfaceSet  []int
+	WavWeight            float64
+	Weight               float64
+	Target               float64
+	Fraction             float64
+	Frequency            float64
+	SurfaceSet           []int
 }
 
 type Result struct {
@@ -207,7 +209,7 @@ type config struct {
 	meritTerms  []meritTerm
 	// meritModes holds the config's named merit-mode term lists (from
 	// configs[].merit_modes). Nil when the config uses its fixed merit.
-	meritModes  map[string][]meritTerm
+	meritModes map[string][]meritTerm
 	// meritModeNumRays holds the per-mode num_rays override (from
 	// configs[].merit_modes[].num_rays). Nil when no mode declares num_rays.
 	meritModeNumRays map[string]int
@@ -227,16 +229,16 @@ type config struct {
 // field angle are resolved at construction; image-height fields are converted
 // to an angle per evaluation because they depend on the current surfaces.
 type meritTerm struct {
-	kind           string
-	fieldAngle     float64
-	useImageHeight bool
-	imageHeight    float64
-	fieldWeight    float64
-	wavelength     float64
+	kind                 string
+	fieldAngle           float64
+	useImageHeight       bool
+	imageHeight          float64
+	fieldWeight          float64
+	wavelength           float64
 	comparisonWavelength float64
-	wavWeight      float64
-	weight         float64
-	target         float64
+	wavWeight            float64
+	weight               float64
+	target               float64
 	// surfaceSet identifies the glass surfaces a kind operates on
 	// (glass_role uses surfaceSet[0] as the element's glass surface).
 	surfaceSet []int
@@ -556,7 +558,7 @@ func (o *Optimizer) updateAttractionSensitivity(x []float64) {
 		copy(xPlus, x)
 		xPlus[p.vdIndex] += dvd
 		mPlus := o.evaluateOpticalMerit(xPlus)
-		s := math.Abs((mPlus - base) / dvd) * x[p.vdIndex] / (base + 1e-30)
+		s := math.Abs((mPlus-base)/dvd) * x[p.vdIndex] / (base + 1e-30)
 		// EMA smoothing.
 		if len(o.sensitivityEMA) > i {
 			o.sensitivityEMA[i] = emaCoeff*o.sensitivityEMA[i] + (1.0-emaCoeff)*s
@@ -930,6 +932,65 @@ func (o *Optimizer) OpticalMerit(x []float64) float64 {
 // HasGlassPairs reports whether any declared nd/vd glass variable pair exists.
 func (o *Optimizer) HasGlassPairs() bool { return len(o.hullPairs) > 0 }
 
+// GlassHullViolations reports the glass surfaces whose nd/vd variable pair
+// lies outside the real-glass convex hull. It returns nil when the hull is
+// absent or every pair is contained. The returned IDs are sorted and
+// deduplicated so callers can compare them directly across calls. An empty,
+// non-nil slice is never returned: a clean state returns nil.
+//
+// The check is the O(n_vertices) barycentric containment test of
+// glass.ConvexHull.Contains, evaluated per hull pair. This is the "core
+// constraint" promotion of the hull: a converged point whose glass is outside
+// the hull is classified as infeasible (not merely penalised), so the escape
+// search does not record it as a solution.
+func (o *Optimizer) GlassHullViolations(x []float64) []int {
+	if o.hull == nil || !o.hull.Enabled() || len(o.hullPairs) == 0 {
+		return nil
+	}
+	seen := make(map[int]bool)
+	for _, pair := range o.hullPairs {
+		if pair.ndIndex < 0 || pair.ndIndex >= len(x) || pair.vdIndex < 0 || pair.vdIndex >= len(x) {
+			continue
+		}
+		nd := x[pair.ndIndex]
+		vd := x[pair.vdIndex]
+		if o.hull.Contains(nd, vd) {
+			continue
+		}
+		// The element's glass surfaces come from the nd variable, which the
+		// variable builder populated via elementGlassSurfaces.
+		for _, id := range o.variableSurfaceSet(pair.ndIndex) {
+			seen[id] = true
+		}
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	out := make([]int, 0, len(seen))
+	for id := range seen {
+		out = append(out, id)
+	}
+	sort.Ints(out)
+	return out
+}
+
+// variableSurfaceSet returns the SurfaceSet of the variable at index i, falling
+// back to the primary surface so a variable without an element grouping still
+// yields a non-empty list.
+func (o *Optimizer) variableSurfaceSet(i int) []int {
+	if i < 0 || i >= len(o.variables) {
+		return nil
+	}
+	v := o.variables[i]
+	if len(v.SurfaceSet) > 0 {
+		return v.SurfaceSet
+	}
+	if v.SurfaceID != 0 {
+		return []int{v.SurfaceID}
+	}
+	return nil
+}
+
 // SnapVariables replaces each declared nd/vd glass variable in x with the
 // nearest real catalog glass (normalised nd/vd distance) and returns the
 // snapped vector plus a per-pair record. The catalog is taken from the
@@ -1177,26 +1238,26 @@ type Optimizer struct {
 	hullWeight       float64
 	hullPairs        []glassPair
 	// Glass attraction: soft-min potential pulling nd/vd toward catalog glasses.
-	catalogField       *glass.CatalogField
-	attractionWeight   float64   // current run-level weight w(t)
+	catalogField         *glass.CatalogField
+	attractionWeight     float64 // current run-level weight w(t)
 	attractionWeightFrom float64 // weight at t=0
 	attractionWeightTo   float64 // weight at t=1
-	attractionSigmaND  float64   // gaussian kernel width (normalised units)
-	attractionSigmaVD  float64
-	attractionKernel   string    // "distance" | "gaussian"
-	attractionMetric   string    // "iteration" | "run_iteration" | "merit_ratio"
-	attractionCurve    string    // "linear" | "sigmoid" | "step"
+	attractionSigmaND    float64 // gaussian kernel width (normalised units)
+	attractionSigmaVD    float64
+	attractionKernel     string // "distance" | "gaussian"
+	attractionMetric     string // "iteration" | "run_iteration" | "merit_ratio"
+	attractionCurve      string // "linear" | "sigmoid" | "step"
 	attractionAnchorFrom float64
 	attractionAnchorTo   float64
-	attractionRunIter  int       // accumulating counter for run_iteration
-	attractionScales   []float64 // per-pair weight scales (sensitivity)
+	attractionRunIter    int       // accumulating counter for run_iteration
+	attractionScales     []float64 // per-pair weight scales (sensitivity)
 	// Sensitivity EMA state (per glass pair, index matches hullPairs).
-	sensitivityEMA  []float64
+	sensitivityEMA      []float64
 	sensitivityWeighted bool
-	sensitivityPower float64
+	sensitivityPower    float64
 	sensitivityScaleMin float64
 	sensitivityScaleMax float64
-	sensitivityRef  string    // "mean" | "max"
+	sensitivityRef      string // "mean" | "max"
 	initialOpticalMerit float64
 	// skipAttraction/hull are temporary flags for sensitivity computation.
 	skipAttraction bool
@@ -1232,11 +1293,11 @@ type Optimizer struct {
 	modeWeights   map[string]float64
 	// phase holds the current escape-cycle phase metric (0=escape, 0.5=glass,
 	// 1=clean), forwarded by the escape.Wrapper for the "phase" schedule metric.
-	phase float64
-	initialMerit    float64
+	phase            float64
+	initialMerit     float64
 	initialSpotRatio float64 // initial spot_diffraction ratio for normalisation
-	modeChanges     int
-	lastMetric      float64
+	modeChanges      int
+	lastMetric       float64
 	// stop, when set, is forwarded into dls.Options.Stop so the solver aborts
 	// mid-solve (returning the best point found so far with Status
 	// "interrupted") once the channel is closed. nil disables interruption.
@@ -1325,20 +1386,20 @@ func (o *Optimizer) SetGlassMerit(configID string, terms []types.MeritTerm) {
 	}
 	mt := make([]meritTerm, 0, len(terms))
 	for _, t := range terms {
-tm := meritTerm{
-		kind:        t.Kind,
-		fieldDirX:   0,
-		fieldDirY:   1,
-		fieldIndex:  -1,
-		wavelength:  t.Wavelength,
-		comparisonWavelength: t.ComparisonWavelength,
-		weight:      t.Weight,
-		target:      t.Target,
-		fraction:    t.Fraction,
-		frequency:   t.Frequency,
-		fieldWeight: 1.0,
-		wavWeight:   1.0,
-	}
+		tm := meritTerm{
+			kind:                 t.Kind,
+			fieldDirX:            0,
+			fieldDirY:            1,
+			fieldIndex:           -1,
+			wavelength:           t.Wavelength,
+			comparisonWavelength: t.ComparisonWavelength,
+			weight:               t.Weight,
+			target:               t.Target,
+			fraction:             t.Fraction,
+			frequency:            t.Frequency,
+			fieldWeight:          1.0,
+			wavWeight:            1.0,
+		}
 		// Resolve the term's field angle from the config's fields (angle or
 		// image height), matching buildMeritTermFromTypes.
 		if c := findConfigByID(o.configs, configID); c != nil {
@@ -1628,20 +1689,20 @@ func NewOptimizer(cfg Config) *Optimizer {
 			dx, dy = normalizeDir(t.FieldDir)
 		}
 		c.meritTerms = append(c.meritTerms, meritTerm{
-			kind:        t.Kind,
-			fieldAngle:  t.FieldAngle,
-			fieldDirX:   dx,
-			fieldDirY:   dy,
-			fieldIndex:  t.FieldIndex,
-			fieldWeight: t.FieldWeight,
-			wavelength:  t.Wavelength,
+			kind:                 t.Kind,
+			fieldAngle:           t.FieldAngle,
+			fieldDirX:            dx,
+			fieldDirY:            dy,
+			fieldIndex:           t.FieldIndex,
+			fieldWeight:          t.FieldWeight,
+			wavelength:           t.Wavelength,
 			comparisonWavelength: t.ComparisonWavelength,
-			wavWeight:   t.WavWeight,
-			weight:      t.Weight,
-			target:      t.Target,
-			fraction:    t.Fraction,
-			frequency:   t.Frequency,
-			surfaceSet:  append([]int(nil), t.SurfaceSet...),
+			wavWeight:            t.WavWeight,
+			weight:               t.Weight,
+			target:               t.Target,
+			fraction:             t.Fraction,
+			frequency:            t.Frequency,
+			surfaceSet:           append([]int(nil), t.SurfaceSet...),
 		})
 	}
 	if len(cfg.MeritModes) > 0 {
@@ -1665,29 +1726,29 @@ func NewOptimizer(cfg Config) *Optimizer {
 				if fieldWeight == 0 {
 					fieldWeight = 1.0
 				}
-terms = append(terms, meritTerm{
-				kind:        t.Kind,
-				fieldAngle:  fieldAngle,
-				fieldDirX:   fieldDirX,
-				fieldDirY:   fieldDirY,
-				fieldIndex:  t.Field,
-				fieldWeight: fieldWeight,
-				wavelength:  t.Wavelength,
-				comparisonWavelength: t.ComparisonWavelength,
-				wavWeight:   1.0,
-				weight:      t.Weight,
-				target:      t.Target,
-				fraction:    t.Fraction,
-				frequency:   t.Frequency,
-				surfaceSet:  append([]int(nil), t.SurfaceSet...),
-			})
+				terms = append(terms, meritTerm{
+					kind:                 t.Kind,
+					fieldAngle:           fieldAngle,
+					fieldDirX:            fieldDirX,
+					fieldDirY:            fieldDirY,
+					fieldIndex:           t.Field,
+					fieldWeight:          fieldWeight,
+					wavelength:           t.Wavelength,
+					comparisonWavelength: t.ComparisonWavelength,
+					wavWeight:            1.0,
+					weight:               t.Weight,
+					target:               t.Target,
+					fraction:             t.Fraction,
+					frequency:            t.Frequency,
+					surfaceSet:           append([]int(nil), t.SurfaceSet...),
+				})
 			}
 			c.meritModes[m.Name] = terms
 		}
 	}
 	variables := make([]Variable, len(cfg.Variables))
 	for i, v := range cfg.Variables {
-		variables[i] = Variable{
+		vv := Variable{
 			Name:      v.Name,
 			SurfaceID: v.SurfaceID,
 			GlassName: v.GlassName,
@@ -1696,6 +1757,12 @@ terms = append(terms, meritTerm{
 			Max:       v.Max,
 			Config:    "config1",
 		}
+		// Compute SurfaceSet for nd/vd variables: all glass surfaces in the
+		// same lens element, so hull/attraction treats the element as a unit.
+		if v.Param == "nd" || v.Param == "vd" {
+			vv.SurfaceSet = elementGlassSurfaces(cfg.Surfaces, v.SurfaceID)
+		}
+		variables[i] = vv
 	}
 	opt := newOptimizer(
 		[]config{c}, variables, nil, nil, cfg.GlassCatalog,
@@ -1783,14 +1850,23 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 		if lv.Target.Type == "pupil_model" {
 			param = "pupil_model_" + param
 		}
-		variables = append(variables, Variable{
+		vv := Variable{
 			Name:      name,
 			SurfaceID: lv.Target.ID,
 			Param:     param,
 			Min:       lv.Min,
 			Max:       lv.Max,
 			Config:    lv.Config,
-		})
+		}
+		// Compute SurfaceSet for nd/vd variables: all glass surfaces in the
+		// same lens element.
+		if lv.Target.Param == "nd" || lv.Target.Param == "vd" {
+			cfgSurfaces := findConfigByID(internal, lv.Config)
+			if cfgSurfaces != nil {
+				vv.SurfaceSet = elementGlassSurfaces(cfgSurfaces.surfaces, lv.Target.ID)
+			}
+		}
+		variables = append(variables, vv)
 	}
 
 	// Build name→index lookup for independent variables.
@@ -1846,19 +1922,19 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 
 func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 	mt := meritTerm{
-		kind:        t.Kind,
-		fieldIndex:  -1,
-		wavelength:  t.Wavelength,
+		kind:                 t.Kind,
+		fieldIndex:           -1,
+		wavelength:           t.Wavelength,
 		comparisonWavelength: t.ComparisonWavelength,
-		weight:      t.Weight,
-		target:      t.Target,
-		fraction:    t.Fraction,
-		frequency:   t.Frequency,
-		surfaceSet:  append([]int(nil), t.SurfaceSet...),
-		fieldDirX:   0,
-		fieldDirY:   1,
-		fieldWeight: 1.0,
-		wavWeight:   1.0,
+		weight:               t.Weight,
+		target:               t.Target,
+		fraction:             t.Fraction,
+		frequency:            t.Frequency,
+		surfaceSet:           append([]int(nil), t.SurfaceSet...),
+		fieldDirX:            0,
+		fieldDirY:            1,
+		fieldWeight:          1.0,
+		wavWeight:            1.0,
 	}
 	for i, f := range ci.Fields {
 		if f.ID == t.Field {
@@ -2208,18 +2284,18 @@ func (o *Optimizer) Variables() []dls.VariableInfo {
 
 func (o *Optimizer) Options() dls.Options {
 	return dls.Options{
-		MaxIter:        o.maxIter,
-		Mu:             o.mu,
-		Tol:            o.tol,
-		Epsilon:        o.epsilon,
-		NumRays:        o.numRays,
-		ApertureMargin: o.apertureMargin,
-		MuConMax:       o.muConMax,
-		Workers:        o.workers,
-		Logger:         o.logger,
-		Stop:           o.stop,
-		CentralDiff:    o.centralDiff,
-		BFGS:           o.bfgs,
+		MaxIter:         o.maxIter,
+		Mu:              o.mu,
+		Tol:             o.tol,
+		Epsilon:         o.epsilon,
+		NumRays:         o.numRays,
+		ApertureMargin:  o.apertureMargin,
+		MuConMax:        o.muConMax,
+		Workers:         o.workers,
+		Logger:          o.logger,
+		Stop:            o.stop,
+		CentralDiff:     o.centralDiff,
+		BFGS:            o.bfgs,
 		AdaptiveDamping: o.adaptiveDamping,
 	}
 }
@@ -2645,22 +2721,22 @@ func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surfac
 			if idx < 0 {
 				continue
 			}
-		switch o.currentBackFocusType {
-		case "wavefront":
-			shift := o.wavefrontBackFocusShift(cfg, surfaces, gc)
-			newThk := surfaces[idx].Thickness + shift
-			if newThk < 0.1 {
-				newThk = 0.1
+			switch o.currentBackFocusType {
+			case "wavefront":
+				shift := o.wavefrontBackFocusShift(cfg, surfaces, gc)
+				newThk := surfaces[idx].Thickness + shift
+				if newThk < 0.1 {
+					newThk = 0.1
+				}
+				surfaces[idx].Thickness = newThk
+			default: // "paraxial"
+				shift := o.paraxialBackFocusShift(cfg, surfaces, gc)
+				newThk := surfaces[idx].Thickness + shift
+				if newThk < 0.1 {
+					newThk = 0.1
+				}
+				surfaces[idx].Thickness = newThk
 			}
-			surfaces[idx].Thickness = newThk
-		default: // "paraxial"
-			shift := o.paraxialBackFocusShift(cfg, surfaces, gc)
-			newThk := surfaces[idx].Thickness + shift
-			if newThk < 0.1 {
-				newThk = 0.1
-			}
-			surfaces[idx].Thickness = newThk
-		}
 		}
 	}
 }
@@ -3983,6 +4059,46 @@ func buildHullPairs(variables []Variable) []glassPair {
 		return pairs[i].vdIndex < pairs[j].vdIndex
 	})
 	return pairs
+}
+
+// elementGlassSurfaces returns the IDs of all glass surfaces in the same lens
+// element as the surface with the given ID. A lens element is a contiguous
+// run of non-air surfaces bounded by air (or system boundaries). If the
+// target surface is not in glass, returns nil.
+func elementGlassSurfaces(surfaces []types.Surface, targetID int) []int {
+	// Find the index of the target surface.
+	targetIdx := -1
+	for i, s := range surfaces {
+		if s.ID == targetID {
+			targetIdx = i
+			break
+		}
+	}
+	if targetIdx < 0 {
+		return nil
+	}
+	// Check that the target surface is glass (non-air).
+	if surfaces[targetIdx].Material.IsAir() {
+		return nil
+	}
+	// Walk backward to find the start of the element (first glass surface).
+	start := targetIdx
+	for start > 0 && !surfaces[start-1].Material.IsAir() {
+		start--
+	}
+	// Walk forward to find the end of the element (last glass surface).
+	end := targetIdx
+	for end < len(surfaces)-1 && !surfaces[end+1].Material.IsAir() {
+		end++
+	}
+	// Collect all glass surface IDs in the element.
+	var ids []int
+	for i := start; i <= end; i++ {
+		if !surfaces[i].Material.IsAir() {
+			ids = append(ids, surfaces[i].ID)
+		}
+	}
+	return ids
 }
 
 func resolveGlassKeyFromSurface(surfaces []types.Surface, id int) string {

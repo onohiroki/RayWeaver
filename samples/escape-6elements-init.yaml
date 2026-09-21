@@ -7,10 +7,10 @@ metadata:
     v14-state with v18 merit (wavefront mode guardrails added to prevent EFL degeneracy\
     \ in step-schedule):\n- step schedule: merit_ratio≈0.6 switches geometric→wavefront\n\
     - wavefront mode: wavefront_sphere_rms 8000 + wavefront_astigmatism 5000 (uniform)\
-    \ + geometric_mtf_sag/tan 5000 (freq 50) + abs_efl 30 + field_alive×5 30 + longitudinal_color\
+    \ + geometric_mtf_sag/tan 5000 (freq 50) + focal_length 30 + field_alive×5 30 + longitudinal_color\
     \ 1.0 + lateral_color×5 0.3–1.0 + glass_role×6 0.01\n- geometric mode: spot_rms\
     \ + seidel + distortion + glass_role×6 + longitudinal/lateral_color + field_alive×5\
-    \ + abs_efl 30\n- back_focus_solve (paraxial) + power_solve (2,4,6,7,9,11)\n\
+    \ + focal_length 30\n- back_focus_solve (paraxial) + power_solve (2,4,6,7,9,11)\n\
     - 5h time budget.\n"
 glass_catalog:
   entries:
@@ -776,7 +776,7 @@ configs:
     - kind: field_alive
       field: 4
       weight: 30
-    - kind: abs_efl
+    - kind: focal_length
       target: 50.0
       weight: 30
     - kind: glass_role
@@ -929,7 +929,7 @@ configs:
     - kind: field_alive
       field: 4
       weight: 30
-    - kind: abs_efl
+    - kind: focal_length
       target: 50.0
       weight: 30
     - kind: glass_role

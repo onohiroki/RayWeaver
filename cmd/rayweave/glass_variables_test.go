@@ -176,8 +176,13 @@ func mustParseInput(t *testing.T, yamlData string) types.Input {
 // (real-glass region), honoring an explicit disabled config, and carrying the
 // custom margin/weight when enabled.
 func TestResolveGlassHullDefaultOn(t *testing.T) {
+	testCat := glass.NewCatalog()
+	testCat.Add(types.Glass{Key: "N-BK7", ND: 1.5168, VD: 64.17})
+	testCat.Add(types.Glass{Key: "N-SF2", ND: 1.64769, VD: 33.82})
+	testCat.Add(types.Glass{Key: "N-LAK9", ND: 1.691, VD: 54.71})
+
 	var hull *glass.ConvexHull
-	m, w := resolveGlassHull(nil, &hull)
+	m, w := resolveGlassHull(nil, &hull, testCat)
 	if hull == nil {
 		t.Fatal("default-on: hull should be set when glass_hull is absent")
 	}
@@ -187,7 +192,7 @@ func TestResolveGlassHullDefaultOn(t *testing.T) {
 
 	// Explicitly disabled -> no hull.
 	var h2 *glass.ConvexHull
-	m2, w2 := resolveGlassHull(&types.GlassHullConfig{Enabled: false}, &h2)
+	m2, w2 := resolveGlassHull(&types.GlassHullConfig{Enabled: false}, &h2, testCat)
 	if h2 != nil {
 		t.Error("explicitly disabled glass_hull should yield no hull")
 	}
@@ -198,7 +203,7 @@ func TestResolveGlassHullDefaultOn(t *testing.T) {
 	// Enabled with custom values is honored.
 	cfgCustom := &types.GlassHullConfig{Enabled: true, Margin: 0.05, Weight: 2.0}
 	var h3 *glass.ConvexHull
-	m3, w3 := resolveGlassHull(cfgCustom, &h3)
+	m3, w3 := resolveGlassHull(cfgCustom, &h3, testCat)
 	if h3 == nil {
 		t.Error("enabled glass_hull should yield a hull")
 	}

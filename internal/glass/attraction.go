@@ -2,6 +2,11 @@ package glass
 
 import "math"
 
+// Point2D is a 2D point in nd/vd space.
+type Point2D struct {
+	ND, VD float64
+}
+
 // CatalogField holds the normalised nd/vd points of every real glass in a
 // catalog. It is built once per optimisation run and queried many times.
 type CatalogField struct {
@@ -10,14 +15,14 @@ type CatalogField struct {
 	// NormPoints are the same points normalised to [0,1] using the range.
 	NormPoints []Point2D
 	// Names are the catalog glass keys, parallel to Points/NormPoints.
-	Names []string
+	Names                        []string
 	NDMin, NDSpan, VDMin, VDSpan float64
 }
 
-// DefaultGlassRange returns the normalisation bounding box shared with the
-// convex hull (same constants as hull_data.go).
+// DefaultGlassRange returns the normalisation bounding box for catalog glasses.
+// These values encompass all known optical glasses.
 func DefaultGlassRange() (ndMin, ndMax, vdMin, vdMax float64) {
-	return DefaultHullNDMin, DefaultHullNDMax, DefaultHullVDMin, DefaultHullVDMax
+	return 1.41, 2.16, 16.0, 101.0
 }
 
 // BuildCatalogField collects every glass in the catalog with valid nd/vd and
@@ -119,6 +124,23 @@ func SoftMinPotential(f *CatalogField, nd, vd, sigmaND, sigmaVD float64, kernel 
 		}
 		// soft-min potential: higher sumExp → closer → lower value
 		return -math.Log(sumExp) * sigma2
+	case "inverse":
+		// Inverse-distance kernel: φ = 1/(1+r²). Bounded (0,1], long-tail
+		// attraction that weakly pulls distant points back toward the catalog.
+		minPhi := math.MaxFloat64
+		for _, p := range f.NormPoints {
+			dx := nx - p.ND
+			dy := ny - p.VD
+			r2 := dx*dx + dy*dy
+			phi := 1.0 / (1.0 + r2)
+			if phi < minPhi {
+				minPhi = phi
+			}
+		}
+		if minPhi == math.MaxFloat64 {
+			return 1.0
+		}
+		return minPhi
 	default: // "distance"
 		minR2 := math.MaxFloat64
 		for _, p := range f.NormPoints {

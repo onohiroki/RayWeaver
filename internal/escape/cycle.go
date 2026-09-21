@@ -221,7 +221,7 @@ func (c *Cycle) debugCycleFields(x []float64, res dls.Result, phase string) map[
 		}
 		// Per-term merit breakdown for clean phases: shows which fields/terms
 		// contribute most to the total merit after the clean DLS converges.
-		if (phase == "clean_dls" || phase == "clean_dls_retry") {
+		if phase == "clean_dls" || phase == "clean_dls_retry" {
 			if bp, ok := c.wrapper.inner.(BreakdownProvider); ok {
 				fields["breakdown"] = bp.MeritBreakdown(x)
 			}
@@ -252,7 +252,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 	copy(currentX, x0)
 	bestX := make([]float64, len(x0))
 	copy(bestX, x0)
-	bestMerit := c.wrapper.InnerMerit(x0)
+	bestMerit := math.Inf(1) // first cycle always beats +Inf; avoids stale cross-phase merit
 
 	c.failures = 0
 	repeatStreak := 0
@@ -284,6 +284,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			escRes = c.explorer.Explore(c.wrapper, currentX)
 		} else {
 			c.setPhase("escape_dls", cyc)
+			c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
 			escRes = dls.Solve(c.wrapper)
 		}
 		escapedX := extractX(escRes)
@@ -336,6 +337,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			c.wrapper.SetPhase(PhaseGlassSolve)
 			c.wrapper.SetStop(c.hardStop)
 			c.setPhase("glass_dls", cyc)
+			c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
 			glassRes := dls.Solve(c.wrapper)
 			glassX := extractX(glassRes)
 			if glassRes.Status == dls.StatusInterrupted {
@@ -352,22 +354,34 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 				endGlass := glassRes.AfterMerit
 				mainOK := endMain <= startMain*1.5 || startMain < 1e-10
 				glassImproved := endGlass < startGlass*0.99 || startGlass < 1e-10
-			if mainOK && glassImproved {
-				cleanStart = glassX
-				fields := map[string]any{
-					"cycle":        cyc,
-					"worker":       c.workerID,
-					"phase":        "glass_dls",
-					"status":       "accepted",
-					"dls_status":   glassRes.Status,
-					"merit":        c.wrapper.InnerMerit(glassX),
-					"main_before":  startMain,
-					"main_after":   endMain,
-					"glass_before": startGlass,
-					"glass_after":  endGlass,
+				if mainOK && glassImproved {
+					cleanStart = glassX
+					fields := map[string]any{
+						"cycle":        cyc,
+						"worker":       c.workerID,
+						"phase":        "glass_dls",
+						"status":       "accepted",
+						"dls_status":   glassRes.Status,
+						"merit":        c.wrapper.InnerMerit(glassX),
+						"main_before":  startMain,
+						"main_after":   endMain,
+						"glass_before": startGlass,
+						"glass_after":  endGlass,
+					}
+					enrich(fields, c.debugCycleFields(glassX, glassRes, "glass_dls"))
+					c.progress.Event("cycle", fields)
+				} else {
+					fields := map[string]any{
+						"cycle":      cyc,
+						"worker":     c.workerID,
+						"phase":      "glass_dls",
+						"status":     "rejected",
+						"dls_status": glassRes.Status,
+						"reason":     fmt.Sprintf("mainMerit %.1f→%.1f (x%.2f) glassMerit %.4f→%.4f", startMain, endMain, endMain/startMain, startGlass, endGlass),
+					}
+					enrich(fields, c.debugCycleFields(glassX, glassRes, "glass_dls"))
+					c.progress.Event("cycle", fields)
 				}
-				enrich(fields, c.debugCycleFields(glassX, glassRes, "glass_dls"))
-				c.progress.Event("cycle", fields)
 			} else {
 				fields := map[string]any{
 					"cycle":      cyc,
@@ -375,22 +389,10 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 					"phase":      "glass_dls",
 					"status":     "rejected",
 					"dls_status": glassRes.Status,
-					"reason":     fmt.Sprintf("mainMerit %.1f→%.1f (x%.2f) glassMerit %.4f→%.4f", startMain, endMain, endMain/startMain, startGlass, endGlass),
 				}
-				enrich(fields, c.debugCycleFields(glassX, glassRes, "glass_dls"))
+				enrich(fields, c.debugCycleFields(nil, glassRes, "glass_dls"))
 				c.progress.Event("cycle", fields)
 			}
-		} else {
-			fields := map[string]any{
-				"cycle":      cyc,
-				"worker":     c.workerID,
-				"phase":      "glass_dls",
-				"status":     "rejected",
-				"dls_status": glassRes.Status,
-			}
-			enrich(fields, c.debugCycleFields(nil, glassRes, "glass_dls"))
-			c.progress.Event("cycle", fields)
-		}
 		}
 
 		// Step 2: clean DLS. Remove escapes and converge to the true minimum.
@@ -401,6 +403,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		c.wrapper.SetPhase(PhaseClean) // leaves the glass phase (restores the variables)
 		c.wrapper.SetStop(c.hardStop)
 		c.setPhase("clean_dls", cyc)
+		c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
 		cleanRes := dls.Solve(c.wrapper)
 		trueX := extractX(cleanRes)
 		if cleanRes.Status == dls.StatusInterrupted {
@@ -436,16 +439,19 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		enrich(fields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
 		c.progress.Event("cycle", fields)
 
-		// Post-glass retry: if clean DLS regressed vs the pre-glass escape
-		// merit, retry clean from escapedX (glass result discarded).
+		// Post-glass retry: if clean DLS regressed vs the post-escape start,
+		// retry clean from escapedX (glass result discarded).  Both merits
+		// are evaluated under the current (PhaseClean / local) weights so
+		// the comparison is meaningful and consistent.
 		cleanMerit := c.wrapper.InnerMerit(trueX)
-		if cleanMerit > escapeMerit {
+		escapeMeritLocal := c.wrapper.InnerMerit(escapedX) // same local weights as cleanMerit
+		if cleanMerit > escapeMeritLocal {
 			retryFields := map[string]any{
 				"cycle":        cyc,
 				"worker":       c.workerID,
 				"phase":        "clean_dls",
 				"status":       "retry",
-				"escape_merit": escapeMerit,
+				"escape_merit": escapeMeritLocal,
 				"clean_merit":  cleanMerit,
 			}
 			enrich(retryFields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
@@ -457,6 +463,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			c.wrapper.SetPhase(PhaseClean)
 			c.wrapper.SetStop(c.hardStop)
 			c.setPhase("clean_dls_retry", cyc)
+			c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
 			retryRes := dls.Solve(c.wrapper)
 			retryX := extractX(retryRes)
 			if retryRes.Status == dls.StatusInterrupted {
@@ -480,11 +487,11 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 					c.progress.Event("cycle", retryAcceptedFields)
 				} else {
 					c.progress.Event("cycle", map[string]any{
-						"cycle":      cyc,
-						"worker":     c.workerID,
-						"phase":      "clean_dls_retry",
-						"status":     "no_improvement",
-						"merit":      retryMerit,
+						"cycle":  cyc,
+						"worker": c.workerID,
+						"phase":  "clean_dls_retry",
+						"status": "no_improvement",
+						"merit":  retryMerit,
 					})
 				}
 			} else {
@@ -516,13 +523,13 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		// Evaluation failures are not recorded (no escape bump placed).
 		if status == MinStatusEvaluationFailure {
 			c.progress.Event("cycle", map[string]any{
-				"cycle":         cyc,
-				"worker":        c.workerID,
-				"phase":         "clean_dls",
-				"status":        "accepted",
-				"dls_status":    cleanRes.Status,
-				"merit":         trueMerit,
-				"min_status":    "evaluation_failure",
+				"cycle":      cyc,
+				"worker":     c.workerID,
+				"phase":      "clean_dls",
+				"status":     "accepted",
+				"dls_status": cleanRes.Status,
+				"merit":      trueMerit,
+				"min_status": "evaluation_failure",
 			})
 			currentX = c.perturb(trueX, cyc, restartAmp)
 			continue
@@ -532,12 +539,12 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			idx := c.store.Add(Point{X: trueX, Merit: trueMerit, Status: status, InvalidReason: invalidReason})
 			c.recorded++
 			c.progress.Event("minimum", map[string]any{
-				"cycle":         cyc,
-				"worker":        c.workerID,
-				"kind":          "new",
-				"index":         idx,
-				"merit":         trueMerit,
-				"min_status":    statusString(status),
+				"cycle":          cyc,
+				"worker":         c.workerID,
+				"kind":           "new",
+				"index":          idx,
+				"merit":          trueMerit,
+				"min_status":     statusString(status),
 				"invalid_reason": reasonString(invalidReason),
 			})
 			repeatStreak = 0
@@ -550,22 +557,22 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			c.store.Strengthen(nearest)
 			if _, improved := c.store.Replace(nearest, Point{X: trueX, Merit: trueMerit, Status: status, InvalidReason: invalidReason}); improved {
 				c.progress.Event("minimum", map[string]any{
-					"cycle":         cyc,
-					"worker":        c.workerID,
-					"kind":          "improved",
-					"index":         nearest,
-					"merit":         trueMerit,
-					"min_status":    statusString(status),
+					"cycle":          cyc,
+					"worker":         c.workerID,
+					"kind":           "improved",
+					"index":          nearest,
+					"merit":          trueMerit,
+					"min_status":     statusString(status),
 					"invalid_reason": reasonString(invalidReason),
 				})
 			} else {
 				c.progress.Event("minimum", map[string]any{
-					"cycle":         cyc,
-					"worker":        c.workerID,
-					"kind":          "repeat",
-					"index":         nearest,
-					"merit":         trueMerit,
-					"min_status":    statusString(status),
+					"cycle":          cyc,
+					"worker":         c.workerID,
+					"kind":           "repeat",
+					"index":          nearest,
+					"merit":          trueMerit,
+					"min_status":     statusString(status),
 					"invalid_reason": reasonString(invalidReason),
 				})
 			}

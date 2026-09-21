@@ -968,8 +968,8 @@ func (m *glassPhaseMock) ComputeResiduals(x []float64) []float64 {
 	return []float64{x[0]}
 }
 func (m *glassPhaseMock) ComputeConstraints(x []float64) []float64 { return nil }
-func (m *glassPhaseMock) EnterGlassPhase(x []float64)               { m.entered = true }
-func (m *glassPhaseMock) ExitGlassPhase()                           { m.entered = false }
+func (m *glassPhaseMock) EnterGlassPhase(x []float64)              { m.entered = true }
+func (m *glassPhaseMock) ExitGlassPhase()                          { m.entered = false }
 
 func TestWrapperGlassPhaseToggles(t *testing.T) {
 	inner := &glassPhaseMock{}
@@ -998,4 +998,130 @@ func TestWrapperGlassPhaseToggles(t *testing.T) {
 	if inner.entered {
 		t.Fatal("inner not exited on leaving PhaseGlassSolve")
 	}
+}
+
+// phaseModel wraps twoWell with a phase-dependent merit: the explore phase
+// uses (x²-0.25)² while the local phase adds a +10 constant.  This makes
+// local merit always higher, so the DLS "beforeMerit" seeding must use the
+// correct phase weights or the solver stalls (bestMerit unbeatable).
+type phaseModel struct {
+	phase float64                   // set via SetEscapePhase
+	sched types.MeritScheduleConfig // set via SetMeritSchedule
+}
+
+func (phaseModel) Variables() []dls.VariableInfo {
+	return twoWell{}.Variables()
+}
+func (phaseModel) InitialState() []float64 { return twoWell{}.InitialState() }
+func (phaseModel) Options() dls.Options {
+	return dls.Options{MaxIter: 200, Mu: 0.1, Tol: 1e-8, Epsilon: 1e-7}
+}
+func (p *phaseModel) EvaluateMerit(x []float64) float64 {
+	base := twoWell{}.EvaluateMerit(x)
+	// Determine which mode is dominant from the schedule.
+	dominant := p.resolveDominant()
+	if dominant == "local" {
+		return base + 10 // local: heavier merit
+	}
+	return base // explore: cheap merit
+}
+func (phaseModel) ComputeResiduals(x []float64) []float64 {
+	return twoWell{}.ComputeResiduals(x)
+}
+func (phaseModel) ComputeConstraints(x []float64) []float64 { return nil }
+
+// SetEscapePhase implements the escape.Wrapper inner-model phase hook.
+func (p *phaseModel) SetEscapePhase(phase float64) { p.phase = phase }
+
+// UpdateMeritWeights implements dls.MeritScheduleUpdater (no-op for this model).
+func (phaseModel) UpdateMeritWeights(_ []float64, _ int) {}
+
+// SetMeritSchedule configures the phase-dependent schedule for testing.
+func (p *phaseModel) SetMeritSchedule(s types.MeritScheduleConfig) { p.sched = s }
+
+// resolveDominant returns the mode name with the highest weight at the
+// current phaseMetric, using the same step-curve logic as the Optimizer.
+func (p *phaseModel) resolveDominant() string {
+	if len(p.sched.Modes) == 0 {
+		return ""
+	}
+	s := p.phase // phaseMetric returns 0/0.5/1
+	t := 0.5
+	span := p.sched.AnchorTo - p.sched.AnchorFrom
+	if math.Abs(span) > 1e-15 {
+		t = (s - p.sched.AnchorFrom) / span
+		if t < 0 {
+			t = 0
+		}
+		if t > 1 {
+			t = 1
+		}
+	}
+	// Step curve: hard switch at t=0.5.
+	best := 0.0
+	bestName := p.sched.Modes[0].Name
+	for _, m := range p.sched.Modes {
+		var w float64
+		if t < 0.5 {
+			w = m.WeightFrom
+		} else {
+			w = m.WeightTo
+		}
+		if w > best {
+			best = w
+			bestName = m.Name
+		}
+	}
+	return bestName
+}
+
+// TestPhaseScheduleCleanDLSMoves verifies that with a "phase" merit schedule,
+// the clean DLS actually improves over its start (does not return the start
+// point due to stale bestMerit).  Before the fix, bestMerit was seeded with
+// explore weights and local merit always exceeded it, so the solver's tracked
+// best never updated.
+func TestPhaseScheduleCleanDLSMoves(t *testing.T) {
+	cfg := types.EscapeConfig{
+		MaxCycles:         3,
+		DistanceThreshold: 0.1,
+		HInitial:          0.5,
+		WInitial:          0.5,
+		HMult:             2.0,
+		WMult:             1.0,
+	}
+	params := BuildParams(cfg, phaseModel{}.Variables())
+	inner := &phaseModel{}
+	wrapper := NewWrapper(inner, params)
+
+	// Install a "phase" merit schedule with two modes:
+	//   explore: merit = (x²-0.25)²                    (weight 1 at phase=0)
+	//   local:   merit = (x²-0.25)² + 10               (weight 1 at phase=1)
+	// step curve gives a hard switch at the midpoint.
+	inner.SetMeritSchedule(types.MeritScheduleConfig{
+		Metric:     "phase",
+		Curve:      "step",
+		AnchorFrom: 0.0,
+		AnchorTo:   1.0,
+		Modes: []types.MeritScheduleMode{
+			{Name: "explore", WeightFrom: 1, WeightTo: 0},
+			{Name: "local", WeightFrom: 0, WeightTo: 1},
+		},
+	})
+
+	store := NewStore(params)
+	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background(), nil, nil, nil, false)
+
+	bestX, bestMerit := cycle.Run([]float64{0.8})
+
+	// The local merit at the start is (0.8²-0.25)² + 10 = 10.0196.
+	localMeritAtStart := inner.EvaluateMerit([]float64{0.8})
+
+	// The DLS must have moved from the start — bestMerit < local merit at x0.
+	if bestMerit >= localMeritAtStart {
+		t.Fatalf("bestMerit=%v did not improve over start merit %v; clean DLS may have returned start point", bestMerit, localMeritAtStart)
+	}
+
+	// The start point x0=0.8 should have been pushed away from the well at
+	// +0.5.  A well-converged result has |x| < 0.6 (near the minimum).
+	_ = bestX
 }

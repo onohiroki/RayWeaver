@@ -193,7 +193,7 @@ func buildGlassPhaseContext(input *types.Input) glassPhaseCtx {
 
 // buildGlassPhaseMerit builds one config's glass-phase objective: its own
 // chromatic terms (longitudinal_color / lateral_color) scaled by colorScale,
-// plus its cheap analytic geometric terms (Seidel / abs_efl / distortion_pct /
+// plus its cheap analytic geometric terms (Seidel / focal_length / distortion_pct /
 // glass_role) retained at their configured weights as a guardrail. Expensive
 // grid-trace terms (spot_rms, geometric_mtf, wavefront_*, field_alive) are
 // deliberately excluded so the phase stays cheap; the full merit is still used
@@ -243,7 +243,7 @@ func isCheapGuardrailKind(kind string) bool {
 	switch kind {
 	case optimize.MeritSeidelSpherical, optimize.MeritSeidelComa,
 		optimize.MeritSeidelAstigmatism, optimize.MeritSeidelDistortion,
-		optimize.MeritAbsEFL, optimize.MeritDistortionPct, optimize.MeritGlassRole:
+		optimize.MeritFocalLength, optimize.MeritDistortionPct, optimize.MeritGlassRole:
 		return true
 	}
 	return false
@@ -345,7 +345,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		cfg.OPDDegenerate = dg.OPDValue
 		cfg.WavefrontDegenerate = dg.WavefrontValue
 	}
-	cfg.HullMargin, cfg.HullWeight = resolveGlassHull(input.Optimization.GlassHull, &cfg.Hull)
+	cfg.HullMargin, cfg.HullWeight = resolveGlassHull(input.Optimization.GlassHull, &cfg.Hull, gc)
 	if input.Optimization.GlassAttraction != nil {
 		cfg.GlassAttraction = input.Optimization.GlassAttraction
 	}
@@ -472,6 +472,16 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 				ratio := float64(nValid) / float64(total)
 				if ratio < throughputThreshold {
 					return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
+				}
+			}
+			// Glass convex-hull constraint: a converged point whose nd/vd lies
+			// outside the real-glass hull is infeasible (core constraint, not
+			// merely penalised), so the escape store never records it.
+			if hv, ok := inner.(interface {
+				GlassHullViolations([]float64) []int
+			}); ok {
+				if ids := hv.GlassHullViolations(x); len(ids) > 0 {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonGlassHullViolation
 				}
 			}
 			return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
@@ -692,7 +702,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	}
 
 	var hull *glass.ConvexHull
-	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull)
+	hullMargin, hullWeight := resolveGlassHull(input.Optimization.GlassHull, &hull, gc)
 
 	factory := func() dls.Model {
 		configsCopy := make([]optimize.ConfigInput, len(configs))
@@ -811,6 +821,14 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 				ratio := float64(nValid) / float64(total)
 				if ratio < throughputThreshold {
 					return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
+				}
+			}
+			// Glass convex-hull core constraint (see runEscapeSingle).
+			if hv, ok := inner.(interface {
+				GlassHullViolations([]float64) []int
+			}); ok {
+				if ids := hv.GlassHullViolations(x); len(ids) > 0 {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonGlassHullViolation
 				}
 			}
 			return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
@@ -1248,13 +1266,13 @@ func reportEscape(res escape.Result, progress *escape.Progress) {
 		}
 	}
 	fields := map[string]any{
-		"workers":            res.Workers,
-		"cycles":             res.Cycles,
-		"escapes":            res.Escapes,
-		"minima_count":       len(res.Minima),
-		"best_merit":         safeF(res.BestMerit),
-		"timed_out":          res.TimedOut,
-		"interrupted":        res.Interrupted,
+		"workers":      res.Workers,
+		"cycles":       res.Cycles,
+		"escapes":      res.Escapes,
+		"minima_count": len(res.Minima),
+		"best_merit":   safeF(res.BestMerit),
+		"timed_out":    res.TimedOut,
+		"interrupted":  res.Interrupted,
 	}
 	if res.MaxSeconds > 0 {
 		fields["max_seconds"] = res.MaxSeconds
@@ -1388,6 +1406,8 @@ func reasonString(r escape.InvalidReason) string {
 		return string(types.ReasonGeometryViolation)
 	case escape.ReasonNumericalFailure:
 		return string(types.ReasonNumericalFailure)
+	case escape.ReasonGlassHullViolation:
+		return string(types.ReasonGlassHullViolation)
 	default:
 		return "unknown"
 	}
@@ -1465,16 +1485,16 @@ func (d *debugLogger) LogModeChange(iter int, from, to string, weights map[strin
 
 func (d *debugLogger) LogDamping(iter int, mu, ref float64, summary dls.DampingSummary) {
 	d.progress.Event("adaptive_damping", map[string]any{
-		"iteration":              iter,
-		"mu":                     safeF64(mu),
-		"sensitivity_reference":  safeF64(ref),
-		"classes":                summary.Classes,
-		"d_min":                  safeF64(summary.DMin),
-		"d_max":                  safeF64(summary.DMax),
-		"d_mean":                 safeF64(summary.DMean),
-		"phase":                  d.phase,
-		"cycle":                  d.cycle,
-		"worker":                 d.worker,
+		"iteration":             iter,
+		"mu":                    safeF64(mu),
+		"sensitivity_reference": safeF64(ref),
+		"classes":               summary.Classes,
+		"d_min":                 safeF64(summary.DMin),
+		"d_max":                 safeF64(summary.DMax),
+		"d_mean":                safeF64(summary.DMean),
+		"phase":                 d.phase,
+		"cycle":                 d.cycle,
+		"worker":                d.worker,
 	})
 }
 

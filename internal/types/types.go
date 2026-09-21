@@ -680,7 +680,7 @@ const (
 	MeasureIncidentAngle         ConstraintMeasure = "incident_angle"
 	MeasureThickness             ConstraintMeasure = "thickness"
 	MeasureEFL                   ConstraintMeasure = "efl"
-	MeasureAbsEFL                ConstraintMeasure = "abs_efl"
+	MeasureFocalLength           ConstraintMeasure = "focal_length"
 	MeasureSystemLength          ConstraintMeasure = "system_length"
 	MeasureEntrancePupilDiameter ConstraintMeasure = "entrance_pupil_diameter"
 	MeasureEdgeThickness         ConstraintMeasure = "edge_thickness"
@@ -934,7 +934,7 @@ type PowerSolveConfig struct {
 	Surfaces []int `yaml:"surfaces,omitempty"`
 	// ColorScale multiplies the config's chromatic merit terms during the
 	// glass phase, so the colour objective dominates while the cheap geometric
-	// terms (Seidel / abs_efl / glass_role) stay in the merit as a guardrail
+	// terms (Seidel / focal_length / glass_role) stay in the merit as a guardrail
 	// against layout collapse. Zero or negative uses the built-in default.
 	ColorScale float64 `yaml:"color_scale,omitempty"`
 }
@@ -1228,6 +1228,9 @@ const (
 	// ReasonNumericalFailure: NaN, Inf, or singular matrix in merit or
 	// Jacobian computation.
 	ReasonNumericalFailure InvalidReason = "numerical_failure"
+	// ReasonGlassHullViolation: an nd/vd glass variable lies outside the
+	// real-glass convex hull (the hull is a core constraint).
+	ReasonGlassHullViolation InvalidReason = "glass_hull_violation"
 )
 
 // ConfigFeatures is one config's feature set for a local minimum — a compact

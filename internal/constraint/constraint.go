@@ -26,7 +26,7 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 		return evaluateThickness(surfaces, op.Surface)
 	case types.MeasureEFL:
 		return evaluateEFL(surfaces, gc)
-	case types.MeasureAbsEFL:
+	case types.MeasureFocalLength:
 		return math.Abs(evaluateEFL(surfaces, gc))
 	case types.MeasureSystemLength:
 		return evaluateSystemLength(surfaces)

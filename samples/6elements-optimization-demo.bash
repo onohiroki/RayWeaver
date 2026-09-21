@@ -100,7 +100,7 @@ echo "  stop | meniscus/flint/crown). Total 14 surfaces."
 echo "  Fields: 0 deg / 10 deg / 16 deg / 23 deg (35 mm format half-diagonal)"
 echo "  Wavelengths: F (486nm) / d (588nm) / C (656nm)"
 echo "  48 variables: curvatures, thicknesses, glass nd/vd, surface diameters"
-echo "  Constraints: abs_efl band 50±0.5 mm, EPD band 17.86±0.3 mm"
+echo "  Constraints: focal_length band 50±0.5 mm, EPD band 17.86±0.3 mm"
 echo "  Merit: spot RMS (12 terms) + lateral colour + OPD RMS"
 echo "  Target threshold: on-axis RMS < 0.1 mm"
 echo

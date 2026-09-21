@@ -454,7 +454,7 @@ func TestMultiOptimizerResultHasExpectedFields(t *testing.T) {
 }
 
 // tripletEqualityConfigs returns a US2645157-triplet config with 2 equality
-// constraints (abs_efl and entrance_pupil_diameter) on the given targets.
+// constraints (focal_length and entrance_pupil_diameter) on the given targets.
 func tripletEqualityConfigs(eflTarget, epdTarget float64) []ConfigInput {
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: 1 / 10.2871491742, Thickness: 1.524, Material: types.Material{Key: "SK18"}, Diameter: 10.0},
@@ -479,7 +479,7 @@ func tripletEqualityConfigs(eflTarget, epdTarget float64) []ConfigInput {
 			{Field: 2, Wavelength: 0.00058756, Weight: 0.5},
 		},
 		Constraints: []types.ConstraintOperand{
-			{Kind: types.ConstraintEquality, Measure: types.MeasureAbsEFL, Target: eflTarget, Weight: 1.0, Active: true},
+			{Kind: types.ConstraintEquality, Measure: types.MeasureFocalLength, Target: eflTarget, Weight: 1.0, Active: true},
 			{Kind: types.ConstraintEquality, Measure: types.MeasureEntrancePupilDiameter, Target: epdTarget, Weight: 1.0, Active: true},
 		},
 	}}
@@ -522,7 +522,7 @@ func TestMultiOptimizerSatisfiableEqualityConstraints(t *testing.T) {
 		t.Fatalf("expected 2 constraint residuals, got %d", len(c))
 	}
 	if math.Abs(c[0]) > 0.05 {
-		t.Errorf("abs_efl residual = %v, want ~0 (constraint not satisfied)", c[0])
+		t.Errorf("focal_length residual = %v, want ~0 (constraint not satisfied)", c[0])
 	}
 	if math.Abs(c[1]) > 0.05 {
 		t.Errorf("entrance_pupil_diameter residual = %v, want ~0 (constraint not satisfied)", c[1])
@@ -722,27 +722,27 @@ func TestMultiOptimizerVariableLinks(t *testing.T) {
 	variableLinks := []types.VariableLink{
 		// Link 1: cfg1 surface 5 = -s1_c (concave/convex flip)
 		{
-			Name:   "s5_c_cfg1",
-			Target: types.VariableTarget{Type: "surface", ID: 5, Param: "curvature", Config: "cfg1"},
-			Source: "s1_c",
+			Name:     "s5_c_cfg1",
+			Target:   types.VariableTarget{Type: "surface", ID: 5, Param: "curvature", Config: "cfg1"},
+			Source:   "s1_c",
 			Relation: types.VariableLinkRelation{Scale: -1.0},
-			Active: true,
+			Active:   true,
 		},
 		// Link 2: cfg2 surface 5 = cfg2_s1 + 0.01 (offset)
 		{
-			Name:   "s5_c_cfg2",
-			Target: types.VariableTarget{Type: "surface", ID: 5, Param: "curvature", Config: "cfg2"},
-			Source: "cfg2_s1",
+			Name:     "s5_c_cfg2",
+			Target:   types.VariableTarget{Type: "surface", ID: 5, Param: "curvature", Config: "cfg2"},
+			Source:   "cfg2_s1",
 			Relation: types.VariableLinkRelation{Scale: 1.0, Offset: 0.01},
-			Active: true,
+			Active:   true,
 		},
 		// Link 3: cfg2 surface 3 = s5_c_cfg2 * 2 (chained link)
 		{
-			Name:   "s3_c_cfg2",
-			Target: types.VariableTarget{Type: "surface", ID: 3, Param: "curvature", Config: "cfg2"},
-			Source: "s5_c_cfg2",
+			Name:     "s3_c_cfg2",
+			Target:   types.VariableTarget{Type: "surface", ID: 3, Param: "curvature", Config: "cfg2"},
+			Source:   "s5_c_cfg2",
 			Relation: types.VariableLinkRelation{Scale: 2.0},
-			Active: true,
+			Active:   true,
 		},
 	}
 
@@ -830,11 +830,11 @@ func TestMultiOptimizerVariableLinksCrossConfig(t *testing.T) {
 	// Cross-config link: cfg2 surface 1 = cfg1 surface 1 * 0.5
 	variableLinks := []types.VariableLink{
 		{
-			Name:   "cfg2_s1",
-			Target: types.VariableTarget{Type: "surface", ID: 1, Param: "curvature", Config: "cfg2"},
-			Source: "cfg1_s1",
+			Name:     "cfg2_s1",
+			Target:   types.VariableTarget{Type: "surface", ID: 1, Param: "curvature", Config: "cfg2"},
+			Source:   "cfg1_s1",
 			Relation: types.VariableLinkRelation{Scale: 0.5},
-			Active: true,
+			Active:   true,
 		},
 	}
 

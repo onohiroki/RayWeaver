@@ -806,7 +806,7 @@ configs:
       weight: 0.15
   constraints:
   - kind: band
-    measure: abs_efl
+    measure: focal_length
     target: 50.0
     lower: 49.5
     upper: 50.5
