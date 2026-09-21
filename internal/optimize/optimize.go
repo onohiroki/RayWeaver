@@ -1703,6 +1703,8 @@ func NewOptimizer(cfg Config) *Optimizer {
 		constraints: cfg.Constraints,
 		pupilModel:  cfg.PupilModel,
 	}
+	// Airy radius for spot-term normalization (0 = fall back to lambda).
+	airyMM := airyRadiusMM(cfg.Surfaces, cfg.StopSurface, cfg.PupilModel, cfg.GlassCatalog, types.DefaultWavelength)
 	for _, t := range cfg.MeritTerms {
 		dx, dy := 0.0, 1.0
 		if len(t.FieldDir) >= 2 {
@@ -1723,7 +1725,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 			fraction:             t.Fraction,
 			frequency:            t.Frequency,
 			surfaceSet:           append([]int(nil), t.SurfaceSet...),
-			normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, cfg.Normalization),
+			normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, airyMM, cfg.Normalization),
 		})
 	}
 	if len(cfg.MeritModes) > 0 {
@@ -1762,7 +1764,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 					fraction:             t.Fraction,
 					frequency:            t.Frequency,
 					surfaceSet:           append([]int(nil), t.SurfaceSet...),
-					normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, cfg.Normalization),
+					normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, airyMM, cfg.Normalization),
 				})
 			}
 			c.meritModes[m.Name] = terms
@@ -1821,13 +1823,16 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			constraints: ci.Constraints,
 			pupilModel:  ci.PupilModel,
 		}
+		// Airy radius for spot-term normalization (0 = fall back to lambda).
+		normWL := effectiveReferenceWavelength(ci.ReferenceWavelength)
+		airyMM := airyRadiusMM(ci.Surfaces, ci.StopSurface, ci.PupilModel, gc, normWL)
 		if len(ci.MeritModes) > 0 {
 			c.meritModes = make(map[string][]meritTerm, len(ci.MeritModes))
 			c.meritModeNumRays = make(map[string]int, len(ci.MeritModes))
 			for _, m := range ci.MeritModes {
 				var terms []meritTerm
 				for _, t := range m.Terms {
-					terms = append(terms, buildMeritTermFromTypes(t, ci))
+					terms = append(terms, buildMeritTermFromTypes(t, ci, airyMM))
 				}
 				c.meritModes[m.Name] = terms
 				if m.NumRays > 0 {
@@ -1836,7 +1841,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			}
 		}
 		for _, t := range ci.MeritTerms {
-			c.meritTerms = append(c.meritTerms, buildMeritTermFromTypes(t, ci))
+			c.meritTerms = append(c.meritTerms, buildMeritTermFromTypes(t, ci, airyMM))
 		}
 		internal[i] = c
 	}
@@ -1942,7 +1947,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 	)
 }
 
-func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
+func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput, airyMM float64) meritTerm {
 	mt := meritTerm{
 		kind:                 t.Kind,
 		fieldIndex:           -1,
@@ -1984,18 +1989,18 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput) meritTerm {
 			break
 		}
 	}
-	mt.normScale = resolveNormScale(t, ci)
+	mt.normScale = resolveNormScale(t, ci, airyMM)
 	return mt
 }
 
 // resolveNormScale resolves a merit term's normalization denominator from the
 // multi-config input (see normScaleFor).
-func resolveNormScale(t types.MeritTerm, ci ConfigInput) float64 {
+func resolveNormScale(t types.MeritTerm, ci ConfigInput, airyMM float64) float64 {
 	wl := t.Wavelength
 	if wl <= 0 {
 		wl = ci.ReferenceWavelength
 	}
-	return normScaleFor(t.Kind, t.Scale, wl, ci.Normalization)
+	return normScaleFor(t.Kind, t.Scale, wl, airyMM, ci.Normalization)
 }
 
 // normScaleFor resolves a merit term's normalization denominator:
@@ -2003,7 +2008,7 @@ func resolveNormScale(t types.MeritTerm, ci ConfigInput) float64 {
 //  2. the per-kind override / automatic scale when normalization is enabled,
 //     else
 //  3. 1 (no normalization).
-func normScaleFor(kind string, explicitScale, wavelength float64, norm *types.MeritNormalizationConfig) float64 {
+func normScaleFor(kind string, explicitScale, wavelength, airyMM float64, norm *types.MeritNormalizationConfig) float64 {
 	if explicitScale > 0 {
 		return explicitScale
 	}
@@ -2013,17 +2018,23 @@ func normScaleFor(kind string, explicitScale, wavelength float64, norm *types.Me
 	if wavelength <= 0 {
 		wavelength = types.DefaultWavelength
 	}
-	return normalizationScale(kind, wavelength, norm.Scales)
+	return normalizationScale(kind, wavelength, airyMM, norm.Scales)
 }
 
 // normalizationScale returns the automatic normalization denominator for a
-// merit kind. Length-valued aberration kinds (spot sizes, wavefront RMS/PV,
-// OPD RMS, chromatic focal/image shift) are measured in waves: the scale is the
-// term's wavelength in mm, so a value equal to one wavelength normalizes to 1.
-// A per-kind override in scales takes precedence; other kinds keep scale 1
-// (their value is already dimensionless, a length without a natural wave
-// scale, or a fraction). The legacy empty kind means spot_rms.
-func normalizationScale(kind string, wavelengthMM float64, scales map[string]float64) float64 {
+// merit kind:
+//   - spot-size kinds use the diffraction-limited Airy radius 0.61·λ/NA (so a
+//     diffraction-limited spot normalizes to 1), falling back to the wavelength
+//     when the NA is unavailable;
+//   - other length-valued aberration kinds (wavefront RMS/PV, OPD RMS,
+//     chromatic focal/image shift) use the term's wavelength in mm, so the
+//     value is measured in waves;
+//   - everything else keeps scale 1 (already dimensionless, a length without a
+//     natural scale such as focal_length in mm, or a fraction).
+//
+// A per-kind override in scales takes precedence. The legacy empty kind means
+// spot_rms.
+func normalizationScale(kind string, wavelengthMM, airyMM float64, scales map[string]float64) float64 {
 	if s, ok := scales[kind]; ok && s > 0 {
 		return s
 	}
@@ -2033,23 +2044,72 @@ func normalizationScale(kind string, wavelengthMM float64, scales map[string]flo
 	if s, ok := scales[kind]; ok && s > 0 {
 		return s
 	}
+	if isSpotScaledKind(kind) {
+		if airyMM > 0 {
+			return airyMM
+		}
+		if wavelengthMM > 0 {
+			return wavelengthMM
+		}
+		return 1.0
+	}
 	if isWaveScaledKind(kind) && wavelengthMM > 0 {
 		return wavelengthMM
 	}
 	return 1.0
 }
 
+// isSpotScaledKind reports whether a merit kind's value is a spot radius in mm
+// whose natural normalization is the diffraction-limited Airy radius.
+func isSpotScaledKind(kind string) bool {
+	switch kind {
+	case dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
+		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius:
+		return true
+	}
+	return false
+}
+
 // isWaveScaledKind reports whether a merit kind's value is an OPD/length in mm
 // whose natural normalization is the wavelength (so value/scale is in waves).
 func isWaveScaledKind(kind string) bool {
 	switch kind {
-	case dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
-		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius,
-		MeritOPDRMS, MeritWavefrontRMSResidual, MeritWavefrontSphereRMS,
+	case MeritOPDRMS, MeritWavefrontRMSResidual, MeritWavefrontSphereRMS,
 		MeritWavefrontSpherePV, MeritLongitudinalColor, MeritLateralColor:
 		return true
 	}
 	return false
+}
+
+// airyRadiusMM returns the diffraction-limited Airy disk radius 0.61·λ/NA for a
+// config, used to normalize spot-size merit terms. The paraxial NA is taken
+// from paraxial.Compute; when a virtual entrance pupil fixes the EPD
+// independently of the stop/beam, the NA is derived from that diameter
+// (EPD/(2·|EFL|)) so a stop-free virtual-pupil system is not mis-normalized by
+// the beam-aware fallback pupil. Returns 0 when the NA cannot be computed, so
+// the caller falls back to the wavelength.
+func airyRadiusMM(surfaces []types.Surface, stopSurface int, pupilModel *types.PupilModelConfig, gc *glass.Catalog, wavelength float64) float64 {
+	if wavelength <= 0 {
+		wavelength = types.DefaultWavelength
+	}
+	if gc == nil {
+		gc = glass.NewCatalog()
+	}
+	sys := types.System{Surfaces: surfaces, StopSurface: stopSurface}
+	pr := paraxial.Compute(sys, wavelength, gc, 0, nil)
+	na := pr.ImageSpaceNA
+	if na <= 0 {
+		na = pr.InfConjImageSpaceNA
+	}
+	if pupilModel != nil && pupilModel.Mode == "virtual_entrance_pupil" && pupilModel.Diameter > 0 {
+		if efl := math.Abs(pr.FocalLength); efl > 1e-9 {
+			na = pupilModel.Diameter / (2 * efl)
+		}
+	}
+	if na <= 0 {
+		return 0
+	}
+	return 0.61 * wavelength / na
 }
 
 func newOptimizer(configs []config, variables []Variable, linkedVars []LinkedVariable, varNameIndex map[string]int, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs bool, adaptiveDamping *types.AdaptiveDampingConfig, raCfg *types.RegionActiveConfig) *Optimizer {

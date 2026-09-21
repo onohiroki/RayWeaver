@@ -942,7 +942,7 @@ func TestWavefrontTermFieldVignetting(t *testing.T) {
 	// buildMeritTermFromTypes (multi-config path) must also carry the field
 	// index from types.MeritTerm.Field.
 	ci := ConfigInput{ID: "c", Fields: fields}
-	mt := buildMeritTermFromTypes(types.MeritTerm{Kind: MeritWavefrontAstigmatism, Field: 0, Wavelength: 0.00058756}, ci)
+	mt := buildMeritTermFromTypes(types.MeritTerm{Kind: MeritWavefrontAstigmatism, Field: 0, Wavelength: 0.00058756}, ci, 0)
 	if mt.fieldIndex != 0 {
 		t.Fatalf("buildMeritTermFromTypes fieldIndex = %d, want 0", mt.fieldIndex)
 	}
@@ -1287,9 +1287,9 @@ func TestFieldAliveMerit(t *testing.T) {
 	surface.Precompute(surfaces)
 
 	cfg := Config{
-		Surfaces:   surfaces,
-		Variables:  []Variable{},
-		MeritTerms: []MeritTerm{{Kind: MeritFieldAlive, FieldAngle: 0, FieldIndex: 0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1000, Target: 0.3}},
+		Surfaces:     surfaces,
+		Variables:    []Variable{},
+		MeritTerms:   []MeritTerm{{Kind: MeritFieldAlive, FieldAngle: 0, FieldIndex: 0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1000, Target: 0.3}},
 		GlassCatalog: gc,
 		NumRays:      64,
 	}
@@ -1309,9 +1309,9 @@ func TestFieldAliveMerit(t *testing.T) {
 	}
 	surface.Precompute(narrow)
 	cfg2 := Config{
-		Surfaces:   narrow,
-		Variables:  []Variable{},
-		MeritTerms: []MeritTerm{{Kind: MeritFieldAlive, FieldAngle: 0, FieldIndex: 0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1000, Target: 0.5}},
+		Surfaces:     narrow,
+		Variables:    []Variable{},
+		MeritTerms:   []MeritTerm{{Kind: MeritFieldAlive, FieldAngle: 0, FieldIndex: 0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 1000, Target: 0.5}},
 		GlassCatalog: gc,
 		NumRays:      128,
 	}

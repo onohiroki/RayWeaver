@@ -376,12 +376,16 @@ optimization:
 divides each term's residual by a characteristic scale so the weights become
 comparable:
 
-- **Wave-scaled kinds** use the term's wavelength (mm), i.e. the residual is
-  measured in **waves**: `spot_rms` / `spot_rms_t` / `spot_rms_s` /
-  `spot_rms_worst` / `spot_rms_weighted` / `spot_ee_radius`,
-  `wavefront_rms_residual` / `wavefront_sphere_rms` / `wavefront_sphere_pv`,
-  `opd_rms`, `longitudinal_color` / `lateral_color`.
-- **Kinds with no natural wave scale** (geometric MTF, `focal_length` in mm,
+- **Spot kinds** use the diffraction-limited **Airy radius** `0.61·λ/NA` (from
+  `paraxial.Compute`, the same NA the `spot_diffraction` metric reads), so a
+  diffraction-limited spot normalizes to 1: `spot_rms` / `spot_rms_t` /
+  `spot_rms_s` / `spot_rms_worst` / `spot_rms_weighted` / `spot_ee_radius`. When
+  the NA cannot be computed it falls back to the wavelength.
+- **Other length-valued kinds** use the term's wavelength (mm), i.e. the
+  residual is measured in **waves**: `wavefront_rms_residual` /
+  `wavefront_sphere_rms` / `wavefront_sphere_pv`, `opd_rms`,
+  `longitudinal_color` / `lateral_color`.
+- **Kinds with no natural length scale** (geometric MTF, `focal_length` in mm,
   `field_alive`, `distortion_pct`, `glass_role`, ...) keep scale 1.
 
 A per-term `scale:` on a merit term overrides both the automatic scale and the
