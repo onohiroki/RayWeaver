@@ -409,8 +409,9 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	// checking that the fraction of valid rays exceeds the threshold (default
 	// 0.3, matching the field_alive merit term default, overridable via
 	// optimization.escape.min_throughput_ratio). The virtual entrance pupil
-	// model (if configured) is forwarded to the chief ray tracer so the
-	// validation uses the same pupil configuration as the DLS.
+	// model (if configured) is forwarded to the chief ray tracer with the
+	// optimised pupil_model_* values applied (effectivePupilModel), so the
+	// validation grid matches the one the DLS merit traced.
 	var validateFn func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason)
 	if input.Chief != nil && len(input.Chief.Fields) > 0 {
 		fieldDefs := input.Chief.Fields
@@ -451,12 +452,16 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 					}
 				}
 			}
-			// Trace pupil grids for each field and count valid rays.
+			// Trace pupil grids for each field and count valid rays. The
+			// virtual entrance pupil must use the optimised axial_position/
+			// diameter (not the static input model), otherwise the grid is
+			// centred on the initial pupil and most rays miss the aperture.
 			sys := types.System{Surfaces: surf, StopSurface: stopSurface}
+			pm := effectivePupilModel(inner, x, "config1", pupilModel)
 			results := chief.DetermineChiefRaysGrid(
 				sys, fieldDefs, refSurf, validationNumRays, gc,
 				types.NewCircularJones(true), wl,
-				false, types.GridPolar, nil, nil, nil, pupilModel, 0, 0,
+				false, types.GridPolar, nil, nil, nil, pm, 0, 0,
 			)
 			for _, r := range results {
 				total := len(r.GridPoints)
@@ -802,10 +807,11 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 				}
 			}
 			sys := types.System{Surfaces: surf, StopSurface: primaryStop}
+			pm := effectivePupilModel(inner, x, template[0].ID, pupilModel)
 			results := chief.DetermineChiefRaysGrid(
 				sys, fieldDefs, refSurf, validationNumRays, gc,
 				types.NewCircularJones(true), wl,
-				false, types.GridPolar, nil, nil, nil, pupilModel, 0, 0,
+				false, types.GridPolar, nil, nil, nil, pm, 0, 0,
 			)
 			for _, r := range results {
 				total := len(r.GridPoints)
@@ -985,6 +991,33 @@ func buildSingleVarStates(variables []optimize.Variable, x []float64) []types.Es
 		}
 	}
 	return states
+}
+
+// effectivePupilModel returns the virtual entrance pupil model that the
+// optimizer applied to the point x: a copy of fallback carrying the optimised
+// pupil_model_* variable values (axial_position, diameter). The escape
+// feasibility grid must use this rather than the static input model — when the
+// virtual pupil is itself an optimisation variable, tracing the grid at the
+// initial pupil makes most rays miss the aperture and spuriously rejects every
+// minimum as insufficient_field_throughput. configID is the optimizer's config
+// key ("config1" in the single-config path, the config ID in the multi path).
+// It falls back to the static model when the optimizer does not expose the
+// applied pupils or the config has no virtual pupil.
+func effectivePupilModel(inner any, x []float64, configID string, fallback *types.PupilModelConfig) *types.PupilModelConfig {
+	if fallback == nil || inner == nil {
+		return fallback
+	}
+	pm, ok := inner.(interface {
+		FinalPupilModels([]float64) map[string]types.PupilModelConfig
+	})
+	if !ok {
+		return fallback
+	}
+	m, ok := pm.FinalPupilModels(x)[configID]
+	if !ok {
+		return fallback
+	}
+	return &m
 }
 
 // applyEscapeX applies a flat variable vector to a copy of the surfaces,
