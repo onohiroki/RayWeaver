@@ -3849,11 +3849,26 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 		o.sizeAutoApertures(cfg, surfaces, gc, nil, p)
 		return
 	}
+	// With a virtual entrance pupil the envelope grid must trace the same
+	// bundle the merit (sizeAutoApertures -> fieldExtents -> gridCentring) and
+	// the escape feasibility validation trace: passing nil would envelope the
+	// dynamic-pupil bundle instead, so the sized diameters would clip the real
+	// one and reject minima as insufficient_field_throughput. The x-applied
+	// model mirrors FinalPupilModels.
+	var pm *types.PupilModelConfig
+	if cfg.pupilModel != nil && p.z != 0 {
+		m := *cfg.pupilModel
+		m.AxialPosition = p.z
+		if p.dia > 0 {
+			m.Diameter = p.dia
+		}
+		pm = &m
+	}
 	pol := types.NewCircularJones(true)
 	results := chief.DetermineChiefRaysGrid(
 		types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
 		cfg.fieldDefs, cfg.refSurface, o.extentRays(512), gc, pol,
-		effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridHex, nil, nil, nil, nil, 0, 0,
+		effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridHex, nil, nil, nil, pm, 0, 0,
 	)
 	engine := ray.NewEngine(gc, nil)
 	surface.Precompute(surfaces)

@@ -256,38 +256,13 @@ func meritTermKey(t types.MeritTerm) string {
 		t.Kind, t.Field, t.Wavelength, t.ComparisonWavelength, t.Target, t.Fraction, t.Frequency)
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
-	var surfaces []types.Surface
-	if len(input.Configs) > 0 {
-		surfaces = input.Configs[0].Surfaces
-	}
-	if len(surfaces) == 0 {
-		errOut("Error: no surfaces defined (add 'configs[0].surfaces')")
-		os.Exit(1)
-	}
-	surface.Precompute(surfaces)
-
-	variables := buildOptimizeVariables(input.Optimization, gc)
-	if len(variables) == 0 {
-		errOut("Error: no optimization variables defined")
-		os.Exit(1)
-	}
-	meritTerms := buildMeritTerms(input)
-	if len(meritTerms) == 0 {
-		// Also accept configs with merit_modes (handled by merit_schedule).
-		hasModes := false
-		for _, c := range input.Configs {
-			if len(c.MeritModes) > 0 {
-				hasModes = true
-				break
-			}
-		}
-		if !hasModes {
-			errOut("Error: no merit terms defined (add 'optimization.merit', 'configs[].merit' or 'configs[].merit_modes')")
-			os.Exit(1)
-		}
-	}
-
+// singleEscapeConfig builds the optimizer configuration for the single-config
+// escape path. It is a function rather than an inline literal so tests can
+// construct the exact config the run uses: PupilModel in particular must be
+// forwarded (pupilModelForConfig) or FinalPupilModels returns an empty map and
+// the feasibility validation silently falls back to the static input pupil,
+// rejecting nearly every minimum as insufficient_field_throughput.
+func singleEscapeConfig(input types.Input, surfaces []types.Surface, variables []optimize.Variable, meritTerms []optimize.MeritTerm, gc *glass.Catalog, gctx glassPhaseCtx, logger dls.Logger) optimize.Config {
 	fields := loadFields(input)
 	constraints := input.Optimization.Constraints
 	if len(input.Configs) > 0 && len(input.Configs[0].Constraints) > 0 {
@@ -327,6 +302,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		StopSurface:        stopSurface,
 		RefSurface:         chiefRefSurface(input),
 		PupilZ:             computePupilZ(input, surfaces, gc),
+		PupilModel:         pupilModelForConfig(input),
 		MaxIter:            input.Optimization.MaxIter,
 		Tol:                input.Optimization.Tol,
 		Epsilon:            input.Optimization.Epsilon,
@@ -359,7 +335,48 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		}
 	}
 
-	cfg.Logger = dlsLogger
+	cfg.Logger = logger
+	return cfg
+}
+
+func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
+	var surfaces []types.Surface
+	if len(input.Configs) > 0 {
+		surfaces = input.Configs[0].Surfaces
+	}
+	if len(surfaces) == 0 {
+		errOut("Error: no surfaces defined (add 'configs[0].surfaces')")
+		os.Exit(1)
+	}
+	surface.Precompute(surfaces)
+
+	variables := buildOptimizeVariables(input.Optimization, gc)
+	if len(variables) == 0 {
+		errOut("Error: no optimization variables defined")
+		os.Exit(1)
+	}
+	meritTerms := buildMeritTerms(input)
+	if len(meritTerms) == 0 {
+		// Also accept configs with merit_modes (handled by merit_schedule).
+		hasModes := false
+		for _, c := range input.Configs {
+			if len(c.MeritModes) > 0 {
+				hasModes = true
+				break
+			}
+		}
+		if !hasModes {
+			errOut("Error: no merit terms defined (add 'optimization.merit', 'configs[].merit' or 'configs[].merit_modes')")
+			os.Exit(1)
+		}
+	}
+
+	stopSurface := 0
+	if input.Chief != nil {
+		stopSurface = input.Chief.StopSurface
+	}
+
+	cfg := singleEscapeConfig(input, surfaces, variables, meritTerms, gc, gctx, dlsLogger)
 
 	// Each worker builds an isolated Optimizer so concurrent merit
 	// evaluations never share mutable glass-override state.
@@ -391,7 +408,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	var saver *escapeFileSaver
 	if saveBase != "" {
 		saver = newEscapeFileSaver(saveBase, func(p escape.Point) types.Input {
-			return materializeSingleInput(input, surfaces, variables, p.X, gc)
+			return materializeSingleInput(input, surfaces, variables, p.X, gc, finalAperturesAt(factory, p.X)["config1"])
 		}, progress, keepInfeasible)
 		onRecord = saver.record
 	}
@@ -437,10 +454,16 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		}
 
 		validateFn = func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
-			surf, newGlasses := applyEscapeX(surfaces, variables, x, gc)
-			for _, g := range newGlasses {
-				gc.Add(g)
-			}
+			// The feasibility grid must trace the prescription EvaluateMerit
+			// traced: variables plus the power/back-focus hard solves, with the
+			// sized auto apertures (see validationSurfaces).
+			surf := validationSurfaces(inner, x, "config1", func() []types.Surface {
+				s, newGlasses := applyEscapeX(surfaces, variables, x, gc)
+				for _, g := range newGlasses {
+					gc.Add(g)
+				}
+				return s
+			})
 			// Check for numerical failure: NaN or Inf merit.
 			if math.IsNaN(merit) || math.IsInf(merit, 0) {
 				return escape.MinStatusEvaluationFailure, escape.ReasonNumericalFailure
@@ -530,6 +553,19 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		saveStem, saveExt = splitSaveBase(saveBase)
 	}
 
+	// Single-config systems may carry no configs section; default it once so
+	// the minima materialisation and the best-solution write-back share one
+	// config metadata (fields/wavelengths) for the back-focus hard solve.
+	if len(input.Configs) == 0 {
+		input.Configs = []types.Config{{
+			ID:     "config1",
+			Name:   "Config1",
+			Weight: 1.0,
+			Active: true,
+		}}
+	}
+	outCfg := &input.Configs[0]
+
 	minima := make([]types.EscapeMinimum, len(res.Minima))
 	for i, p := range res.Minima {
 		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
@@ -538,6 +574,14 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		for _, g := range newGlasses {
 			gc.Add(g)
 		}
+		// Element powers come from the variable-only projection, matching the
+		// fingerprint the escape store used during the run.
+		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
+		// Then bring the surfaces to the prescription the optimizer evaluated
+		// (back-focus hard solve + sized auto apertures), so `escape extract`
+		// agrees with the --save file for the same index.
+		applySavedBackFocusSolve(input, outCfg, surf, gc)
+		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
 		minima[i] = types.EscapeMinimum{
 			Index:     i,
 			Merit:     p.Merit,
@@ -545,7 +589,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 			Variables: buildSingleVarStates(variables, p.X),
 			Features: []types.ConfigFeatures{{
 				ID:            cfgID,
-				ElementPowers: paraxial.ElementPowers(surf, paraxial.DLine, gc),
+				ElementPowers: powers,
 			}},
 		}
 		if saveBase != "" {
@@ -560,6 +604,9 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		for _, g := range newGlasses {
 			gc.Add(g)
 		}
+		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
+		applySavedBackFocusSolve(input, outCfg, surf, gc)
+		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
 		infeasibleMinima[i] = types.EscapeMinimum{
 			Index:         i,
 			Merit:         p.Merit,
@@ -569,7 +616,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 			Variables:     buildSingleVarStates(variables, p.X),
 			Features: []types.ConfigFeatures{{
 				ID:            cfgID,
-				ElementPowers: paraxial.ElementPowers(surf, paraxial.DLine, gc),
+				ElementPowers: powers,
 			}},
 		}
 	}
@@ -583,15 +630,16 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		applyPupilVariables(&input, variables, res.Minima[res.BestIdx].X)
 	}
 
-	if len(input.Configs) == 0 {
-		input.Configs = []types.Config{{
-			ID:     "config1",
-			Name:   "Config1",
-			Weight: 1.0,
-			Active: true,
-		}}
-	}
 	input.Configs[0].Surfaces = bestSurfaces
+
+	// Keep the pipeline output consistent with the saved minima: the
+	// variable-only projection would otherwise retain the template image
+	// plane and the stale stored diameters, diverging from both the saved
+	// minimum file and what the merit evaluated.
+	if len(res.Minima) > 0 {
+		applySavedBackFocusSolve(input, outCfg, input.Configs[0].Surfaces, gc)
+		applyApertures(input.Configs[0].Surfaces, finalAperturesAt(factory, res.Minima[res.BestIdx].X)["config1"])
+	}
 
 	for _, g := range bestGlasses {
 		input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
@@ -742,7 +790,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	var saver *escapeFileSaver
 	if saveBase != "" {
 		saver = newEscapeFileSaver(saveBase, func(p escape.Point) types.Input {
-			return materializeMultiInput(input, input.Optimization, p.X, gc)
+			return materializeMultiInput(input, input.Optimization, p.X, gc, finalAperturesAt(factory, p.X))
 		}, progress, keepInfeasible)
 		onRecord = saver.record
 	}
@@ -795,11 +843,14 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		}
 
 		validateFn = func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
-			configSurfaces := applyEscapeMulti(template, input.Optimization, x)
-			surf, ok := configSurfaces[template[0].ID]
-			if !ok {
-				surf = primarySurfaces
-			}
+			// Mirror the merit's geometry, exactly as in the single-config path.
+			surf := validationSurfaces(inner, x, template[0].ID, func() []types.Surface {
+				configSurfaces := applyEscapeMulti(template, input.Optimization, x)
+				if s, ok := configSurfaces[template[0].ID]; ok {
+					return s
+				}
+				return primarySurfaces
+			})
 			if math.IsNaN(merit) || math.IsInf(merit, 0) {
 				return escape.MinStatusEvaluationFailure, escape.ReasonNumericalFailure
 			}
@@ -876,16 +927,25 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	minima := make([]types.EscapeMinimum, len(res.Minima))
 	for i, p := range res.Minima {
 		configSurfaces := applyEscapeMulti(template, input.Optimization, p.X)
+		apertures := finalAperturesAt(factory, p.X)
 		var cfgs []types.Config
 		var features []types.ConfigFeatures
 		for ci := range template {
 			if s, ok := configSurfaces[template[ci].ID]; ok {
 				c := template[ci]
 				c.Surfaces = s
+				// Element powers from the variable-only projection (the
+				// run-time fingerprint), then bring the surfaces to the
+				// prescription the optimizer evaluated — back-focus hard solve
+				// + sized auto apertures — so `escape extract` agrees with
+				// the --save file for the same index.
+				powers := paraxial.ElementPowers(s, paraxial.DLine, gc)
+				applySavedBackFocusSolve(input, &c, s, gc)
+				applyApertures(s, apertures[template[ci].ID])
 				cfgs = append(cfgs, c)
 				features = append(features, types.ConfigFeatures{
 					ID:            template[ci].ID,
-					ElementPowers: paraxial.ElementPowers(s, paraxial.DLine, gc),
+					ElementPowers: powers,
 				})
 			}
 		}
@@ -905,16 +965,20 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	infeasibleMinima := make([]types.EscapeMinimum, len(res.InfeasibleBasins))
 	for i, p := range res.InfeasibleBasins {
 		configSurfaces := applyEscapeMulti(template, input.Optimization, p.X)
+		apertures := finalAperturesAt(factory, p.X)
 		var cfgs []types.Config
 		var features []types.ConfigFeatures
 		for ci := range template {
 			if s, ok := configSurfaces[template[ci].ID]; ok {
 				c := template[ci]
 				c.Surfaces = s
+				powers := paraxial.ElementPowers(s, paraxial.DLine, gc)
+				applySavedBackFocusSolve(input, &c, s, gc)
+				applyApertures(s, apertures[template[ci].ID])
 				cfgs = append(cfgs, c)
 				features = append(features, types.ConfigFeatures{
 					ID:            template[ci].ID,
-					ElementPowers: paraxial.ElementPowers(s, paraxial.DLine, gc),
+					ElementPowers: powers,
 				})
 			}
 		}
@@ -933,8 +997,13 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	if len(res.Minima) > 0 {
 		best := res.Minima[res.BestIdx]
 		bestSurfaces := applyEscapeMulti(template, input.Optimization, best.X)
+		apertures := finalAperturesAt(factory, best.X)
 		for i := range input.Configs {
 			if s, ok := bestSurfaces[input.Configs[i].ID]; ok {
+				// Same prescription as the --save file: back-focus hard solve
+				// + sized auto apertures (see the single-config path).
+				applySavedBackFocusSolve(input, &input.Configs[i], s, gc)
+				applyApertures(s, apertures[input.Configs[i].ID])
 				input.Configs[i].Surfaces = s
 			}
 		}
@@ -1020,6 +1089,69 @@ func effectivePupilModel(inner any, x []float64, configID string, fallback *type
 		return fallback
 	}
 	return &m
+}
+
+// validationSurfaces builds the lens prescription the escape feasibility check
+// must trace for the point x. When the worker's optimizer exposes the
+// final-state hooks it mirrors exactly what EvaluateMerit evaluated:
+// FinalConfigs applies the variables plus the power/back-focus hard solves
+// (and materialises the optimised nd/vd model glasses), and FinalApertures
+// replaces the stored auto_aperture diameters with the sized ones —
+// EvaluateMerit runs restoreDiameters+sizeAutoApertures before every grid
+// trace, so tracing the raw input diameters would clip the beam at the first
+// undersized aperture (and omitting the hard solves would trace the image
+// plane somewhere the merit never looked), spuriously rejecting minima as
+// insufficient_field_throughput. fallback builds the variable-only projection
+// used when the model does not expose these hooks (stub models in tests).
+func validationSurfaces(inner any, x []float64, configID string, fallback func() []types.Surface) []types.Surface {
+	type finalState interface {
+		FinalConfigs([]float64) (map[string][]types.Surface, []types.Glass)
+		FinalApertures([]float64) map[string]map[int]float64
+	}
+	fs, ok := inner.(finalState)
+	if !ok {
+		return fallback()
+	}
+	geo, _ := fs.FinalConfigs(x)
+	surf, ok := geo[configID]
+	if !ok {
+		return fallback()
+	}
+	// FinalConfigs hands back a fresh copy per call, so overlaying the sized
+	// diameters in place is safe; copy anyway to stay independent of that.
+	out := make([]types.Surface, len(surf))
+	copy(out, surf)
+	applyApertures(out, fs.FinalApertures(x)[configID])
+	return out
+}
+
+// finalAperturesAt asks a freshly built optimizer for the sized auto_aperture
+// diameters at x (keyed by config ID), so a saved minimum and the output
+// document carry the apertures the optimizer evaluated. The raw stored
+// diameters are stale placeholders that would clip the beam for anything
+// reading the file afterwards. Returns nil when the model does not expose
+// the hook.
+func finalAperturesAt(factory func() dls.Model, x []float64) map[string]map[int]float64 {
+	fs, ok := factory().(interface {
+		FinalApertures([]float64) map[string]map[int]float64
+	})
+	if !ok {
+		return nil
+	}
+	return fs.FinalApertures(x)
+}
+
+// applyApertures writes sized diameters (keyed by surface ID) into the
+// auto_aperture surfaces of a materialised prescription.
+func applyApertures(surfaces []types.Surface, apertures map[int]float64) {
+	for i := range surfaces {
+		if !surfaces[i].AutoAperture {
+			continue
+		}
+		if d, ok := apertures[surfaces[i].ID]; ok && d > 0 {
+			surfaces[i].Diameter = d
+		}
+	}
 }
 
 // applyEscapeX applies a flat variable vector to a copy of the surfaces,
