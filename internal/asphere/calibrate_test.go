@@ -163,16 +163,3 @@ func TestRunTripletCalibratesScale(t *testing.T) {
 }
 
 // TestScoreSurfaceClampsNegativeMeasuredH guards the backstop that prevents an
-// overshooting probe from feeding a negative sensitivity term into the score.
-func TestScoreSurfaceClampsNegativeMeasuredH(t *testing.T) {
-	cells := []types.AsphereCellStat{
-		{SurfaceID: 1, MeanR: 1, CommonOPD: 0.01, Weight: 1, OccupiedFields: []int{1, 2}},
-	}
-	surf := types.Surface{Curvature: 0.02, Diameter: 6}
-	weights := DefaultConfig().ScoreWeights
-	opts := ScoreOptions{MeasuredH: -0.5, HasMeasuredH: true, MaxEvenOrder: 10}
-	score := ScoreSurface(cells, surf, 1.0, 1.5, weights, opts)
-	if score.SensitivityPenalty != 0 {
-		t.Fatalf("SensitivityPenalty = %v, want 0 (negative measured H clamped)", score.SensitivityPenalty)
-	}
-}

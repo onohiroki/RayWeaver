@@ -13,7 +13,7 @@ func TestBuildFocusSamplesUsesCandidateSurfaceHit(t *testing.T) {
 	samples := []pupil.Sample{
 		{PupilX: -1, Dir: types.Vec3{Z: 1}, OK: true, Surfaces: []types.SurfaceResult{
 			{SurfaceID: 2, Position: types.Vec3{X: 2, Y: 3}},
-			{SurfaceID: 7, Position: types.Vec3{X: 70, Y: 80}},  // Target
+			{SurfaceID: 7, Position: types.Vec3{X: 70, Y: 80}},   // Target
 			{SurfaceID: 8, Position: types.Vec3{X: 800, Y: 900}}, // NOT target (must be ignored)
 		}},
 		{PupilX: 0, Dir: types.Vec3{Z: 1}, OK: true, Surfaces: []types.SurfaceResult{
@@ -131,68 +131,6 @@ func TestPreprocessOPD(t *testing.T) {
 	}
 }
 
-func TestComputeCellStatsCommonAndUnique(t *testing.T) {
-	cells := []cellData{
-		// Shared cell: two fields, same OPD → common mu, zero conflict.
-		{SurfaceID: 1, Ring: 0, Sector: 0, MeanR: 1,
-			Hits: []cellHit{
-				{FieldID: 1, OPD: 0.01, Weight: 1, R: 1},
-				{FieldID: 2, OPD: 0.01, Weight: 1, R: 1},
-			}},
-		// Unique cell: single field.
-		{SurfaceID: 1, Ring: 1, Sector: 1, MeanR: 2,
-			Hits: []cellHit{
-				{FieldID: 3, OPD: 0.02, Weight: 1, R: 2},
-			}},
-	}
-	stats := ComputeCellStats(cells, 1, 3.0)
-	if len(stats) != 2 {
-		t.Fatalf("expected 2 cells, got %d", len(stats))
-	}
-	shared := stats[0]
-	if len(shared.OccupiedFields) != 2 {
-		t.Fatalf("shared cell occupied fields = %v, want 2", shared.OccupiedFields)
-	}
-	if math.Abs(shared.CommonOPD-0.01) > 1e-15 {
-		t.Fatalf("common OPD = %v, want 0.01", shared.CommonOPD)
-	}
-	if math.Abs(shared.Conflict) > 1e-15 {
-		t.Fatalf("conflict = %v, want 0", shared.Conflict)
-	}
-	uniq := stats[1]
-	if math.Abs(uniq.UniqueResidual-0.0004) > 1e-15 {
-		t.Fatalf("unique residual = %v, want 4e-4", uniq.UniqueResidual)
-	}
-}
-
-func TestBuildCellGridBinsByPolarCell(t *testing.T) {
-	fp := []FieldFootprintData{{
-		FieldID: 1,
-		Weight:  1,
-		RayHits: []RayHit{
-			{Hits: map[int]SurfaceHit{1: {Position: types.Vec3{X: 1, Y: 0}}}, OK: true},
-			{Hits: map[int]SurfaceHit{1: {Position: types.Vec3{X: -1, Y: 0}}}, OK: true},
-			{Hits: map[int]SurfaceHit{1: {Position: types.Vec3{X: 0, Y: 1}}}, OK: true},
-			{Hits: map[int]SurfaceHit{1: {Position: types.Vec3{X: 0, Y: -1}}}, OK: true},
-		},
-	}}
-	cells := BuildCellGrid(fp, 1, 1, 4)
-	if len(cells) != 4 {
-		t.Fatalf("expected 4 sectors in 1 ring, got %d", len(cells))
-	}
-	// All four cardinal directions should fall in distinct sectors.
-	seen := map[int]bool{}
-	for _, c := range cells {
-		seen[c.Sector] = true
-		if c.Ring != 0 {
-			t.Fatalf("ring = %d, want 0", c.Ring)
-		}
-	}
-	if len(seen) != 4 {
-		t.Fatalf("sectors = %v, want 4 distinct", seen)
-	}
-}
-
 func TestBuildOPDProfilesPerFieldPerRing(t *testing.T) {
 	fp := []FieldFootprintData{
 		{
@@ -241,58 +179,6 @@ func TestBuildOPDProfilesPerFieldPerRing(t *testing.T) {
 	// Ring radius is the weight-mean |r| (all weight 1 here).
 	if math.Abs(f1.RingRadius[0]-1.0) > 1e-12 {
 		t.Fatalf("field 1 ring radius = %v, want 1.0", f1.RingRadius[0])
-	}
-}
-
-func TestFitAsphereCoeffsSmallForSmoothOPD(t *testing.T) {
-	// A smooth r^4 spherical-aberration OPD should yield a small, non-pathological
-	// A4 estimate and no enormous higher orders.
-	var cells []types.AsphereCellStat
-	for i := 1; i <= 8; i++ {
-		r := float64(i) * 0.3
-		cells = append(cells, types.AsphereCellStat{
-			CommonOPD: 1e-4 * math.Pow(r, 4), Weight: 1, MeanR: r,
-			OccupiedFields: []int{1, 2},
-		})
-	}
-	surf := types.Surface{Curvature: 0.02, Diameter: 6}
-	coeffs, warnings := FitAsphereCoeffs(cells, surf, 1.0, 1.5, DefaultConfig())
-	if coeffs.A4 == 0 && coeffs.A6 == 0 && coeffs.A8 == 0 {
-		t.Fatal("FitAsphereCoeffs returned zero coeffs")
-	}
-	if math.Abs(coeffs.A4) < 1e-6 || math.Abs(coeffs.A4) > 1e-2 {
-		t.Fatalf("A4 = %v, want a moderate magnitude for a smooth r^4 residual", coeffs.A4)
-	}
-	if len(warnings) == 0 {
-		t.Fatal("expected defocus-removal warning")
-	}
-}
-
-func TestFitAsphereCoeffsA4BoundedByRadius(t *testing.T) {
-	// A pathological OPD would suggest an A4 beyond the surface-radius bound;
-	// the constraint must clamp it to 1/|R| and warn.
-	var cells []types.AsphereCellStat
-	for i := 1; i <= 8; i++ {
-		r := float64(i) * 0.3
-		cells = append(cells, types.AsphereCellStat{
-			CommonOPD: 1.0 * math.Pow(r, 4), Weight: 1, MeanR: r,
-			OccupiedFields: []int{1, 2},
-		})
-	}
-	surf := types.Surface{Curvature: 0.02, Diameter: 6} // R = 50 → bound = 0.02
-	coeffs, warnings := FitAsphereCoeffs(cells, surf, 1.0, 1.5, DefaultConfig())
-	bound := 1.0 / 50.0
-	if math.Abs(coeffs.A4) > bound+1e-12 {
-		t.Fatalf("A4 = %v, want |A4| <= %v (surface-radius bound)", coeffs.A4, bound)
-	}
-	var constrained bool
-	for _, w := range warnings {
-		if w == "A4 coefficient bounded by surface radius" {
-			constrained = true
-		}
-	}
-	if !constrained {
-		t.Fatal("expected A4-bounded warning")
 	}
 }
 

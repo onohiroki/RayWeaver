@@ -34,9 +34,9 @@ PreprocessOPD (piston by mean reference; optional tilt / defocus removal)
         │
         ▼
 per candidate surface:
-   BuildCellGrid  → ring×sector polar cells
-   ComputeCellStats → common OPD, conflict, unique residual, azimuth variance,
-                      radial gradient, coverage weight per cell
+   JointRadialFit → raw-ray shared OPD fit on a polar ring basis around the
+                    beam-frame centre (common energy, conflict, unique
+                    residual, fit quality, sagittal asymmetry)
         │
         ▼
 Phase 3 (if sensitivity_samples > 0): measured sensitivity H per surface
@@ -44,10 +44,10 @@ Phase 3 (if sensitivity_samples > 0): measured sensitivity H per surface
    plus per-coefficient finite-difference derivatives ∂Merit/∂c_j
         │
         ▼
-RankSurfaces → composite score, sorted descending
+RankSurfaceMetrics → composite score, sorted descending
         │
         ▼
-top-K: FitAsphereCoeffs → conic + A4..A12 (physical + scaled)
+top-K: FitAsphereCoeffsJoint → conic + A4..A12 (physical + scaled)
         │
         ▼
 (optional --validate) short DLS per fitted surface on spot RMS → validation block
@@ -91,7 +91,7 @@ coeffs = (AᵀWA)⁻¹ AᵀWb
 
 `remove_tilt` and `remove_defocus` default to `true` / `false`. The `r²` term
 that dominates the asphere's low-order behaviour is therefore usually removed
-from the OPD before the fit; `FitAsphereCoeffs` reports the magnitude of that
+from the OPD before the fit; `FitAsphereCoeffsJoint` reports the magnitude of that
 removed term as a warning. (The YAML field `remove_piston` is accepted but has
 no effect — piston removal is implicit in the mean reference.)
 
@@ -174,15 +174,17 @@ of `(n1, n2)` in `mediaIndices` (mirrors get `n2 = −n1`).
 ## 7. Initial coefficient fit
 
 For the top-K surfaces (those with the highest score that also yield a valid
-fit) `FitAsphereCoeffs` estimates initial coefficients.
+fit) `FitAsphereCoeffsJoint` estimates initial coefficients from the exact-ray
+joint fit (`JointFit`): every traced ray contributes, so the fit is not limited
+by the polar cell bins.
 
-### 7.1 Radial fit of the common OPD
+### 7.1 Radial fit of the shared OPD
 
-The shared-cell common OPD is fitted to an even-order polynomial in the cell
-mean radius, normalised by the footprint max radius `rMax`:
+The joint fit's shared OPD is fitted to an even-order polynomial in the
+beam-frame radius, normalised by the footprint max radius `rMax`:
 
 ```
-basis rows:  [ρ², ρ⁴, ρ⁶, …]  with ρ = MeanR / rMax
+basis rows:  [ρ², ρ⁴, ρ⁶, …]  with ρ = r / rMax
 solveRidge:  weighted least squares with Tikhonov ridge regularisation
 ```
 
