@@ -636,14 +636,9 @@ func (o *Optimizer) updateBackFocusType() {
 		o.currentBackFocusType = fallback
 		return
 	}
-	// Find the dominant mode (largest weight).
-	bestMode := ""
-	bestWeight := -1.0
-	for name, w := range o.modeWeights {
-		if w > bestWeight {
-			bestWeight, bestMode = w, name
-		}
-	}
+	// Find the dominant mode (largest weight, deterministic tie-break).
+	bestMode := dominantMode(o.modeWeights)
+	bestWeight := o.modeWeights[bestMode]
 	threshold := o.backFocusSchedule.DominantThreshold
 	if threshold == 0 {
 		threshold = 0.5
@@ -878,11 +873,16 @@ func scheduleCurve(curve string, t float64) float64 {
 
 // dominantMode returns the mode name with the largest weight (ties keep the
 // first in map iteration order; stable enough for change counting).
+// dominantMode returns the mode with the largest weight. Ties are broken
+// deterministically by the lexicographically smallest mode name: iterating the
+// map and keeping the first strict maximum picked an arbitrary winner when two
+// weights were equal (or crossed), which made currentBackFocusType and
+// opt_results.active_mode non-reproducible across identical runs.
 func dominantMode(weights map[string]float64) string {
 	best := ""
 	bestW := math.Inf(-1)
 	for name, w := range weights {
-		if w > bestW {
+		if w > bestW || (w == bestW && name < best) {
 			best, bestW = name, w
 		}
 	}
