@@ -3626,6 +3626,31 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 			objTotal += cfg.weight * contrib
 		}
 	}
+
+	// Mirror EvaluateMerit's hull and glass-attraction contributions so the
+	// breakdown total reconciles with the merit the solver reports (the
+	// --verbose breakdown previously disagreed with the DLS merit whenever the
+	// hull or the attraction was active).
+	if o.hull != nil && !o.skipHull {
+		hullPenalty := 0.0
+		for _, pair := range o.hullPairs {
+			hullPenalty += o.hull.Penalty(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight)
+		}
+		out["hull"] = hullPenalty
+		objTotal += hullPenalty
+	}
+	if o.catalogField != nil && o.catalogField.CatalogFieldCount() > 0 && !o.skipAttraction && o.attractionWeight > 0 {
+		attraction := 0.0
+		for i, pair := range o.hullPairs {
+			w := o.attractionWeight
+			if i < len(o.attractionScales) {
+				w *= o.attractionScales[i]
+			}
+			attraction += glass.Penalty(o.catalogField, x[pair.ndIndex], x[pair.vdIndex], o.attractionSigmaND, o.attractionSigmaVD, 0, w, o.attractionKernel)
+		}
+		out["glass_attraction"] = attraction
+		objTotal += attraction
+	}
 	out["objective_total"] = objTotal
 	return out
 }
