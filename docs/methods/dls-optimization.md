@@ -77,21 +77,25 @@ its own slice, the result is **bit-identical for any worker count**.
 At each iteration the solver forms the normal equations
 
 ```
-(JᵀJ + μI) δ = −Jᵀ r
+(JᵀJ + μD) δ = −Jᵀ r
 ```
 
 and solves for the step `δ`. The linear system is solved via **Cholesky
 decomposition** first (`raymath.SolveCholesky`, O(n³/3)), which exploits the
-symmetry and positive-definiteness of `JᵀJ + μI`; on failure it falls back to
+symmetry and positive-definiteness of `JᵀJ + μD`; on failure it falls back to
 Gaussian elimination with partial pivoting (`raymath.SolveLinear`, O(n³)).
 
-The damping parameter `μ` (default 1e-2) is the "damped" part of DLS: large `μ`
-behaves like gradient descent (robust, slow), small `μ` like Gauss–Newton
-(fast, fragile).
+The damping is `μD`, where `D` is the always-active per-variable adaptive
+diagonal (`optimization.adaptive_damping`): it is derived from the Jacobian
+sensitivity, the variable class (curvature, thickness, asphere, …) and the
+accept/reject history, so each variable is damped according to how nonlinear
+and how sensitive it is. Large damping behaves like gradient descent (robust,
+slow), small damping like Gauss–Newton (fast, fragile). The legacy fixed `μI`
+damping has been removed.
 
 ### 3a. BFGS-augmented damping (`optimization.bfgs`)
 
-When `bfgs: true`, the damping term `μI` is replaced by `μ·B⁻¹` where `B` is
+When `bfgs: true`, the damping term `μD` is replaced by `μ·B⁻¹` where `B` is
 the **damped-BFGS inverse Hessian approximation**. This captures the curvature
 anisotropy of the merit landscape (e.g. tight valleys in some variables, flat
 in others), giving superlinear convergence in well-conditioned regions where

@@ -22,7 +22,7 @@ that does not run DLS.
 | `--glass-dir DIR` | AGF glass catalog directory |
 | `--exclude-param LIST` | comma-separated target param names to drop from the optimization variables (e.g. `conic,a4,a6`) |
 | `--central-diff` | use central-difference Jacobian (2nd-order accurate, 2× residual evaluations) |
-| `--bfgs` | enable BFGS-augmented damping (replaces μI with μ·B⁻¹) |
+| `--bfgs` | enable BFGS-augmented damping (replaces μD with μ·B⁻¹) |
 | `--auto-scale` | enable Jacobian-based variable scaling (equalises sensitivity across variables) |
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`
@@ -40,7 +40,7 @@ optimization:
   jacobian_workers: 8       # parallel Jacobian goroutines (default GOMAXPROCS)
   max_iter: 100
   central_diff: true        # central-difference Jacobian (2nd-order, 2× cost)
-  bfgs: true                # BFGS-augmented damping (μ·B⁻¹ instead of μI)
+  bfgs: true                # BFGS-augmented damping (μ·B⁻¹ instead of μD)
   adaptive_damping:         # per-variable adaptive damping (sensitivity-based)
     sensitivity_ema: 0.70
     classes:
@@ -520,7 +520,7 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   recommended when using `bfgs: true`** — forward-difference gradient errors
   make the BFGS inverse Hessian approximation unreliable.
 - `optimization.bfgs` enables BFGS-augmented damping: the normal equations
-  use `μ·B⁻¹` instead of `μI`, where `B` is the damped-BFGS inverse Hessian
+  use `μ·B⁻¹` instead of `μD`, where `B` is the damped-BFGS inverse Hessian
   approximation. Gives superlinear convergence in well-conditioned valleys.
   **Always pair with `central_diff: true`** — BFGS alone may stall because
   noisy forward-difference gradients corrupt the Hessian update.
