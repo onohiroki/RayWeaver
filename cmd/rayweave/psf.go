@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/psf"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -48,6 +49,7 @@ func runPSF(data []byte) {
 	yamlOut := fs.String("yaml", "", "write full structured PSF data to FILE (index-suffixed per result)")
 	csvOut := fs.String("csv", "", "write gnuplot x,y,intensity map to FILE (index-suffixed per result)")
 	bestFocus := fs.Bool("best-focus", false, "evaluate each field at its best-focus image plane (removes field-curvature defocus)")
+	focusPlane := fs.String("focus-plane", "", "focus plane: '' (as-is) | all (move the image plane to the single all-field best focus before evaluating)")
 	fs.String("converge-check", "", "label sampling convergence by re-evaluating each result at a higher ray count (default: on; true|false)")
 	convergeTol := fs.Float64("converge-tol", 0, "relative Strehl change threshold for convergence (default 0.10)")
 	fs.Parse(os.Args[2:])
@@ -68,6 +70,37 @@ func runPSF(data []byte) {
 	}
 	surface.Precompute(surfaces)
 	system := types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface}
+
+	// --focus-plane all: move the image plane to the single all-field
+	// best-focus position — the uniform-weighted wavefront best focus, the same
+	// solve the escape save applies — so the fixed-plane PSF/MTF is evaluated
+	// at the plane the deliverable carries. The applied shift is reported on
+	// stderr (stdout stays a clean pipeline document).
+	if strings.EqualFold(strings.TrimSpace(*focusPlane), "all") {
+		cfgIdx := 0
+		if *configFlag != "" {
+			i, err := resolveConfig(input.Configs, *configFlag)
+			if i < 0 {
+				errOut("Error: %s", err)
+				os.Exit(1)
+			}
+			cfgIdx = i
+		}
+		var cfgFields []types.FieldItem
+		var cfgWLs []types.WavelengthItem
+		if len(input.Configs) > 0 {
+			cfgFields = input.Configs[cfgIdx].Fields
+			cfgWLs = input.Configs[cfgIdx].Wavelengths
+		}
+		before := append([]types.Surface(nil), surfaces...)
+		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform"}
+		optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", input.Chief.StopSurface,
+			effectiveReferenceWavelength(input.Chief), cfgFields, cfgWLs, gc)
+		surface.Precompute(surfaces)
+		system.Surfaces = surfaces
+		fmt.Fprintf(os.Stderr, "focus-plane all: image plane shifted by %.6f mm to the all-field best focus\n",
+			maxThicknessDelta(before, surfaces))
+	}
 
 	fields := chiefFieldDefs(input)
 	selected := selectedFieldIndices(fields, input.PSF, *fieldsFlag)
@@ -324,6 +357,22 @@ func convergenceFlag(checked, converged bool) *bool {
 }
 
 // writeBackPSF stores the effective options into the output psf: section.
+// maxThicknessDelta returns the largest signed thickness change between two
+// surface lists (the back-focus solve changes exactly one surface's thickness).
+func maxThicknessDelta(before, after []types.Surface) float64 {
+	d := 0.0
+	for i := range before {
+		if i >= len(after) {
+			break
+		}
+		delta := after[i].Thickness - before[i].Thickness
+		if math.Abs(delta) > math.Abs(d) {
+			d = delta
+		}
+	}
+	return d
+}
+
 func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opts psf.Options, bestFocusSet bool) {
 	if input.PSF == nil {
 		input.PSF = &types.PSFConfig{}
