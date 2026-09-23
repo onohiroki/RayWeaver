@@ -167,12 +167,7 @@ func TestBackFocusFieldsOnAxisOnly(t *testing.T) {
 			{Angle: 0.0},
 		},
 	}
-	opt := &Optimizer{
-		backFocusSolve: &types.BackFocusSolveConfig{
-			WeightType: "on_axis_only",
-		},
-	}
-	fields := opt.backFocusFields(&cfg)
+	fields := backFocusFieldsFor(cfg.fieldDefs, "on_axis_only")
 	if len(fields) != 1 || fields[0].Angle != 0 {
 		t.Errorf("on_axis_only should select field with angle 0, got %v", fields)
 	}
@@ -192,12 +187,7 @@ func TestBackFocusFieldsUniform(t *testing.T) {
 			{Angle: 0.0},
 		},
 	}
-	opt := &Optimizer{
-		backFocusSolve: &types.BackFocusSolveConfig{
-			WeightType: "uniform",
-		},
-	}
-	fields := opt.backFocusFields(&cfg)
+	fields := backFocusFieldsFor(cfg.fieldDefs, "uniform")
 	if len(fields) != 2 {
 		t.Errorf("uniform should select all fields, got %d", len(fields))
 	}
@@ -217,13 +207,7 @@ func TestBackFocusFieldsCustomWeights(t *testing.T) {
 			{Angle: 0.0},
 		},
 	}
-	opt := &Optimizer{
-		backFocusSolve: &types.BackFocusSolveConfig{
-			WeightType:    "custom",
-			CustomWeights: []float64{0.3, 0.7},
-		},
-	}
-	fields := opt.backFocusFields(&cfg)
+	fields := backFocusFieldsFor(cfg.fieldDefs, "custom")
 	if len(fields) != 2 {
 		t.Errorf("custom should select all fields, got %d", len(fields))
 	}

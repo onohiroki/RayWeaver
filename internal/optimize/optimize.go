@@ -3030,14 +3030,6 @@ func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSo
 	return result.BestFocus.ShiftMM
 }
 
-// backFocusFields returns the fields used by the back-focus wavefront solve.
-func (o *Optimizer) backFocusFields(cfg *config) []types.FieldDef {
-	if o.backFocusSolve == nil {
-		return nil
-	}
-	return backFocusFieldsFor(cfg.fieldDefs, o.backFocusSolve.WeightType)
-}
-
 // backFocusFieldsFor selects the fields used by the back-focus wavefront solve
 // from the config's field definitions and the configured weight type.
 func backFocusFieldsFor(fieldDefs []types.FieldDef, weightType string) []types.FieldDef {

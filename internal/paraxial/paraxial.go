@@ -166,21 +166,6 @@ func stopSurfaceIndex(surfaces []types.Surface, explicitID int) int {
 	return -1
 }
 
-func computeStopZ(surfaces []types.Surface, stopID int) float64 {
-	if stopID <= 0 {
-		stopID = stopSurfaceID(surfaces, 0)
-	}
-	if stopID == 0 {
-		return 0
-	}
-	for _, s := range surfaces {
-		if s.ID == stopID {
-			return s.PhysicalZ
-		}
-	}
-	return 0
-}
-
 // totalTrack is the physical distance from the first surface vertex to the
 // image plane. The image lies at the last surface vertex advanced along its
 // local Z by the last thickness; after an odd number of reflections the local

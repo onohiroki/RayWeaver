@@ -225,7 +225,7 @@ func TestStopSurfaceExplicit(t *testing.T) {
 	if idx != 0 {
 		t.Errorf("explicit stop index = %d, want 0 (surface 1)", idx)
 	}
-	z := computeStopZ(surfaces, 1)
+	z := surface.ComputeStopZ(surfaces, 1)
 	if z != 0 {
 		t.Errorf("explicit stop Z = %v, want 0 (surface 1 physical Z)", z)
 	}
