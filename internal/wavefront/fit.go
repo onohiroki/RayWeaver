@@ -37,24 +37,6 @@ func FitFieldParaboloid(system types.System, gc *glass.Catalog, fd types.FieldDe
 	return an.Paraboloid, nil
 }
 
-// FitFieldSphereRMS computes the reference-sphere residual RMS (and PV) of the
-// OPD on the reference surface for one (field, wavelength), referencing the
-// OPD to the best-focus point exactly like the full wavefront analysis and
-// psf --best-focus. The reference sphere removes piston + tilt + defocus only,
-// so astigmatism is retained in the residual — this is the exact quantity psf
-// reports as rms_opd and the direct Strehl determinant, so minimizing it drives
-// the psf-reported Strehl directly. The grid, pupil and fallback machinery are
-// shared with FitFieldParaboloid.
-func FitFieldSphereRMS(system types.System, gc *glass.Catalog, fd types.FieldDef,
-	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64,
-	pupilModel *types.PupilModelConfig) (rms, pv float64, err error) {
-	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel)
-	if err != nil {
-		return 0, 0, err
-	}
-	return an.Statistics.RMS, an.Statistics.PV, nil
-}
-
 // analyzeField traces the wavefront for one (field, wavelength) on the
 // reference surface (frozen or dynamic pupil) and runs the full analysis,
 // returning the paraboloid, reference-sphere and Strehl statistics. It is the

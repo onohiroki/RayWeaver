@@ -3195,12 +3195,6 @@ func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surface
 	return pts
 }
 
-// traceFieldGrid traces the pupil grid for a merit term and returns the spot
-// points.
-func (o *Optimizer) traceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm, p appliedPupil) []dls.IPoint {
-	return o.gridForTerm(nil, gc, surfaces, cfg, term, p)
-}
-
 // precomputeGrids traces all grid merit terms for cfg in parallel, storing the
 // results in cache. This avoids redundant traces when multiple terms share the
 // same (field, wavelength) key, and the parallel trace overlaps the CPU-bound

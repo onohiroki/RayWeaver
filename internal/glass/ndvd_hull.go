@@ -40,7 +40,6 @@ type ConvexHull struct {
 	points     []ndvdPoint
 	hull       []ndvdPoint // 2-D convex hull in CCW order
 	halfSpaces []hullHalfSpace
-	baryCache  *baryCache
 	ndMin      float64
 	ndMax      float64
 	vdMin      float64
@@ -177,7 +176,6 @@ func buildConvexHull(p []ndvdPoint, refs []HullReference) *ConvexHull {
 	}
 
 	hull := convexHull2D(p)
-	cache := buildBaryCache(hull)
 	halfSpaces := buildHalfSpaces(hull)
 
 	ndMin, ndMax := p[0].nd, p[0].nd
@@ -200,7 +198,6 @@ func buildConvexHull(p []ndvdPoint, refs []HullReference) *ConvexHull {
 		points:     p,
 		hull:       hull,
 		halfSpaces: halfSpaces,
-		baryCache:  cache,
 		ndMin:      ndMin,
 		ndMax:      ndMax,
 		vdMin:      vdMin,
@@ -326,7 +323,6 @@ func newDefaultConvexHull() *ConvexHull {
 		points:     pts,
 		hull:       hull,
 		halfSpaces: halfSpaces,
-		baryCache:  buildBaryCache(hull),
 		ndMin:      ndMin,
 		ndMax:      ndMax,
 		vdMin:      vdMin,
@@ -351,44 +347,6 @@ type barycentricCoordinates struct {
 	coords     []float64 // barycentric weights relative to hull vertices
 	dist       float64   // signed distance; negative inside the hull
 	facetIndex int       // index of nearest facet
-}
-
-// baryCache caches barycentric coordinates for all hull points.
-type baryCache struct {
-	cache map[uint64]barycentricCoordinates
-}
-
-func makePointKey(nd, vd float64) uint64 {
-	n := math.Float64bits(nd)
-	v := math.Float64bits(vd)
-	return n | (v << 32)
-}
-
-func (c *baryCache) get(nd, vd float64) (barycentricCoordinates, bool) {
-	v, ok := c.cache[makePointKey(nd, vd)]
-	return v, ok
-}
-
-func (c *baryCache) put(nd, vd float64, bary barycentricCoordinates) {
-	c.cache[makePointKey(nd, vd)] = bary
-}
-
-func buildBaryCache(hull []ndvdPoint) *baryCache {
-	cache := &baryCache{cache: make(map[uint64]barycentricCoordinates)}
-	if len(hull) < 3 {
-		return cache
-	}
-	n := len(hull)
-	for i := 0; i < n; i++ {
-		p := hull[i]
-		coords, dist := barycentricCoords(hull, p.nd, p.vd)
-		cache.put(p.nd, p.vd, barycentricCoordinates{
-			coords:     coords,
-			dist:       dist,
-			facetIndex: 0,
-		})
-	}
-	return cache
 }
 
 func (h *ConvexHull) ReferencePoints() []HullPoint {
@@ -422,7 +380,9 @@ func (h *ConvexHull) Penalty(nd, vd, margin, weight float64) float64 {
 	}
 
 	if len(h.hull) < 3 {
-		return h.penaltyLegacy(nd, vd, weight)
+		// Degenerate hull (fewer than three facets): there is no interior
+		// region to constrain against, so no penalty applies.
+		return 0
 	}
 
 	scaledMargin := margin
@@ -505,31 +465,6 @@ func (h *ConvexHull) Residual(nd, vd, margin, weight float64) float64 {
 		return 0
 	}
 	return math.Sqrt(pen)
-}
-
-func (h *ConvexHull) penaltyLegacy(nd, vd, weight float64) float64 {
-	closest := math.MaxFloat64
-	if len(h.points) == 0 {
-		return 0
-	}
-	for _, p := range h.points {
-		d2 := (p.nd-nd)*(p.nd-nd) + (p.vd-vd)*(p.vd-vd)
-		if d2 < closest {
-			closest = d2
-		}
-	}
-	if weight <= 0 {
-		weight = 1.0
-	}
-	if closest < 1e-6 {
-		return 0
-	}
-	d := math.Sqrt(closest)
-	if d < 1e-3 {
-		return 0
-	}
-	// With legacy hull (no proper hull), return 0 for any reasonable point
-	return 0
 }
 
 func (h *ConvexHull) inBounds(nd, vd float64) bool {
@@ -624,11 +559,6 @@ func pointToSegmentDistSigned(ax, ay, bx, by, px, py float64) float64 {
 	ny := dx / dLen
 	d := (px-ax)*nx + (py-ay)*ny
 	return d
-}
-
-// Weight returns the configured weight of this hull.
-func (h *ConvexHull) Weight() float64 {
-	return h.weight
 }
 
 // Enabled reports whether this hull is active.
