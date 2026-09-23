@@ -942,7 +942,7 @@ func TestWavefrontTermFieldVignetting(t *testing.T) {
 	// buildMeritTermFromTypes (multi-config path) must also carry the field
 	// index from types.MeritTerm.Field.
 	ci := ConfigInput{ID: "c", Fields: fields}
-	mt := buildMeritTermFromTypes(types.MeritTerm{Kind: MeritWavefrontAstigmatism, Field: 0, Wavelength: 0.00058756}, ci, 0)
+	mt := buildMeritTermFromTypes(types.MeritTerm{Kind: MeritWavefrontAstigmatism, Field: 0, Wavelength: 0.00058756}, ci, nil)
 	if mt.fieldIndex != 0 {
 		t.Fatalf("buildMeritTermFromTypes fieldIndex = %d, want 0", mt.fieldIndex)
 	}

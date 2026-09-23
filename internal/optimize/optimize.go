@@ -1703,8 +1703,12 @@ func NewOptimizer(cfg Config) *Optimizer {
 		constraints: cfg.Constraints,
 		pupilModel:  cfg.PupilModel,
 	}
-	// Airy radius for spot-term normalization (0 = fall back to lambda).
-	airyMM := airyRadiusMM(cfg.Surfaces, cfg.StopSurface, cfg.PupilModel, cfg.GlassCatalog, types.DefaultWavelength)
+	// Airy radius for spot-term normalization, evaluated at each term's own
+	// wavelength (0 = fall back to lambda). A single default-wavelength value
+	// biased the 486/656 nm spot terms by ~11%.
+	airyFor := func(wavelength float64) float64 {
+		return airyRadiusMM(cfg.Surfaces, cfg.StopSurface, cfg.PupilModel, cfg.GlassCatalog, wavelength)
+	}
 	for _, t := range cfg.MeritTerms {
 		dx, dy := 0.0, 1.0
 		if len(t.FieldDir) >= 2 {
@@ -1725,7 +1729,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 			fraction:             t.Fraction,
 			frequency:            t.Frequency,
 			surfaceSet:           append([]int(nil), t.SurfaceSet...),
-			normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, airyMM, cfg.Normalization),
+			normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, airyFor(t.Wavelength), cfg.Normalization),
 		})
 	}
 	if len(cfg.MeritModes) > 0 {
@@ -1764,7 +1768,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 					fraction:             t.Fraction,
 					frequency:            t.Frequency,
 					surfaceSet:           append([]int(nil), t.SurfaceSet...),
-					normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, airyMM, cfg.Normalization),
+					normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, airyFor(t.Wavelength), cfg.Normalization),
 				})
 			}
 			c.meritModes[m.Name] = terms
@@ -1823,16 +1827,15 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			constraints: ci.Constraints,
 			pupilModel:  ci.PupilModel,
 		}
-		// Airy radius for spot-term normalization (0 = fall back to lambda).
-		normWL := effectiveReferenceWavelength(ci.ReferenceWavelength)
-		airyMM := airyRadiusMM(ci.Surfaces, ci.StopSurface, ci.PupilModel, gc, normWL)
+		// The Airy radius for spot-term normalization is resolved per term at
+		// the term's own wavelength inside buildMeritTermFromTypes.
 		if len(ci.MeritModes) > 0 {
 			c.meritModes = make(map[string][]meritTerm, len(ci.MeritModes))
 			c.meritModeNumRays = make(map[string]int, len(ci.MeritModes))
 			for _, m := range ci.MeritModes {
 				var terms []meritTerm
 				for _, t := range m.Terms {
-					terms = append(terms, buildMeritTermFromTypes(t, ci, airyMM))
+					terms = append(terms, buildMeritTermFromTypes(t, ci, gc))
 				}
 				c.meritModes[m.Name] = terms
 				if m.NumRays > 0 {
@@ -1841,7 +1844,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			}
 		}
 		for _, t := range ci.MeritTerms {
-			c.meritTerms = append(c.meritTerms, buildMeritTermFromTypes(t, ci, airyMM))
+			c.meritTerms = append(c.meritTerms, buildMeritTermFromTypes(t, ci, gc))
 		}
 		internal[i] = c
 	}
@@ -1947,7 +1950,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 	)
 }
 
-func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput, airyMM float64) meritTerm {
+func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput, gc *glass.Catalog) meritTerm {
 	mt := meritTerm{
 		kind:                 t.Kind,
 		fieldIndex:           -1,
@@ -1989,18 +1992,20 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput, airyMM float64) 
 			break
 		}
 	}
-	mt.normScale = resolveNormScale(t, ci, airyMM)
+	mt.normScale = resolveNormScale(t, ci, gc)
 	return mt
 }
 
 // resolveNormScale resolves a merit term's normalization denominator from the
-// multi-config input (see normScaleFor).
-func resolveNormScale(t types.MeritTerm, ci ConfigInput, airyMM float64) float64 {
+// multi-config input (see normScaleFor). The Airy radius is evaluated at the
+// term's own wavelength so the 486/656 nm spot terms normalize correctly.
+func resolveNormScale(t types.MeritTerm, ci ConfigInput, gc *glass.Catalog) float64 {
 	wl := t.Wavelength
 	if wl <= 0 {
 		wl = ci.ReferenceWavelength
 	}
-	return normScaleFor(t.Kind, t.Scale, wl, airyMM, ci.Normalization)
+	airy := airyRadiusMM(ci.Surfaces, ci.StopSurface, ci.PupilModel, gc, wl)
+	return normScaleFor(t.Kind, t.Scale, wl, airy, ci.Normalization)
 }
 
 // normScaleFor resolves a merit term's normalization denominator:
@@ -2091,6 +2096,9 @@ func isWaveScaledKind(kind string) bool {
 func airyRadiusMM(surfaces []types.Surface, stopSurface int, pupilModel *types.PupilModelConfig, gc *glass.Catalog, wavelength float64) float64 {
 	if wavelength <= 0 {
 		wavelength = types.DefaultWavelength
+	}
+	if len(surfaces) == 0 {
+		return 0
 	}
 	if gc == nil {
 		gc = glass.NewCatalog()
