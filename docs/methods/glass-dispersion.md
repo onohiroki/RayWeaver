@@ -122,8 +122,12 @@ When `optimization.glass_hull.enabled: true`, the hull constrains model-glass
 `(nd, vd)` points in two layers:
 
 - **Smooth interior penalty** (`ConvexHull.Penalty`): near-zero well inside the
-  hull, ramping smoothly to a hard `1e6` beyond the boundary (scaled by
-  `glass_hull.margin` and `glass_hull.weight`). This steers the DLS interior.
+  hull, ramping smoothly across the boundary band (scaled by
+  `glass_hull.margin`), then — outside the band — a linear ramp with a non-zero
+  gradient up to the bounded hard `glass_hull.weight`-scaled cap, saturating at
+  `1e6` far outside. The gradient outside the band keeps an overshooting point
+  pulled back instead of settling on a flat plateau. This steers the DLS
+  interior.
 - **Core-constraint check** (`ConvexHull.Contains` + `Optimizer.GlassHullViolations`):
   an O(n_vertices) barycentric point-in-hull test. During `escape`, a converged
   point whose nd/vd lies outside the hull is classified as an
