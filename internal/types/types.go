@@ -827,8 +827,6 @@ type OptimizationConfig struct {
 	Tol                float64                   `yaml:"tol,omitempty"`
 	Epsilon            float64                   `yaml:"epsilon,omitempty"`
 	NumRays            int                       `yaml:"num_rays,omitempty"`
-	NumRings           int                       `yaml:"num_rings,omitempty"`
-	NumSpokes          int                       `yaml:"num_spokes,omitempty"`
 	MuConMax           float64                   `yaml:"mu_con_max,omitempty"`
 	ApertureMargin     float64                   `yaml:"aperture_margin,omitempty"`
 	ApertureMarginMM   float64                   `yaml:"aperture_margin_mm,omitempty"`
@@ -917,41 +915,17 @@ type DampingVarConfig struct {
 	Max *float64 `yaml:"max,omitempty"`
 }
 
-// PupilModelSharing configures whether the virtual entrance pupil is shared
-// across configs or each config has its own.
-type PupilModelSharing struct {
-	PerConfiguration bool `yaml:"per_configuration"` // true = per-config pupil
-	PerField         bool `yaml:"per_field"`         // false = one pupil for all fields (future)
-}
-
-// PupilModelSolve marks which pupil-model parameters are optimization variables.
-type PupilModelSolve struct {
-	AxialPosition bool `yaml:"axial_position"` // true = optimize axial position
-	Diameter      bool `yaml:"diameter"`       // true = optimize diameter
-}
-
-// PupilModelConstraints bounds the pupil-model optimization variables.
-type PupilModelConstraints struct {
-	AxialPositionMin float64 `yaml:"axial_position_min"`
-	AxialPositionMax float64 `yaml:"axial_position_max"`
-	DiameterMin      float64 `yaml:"diameter_min"`
-	DiameterMax      float64 `yaml:"diameter_max"`
-}
-
 // PupilModelConfig defines the virtual entrance pupil: a virtual pupil plane
 // at Z = axial_position (from surface 0 vertex) with the given diameter, used
 // as the primary beam-specification origin. The chief ray of every field
 // passes through its center (0,0). This replaces the dynamic-pupil iteration
 // and the physical stop for initial exploration / escape optimization.
 type PupilModelConfig struct {
-	Mode             string                `yaml:"mode"`              // "virtual_entrance_pupil"
-	ReferenceSurface int                   `yaml:"reference_surface"` // chief ray reference surface
-	AxialPosition    float64               `yaml:"axial_position"`    // Z from surface 0 vertex (mm, negative allowed)
-	Diameter         float64               `yaml:"diameter"`          // entrance pupil diameter (mm)
-	PlaneOrientation string                `yaml:"plane_orientation"` // "chief_ray_normal" (default) | "optical_axis_normal"
-	Sharing          PupilModelSharing     `yaml:"sharing,omitempty"`
-	Solve            PupilModelSolve       `yaml:"solve,omitempty"`
-	Constraints      PupilModelConstraints `yaml:"constraints,omitempty"`
+	Mode             string  `yaml:"mode"`              // "virtual_entrance_pupil"
+	ReferenceSurface int     `yaml:"reference_surface"` // chief ray reference surface
+	AxialPosition    float64 `yaml:"axial_position"`    // Z from surface 0 vertex (mm, negative allowed)
+	Diameter         float64 `yaml:"diameter"`          // entrance pupil diameter (mm)
+	PlaneOrientation string  `yaml:"plane_orientation"` // "chief_ray_normal" (default) | "optical_axis_normal"
 }
 
 // PowerSolveConfig configures the power-preserving hard solve: the curvatures
@@ -1357,9 +1331,6 @@ type AsphereCandidateConfig struct {
 	IncludeConic            *bool               `yaml:"include_conic,omitempty"`
 	PreserveVertexCurvature *bool               `yaml:"preserve_vertex_curvature,omitempty"`
 	SagScale                float64             `yaml:"sag_scale,omitempty"`
-	MaxSag                  float64             `yaml:"max_sag,omitempty"`
-	MaxSlopeDeg             float64             `yaml:"max_slope_deg,omitempty"`
-	MaxCurvatureVariation   float64             `yaml:"max_curvature_variation,omitempty"`
 	CellRings               int                 `yaml:"cell_rings,omitempty"`
 	CellAngles              int                 `yaml:"cell_angles,omitempty"`
 	TBins                   int                 `yaml:"t_bins,omitempty"`
@@ -1403,12 +1374,6 @@ type AsphereCandidateConfig struct {
 	// values are "tangential" and "sagittal" (CLI --focus-fans, YAML
 	// focus_fans). Empty means both.
 	FocusFans []string `yaml:"focus_fans,omitempty"`
-	// RankingProfile selects the ranking emphasis for --apply: "practical"
-	// (default), "wavefront", "field", or "custom". Focus metrics are
-	// diagnostic-only in the first version and do not change the default
-	// practical_score; the profile only switches which column drives
-	// --apply's selection when focus diagnostics are on.
-	RankingProfile string `yaml:"ranking_profile,omitempty"`
 }
 
 // AsphereScoreWeights are the weights of the composite surface score
@@ -1946,8 +1911,6 @@ type PSFConfig struct {
 	GridSize         int       `yaml:"grid_size,omitempty"`
 	HalfWidth        float64   `yaml:"half_width,omitempty"`
 	NumRays          int       `yaml:"num_rays,omitempty"`
-	NumRings         int       `yaml:"num_rings,omitempty"`
-	NumSpokes        int       `yaml:"num_spokes,omitempty"`
 	Fields           []int     `yaml:"fields,omitempty"`
 	Wavelengths      []float64 `yaml:"wavelengths,omitempty"`
 	Polarization     string    `yaml:"polarization,omitempty"`
@@ -1988,10 +1951,6 @@ type WavefrontConfig struct {
 	ReferenceSurface int `yaml:"reference_surface,omitempty"`
 	// NumRays is the entrance-pupil grid ray count per field (default 400).
 	NumRays int `yaml:"num_rays,omitempty"`
-	// NumRings overrides the polar-grid ring count (0 = derive from NumRays).
-	NumRings int `yaml:"num_rings,omitempty"`
-	// NumSpokes overrides the polar-grid spoke count (0 = derive from NumRays).
-	NumSpokes int `yaml:"num_spokes,omitempty"`
 	// Fields selects which chief field indices to analyse (default: all).
 	Fields []int `yaml:"fields,omitempty"`
 	// Wavelengths in mm (default: chief wavelengths, else 587.56 nm).

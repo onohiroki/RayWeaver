@@ -22,9 +22,6 @@ type Config struct {
 	IncludeConic            bool
 	PreserveVertexCurvature bool
 	SagScale                float64
-	MaxSag                  float64
-	MaxSlopeDeg             float64
-	MaxCurvatureVariation   float64
 	CellRings               int
 	CellAngles              int
 	TBins                   int
@@ -52,9 +49,6 @@ func DefaultConfig() Config {
 		IncludeConic:            true,
 		PreserveVertexCurvature: true,
 		SagScale:                0.2,
-		MaxSag:                  0.05,
-		MaxSlopeDeg:             25.0,
-		MaxCurvatureVariation:   2.0,
 		CellRings:               8,
 		CellAngles:              16,
 		TBins:                   8,
@@ -99,15 +93,6 @@ func ConfigFromYAML(c *types.AsphereCandidateConfig) Config {
 	}
 	if c.SagScale != 0 {
 		cfg.SagScale = c.SagScale
-	}
-	if c.MaxSag != 0 {
-		cfg.MaxSag = c.MaxSag
-	}
-	if c.MaxSlopeDeg != 0 {
-		cfg.MaxSlopeDeg = c.MaxSlopeDeg
-	}
-	if c.MaxCurvatureVariation != 0 {
-		cfg.MaxCurvatureVariation = c.MaxCurvatureVariation
 	}
 	if c.CellRings > 0 {
 		cfg.CellRings = c.CellRings

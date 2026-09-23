@@ -354,10 +354,10 @@ the data behind the beam-frame chart in `samples/asphere-demo.bash`.
 - It does **not** finalise a design — the fitted coefficients are an estimate
   used to seed a subsequent `optimize`/DLS run (the demo verifies them, then
   `--apply` embeds the DLS-solved values).
-- The `max_sag`, `max_slope_deg` and `max_curvature_variation` config fields are
-  accepted but currently unused by the scoring/fit; slope and curvature limits
-  are effectively enforced indirectly (bounded A4/conic, ridge regularisation,
-  sag-scale).
+- The former `max_sag`, `max_slope_deg` and `max_curvature_variation` config
+  fields were accepted but never used by the scoring/fit and have been removed;
+  slope and curvature limits are effectively enforced indirectly (bounded
+  A4/conic, ridge regularisation, sag-scale).
 - Beam-aperture clipping by fixed surfaces is not part of the footprint
   measurement; the grid is sized by the pupil and checked only for successful
   traces.

@@ -34,7 +34,6 @@ func runAsphere(data []byte) {
 	diagnostics := fs.String("diagnostics", "", "comma-separated diagnostics to emit: opd (OPD map, existing), focus (T/S focus channel). Empty = no extra data (backward compatible)")
 	focusSamples := fs.Int("focus-samples", 0, "rays per T/S fan for focus channel (default 17)")
 	focusFans := fs.String("focus-fans", "", "comma-separated: tangential,sagittal (default both)")
-	rankingProfile := fs.String("ranking", "", "ranking profile for --apply selection: practical (default), wavefront, field")
 	fs.Parse(os.Args[2:])
 
 	input := parseYAML[types.Input](data)
@@ -86,9 +85,6 @@ func runAsphere(data []byte) {
 	}
 	if *focusFans != "" {
 		input.Asphere.FocusFans = parseCommaList(*focusFans)
-	}
-	if *rankingProfile != "" {
-		input.Asphere.RankingProfile = *rankingProfile
 	}
 
 	// Principle 3: echo the flag-won analysis values back into the output's
@@ -171,7 +167,7 @@ func runAsphere(data []byte) {
 func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.FlagSet) {
 	if !anyFlagSet(fs, "rings", "angles", "t-bins", "pupil-samples", "sensitivity-samples",
 		"top-k", "sag-scale", "calibrate-scale", "scale-probes",
-		"diagnostics", "focus-samples", "focus-fans", "ranking") {
+		"diagnostics", "focus-samples", "focus-fans") {
 		return
 	}
 	if input.Asphere == nil {
@@ -215,9 +211,6 @@ func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.Fla
 	}
 	if flagWasSet(fs, "focus-fans") {
 		// Already applied to input.Asphere.FocusFans by the caller.
-	}
-	if flagWasSet(fs, "ranking") {
-		// Already applied to input.Asphere.RankingProfile by the caller.
 	}
 }
 
