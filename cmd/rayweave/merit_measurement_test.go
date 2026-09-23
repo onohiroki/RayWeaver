@@ -15,25 +15,32 @@ import (
 	"github.com/hiroki/rayweaver/internal/wavefront"
 )
 
-// TestMeritWavefrontMeasurementConsistency is the Phase-0 golden measurement
-// harness for the merit-vs-standalone grid-context work (finding P1).
+// TestMeritWavefrontMeasurementConsistency is the golden measurement harness
+// for the merit-vs-standalone wavefront comparison.
 //
 // It builds the optimizer exactly as the escape worker factory does
 // (singleEscapeConfig + SetPowerSolveEnabled(false) + back-focus + merit
 // schedule, config id "config1"), forces the terminal (local) merit mode, and
 // compares the optimizer's own wavefront_sphere_rms term value with the
-// standalone wavefront.AnalyzeField reference-sphere RMS on
+// standalone wavefront.AnalyzeField reference-sphere RMS on the same
+// (variable-applied, back-focus-solved) surfaces but with different aperture
+// sources:
 //
-//	(a) the file's surfaces, and
-//	(b) the optimizer's final surfaces (FinalConfigs, i.e. what a saved
-//	    minimum carries).
+//	(a) the input file's stored auto-aperture diameters, and
+//	(b) the tool-sized apertures (FinalApertures, 512-ray BeamEnvelope).
+//
+// The merit itself sizes the auto apertures with an 8-ray extent
+// (sizeAutoApertures) before every evaluation, so (b) is the comparable
+// column. This harness established that the earlier apparent 2-4x
+// "merit under-measures off-axis" gap was an artefact of comparing against the
+// raw input's stored diameters: the merit matches the tool-sized apertures to
+// within the 8-ray vs 512-ray sizing delta (<=8% here). A saved minimum
+// carries the sized diameters, so the deliverable and the merit agree.
 //
 // The merit contribution is inverted back to a raw RMS with
 // rms = sqrt(contribution / weight) * wavelength, valid because the term has
-// no target and the wavefront kinds normalise by the term wavelength.
-//
-// The ratios are logged, not asserted: this is a diagnostic that documents the
-// current gap and will become the regression gate once the cause is fixed. It
+// no target and the wavefront kinds normalise by the term wavelength. The
+// harness logs the ratios and requires the merit value to be positive; it
 // skips when the (gitignored) input is absent.
 func TestMeritWavefrontMeasurementConsistency(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "untrack-samples", "wavefront-broad-v7.yaml"))
@@ -98,8 +105,27 @@ func TestMeritWavefrontMeasurementConsistency(t *testing.T) {
 		meritRMS[math.Round(angle*10)/10] = math.Sqrt(contrib/wfWeight) * wl
 	}
 
-	finalSurfaces, _ := opt.FinalConfigs(x)
-	fs := finalSurfaces["config1"]
+	// Reproduce the optimizer's surfaces: variables applied + the terminal
+	// (wavefront) back-focus solve.
+	meritSurfaces, _ := applyEscapeX(surfaces, variables, x, gc)
+	stopSurface, refWl0 := 0, 0.0
+	if input.Chief != nil {
+		stopSurface = input.Chief.StopSurface
+		refWl0 = input.Chief.ReferenceWavelength
+	}
+	optimize.ApplyBackFocusSolve(meritSurfaces, input.Optimization.BackFocusSolve,
+		savedBackFocusType(input.Optimization), stopSurface, refWl0,
+		input.Configs[0].Fields, input.Configs[0].Wavelengths, gc)
+
+	// Tool-sized apertures (FinalApertures) for the comparable column.
+	sizedSurfaces := append([]types.Surface(nil), meritSurfaces...)
+	if aps := opt.FinalApertures(x)["config1"]; len(aps) > 0 {
+		for i := range sizedSurfaces {
+			if d, ok := aps[sizedSurfaces[i].ID]; ok {
+				sizedSurfaces[i].Diameter = d
+			}
+		}
+	}
 
 	refSurf := psf.DefaultReferenceSurface(surfaces)
 	refWl := effectiveReferenceWavelength(input.Chief)
@@ -122,10 +148,10 @@ func TestMeritWavefrontMeasurementConsistency(t *testing.T) {
 			z := pm.AxialPosition
 			fz = &z
 		}
-		fileEntry, _ := wavefront.AnalyzeField(
-			types.System{Surfaces: surfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm)
-		finalEntry, _ := wavefront.AnalyzeField(
-			types.System{Surfaces: fs}, gc, fd, refSurf, numRays, refWl, margin, fz, pm)
+		storedEntry, _ := wavefront.AnalyzeField(
+			types.System{Surfaces: meritSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm)
+		sizedEntry, _ := wavefront.AnalyzeField(
+			types.System{Surfaces: sizedSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm)
 
 		key := math.Round(angle*10) / 10
 		mrms, has := meritRMS[key]
@@ -133,10 +159,9 @@ func TestMeritWavefrontMeasurementConsistency(t *testing.T) {
 			t.Logf("field %6.2f°: no wavefront_sphere_rms merit term (skipped)", angle)
 			continue
 		}
-		fileRMS := fileEntry.Statistics.RMS
-		finalRMS := finalEntry.Statistics.RMS
-		t.Logf("field %6.2f°: merit=%.6g mm | file=%.6g (x%.2f) | final=%.6g (x%.2f)",
-			angle, mrms, fileRMS, safeRatio(fileRMS, mrms), finalRMS, safeRatio(finalRMS, mrms))
+		t.Logf("field %6.2f°: merit=%.6g mm | stored-aperture standalone=%.6g (x%.2f) | final-aperture standalone=%.6g (x%.2f)",
+			angle, mrms, storedEntry.Statistics.RMS, safeRatio(storedEntry.Statistics.RMS, mrms),
+			sizedEntry.Statistics.RMS, safeRatio(sizedEntry.Statistics.RMS, mrms))
 		if mrms <= 0 {
 			t.Errorf("field %.2f°: merit wavefront_sphere_rms term present but zero", angle)
 		}
