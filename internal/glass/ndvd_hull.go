@@ -67,6 +67,17 @@ type hullHalfSpace struct {
 // begins, expressed as a fraction of the hull radius from each facet.
 const hullBoundaryOffset = 0.05
 
+// hullHardPenalty is the bounded penalty far outside the hull, and
+// hullOutsideSpan is the width of the linear ramp outside the band, as a
+// fraction of the hull radius (hullOutsideSpan × radius). The ramp replaced a
+// flat hullHardPenalty outside the band, whose zero gradient let a point settle
+// just outside with no restoring force (the escape then rejected it as
+// glass_hull_violation).
+const (
+	hullHardPenalty = 1e6
+	hullOutsideSpan = 1.0
+)
+
 // NewConvexHull builds a hull from a glass catalogue restricted to the
 // specified glass kinds. k is the index into DefaultGlassKindOrder (1-based)
 // that selects the kinds; 0 means all kinds. Negative kinds select by
@@ -407,7 +418,7 @@ func (h *ConvexHull) Penalty(nd, vd, margin, weight float64) float64 {
 		return 0
 	}
 	if !h.inBounds(nd, vd) {
-		return 1e6
+		return hullHardPenalty
 	}
 
 	if len(h.hull) < 3 {
@@ -446,11 +457,25 @@ func (h *ConvexHull) Penalty(nd, vd, margin, weight float64) float64 {
 	}
 
 	offset := radius * hullBoundaryOffset * scaledMargin
+	if offset <= 1e-12 {
+		offset = 1e-12
+	}
 	if d < -offset {
-		return 1e6
+		// Outside the smooth band the penalty must keep a slope. The legacy
+		// flat 1e6 had zero gradient, so a point that overshot the band settled
+		// just outside with no restoring force and the escape later rejected it
+		// as glass_hull_violation. Ramp linearly from weight at the band edge to
+		// hullHardPenalty over hullOutsideSpan × radius, then saturate (bounded,
+		// matching the legacy hardness far outside).
+		over := -d - offset
+		p := weight + (hullHardPenalty-weight)*over/(hullOutsideSpan*radius)
+		if p > hullHardPenalty {
+			p = hullHardPenalty
+		}
+		return p
 	}
 
-	// Smooth penalty: 0 well inside, 1 at boundary, hard 1e6 outside.
+	// Smooth penalty: 0 well inside, weight at the boundary, ramping outside.
 	t := 0.0
 	if offset > 1e-12 && d < offset {
 		t = 1.0 - (d+offset)/(2*offset)
