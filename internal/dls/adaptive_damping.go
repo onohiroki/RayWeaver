@@ -11,27 +11,27 @@ import (
 // sensitivity, nonlinear), thickness gets weaker damping (low sensitivity,
 // often stalls with uniform damping).
 var defaultClassConfig = map[string]types.DampingClassConfig{
-	"curvature": {sensitivityPower(1.20), multiplierPtr(1.50)},
-	"power":     {sensitivityPower(1.20), multiplierPtr(1.50)},
-	"thickness": {sensitivityPower(0.75), multiplierPtr(0.50)},
-	"diameter":  {sensitivityPower(1.00), multiplierPtr(1.00)},
-	"nd":        {sensitivityPower(1.00), multiplierPtr(1.00)},
-	"vd":        {sensitivityPower(1.00), multiplierPtr(1.00)},
-	"conic":     {sensitivityPower(1.20), multiplierPtr(2.00)},
-	"asphere":   {sensitivityPower(1.30), multiplierPtr(3.00)},
-	"shared":    {sensitivityPower(1.00), multiplierPtr(1.00)},
+	"curvature": {SensitivityPower: sensitivityPower(1.20), Multiplier: multiplierPtr(1.50)},
+	"power":     {SensitivityPower: sensitivityPower(1.20), Multiplier: multiplierPtr(1.50)},
+	"thickness": {SensitivityPower: sensitivityPower(0.75), Multiplier: multiplierPtr(0.50)},
+	"diameter":  {SensitivityPower: sensitivityPower(1.00), Multiplier: multiplierPtr(1.00)},
+	"nd":        {SensitivityPower: sensitivityPower(1.00), Multiplier: multiplierPtr(1.00)},
+	"vd":        {SensitivityPower: sensitivityPower(1.00), Multiplier: multiplierPtr(1.00)},
+	"conic":     {SensitivityPower: sensitivityPower(1.20), Multiplier: multiplierPtr(2.00)},
+	"asphere":   {SensitivityPower: sensitivityPower(1.30), Multiplier: multiplierPtr(3.00)},
+	"shared":    {SensitivityPower: sensitivityPower(1.00), Multiplier: multiplierPtr(1.00)},
 }
 
 func sensitivityPower(v float64) *float64 { return &v }
-func multiplierPtr(v float64) *float64     { return &v }
+func multiplierPtr(v float64) *float64    { return &v }
 
 // AdaptiveDampingState holds the per-iteration state for adaptive damping.
 type AdaptiveDampingState struct {
-	emaH         []float64 // EMA-smoothed Hessian diagonal per variable
-	localFactor  []float64 // history-based local damping multiplier per variable
-	diagonal     []float64 // last built diagonal (for logging)
-	lastRatio    []float64 // last sensitivity ratio per variable (for logging)
-	lastRef      float64   // last geometric mean reference (for logging)
+	emaH        []float64 // EMA-smoothed Hessian diagonal per variable
+	localFactor []float64 // history-based local damping multiplier per variable
+	diagonal    []float64 // last built diagonal (for logging)
+	lastRatio   []float64 // last sensitivity ratio per variable (for logging)
+	lastRef     float64   // last geometric mean reference (for logging)
 }
 
 // NewAdaptiveDampingState allocates state for nVars variables.
