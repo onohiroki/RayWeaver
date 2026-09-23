@@ -1069,13 +1069,6 @@ type PSOConfig struct {
 	ConstraintPenalty float64 `yaml:"constraint_penalty,omitempty"`
 }
 
-type MeritBeforeAfter struct {
-	Before      float64 `yaml:"before"`
-	After       float64 `yaml:"after"`
-	Improvement float64 `yaml:"improvement,omitempty"`
-	Ratio       float64 `yaml:"ratio,omitempty"`
-}
-
 // GlassAttractionPairResult reports the final glass-attraction state for one
 // nd/vd glass variable pair.
 type GlassAttractionPairResult struct {
