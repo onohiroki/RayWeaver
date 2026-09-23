@@ -273,8 +273,8 @@ func TestOptimizerDegeneratePenalty(t *testing.T) {
 	ccfg := opt.primaryConfig()
 
 	// Default penalty values.
-	if opt.spotDegenerate != 0.1 || opt.opdDegenerate != 0.01 || opt.wavefrontDegenerate != 0.001 {
-		t.Fatalf("default degenerate penalties = %v/%v/%v, want 0.1/0.01/0.001",
+	if opt.spotDegenerate != 0.1 || opt.opdDegenerate != 0.01 || opt.wavefrontDegenerate != 0.01 {
+		t.Fatalf("default degenerate penalties = %v/%v/%v, want 0.1/0.01/0.01",
 			opt.spotDegenerate, opt.opdDegenerate, opt.wavefrontDegenerate)
 	}
 
@@ -322,8 +322,8 @@ func TestOptimizerDegeneratePenalty(t *testing.T) {
 	// adaptive pupil probe) must return the bounded wavefront penalty,
 	// never the 1e6 sentinel.
 	wf := opt.evaluateWavefrontTerm(ccfg, &meritTerm{kind: MeritWavefrontAstigmatism, fieldAngle: 89.9, wavelength: 0.00058756}, ccfg.surfaces, gc, nil, appliedPupil{})
-	if wf != 0.001 {
-		t.Fatalf("degenerate wavefront = %v, want bounded penalty 0.001", wf)
+	if wf != 0.01 {
+		t.Fatalf("degenerate wavefront = %v, want bounded penalty 0.01", wf)
 	}
 	if wf >= 1e6 {
 		t.Fatalf("degenerate wavefront leaked the 1e6 sentinel: %v", wf)
@@ -331,8 +331,11 @@ func TestOptimizerDegeneratePenalty(t *testing.T) {
 	cfgW := cfg
 	cfgW.MeritTerms = []MeritTerm{{Kind: MeritWavefrontAstigmatism, FieldAngle: 89.0, FieldWeight: 1.0, Wavelength: 0.00058756, WavWeight: 1.0, Weight: 14000.0}}
 	optW := NewOptimizer(cfgW)
-	if m := optW.EvaluateMerit([]float64{}); m >= 1.0 {
-		t.Fatalf("merit with a degenerate wavefront term = %v, want bounded (< 1)", m)
+	// With the 0.01 mm wavefront default and weight 14000 the degenerate
+	// contribution is 14000·0.01² = 1.4 — bounded, far below the legacy 1e6
+	// sentinel's 14000·1e12.
+	if m := optW.EvaluateMerit([]float64{}); m <= 0 || m >= 10.0 {
+		t.Fatalf("merit with a degenerate wavefront term = %v, want bounded (0, 10)", m)
 	}
 }
 
@@ -935,8 +938,8 @@ func TestWavefrontTermFieldVignetting(t *testing.T) {
 	optV := NewOptimizer(cfgV)
 	ccfgV := optV.primaryConfig()
 	penalty := optV.evaluateWavefrontTerm(ccfgV, &ccfgV.meritTerms[0], surfs, gc, nil, appliedPupil{})
-	if penalty != 0.001 {
-		t.Fatalf("wavefront term with full-clip vignetting = %v, want the degenerate penalty 0.001", penalty)
+	if penalty != 0.01 {
+		t.Fatalf("wavefront term with full-clip vignetting = %v, want the degenerate penalty 0.01", penalty)
 	}
 
 	// buildMeritTermFromTypes (multi-config path) must also carry the field

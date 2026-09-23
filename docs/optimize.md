@@ -247,7 +247,8 @@ quantity the Strehl is computed from, so a `wavefront_sphere_rms` term (with
 kinds drive the low-order coefficients separately. The pupil grid
 follows `optimization.num_rays` and `optimization.aperture_margin`, and — like
 every grid term — is centred on the config's per-iteration frozen pupil, so the
-DLS Jacobian stays consistent. A degenerate fit returns merit `1e6`.
+DLS Jacobian stays consistent. A degenerate fit returns the bounded
+`optimization.degenerate` penalty (see below).
 
 The off-axis spot kinds (`spot_rms_t`/`_s`/`_worst`/`spot_rms_weighted`/
 `spot_ee_radius`) address the blind spot of the rotationally symmetric,
@@ -556,15 +557,20 @@ optimization:
   degenerate:
     spot_value: 0.1          # mm; spot_rms / spot_rms_t/s/worst / weighted / ee_radius
     opd_value: 1.0e-2        # mm; opd_rms
-    wavefront_value: 1.0e-3  # mm; wavefront_* paraboloid kinds
+    wavefront_value: 1.0e-2  # mm; wavefront_* paraboloid kinds
 ```
 
-All values default when unset (0.1 / 0.01 / 0.001 mm). Non-positive values keep
-the built-in default. The contribution is `weight·value²` (e.g. a
-`wavefront_astigmatism` term at weight 14000 contributes at most
-`14000·(1e-3)² = 1.4e-2`), so a degenerate off-axis field pushes the solver
-towards a region where the term can be evaluated without exploding the merit.
-Successful terms are unaffected, so existing merit values are unchanged.
+All values default when unset (0.1 / 0.01 / 0.01 mm). Non-positive values keep
+the built-in default. The fallbacks are sized to exceed a realistic residual —
+the campaign's starting design reaches ~0.007 mm off-axis RMS (12 waves at
+587.6 nm) — so a failed evaluation is never cheaper than a real measurement; a
+too-small fallback lets the solver prefer killing the fit (the wavefront value
+was 0.001 mm, below the realistic residual). The contribution is
+`weight·value²` (e.g. a `wavefront_astigmatism` term at weight 14000
+contributes at most `14000·(1e-2)² = 1.4`), staying bounded so a degenerate
+off-axis field pushes the solver towards a region where the term can be
+evaluated without exploding the merit. Successful terms are unaffected, so
+their merit values are unchanged.
 
 ### Glass attraction (`optimization.glass_attraction`)
 

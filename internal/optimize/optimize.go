@@ -1534,7 +1534,10 @@ func (o *Optimizer) SetApertureMarginMM(mm float64) {
 // SetDegenerate overrides the bounded penalties for merit terms that cannot
 // be evaluated (pupil grid with no valid rays, or a failed wavefront fit).
 // Non-positive values keep the built-in defaults (spot 0.1, opd 0.01,
-// wavefront 0.001 mm). See the DegenerateConfig YAML section.
+// wavefront 0.01 mm). The fallbacks must exceed a realistic residual so a
+// failed evaluation is never cheaper than a real measurement, while staying
+// bounded so the DLS line search is not stalled. See the DegenerateConfig
+// YAML section.
 func (o *Optimizer) SetDegenerate(spot, opd, wavefront float64) {
 	if spot > 0 {
 		o.spotDegenerate = spot
@@ -2248,7 +2251,7 @@ func newOptimizer(configs []config, variables []Variable, linkedVars []LinkedVar
 		hullPairs:           hullPairs,
 		spotDegenerate:      0.1,
 		opdDegenerate:       0.01,
-		wavefrontDegenerate: 0.001,
+		wavefrontDegenerate: 0.01,
 		linkedVariables:     linkedVars,
 		varNameIndex:        varNameIndex,
 	}

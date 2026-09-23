@@ -131,7 +131,8 @@ The entrance-pupil grid follows `optimization.num_rays` and
 config's per-iteration **frozen** pupil Z, so the DLS base point and its
 Jacobian perturbations share one pupil (the wavefront analysis itself settles
 the dynamic pupil once per iteration). A degenerate fit (no grid, fewer than
-six valid rays) returns the 1e6 penalty.
+six valid rays) returns the bounded wavefront degenerate penalty
+(`optimization.degenerate.wavefront_value`, default 0.01 mm).
 
 **Reference-surface fallback.** The wavefront fit needs a sampling surface
 strictly before the image plane. A `chief.reference_surface` set to the image
@@ -144,7 +145,8 @@ vignetting cut, so a strongly off-axis field whose beam clips a fixed aperture
 can produce a singular paraboloid fit (e.g. the 24° field of the US2645157
 triplet at an un-resolved `pupilZ`). On a failed fit the term retries once with
 the dynamic pupil (chief resolves the entrance pupil), matching the standalone
-`wavefront` command's grid, before giving the 1e6 penalty.
+`wavefront` command's grid, before giving the bounded wavefront degenerate
+penalty.
 
 **Weight design (escape-demo).** The term weight must be balanced against the
 measured residual, not the idealised value: with `wavefront_rms_residual` the
@@ -324,7 +326,9 @@ kinds: `equality`, `inequality_upper`, `inequality_lower`, `band`, `fuzzy`.
 ## 4. Notes
 
 - An evaluation that degenerates (all rays missing, division by zero) returns a
-  large merit (1e6) so the solver is pushed away rather than misled.
+  bounded penalty (`optimization.degenerate`, defaults 0.1 / 0.01 / 0.01 mm)
+  large enough to exceed a realistic residual, so the solver is pushed away
+  rather than misled — and a failed fit is never cheaper than a real one.
 - `distortion`/`colour`/`seidel` terms are evaluated from chief-ray / paraxial
   traces rather than a full grid, so they are cheap.
 - The `breakdown` event in `optimize --log`/`--verbose` JSONL output lists the
