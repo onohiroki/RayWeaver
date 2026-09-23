@@ -803,7 +803,7 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 			seen := make(map[float64]bool)
 			for ti := range cfg.meritTerms {
 				term := &cfg.meritTerms[ti]
-				if !isGridKind(term.kind) {
+				if !isGridTraceKind(term.kind) {
 					continue
 				}
 				a := o.termFieldAngle(cfg, term, surfaces, gc)
@@ -3205,7 +3205,7 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 	seen := make(map[gridKey]bool)
 	var jobs []traceJob
 	for _, st := range o.scheduledTerms(cfg) {
-		if !isGridKind(st.term.kind) {
+		if !isGridTraceKind(st.term.kind) {
 			continue
 		}
 		angle := o.termFieldAngle(cfg, st.term, surfaces, gc)
@@ -3249,17 +3249,32 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 	wg.Wait()
 }
 
-// isGridKind reports whether the merit kind is evaluated from the pupil-grid
-// spot statistics (rather than a chief-ray/paraxial/Seidel/wavefront kind).
-// The legacy empty kind means spot_rms.
+// isGridKind reports whether the merit kind is evaluated by evaluateGridKind
+// from the pupil-grid spot statistics. The legacy empty kind means spot_rms.
+// The wavefront-shift / pair-phase kinds also consume a grid trace but have
+// their own evaluators (evaluateKindTerm), so they are NOT grid kinds —
+// listing them here routed them to evaluateGridKind, whose switch has no case
+// for them and silently evaluated them as spot_rms.
 func isGridKind(kind string) bool {
 	switch kind {
 	case "", dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
-		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius,
-		dls.MeritWavefrontShiftSag, dls.MeritWavefrontShiftTan, dls.MeritWavefrontPairPhase:
+		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius:
 		return true
 	}
 	return false
+}
+
+// isGridTraceKind reports whether the merit kind needs a pupil-grid trace,
+// either directly (the grid/spot kinds) or through a dedicated grid-consuming
+// evaluator (the wavefront shift / pair-phase kinds). It is the predicate for
+// the grid precompute and the angle-fallback loops, which must see every
+// trace-consuming term even when isGridKind is false.
+func isGridTraceKind(kind string) bool {
+	switch kind {
+	case dls.MeritWavefrontShiftSag, dls.MeritWavefrontShiftTan, dls.MeritWavefrontPairPhase:
+		return true
+	}
+	return isGridKind(kind)
 }
 
 // evaluateGridKind traces the pupil grid for a grid merit term and returns the
@@ -3438,7 +3453,7 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 	if len(angles) == 0 {
 		for ti := range cfg.meritTerms {
 			term := &cfg.meritTerms[ti]
-			if !isGridKind(term.kind) {
+			if !isGridTraceKind(term.kind) {
 				continue
 			}
 			angles[o.termFieldAngle(cfg, term, surfaces, gc)] = true
