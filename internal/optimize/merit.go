@@ -329,19 +329,28 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 	}
 }
 
+// fieldAliveThreshold resolves the field_alive aliveness threshold: the term's
+// target when set, else the default 0.3 (30% of the grid must survive). Both
+// the traced and the untraceable-grid paths use it so a field whose grid
+// cannot be traced is penalised exactly like a fully dead traced field (it
+// previously used a laxer 0.1 default and was rewarded for failing).
+func fieldAliveThreshold(target float64) float64 {
+	if target > 0 {
+		return target
+	}
+	return 0.3
+}
+
 // evaluateFieldAliveTerm traces the pupil grid for the term's field and returns
 // the "aliveness deficit": max(0, threshold − nValid/totalRays). A fully dead
 // field (nValid=0) returns threshold; a fully alive field returns 0. The
-// threshold defaults to 0.1 (10% of the grid must survive) when target is 0.
+// threshold defaults to 0.3 (30% of the grid must survive) when target is 0.
 func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
 	points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+	threshold := fieldAliveThreshold(term.target)
 	totalRays := len(points)
 	if totalRays == 0 {
 		// Grid could not be traced at all — treat as fully dead.
-		threshold := term.target
-		if threshold <= 0 {
-			threshold = 0.1
-		}
 		return threshold
 	}
 	nValid := 0
@@ -351,10 +360,6 @@ func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surface
 		}
 	}
 	ratio := float64(nValid) / float64(totalRays)
-	threshold := term.target
-	if threshold <= 0 {
-		threshold = 0.3
-	}
 	deficit := threshold - ratio
 	if deficit <= 0 {
 		return 0
@@ -362,11 +367,7 @@ func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surface
 	return deficit
 }
 
-// EvaluateMeritKind is the public wrapper over the merit-kind evaluator,
-// kept for callers that do not go through the unified Optimizer evaluation
-// loop (e.g. external tools evaluating a single term). OPD_RMS and the
-// wavefront paraboloid kinds require an Optimizer to trace the grid and return
-// 0 when o is nil.
+// evaluateDistortionPct returns the distortion percentage for the term's field.
 func evaluateDistortionPct(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
