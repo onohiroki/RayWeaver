@@ -3235,8 +3235,10 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 		go func() {
 			defer wg.Done()
 			for job := range ch {
+				gridTraceSem <- struct{}{}
 				pupilZ := o.gridCentring(cfg, p, job.angle)
 				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, 1, p.dia)
+				<-gridTraceSem
 				mu.Lock()
 				cache.spots[job.key] = points
 				mu.Unlock()
@@ -3318,6 +3320,18 @@ func (o *Optimizer) gridWorkers() int {
 	}
 	return w
 }
+
+// gridTraceSem bounds the number of concurrently running pupil-grid traces
+// across every Optimizer in the process. An escape run keeps escape_workers
+// independent Optimizers alive and each precomputeGrids fans out gridWorkers
+// traces, so without a global cap the in-flight allocation load scales as
+// escape_workers × gridWorkers (8 × 10 = 80 in the broad campaign, because
+// gridWorkers = GOMAXPROCS / jacobian_workers is maximal at
+// jacobian_workers = 1). That load made the Go heap target ratchet up into the
+// GBs (measured: heap goal 0.3 → 1.5 GB within minutes, RSS saturating around
+// 8 GB). The traces are CPU-bound, so capping at GOMAXPROCS keeps the cores
+// busy while bounding the in-flight memory and the GC pressure.
+var gridTraceSem = make(chan struct{}, runtime.GOMAXPROCS(0))
 
 // BeginJacobian computes the auto-aperture sizing once at the base variable
 // state so that the expensive column evaluations reuse the cached diameters
