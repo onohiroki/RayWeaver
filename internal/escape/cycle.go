@@ -52,7 +52,7 @@ type Cycle struct {
 	explorer   Explorer
 	debug      bool
 	failures   int
-	retired    bool
+	retiredA   atomic.Bool
 	escapedA   atomic.Int64
 	recordedA  atomic.Int64
 	bestMeritA atomic.Uint64 // math.Float64bits of the best recorded merit; 0 = none
@@ -367,7 +367,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		// previous cycle's result is already recorded) and report the reason
 		// plus the resource metrics that triggered it.
 		if c.retireRequested() {
-			c.retired = true
+			c.retiredA.Store(true)
 			c.progress.Event("worker_retired", map[string]any{
 				"worker":     c.workerID,
 				"reason":     c.retireReasonValue(),
@@ -771,9 +771,10 @@ func (c *Cycle) recordInterrupted(res dls.Result, cyc int, phase string) {
 	}
 }
 
-// Retired reports whether the resource guard retired this worker. It is only
-// safe to read from the worker's own goroutine (e.g. after Run returns).
-func (c *Cycle) Retired() bool { return c.retired }
+// Retired reports whether the resource guard retired this worker. It is set
+// atomically so the guard can observe the actual exit and time the next
+// retirement from it.
+func (c *Cycle) Retired() bool { return c.retiredA.Load() }
 
 // resourceMetrics snapshots the process/system resource state for a JSONL event.
 func resourceMetrics() map[string]any {

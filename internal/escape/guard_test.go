@@ -90,6 +90,55 @@ func TestResourceGuardTrendChanged(t *testing.T) {
 	}
 }
 
+// TestTightenTarget verifies the staged memory-limit tightening: a 20 % step,
+// clamped to a floor of 1.5× the live heap, with no room left once at the
+// floor (the guard then retires a worker instead).
+func TestTightenTarget(t *testing.T) {
+	// A plain 20 % step from a 2 GB limit with a small live heap.
+	if got, ok := tightenTarget(2048, 3000, 200); !ok || got != 2048*tightenStep {
+		t.Errorf("tightenTarget(2048, _, 200) = %v (ok=%v), want %v", got, ok, 2048*tightenStep)
+	}
+	// From unlimited, the first step is taken from the current heap.
+	if got, ok := tightenTarget(0, 4000, 200); !ok || got != 4000*tightenStep {
+		t.Errorf("tightenTarget(0, 4000, 200) = %v (ok=%v), want %v", got, ok, 4000*tightenStep)
+	}
+	// The floor (1.5× live) clamps a step that would go below it.
+	if got, ok := tightenTarget(1200, 0, 700); !ok || got != 1050 {
+		t.Errorf("tightenTarget(1200, _, 700) = %v (ok=%v), want the 1050 floor", got, ok)
+	}
+	// At the floor there is no room left.
+	if _, ok := tightenTarget(1050, 0, 700); ok {
+		t.Error("tightenTarget at the floor returned ok, want no room left")
+	}
+}
+
+// TestObserveExits verifies the actual-exit observation that starts the
+// retirement cooldown.
+func TestObserveExits(t *testing.T) {
+	cycles := []*Cycle{{workerID: 0}, {workerID: 1}}
+	enabled := true
+	g := newResourceGuard(&types.ResourceGuardConfig{Enabled: &enabled, MinWorkers: 1}, nil, cycles, make([]chan struct{}, 2), make([]string, 2))
+
+	if at, remaining := g.observeExits(); !at.IsZero() || remaining {
+		t.Errorf("observeExits with no pending = (%v, %v), want (zero, false)", at, remaining)
+	}
+	g.pending[0], g.pending[1] = true, true
+	if at, remaining := g.observeExits(); !at.IsZero() || !remaining {
+		t.Errorf("observeExits before any exit = (%v, %v), want (zero, true)", at, remaining)
+	}
+	cycles[0].retiredA.Store(true)
+	if at, remaining := g.observeExits(); at.IsZero() || !remaining {
+		t.Errorf("observeExits with one of two exited = (%v, %v), want (nonzero, true)", at, remaining)
+	}
+	cycles[1].retiredA.Store(true)
+	if at, remaining := g.observeExits(); at.IsZero() || remaining {
+		t.Errorf("observeExits after both exits = (%v, %v), want (nonzero, false)", at, remaining)
+	}
+	if g.pending[0] || g.pending[1] {
+		t.Error("pending flags were not cleared after the exits")
+	}
+}
+
 // TestHeapCeilingAuto verifies the backstop ceiling: a configured value wins,
 // otherwise it is 30 % of the physical RAM (much looser than the original
 // 2048 MB default), falling back to a fixed value when the RAM is unknown.

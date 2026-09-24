@@ -3,6 +3,7 @@ package escape
 import (
 	"context"
 	"math"
+	"runtime/debug"
 	"time"
 
 	"github.com/hiroki/rayweaver/internal/resource"
@@ -14,14 +15,22 @@ import (
 // `resource` event even between the regular report intervals.
 const trendSlopeDeltaMBPerMin = 50.0
 
+// exitFallbackWait bounds how long the guard waits for a retired worker to
+// actually exit before it falls back to the decision time as the cooldown
+// origin, so a stuck worker cannot stall the guard forever.
+const exitFallbackWait = 30 * time.Minute
+
+// tightenStep is the multiplicative step of the memory-limit tightening (and
+// the inverse restore step).
+const tightenStep = 0.8
+
 // resourceGuard monitors the process/system memory state during an escape run
-// and retires the least-productive worker, one at a time with a cooldown, when
-// pressure builds up. It is the safety net for the cases where the Go heap is
-// not bounded by GOMEMLIMIT or the pressure comes from other processes.
-//
-// Nothing here mutates the search state: a retired worker finishes its current
-// cycle (recording its result), emits worker_retired and returns; the shared
-// Store and the result aggregation are unaffected.
+// and relieves pressure in stages: first by tightening the Go memory limit
+// (reversible, no worker lost), then by retiring the least-productive worker,
+// one at a time with a cooldown measured from the previous worker's actual
+// exit. Nothing here mutates the search state: a retired worker finishes its
+// current cycle (recording its result), emits worker_retired and returns; the
+// shared Store and the result aggregation are unaffected.
 type resourceGuard struct {
 	cfg        types.ResourceGuardConfig
 	progress   *Progress
@@ -29,6 +38,7 @@ type resourceGuard struct {
 	retires    []chan struct{}
 	reasons    []string
 	active     []bool
+	pending    []bool // retired but the exit has not been observed yet
 	activeN    int
 	minWorkers int
 }
@@ -56,14 +66,16 @@ func newResourceGuard(cfg *types.ResourceGuardConfig, progress *Progress, cycles
 		retires:    retires,
 		reasons:    reasons,
 		active:     active,
+		pending:    make([]bool, len(cycles)),
 		activeN:    len(cycles),
 		minWorkers: minW,
 	}
 }
 
 // run samples the resource state on the configured interval, emits `resource`
-// events periodically and on trend changes, and retires workers gradually when
-// the guard triggers. It returns when the run context is cancelled.
+// events periodically and on trend changes, and relieves pressure by tightening
+// the Go memory limit first and then retiring workers. It returns when the run
+// context is cancelled or the workers are done.
 func (g *resourceGuard) run(ctx context.Context, done <-chan struct{}) {
 	check := secondsOr(g.cfg.CheckSeconds, 60)
 	report := secondsOr(g.cfg.ReportSeconds, 600)
@@ -90,10 +102,18 @@ func (g *resourceGuard) run(ctx context.Context, done <-chan struct{}) {
 	var prevAt time.Time
 	var prevSlope float64
 	var lastReport time.Time
-	var lastRetire time.Time
+	var lastAction time.Time // tighten/restore cooldown origin
+	var lastExitAt time.Time // last observed worker exit (retirement cooldown origin)
+	var pendingSince time.Time
 	breaches := 0
 	breachReason := ""
 	first := true
+
+	// Memory-limit tightening state. The original limit is read once so a
+	// restore can return to it.
+	origLimitMB := readMemoryLimitMB()
+	limitMB := origLimitMB
+	tightened := false
 
 	for {
 		select {
@@ -150,39 +170,116 @@ func (g *resourceGuard) run(ctx context.Context, done <-chan struct{}) {
 		}
 		first = false
 
-		if reason != "" && breaches >= need &&
-			(lastRetire.IsZero() || now.Sub(lastRetire) >= time.Duration(cooldown*float64(time.Second))) {
-			if idx, ok := g.selectWorker(); ok {
-				before := g.activeN
-				g.reasons[idx] = reason
-				close(g.retires[idx])
-				g.active[idx] = false
-				g.activeN--
-				g.progress.Event("worker_retire", map[string]any{
-					"worker":              idx,
-					"reason":              reason,
-					"cycle":               g.cycles[idx].CycleCount(),
-					"workers_before":      before,
-					"workers_after":       g.activeN,
-					"min_workers":         g.minWorkers,
-					"cooldown_seconds":    cooldown,
-					"selection_recorded":  g.cycles[idx].Recorded(),
-					"selection_best":      g.cycles[idx].BestMerit(),
-					"trigger_heap_sys_mb": s.HeapSysMB,
-					"trigger_ceiling_mb":  ceiling,
-					"trigger_pressure":    s.PressureLevel,
-					"trigger_comp_rate":   compRate,
-					"trigger_consecutive": breaches,
-					"metrics":             resourceMetrics(),
-				})
-				lastRetire = now
-				breaches = 0
+		cooldownDur := time.Duration(cooldown * float64(time.Second))
+
+		// Observe the actual exits of retired workers; the retirement cooldown
+		// runs from the last observed exit, with the stuck-worker fallback to
+		// the decision time.
+		if at, remaining := g.observeExits(); !at.IsZero() {
+			lastExitAt = at
+			if !remaining {
+				pendingSince = time.Time{}
 			}
+		}
+
+		if reason != "" && breaches >= need {
+			origin := lastExitAt
+			originKind := "exit"
+			if !pendingSince.IsZero() && now.Sub(pendingSince) > exitFallbackWait {
+				origin = pendingSince
+				originKind = "decision_fallback"
+			}
+			if origin.IsZero() || now.Sub(origin) >= cooldownDur {
+				// Stage 1: tighten the Go memory limit (reversible, no worker
+				// lost) before retiring anyone.
+				if target, ok := tightenTarget(limitMB, s.HeapSysMB, s.HeapAllocMB); ok {
+					before := limitMB
+					limitMB = target
+					tightened = true
+					debug.SetMemoryLimit(mbToBytes(target))
+					g.progress.Event("memory_limit", map[string]any{
+						"kind":          "tighten",
+						"reason":        reason,
+						"before_mb":     before,
+						"after_mb":      target,
+						"live_alloc_mb": s.HeapAllocMB,
+						"floor_mb":      tightenFloorMB(s.HeapAllocMB),
+						"metrics":       resourceMetrics(),
+					})
+					breaches = 0
+					lastAction = now
+				} else if idx, ok := g.selectWorker(); ok {
+					// Stage 2: retire the least-productive worker.
+					before := g.activeN
+					g.reasons[idx] = reason
+					close(g.retires[idx])
+					g.active[idx] = false
+					g.pending[idx] = true
+					g.activeN--
+					g.progress.Event("worker_retire", map[string]any{
+						"worker":              idx,
+						"reason":              reason,
+						"cycle":               g.cycles[idx].CycleCount(),
+						"workers_before":      before,
+						"workers_after":       g.activeN,
+						"min_workers":         g.minWorkers,
+						"cooldown_seconds":    cooldown,
+						"cooldown_origin":     originKind,
+						"selection_recorded":  g.cycles[idx].Recorded(),
+						"selection_best":      g.cycles[idx].BestMerit(),
+						"trigger_heap_sys_mb": s.HeapSysMB,
+						"trigger_ceiling_mb":  ceiling,
+						"trigger_pressure":    s.PressureLevel,
+						"trigger_comp_rate":   compRate,
+						"trigger_consecutive": breaches,
+						"metrics":             resourceMetrics(),
+					})
+					pendingSince = now
+					breaches = 0
+				}
+			}
+		} else if reason == "" && tightened && (lastAction.IsZero() || now.Sub(lastAction) >= cooldownDur) {
+			// Pressure eased: restore one step toward the original limit.
+			before := limitMB
+			target := limitMB / tightenStep
+			if origLimitMB <= 0 || target >= origLimitMB {
+				target = origLimitMB
+				tightened = false
+			}
+			limitMB = target
+			debug.SetMemoryLimit(mbToBytes(target))
+			g.progress.Event("memory_limit", map[string]any{
+				"kind":      "restore",
+				"before_mb": before,
+				"after_mb":  target,
+				"metrics":   resourceMetrics(),
+			})
+			lastAction = now
 		}
 
 		prev = s
 		prevAt = now
 	}
+}
+
+// observeExits clears the pending flags of workers whose retirement has been
+// observed. It returns the time of an observed exit (zero when none happened
+// this tick) and whether any pending retirement remains.
+func (g *resourceGuard) observeExits() (time.Time, bool) {
+	var at time.Time
+	remaining := false
+	for i, p := range g.pending {
+		if !p {
+			continue
+		}
+		if g.cycles[i].Retired() {
+			g.pending[i] = false
+			at = time.Now()
+		} else {
+			remaining = true
+		}
+	}
+	return at, remaining
 }
 
 // selectWorker returns the least-productive still-active worker: fewest
@@ -289,3 +386,59 @@ func heapCeilingMB(configured float64) float64 {
 	}
 	return 4096
 }
+
+// tightenFloorMB is the lowest memory limit the guard will set: 1.5× the live
+// heap, so the GC cannot be pushed into a thrashing limit below the live set.
+func tightenFloorMB(liveAllocMB float64) float64 {
+	floor := 1.5 * liveAllocMB
+	if floor < 64 {
+		floor = 64
+	}
+	return floor
+}
+
+// tightenTarget proposes the next memory-limit value: tightenStep of the
+// current limit (or of the current heap when the limit is unlimited), never
+// below tightenFloorMB. ok is false when there is no room left to tighten, in
+// which case the guard falls through to retiring a worker.
+func tightenTarget(curLimitMB, heapSysMB, liveAllocMB float64) (float64, bool) {
+	floor := tightenFloorMB(liveAllocMB)
+	base := curLimitMB
+	if base <= 0 {
+		base = heapSysMB // first tightening from unlimited: step down from the heap
+	}
+	target := base * tightenStep
+	if target < floor {
+		target = floor
+	}
+	if curLimitMB > 0 && target >= curLimitMB {
+		return 0, false
+	}
+	if target <= 0 {
+		return 0, false
+	}
+	return target, true
+}
+
+// readMemoryLimitMB returns the current Go memory limit in MB (0 = unlimited)
+// without changing it.
+func readMemoryLimitMB() float64 {
+	prev := debug.SetMemoryLimit(-1)
+	debug.SetMemoryLimit(prev)
+	if prev <= 0 {
+		return 0
+	}
+	return bytesToMB(prev)
+}
+
+// mbToBytes converts a limit in MB to the debug.SetMemoryLimit argument
+// (a value <= 0 means unlimited).
+func mbToBytes(mb float64) int64 {
+	if mb <= 0 {
+		return -1
+	}
+	return int64(mb * (1 << 20))
+}
+
+// bytesToMB converts bytes to MB.
+func bytesToMB(b int64) float64 { return float64(b) / (1 << 20) }
