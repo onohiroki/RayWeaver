@@ -61,6 +61,10 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 // loaded glass catalog, and handles progress logging, signal handling, single/
 // multi-config dispatch, output, and result validation.
 func runEscapeCore(input types.Input, gc *glass.Catalog, verbose bool, logFile string, saveBase string, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
+	// Apply the Go soft memory limit (CLI --mem-limit wins over
+	// optimization.mem_limit_mb); the effective value is written back.
+	applyMemLimit(&input, optEscapeMemLimit)
+
 	// Build the per-config glass-phase merit from the config's own terms: the
 	// chromatic terms scaled by power_solve.color_scale plus a cheap geometric
 	// guardrail. The config's explicit merit is never replaced.

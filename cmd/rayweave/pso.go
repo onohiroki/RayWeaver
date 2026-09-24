@@ -24,6 +24,10 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 		os.Exit(1)
 	}
 
+	// Apply the Go soft memory limit (CLI --mem-limit wins over
+	// optimization.mem_limit_mb); the effective value is written back.
+	applyMemLimit(&input, optPSOMemLimit)
+
 	// Apply CLI overrides to the PSO config (CLI wins per 3 principles).
 	if swarmSize > 0 {
 		input.Optimization.PSO.SwarmSize = swarmSize

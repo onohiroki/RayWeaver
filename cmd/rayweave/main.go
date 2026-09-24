@@ -145,6 +145,7 @@ func main() {
 			fs.StringVar(&optEscapeMemProfile, "memprofile", "", "write a heap profile (pprof) to FILE at exit")
 			fs.StringVar(&optEscapeGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
 			fs.IntVar(&optEscapeGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
+			fs.StringVar(&optEscapeMemLimit, "mem-limit", "", "cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1 (unlimited); default optimization.mem_limit_mb")
 			fs.Parse(args[1:])
 		}
 	}
@@ -188,6 +189,7 @@ func main() {
 			fs.StringVar(&optPSOMemProfile, "memprofile", "", "write a heap profile (pprof) to FILE at exit")
 			fs.StringVar(&optPSOGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
 			fs.IntVar(&optPSOGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
+			fs.StringVar(&optPSOMemLimit, "mem-limit", "", "cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1 (unlimited); default optimization.mem_limit_mb")
 			fs.Parse(args[1:])
 		}
 	}
@@ -320,6 +322,82 @@ func applyGCPercent(gogc int) {
 	if os.Getenv("GOGC") == "" {
 		debug.SetGCPercent(400)
 	}
+}
+
+// Memory-limit CLI options (--mem-limit). They are read by the escape and PSO
+// commands after the input has been parsed, so they live at package scope; an
+// empty value falls back to optimization.mem_limit_mb.
+var (
+	optEscapeMemLimit string
+	optPSOMemLimit    string
+)
+
+// applyMemLimit applies the Go soft memory limit (runtime/debug.SetMemoryLimit)
+// for a long-running compute command. Precedence: the --mem-limit CLI flag, then
+// optimization.mem_limit_mb. An empty flag and an absent/zero YAML value leave
+// the limit unset (the GOMEMLIMIT environment variable / Go default applies);
+// -1 means unlimited. The effective value is written back into the input.
+func applyMemLimit(input *types.Input, flagValue string) {
+	mb, set := 0.0, false
+	if strings.TrimSpace(flagValue) != "" {
+		v, err := parseMemLimitMB(flagValue)
+		if err != nil {
+			errOut("Error: --mem-limit %q: %v", flagValue, err)
+			os.Exit(1)
+		}
+		mb, set = v, true
+	} else if input.Optimization != nil && input.Optimization.MemLimitMB != 0 {
+		mb, set = input.Optimization.MemLimitMB, true
+	}
+	if !set {
+		return
+	}
+	debug.SetMemoryLimit(memLimitBytes(mb))
+	if input.Optimization != nil {
+		input.Optimization.MemLimitMB = mb
+	}
+}
+
+// parseMemLimitMB parses a memory-limit size: a bare number is MB, and the
+// KiB/MiB/GiB (binary) and KB/MB/GB (decimal) suffixes are accepted. A value
+// <= 0 means unlimited.
+func parseMemLimitMB(s string) (float64, error) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return 0, fmt.Errorf("empty value")
+	}
+	mult := 1.0
+	for _, suf := range []struct {
+		s string
+		m float64
+	}{
+		{"kib", 1.0 / 1024}, {"mib", 1}, {"gib", 1024},
+		{"kb", 1.0 / 1000}, {"mb", 1}, {"gb", 1000},
+		{"k", 1.0 / 1024}, {"m", 1}, {"g", 1024},
+	} {
+		if strings.HasSuffix(s, suf.s) {
+			mult = suf.m
+			s = strings.TrimSuffix(s, suf.s)
+			break
+		}
+	}
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid number %q", s)
+	}
+	if v <= 0 {
+		return -1, nil // unlimited
+	}
+	return v * mult, nil
+}
+
+// memLimitBytes converts MB to the debug.SetMemoryLimit argument (<= 0 =
+// unlimited).
+func memLimitBytes(mb float64) int64 {
+	if mb <= 0 {
+		return -1
+	}
+	return int64(mb * (1 << 20))
 }
 
 // writeMemGorProfiles writes the heap and goroutine profiles to the given paths

@@ -820,14 +820,19 @@ type RegionActiveConfig struct {
 }
 
 type OptimizationConfig struct {
-	Method             string                    `yaml:"method"`
-	Aggregate          string                    `yaml:"aggregate,omitempty"`
-	Mu                 float64                   `yaml:"mu,omitempty"`
-	MaxIter            int                       `yaml:"max_iter,omitempty"`
-	Tol                float64                   `yaml:"tol,omitempty"`
-	Epsilon            float64                   `yaml:"epsilon,omitempty"`
-	NumRays            int                       `yaml:"num_rays,omitempty"`
-	MuConMax           float64                   `yaml:"mu_con_max,omitempty"`
+	Method    string  `yaml:"method"`
+	Aggregate string  `yaml:"aggregate,omitempty"`
+	Mu        float64 `yaml:"mu,omitempty"`
+	MaxIter   int     `yaml:"max_iter,omitempty"`
+	Tol       float64 `yaml:"tol,omitempty"`
+	Epsilon   float64 `yaml:"epsilon,omitempty"`
+	NumRays   int     `yaml:"num_rays,omitempty"`
+	MuConMax  float64 `yaml:"mu_con_max,omitempty"`
+	// MemLimitMB caps the Go heap (runtime/debug.SetMemoryLimit) so the GC
+	// keeps the process under it. -1 disables the limit; 0 leaves it unset (the
+	// GOMEMLIMIT environment variable / Go default applies). The --mem-limit
+	// CLI flag overrides it (accepting 2GiB / 2048MiB / 2048 / -1).
+	MemLimitMB         float64                   `yaml:"mem_limit_mb,omitempty"`
 	ApertureMargin     float64                   `yaml:"aperture_margin,omitempty"`
 	ApertureMarginMM   float64                   `yaml:"aperture_margin_mm,omitempty"`
 	JacobianWorkers    int                       `yaml:"jacobian_workers,omitempty"`
