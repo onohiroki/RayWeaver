@@ -133,6 +133,11 @@ func writeFileAtomic(path string, data []byte) error {
 // write-back. The original input is not mutated; the glass catalog is only
 // read (never written), so the saver is safe to run while DLS workers share
 // the catalog.
+//
+// The sized apertures are applied before the back-focus solve so the solved
+// image plane is the best focus of the same (sized-diameter) beam the optimizer
+// evaluated; solving first would freeze the plane on the stored-diameter bundle
+// and leave the saved plane offset from the evaluated one.
 func materializeSingleInput(input types.Input, surfaces []types.Surface, variables []optimize.Variable, x []float64, gc *glass.Catalog, apertures map[int]float64) types.Input {
 	out := cloneChiefForOutput(input)
 	out.Configs = append([]types.Config{}, input.Configs...)
@@ -145,8 +150,8 @@ func materializeSingleInput(input types.Input, surfaces []types.Surface, variabl
 		}}
 	}
 	surf, newGlasses := applyEscapeX(surfaces, variables, x, gc)
-	applySavedBackFocusSolve(input, &out.Configs[0], surf, gc)
 	applyApertures(surf, apertures)
+	applySavedBackFocusSolve(input, &out.Configs[0], surf, gc)
 	out.Configs[0].Surfaces = surf
 	applyPupilVariables(&out, variables, x)
 	if len(newGlasses) > 0 && out.GlassCatalog != nil {
@@ -167,8 +172,8 @@ func materializeMultiInput(input types.Input, opt *types.OptimizationConfig, x [
 	configSurfaces := applyEscapeMulti(input.Configs, opt, x)
 	for i := range out.Configs {
 		if s, ok := configSurfaces[out.Configs[i].ID]; ok {
-			applySavedBackFocusSolve(input, &out.Configs[i], s, gc)
 			applyApertures(s, apertures[out.Configs[i].ID])
+			applySavedBackFocusSolve(input, &out.Configs[i], s, gc)
 			out.Configs[i].Surfaces = s
 		}
 	}

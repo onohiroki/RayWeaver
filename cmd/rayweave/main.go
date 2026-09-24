@@ -267,6 +267,8 @@ func main() {
 		runAsphere(data)
 	case "psf":
 		runPSF(data)
+	case "focus":
+		runFocus(data)
 	case "wavefront":
 		runWavefront(data)
 	case "query":
@@ -1250,6 +1252,58 @@ Notes:
     sphere (piston + tilt + defocus removed), the standard wavefront
     aberration definition.
 `)
+	case "focus":
+		fmt.Print(`Usage: rayweave focus <mtf|psf> [flags] < input.yaml
+
+Image-plane comparison: evaluate the same system at up to three focus
+conventions and report the requested metric for each, so it is clear which
+image plane the design actually delivers.
+
+Planes (--planes file,all,best; default: all three):
+  file   the image plane as written in the input (no solve)
+  all    the single all-field best focus (uniform-weighted wavefront solve),
+         the plane a saved escape/optimize minimum carries
+  best   each field's own best focus (removes field-curvature defocus)
+
+Sub-subcommands:
+  focus mtf   MTF (with Strehl/FWHM) at the requested spatial frequencies,
+              tabulated per (field, wavelength) x plane.
+  focus psf   PSF metrics (Strehl, FWHM, encircled energy, centroid) per
+              (field, wavelength) x plane.
+
+The base psf command remains the single-plane imaging measurement; focus
+is the plane-comparison layer on top of the same engine.
+
+Options (both sub-subcommands):
+  --wavelengths W1,...  wavelengths in mm (default: config wavelengths,
+                          else the chief reference wavelength)
+  --fields I1,I2,...    field indices to compare (default: all)
+  --planes LIST         file,all,best (default: all three)
+  --num-rays N          pupil grid rays (default 400)
+  --psf-grid N          image-plane pixels per side (default 64)
+  --ref-surface N       reference surface ID for wavefront sampling
+                          (default: the last optical surface)
+  --polarization S      RCP (default) | LCP | X | Y | RCP+LCP
+  --converge-check BOOL label sampling convergence by re-evaluating at 1.5x
+                          rays (default: off)
+  --config ID           select config by id (multi-config mode)
+  --glass-dir DIR       AGF glass catalog directory
+  focus mtf only:
+  --frequencies F1,...  spatial frequencies in cycles/mm (default: 50)
+
+Input YAML — focus section (optional; flags override):
+  focus:
+    mtf:
+      wavelengths: [0.0004861, 0.0005876, 0.0006563]
+      frequencies: [30, 50, 80]
+      planes: [file, all, best]
+    psf:
+      planes: [all, best]
+
+Output: augmented YAML with a focus_comparison section holding the mtf or psf
+table (rows = field x wavelength, each with the file / focus_plane_all /
+best_focus plane blocks). A human-readable table is written to stderr.
+`)
 	case "wavefront":
 		fmt.Print(`Usage: rayweave wavefront [flags] < pipeline.yaml
 
@@ -1437,6 +1491,7 @@ Subcommands:
   scale      Scale a system so its EFL equals --efl TARGET
   asphere    Rank surfaces for asphere introduction, estimate initial coefficients
   psf        Point-spread function via direct vector Huygens integration
+  focus      Image-plane comparison of MTF/PSF across focus conventions
   wavefront  Wavefront analysis (paraboloid, best-fit sphere, Fringe Zernike, best focus)
   import     Import system from ZEMAX ZMX / CODE V SEQ / OSLO LEN
   export     Export system to ZEMAX ZMX / CODE V SEQ / OSLO LEN

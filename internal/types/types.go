@@ -1671,6 +1671,7 @@ type Input struct {
 	Paraxial       *ParaxialInput          `yaml:"paraxial,omitempty"`
 	Asphere        *AsphereCandidateConfig `yaml:"asphere_candidate,omitempty"`
 	PSF            *PSFConfig              `yaml:"psf,omitempty"`
+	Focus          *FocusConfig            `yaml:"focus,omitempty"`
 	Wavefront      *WavefrontConfig        `yaml:"wavefront,omitempty"`
 	Scale          *ScaleConfig            `yaml:"scale,omitempty"`
 	EscapeMinimum  *EscapeMinimumInfo      `yaml:"escape_minimum,omitempty"`
@@ -1985,6 +1986,59 @@ type PSFConfig struct {
 	MTFCfg *PSFMTFConfig `yaml:"mtf_config,omitempty"`
 }
 
+// FocusConfig configures the `focus` subcommand family (the `focus:` YAML
+// section): image-plane comparison tools that evaluate the same system under
+// three conventions — the input file plane, the single all-field best focus,
+// and each field's own best focus. MTF holds the `focus mtf` options; PSF
+// holds the `focus psf` options.
+type FocusConfig struct {
+	MTF *FocusMTFConfig `yaml:"mtf,omitempty"`
+	PSF *FocusPSFConfig `yaml:"psf,omitempty"`
+}
+
+// FocusMTFConfig configures `focus mtf`: the MTF at the requested spatial
+// frequencies (with the matching Strehl/FWHM) compared across the plane
+// conventions. All fields are optional; flags override them.
+type FocusMTFConfig struct {
+	// Wavelengths in mm (default: config wavelengths, else the reference).
+	Wavelengths []float64 `yaml:"wavelengths,omitempty"`
+	// Frequencies are the spatial frequencies (cycles/mm) reported per plane
+	// (default: [50]).
+	Frequencies []float64 `yaml:"frequencies,omitempty"`
+	// Fields selects the chief field indices to analyse (default: all).
+	Fields []int `yaml:"fields,omitempty"`
+	// Planes selects the compared conventions: file, all, best (default: all
+	// three). "all" is the single all-field best-focus plane, "best" the
+	// per-field best-focus plane.
+	Planes []string `yaml:"planes,omitempty"`
+	// NumRays is the entrance-pupil grid ray count per field (default 400).
+	NumRays int `yaml:"num_rays,omitempty"`
+	// GridSize is the image-plane pixels per side (default 64).
+	GridSize int `yaml:"grid_size,omitempty"`
+	// Polarization is the input state: RCP (default) | LCP | X | Y | RCP+LCP.
+	Polarization string `yaml:"polarization,omitempty"`
+	// ReferenceSurface is the wavefront sampling surface (0 = the last optical
+	// surface).
+	ReferenceSurface int `yaml:"reference_surface,omitempty"`
+	// ConvergeCheck labels sampling convergence by re-evaluating at 1.5× the
+	// ray count. The focus commands default it OFF (the comparison is about the
+	// plane, not the sampling); a nil pointer keeps the default.
+	ConvergeCheck *bool `yaml:"converge_check,omitempty"`
+}
+
+// FocusPSFConfig configures `focus psf`: the PSF metrics (Strehl, FWHM,
+// encircled energy, centroid) compared across the same plane conventions.
+type FocusPSFConfig struct {
+	Wavelengths      []float64 `yaml:"wavelengths,omitempty"`
+	Fields           []int     `yaml:"fields,omitempty"`
+	Planes           []string  `yaml:"planes,omitempty"`
+	NumRays          int       `yaml:"num_rays,omitempty"`
+	GridSize         int       `yaml:"grid_size,omitempty"`
+	Polarization     string    `yaml:"polarization,omitempty"`
+	ReferenceSurface int       `yaml:"reference_surface,omitempty"`
+	ConvergeCheck    *bool     `yaml:"converge_check,omitempty"`
+}
+
 // WavefrontConfig configures the `wavefront` subcommand (the `wavefront:`
 // YAML section). All fields are optional; flags on the command line override
 // them (CLI wins, effective values written back).
@@ -2076,6 +2130,85 @@ type PSFResult struct {
 	// MTF is the OTF/MTF summary (thresholds, and evaluated frequencies when
 	// configured). Full curves go to the --yaml file.
 	MTF *PSFMTFSummary `yaml:"mtf,omitempty"`
+}
+
+// FocusComparison is the pipeline result of a `focus` sub-subcommand: the
+// plane-comparison table under either the MTF or the PSF metric set. Exactly
+// one of MTF/PSF is populated, matching the sub-subcommand that ran.
+type FocusComparison struct {
+	MTF *FocusMTFComparison `yaml:"mtf,omitempty"`
+	PSF *FocusPSFComparison `yaml:"psf,omitempty"`
+}
+
+// FocusMTFComparison is the `focus mtf` table: per (field, wavelength) the MTF
+// at each requested frequency (plus Strehl/FWHM) under each plane convention.
+type FocusMTFComparison struct {
+	// Planes are the compared conventions in canonical order (file,
+	// focus_plane_all, best_focus).
+	Planes []string `yaml:"planes"`
+	// Frequencies are the reported spatial frequencies (cycles/mm); each
+	// plane's sagittal/tangential arrays are aligned to this list.
+	Frequencies []float64 `yaml:"frequencies"`
+	// FocusPlaneAllShiftMM is the image-plane shift the `all` convention
+	// applied (mm); 0 when the `all` plane was not requested.
+	FocusPlaneAllShiftMM float64       `yaml:"focus_plane_all_shift_mm,omitempty"`
+	Polarization         string        `yaml:"polarization,omitempty"`
+	Rows                 []FocusMTFRow `yaml:"rows"`
+}
+
+// FocusMTFRow is one (field, wavelength) comparison row. The plane blocks are
+// present only for the conventions that were requested.
+type FocusMTFRow struct {
+	FieldIndex    int            `yaml:"field_index"`
+	FieldAngle    float64        `yaml:"field_angle"`
+	Wavelength    float64        `yaml:"wavelength"`
+	File          *FocusMTFPlane `yaml:"file,omitempty"`
+	FocusPlaneAll *FocusMTFPlane `yaml:"focus_plane_all,omitempty"`
+	BestFocus     *FocusMTFPlane `yaml:"best_focus,omitempty"`
+}
+
+// FocusMTFPlane is the MTF (and image-quality) summary at one plane convention.
+type FocusMTFPlane struct {
+	Strehl float64 `yaml:"strehl"`
+	FWHMX  float64 `yaml:"fwhm_x"`
+	FWHMY  float64 `yaml:"fwhm_y"`
+	// BestFocusShiftMM is the per-field best-focus shift (mm) applied for the
+	// best_focus convention; 0 for the fixed planes.
+	BestFocusShiftMM float64 `yaml:"best_focus_shift_mm,omitempty"`
+	// Sagittal/Tangential are the MTF values at the comparison frequencies, in
+	// the same order as FocusMTFComparison.Frequencies.
+	Sagittal   []float64 `yaml:"mtf_sagittal,omitempty"`
+	Tangential []float64 `yaml:"mtf_tangential,omitempty"`
+}
+
+// FocusPSFComparison is the `focus psf` table: per (field, wavelength) the PSF
+// metrics under each plane convention.
+type FocusPSFComparison struct {
+	Planes               []string      `yaml:"planes"`
+	FocusPlaneAllShiftMM float64       `yaml:"focus_plane_all_shift_mm,omitempty"`
+	Polarization         string        `yaml:"polarization,omitempty"`
+	Rows                 []FocusPSFRow `yaml:"rows"`
+}
+
+// FocusPSFRow is one (field, wavelength) PSF comparison row.
+type FocusPSFRow struct {
+	FieldIndex    int            `yaml:"field_index"`
+	FieldAngle    float64        `yaml:"field_angle"`
+	Wavelength    float64        `yaml:"wavelength"`
+	File          *FocusPSFPlane `yaml:"file,omitempty"`
+	FocusPlaneAll *FocusPSFPlane `yaml:"focus_plane_all,omitempty"`
+	BestFocus     *FocusPSFPlane `yaml:"best_focus,omitempty"`
+}
+
+// FocusPSFPlane is the PSF metric summary at one plane convention.
+type FocusPSFPlane struct {
+	Strehl            float64 `yaml:"strehl"`
+	FWHMX             float64 `yaml:"fwhm_x"`
+	FWHMY             float64 `yaml:"fwhm_y"`
+	EncircledEnergy50 float64 `yaml:"encircled_energy_50"`
+	CentroidX         float64 `yaml:"centroid_x"`
+	CentroidY         float64 `yaml:"centroid_y"`
+	BestFocusShiftMM  float64 `yaml:"best_focus_shift_mm,omitempty"`
 }
 
 // WavefrontResult is the per-run wavefront analysis carried in the pipeline
@@ -2221,6 +2354,7 @@ type Output struct {
 	Vignetting       *VignettingResult       `yaml:"vignetting_result,omitempty"`
 	AsphereResult    *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
 	PsfResults       []PSFResult             `yaml:"psf_results,omitempty"`
+	FocusComparison  *FocusComparison        `yaml:"focus_comparison,omitempty"`
 	WavefrontResults *WavefrontResult        `yaml:"wavefront_result,omitempty"`
 	Stop             *StopInfo               `yaml:"stop,omitempty"`
 }

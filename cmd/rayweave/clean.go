@@ -57,6 +57,10 @@ func runClean(data []byte) {
 		removed = append(removed, removedEntry{Field: "psf_results", Count: n})
 		output.PsfResults = nil
 	}
+	if output.FocusComparison != nil {
+		removed = append(removed, removedEntry{Field: "focus_comparison", Count: 1})
+		output.FocusComparison = nil
+	}
 	if output.WavefrontResults != nil {
 		removed = append(removed, removedEntry{Field: "wavefront_result", Count: 1})
 		output.WavefrontResults = nil

@@ -2767,18 +2767,30 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 	// can build element power from a zero-power start), and the escape glass
 	// phase preserves it by locking the variable (Min==Max), which keeps
 	// SolveElementPower reproducing the same curvature every evaluation.
-	o.applyPowerVariables(x, configSurfaces, effectiveGC(o.gc, tempGC))
+	gc := effectiveGC(o.gc, tempGC)
+	o.applyPowerVariables(x, configSurfaces, gc)
 
 	// Apply the power-preserving solve after the variables and in-flight glass
 	// overrides are in place but before Precompute, so the solved curvature
 	// feeds both ParaxialRadius (Precompute) and every downstream consumer.
 	// The solve keeps each pinned element's thin-lens power at its initial
 	// value, so the pure glass chromatic optimisation cannot drift the layout.
-	o.applyPowerSolve(configSurfaces, effectiveGC(o.gc, tempGC))
+	o.applyPowerSolve(configSurfaces, gc)
+
+	// Size the auto_aperture diameters before the back-focus solve so the solve
+	// sees the same beam envelope the merit grid will trace. The evaluators'
+	// restoreDiameters + sizeAutoApertures pair then reproduces identical
+	// diameters, so only the solve's input (the image plane) changes. Without
+	// this the solved plane is the best focus of the stored-diameter bundle and
+	// the saved/evaluated plane drifts from the merit's (observed ~0.46 mm on
+	// the broad campaign).
+	if o.backFocusSolve != nil {
+		o.sizeAperturesForBackFocus(configSurfaces, pupils, gc)
+	}
 
 	// Apply the back-focus solve after the power-preserving solve so the
 	// target surface thickness reflects the final paraxial/wavefront focus.
-	o.applyBackFocusSolve(configSurfaces, effectiveGC(o.gc, tempGC))
+	o.applyBackFocusSolve(configSurfaces, gc)
 
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
@@ -3497,6 +3509,30 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 				surfaces[i].Diameter = 2 * (e + o.apertureMarginMM)
 			}
 		}
+	}
+}
+
+// sizeAperturesForBackFocus sizes every config's auto_aperture surfaces from the
+// current variable state so the immediately following back-focus solve uses the
+// same beam envelope the merit grid traces. It mirrors the evaluators'
+// restoreDiameters + sizeAutoApertures pair; the sizing the evaluators run
+// afterwards reproduces identical diameters (deterministic traces), so the only
+// thing the earlier call changes is the solve's input. During a Jacobian sweep
+// sizeAutoApertures reads the diameters cached by BeginJacobian, so no trace is
+// repeated.
+func (o *Optimizer) sizeAperturesForBackFocus(configSurfaces map[string][]types.Surface, pupils map[string]appliedPupil, gc *glass.Catalog) {
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces, ok := configSurfaces[cfg.id]
+		if !ok {
+			continue
+		}
+		// The variable-applied curvatures have not been precomputed yet in
+		// applyVariables; the aperture measurement (ApertureRadiusForGrid ->
+		// paraxial.Compute) reads ParaxialRadius, so refresh first.
+		surface.Precompute(surfaces)
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil, pupils[cfg.id])
 	}
 }
 

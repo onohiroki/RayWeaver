@@ -1,6 +1,7 @@
 package optimize
 
 import (
+	"math"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -459,5 +460,71 @@ func TestBackFocusSolveScheduleThreshold(t *testing.T) {
 	opt.UpdateMeritWeights(x, 0) // iteration 0 → metric=0, t=0, early=1.0, late=0.0
 	if opt.currentBackFocusType != "paraxial" {
 		t.Errorf("threshold not met: want paraxial, got %s", opt.currentBackFocusType)
+	}
+}
+
+// TestApplyVariablesSizesAperturesBeforeBackFocus verifies that the back-focus
+// solve inside applyVariables sees the sized auto_aperture diameters the merit
+// grid will use, not the stored ones. Two identical systems whose only
+// difference is the pre-sizing stored diameter of an auto_aperture surface must
+// land on the same solved image plane; before the fix the solve read the stored
+// diameter and the planes diverged.
+func TestApplyVariablesSizesAperturesBeforeBackFocus(t *testing.T) {
+	gc := tripletGC()
+	bf := &types.BackFocusSolveConfig{
+		Enabled: true, Surface: 7, Type: "wavefront",
+		WeightType: "uniform", NumRays: 48,
+	}
+	fieldDefs := []types.FieldDef{{Angle: 0}, {Angle: 16}}
+
+	// Premise: the wavefront back-focus is sensitive to an auto_aperture
+	// surface's diameter (the trace clips rays there), so a stored-vs-sized
+	// mix-up would change the solved plane.
+	withDia := func(d float64) []types.Surface {
+		s := powerSolveTripletSurfaces()
+		for i := range s {
+			if s[i].ID == 5 {
+				s[i].AutoAperture = true
+				s[i].Diameter = d
+			}
+		}
+		surface.Precompute(s)
+		return s
+	}
+	shSmall := wavefrontBackFocusShiftFor(withDia(2.0), bf, 0, 0, nil, fieldDefs, gc)
+	shLarge := wavefrontBackFocusShiftFor(withDia(40.0), bf, 0, 0, nil, fieldDefs, gc)
+	if shSmall == shLarge {
+		t.Fatalf("test setup: wavefront back-focus not aperture-sensitive (%.6f)", shSmall)
+	}
+
+	mk := func(stored float64) *Optimizer {
+		cfg := Config{
+			Surfaces:       withDia(stored),
+			Fields:         []types.FieldItem{{ID: 0, AngleDeg: 0}, {ID: 1, AngleDeg: 16}},
+			RefSurface:     8,
+			NumRays:        48,
+			GlassCatalog:   gc,
+			ApertureMargin: 0.5,
+		}
+		opt := NewOptimizer(cfg)
+		opt.SetBackFocusSolve(bf)
+		opt.UpdatePupils(nil)
+		return opt
+	}
+
+	thk := func(o *Optimizer) float64 {
+		surfMap, _, _ := o.applyVariables(nil)
+		for _, s := range surfMap["config1"] {
+			if s.ID == 7 {
+				return s.Thickness
+			}
+		}
+		return math.NaN()
+	}
+	smallThk := thk(mk(2.0))
+	largeThk := thk(mk(40.0))
+	if math.Abs(smallThk-largeThk) > 1e-9 {
+		t.Errorf("solved plane depends on the stored auto_aperture diameter: %.6f vs %.6f (must use the sized diameter)",
+			smallThk, largeThk)
 	}
 }

@@ -7,6 +7,12 @@ for non-uniform area weights), and integrates it with a **direct vector Huygens
 integral** — no FFT. The numerical method is described in
 [methods/psf.md](methods/psf.md).
 
+To compare the PSF (or its MTF) across image-plane conventions — the file
+plane, the single all-field best focus, and each field's best focus — use the
+`focus` command family (`focus psf` / `focus mtf`); see
+[focus.md](focus.md). The base `psf` command stays the single-plane
+measurement.
+
 ```
 rayweave psf [--ref-surface N] [--psf-grid 64] [--psf-width W]
              [--num-rays 400] [--fields I1,I2,...] [--wavelengths W1,...]
