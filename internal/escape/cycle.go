@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/hiroki/rayweaver/internal/dls"
+	"github.com/hiroki/rayweaver/internal/resource"
 )
 
 // Cycle runs the two-step escape optimisation loop for one worker:
@@ -50,9 +52,18 @@ type Cycle struct {
 	explorer   Explorer
 	debug      bool
 	failures   int
-	escaped    int
-	recorded   int
-	stopped    bool
+	retired    bool
+	escapedA   atomic.Int64
+	recordedA  atomic.Int64
+	bestMeritA atomic.Uint64 // math.Float64bits of the best recorded merit; 0 = none
+	cycleA     atomic.Int64  // last cycle index this worker started
+	// retire is closed by the resource guard to request a graceful stop at the
+	// next cycle boundary. retireReason (when non-nil) is written by the guard
+	// before the close and read at exit to label the worker_retired event.
+	retire       <-chan struct{}
+	retireReason *string
+	dlsStop      <-chan struct{} // merged hard-stop+retire when mid_dls_stop
+	stopped      bool
 }
 
 // NewCycle creates an escape cycle bound to a wrapper and shared store.
@@ -84,10 +95,91 @@ func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed
 }
 
 // Escaped reports how many successful escape steps this cycle performed.
-func (c *Cycle) Escaped() int { return c.escaped }
+func (c *Cycle) Escaped() int { return int(c.escapedA.Load()) }
 
 // Recorded reports how many distinct minima this cycle recorded.
-func (c *Cycle) Recorded() int { return c.recorded }
+func (c *Cycle) Recorded() int { return int(c.recordedA.Load()) }
+
+// CycleCount reports the last cycle index this worker started.
+func (c *Cycle) CycleCount() int { return int(c.cycleA.Load()) }
+
+// BestMerit reports the best (lowest) merit this worker has recorded, or +Inf
+// when it has recorded none. It is read by the resource guard for worker
+// selection, so it is updated atomically on every record.
+func (c *Cycle) BestMerit() float64 {
+	bits := c.bestMeritA.Load()
+	if bits == 0 {
+		return math.Inf(1)
+	}
+	return math.Float64frombits(bits)
+}
+
+// SetRetire installs the resource guard's graceful-stop signal: once ch is
+// closed the cycle finishes the current cycle, records its result and returns.
+// reason (may be nil) is read when the worker_retired event is emitted. When
+// midDLS is true the running DLS solve is additionally aborted (the shared
+// hard-stop and ch are merged into one stop channel) instead of waiting for the
+// cycle boundary.
+func (c *Cycle) SetRetire(ch <-chan struct{}, reason *string, midDLS bool) {
+	c.retire = ch
+	c.retireReason = reason
+	if midDLS && ch != nil {
+		merged := make(chan struct{})
+		go func() {
+			select {
+			case <-ch:
+			case <-c.hardStop: // nil blocks forever, leaving ch as the only trigger
+			}
+			close(merged)
+		}()
+		c.dlsStop = merged
+	}
+}
+
+// stopCh returns the channel the DLS solve listens on (the merged stop channel
+// when mid_dls_stop is enabled, else the shared hard-stop).
+func (c *Cycle) stopCh() <-chan struct{} {
+	if c.dlsStop != nil {
+		return c.dlsStop
+	}
+	return c.hardStop
+}
+
+// noteRecorded increments the recorded-minimum counter and keeps the best-merit
+// high-water mark, atomically so the guard can read them concurrently.
+func (c *Cycle) noteRecorded(merit float64) {
+	c.recordedA.Add(1)
+	for {
+		cur := c.bestMeritA.Load()
+		if cur != 0 && math.Float64frombits(cur) <= merit {
+			return
+		}
+		if c.bestMeritA.CompareAndSwap(cur, math.Float64bits(merit)) {
+			return
+		}
+	}
+}
+
+// retireRequested reports whether the guard asked this worker to stop.
+func (c *Cycle) retireRequested() bool {
+	if c.retire == nil {
+		return false
+	}
+	select {
+	case <-c.retire:
+		return true
+	default:
+		return false
+	}
+}
+
+// retireReasonValue returns the guard-supplied reason (empty when unset).
+func (c *Cycle) retireReasonValue() string {
+	if c.retireReason == nil {
+		return ""
+	}
+	return *c.retireReason
+}
 
 // StoppedByTime reports whether the cycle was cut short by the time budget
 // (not by an external interrupt or a hard stop).
@@ -271,11 +363,27 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			c.stopped = true
 			break
 		}
+		// Resource guard graceful stop: finish at this cycle boundary (the
+		// previous cycle's result is already recorded) and report the reason
+		// plus the resource metrics that triggered it.
+		if c.retireRequested() {
+			c.retired = true
+			c.progress.Event("worker_retired", map[string]any{
+				"worker":     c.workerID,
+				"reason":     c.retireReasonValue(),
+				"cycle":      cyc,
+				"escaped":    c.Escaped(),
+				"recorded":   c.Recorded(),
+				"best_merit": c.BestMerit(),
+				"metrics":    resourceMetrics(),
+			})
+			break
+		}
 		// Step 1: escape exploration. Push away from every recorded minimum.
 		c.wrapper.SetEscapes(c.store.All())
 		c.wrapper.SetStartX(currentX)
 		c.wrapper.SetPhase(PhaseEscape)
-		c.wrapper.SetStop(c.hardStop)
+		c.wrapper.SetStop(c.stopCh())
 		phaseName := "escape_dls"
 		var escRes dls.Result
 		if c.explorer != nil {
@@ -335,7 +443,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			c.wrapper.SetEscapes(nil)
 			c.wrapper.SetStartX(escapedX)
 			c.wrapper.SetPhase(PhaseGlassSolve)
-			c.wrapper.SetStop(c.hardStop)
+			c.wrapper.SetStop(c.stopCh())
 			c.setPhase("glass_dls", cyc)
 			c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
 			glassRes := dls.Solve(c.wrapper)
@@ -401,7 +509,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		copy(cleanStartCopy, cleanStart)
 		c.wrapper.SetStartX(cleanStartCopy)
 		c.wrapper.SetPhase(PhaseClean) // leaves the glass phase (restores the variables)
-		c.wrapper.SetStop(c.hardStop)
+		c.wrapper.SetStop(c.stopCh())
 		c.setPhase("clean_dls", cyc)
 		c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
 		cleanRes := dls.Solve(c.wrapper)
@@ -461,7 +569,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			copy(retryCopy, escapedX)
 			c.wrapper.SetStartX(retryCopy)
 			c.wrapper.SetPhase(PhaseClean)
-			c.wrapper.SetStop(c.hardStop)
+			c.wrapper.SetStop(c.stopCh())
 			c.setPhase("clean_dls_retry", cyc)
 			c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
 			retryRes := dls.Solve(c.wrapper)
@@ -508,7 +616,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		}
 
 		c.failures = 0
-		c.escaped++
+		c.escapedA.Add(1)
 
 		trueMerit := c.wrapper.InnerMerit(trueX)
 
@@ -537,7 +645,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 
 		if c.store.IsNew(trueX) {
 			idx := c.store.Add(Point{X: trueX, Merit: trueMerit, Status: status, InvalidReason: invalidReason})
-			c.recorded++
+			c.noteRecorded(trueMerit)
 			c.progress.Event("minimum", map[string]any{
 				"cycle":          cyc,
 				"worker":         c.workerID,
@@ -632,7 +740,7 @@ func (c *Cycle) recordInterrupted(res dls.Result, cyc int, phase string) {
 	})
 	if c.store.IsNew(x) {
 		idx := c.store.Add(Point{X: x, Merit: m})
-		c.recorded++
+		c.noteRecorded(m)
 		c.progress.Event("minimum", map[string]any{
 			"cycle":  cyc,
 			"worker": c.workerID,
@@ -660,6 +768,27 @@ func (c *Cycle) recordInterrupted(res dls.Result, cyc int, phase string) {
 			"index":  nearest,
 			"merit":  m,
 		})
+	}
+}
+
+// Retired reports whether the resource guard retired this worker. It is only
+// safe to read from the worker's own goroutine (e.g. after Run returns).
+func (c *Cycle) Retired() bool { return c.retired }
+
+// resourceMetrics snapshots the process/system resource state for a JSONL event.
+func resourceMetrics() map[string]any {
+	s := resource.SampleNow()
+	return map[string]any{
+		"heap_alloc_mb":  s.HeapAllocMB,
+		"heap_sys_mb":    s.HeapSysMB,
+		"heap_inuse_mb":  s.HeapInuseMB,
+		"goroutines":     s.Goroutines,
+		"gc_count":       s.GCCount,
+		"gc_pause_ms":    s.GCPauseMS,
+		"cpu_sec":        s.CPUSeconds,
+		"pressure_level": s.PressureLevel,
+		"memory_level":   s.MemoryLevel,
+		"compaction":     s.CompactionActivity,
 	}
 }
 

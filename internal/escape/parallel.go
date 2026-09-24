@@ -12,19 +12,19 @@ import (
 // Result is the outcome of a parallel escape search: every discovered local
 // minimum ordered by merit, plus the parameters used.
 type Result struct {
-	Params            Params
-	Minima            []Point   // feasible local minima only
-	MinimaIdx         []int     // discovery-order store index of each minimum in Minima
-	InfeasibleBasins  []Point   // infeasible basins (not listed as solutions)
-	InfeasibleBasinIdx []int    // discovery-order store index of each basin
-	BestIdx           int
-	BestMerit         float64
-	Escapes           int
-	Workers           int
-	Cycles            int
-	MaxSeconds        float64
-	TimedOut          bool
-	Interrupted       bool
+	Params             Params
+	Minima             []Point // feasible local minima only
+	MinimaIdx          []int   // discovery-order store index of each minimum in Minima
+	InfeasibleBasins   []Point // infeasible basins (not listed as solutions)
+	InfeasibleBasinIdx []int   // discovery-order store index of each basin
+	BestIdx            int
+	BestMerit          float64
+	Escapes            int
+	Workers            int
+	Cycles             int
+	MaxSeconds         float64
+	TimedOut           bool
+	Interrupted        bool
 }
 
 // RunOptions configures a parallel escape search.
@@ -189,52 +189,71 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 	timedOut := false
 	var escMu sync.Mutex
 
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func(seed int64) {
-			defer wg.Done()
-			inner := newModel()
-			workerParams := params
-			wSpan := workerParams.WSpan
-			if wSpan <= 0 {
-				wSpan = 2.0
-			}
-			if numWorkers > 1 {
-				workerParams.W = workerParams.W * (1 + float64(seed)/float64(numWorkers-1)*(wSpan-1))
-			}
-			wrapper := NewWrapper(inner, workerParams)
-			wrapper.SetGlassPhase(opts.GlassPhase)
-			if opts.NewPhaseLog != nil {
-				wrapper.SetPhaseLog(opts.NewPhaseLog())
-			}
-			var explorer Explorer
-			if opts.NewExplorer != nil {
-				explorer = opts.NewExplorer(progress, seed)
-			}
-			cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop, opts.ValidateFn, explorer, opts.Debug)
+	// Per-worker graceful-retirement plumbing for the resource guard: each
+	// worker owns a retire channel the guard closes and a reason slot the guard
+	// fills before closing, so the worker_retired event can report why.
+	retires := make([]chan struct{}, numWorkers)
+	reasons := make([]string, numWorkers)
+	cycles := make([]*Cycle, numWorkers)
+	guardEnabled := cfg.ResourceGuard != nil && cfg.ResourceGuard.Enabled != nil && *cfg.ResourceGuard.Enabled
+	midDLS := guardEnabled && cfg.ResourceGuard.MidDLSStop
 
+	for i := 0; i < numWorkers; i++ {
+		seed := int64(i)
+		inner := newModel()
+		workerParams := params
+		wSpan := workerParams.WSpan
+		if wSpan <= 0 {
+			wSpan = 2.0
+		}
+		if numWorkers > 1 {
+			workerParams.W = workerParams.W * (1 + float64(seed)/float64(numWorkers-1)*(wSpan-1))
+		}
+		wrapper := NewWrapper(inner, workerParams)
+		wrapper.SetGlassPhase(opts.GlassPhase)
+		if opts.NewPhaseLog != nil {
+			wrapper.SetPhaseLog(opts.NewPhaseLog())
+		}
+		var explorer Explorer
+		if opts.NewExplorer != nil {
+			explorer = opts.NewExplorer(progress, seed)
+		}
+		retires[i] = make(chan struct{})
+		cycle := NewCycle(wrapper, store, workerParams, maxCycles, seed, progress, deadline, opts.Context, opts.HardStop, opts.ValidateFn, explorer, opts.Debug)
+		cycle.SetRetire(retires[i], &reasons[i], midDLS)
+		cycles[i] = cycle
+
+		wg.Add(1)
+		go func(seed int64, inner dls.Model, cyc *Cycle, perturbAmp float64) {
+			defer wg.Done()
 			x0 := inner.InitialState()
 			if seed != 0 {
-				x0 = cycle.perturb(x0, int(seed), workerParams.InitialPerturb)
+				x0 = cyc.perturb(x0, int(seed), perturbAmp)
 			}
-			cycle.Run(x0)
+			cyc.Run(x0)
 			progress.Event("worker_done", map[string]any{
 				"worker":      int(seed),
-				"escaped":     cycle.Escaped(),
-				"recorded":    cycle.Recorded(),
-				"interrupted": cycle.Interrupted(),
-				"timed_out":   cycle.StoppedByTime(),
+				"escaped":     cyc.Escaped(),
+				"recorded":    cyc.Recorded(),
+				"retired":     cyc.Retired(),
+				"interrupted": cyc.Interrupted(),
+				"timed_out":   cyc.StoppedByTime(),
 			})
 
 			escMu.Lock()
-			totalEscapes += cycle.Escaped()
-			if cycle.StoppedByTime() {
+			totalEscapes += cyc.Escaped()
+			if cyc.StoppedByTime() {
 				timedOut = true
 			}
 			escMu.Unlock()
-		}(int64(i))
+		}(seed, inner, cycle, workerParams.InitialPerturb)
+	}
+	guardDone := make(chan struct{})
+	if guard := newResourceGuard(cfg.ResourceGuard, progress, cycles, retires, reasons); guard != nil {
+		go guard.run(opts.Context, guardDone)
 	}
 	wg.Wait()
+	close(guardDone)
 
 	allPoints, allIdxs := store.SortedByMerit()
 

@@ -1040,6 +1040,51 @@ type EscapeConfig struct {
 	// A higher value (e.g. 64) checks throughput at finer sampling, preventing
 	// valid low-ray-count solutions from being rejected as infeasible.
 	ValidationNumRays int `yaml:"validation_num_rays,omitempty"`
+	// ResourceGuard enables the escape resource self-monitor: it samples the
+	// process and OS memory state and retires the least-productive worker, one
+	// at a time with a cooldown, when pressure builds up. Disabled unless the
+	// section is present with enabled: true.
+	ResourceGuard *ResourceGuardConfig `yaml:"resource_guard,omitempty"`
+}
+
+// ResourceGuardConfig configures the escape resource self-monitor. Every field
+// is optional; the defaults are noted per field.
+type ResourceGuardConfig struct {
+	Enabled *bool `yaml:"enabled,omitempty"`
+	// CheckSeconds is the internal sampling interval (default 60).
+	CheckSeconds float64 `yaml:"check_seconds,omitempty"`
+	// ReportSeconds is the regular `resource` event cadence (default 600, ten
+	// minutes). A material trend change emits an extra event immediately.
+	ReportSeconds float64 `yaml:"report_seconds,omitempty"`
+	// HeapCeilingMB triggers when the process HeapSys exceeds it. 0 = automatic
+	// (30 % of the physical RAM, falling back to 4096 MB when the RAM is
+	// unknown). It is the backstop behind the OS memory-pressure signal, so it
+	// sits high enough not to retire workers while the system is healthy.
+	HeapCeilingMB float64 `yaml:"heap_ceiling_mb,omitempty"`
+	// PressureLevel triggers when the OS memory-pressure level reaches it
+	// (macOS kern.memorystatus_vm_pressure_level: 1 normal, 2 warning,
+	// 4 critical; Linux derives an equivalent level from PSI; default 2).
+	// 0 disables the pressure condition. This is the primary signal.
+	PressureLevel uint32 `yaml:"pressure_level,omitempty"`
+	// PressureConsecutive is how many consecutive breaching checks the pressure
+	// condition requires (default 2). The primary signal reacts faster than the
+	// heap backstop, which uses Consecutive.
+	PressureConsecutive int `yaml:"pressure_consecutive,omitempty"`
+	// CompressionRate triggers when the compaction/swap activity rate (per
+	// second, OS-specific counter) exceeds it. 0 disables the condition.
+	CompressionRate float64 `yaml:"compression_rate,omitempty"`
+	// Consecutive is how many consecutive breaching checks the heap-ceiling and
+	// compaction backstops require (default 3).
+	Consecutive int `yaml:"consecutive,omitempty"`
+	// MinWorkers is the floor: the guard never retires below it. 0 = half the
+	// configured escape_workers.
+	MinWorkers int `yaml:"min_workers,omitempty"`
+	// RetireCooldownSeconds is the observation window after a retirement
+	// (default 600): at most one worker is retired per window.
+	RetireCooldownSeconds float64 `yaml:"retire_cooldown_seconds,omitempty"`
+	// MidDLSStop also aborts the running DLS solve of a retired worker instead
+	// of only stopping at the next cycle boundary (default false).
+	MidDLSStop bool `yaml:"mid_dls_stop,omitempty"`
 }
 
 // PSOConfig configures the Particle Swarm Optimization escape-function
