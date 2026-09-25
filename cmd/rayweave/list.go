@@ -2960,8 +2960,9 @@ type focusJSONListOutput struct {
 // those types carry yaml tags only (encoding/json would fall back to the Go
 // field names), so JSON output needs a parallel tagged shape.
 type focusJSONComparison struct {
-	MTF *focusJSONMTF `json:"mtf,omitempty"`
-	PSF *focusJSONPSF `json:"psf,omitempty"`
+	MTF          *focusJSONMTF          `json:"mtf,omitempty"`
+	PSF          *focusJSONPSF          `json:"psf,omitempty"`
+	ThroughFocus *focusJSONThroughFocus `json:"through_focus,omitempty"`
 }
 
 type focusJSONMTF struct {
@@ -3014,6 +3015,41 @@ type focusJSONPSFPlane struct {
 	BestFocusShiftMM  float64 `json:"best_focus_shift_mm,omitempty"`
 }
 
+type focusJSONThroughFocus struct {
+	Metric       string                 `json:"metric"`
+	From         float64                `json:"from"`
+	Step         float64                `json:"step"`
+	Count        int                    `json:"count"`
+	Frequencies  []float64              `json:"frequencies,omitempty"`
+	Polarization string                 `json:"polarization,omitempty"`
+	Scans        []focusJSONThroughScan `json:"scans"`
+}
+
+type focusJSONThroughScan struct {
+	Base        string                `json:"base"`
+	BaseShiftMM float64               `json:"base_shift_mm,omitempty"`
+	Rows        []focusJSONThroughRow `json:"rows"`
+}
+
+type focusJSONThroughRow struct {
+	FieldIndex int                  `json:"field_index"`
+	FieldAngle float64              `json:"field_angle"`
+	Wavelength float64              `json:"wavelength"`
+	Points     []focusJSONThroughPt `json:"points"`
+}
+
+type focusJSONThroughPt struct {
+	FocusMM           float64   `json:"focus_mm"`
+	Strehl            float64   `json:"strehl"`
+	FWHMX             float64   `json:"fwhm_x,omitempty"`
+	FWHMY             float64   `json:"fwhm_y,omitempty"`
+	EncircledEnergy50 float64   `json:"encircled_energy_50,omitempty"`
+	CentroidX         float64   `json:"centroid_x,omitempty"`
+	CentroidY         float64   `json:"centroid_y,omitempty"`
+	Sagittal          []float64 `json:"mtf_sagittal,omitempty"`
+	Tangential        []float64 `json:"mtf_tangential,omitempty"`
+}
+
 // focusToJSON converts a pipeline focus comparison to its json-tagged mirror.
 func focusToJSON(fc *types.FocusComparison) focusJSONComparison {
 	out := focusJSONComparison{}
@@ -3054,6 +3090,49 @@ func focusToJSON(fc *types.FocusComparison) focusJSONComparison {
 		}
 		out.PSF = p
 	}
+	if fc.ThroughFocus != nil {
+		out.ThroughFocus = focusJSONThroughFocusFrom(fc.ThroughFocus)
+	}
+	return out
+}
+
+func focusJSONThroughFocusFrom(tf *types.FocusThroughFocusComparison) *focusJSONThroughFocus {
+	if tf == nil {
+		return nil
+	}
+	out := &focusJSONThroughFocus{
+		Metric:       tf.Metric,
+		From:         tf.From,
+		Step:         tf.Step,
+		Count:        tf.Count,
+		Frequencies:  tf.Frequencies,
+		Polarization: tf.Polarization,
+	}
+	for _, s := range tf.Scans {
+		scan := focusJSONThroughScan{Base: s.Base, BaseShiftMM: s.BaseShiftMM}
+		for _, r := range s.Rows {
+			row := focusJSONThroughRow{
+				FieldIndex: r.FieldIndex,
+				FieldAngle: r.FieldAngle,
+				Wavelength: r.Wavelength,
+			}
+			for _, p := range r.Points {
+				row.Points = append(row.Points, focusJSONThroughPt{
+					FocusMM:           p.FocusMM,
+					Strehl:            p.Strehl,
+					FWHMX:             p.FWHMX,
+					FWHMY:             p.FWHMY,
+					EncircledEnergy50: p.EncircledEnergy50,
+					CentroidX:         p.CentroidX,
+					CentroidY:         p.CentroidY,
+					Sagittal:          p.Sagittal,
+					Tangential:        p.Tangential,
+				})
+			}
+			scan.Rows = append(scan.Rows, row)
+		}
+		out.Scans = append(out.Scans, scan)
+	}
 	return out
 }
 
@@ -3090,7 +3169,7 @@ func focusJSONPSFPlaneFrom(p *types.FocusPSFPlane) *focusJSONPSFPlane {
 // auto-detected; normally only one is present. It never re-computes anything.
 func listFocus(output types.Output, format string) {
 	fc := output.FocusComparison
-	if fc == nil || (fc.MTF == nil && fc.PSF == nil) {
+	if fc == nil || (fc.MTF == nil && fc.PSF == nil && fc.ThroughFocus == nil) {
 		switch format {
 		case "yaml":
 			os.Stdout.Write([]byte("focus_comparison: {}\n"))
@@ -3129,6 +3208,13 @@ func listFocus(output types.Output, format string) {
 				fmt.Println()
 			}
 			writeFocusPSFCSV(fc.PSF)
+			first = false
+		}
+		if fc.ThroughFocus != nil {
+			if !first {
+				fmt.Println()
+			}
+			writeFocusThroughFocusCSV(fc.ThroughFocus)
 		}
 	default: // "table"
 		if fc.MTF != nil {
@@ -3139,6 +3225,12 @@ func listFocus(output types.Output, format string) {
 				fmt.Println()
 			}
 			writeFocusPSFTable(os.Stdout, fc.PSF)
+		}
+		if fc.ThroughFocus != nil {
+			if fc.MTF != nil || fc.PSF != nil {
+				fmt.Println()
+			}
+			writeFocusThroughFocusTable(os.Stdout, fc.ThroughFocus)
 		}
 	}
 }
@@ -3213,6 +3305,58 @@ func writeFocusPSFCSV(c *types.FocusPSFComparison) {
 				strconv.FormatFloat(e.plane.BestFocusShiftMM, 'g', -1, 64),
 			}
 			fmt.Println(strings.Join(quoteCSV(cells), ","))
+		}
+	}
+}
+
+// writeFocusThroughFocusCSV flattens a through-focus scan to one row per
+// (base, row, focus plane).
+func writeFocusThroughFocusCSV(c *types.FocusThroughFocusComparison) {
+	fmt.Printf("Focus Comparison (through-focus %s):\n", c.Metric)
+	header := []string{"base", "base_shift_mm", "field_index", "field_angle", "wavelength", "focus_mm", "strehl"}
+	if c.Metric == "mtf" {
+		for _, f := range c.Frequencies {
+			header = append(header, fmt.Sprintf("mtf_sagittal_%g", f), fmt.Sprintf("mtf_tangential_%g", f))
+		}
+	} else {
+		header = append(header, "fwhm_x", "fwhm_y", "encircled_energy_50", "centroid_x", "centroid_y")
+	}
+	fmt.Println(strings.Join(quoteCSV(header), ","))
+	for _, s := range c.Scans {
+		for _, row := range s.Rows {
+			for _, p := range row.Points {
+				cells := []string{
+					s.Base,
+					strconv.FormatFloat(s.BaseShiftMM, 'g', -1, 64),
+					strconv.Itoa(row.FieldIndex),
+					strconv.FormatFloat(row.FieldAngle, 'g', -1, 64),
+					strconv.FormatFloat(row.Wavelength, 'g', -1, 64),
+					strconv.FormatFloat(p.FocusMM, 'g', -1, 64),
+					strconv.FormatFloat(p.Strehl, 'g', -1, 64),
+				}
+				if c.Metric == "mtf" {
+					for i := range c.Frequencies {
+						sag, tan := math.NaN(), math.NaN()
+						if i < len(p.Sagittal) {
+							sag = p.Sagittal[i]
+						}
+						if i < len(p.Tangential) {
+							tan = p.Tangential[i]
+						}
+						cells = append(cells,
+							strconv.FormatFloat(sag, 'g', -1, 64),
+							strconv.FormatFloat(tan, 'g', -1, 64))
+					}
+				} else {
+					cells = append(cells,
+						strconv.FormatFloat(p.FWHMX, 'g', -1, 64),
+						strconv.FormatFloat(p.FWHMY, 'g', -1, 64),
+						strconv.FormatFloat(p.EncircledEnergy50, 'g', -1, 64),
+						strconv.FormatFloat(p.CentroidX, 'g', -1, 64),
+						strconv.FormatFloat(p.CentroidY, 'g', -1, 64))
+				}
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
 		}
 	}
 }

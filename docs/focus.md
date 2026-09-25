@@ -122,6 +122,50 @@ metric set (`strehl`, `fwhm_x`, `fwhm_y`, `encircled_energy_50`, `centroid_x`,
 
 The `clean` command strips `focus_comparison`.
 
+## Through-focus
+
+Both sub-subcommands accept a through-focus scan, which replaces the plane
+comparison:
+
+```sh
+rayweave focus psf --through-focus 0,0.01,10 < lens.yaml | rayweave list focus
+rayweave focus mtf --frequencies 30,50 --through-focus -0.05,0.01,11 --planes all < lens.yaml | rayweave list focus
+```
+
+- `--through-focus FROM,STEP,COUNT` (mm, mm, number of planes; YAML
+  `focus.mtf.through_focus` / `focus.psf.through_focus`) scans `COUNT` image
+  planes at `FROM + i*STEP`, `i = 0..COUNT-1`. `0,0.01,10` gives the 10 planes
+  0.00 … 0.09 mm.
+- `--planes` selects the base plane(s) the scan is measured from: `file`
+  (default), `all` (the single all-field best focus), `on_axis` (the on-axis
+  best focus). The per-field `best` base is rejected. One scan is produced per
+  requested base; `focus_mm` is relative to that base and `base_shift_mm` records
+  the base's shift from the file plane.
+- The result is `focus_comparison.through_focus` (`metric`, `from`, `step`,
+  `count`, optional `frequencies`, `scans[]`), rendered by `list focus`
+  (table/yaml/json/csv). `clean` strips it.
+
+```yaml
+focus_comparison:
+  through_focus:
+    metric: psf
+    from: 0
+    step: 0.01
+    count: 3
+    polarization: RCP
+    scans:
+      - base: file
+        rows:
+          - field_index: 0
+            field_angle: 0
+            wavelength: 0.0005876
+            points:
+              - {focus_mm: 0, strehl: 0.958, fwhm_x: 0.0041, ...}
+```
+
+A scan costs `bases × fields × wavelengths × count` `psf` evaluations; keep
+`count` and the field/wavelength set small for interactive use.
+
 ## Viewing the result — `list focus`
 
 `focus` writes no table to stderr. Pipe its output into the `list focus`

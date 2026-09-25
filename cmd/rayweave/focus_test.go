@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 
@@ -372,5 +373,122 @@ func TestListAllIncludesFocus(t *testing.T) {
 	text := string(runCommand(t, []string{"rayweave", "list", "all"}, func() { runList(pipeline) }))
 	if !strings.Contains(text, "focus psf: PSF comparison") {
 		t.Error("list all did not include the focus target")
+	}
+}
+
+// TestParseThroughFocus verifies the FROM,STEP,COUNT parser and its validation.
+func TestParseThroughFocus(t *testing.T) {
+	tf, err := parseThroughFocus("0,0.01,10")
+	if err != nil {
+		t.Fatalf("parseThroughFocus: %v", err)
+	}
+	if tf.From != 0 || tf.Step != 0.01 || tf.Count != 10 {
+		t.Errorf("parsed = %+v, want {0 0.01 10}", tf)
+	}
+	for _, bad := range []string{"0,0.01", "0,0.01,0", "0,0,5", "a,0.01,3", "0,1.0.2,3"} {
+		if _, err := parseThroughFocus(bad); err == nil {
+			t.Errorf("%q must error", bad)
+		}
+	}
+	// A single plane may use step 0.
+	if _, err := parseThroughFocus("0,0,1"); err != nil {
+		t.Errorf("count=1 step=0 must be accepted: %v", err)
+	}
+}
+
+// TestParseThroughFocusPlanes verifies the base-plane selector: default file,
+// canonical order, and the per-field best-plane rejection.
+func TestParseThroughFocusPlanes(t *testing.T) {
+	if _, err := parseThroughFocusPlanes("best", nil); err == nil {
+		t.Error("best must be rejected as a through-focus base")
+	}
+	if _, err := parseThroughFocusPlanes("sideways", nil); err == nil {
+		t.Error("unknown base must be rejected")
+	}
+	got, err := parseThroughFocusPlanes("", nil)
+	if err != nil || len(got) != 1 || got[0] != "file" {
+		t.Errorf("default = %v (err %v), want [file]", got, err)
+	}
+	got, err = parseThroughFocusPlanes("on_axis,all", nil)
+	if err != nil || len(got) != 2 || got[0] != "all" || got[1] != "on_axis" {
+		t.Errorf("order = %v (err %v), want [all on_axis]", got, err)
+	}
+}
+
+// TestFocusThroughFocusPSF verifies the through-focus PSF scan shape: one scan
+// per requested base plane, `count` points at from + i*step, and the base
+// plane's shift (0 for file, nonzero for all).
+func TestFocusThroughFocusPSF(t *testing.T) {
+	args := []string{"rayweave", "focus", "psf", "--through-focus", "0,0.01,3", "--planes", "file,all", "--num-rays", "24", "--psf-grid", "24"}
+	out := runCommand(t, args, func() {
+		runFocusPSF([]byte(focusInput("")), []string{"--through-focus", "0,0.01,3", "--planes", "file,all", "--num-rays", "24", "--psf-grid", "24"})
+	})
+	var res types.Output
+	if err := yaml.Unmarshal(out, &res); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if res.FocusComparison == nil || res.FocusComparison.ThroughFocus == nil {
+		t.Fatal("focus_comparison.through_focus missing")
+	}
+	tf := res.FocusComparison.ThroughFocus
+	if tf.Metric != "psf" || tf.From != 0 || tf.Step != 0.01 || tf.Count != 3 {
+		t.Errorf("header = %+v, want psf 0 0.01 3", tf)
+	}
+	if len(tf.Scans) != 2 || tf.Scans[0].Base != "file" || tf.Scans[1].Base != "all" {
+		t.Fatalf("scans = %+v, want bases [file all]", tf.Scans)
+	}
+	if tf.Scans[0].BaseShiftMM != 0 {
+		t.Errorf("file base shift = %v, want 0", tf.Scans[0].BaseShiftMM)
+	}
+	if tf.Scans[1].BaseShiftMM == 0 {
+		t.Error("all base shift = 0, want the all-field best-focus shift")
+	}
+	for _, s := range tf.Scans {
+		if len(s.Rows) == 0 {
+			t.Fatalf("base %s: no rows", s.Base)
+		}
+		for _, row := range s.Rows {
+			if len(row.Points) != 3 {
+				t.Fatalf("base %s field %d: points = %d, want 3", s.Base, row.FieldIndex, len(row.Points))
+			}
+			for i, p := range row.Points {
+				want := float64(i) * 0.01
+				if math.Abs(p.FocusMM-want) > 1e-12 {
+					t.Errorf("focus_mm = %v, want %v", p.FocusMM, want)
+				}
+				if p.Strehl <= 0 || p.Strehl > 1 {
+					t.Errorf("strehl = %v, want in (0,1]", p.Strehl)
+				}
+			}
+		}
+	}
+	// Write-back: the effective through_focus and base planes land in focus.psf.
+	if res.Focus == nil || res.Focus.PSF == nil || res.Focus.PSF.ThroughFocus == nil {
+		t.Fatal("focus.psf.through_focus not written back")
+	}
+	if len(res.Focus.PSF.Planes) != 2 {
+		t.Errorf("focus.psf.planes = %v, want 2 base planes", res.Focus.PSF.Planes)
+	}
+}
+
+// TestListFocusThroughFocus verifies `list focus` renders a through-focus scan
+// (table and csv).
+func TestListFocusThroughFocus(t *testing.T) {
+	pipeline := runCommand(t, []string{"rayweave", "focus", "psf", "--through-focus", "0,0.01,2", "--num-rays", "24", "--psf-grid", "24"},
+		func() {
+			runFocusPSF([]byte(focusInput("")), []string{"--through-focus", "0,0.01,2", "--num-rays", "24", "--psf-grid", "24"})
+		})
+	text := string(runListFocus(t, pipeline))
+	for _, want := range []string{"through-focus", "focus_mm", "base"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("list focus table missing %q:\n%s", want, text)
+		}
+	}
+	csvText := string(runListFocus(t, pipeline, "--format", "csv"))
+	if !strings.Contains(csvText, "Focus Comparison (through-focus psf):") {
+		t.Errorf("csv missing header:\n%s", csvText)
+	}
+	if !strings.Contains(csvText, "base,base_shift_mm,field_index") {
+		t.Errorf("csv missing columns:\n%s", csvText)
 	}
 }

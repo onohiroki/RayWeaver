@@ -646,6 +646,12 @@ Plane names: `file`, `focus_plane_all` (the single all-field best focus), and
 `best_focus` (each field's own best focus). `focus mtf` adds one
 `MTF<f>(sag/tan)` column per reported frequency.
 
+A `through_focus` section (from `focus ... --through-focus FROM,STEP,COUNT`)
+renders one row per (base, field, wavelength, `focus_mm`): a `base` column and a
+`focus_mm` column replace the plane blocks. Bases are `file` / `all` /
+`on_axis`; `focus mtf` adds the MTF pair columns and `focus psf` the FWHM /
+EE50 / centroid columns.
+
 ### CSV
 
 `--format csv` flattens one row per (row, plane):

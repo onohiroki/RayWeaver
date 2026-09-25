@@ -1265,8 +1265,14 @@ Planes (--planes file,all,best; default: all three):
          the plane a saved escape/optimize minimum carries
   best   each field's own best focus (removes field-curvature defocus)
 
+Through-focus (--through-focus FROM,STEP,COUNT): replaces the plane comparison
+with a scan of COUNT planes at FROM + i*STEP (mm). --planes then selects the
+base plane(s) the scan is measured from: file (default) | all | on_axis (the
+on-axis best focus); the per-field best base is rejected. One scan is produced
+per base; focus_mm is relative to that base.
+
 Sub-subcommands:
-  focus mtf   MTF (with Strehl/FWHM) at the requested spatial frequencies,
+  focus mtf   MTF (with Strehl) at the requested spatial frequencies,
               tabulated per (field, wavelength) x plane.
   focus psf   PSF metrics (Strehl, FWHM, encircled energy, centroid) per
               (field, wavelength) x plane.
@@ -1278,7 +1284,11 @@ Options (both sub-subcommands):
   --wavelengths W1,...  wavelengths in mm (default: config wavelengths,
                           else the chief reference wavelength)
   --fields I1,I2,...    field indices to compare (default: all)
-  --planes LIST         file,all,best (default: all three)
+  --planes LIST         file,all,best (default: all three); with
+                          --through-focus: base planes file,all,on_axis
+                          (default: file)
+  --through-focus F,S,N through-focus scan FROM,STEP,COUNT (mm, number of
+                          planes); scans around each base plane in --planes
   --num-rays N          pupil grid rays (default 400)
   --psf-grid N          image-plane pixels per side (default 64)
   --ref-surface N       reference surface ID for wavefront sampling
@@ -1299,11 +1309,13 @@ Input YAML — focus section (optional; flags override):
       planes: [file, all, best]
     psf:
       planes: [all, best]
+      through_focus: {from: 0.0, step: 0.01, count: 10}
 
 Output: augmented YAML with a focus_comparison section holding the mtf or psf
 table (rows = field x wavelength, each with the file / focus_plane_all /
-best_focus plane blocks). No table is printed to stderr; pipe the output into
-"rayweave list focus" for a human-readable comparison.
+best_focus plane blocks), or a through_focus scan when --through-focus is
+given. No table is printed to stderr; pipe the output into "rayweave list
+focus" for a human-readable comparison.
 `)
 	case "wavefront":
 		fmt.Print(`Usage: rayweave wavefront [flags] < pipeline.yaml
@@ -1560,9 +1572,10 @@ and implies --auto-aperture, --all-glasses, and --roles):
              merit, file), per-minimum element powers, and the best solution.
              File directory is shown when all minima share the same path.
   focus      image-plane comparison results from focus_comparison (requires
-             focus mtf / focus psf output). Auto-detects the mtf or psf
-             sub-section and renders the per-(field, wavelength) x plane table
-             (file / focus_plane_all / best_focus), plus the MTF or PSF metrics.
+             focus mtf / focus psf output). Auto-detects the mtf, psf or
+             through_focus sub-section and renders the per-(field, wavelength)
+             x plane table (file / focus_plane_all / best_focus), the through-
+             focus scan (base x focus_mm), plus the MTF or PSF metrics.
 
 Options:
   --format table|yaml|json|csv   output format (default table)

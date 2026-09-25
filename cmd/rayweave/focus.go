@@ -56,6 +56,7 @@ type focusFlags struct {
 	wavelengths  string
 	polarization string
 	planes       string
+	throughFocus string
 }
 
 // registerFocusFlags declares the flags shared by `focus mtf` and `focus psf`.
@@ -70,7 +71,8 @@ func registerFocusFlags(fs *flag.FlagSet) *focusFlags {
 	fs.StringVar(&fl.fields, "fields", "", "comma-separated field indices to compute (default: all)")
 	fs.StringVar(&fl.wavelengths, "wavelengths", "", "comma-separated wavelengths in mm (default: config wavelengths, else reference)")
 	fs.StringVar(&fl.polarization, "polarization", "", "input polarization: RCP (default) | LCP | X | Y | RCP+LCP")
-	fs.StringVar(&fl.planes, "planes", "", "planes to compare: file,all,best (default: all three)")
+	fs.StringVar(&fl.planes, "planes", "", "planes to compare: file,all,best (default: all three); with --through-focus: base planes file,all,on_axis (default: file)")
+	fs.StringVar(&fl.throughFocus, "through-focus", "", "through-focus scan FROM,STEP,COUNT (mm, number of planes); scans around each base plane in --planes")
 	fs.String("converge-check", "", "label sampling convergence by re-evaluating at 1.5x rays (default: off; true|false)")
 	return fl
 }
@@ -85,6 +87,7 @@ type focusYAML struct {
 	polarization     string
 	referenceSurface int
 	convergeCheck    *bool
+	throughFocus     *types.FocusThroughFocus
 }
 
 func focusYAMLFromMTF(c *types.FocusMTFConfig) focusYAML {
@@ -95,6 +98,7 @@ func focusYAMLFromMTF(c *types.FocusMTFConfig) focusYAML {
 		wavelengths: c.Wavelengths, fields: c.Fields, planes: c.Planes,
 		numRays: c.NumRays, gridSize: c.GridSize, polarization: c.Polarization,
 		referenceSurface: c.ReferenceSurface, convergeCheck: c.ConvergeCheck,
+		throughFocus: c.ThroughFocus,
 	}
 }
 
@@ -106,6 +110,7 @@ func focusYAMLFromPSF(c *types.FocusPSFConfig) focusYAML {
 		wavelengths: c.Wavelengths, fields: c.Fields, planes: c.Planes,
 		numRays: c.NumRays, gridSize: c.GridSize, polarization: c.Polarization,
 		referenceSurface: c.ReferenceSurface, convergeCheck: c.ConvergeCheck,
+		throughFocus: c.ThroughFocus,
 	}
 }
 
@@ -134,8 +139,10 @@ type focusKey struct {
 
 // buildFocusRun performs the shared CLI-over-YAML resolution for a focus
 // sub-subcommand. y carries the sub-subcommand's YAML section on the common
-// shape; fl the parsed flags.
-func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML) *focusRun {
+// shape; fl the parsed flags. planeFn resolves the plane set: the file/all/best
+// comparison for a normal run, or the file/all/on_axis base planes for a
+// through-focus scan.
+func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func(flagVal string, yamlPlanes []string) ([]string, error)) *focusRun {
 	gc, _ := loadCatalogs(input, fl.glassDir)
 	writeBackGlassDir(input, fl.glassDir)
 
@@ -206,7 +213,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML) *focusRun {
 		polLabels = []string{string(types.PolRCP)}
 	}
 
-	planes, err := parseFocusPlanes(fl.planes, y.planes)
+	planes, err := planeFn(fl.planes, y.planes)
 	if err != nil {
 		errOut("Error: %s", err)
 		os.Exit(1)
@@ -310,6 +317,169 @@ func parseFocusPlanes(flagVal string, yamlPlanes []string) ([]string, error) {
 		}
 	}
 	return ordered, nil
+}
+
+// parseThroughFocusPlanes resolves the base-plane list for a through-focus
+// scan: file (default) | all | on_axis. The per-field `best` plane is not a
+// valid scan base and is rejected.
+func parseThroughFocusPlanes(flagVal string, yamlPlanes []string) ([]string, error) {
+	spec := flagVal
+	if spec == "" {
+		spec = strings.Join(yamlPlanes, ",")
+	}
+	if strings.TrimSpace(spec) == "" {
+		return []string{"file"}, nil
+	}
+	seen := make(map[string]bool)
+	for _, tok := range strings.Split(spec, ",") {
+		p := strings.ToLower(strings.TrimSpace(tok))
+		switch p {
+		case "file", "all", "on_axis":
+			seen[p] = true
+		case "best":
+			return nil, fmt.Errorf("through-focus does not support the per-field best plane (use file, all or on_axis)")
+		default:
+			return nil, fmt.Errorf("invalid through-focus base %q (want file|all|on_axis)", tok)
+		}
+	}
+	if len(seen) == 0 {
+		return []string{"file"}, nil
+	}
+	ordered := make([]string, 0, 3)
+	for _, p := range []string{"file", "all", "on_axis"} {
+		if seen[p] {
+			ordered = append(ordered, p)
+		}
+	}
+	return ordered, nil
+}
+
+// parseThroughFocus parses a FROM,STEP,COUNT through-focus spec (mm, mm,
+// number of planes).
+func parseThroughFocus(spec string) (*types.FocusThroughFocus, error) {
+	parts := strings.Split(spec, ",")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("--through-focus needs FROM,STEP,COUNT (got %q)", spec)
+	}
+	from, err := strconv.ParseFloat(strings.TrimSpace(parts[0]), 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --through-focus FROM %q", parts[0])
+	}
+	step, err := strconv.ParseFloat(strings.TrimSpace(parts[1]), 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid --through-focus STEP %q", parts[1])
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(parts[2]))
+	if err != nil {
+		return nil, fmt.Errorf("invalid --through-focus COUNT %q", parts[2])
+	}
+	if count < 1 {
+		return nil, fmt.Errorf("--through-focus COUNT must be >= 1 (got %d)", count)
+	}
+	if count > 1 && step <= 0 {
+		return nil, fmt.Errorf("--through-focus STEP must be > 0 when COUNT > 1 (got %g)", step)
+	}
+	return &types.FocusThroughFocus{From: from, Step: step, Count: count}, nil
+}
+
+// resolveThroughFocus resolves the through-focus scan: an explicit flag wins
+// over the YAML section; nil means a normal plane comparison.
+func resolveThroughFocus(fl *focusFlags, y focusYAML) *types.FocusThroughFocus {
+	if strings.TrimSpace(fl.throughFocus) != "" {
+		tf, err := parseThroughFocus(fl.throughFocus)
+		if err != nil {
+			errOut("Error: %s", err)
+			os.Exit(1)
+		}
+		return tf
+	}
+	return y.throughFocus
+}
+
+// throughFocusBaseShift returns the base plane's image-plane shift from the
+// file plane (mm): 0 for file, the all-field best-focus shift for all, the
+// on-axis best-focus shift for on_axis. The shift is read from the back-focus
+// solve applied to a copy, so the run's surfaces are not modified.
+func throughFocusBaseShift(run *focusRun, base string) float64 {
+	switch base {
+	case "all", "on_axis":
+	default:
+		return 0
+	}
+	weight := "uniform"
+	if base == "on_axis" {
+		weight = "on_axis_only"
+	}
+	surfaces := append([]types.Surface(nil), run.baseSurfaces...)
+	before := append([]types.Surface(nil), surfaces...)
+	bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: weight,
+		NumRays: effectivePSFNumRays(run.psfOpts.NumRays)}
+	optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", run.stopSurface,
+		run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc)
+	return maxThicknessDelta(before, surfaces)
+}
+
+// computeThroughFocus runs the through-focus scan: Count planes at
+// From + i*Step (mm) around every base plane in run.planes. metric is "psf" or
+// "mtf"; freqs are the MTF frequencies (metric == "mtf").
+func computeThroughFocus(run *focusRun, tf *types.FocusThroughFocus, metric string, freqs []float64) *types.FocusThroughFocusComparison {
+	opts := run.psfOpts
+	if metric == "mtf" {
+		opts.MTFCfg = &types.PSFMTFConfig{Frequencies: freqs}
+	}
+	system := types.System{Surfaces: run.baseSurfaces, StopSurface: run.stopSurface}
+	comp := &types.FocusThroughFocusComparison{
+		Metric:       metric,
+		From:         tf.From,
+		Step:         tf.Step,
+		Count:        tf.Count,
+		Polarization: strings.Join(run.polLabels, ","),
+	}
+	if metric == "mtf" {
+		comp.Frequencies = freqs
+	}
+	for _, base := range run.planes {
+		baseShift := throughFocusBaseShift(run, base)
+		scan := types.FocusThroughFocusScan{Base: base, BaseShiftMM: baseShift}
+		index := make(map[focusKey]int)
+		for i := 0; i < tf.Count; i++ {
+			focusMM := tf.From + float64(i)*tf.Step
+			o := opts
+			o.PlaneShift = baseShift + focusMM
+			results, err := psf.Compute(system, run.gc, run.fields, run.wavelengths, o)
+			if err != nil {
+				errOut("Error: %v", err)
+				os.Exit(1)
+			}
+			for _, r := range results {
+				k := focusKey{r.FieldIndex, r.Wavelength, r.Polarization}
+				idx, ok := index[k]
+				if !ok {
+					idx = len(scan.Rows)
+					index[k] = idx
+					scan.Rows = append(scan.Rows, types.FocusThroughFocusRow{
+						FieldIndex: r.FieldIndex,
+						FieldAngle: r.FieldAngle,
+						Wavelength: r.Wavelength,
+					})
+				}
+				pt := types.FocusThroughFocusPoint{FocusMM: focusMM, Strehl: r.Strehl}
+				if metric == "mtf" {
+					pt.Sagittal = mtfAxisValues(r.MTF, true, freqs)
+					pt.Tangential = mtfAxisValues(r.MTF, false, freqs)
+				} else {
+					pt.FWHMX = r.FWHMX
+					pt.FWHMY = r.FWHMY
+					pt.EncircledEnergy50 = r.Encircled50
+					pt.CentroidX = r.CentroidX
+					pt.CentroidY = r.CentroidY
+				}
+				scan.Rows[idx].Points = append(scan.Rows[idx].Points, pt)
+			}
+		}
+		comp.Scans = append(comp.Scans, scan)
+	}
+	return comp
 }
 
 // focusPlaneLabel maps a plane selector to its output key.
@@ -431,9 +601,21 @@ func runFocusMTF(data []byte, args []string) {
 	if input.Focus != nil {
 		mtfCfg = input.Focus.MTF
 	}
-	run := buildFocusRun(&input, fl, focusYAMLFromMTF(mtfCfg))
-
+	y := focusYAMLFromMTF(mtfCfg)
 	freqs := focusFrequencies(*freqFlag, mtfCfg)
+
+	if tf := resolveThroughFocus(fl, y); tf != nil {
+		run := buildFocusRun(&input, fl, y, parseThroughFocusPlanes)
+		comp := computeThroughFocus(run, tf, "mtf", freqs)
+		writeBackFocusMTF(&input, run, freqs)
+		input.Focus.MTF.ThroughFocus = tf
+		output := types.Output{Input: input, FocusComparison: &types.FocusComparison{ThroughFocus: comp}}
+		withOutputMetadata(&output.Input, "focus mtf", subcmdArgs())
+		writeYAML(&output)
+		return
+	}
+
+	run := buildFocusRun(&input, fl, y, parseFocusPlanes)
 	run.psfOpts.MTFCfg = &types.PSFMTFConfig{Frequencies: freqs}
 
 	byPlane, order, shiftAll, err := computeFocusPlanes(run)
@@ -477,7 +659,20 @@ func runFocusPSF(data []byte, args []string) {
 	if input.Focus != nil {
 		psfCfg = input.Focus.PSF
 	}
-	run := buildFocusRun(&input, fl, focusYAMLFromPSF(psfCfg))
+	y := focusYAMLFromPSF(psfCfg)
+
+	if tf := resolveThroughFocus(fl, y); tf != nil {
+		run := buildFocusRun(&input, fl, y, parseThroughFocusPlanes)
+		comp := computeThroughFocus(run, tf, "psf", nil)
+		writeBackFocusPSF(&input, run)
+		input.Focus.PSF.ThroughFocus = tf
+		output := types.Output{Input: input, FocusComparison: &types.FocusComparison{ThroughFocus: comp}}
+		withOutputMetadata(&output.Input, "focus psf", subcmdArgs())
+		writeYAML(&output)
+		return
+	}
+
+	run := buildFocusRun(&input, fl, y, parseFocusPlanes)
 
 	byPlane, order, shiftAll, err := computeFocusPlanes(run)
 	if err != nil {
@@ -737,6 +932,60 @@ func writeFocusPSFTable(w io.Writer, c *types.FocusPSFComparison) {
 				row.FieldIndex, row.FieldAngle, row.Wavelength*1e6, e.name,
 				e.plane.Strehl, e.plane.FWHMX, e.plane.FWHMY,
 				e.plane.EncircledEnergy50, e.plane.CentroidX, e.plane.CentroidY)
+		}
+	}
+}
+
+// throughFocusBaseNames lists the scan bases in order (file, all, on_axis).
+func throughFocusBaseNames(c *types.FocusThroughFocusComparison) string {
+	names := make([]string, len(c.Scans))
+	for i, s := range c.Scans {
+		names[i] = s.Base
+	}
+	return strings.Join(names, ", ")
+}
+
+// writeFocusThroughFocusTable writes a human-readable through-focus scan to w
+// (see writeFocusMTFTable).
+func writeFocusThroughFocusTable(w io.Writer, c *types.FocusThroughFocusComparison) {
+	fmt.Fprintf(w, "focus %s: through-focus (from %.3f, step %.3f, count %d, bases: %s, polarization: %s)\n",
+		c.Metric, c.From, c.Step, c.Count, throughFocusBaseNames(c), c.Polarization)
+	if c.Metric == "mtf" {
+		header := fmt.Sprintf("  %-8s %-4s %-7s %-9s %-9s %-8s", "base", "fld", "angle", "wl(nm)", "focus_mm", "strehl")
+		for _, f := range c.Frequencies {
+			header += fmt.Sprintf("  %-14s", fmt.Sprintf("MTF%.0f(sag/tan)", f))
+		}
+		fmt.Fprintln(w, header)
+		for _, s := range c.Scans {
+			for _, row := range s.Rows {
+				for _, p := range row.Points {
+					line := fmt.Sprintf("  %-8s %-4d %-7.2f %-9.1f %-9.3f %-8.4f",
+						s.Base, row.FieldIndex, row.FieldAngle, row.Wavelength*1e6, p.FocusMM, p.Strehl)
+					for i := range c.Frequencies {
+						sag, tan := math.NaN(), math.NaN()
+						if i < len(p.Sagittal) {
+							sag = p.Sagittal[i]
+						}
+						if i < len(p.Tangential) {
+							tan = p.Tangential[i]
+						}
+						line += fmt.Sprintf("  %-14s", fmt.Sprintf("%.3f/%.3f", sag, tan))
+					}
+					fmt.Fprintln(w, line)
+				}
+			}
+		}
+		return
+	}
+	fmt.Fprintf(w, "  %-8s %-4s %-7s %-9s %-9s %-8s %-9s %-9s %-10s %-10s %-10s\n",
+		"base", "fld", "angle", "wl(nm)", "focus_mm", "strehl", "fwhm_x", "fwhm_y", "ee50", "centroid_x", "centroid_y")
+	for _, s := range c.Scans {
+		for _, row := range s.Rows {
+			for _, p := range row.Points {
+				fmt.Fprintf(w, "  %-8s %-4d %-7.2f %-9.1f %-9.3f %-8.4f %-9.5f %-9.5f %-10.5f %-10.4f %-10.4f\n",
+					s.Base, row.FieldIndex, row.FieldAngle, row.Wavelength*1e6, p.FocusMM, p.Strehl,
+					p.FWHMX, p.FWHMY, p.EncircledEnergy50, p.CentroidX, p.CentroidY)
+			}
 		}
 	}
 }

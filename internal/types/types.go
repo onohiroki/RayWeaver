@@ -2024,6 +2024,10 @@ type FocusMTFConfig struct {
 	// ray count. The focus commands default it OFF (the comparison is about the
 	// plane, not the sampling); a nil pointer keeps the default.
 	ConvergeCheck *bool `yaml:"converge_check,omitempty"`
+	// ThroughFocus, when set, replaces the plane comparison with a
+	// through-focus scan (From/Step/Count planes, mm) around each base plane
+	// listed in Planes. The bases are limited to file / all / on_axis.
+	ThroughFocus *FocusThroughFocus `yaml:"through_focus,omitempty"`
 }
 
 // FocusPSFConfig configures `focus psf`: the PSF metrics (Strehl, FWHM,
@@ -2037,6 +2041,18 @@ type FocusPSFConfig struct {
 	Polarization     string    `yaml:"polarization,omitempty"`
 	ReferenceSurface int       `yaml:"reference_surface,omitempty"`
 	ConvergeCheck    *bool     `yaml:"converge_check,omitempty"`
+	// ThroughFocus, when set, replaces the plane comparison with a
+	// through-focus scan (From/Step/Count planes, mm) around each base plane
+	// listed in Planes. The bases are limited to file / all / on_axis.
+	ThroughFocus *FocusThroughFocus `yaml:"through_focus,omitempty"`
+}
+
+// FocusThroughFocus defines a through-focus scan: Count image planes at
+// From + i*Step (mm, relative to the scan's base plane), i = 0..Count-1.
+type FocusThroughFocus struct {
+	From  float64 `yaml:"from"`
+	Step  float64 `yaml:"step"`
+	Count int     `yaml:"count"`
 }
 
 // WavefrontConfig configures the `wavefront` subcommand (the `wavefront:`
@@ -2133,11 +2149,62 @@ type PSFResult struct {
 }
 
 // FocusComparison is the pipeline result of a `focus` sub-subcommand: the
-// plane-comparison table under either the MTF or the PSF metric set. Exactly
-// one of MTF/PSF is populated, matching the sub-subcommand that ran.
+// plane-comparison table under either the MTF or the PSF metric set, or a
+// through-focus scan. Exactly one of MTF/PSF/ThroughFocus is populated.
 type FocusComparison struct {
-	MTF *FocusMTFComparison `yaml:"mtf,omitempty"`
-	PSF *FocusPSFComparison `yaml:"psf,omitempty"`
+	MTF          *FocusMTFComparison          `yaml:"mtf,omitempty"`
+	PSF          *FocusPSFComparison          `yaml:"psf,omitempty"`
+	ThroughFocus *FocusThroughFocusComparison `yaml:"through_focus,omitempty"`
+}
+
+// FocusThroughFocusComparison is the `focus mtf|psf --through-focus` result: a
+// scan of Count image planes at From + i*Step (mm, relative to each scan's base
+// plane) around every requested base plane.
+type FocusThroughFocusComparison struct {
+	// Metric is "psf" or "mtf".
+	Metric string  `yaml:"metric"`
+	From   float64 `yaml:"from"`
+	Step   float64 `yaml:"step"`
+	Count  int     `yaml:"count"`
+	// Frequencies are the reported MTF frequencies (cycles/mm); present for
+	// metric == "mtf".
+	Frequencies  []float64               `yaml:"frequencies,omitempty"`
+	Polarization string                  `yaml:"polarization,omitempty"`
+	Scans        []FocusThroughFocusScan `yaml:"scans"`
+}
+
+// FocusThroughFocusScan is the through-focus scan around one base plane.
+type FocusThroughFocusScan struct {
+	// Base is the base plane selector: file | all | on_axis.
+	Base string `yaml:"base"`
+	// BaseShiftMM is the base plane's image-plane shift from the file plane
+	// (mm); 0 for file.
+	BaseShiftMM float64                `yaml:"base_shift_mm,omitempty"`
+	Rows        []FocusThroughFocusRow `yaml:"rows"`
+}
+
+// FocusThroughFocusRow is one (field, wavelength) scan row: one point per
+// scanned plane.
+type FocusThroughFocusRow struct {
+	FieldIndex int                      `yaml:"field_index"`
+	FieldAngle float64                  `yaml:"field_angle"`
+	Wavelength float64                  `yaml:"wavelength"`
+	Points     []FocusThroughFocusPoint `yaml:"points"`
+}
+
+// FocusThroughFocusPoint is one scanned plane's metrics. FocusMM is the plane
+// position relative to the scan's base plane (mm). FWHM/EE/centroid are filled
+// for metric == "psf"; the MTF arrays for metric == "mtf".
+type FocusThroughFocusPoint struct {
+	FocusMM           float64   `yaml:"focus_mm"`
+	Strehl            float64   `yaml:"strehl"`
+	FWHMX             float64   `yaml:"fwhm_x,omitempty"`
+	FWHMY             float64   `yaml:"fwhm_y,omitempty"`
+	EncircledEnergy50 float64   `yaml:"encircled_energy_50,omitempty"`
+	CentroidX         float64   `yaml:"centroid_x,omitempty"`
+	CentroidY         float64   `yaml:"centroid_y,omitempty"`
+	Sagittal          []float64 `yaml:"mtf_sagittal,omitempty"`
+	Tangential        []float64 `yaml:"mtf_tangential,omitempty"`
 }
 
 // FocusMTFComparison is the `focus mtf` table: per (field, wavelength) the MTF

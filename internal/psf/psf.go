@@ -50,6 +50,11 @@ type Options struct {
 	// dynamic-pupil / stop-based position, ensuring consistent sampling across
 	// all field angles.
 	PupilModel *types.PupilModelConfig
+	// PlaneShift moves the flat image plane by this many mm along the optical
+	// axis before the Huygens integral (a fixed through-focus offset applied to
+	// every field). It does not modify the surfaces; 0 = the geometric image
+	// plane.
+	PlaneShift float64
 }
 
 // Result is one computed PSF with its analysis summary.
@@ -178,7 +183,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 		wavelengths = []float64{types.DefaultWavelength}
 	}
 	pols := resolvePolStates(opts.Polarizations)
-	planeZ := imagePlaneZ(system.Surfaces)
+	planeZ := imagePlaneZ(system.Surfaces) + opts.PlaneShift
 
 	white := opts.SpectralCurve != "" || len(opts.SpectralEntries) > 0
 	var spdCurve *spectral.Curve
