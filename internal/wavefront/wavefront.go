@@ -334,9 +334,9 @@ func analyzeSamples(global []psf.WavefrontSample, surfaces []types.Surface, refS
 		dir = types.Vec3{Z: 1}
 	}
 
-	// Best focus: geometric spot RMS minimization along the image-plane normal
-	// (global frame, robust against angle-field OPL artifacts).
-	sph, err := FitSphereShift(global, planeZ)
+	// Best focus: coherent PSF peak maximization (global maximum bracketed by a
+	// coarse scan; global frame, robust against angle-field OPL artifacts).
+	sph, err := FitSphereShift(global, planeZ, nImage, wl)
 	if err != nil {
 		return an, err
 	}

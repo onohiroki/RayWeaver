@@ -52,7 +52,7 @@ single flat exit pupil would break down.
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` (unpolarised average) |
 | `--psf-workers N` | parallel workers for the Huygens integral and wavefront tracing (default: GOMAXPROCS) |
 | `--max-freq N` | MTF frequency cap in cycles/mm (default: `psf.mtf_config.max_frequency`, else the Nyquist) |
-| `--best-focus` | evaluate each field at its **best-focus image plane**: the plane shift minimizing the geometric spot RMS is applied per field before the Huygens integral, removing field-curvature defocus |
+| `--best-focus` | evaluate each field at its **best-focus image plane**: the plane shift maximizing the coherent PSF peak (the plane of greatest peak-ratio Strehl) is applied per field before the Huygens integral, removing field-curvature defocus |
 | `--converge-check BOOL` | label sampling convergence by re-evaluating each result at a higher ray count (**on by default**; use `--converge-check false` to disable) |
 | `--converge-tol T` | relative Strehl change threshold for convergence (default 0.10) |
 | `--yaml FILE` | write full structured data to FILE, one index-suffixed file per result (`FILE_0.yaml`, `FILE_1.yaml`, …) |
@@ -154,7 +154,7 @@ psf_results:
 | Field | Meaning |
 |---|---|
 | `strehl_ratio` | peak intensity of the actual PSF divided by the peak of the diffraction-limited PSF computed from the **same** samples (a converging sphere to the window centre). A perfect system gives 1.0. |
-| `best_focus_shift_mm` | with `--best-focus`: the image-plane shift applied to this field (plane at the best-focus spot-RMS minimum) before the Huygens integral; the sign is the plane displacement, so `+` means the best focus lies **beyond** the fixed plane |
+| `best_focus_shift_mm` | with `--best-focus`: the image-plane shift applied to this field (the coherent-peak-maximizing plane) before the Huygens integral; the sign is the plane displacement, so `+` means the best focus lies **beyond** the fixed plane |
 | `fwhm_x` / `fwhm_y` | full width at half maximum through the peak, sub-pixel interpolated |
 | `centroid_x` / `centroid_y` | intensity-weighted centroid of the sampled PSF |
 | `peak_value` / `peak_x` / `peak_y` | peak of the intensity-normalised grid (Σ I·Δx·Δy = 1) |
@@ -212,15 +212,20 @@ rayweave chief < lens.yaml | rayweave psf > psf-summary.yaml
   wavefront there and propagating to the fixed image plane means field curvature
   and defocus appear naturally in the PSF (they are not refocused away).
 - `--best-focus` (or `psf.best_focus`) instead propagates each field to its
-  best-focus plane: the shift that minimizes the geometric spot RMS is applied
-  per field before the Huygens integral, removing field-curvature defocus. Use it
-  when the fixed-plane Strehl is dominated by focus — the result then measures
-  wavefront quality directly and is comparable with the `wavefront` command's
-  best-focus `rms`/`strehl` (the two agree; `wavefront_result.best_focus.
-  per_field[].shift_mm` carries the same magnitude with the opposite sign). The
-  on-axis field of a field-curved system typically gains the most (e.g. the
-  Schmidt flat-field example: fixed-plane Strehl 0.04–0.08 → best-focus
-  0.04–0.096 across the field).
+  best-focus plane: the shift that **maximizes the coherent PSF peak** (the plane
+  of greatest peak-ratio Strehl, found by a coarse scan of the vector Huygens
+  sum around a geometric spot-RMS seed) is applied per field before the Huygens
+  integral, removing field-curvature defocus. Use it when the fixed-plane Strehl
+  is dominated by focus — the result then measures wavefront quality directly
+  and is comparable with the `wavefront` command's best-focus `rms`/`strehl`
+  (the two agree; `wavefront_result.best_focus.per_field[].shift_mm` carries the
+  same magnitude with the opposite sign). The on-axis field of a field-curved
+  system typically gains the most (e.g. the Schmidt flat-field example:
+  fixed-plane Strehl 0.04–0.08 → best-focus 0.04–0.096 across the field). The
+  objective is the coherent peak rather than the geometric spot RMS because the
+  two diverge for strongly aberrated (astigmatic) fields — the spot-RMS minimum
+  can sit at a plane with a *lower* Strehl than the fixed plane, whereas the
+  coherent-peak plane is by construction the Strehl maximum.
 - The evaluation window is centred on the geometric spot centroid and sized to
   cover both the diffraction core and the geometric spot. Set `--psf-width` to
   override. When the geometric spot dominates the window (fast or aberrated

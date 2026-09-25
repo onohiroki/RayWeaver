@@ -342,6 +342,33 @@ func chiefFieldDefs(input types.Input) []types.FieldDef {
 	return fields
 }
 
+// fieldItemsFromDefs converts chief field definitions back into the per-config
+// field-item shape (the inverse of fieldDefsFromItems), so a document whose
+// fields live only in chief.fields can still drive per-config machinery such as
+// the all-field back-focus solve.
+func fieldItemsFromDefs(defs []types.FieldDef) []types.FieldItem {
+	if len(defs) == 0 {
+		return nil
+	}
+	out := make([]types.FieldItem, 0, len(defs))
+	for _, d := range defs {
+		dir := d.Direction
+		if len(dir) == 0 {
+			dir = []float64{0, 1}
+		}
+		out = append(out, types.FieldItem{
+			AngleDeg:    d.Angle,
+			ImageHeight: d.ImageHeight,
+			Height:      d.Height,
+			ObjectZ:     d.ObjectZ,
+			Direction:   dir,
+			Weight:      1,
+			Vignetting:  d.Vignetting,
+		})
+	}
+	return out
+}
+
 // fieldDefsFromItems converts per-config field items into chief field
 // definitions for the dynamic-pupil pass.
 func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {

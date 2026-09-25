@@ -21,12 +21,13 @@ func syntheticSamples(y0, f, n float64) []psf.WavefrontSample {
 			z := -(x*x + (y-y0)*(y-y0)) / 20.0 // radius -10 reference surface
 			P := types.Vec3{X: x, Y: y, Z: z}
 			F := types.Vec3{Y: y0, Z: f}
-			d := P.Subtract(F)
+			d := F.Subtract(P)
 			dir := d.Scale(1 / d.Length())
 			out = append(out, psf.WavefrontSample{
 				Position:  P,
 				Direction: dir,
 				OPL:       K - n*d.Length(),
+				Field:     types.Vec3C{X: 1},
 				Area:      1,
 				Intensity: 1,
 			})
@@ -46,7 +47,7 @@ func TestFitSphereShiftSynthetic(t *testing.T) {
 		const planeZ = 21.37
 		// Perfect converging wave focused at (0, y0, focusZ).
 		samples := syntheticSamples(tc.y0, tc.focusZ, 1.0)
-		sph, err := FitSphereShift(samples, planeZ)
+		sph, err := FitSphereShift(samples, planeZ, 1.0, 0.00058756)
 		if err != nil {
 			t.Fatalf("y0=%v: %v", tc.y0, err)
 		}
@@ -54,7 +55,10 @@ func TestFitSphereShiftSynthetic(t *testing.T) {
 		if math.Abs(sph.ShiftMM-want) > 1e-3 {
 			t.Errorf("y0=%v: shift = %v, want ~%v", tc.y0, sph.ShiftMM, want)
 		}
-		if sph.SpotRMS > 1e-6 {
+		// The coherent-peak plane sits within the amplitude-weighted Huygens
+		// peak of the geometric focus; the tiny residual spot (≪ the aperture)
+		// reflects the obliquity/1R weighting, not a geometry error.
+		if sph.SpotRMS > 1e-4 {
 			t.Errorf("y0=%v: spot RMS = %v, want ~0 (perfect wave)", tc.y0, sph.SpotRMS)
 		}
 	}
@@ -65,7 +69,7 @@ func TestFitSphereShiftDefocus(t *testing.T) {
 	// plane is at 21 mm -> best shift ≈ -4 mm (move the image toward the lens).
 	const planeZ = 21.0
 	samples := syntheticSamples(0, 17.0, 1.0)
-	sph, err := FitSphereShift(samples, planeZ)
+	sph, err := FitSphereShift(samples, planeZ, 1.0, 0.00058756)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -74,15 +74,16 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, comparison_wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
 | `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables/variable links, `merit_schedule`, and the sub-configs (`escape`, `glass_hull`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
 | `escape` | Escape-function global optimisation results (requires `escape` output). Shows escape parameters, discovered local minima, per-minimum element powers, and the best solution. |
+| `focus` | Image-plane comparison results from the `focus_comparison` section (requires `focus mtf` / `focus psf` output). Auto-detects the MTF/PSF sub-section and renders the per-(field, wavelength) × plane table. |
 
 Default (no target arguments): `surfaces glasses paraxial fields`. The
 explicit keyword `default` expands to this set **in place**, preserving the
 order of the remaining targets — `rayweave list default merit` shows the
 default targets followed by merit, and `rayweave list merit default` shows
-merit first. The explicit keyword `all` expands to all eight targets
+merit first. The explicit keyword `all` expands to all nine targets
 (`surfaces`, `glasses`, `paraxial`, `fields`, `rays`, `merit`, `optimization`,
-`escape`) and implies `--auto-aperture`, `--all-glasses`, and `--roles` so
-every optional detail is shown without specifying each flag individually.
+`escape`, `focus`) and implies `--auto-aperture`, `--all-glasses`, and `--roles`
+so every optional detail is shown without specifying each flag individually.
 Duplicate targets (e.g. `default surfaces`, `all merit`) are shown once.
 
 ```sh
@@ -613,7 +614,56 @@ pairs), `Mode Changes`, `Metric Value`, `Effective Num Rays`, `Interrupted`,
 
 ---
 
-## 10. Output formats
+## 10. Focus section — image-plane comparison results
+
+The `focus` target renders the results of a previous `focus mtf` / `focus psf`
+run (the `focus_comparison` section). It never re-computes: the data comes
+straight from the pipeline document.
+
+```sh
+rayweave focus psf --planes all,best < lens.yaml | rayweave list focus
+rayweave focus mtf --frequencies 30,50,80 < lens.yaml | rayweave list focus
+```
+
+The `mtf` or `psf` sub-section is auto-detected (normally only one is
+present); if both are present they are shown in that order. With no
+`focus_comparison`, the target prints a hint and continues.
+
+### Table format
+
+One row per (field, wavelength) × plane:
+
+```
+focus psf: PSF comparison (planes: file, focus_plane_all, best_focus, polarization: RCP)
+  all-field best-focus shift: -55.418357 mm
+  fld  angle   wl(nm)    plane            strehl   fwhm_x    fwhm_y    ee50       centroid_x centroid_y
+  0    0.00    587.6     file             0.8128   0.02114   0.02203   16.38433   0.0014     0.0013
+  0    0.00    587.6     focus_plane_all  0.8480   0.00152   0.00150   1.13083    0.0001     0.0001
+  0    0.00    587.6     best_focus       0.7622   0.00136   0.00136   0.23575    0.0000     0.0000
+```
+
+Plane names: `file`, `focus_plane_all` (the single all-field best focus), and
+`best_focus` (each field's own best focus). `focus mtf` adds one
+`MTF<f>(sag/tan)` column per reported frequency.
+
+### CSV
+
+`--format csv` flattens one row per (row, plane):
+
+```
+Focus Comparison (mtf):
+field_index,field_angle,wavelength,plane,strehl,best_focus_shift_mm,mtf_sagittal_20,mtf_tangential_20,...
+```
+
+`focus psf` CSV replaces the MTF columns with
+`encircled_energy_50,centroid_x,centroid_y`. `yaml`/`json` echo the section
+under `focus_comparison`; the `json` output uses the same key names as the YAML
+(`focus_plane_all_shift_mm`, `focus_plane_all`, `mtf_sagittal`, …). See
+`docs/focus.md` for the full shape.
+
+---
+
+## 11. Output formats
 
 ### Table (default)
 
@@ -690,7 +740,7 @@ rayweave list --format json < lens.yaml
 
 ---
 
-## 11. Examples
+## 12. Examples
 
 ```sh
 # Full listing (surfaces + glasses + paraxial + fields)
@@ -738,6 +788,10 @@ rayweave optimize < lens.yaml | rayweave list merit
 
 # Optimizer configuration (solver, variables, sub-configs)
 rayweave list optimization < lens.yaml
+
+# Focus plane comparison results (MTF/PSF, from focus mtf/focus psf)
+rayweave focus psf --planes all,best < lens.yaml | rayweave list focus
+rayweave focus mtf --frequencies 30,50,80 < lens.yaml | rayweave list focus --format csv
 
 # Pipe into query for programmatic access
 rayweave list --format yaml < lens.yaml | rayweave query -r glasses[0].nd

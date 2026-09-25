@@ -92,8 +92,21 @@ func runPSF(data []byte) {
 			cfgFields = input.Configs[cfgIdx].Fields
 			cfgWLs = input.Configs[cfgIdx].Wavelengths
 		}
+		// Hand-written single-config documents carry their fields in
+		// chief.fields; fall back so the solve is not a silent no-op.
+		if len(cfgFields) == 0 {
+			cfgFields = fieldItemsFromDefs(chiefFieldDefs(input))
+		}
 		before := append([]types.Surface(nil), surfaces...)
-		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform"}
+		// Sample the back-focus solve with the same pupil grid the PSF/MTF is
+		// evaluated at (CLI > YAML > psf.Compute's default); the solve's
+		// coherent-peak objective is sampling-sensitive for aberrated fields.
+		bfRays := *numRays
+		if input.PSF != nil {
+			bfRays = intOrYAML(*numRays, input.PSF.NumRays)
+		}
+		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform",
+			NumRays: effectivePSFNumRays(bfRays)}
 		optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", input.Chief.StopSurface,
 			effectiveReferenceWavelength(input.Chief), cfgFields, cfgWLs, gc)
 		surface.Precompute(surfaces)
@@ -371,6 +384,16 @@ func maxThicknessDelta(before, after []types.Surface) float64 {
 		}
 	}
 	return d
+}
+
+// effectivePSFNumRays resolves the effective pupil-grid ray count a psf
+// computation uses (psf.Compute's DefaultNumRays when unset), so a back-focus
+// solve run just before the evaluation samples the same grid.
+func effectivePSFNumRays(n int) int {
+	if n > 0 {
+		return n
+	}
+	return psf.DefaultNumRays
 }
 
 func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opts psf.Options, bestFocusSet bool) {

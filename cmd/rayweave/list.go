@@ -182,15 +182,15 @@ type fieldsListOutput struct {
 
 // MeritTermRow is one row of the `list merit` terms table.
 type MeritTermRow struct {
-	Config      string  `json:"config" yaml:"config"`
-	Kind        string  `json:"kind" yaml:"kind"`
-	Field       int     `json:"field,omitempty" yaml:"field,omitempty"`
-	Wavelength  float64 `json:"wavelength,omitempty" yaml:"wavelength,omitempty"`
+	Config               string  `json:"config" yaml:"config"`
+	Kind                 string  `json:"kind" yaml:"kind"`
+	Field                int     `json:"field,omitempty" yaml:"field,omitempty"`
+	Wavelength           float64 `json:"wavelength,omitempty" yaml:"wavelength,omitempty"`
 	ComparisonWavelength float64 `json:"comparison_wavelength,omitempty" yaml:"comparison_wavelength,omitempty"`
-	Target      float64 `json:"target,omitempty" yaml:"target,omitempty"`
-	Fraction    float64 `json:"fraction,omitempty" yaml:"fraction,omitempty"`
-	SurfaceSet  []int   `json:"surface_set,omitempty" yaml:"surface_set,omitempty"`
-	Weight      float64 `json:"weight" yaml:"weight"`
+	Target               float64 `json:"target,omitempty" yaml:"target,omitempty"`
+	Fraction             float64 `json:"fraction,omitempty" yaml:"fraction,omitempty"`
+	SurfaceSet           []int   `json:"surface_set,omitempty" yaml:"surface_set,omitempty"`
+	Weight               float64 `json:"weight" yaml:"weight"`
 }
 
 // MeritModeRow is one row of the `list merit` modes table.
@@ -314,15 +314,15 @@ type SubConfigSection struct {
 // OptimizationResultSummary is the piped-output summary shown by
 // `list optimization` (output.opt_results).
 type OptimizationResultSummary struct {
-	Status           string             `json:"status" yaml:"status"`
-	Iterations       int                `json:"iterations" yaml:"iterations"`
-	ActiveMode       string             `json:"active_mode,omitempty" yaml:"active_mode,omitempty"`
-	ModeWeights      map[string]float64 `json:"mode_weights,omitempty" yaml:"mode_weights,omitempty"`
-	ModeChanges      int                `json:"mode_changes,omitempty" yaml:"mode_changes,omitempty"`
-	MetricValue      float64            `json:"metric_value,omitempty" yaml:"metric_value,omitempty"`
-	EffectiveNumRays int                `json:"effective_num_rays,omitempty" yaml:"effective_num_rays,omitempty"`
-	Interrupted      bool               `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
-	Reason           string             `json:"reason,omitempty" yaml:"reason,omitempty"`
+	Status           string                       `json:"status" yaml:"status"`
+	Iterations       int                          `json:"iterations" yaml:"iterations"`
+	ActiveMode       string                       `json:"active_mode,omitempty" yaml:"active_mode,omitempty"`
+	ModeWeights      map[string]float64           `json:"mode_weights,omitempty" yaml:"mode_weights,omitempty"`
+	ModeChanges      int                          `json:"mode_changes,omitempty" yaml:"mode_changes,omitempty"`
+	MetricValue      float64                      `json:"metric_value,omitempty" yaml:"metric_value,omitempty"`
+	EffectiveNumRays int                          `json:"effective_num_rays,omitempty" yaml:"effective_num_rays,omitempty"`
+	Interrupted      bool                         `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
+	Reason           string                       `json:"reason,omitempty" yaml:"reason,omitempty"`
 	GlassAttraction  *types.GlassAttractionResult `json:"glass_attraction,omitempty" yaml:"glass_attraction,omitempty"`
 	Snap             *types.SnapResult            `json:"snap,omitempty" yaml:"snap,omitempty"`
 }
@@ -343,11 +343,11 @@ type optimizationListOutput struct {
 
 // EscapeMinimumRow is one local minimum for `list escape`.
 type EscapeMinimumRow struct {
-	Index         int          `json:"index" yaml:"index"`
-	Merit         float64      `json:"merit" yaml:"merit"`
-	Status        string       `json:"status,omitempty" yaml:"status,omitempty"`
-	File          string       `json:"file,omitempty" yaml:"file,omitempty"`
-	ElementPowers [][]float64  `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
+	Index         int         `json:"index" yaml:"index"`
+	Merit         float64     `json:"merit" yaml:"merit"`
+	Status        string      `json:"status,omitempty" yaml:"status,omitempty"`
+	File          string      `json:"file,omitempty" yaml:"file,omitempty"`
+	ElementPowers [][]float64 `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
 }
 
 // escapeListOutput is the structured (yaml/json) shape of `list escape`.
@@ -394,7 +394,7 @@ func runList(data []byte) {
 	defaultListTargets := []string{"surfaces", "glasses", "paraxial", "fields"}
 	// allListTargets is the full target set; the "all" keyword expands to it
 	// and implies --auto-aperture, --all-glasses, and --roles.
-	allListTargets := []string{"surfaces", "glasses", "paraxial", "fields", "rays", "merit", "optimization", "escape"}
+	allListTargets := []string{"surfaces", "glasses", "paraxial", "fields", "rays", "merit", "optimization", "escape", "focus"}
 
 	targets := args.positional
 	if len(targets) == 0 {
@@ -429,7 +429,7 @@ func runList(data []byte) {
 
 	needsOutput := false
 	for _, t := range targets {
-		if t == "rays" || t == "merit" || t == "optimization" || t == "escape" {
+		if t == "rays" || t == "merit" || t == "optimization" || t == "escape" || t == "focus" {
 			needsOutput = true
 		}
 	}
@@ -474,8 +474,10 @@ func runList(data []byte) {
 			listOptimization(input, output, *format)
 		case "escape":
 			listEscape(output, *format)
+		case "focus":
+			listFocus(output, *format)
 		default:
-			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, escape, \"default\", or \"all\")", target)
+			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, escape, focus, \"default\", or \"all\")", target)
 			os.Exit(1)
 		}
 	}
@@ -1497,23 +1499,23 @@ func listParaxial(data []byte, input types.Input, gc *glass.Catalog, format stri
 		for _, p := range props {
 			fmt.Printf("%s,%s\n", p.Name, p.Value)
 		}
-	if showRoles && len(result.ElementRoles) > 0 {
-		fmt.Println()
-		fmt.Println("Element Roles:")
-		fmt.Println("Surfaces,Phi,W,Role,nd Target,vd Target,nd Actual,vd Actual")
-		for _, r := range result.ElementRoles {
-			sids := fmt.Sprintf("%v", r.SurfaceIDs)
-			fmt.Printf("%s,%s,%s,%s,%s,%s,%s,%s\n",
-				sids,
-				formatTableFloat(r.Phi),
-				formatTableFloat(r.W),
-				r.Role,
-				formatTableFloat(r.NDTarget),
-				formatTableFloat(r.VTarget),
-				formatTableFloat(r.NDActual),
-				formatTableFloat(r.VActual))
+		if showRoles && len(result.ElementRoles) > 0 {
+			fmt.Println()
+			fmt.Println("Element Roles:")
+			fmt.Println("Surfaces,Phi,W,Role,nd Target,vd Target,nd Actual,vd Actual")
+			for _, r := range result.ElementRoles {
+				sids := fmt.Sprintf("%v", r.SurfaceIDs)
+				fmt.Printf("%s,%s,%s,%s,%s,%s,%s,%s\n",
+					sids,
+					formatTableFloat(r.Phi),
+					formatTableFloat(r.W),
+					r.Role,
+					formatTableFloat(r.NDTarget),
+					formatTableFloat(r.VTarget),
+					formatTableFloat(r.NDActual),
+					formatTableFloat(r.VActual))
+			}
 		}
-	}
 	default: // "table"
 		fmt.Println("Paraxial:")
 		if len(props) == 0 {
@@ -2226,15 +2228,15 @@ func listMerit(input types.Input, output types.Output, format string) {
 		if cfg.Merit != nil {
 			for _, t := range cfg.Merit.Terms {
 				row := MeritTermRow{
-					Config:      cfgID,
-					Kind:        t.Kind,
-					Field:       t.Field,
-					Wavelength:  t.Wavelength,
+					Config:               cfgID,
+					Kind:                 t.Kind,
+					Field:                t.Field,
+					Wavelength:           t.Wavelength,
 					ComparisonWavelength: t.ComparisonWavelength,
-					Target:      t.Target,
-					Fraction:    t.Fraction,
-					SurfaceSet:  t.SurfaceSet,
-					Weight:      t.Weight,
+					Target:               t.Target,
+					Fraction:             t.Fraction,
+					SurfaceSet:           t.SurfaceSet,
+					Weight:               t.Weight,
 				}
 				terms = append(terms, row)
 			}
@@ -2940,6 +2942,279 @@ func maxElementPowerCount(minima []EscapeMinimumRow) int {
 		}
 	}
 	return n
+}
+
+// focusListOutput is the structured (yaml/json) shape of `list focus`: the
+// pipeline focus_comparison section echoed back under its own key so the output
+// is self-describing.
+type focusListOutput struct {
+	FocusComparison *types.FocusComparison `json:"focus_comparison,omitempty" yaml:"focus_comparison,omitempty"`
+}
+
+// focusJSONListOutput is the JSON wrapper for `list focus`.
+type focusJSONListOutput struct {
+	FocusComparison focusJSONComparison `json:"focus_comparison"`
+}
+
+// The focusJSON* types mirror the pipeline types.Focus* structs with json tags:
+// those types carry yaml tags only (encoding/json would fall back to the Go
+// field names), so JSON output needs a parallel tagged shape.
+type focusJSONComparison struct {
+	MTF *focusJSONMTF `json:"mtf,omitempty"`
+	PSF *focusJSONPSF `json:"psf,omitempty"`
+}
+
+type focusJSONMTF struct {
+	Planes               []string          `json:"planes"`
+	Frequencies          []float64         `json:"frequencies"`
+	FocusPlaneAllShiftMM float64           `json:"focus_plane_all_shift_mm,omitempty"`
+	Polarization         string            `json:"polarization,omitempty"`
+	Rows                 []focusJSONMTFRow `json:"rows"`
+}
+
+type focusJSONMTFRow struct {
+	FieldIndex    int                `json:"field_index"`
+	FieldAngle    float64            `json:"field_angle"`
+	Wavelength    float64            `json:"wavelength"`
+	File          *focusJSONMTFPlane `json:"file,omitempty"`
+	FocusPlaneAll *focusJSONMTFPlane `json:"focus_plane_all,omitempty"`
+	BestFocus     *focusJSONMTFPlane `json:"best_focus,omitempty"`
+}
+
+type focusJSONMTFPlane struct {
+	Strehl           float64   `json:"strehl"`
+	BestFocusShiftMM float64   `json:"best_focus_shift_mm,omitempty"`
+	Sagittal         []float64 `json:"mtf_sagittal,omitempty"`
+	Tangential       []float64 `json:"mtf_tangential,omitempty"`
+}
+
+type focusJSONPSF struct {
+	Planes               []string          `json:"planes"`
+	FocusPlaneAllShiftMM float64           `json:"focus_plane_all_shift_mm,omitempty"`
+	Polarization         string            `json:"polarization,omitempty"`
+	Rows                 []focusJSONPSFRow `json:"rows"`
+}
+
+type focusJSONPSFRow struct {
+	FieldIndex    int                `json:"field_index"`
+	FieldAngle    float64            `json:"field_angle"`
+	Wavelength    float64            `json:"wavelength"`
+	File          *focusJSONPSFPlane `json:"file,omitempty"`
+	FocusPlaneAll *focusJSONPSFPlane `json:"focus_plane_all,omitempty"`
+	BestFocus     *focusJSONPSFPlane `json:"best_focus,omitempty"`
+}
+
+type focusJSONPSFPlane struct {
+	Strehl            float64 `json:"strehl"`
+	FWHMX             float64 `json:"fwhm_x"`
+	FWHMY             float64 `json:"fwhm_y"`
+	EncircledEnergy50 float64 `json:"encircled_energy_50"`
+	CentroidX         float64 `json:"centroid_x"`
+	CentroidY         float64 `json:"centroid_y"`
+	BestFocusShiftMM  float64 `json:"best_focus_shift_mm,omitempty"`
+}
+
+// focusToJSON converts a pipeline focus comparison to its json-tagged mirror.
+func focusToJSON(fc *types.FocusComparison) focusJSONComparison {
+	out := focusJSONComparison{}
+	if fc.MTF != nil {
+		m := &focusJSONMTF{
+			Planes:               fc.MTF.Planes,
+			Frequencies:          fc.MTF.Frequencies,
+			FocusPlaneAllShiftMM: fc.MTF.FocusPlaneAllShiftMM,
+			Polarization:         fc.MTF.Polarization,
+		}
+		for _, r := range fc.MTF.Rows {
+			m.Rows = append(m.Rows, focusJSONMTFRow{
+				FieldIndex:    r.FieldIndex,
+				FieldAngle:    r.FieldAngle,
+				Wavelength:    r.Wavelength,
+				File:          focusJSONMTFPlaneFrom(r.File),
+				FocusPlaneAll: focusJSONMTFPlaneFrom(r.FocusPlaneAll),
+				BestFocus:     focusJSONMTFPlaneFrom(r.BestFocus),
+			})
+		}
+		out.MTF = m
+	}
+	if fc.PSF != nil {
+		p := &focusJSONPSF{
+			Planes:               fc.PSF.Planes,
+			FocusPlaneAllShiftMM: fc.PSF.FocusPlaneAllShiftMM,
+			Polarization:         fc.PSF.Polarization,
+		}
+		for _, r := range fc.PSF.Rows {
+			p.Rows = append(p.Rows, focusJSONPSFRow{
+				FieldIndex:    r.FieldIndex,
+				FieldAngle:    r.FieldAngle,
+				Wavelength:    r.Wavelength,
+				File:          focusJSONPSFPlaneFrom(r.File),
+				FocusPlaneAll: focusJSONPSFPlaneFrom(r.FocusPlaneAll),
+				BestFocus:     focusJSONPSFPlaneFrom(r.BestFocus),
+			})
+		}
+		out.PSF = p
+	}
+	return out
+}
+
+func focusJSONMTFPlaneFrom(p *types.FocusMTFPlane) *focusJSONMTFPlane {
+	if p == nil {
+		return nil
+	}
+	return &focusJSONMTFPlane{
+		Strehl:           p.Strehl,
+		BestFocusShiftMM: p.BestFocusShiftMM,
+		Sagittal:         p.Sagittal,
+		Tangential:       p.Tangential,
+	}
+}
+
+func focusJSONPSFPlaneFrom(p *types.FocusPSFPlane) *focusJSONPSFPlane {
+	if p == nil {
+		return nil
+	}
+	return &focusJSONPSFPlane{
+		Strehl:            p.Strehl,
+		FWHMX:             p.FWHMX,
+		FWHMY:             p.FWHMY,
+		EncircledEnergy50: p.EncircledEnergy50,
+		CentroidX:         p.CentroidX,
+		CentroidY:         p.CentroidY,
+		BestFocusShiftMM:  p.BestFocusShiftMM,
+	}
+}
+
+// listFocus renders the piped focus_comparison section (from `focus mtf` /
+// `focus psf`): the per-(field, wavelength) comparison across the file /
+// focus_plane_all / best_focus plane conventions. The MTF and PSF sections are
+// auto-detected; normally only one is present. It never re-computes anything.
+func listFocus(output types.Output, format string) {
+	fc := output.FocusComparison
+	if fc == nil || (fc.MTF == nil && fc.PSF == nil) {
+		switch format {
+		case "yaml":
+			os.Stdout.Write([]byte("focus_comparison: {}\n"))
+		case "json":
+			fmt.Println(`{"focus_comparison":{}}`)
+		default:
+			fmt.Println("Focus: (no focus comparison; run 'focus mtf' or 'focus psf' first)")
+		}
+		return
+	}
+
+	switch format {
+	case "yaml":
+		outData, err := yaml.Marshal(focusListOutput{FocusComparison: fc})
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+	case "json":
+		outData, err := json.MarshalIndent(focusJSONListOutput{FocusComparison: focusToJSON(fc)}, "", "  ")
+		if err != nil {
+			errOut("Error marshaling list output: %v", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(outData)
+		fmt.Println()
+	case "csv":
+		first := true
+		if fc.MTF != nil {
+			writeFocusMTFCSV(fc.MTF)
+			first = false
+		}
+		if fc.PSF != nil {
+			if !first {
+				fmt.Println()
+			}
+			writeFocusPSFCSV(fc.PSF)
+		}
+	default: // "table"
+		if fc.MTF != nil {
+			writeFocusMTFTable(os.Stdout, fc.MTF)
+		}
+		if fc.PSF != nil {
+			if fc.MTF != nil {
+				fmt.Println()
+			}
+			writeFocusPSFTable(os.Stdout, fc.PSF)
+		}
+	}
+}
+
+// writeFocusMTFCSV flattens the MTF comparison to one row per (row, plane),
+// with one sagittal/tangential column pair per reported frequency.
+func writeFocusMTFCSV(c *types.FocusMTFComparison) {
+	fmt.Println("Focus Comparison (mtf):")
+	header := []string{
+		"field_index", "field_angle", "wavelength", "plane",
+		"strehl", "best_focus_shift_mm",
+	}
+	for _, f := range c.Frequencies {
+		header = append(header,
+			fmt.Sprintf("mtf_sagittal_%g", f), fmt.Sprintf("mtf_tangential_%g", f))
+	}
+	fmt.Println(strings.Join(quoteCSV(header), ","))
+	for _, row := range c.Rows {
+		for _, e := range focusMTFPlaneEntries(row) {
+			if e.plane == nil {
+				continue
+			}
+			cells := []string{
+				strconv.Itoa(row.FieldIndex),
+				strconv.FormatFloat(row.FieldAngle, 'g', -1, 64),
+				strconv.FormatFloat(row.Wavelength, 'g', -1, 64),
+				e.name,
+				strconv.FormatFloat(e.plane.Strehl, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.BestFocusShiftMM, 'g', -1, 64),
+			}
+			for i := range c.Frequencies {
+				sag, tan := math.NaN(), math.NaN()
+				if i < len(e.plane.Sagittal) {
+					sag = e.plane.Sagittal[i]
+				}
+				if i < len(e.plane.Tangential) {
+					tan = e.plane.Tangential[i]
+				}
+				cells = append(cells,
+					strconv.FormatFloat(sag, 'g', -1, 64),
+					strconv.FormatFloat(tan, 'g', -1, 64))
+			}
+			fmt.Println(strings.Join(quoteCSV(cells), ","))
+		}
+	}
+}
+
+// writeFocusPSFCSV flattens the PSF comparison to one row per (row, plane).
+func writeFocusPSFCSV(c *types.FocusPSFComparison) {
+	fmt.Println("Focus Comparison (psf):")
+	fmt.Println(strings.Join(quoteCSV([]string{
+		"field_index", "field_angle", "wavelength", "plane",
+		"strehl", "fwhm_x", "fwhm_y", "encircled_energy_50",
+		"centroid_x", "centroid_y", "best_focus_shift_mm",
+	}), ","))
+	for _, row := range c.Rows {
+		for _, e := range focusPSFPlaneEntries(row) {
+			if e.plane == nil {
+				continue
+			}
+			cells := []string{
+				strconv.Itoa(row.FieldIndex),
+				strconv.FormatFloat(row.FieldAngle, 'g', -1, 64),
+				strconv.FormatFloat(row.Wavelength, 'g', -1, 64),
+				e.name,
+				strconv.FormatFloat(e.plane.Strehl, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.FWHMX, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.FWHMY, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.EncircledEnergy50, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.CentroidX, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.CentroidY, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.BestFocusShiftMM, 'g', -1, 64),
+			}
+			fmt.Println(strings.Join(quoteCSV(cells), ","))
+		}
+	}
 }
 
 // listOptimization renders the optimization configuration from

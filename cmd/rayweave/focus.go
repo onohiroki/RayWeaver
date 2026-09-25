@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"sort"
@@ -165,6 +166,13 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML) *focusRun {
 	if len(input.Configs) > 0 {
 		cfgFields = input.Configs[cfgIdx].Fields
 		cfgWLs = input.Configs[cfgIdx].Wavelengths
+	}
+	// A hand-written single-config document carries its fields in chief.fields,
+	// not configs[].fields. The all-field back-focus solve needs the field list,
+	// so fall back to the chief fields rather than silently solving a zero-field
+	// system (which no-ops and leaves the file plane unchanged).
+	if len(cfgFields) == 0 {
+		cfgFields = fieldItemsFromDefs(chiefFieldDefs(*input))
 	}
 
 	fields := chiefFieldDefs(*input)
@@ -335,7 +343,11 @@ func computeFocusPlane(run *focusRun, plane string) ([]psf.Result, float64, erro
 	switch plane {
 	case "all":
 		before := append([]types.Surface(nil), surfaces...)
-		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform"}
+		// Sample the back-focus solve with the same pupil grid the comparison
+		// is evaluated at (CLI > YAML > psf default); the solve's coherent-peak
+		// objective is sampling-sensitive for aberrated fields.
+		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform",
+			NumRays: effectivePSFNumRays(opts.NumRays)}
 		optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", run.stopSurface,
 			run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc)
 		// The solve changes a thickness after its internal Precompute, so the
@@ -446,7 +458,6 @@ func runFocusMTF(data []byte, args []string) {
 	writeBackFocusMTF(&input, run, freqs)
 	output := types.Output{Input: input, FocusComparison: &types.FocusComparison{MTF: comp}}
 	withOutputMetadata(&output.Input, "focus mtf", subcmdArgs())
-	printFocusMTFTable(comp)
 	writeYAML(&output)
 }
 
@@ -489,7 +500,6 @@ func runFocusPSF(data []byte, args []string) {
 	writeBackFocusPSF(&input, run)
 	output := types.Output{Input: input, FocusComparison: &types.FocusComparison{PSF: comp}}
 	withOutputMetadata(&output.Input, "focus psf", subcmdArgs())
-	printFocusPSFTable(comp)
 	writeYAML(&output)
 }
 
@@ -531,8 +541,6 @@ func focusMTFPlane(r *psf.Result, freqs []float64) *types.FocusMTFPlane {
 	}
 	return &types.FocusMTFPlane{
 		Strehl:           r.Strehl,
-		FWHMX:            r.FWHMX,
-		FWHMY:            r.FWHMY,
 		BestFocusShiftMM: r.BestFocusShift,
 		Sagittal:         mtfAxisValues(r.MTF, true, freqs),
 		Tangential:       mtfAxisValues(r.MTF, false, freqs),
@@ -674,26 +682,27 @@ func focusPSFPlaneEntries(row types.FocusPSFRow) []struct {
 	}
 }
 
-// printFocusMTFTable writes a human-readable MTF comparison to stderr (stdout
-// stays a clean pipeline document).
-func printFocusMTFTable(c *types.FocusMTFComparison) {
-	fmt.Fprintf(os.Stderr, "focus mtf: MTF comparison (planes: %s, polarization: %s)\n",
+// writeFocusMTFTable writes a human-readable MTF comparison to w. It is used by
+// `list focus` (w = stdout); the `focus` command itself no longer prints a
+// table (its stdout stays a clean pipeline document).
+func writeFocusMTFTable(w io.Writer, c *types.FocusMTFComparison) {
+	fmt.Fprintf(w, "focus mtf: MTF comparison (planes: %s, polarization: %s)\n",
 		strings.Join(c.Planes, ", "), c.Polarization)
 	if c.FocusPlaneAllShiftMM != 0 {
-		fmt.Fprintf(os.Stderr, "  all-field best-focus shift: %.6f mm\n", c.FocusPlaneAllShiftMM)
+		fmt.Fprintf(w, "  all-field best-focus shift: %.6f mm\n", c.FocusPlaneAllShiftMM)
 	}
-	header := fmt.Sprintf("  %-4s %-7s %-9s %-16s %-8s %-9s", "fld", "angle", "wl(nm)", "plane", "strehl", "fwhm_x")
+	header := fmt.Sprintf("  %-4s %-7s %-9s %-16s %-8s", "fld", "angle", "wl(nm)", "plane", "strehl")
 	for _, f := range c.Frequencies {
 		header += fmt.Sprintf("  %-14s", fmt.Sprintf("MTF%.0f(sag/tan)", f))
 	}
-	fmt.Fprintln(os.Stderr, header)
+	fmt.Fprintln(w, header)
 	for _, row := range c.Rows {
 		for _, e := range focusMTFPlaneEntries(row) {
 			if e.plane == nil {
 				continue
 			}
-			line := fmt.Sprintf("  %-4d %-7.2f %-9.1f %-16s %-8.4f %-9.5f",
-				row.FieldIndex, row.FieldAngle, row.Wavelength*1e6, e.name, e.plane.Strehl, e.plane.FWHMX)
+			line := fmt.Sprintf("  %-4d %-7.2f %-9.1f %-16s %-8.4f",
+				row.FieldIndex, row.FieldAngle, row.Wavelength*1e6, e.name, e.plane.Strehl)
 			for i := range c.Frequencies {
 				sag, tan := math.NaN(), math.NaN()
 				if i < len(e.plane.Sagittal) {
@@ -704,26 +713,27 @@ func printFocusMTFTable(c *types.FocusMTFComparison) {
 				}
 				line += fmt.Sprintf("  %-14s", fmt.Sprintf("%.3f/%.3f", sag, tan))
 			}
-			fmt.Fprintln(os.Stderr, line)
+			fmt.Fprintln(w, line)
 		}
 	}
 }
 
-// printFocusPSFTable writes a human-readable PSF comparison to stderr.
-func printFocusPSFTable(c *types.FocusPSFComparison) {
-	fmt.Fprintf(os.Stderr, "focus psf: PSF comparison (planes: %s, polarization: %s)\n",
+// writeFocusPSFTable writes a human-readable PSF comparison to w (see
+// writeFocusMTFTable).
+func writeFocusPSFTable(w io.Writer, c *types.FocusPSFComparison) {
+	fmt.Fprintf(w, "focus psf: PSF comparison (planes: %s, polarization: %s)\n",
 		strings.Join(c.Planes, ", "), c.Polarization)
 	if c.FocusPlaneAllShiftMM != 0 {
-		fmt.Fprintf(os.Stderr, "  all-field best-focus shift: %.6f mm\n", c.FocusPlaneAllShiftMM)
+		fmt.Fprintf(w, "  all-field best-focus shift: %.6f mm\n", c.FocusPlaneAllShiftMM)
 	}
-	fmt.Fprintf(os.Stderr, "  %-4s %-7s %-9s %-16s %-8s %-9s %-9s %-10s %-10s %-10s\n",
+	fmt.Fprintf(w, "  %-4s %-7s %-9s %-16s %-8s %-9s %-9s %-10s %-10s %-10s\n",
 		"fld", "angle", "wl(nm)", "plane", "strehl", "fwhm_x", "fwhm_y", "ee50", "centroid_x", "centroid_y")
 	for _, row := range c.Rows {
 		for _, e := range focusPSFPlaneEntries(row) {
 			if e.plane == nil {
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "  %-4d %-7.2f %-9.1f %-16s %-8.4f %-9.5f %-9.5f %-10.5f %-10.4f %-10.4f\n",
+			fmt.Fprintf(w, "  %-4d %-7.2f %-9.1f %-16s %-8.4f %-9.5f %-9.5f %-10.5f %-10.4f %-10.4f\n",
 				row.FieldIndex, row.FieldAngle, row.Wavelength*1e6, e.name,
 				e.plane.Strehl, e.plane.FWHMX, e.plane.FWHMY,
 				e.plane.EncircledEnergy50, e.plane.CentroidX, e.plane.CentroidY)

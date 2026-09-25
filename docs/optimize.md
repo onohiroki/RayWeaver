@@ -236,7 +236,7 @@ The wavefront kinds fit the least-squares quadratic
 `P(x,y) = a·x² + b·y² + c·xy + d·x + e·y + f` to the field's OPD sampled on the
 reference surface (default: the last optical surface; override via
 `chief.reference_surface`). The OPD is referenced to the best-focus point
-(geometric spot-RMS minimization), exactly like the `wavefront` command, so the
+(coherent-PSF-peak maximization), exactly like the `wavefront` command, so the
 coefficient values match `wavefront_result.fields[].paraboloid`. The
 `wavefront_sphere_rms`/`_pv` kinds instead evaluate the best-fit reference
 sphere `S(x,y) = a + b·x + c·y + d·(x²+y²)` (piston/tilt/defocus only), so
@@ -412,7 +412,7 @@ optimization:
   back_focus_solve:
     enabled: true
     type: paraxial             # paraxial (default) | wavefront
-    surface: 8                 # 0 = auto-detect (last lens surface before image)
+    surface: 8                 # 0 = auto-detect (back air gap of the last powered element)
     reference_surface: 0       # wavefront only; 0 = last optical surface
     num_rays: 200              # wavefront only
     wavelength: 0.0005876      # wavefront only; default = config reference wavelength
@@ -420,15 +420,18 @@ optimization:
     custom_weights: [1.0, 0.5] # weight_type: custom
 ```
 
-`surface: 0` (the default) auto-detects the target: the last lens surface before
-the image plane, skipping air-gap / filter surfaces. An explicit `surface` ID
+`surface: 0` (the default) auto-detects the target: the back air gap after the
+image-side-most **powered** element (that element's rear surface, whose thickness
+is the back focal distance). A powerless window / filter before the image plane
+is skipped, so the gap chosen is the one *before* it and the downstream block
+(the window and the image plane) translates rigidly. An explicit `surface` ID
 must exist; an invalid ID disables the solve.
 
 - `type: paraxial` shifts the image plane to the paraxial second principal focus
   (`paraxial.Compute`, `SecondPrincipalFocus`) — fast.
 - `type: wavefront` references the wavefront to the **best-focus point**
-  (`wavefront.Compute` with `BestFocus`, sphere center from the spot-RMS
-  minimisation) — accurate but far more expensive.
+  (`wavefront.Compute` with `BestFocus`, sphere center from the coherent-PSF-peak
+  maximization) — accurate but far more expensive.
 
 For the wavefront type, `reference_surface: 0` uses the last optical surface,
 `num_rays` defaults to 200, `wavelength` defaults to the config reference

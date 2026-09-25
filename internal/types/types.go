@@ -2167,11 +2167,10 @@ type FocusMTFRow struct {
 	BestFocus     *FocusMTFPlane `yaml:"best_focus,omitempty"`
 }
 
-// FocusMTFPlane is the MTF (and image-quality) summary at one plane convention.
+// FocusMTFPlane is the MTF summary at one plane convention. FWHM is a
+// PSF-domain metric and is reported by `focus psf` (FocusPSFPlane), not here.
 type FocusMTFPlane struct {
 	Strehl float64 `yaml:"strehl"`
-	FWHMX  float64 `yaml:"fwhm_x"`
-	FWHMY  float64 `yaml:"fwhm_y"`
 	// BestFocusShiftMM is the per-field best-focus shift (mm) applied for the
 	// best_focus convention; 0 for the fixed planes.
 	BestFocusShiftMM float64 `yaml:"best_focus_shift_mm,omitempty"`

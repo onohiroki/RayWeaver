@@ -9,10 +9,9 @@ import (
 )
 
 // Sphere is the best-focus reference sphere described by its focus point. The
-// best-focus shift δ minimizes the geometric spot RMS: the image plane is
-// moved by δ along the image-plane normal so the beam's RMS spot radius about
-// its intensity centroid is smallest. This is robust against the
-// launch-geometry artifacts that affect angle-field OPL values.
+// best-focus shift δ maximizes the coherent PSF peak: the image plane is moved
+// by δ along the image-plane normal to the plane where the peak-ratio Strehl is
+// largest (the geometric spot-RMS focus seeds the oscillatory coherent search).
 type Sphere struct {
 	// Center is the best-focus point in the samples' frame (the same frame as
 	// the traced wavefront positions and directions).
@@ -34,17 +33,18 @@ func (s Sphere) Center() types.Vec3 {
 	return types.Vec3{X: s.CenterX, Y: s.CenterY, Z: s.CenterZ}
 }
 
-// FitSphereShift finds the best-focus shift δ that minimizes the geometric
-// RMS spot radius of the samples propagated to the flat image plane moved by δ
-// along its normal. The samples carry their emergent Direction and Intensity;
-// planeZ is the current image-plane position (all in the samples' frame). The
+// FitSphereShift finds the best-focus shift δ that maximizes the coherent PSF
+// peak of the samples at the flat image plane moved by δ along its normal. The
+// samples carry their emergent Direction and Intensity; planeZ is the current
+// image-plane position (all in the samples' frame). nImage and wavelength give
+// the image-space index and the (mm) wavelength of the phase reference. The
 // shift delegates to psf.BestFocusShift so the wavefront best-focus reference
-// and psf --best-focus evaluate the same spot-RMS objective.
-func FitSphereShift(samples []psf.WavefrontSample, planeZ float64) (Sphere, error) {
+// and psf --best-focus evaluate the same coherent-peak objective.
+func FitSphereShift(samples []psf.WavefrontSample, planeZ, nImage, wavelength float64) (Sphere, error) {
 	if len(samples) < 4 {
 		return Sphere{}, fmt.Errorf("sphere fit needs >= 4 samples, got %d", len(samples))
 	}
-	delta := psf.BestFocusShift(samples, planeZ)
+	delta := psf.BestFocusShift(samples, planeZ, nImage, wavelength)
 	centroid, spotRMS := spotAtShift(samples, planeZ, delta)
 
 	return Sphere{

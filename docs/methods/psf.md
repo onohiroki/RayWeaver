@@ -392,11 +392,13 @@ and `--csv` files (one per result).
 - **Fixed image plane (default)**: all wavelengths evaluated at the nominal
   image plane. Longitudinal color appears as defocus blur in the combined PSF;
   the polychromatic Strehl and MTF reflect real sensor-plane performance.
-- **`--best-focus`**: the best-focus shift is determined from the **reference
-  wavelength's** geometric spot RMS minimum, and **applied to all wavelengths
-  identically**. This removes the field-curvature defocus common to all
-  wavelengths while preserving lateral color and the relative defocus between
-  wavelengths. Use for comparing intrinsic wavefront quality.
+- **`--best-focus`**: the best-focus shift is the **reference wavelength's**
+  coherent-PSF-peak maximum (the plane of greatest peak-ratio Strehl, found by a
+  coarse scan of the vector Huygens sum around a geometric spot-RMS seed), and is
+  **applied to all wavelengths identically**. This removes the field-curvature
+  defocus common to all wavelengths while preserving lateral color and the
+  relative defocus between wavelengths. Use for comparing intrinsic wavefront
+  quality.
 
 Per-wavelength independent best focus is not provided for polychromatic
 evaluation as it would remove longitudinal chromatic aberration.

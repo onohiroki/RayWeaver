@@ -1302,7 +1302,8 @@ Input YAML — focus section (optional; flags override):
 
 Output: augmented YAML with a focus_comparison section holding the mtf or psf
 table (rows = field x wavelength, each with the file / focus_plane_all /
-best_focus plane blocks). A human-readable table is written to stderr.
+best_focus plane blocks). No table is printed to stderr; pipe the output into
+"rayweave list focus" for a human-readable comparison.
 `)
 	case "wavefront":
 		fmt.Print(`Usage: rayweave wavefront [flags] < pipeline.yaml
@@ -1513,7 +1514,7 @@ not pipeline YAML.
 Targets (space-separated, flags may appear before or after them;
 default: surfaces, glasses, paraxial and fields — the keyword "default"
 expands to this set in place, e.g. "list default merit" shows the default
-targets followed by merit; the keyword "all" expands to all eight targets
+targets followed by merit; the keyword "all" expands to all nine targets
 and implies --auto-aperture, --all-glasses, and --roles):
   surfaces   surface table of the selected config (object plane 0 excluded)
               With --auto-aperture, also shows the per-surface auto_aperture
@@ -1558,6 +1559,10 @@ and implies --auto-aperture, --all-glasses, and --roles):
              max_cycles, etc.), the list of discovered local minima (index,
              merit, file), per-minimum element powers, and the best solution.
              File directory is shown when all minima share the same path.
+  focus      image-plane comparison results from focus_comparison (requires
+             focus mtf / focus psf output). Auto-detects the mtf or psf
+             sub-section and renders the per-(field, wavelength) x plane table
+             (file / focus_plane_all / best_focus), plus the MTF or PSF metrics.
 
 Options:
   --format table|yaml|json|csv   output format (default table)
@@ -1621,6 +1626,8 @@ Examples:
   rayweave list paraxial --roles < lens.yaml
   rayweave trace single --origin 0,5,-100 --angle-yz 5 < lens.yaml | rayweave list rays
   rayweave chief | rayweave trace | rayweave list rays --summary
+  rayweave focus psf --planes all,best < lens.yaml | rayweave list focus
+  rayweave focus mtf --frequencies 30,50,80 < lens.yaml | rayweave list focus --format csv
 `)
 	case "clean":
 		fmt.Print(`Usage: rayweave clean [--verbose] < pipeline.yaml

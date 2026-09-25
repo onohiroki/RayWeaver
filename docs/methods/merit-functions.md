@@ -102,7 +102,7 @@ P(x,y) = a·x² + b·y² + c·xy + d·x + e·y + f
 
 of the field's OPD sampled on the reference surface (default: the last optical
 surface, overridable via `chief.reference_surface`). The OPD is referenced to
-the **best-focus point** — the geometric spot-RMS minimization along the
+the **best-focus point** — the coherent-PSF-peak maximization along the
 image-plane normal — exactly like the `wavefront` command, so:
 `wavefront_defocus = (a+b)/2`, `wavefront_astigmatism = √(((a−b)/2)² + (c/2)²)`,
 `wavefront_tilt = √(d²+e²)`, and `wavefront_rms_residual` is the area-weighted

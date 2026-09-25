@@ -9,7 +9,8 @@ import (
 )
 
 // TestBackFocusSolveAutoDetectsTarget verifies that the default target surface
-// is the last lens surface before the image plane.
+// is the back air gap of the image-side-most powered element (its rear
+// surface), not the element's centre thickness.
 func TestBackFocusSolveAutoDetectsTarget(t *testing.T) {
 	gc := tripletGC()
 	surfaces := powerSolveTripletSurfaces()
@@ -34,10 +35,46 @@ func TestBackFocusSolveAutoDetectsTarget(t *testing.T) {
 		t.Fatal("backFocusTargets config1 should not be empty")
 	}
 	// The triplet has surfaces: 1(lens), 2(spacer), 3(lens), 4(spacer),
-	// 5(spacer), 6(lens), 7(spacer), 8(image plane). The last lens surface
-	// before image plane is surface 6.
-	if entries[0].solveID != 6 {
-		t.Errorf("auto-detected target: want surface 6, got %d", entries[0].solveID)
+	// 5(spacer), 6/7(last lens), 8(image plane). The last powered element is
+	// bounded by surfaces 6 and 7; its rear surface 7 owns the back air gap
+	// (thickness 21.37 = the image distance), so the target is 7 — not the
+	// element centre thickness on surface 6.
+	if entries[0].solveID != 7 {
+		t.Errorf("auto-detected target: want surface 7, got %d", entries[0].solveID)
+	}
+}
+
+// TestBackFocusSolveSkipsPowerlessElement verifies that a flat window (no
+// thin-lens power) before the image plane does not become the target: the gap
+// chosen is the one *before* the window, so the window and image plane
+// translate together.
+func TestBackFocusSolveSkipsPowerlessElement(t *testing.T) {
+	gc := tripletGC()
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 1 / 50.0, Thickness: 5.0, Material: types.Material{Key: "SK18"}, Diameter: 30},
+		{ID: 2, Type: types.Sphere, Curvature: 1 / -50.0, Thickness: 10.0, Material: types.Material{}, Diameter: 30},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 2.0, Material: types.Material{Key: "SK18"}, Diameter: 30}, // window front
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 30.0, Material: types.Material{}, Diameter: 30},           // window rear
+		{ID: 5, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 30},              // image plane
+	}
+	surface.Precompute(surfaces)
+	cfg := Config{
+		Surfaces:     surfaces,
+		GlassCatalog: gc,
+		Variables: []Variable{
+			{Name: "c", SurfaceID: 1, Param: "curvature", Min: -0.1, Max: 0.1, Config: "config1"},
+		},
+	}
+	opt := NewOptimizer(cfg)
+	opt.SetBackFocusSolve(&types.BackFocusSolveConfig{Enabled: true, Type: "paraxial"})
+	entries := opt.backFocusTargets["config1"]
+	if len(entries) == 0 {
+		t.Fatal("backFocusTargets config1 should not be empty")
+	}
+	// Surface 2 is the rear of the powered lens (its thickness is the gap
+	// before the powerless window); surfaces 3/4 are the window.
+	if entries[0].solveID != 2 {
+		t.Errorf("auto-detected target: want surface 2 (gap before the window), got %d", entries[0].solveID)
 	}
 }
 

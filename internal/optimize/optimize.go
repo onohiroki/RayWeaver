@@ -1631,7 +1631,7 @@ func (o *Optimizer) SetBackFocusSolve(cfg *types.BackFocusSolveConfig) {
 		cfg := &o.configs[ci]
 		cfg.backFocusSolve = o.backFocusSolve
 		surfaces := cfg.surfaces
-		sid := cfg.resolveBackFocusTarget(surfaces)
+		sid := cfg.resolveBackFocusTarget(surfaces, o.gc)
 		if sid < 0 {
 			continue
 		}
@@ -1644,16 +1644,27 @@ func (o *Optimizer) SetBackFocusSolve(cfg *types.BackFocusSolveConfig) {
 
 // resolveBackFocusTarget resolves the config's back-focus target surface ID
 // (see resolveBackFocusTargetID).
-func (cfg *config) resolveBackFocusTarget(surfaces []types.Surface) int {
-	return resolveBackFocusTargetID(surfaces, cfg.backFocusSolve)
+func (cfg *config) resolveBackFocusTarget(surfaces []types.Surface, gc *glass.Catalog) int {
+	return resolveBackFocusTargetID(surfaces, cfg.backFocusSolve, gc)
 }
+
+// backFocusPowerEps is the thin-lens power magnitude (mm⁻¹) at or below which
+// an element counts as powerless (a window / filter / dummy plate) for the
+// back-focus target auto-detect.
+const backFocusPowerEps = 1e-6
 
 // resolveBackFocusTargetID returns the surface ID whose thickness will be
 // adjusted by the back-focus solve. When cfg specifies a positive Surface ID it
-// is validated and returned directly; otherwise the last lens surface before
-// the image plane is selected (skipping air-gap / filter surfaces). A return
-// value of -1 means no suitable surface was found.
-func resolveBackFocusTargetID(surfaces []types.Surface, cfg *types.BackFocusSolveConfig) int {
+// is validated and returned directly. Otherwise the target is the back air gap
+// immediately after the image-side-most *powered* element — the rear surface of
+// the last element whose thin-lens power is non-zero. Adjusting that thickness
+// refocuses the image plane without changing any element's thickness; when a
+// powerless element (window / filter) sits before the image plane the chosen
+// gap is the one *before* it, so the downstream block translates rigidly with
+// the image plane. gc is the glass catalog for the element-power test; a nil
+// catalog skips the power filter and returns the last glass element's rear
+// surface. A return value of -1 means no suitable surface was found.
+func resolveBackFocusTargetID(surfaces []types.Surface, cfg *types.BackFocusSolveConfig, gc *glass.Catalog) int {
 	if len(surfaces) < 3 {
 		return -1
 	}
@@ -1667,13 +1678,23 @@ func resolveBackFocusTargetID(surfaces []types.Surface, cfg *types.BackFocusSolv
 		}
 		return -1
 	}
-	// auto-detect: last lens surface before the image plane
+	// Auto-detect: the back air gap of the image-side-most powered element. A
+	// mirror is its own (single-surface) element and its following gap is the
+	// back focus. A rear surface of a glass element has air after it and glass
+	// before it; its thickness is the air gap (the back focal distance).
 	imgIdx := len(surfaces) - 1
 	for i := imgIdx - 1; i >= 1; i-- {
 		s := surfaces[i]
-		if !s.Material.IsAir() || s.Reflects() {
+		if s.Reflects() {
 			return s.ID
 		}
+		if !s.Material.IsAir() || surfaces[i-1].Material.IsAir() {
+			continue
+		}
+		if gc != nil && math.Abs(paraxial.ElementPowerCurvature(surfaces, gc, s.ID)) <= backFocusPowerEps {
+			continue // powerless element (window / filter): keep scanning object-ward
+		}
+		return s.ID
 	}
 	return surfaces[imgIdx-1].ID
 }
@@ -3079,7 +3100,7 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 	if cfg == nil || !cfg.Enabled {
 		return
 	}
-	targetID := resolveBackFocusTargetID(surfaces, cfg)
+	targetID := resolveBackFocusTargetID(surfaces, cfg, gc)
 	if targetID < 0 {
 		return
 	}

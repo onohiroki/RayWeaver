@@ -31,7 +31,7 @@ type Options struct {
 	// MTFCfg configures the OTF/MTF computation (nil = defaults).
 	MTFCfg *types.PSFMTFConfig
 	// BestFocus evaluates each field at its best-focus image plane: the plane
-	// shift δ minimizing the geometric spot RMS (BestFocusShift) is applied per
+	// shift δ maximizing the coherent PSF peak (BestFocusShift) is applied per
 	// field before the Huygens integral, removing field-curvature defocus so
 	// the peak-ratio Strehl and rms_opd are wavefront-quality numbers. False =
 	// evaluate at the fixed image plane (field curvature appears naturally).
@@ -54,27 +54,27 @@ type Options struct {
 
 // Result is one computed PSF with its analysis summary.
 type Result struct {
-	FieldIndex     int
-	FieldAngle     float64
-	Wavelength     float64
-	Polarization   string
-	Grid           *FieldGrid
-	IdealPeak      float64
-	Strehl         float64
-	FWHMX          float64
-	FWHMY          float64
-	CentroidX      float64
-	CentroidY      float64
-	PeakValue      float64
-	PeakX          float64
-	PeakY          float64
-	Encircled50    float64
-	AiryRadius     float64
-	ImageNA        float64
-	SpotRMS        float64
-	RMSOPD         float64 // wavefront error RMS relative to the focus reference (mm)
-	PVOPD          float64 // wavefront error peak-to-valley (mm)
-	Stats          WavefrontStats
+	FieldIndex   int
+	FieldAngle   float64
+	Wavelength   float64
+	Polarization string
+	Grid         *FieldGrid
+	IdealPeak    float64
+	Strehl       float64
+	FWHMX        float64
+	FWHMY        float64
+	CentroidX    float64
+	CentroidY    float64
+	PeakValue    float64
+	PeakX        float64
+	PeakY        float64
+	Encircled50  float64
+	AiryRadius   float64
+	ImageNA      float64
+	SpotRMS      float64
+	RMSOPD       float64 // wavefront error RMS relative to the focus reference (mm)
+	PVOPD        float64 // wavefront error peak-to-valley (mm)
+	Stats        WavefrontStats
 	// RawIntensitySum is the unnormalized window energy Σ (I·Δx·Δy) before
 	// Normalize.
 	RawIntensitySum float64
@@ -147,6 +147,12 @@ func resolvePolStates(labels []string) []polState {
 	return out
 }
 
+// DefaultNumRays is the pupil-grid ray count psf.Compute uses when
+// Options.NumRays is unset. Callers that must match the psf sampling (e.g. a
+// back-focus solve run just before a psf evaluation) resolve the same value
+// through this constant.
+const DefaultNumRays = 400
+
 // Compute runs the full PSF pipeline: for every (field, wavelength,
 // polarization) it samples the entrance pupil, traces the polarized wavefront
 // to the reference surface, and integrates it onto the flat image plane via
@@ -160,7 +166,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 		opts.ReferenceSurface = DefaultReferenceSurface(system.Surfaces)
 	}
 	if opts.NumRays <= 0 {
-		opts.NumRays = 400
+		opts.NumRays = DefaultNumRays
 	}
 	if opts.GridSize <= 0 {
 		opts.GridSize = 64
@@ -243,7 +249,7 @@ func computeOne(engine *ray.Engine, gc *glass.Catalog, system types.System, pg *
 	}
 	evaluateZ := planeZ
 	if opts.BestFocus {
-		evaluateZ = planeZ + BestFocusShift(samples, planeZ)
+		evaluateZ = planeZ + BestFocusShift(samples, planeZ, nImage, wl)
 	}
 	cx, cy, _ := ImagePlaneSpot(samples, evaluateZ)
 	center := types.Vec3{X: cx, Y: cy, Z: evaluateZ}
@@ -288,7 +294,7 @@ func computeCombined(engine *ray.Engine, gc *glass.Catalog, system types.System,
 	}
 	evaluateZ := planeZ
 	if opts.BestFocus {
-		evaluateZ = planeZ + BestFocusShift(r1.samples, planeZ)
+		evaluateZ = planeZ + BestFocusShift(r1.samples, planeZ, nImage, wl)
 	}
 	cx, cy, _ := ImagePlaneSpot(r1.samples, evaluateZ)
 	center := types.Vec3{X: cx, Y: cy, Z: evaluateZ}
@@ -488,7 +494,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 	ref := tds[0]
 	evaluateZ := planeZ
 	if opts.BestFocus {
-		evaluateZ = planeZ + BestFocusShift(ref.samples[refIdx], planeZ)
+		evaluateZ = planeZ + BestFocusShift(ref.samples[refIdx], planeZ, ref.nImage, ref.wl)
 	}
 	cx, cy, _ := ImagePlaneSpot(ref.samples[refIdx], evaluateZ)
 	center := types.Vec3{X: cx, Y: cy, Z: evaluateZ}
@@ -576,7 +582,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 			stats.Missed += td.stats[p].Missed
 		}
 		cxw, cyw := act.Centroid()
-		
+
 		// Store per-wavelength physical intensity for polychromatic MTF
 		mtfWavelengths = append(mtfWavelengths, td.wl)
 		mtfIntensities = append(mtfIntensities, act.Intensity)
@@ -633,7 +639,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 			mtfSPD = spectral.D65()
 		}
 		mtfResult = ComputePolychromaticMTF(mtfWavelengths, mtfIntensities, spec, mtfSPD, mtfTransmittances, opts.MTFCfg)
-		
+
 		// Add per-wavelength MTF threshold data to summary
 		if mtfResult != nil {
 			for i, wl := range mtfWavelengths {
@@ -642,12 +648,12 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 						Wavelength:     wl,
 						SpectralWeight: mtfTransmittances[i] * mtfSPD.IntegratedWeight(wl),
 						Sagittal: types.PSFMTFAxis{
-							Thresholds:  contributions[i].MTF.Sagittal.Thresholds,
-							Evaluated:   contributions[i].MTF.Sagittal.Evaluated,
+							Thresholds: contributions[i].MTF.Sagittal.Thresholds,
+							Evaluated:  contributions[i].MTF.Sagittal.Evaluated,
 						},
 						Tangential: types.PSFMTFAxis{
-							Thresholds:  contributions[i].MTF.Tangential.Thresholds,
-							Evaluated:   contributions[i].MTF.Tangential.Evaluated,
+							Thresholds: contributions[i].MTF.Tangential.Thresholds,
+							Evaluated:  contributions[i].MTF.Tangential.Evaluated,
 						},
 					})
 				}
@@ -669,34 +675,34 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 	}
 
 	return &Result{
-		FieldIndex:         fi,
-		FieldAngle:         angleFromDir(ref.chiefDir),
-		Wavelength:         ref.wl,
-		Polarization:       label,
-		Grid:               whiteGrid,
-		IdealPeak:          idealPeak,
-		Strehl:             strehl,
-		FWHMX:              fx,
-		FWHMY:              fy,
-		CentroidX:          wcx,
-		CentroidY:          wcy,
-		PeakValue:          peakVal,
-		PeakX:              peakX,
-		PeakY:              peakY,
-		Encircled50:        ee50,
-		AiryRadius:         AiryRadius(ref.wl, na),
-		ImageNA:            na,
-		SpotRMS:            spotRMS,
-		RMSOPD:             rmsOPD,
-		PVOPD:              pvOPD,
-		Stats:              stats,
-		RawIntensitySum:    whiteRawSum,
-		Transmittance:      transmittance,
-		SpectralCurve:      opts.SpectralCurve,
-		BestFocusShift:     evaluateZ - planeZ,
-		Contributions:      contributions,
-		MTF:                mtfResult,
-		whiteRawIntensity:  whiteRawIntensity,
+		FieldIndex:        fi,
+		FieldAngle:        angleFromDir(ref.chiefDir),
+		Wavelength:        ref.wl,
+		Polarization:      label,
+		Grid:              whiteGrid,
+		IdealPeak:         idealPeak,
+		Strehl:            strehl,
+		FWHMX:             fx,
+		FWHMY:             fy,
+		CentroidX:         wcx,
+		CentroidY:         wcy,
+		PeakValue:         peakVal,
+		PeakX:             peakX,
+		PeakY:             peakY,
+		Encircled50:       ee50,
+		AiryRadius:        AiryRadius(ref.wl, na),
+		ImageNA:           na,
+		SpotRMS:           spotRMS,
+		RMSOPD:            rmsOPD,
+		PVOPD:             pvOPD,
+		Stats:             stats,
+		RawIntensitySum:   whiteRawSum,
+		Transmittance:     transmittance,
+		SpectralCurve:     opts.SpectralCurve,
+		BestFocusShift:    evaluateZ - planeZ,
+		Contributions:     contributions,
+		MTF:               mtfResult,
+		whiteRawIntensity: whiteRawIntensity,
 	}
 }
 

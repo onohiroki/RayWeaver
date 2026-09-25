@@ -8,8 +8,9 @@ polarization. It produces three complementary descriptions:
    `P(x,y) = a·x² + b·y² + c·xy + d·x + e·y + f` to the sampled OPD, with the
    derived low-order magnitudes (defocus, astigmatism, tilt).
 2. **Best-fit sphere** — the reference sphere through the vertex, whose center
-   (focus) is found by minimizing the **geometric spot RMS** along the
-   image-plane normal.
+   (focus) is found by maximizing the **coherent PSF peak** (the peak-ratio
+   Strehl) along the image-plane normal, seeded by the geometric spot-RMS
+   minimum.
 3. **Stabilized Fringe-Zernike** — the decomposition of the OPD residual after
    the low-order terms (piston, tilt, defocus, astigmatism) are removed, so
    off-axis coefficients stay stable and meaningful.
@@ -36,13 +37,13 @@ pipeline-compatible YAML with a lightweight `wavefront_result` appended
 
 ```
 per-field polarized ray tracing → OPD referenced to the best-focus point →
-paraboloid fit (always) → best-focus sphere (geometric spot RMS) →
+paraboloid fit (always) → best-focus sphere (coherent-peak maximum) →
 stabilized Fringe-Zernike on the low-order-removed residual → statistics
 ```
 
 The OPD at each sampled point is `OPL + n·|P − Fbest|` referenced to the
-**best-focus point** `Fbest` (the best-fit-sphere center found by minimizing the
-geometric spot RMS, so the reference follows the true refocus even without
+**best-focus point** `Fbest` (the best-fit-sphere center found by maximizing the
+coherent PSF peak, so the reference follows the true refocus even without
 `--best-focus`). Angle fields are launched from the wavefront plane
 perpendicular to the ray direction, so their OPL carries no launch-geometry
 tilt; referencing to the best-focus point and removing the low-order terms
@@ -145,10 +146,11 @@ All OPD/RMS/PV values are in mm. `shift_wavelengths = shift_mm / λ_ref`.
 
 ### Best-focus image-plane shift
 
-Each field's best-focus shift δ minimizes the intensity-weighted geometric
-spot RMS of the beam propagated to the image plane moved by δ. The weighted
-average is applied to the **image plane's last decenter Z shift** in every
-target config (`--config` selects one config; otherwise all configs get the
+Each field's best-focus shift δ maximizes the coherent PSF peak of the beam
+propagated to the image plane moved by δ (the plane of greatest peak-ratio
+Strehl; a geometric spot-RMS focus seeds the oscillatory through-focus scan).
+The weighted average is applied to the **image plane's last decenter Z shift**
+in every target config (`--config` selects one config; otherwise all configs get the
 shift recomputed from their own image distance). The shifted lens can be
 written standalone with `--output-shifted-lens FILE`.
 
