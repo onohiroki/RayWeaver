@@ -1253,7 +1253,7 @@ Notes:
     aberration definition.
 `)
 	case "focus":
-		fmt.Print(`Usage: rayweave focus <mtf|psf> [flags] < input.yaml
+		fmt.Print(`Usage: rayweave focus <mtf|psf|spot> [flags] < input.yaml
 
 Image-plane comparison: evaluate the same system at up to three focus
 conventions and report the requested metric for each, so it is clear which
@@ -1276,11 +1276,14 @@ Sub-subcommands:
               tabulated per (field, wavelength) x plane.
   focus psf   PSF metrics (Strehl, FWHM, encircled energy, centroid) per
               (field, wavelength) x plane.
+  focus spot  geometric (ray) spot RMS and its tangential/sagittal (rms_t,
+              rms_s) and x/y (rms_x, rms_y) decompositions per plane. Needs no
+              Huygens integral, so it is much cheaper than focus psf.
 
 The base psf command remains the single-plane imaging measurement; focus
 is the plane-comparison layer on top of the same engine.
 
-Options (both sub-subcommands):
+Options (all sub-subcommands):
   --wavelengths W1,...  wavelengths in mm (default: config wavelengths,
                           else the chief reference wavelength)
   --fields I1,I2,...    field indices to compare (default: all)
@@ -1290,12 +1293,11 @@ Options (both sub-subcommands):
   --through-focus F,S,N through-focus scan FROM,STEP,COUNT (mm, number of
                           planes); scans around each base plane in --planes
   --num-rays N          pupil grid rays (default 400)
-  --psf-grid N          image-plane pixels per side (default 64)
+  --psf-grid N          image-plane pixels per side (mtf/psf; default 64)
   --ref-surface N       reference surface ID for wavefront sampling
                           (default: the last optical surface)
   --polarization S      RCP (default) | LCP | X | Y | RCP+LCP
-  --converge-check BOOL label sampling convergence by re-evaluating at 1.5x
-                          rays (default: off)
+  --converge-check BOOL label sampling convergence (mtf/psf; default: off)
   --config ID           select config by id (multi-config mode)
   --glass-dir DIR       AGF glass catalog directory
   focus mtf only:
@@ -1310,9 +1312,11 @@ Input YAML — focus section (optional; flags override):
     psf:
       planes: [all, best]
       through_focus: {from: 0.0, step: 0.01, count: 10}
+    spot:
+      planes: [file, all, best]
 
-Output: augmented YAML with a focus_comparison section holding the mtf or psf
-table (rows = field x wavelength, each with the file / focus_plane_all /
+Output: augmented YAML with a focus_comparison section holding the mtf, psf or
+spot table (rows = field x wavelength, each with the file / focus_plane_all /
 best_focus plane blocks), or a through_focus scan when --through-focus is
 given. No table is printed to stderr; pipe the output into "rayweave list
 focus" for a human-readable comparison.
@@ -1572,10 +1576,10 @@ and implies --auto-aperture, --all-glasses, and --roles):
              merit, file), per-minimum element powers, and the best solution.
              File directory is shown when all minima share the same path.
   focus      image-plane comparison results from focus_comparison (requires
-             focus mtf / focus psf output). Auto-detects the mtf, psf or
-             through_focus sub-section and renders the per-(field, wavelength)
-             x plane table (file / focus_plane_all / best_focus), the through-
-             focus scan (base x focus_mm), plus the MTF or PSF metrics.
+             focus mtf / focus psf / focus spot output). Auto-detects the mtf,
+             psf, spot or through_focus sub-section and renders the per-(field,
+             wavelength) x plane table (file / focus_plane_all / best_focus), the
+             through-focus scan (base x focus_mm), plus the MTF/PSF/spot metrics.
 
 Options:
   --format table|yaml|json|csv   output format (default table)

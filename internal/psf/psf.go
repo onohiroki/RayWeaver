@@ -217,7 +217,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 			if err != nil || len(pg.GridPoints) == 0 {
 				continue
 			}
-			nImage := imageSpaceIndex(system.Surfaces, opts.ReferenceSurface, wl, gc)
+			nImage := ImageSpaceIndex(system.Surfaces, opts.ReferenceSurface, wl, gc)
 			fieldAngle := angleFromDir(pg.ChiefDir)
 
 			for pi := 0; pi < len(pols); pi++ {
@@ -468,7 +468,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 		if err != nil || len(pg.GridPoints) == 0 {
 			continue
 		}
-		nImage := imageSpaceIndex(system.Surfaces, opts.ReferenceSurface, wl, gc)
+		nImage := ImageSpaceIndex(system.Surfaces, opts.ReferenceSurface, wl, gc)
 		samples := make([][]WavefrontSample, len(group))
 		stats := make([]WavefrontStats, len(group))
 		ok := false

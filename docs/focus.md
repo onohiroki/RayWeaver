@@ -67,6 +67,18 @@ The reported MTF arrays are aligned to the effective frequency list.
 The same plane comparison with PSF metrics instead of MTF: Strehl, FWHM X/Y,
 encircled-energy 50%, and the PSF centroid per plane.
 
+## `focus spot`
+
+The same plane comparison with the geometric (ray) spot metrics: `spot_rms`
+(flux-weighted RMS radius about the centroid, mm) and its orthonormal
+decompositions `spot_rms_t`/`spot_rms_s` (tangential / sagittal — the tangential
+axis is the field azimuth) and `spot_rms_x`/`spot_rms_y` (image-plane x/y), plus
+the centroid. It needs no Huygens integral, so it is much cheaper than
+`focus psf`. Samples are weighted by `Area·Intensity` (the optimizer's
+`spot_rms` convention), which differs slightly from `psf`'s `SpotRMS`
+(Intensity-weighted). The `best` plane uses each field's coherent-peak best
+focus, so the spot RMS there is not necessarily the geometric minimum.
+
 ## CLI / YAML
 
 Every flag mirrors the `focus:` section (CLI wins; the effective values are

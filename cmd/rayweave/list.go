@@ -2962,6 +2962,7 @@ type focusJSONListOutput struct {
 type focusJSONComparison struct {
 	MTF          *focusJSONMTF          `json:"mtf,omitempty"`
 	PSF          *focusJSONPSF          `json:"psf,omitempty"`
+	Spot         *focusJSONSpot         `json:"spot,omitempty"`
 	ThroughFocus *focusJSONThroughFocus `json:"through_focus,omitempty"`
 }
 
@@ -3040,14 +3041,46 @@ type focusJSONThroughRow struct {
 
 type focusJSONThroughPt struct {
 	FocusMM           float64   `json:"focus_mm"`
-	Strehl            float64   `json:"strehl"`
+	Strehl            float64   `json:"strehl,omitempty"`
 	FWHMX             float64   `json:"fwhm_x,omitempty"`
 	FWHMY             float64   `json:"fwhm_y,omitempty"`
 	EncircledEnergy50 float64   `json:"encircled_energy_50,omitempty"`
 	CentroidX         float64   `json:"centroid_x,omitempty"`
 	CentroidY         float64   `json:"centroid_y,omitempty"`
+	SpotRMS           float64   `json:"spot_rms,omitempty"`
+	SpotRMSX          float64   `json:"spot_rms_x,omitempty"`
+	SpotRMSY          float64   `json:"spot_rms_y,omitempty"`
+	SpotRMST          float64   `json:"spot_rms_t,omitempty"`
+	SpotRMSS          float64   `json:"spot_rms_s,omitempty"`
 	Sagittal          []float64 `json:"mtf_sagittal,omitempty"`
 	Tangential        []float64 `json:"mtf_tangential,omitempty"`
+}
+
+type focusJSONSpot struct {
+	Planes               []string           `json:"planes"`
+	FocusPlaneAllShiftMM float64            `json:"focus_plane_all_shift_mm,omitempty"`
+	Polarization         string             `json:"polarization,omitempty"`
+	Rows                 []focusJSONSpotRow `json:"rows"`
+}
+
+type focusJSONSpotRow struct {
+	FieldIndex    int                 `json:"field_index"`
+	FieldAngle    float64             `json:"field_angle"`
+	Wavelength    float64             `json:"wavelength"`
+	File          *focusJSONSpotPlane `json:"file,omitempty"`
+	FocusPlaneAll *focusJSONSpotPlane `json:"focus_plane_all,omitempty"`
+	BestFocus     *focusJSONSpotPlane `json:"best_focus,omitempty"`
+}
+
+type focusJSONSpotPlane struct {
+	SpotRMS          float64 `json:"spot_rms"`
+	SpotRMSX         float64 `json:"spot_rms_x"`
+	SpotRMSY         float64 `json:"spot_rms_y"`
+	SpotRMST         float64 `json:"spot_rms_t"`
+	SpotRMSS         float64 `json:"spot_rms_s"`
+	CentroidX        float64 `json:"centroid_x"`
+	CentroidY        float64 `json:"centroid_y"`
+	BestFocusShiftMM float64 `json:"best_focus_shift_mm,omitempty"`
 }
 
 // focusToJSON converts a pipeline focus comparison to its json-tagged mirror.
@@ -3090,10 +3123,44 @@ func focusToJSON(fc *types.FocusComparison) focusJSONComparison {
 		}
 		out.PSF = p
 	}
+	if fc.Spot != nil {
+		s := &focusJSONSpot{
+			Planes:               fc.Spot.Planes,
+			FocusPlaneAllShiftMM: fc.Spot.FocusPlaneAllShiftMM,
+			Polarization:         fc.Spot.Polarization,
+		}
+		for _, r := range fc.Spot.Rows {
+			s.Rows = append(s.Rows, focusJSONSpotRow{
+				FieldIndex:    r.FieldIndex,
+				FieldAngle:    r.FieldAngle,
+				Wavelength:    r.Wavelength,
+				File:          focusJSONSpotPlaneFrom(r.File),
+				FocusPlaneAll: focusJSONSpotPlaneFrom(r.FocusPlaneAll),
+				BestFocus:     focusJSONSpotPlaneFrom(r.BestFocus),
+			})
+		}
+		out.Spot = s
+	}
 	if fc.ThroughFocus != nil {
 		out.ThroughFocus = focusJSONThroughFocusFrom(fc.ThroughFocus)
 	}
 	return out
+}
+
+func focusJSONSpotPlaneFrom(p *types.FocusSpotPlane) *focusJSONSpotPlane {
+	if p == nil {
+		return nil
+	}
+	return &focusJSONSpotPlane{
+		SpotRMS:          p.SpotRMS,
+		SpotRMSX:         p.SpotRMSX,
+		SpotRMSY:         p.SpotRMSY,
+		SpotRMST:         p.SpotRMST,
+		SpotRMSS:         p.SpotRMSS,
+		CentroidX:        p.CentroidX,
+		CentroidY:        p.CentroidY,
+		BestFocusShiftMM: p.BestFocusShiftMM,
+	}
 }
 
 func focusJSONThroughFocusFrom(tf *types.FocusThroughFocusComparison) *focusJSONThroughFocus {
@@ -3125,6 +3192,11 @@ func focusJSONThroughFocusFrom(tf *types.FocusThroughFocusComparison) *focusJSON
 					EncircledEnergy50: p.EncircledEnergy50,
 					CentroidX:         p.CentroidX,
 					CentroidY:         p.CentroidY,
+					SpotRMS:           p.SpotRMS,
+					SpotRMSX:          p.SpotRMSX,
+					SpotRMSY:          p.SpotRMSY,
+					SpotRMST:          p.SpotRMST,
+					SpotRMSS:          p.SpotRMSS,
 					Sagittal:          p.Sagittal,
 					Tangential:        p.Tangential,
 				})
@@ -3169,7 +3241,7 @@ func focusJSONPSFPlaneFrom(p *types.FocusPSFPlane) *focusJSONPSFPlane {
 // auto-detected; normally only one is present. It never re-computes anything.
 func listFocus(output types.Output, format string) {
 	fc := output.FocusComparison
-	if fc == nil || (fc.MTF == nil && fc.PSF == nil && fc.ThroughFocus == nil) {
+	if fc == nil || (fc.MTF == nil && fc.PSF == nil && fc.Spot == nil && fc.ThroughFocus == nil) {
 		switch format {
 		case "yaml":
 			os.Stdout.Write([]byte("focus_comparison: {}\n"))
@@ -3210,6 +3282,13 @@ func listFocus(output types.Output, format string) {
 			writeFocusPSFCSV(fc.PSF)
 			first = false
 		}
+		if fc.Spot != nil {
+			if !first {
+				fmt.Println()
+			}
+			writeFocusSpotCSV(fc.Spot)
+			first = false
+		}
 		if fc.ThroughFocus != nil {
 			if !first {
 				fmt.Println()
@@ -3226,8 +3305,14 @@ func listFocus(output types.Output, format string) {
 			}
 			writeFocusPSFTable(os.Stdout, fc.PSF)
 		}
-		if fc.ThroughFocus != nil {
+		if fc.Spot != nil {
 			if fc.MTF != nil || fc.PSF != nil {
+				fmt.Println()
+			}
+			writeFocusSpotTable(os.Stdout, fc.Spot)
+		}
+		if fc.ThroughFocus != nil {
+			if fc.MTF != nil || fc.PSF != nil || fc.Spot != nil {
 				fmt.Println()
 			}
 			writeFocusThroughFocusTable(os.Stdout, fc.ThroughFocus)
@@ -3313,13 +3398,17 @@ func writeFocusPSFCSV(c *types.FocusPSFComparison) {
 // (base, row, focus plane).
 func writeFocusThroughFocusCSV(c *types.FocusThroughFocusComparison) {
 	fmt.Printf("Focus Comparison (through-focus %s):\n", c.Metric)
-	header := []string{"base", "base_shift_mm", "field_index", "field_angle", "wavelength", "focus_mm", "strehl"}
-	if c.Metric == "mtf" {
+	header := []string{"base", "base_shift_mm", "field_index", "field_angle", "wavelength", "focus_mm"}
+	switch c.Metric {
+	case "mtf":
+		header = append(header, "strehl")
 		for _, f := range c.Frequencies {
 			header = append(header, fmt.Sprintf("mtf_sagittal_%g", f), fmt.Sprintf("mtf_tangential_%g", f))
 		}
-	} else {
-		header = append(header, "fwhm_x", "fwhm_y", "encircled_energy_50", "centroid_x", "centroid_y")
+	case "spot":
+		header = append(header, "spot_rms", "spot_rms_t", "spot_rms_s", "spot_rms_x", "spot_rms_y", "centroid_x", "centroid_y")
+	default:
+		header = append(header, "strehl", "fwhm_x", "fwhm_y", "encircled_energy_50", "centroid_x", "centroid_y")
 	}
 	fmt.Println(strings.Join(quoteCSV(header), ","))
 	for _, s := range c.Scans {
@@ -3332,9 +3421,10 @@ func writeFocusThroughFocusCSV(c *types.FocusThroughFocusComparison) {
 					strconv.FormatFloat(row.FieldAngle, 'g', -1, 64),
 					strconv.FormatFloat(row.Wavelength, 'g', -1, 64),
 					strconv.FormatFloat(p.FocusMM, 'g', -1, 64),
-					strconv.FormatFloat(p.Strehl, 'g', -1, 64),
 				}
-				if c.Metric == "mtf" {
+				switch c.Metric {
+				case "mtf":
+					cells = append(cells, strconv.FormatFloat(p.Strehl, 'g', -1, 64))
 					for i := range c.Frequencies {
 						sag, tan := math.NaN(), math.NaN()
 						if i < len(p.Sagittal) {
@@ -3347,8 +3437,18 @@ func writeFocusThroughFocusCSV(c *types.FocusThroughFocusComparison) {
 							strconv.FormatFloat(sag, 'g', -1, 64),
 							strconv.FormatFloat(tan, 'g', -1, 64))
 					}
-				} else {
+				case "spot":
 					cells = append(cells,
+						strconv.FormatFloat(p.SpotRMS, 'g', -1, 64),
+						strconv.FormatFloat(p.SpotRMST, 'g', -1, 64),
+						strconv.FormatFloat(p.SpotRMSS, 'g', -1, 64),
+						strconv.FormatFloat(p.SpotRMSX, 'g', -1, 64),
+						strconv.FormatFloat(p.SpotRMSY, 'g', -1, 64),
+						strconv.FormatFloat(p.CentroidX, 'g', -1, 64),
+						strconv.FormatFloat(p.CentroidY, 'g', -1, 64))
+				default:
+					cells = append(cells,
+						strconv.FormatFloat(p.Strehl, 'g', -1, 64),
 						strconv.FormatFloat(p.FWHMX, 'g', -1, 64),
 						strconv.FormatFloat(p.FWHMY, 'g', -1, 64),
 						strconv.FormatFloat(p.EncircledEnergy50, 'g', -1, 64),
@@ -3357,6 +3457,38 @@ func writeFocusThroughFocusCSV(c *types.FocusThroughFocusComparison) {
 				}
 				fmt.Println(strings.Join(quoteCSV(cells), ","))
 			}
+		}
+	}
+}
+
+// writeFocusSpotCSV flattens the spot comparison to one row per (row, plane).
+func writeFocusSpotCSV(c *types.FocusSpotComparison) {
+	fmt.Println("Focus Comparison (spot):")
+	fmt.Println(strings.Join(quoteCSV([]string{
+		"field_index", "field_angle", "wavelength", "plane",
+		"spot_rms", "spot_rms_t", "spot_rms_s", "spot_rms_x", "spot_rms_y",
+		"centroid_x", "centroid_y", "best_focus_shift_mm",
+	}), ","))
+	for _, row := range c.Rows {
+		for _, e := range focusSpotPlaneEntries(row) {
+			if e.plane == nil {
+				continue
+			}
+			cells := []string{
+				strconv.Itoa(row.FieldIndex),
+				strconv.FormatFloat(row.FieldAngle, 'g', -1, 64),
+				strconv.FormatFloat(row.Wavelength, 'g', -1, 64),
+				e.name,
+				strconv.FormatFloat(e.plane.SpotRMS, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.SpotRMST, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.SpotRMSS, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.SpotRMSX, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.SpotRMSY, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.CentroidX, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.CentroidY, 'g', -1, 64),
+				strconv.FormatFloat(e.plane.BestFocusShiftMM, 'g', -1, 64),
+			}
+			fmt.Println(strings.Join(quoteCSV(cells), ","))
 		}
 	}
 }
