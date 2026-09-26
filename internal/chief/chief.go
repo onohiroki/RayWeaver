@@ -371,7 +371,7 @@ func traceFields(
 ) []Result {
 	var results []Result
 
-for fi, fd := range fields {
+	for fi, fd := range fields {
 		dx, dy := raymath.FieldAzimuth(fd.Direction)
 
 		path := dls.BuildPath(system.Surfaces)
@@ -1781,6 +1781,7 @@ func tracePupilGrid(
 		cx = weightedX / totalWeight
 		cy = weightedY / totalWeight
 	}
+	pupil.Release(samples)
 	return
 }
 

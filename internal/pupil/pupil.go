@@ -82,6 +82,14 @@ type Sample struct {
 	Slab []types.SurfaceResult
 }
 
+// surfaceResultSlabs reuses the backing arrays for the per-ray surface results
+// produced by Trace. Merit evaluation traces many grids and immediately
+// reduces the detailed per-surface results to scalar IPoints; allocating a
+// fresh nRays×nSurfaces slab for every field/wavelength/Jacobian point caused
+// the dominant allocation churn in escape profiles. Call Release after the
+// caller has copied the values it needs out of Samples.
+var surfaceResultSlabs sync.Pool
+
 // GridCentre returns the grid centre on the zStart plane whose ray in the
 // given direction passes through the entrance-pupil centre (0, 0, pupilZ).
 // Vector-based (no tanθ), degrading to the wavefront plane through the pupil
@@ -187,7 +195,7 @@ func Trace(engine *ray.Engine, path []int, surfaces []types.Surface,
 	// sub-slices, one per ray.  This eliminates the per-ray allocation that
 	// previously dominated the heap profile (1.17 TB over a full escape run).
 	pathLen := len(path)
-	slab := make([]types.SurfaceResult, n*pathLen)
+	slab := acquireSurfaceResultSlab(n * pathLen)
 	for i := range samples {
 		samples[i].Surfaces = slab[i*pathLen : i*pathLen : (i+1)*pathLen]
 	}
@@ -258,4 +266,41 @@ func Trace(engine *ray.Engine, path []int, surfaces []types.Surface,
 		}()
 	}
 	wg.Wait()
+}
+
+// Release returns Trace's shared per-surface result slab to the pool and drops
+// the Samples' references to it. It must only be called after all reads of
+// Sample.Surfaces/Slab are complete. Scalar values (OK, OPL, Intensity, etc.)
+// remain untouched. Samples that had to grow an individual slice for an error
+// result are detached as well and become collectible normally.
+func Release(samples []Sample) {
+	if len(samples) == 0 {
+		return
+	}
+	slab := samples[0].Slab
+	for i := range samples {
+		samples[i].Surfaces = nil
+		samples[i].Slab = nil
+	}
+	if len(slab) == 0 {
+		return
+	}
+	// SurfaceResult has optional pointer fields when detail tracing is enabled.
+	// Clear the entire capacity before pooling so a future detail trace or a
+	// shorter path cannot keep stale objects alive.
+	clear(slab[:cap(slab)])
+	surfaceResultSlabs.Put(slab[:0])
+}
+
+func acquireSurfaceResultSlab(n int) []types.SurfaceResult {
+	if n <= 0 {
+		return nil
+	}
+	if v := surfaceResultSlabs.Get(); v != nil {
+		slab := v.([]types.SurfaceResult)
+		if cap(slab) >= n {
+			return slab[:n]
+		}
+	}
+	return make([]types.SurfaceResult, n)
 }

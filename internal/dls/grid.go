@@ -97,6 +97,7 @@ func TraceFieldExtents8Rays(gc *glass.Catalog, surfaces []types.Surface, stopSur
 			}
 		}
 	}
+	pupil.Release(samples)
 	return perSurfMax
 }
 
@@ -164,6 +165,7 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 			}
 		}
 	}
+	pupil.Release(samples)
 
 	return points, perSurfMax
 }

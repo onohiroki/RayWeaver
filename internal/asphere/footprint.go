@@ -118,6 +118,7 @@ func GenerateFootprints(surfaces []types.Surface, fields []Field, wavelengths []
 				}
 				fd.RayHits[i] = hit
 			}
+			pupil.Release(samples)
 
 			out = append(out, fd)
 		}

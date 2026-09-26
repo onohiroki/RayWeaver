@@ -404,6 +404,7 @@ func ComputeFieldFocus(surfaces []types.Surface, fields []Field, wavelengths []f
 					RMSLineWidth: rms,
 					Samples:      buildFocusSamples(tSamples, dir, fanDir, bestZ, f.ID, surfaceID, "tangential", false),
 				}
+				pupil.Release(tSamples)
 			}
 			if cfg.Sagittal {
 				traceFanRays(sSamples, surfaces, wl, gc)
@@ -415,6 +416,7 @@ func ComputeFieldFocus(surfaces []types.Surface, fields []Field, wavelengths []f
 					RMSLineWidth: rms,
 					Samples:      buildFocusSamples(sSamples, dir, fanDir, bestZ, f.ID, surfaceID, "sagittal", false),
 				}
+				pupil.Release(sSamples)
 			}
 
 			result.PerField = append(result.PerField, ffr)
