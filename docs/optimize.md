@@ -219,6 +219,8 @@ A `CONF` operand selects which config's merit terms are active for each rule.
 | `spot_rms_weighted` | flux-weighted (pupil-cell-area × intensity) RMS spot |
 | `spot_ee_radius` | encircled-energy radius (`fraction` on the term, default 0.8) |
 | `opd_rms` | RMS optical path difference across the pupil |
+| `field_alive` | bounded pupil-aliveness deficit `max(0, threshold − valid/total)` (threshold via `target`, default 0.3) |
+| `pupil_fill` | unbounded pupil-fill deficit `(1 − ratio)/ratio` (capped at 999); defeats the "clip the pupil to shrink the survivor-only residual" incentive |
 | `distortion_pct` | percent distortion (chief-ray vs paraxial height) |
 | `lateral_color` | lateral colour (chief-ray height difference between two wavelengths) |
 | `longitudinal_color` | longitudinal colour (EFL difference between two wavelengths) |
@@ -387,7 +389,7 @@ comparable:
   `wavefront_sphere_rms` / `wavefront_sphere_pv`, `opd_rms`,
   `longitudinal_color` / `lateral_color`.
 - **Kinds with no natural length scale** (geometric MTF, `focal_length` in mm,
-  `field_alive`, `distortion_pct`, `glass_role`, ...) keep scale 1.
+  `field_alive`, `pupil_fill`, `distortion_pct`, `glass_role`, ...) keep scale 1.
 
 A per-term `scale:` on a merit term overrides both the automatic scale and the
 per-kind map, and works even when normalization is disabled. Normalization is

@@ -31,6 +31,8 @@ small). Weighting lets the designer balance fields, wavelengths and configs
 | `spot_rms_weighted` | flux-weighted (pupil-cell-area × intensity) RMS spot size |
 | `spot_ee_radius` | encircled-energy radius (EE fraction via `fraction`, default 0.8) |
 | `opd_rms` | RMS optical path difference across the pupil grid |
+| `field_alive` | bounded pupil-aliveness deficit `max(0, threshold − valid/total)` (threshold via `target`, default 0.3) |
+| `pupil_fill` | unbounded pupil-fill deficit `(1 − ratio)/ratio` (capped at 999), so partial clipping cannot be traded against a smaller survivor-only residual |
 | `distortion_pct` | percent distortion |
 | `lateral_color` | lateral colour |
 | `longitudinal_color` | longitudinal colour |
@@ -91,6 +93,28 @@ OPD_RMS = √( (1/N) Σ (OPLᵢ − OPL̄)² )
 
 This is a convenient aberration measure that does not require a chosen
 reference sphere.
+
+### field_alive / pupil_fill
+
+Both consume the same pupil-grid trace and measure how much of the field's
+pupil survives (the fraction of grid rays with a valid image point):
+
+```
+field_alive = max(0, threshold − ratio)      # bounded by `threshold`
+pupil_fill  = (1 − ratio) / ratio            # unbounded (capped at 999)
+```
+
+`field_alive` is a bounded aliveness guardrail (default threshold 0.3, override
+with `target`). Its `target` is the **threshold only** — the residual is the
+plain deficit — so a high threshold penalises any fill below it rather than
+rewarding a dead field. `pupil_fill` is its unbounded counterpart: the spot/OPD
+kinds are
+computed on the **surviving** rays only, so clipping the pupil shrinks their
+residual and a design could otherwise trade a dead periphery for a smaller
+aberration. `pupil_fill` grows without bound as the surviving fraction shrinks
+(`0.5 → 1`, `0.1 → 9`, `0.03 → ~32.3`), so with a suitable weight (`~1e4–1e5`,
+calibrate with `optimize --verbose`'s breakdown) partial clipping dominates any
+live-field aberration. Neither kind adds a trace (they share the grid cache).
 
 ### wavefront paraboloid coefficients
 

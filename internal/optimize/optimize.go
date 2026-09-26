@@ -3303,7 +3303,8 @@ func isGridKind(kind string) bool {
 // trace-consuming term even when isGridKind is false.
 func isGridTraceKind(kind string) bool {
 	switch kind {
-	case dls.MeritWavefrontShiftSag, dls.MeritWavefrontShiftTan, dls.MeritWavefrontPairPhase:
+	case dls.MeritWavefrontShiftSag, dls.MeritWavefrontShiftTan, dls.MeritWavefrontPairPhase,
+		MeritPupilFill:
 		return true
 	}
 	return isGridKind(kind)
@@ -3612,11 +3613,11 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 			term := st.term
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
-				diff := (val - term.target) / term.normDivisor()
+				diff := (val - term.residualTarget()) / term.normDivisor()
 				cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache, p)
-				diff := (val - term.target) / term.normDivisor()
+				diff := (val - term.residualTarget()) / term.normDivisor()
 				cfgMerit += st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
 		}
@@ -3675,11 +3676,11 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 			var contrib float64
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
-				diff := (val - term.target) / term.normDivisor()
+				diff := (val - term.residualTarget()) / term.normDivisor()
 				contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache, p)
-				diff := (val - term.target) / term.normDivisor()
+				diff := (val - term.residualTarget()) / term.normDivisor()
 				contrib = st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff
 			}
 			kind := term.kind
@@ -3743,10 +3744,10 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 			w := math.Sqrt(cfg.weight*st.scale*term.weight*term.fieldWeight*term.wavWeight) / term.normDivisor()
 			if isGridKind(term.kind) {
 				val := o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
-				allR = append(allR, w*(val-term.target))
+				allR = append(allR, w*(val-term.residualTarget()))
 			} else {
 				val := o.evaluateKindTerm(cfg, term, surfaces, gc, cache, p)
-				allR = append(allR, w*(val-term.target))
+				allR = append(allR, w*(val-term.residualTarget()))
 			}
 		}
 	}

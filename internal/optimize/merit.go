@@ -48,6 +48,13 @@ const (
 	// field_alive penalises a field whose pupil grid has too few valid rays.
 	MeritFieldAlive = "field_alive"
 
+	// pupil_fill penalises a field's surviving-pupil fraction without bound:
+	// the value (1-ratio)/ratio grows without limit as the fraction of valid
+	// grid rays shrinks, so partial clipping cannot be traded against a smaller
+	// aberration residual (the bounded field_alive deficit and the
+	// zero-rays-only degenerate penalty cannot express that trade).
+	MeritPupilFill = "pupil_fill"
+
 	// Virtual entrance pupil merit kinds.
 	MeritPupilPosition = "pupil_position"
 	MeritPupilDiameter = "pupil_diameter"
@@ -84,6 +91,8 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		return val
 	case MeritFieldAlive:
 		return o.evaluateFieldAliveTerm(cfg, term, surfaces, gc, cache, p)
+	case MeritPupilFill:
+		return o.evaluatePupilFillTerm(cfg, term, surfaces, gc, cache, p)
 	case MeritGeometricMTFSag:
 		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 		if len(points) == 0 {
@@ -341,6 +350,20 @@ func fieldAliveThreshold(target float64) float64 {
 	return 0.3
 }
 
+// residualTarget returns the target the merit residual (value−target)² uses.
+// For field_alive the term's `target` is the aliveness *threshold* (documented
+// in AGENTS.md: "default threshold is 0.3; override with target on the merit
+// term"), not a value to drive toward: the residual must be the plain deficit,
+// so a nonzero target must not be subtracted or the term would reward a field
+// that is closer to dead (a target of 0.9 would minimise at ratio 0). All other
+// kinds use their target directly.
+func (t *meritTerm) residualTarget() float64 {
+	if t.kind == MeritFieldAlive {
+		return 0
+	}
+	return t.target
+}
+
 // evaluateFieldAliveTerm traces the pupil grid for the term's field and returns
 // the "aliveness deficit": max(0, threshold − nValid/totalRays). A fully dead
 // field (nValid=0) returns threshold; a fully alive field returns 0. The
@@ -365,6 +388,54 @@ func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surface
 		return 0
 	}
 	return deficit
+}
+
+// pupilFillCap bounds the pupil_fill merit value for a grid that is empty or
+// effectively dead (surviving fraction below 1e-3), so the squared residual
+// stays finite for the DLS line search while still dwarfing any live-field
+// aberration term.
+const pupilFillCap = 999.0
+
+// evaluatePupilFillTerm returns the unbounded pupil-fill deficit
+// (1−ratio)/ratio for the term's field, where ratio is the fraction of the
+// pupil-grid rays that survived (OK). It is 0 when every ray survives and grows
+// without bound as the surviving fraction shrinks: 0.5 → 1, 0.1 → 9, 0.03 →
+// ~32.3. Unlike field_alive — whose max(0, threshold−ratio) deficit is bounded
+// by `threshold` — this cannot be traded against the (survivor-only) spot/OPD
+// residuals, which shrink as the pupil is clipped. It reuses the same cached
+// grid trace as the other grid kinds, so it costs no extra tracing.
+func (o *Optimizer) evaluatePupilFillTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
+	return pupilFillFromPoints(o.gridForTerm(cache, gc, surfaces, cfg, term, p))
+}
+
+// pupilFillFromPoints returns the pupil_fill value of a traced pupil grid: the
+// fraction of OK points mapped through pupilFillValue. An empty grid (the trace
+// could not be built at all) is treated as fully dead.
+func pupilFillFromPoints(points []dls.IPoint) float64 {
+	total := len(points)
+	if total == 0 {
+		return pupilFillCap
+	}
+	nValid := 0
+	for _, q := range points {
+		if q.OK {
+			nValid++
+		}
+	}
+	return pupilFillValue(float64(nValid) / float64(total))
+}
+
+// pupilFillValue maps a surviving-ray fraction to the unbounded pupil_fill
+// merit value: 0 when every ray survives, (1−ratio)/ratio otherwise, capped at
+// pupilFillCap for an effectively dead pupil (ratio < 1e-3).
+func pupilFillValue(ratio float64) float64 {
+	if ratio >= 1 {
+		return 0
+	}
+	if ratio < 1e-3 {
+		return pupilFillCap
+	}
+	return (1 - ratio) / ratio
 }
 
 // evaluateDistortionPct returns the distortion percentage for the term's field.

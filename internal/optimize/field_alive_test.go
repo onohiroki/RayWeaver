@@ -43,3 +43,31 @@ func TestFieldAliveThresholdConsistent(t *testing.T) {
 		t.Errorf("field_alive default on-axis = %v, want 0 (all rays alive)", val)
 	}
 }
+
+// TestFieldAliveResidualTarget guards the threshold/target double-use: the
+// term's `target` is the aliveness threshold, so the merit residual must use 0
+// (the plain deficit). Subtracting the threshold made a fully alive field
+// (deficit 0) carry a (0−threshold)² penalty — with target 0.9 that is 0.81,
+// i.e. the merit rewarded driving the field toward dead.
+func TestFieldAliveResidualTarget(t *testing.T) {
+	alive := &meritTerm{kind: MeritFieldAlive, target: 0.9}
+	if got := alive.residualTarget(); got != 0 {
+		t.Fatalf("field_alive residual target = %v, want 0 (target is the threshold)", got)
+	}
+	spot := &meritTerm{kind: MeritSpotRMS, target: 0.5}
+	if got := spot.residualTarget(); got != 0.5 {
+		t.Fatalf("spot_rms residual target = %v, want 0.5", got)
+	}
+
+	// A fully alive field (deficit 0) contributes nothing even with target 0.9.
+	val := 0.0
+	diff := (val - alive.residualTarget()) / 1.0
+	if diff != 0 {
+		t.Errorf("field_alive alive-field residual = %v, want 0", diff)
+	}
+	// A fully dead field (deficit = threshold) still carries the deficit.
+	dead := (fieldAliveThreshold(alive.target) - 0.0)
+	if dead != 0.9 {
+		t.Errorf("field_alive dead-field deficit = %v, want 0.9", dead)
+	}
+}
