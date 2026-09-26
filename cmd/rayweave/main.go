@@ -1512,7 +1512,8 @@ Subcommands:
   wavefront  Wavefront analysis (paraboloid, best-fit sphere, Fringe Zernike, best focus)
   import     Import system from ZEMAX ZMX / CODE V SEQ / OSLO LEN
   export     Export system to ZEMAX ZMX / CODE V SEQ / OSLO LEN
-	query      YAML/JSONL selector with in-memory edits
+  query      YAML/JSONL selector with in-memory edits
+  clean      Strip calculation results, keeping only configuration
   list       Read-only listing of system data (surfaces, glasses, rays)
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
@@ -1654,8 +1655,9 @@ configuration settings. The metadata.tool section is overwritten with
 this tool's own identity.
 
 Removed fields: chief_rays, results, paraxial_result, opt_results,
-escape_result, vignetting_result, asphere_candidate_result,
-psf_results, wavefront_result.
+escape_result, escape_minimum, vignetting_result,
+asphere_candidate_result, psf_results, focus_comparison,
+wavefront_result.
 
 The "stop" section is preserved (it may be hand-entered as input).
 
