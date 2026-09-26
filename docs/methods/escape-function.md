@@ -131,9 +131,12 @@ inside the Jacobian — while still preventing the search from re-entering
 broken basins.
 
 The default criterion: any field with fewer than 30 % of its pupil rays
-surviving the trace (the `field_alive` threshold) causes the entire point to
-be classified as infeasible. This is consistent with the `field_alive` merit
-term, so the two classifications agree.
+surviving the trace (the `field_alive` threshold, overridable with
+`optimization.escape.min_throughput_ratio`) causes the entire point to be
+classified as infeasible. This is consistent with the `field_alive` merit
+term, so the two classifications agree; the merit side also carries the
+unbounded `pupil_fill` kind so a partially clipped pupil is penalised during
+the search rather than only rejected at the end.
 
 ## 3. Parallel workers
 

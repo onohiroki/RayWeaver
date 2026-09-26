@@ -31,7 +31,7 @@ small). Weighting lets the designer balance fields, wavelengths and configs
 | `spot_rms_weighted` | flux-weighted (pupil-cell-area × intensity) RMS spot size |
 | `spot_ee_radius` | encircled-energy radius (EE fraction via `fraction`, default 0.8) |
 | `opd_rms` | RMS optical path difference across the pupil grid |
-| `field_alive` | bounded pupil-aliveness deficit `max(0, threshold − valid/total)` (threshold via `target`, default 0.3) |
+| `field_alive` | bounded pupil-aliveness deficit `max(0, threshold − valid/total)`; `target` is the **threshold** only (default 0.3) — the residual is the plain deficit |
 | `pupil_fill` | unbounded pupil-fill deficit `(1 − ratio)/ratio` (capped at 999), so partial clipping cannot be traded against a smaller survivor-only residual |
 | `distortion_pct` | percent distortion |
 | `lateral_color` | lateral colour |
@@ -79,7 +79,9 @@ The five off-axis kinds reuse the same pupil grid but weight and decompose it:
   MTF better than RMS for off-axis fields.
 
 All grid-based kinds contribute `(value − target)²`, so `target: 0` minimises
-them and a non-zero target drives them to that value.
+them and a non-zero target drives them to that value — except `field_alive`,
+whose `target` is an aliveness threshold and whose residual target is always 0
+(see [field_alive / pupil_fill](#field_alive--pupil_fill)).
 
 ### opd_rms
 

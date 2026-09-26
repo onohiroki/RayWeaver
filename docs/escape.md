@@ -162,7 +162,8 @@ config's **own** terms, never auto-generated: its chromatic terms
 while the config's cheap analytic geometric terms (`seidel_*`, `focal_length`,
 `distortion_pct`, `glass_role`) are retained at their configured weights as a
 **guardrail**. Expensive grid-trace terms (`spot_rms*`, `geometric_mtf_*`,
-`wavefront_*`, `field_alive`) are excluded so the phase stays cheap. This
+`wavefront_*`, `field_alive`, `pupil_fill`) are excluded so the phase stays
+cheap. This
 decouples the glass gradient from the layout: a glass change no longer drifts
 focus, so the axial and lateral chromatic aberration are improved by the glass
 balance itself, while the guardrail keeps the colour solve from wandering onto a
@@ -351,8 +352,12 @@ categories differently:
 
 The default infeasibility rule: **any** field with fewer than 30 % of its pupil
 rays surviving the validation trace causes the point to be classified as
-infeasible. The threshold is the same 0.3 default used by the `field_alive`
-merit term, so the two are consistent.
+infeasible. The threshold is `optimization.escape.min_throughput_ratio` when
+set, else the same 0.3 default used by the `field_alive` merit term, so the two
+are consistent. The merit-side counterpart is the bounded `field_alive` plus the
+unbounded `pupil_fill` kind: a partially clipped pupil shrinks the survivor-only
+spot/OPD residuals, so `pupil_fill` (a non-zero weight) keeps the solver from
+buying a smaller residual by killing a field's periphery.
 
 Validation happens **post-DLS only** — after the clean DLS converges, the
 converged point is traced through `chief.DetermineChiefRaysGrid` with the same
@@ -364,7 +369,7 @@ The invalid reason is reported per basin:
 
 | Reason | Meaning |
 |---|---|
-| `insufficient_field_throughput` | fewer than 30 % of pupil rays reach the image for at least one field |
+| `insufficient_field_throughput` | fewer than `min_throughput_ratio` (default 30 %) of pupil rays reach the image for at least one field |
 | `field_unreachable` | zero rays reach the image for at least one field |
 | `severe_vignetting` | intermediate vignetting caused catastrophic beam loss |
 | `geometry_violation` | negative thickness or other surface-geometry error |

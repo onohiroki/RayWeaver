@@ -219,7 +219,7 @@ A `CONF` operand selects which config's merit terms are active for each rule.
 | `spot_rms_weighted` | flux-weighted (pupil-cell-area × intensity) RMS spot |
 | `spot_ee_radius` | encircled-energy radius (`fraction` on the term, default 0.8) |
 | `opd_rms` | RMS optical path difference across the pupil |
-| `field_alive` | bounded pupil-aliveness deficit `max(0, threshold − valid/total)` (threshold via `target`, default 0.3) |
+| `field_alive` | bounded pupil-aliveness deficit `max(0, threshold − valid/total)`; `target` sets the **threshold** only (default 0.3) — the residual is the plain deficit, so a high threshold never rewards a dead field |
 | `pupil_fill` | unbounded pupil-fill deficit `(1 − ratio)/ratio` (capped at 999); defeats the "clip the pupil to shrink the survivor-only residual" incentive |
 | `distortion_pct` | percent distortion (chief-ray vs paraxial height) |
 | `lateral_color` | lateral colour (chief-ray height difference between two wavelengths) |
@@ -361,7 +361,8 @@ that section for the dynamic switching.
 
 ### Merit weight normalization (`optimization.merit_normalization`)
 
-The merit is `Σ weight·((value−target)/scale)²`. Because the term kinds carry
+The merit is `Σ weight·((value−target)/scale)²` (except `field_alive`, whose
+`target` is an aliveness threshold — see the kinds table). Because the term kinds carry
 very different units (spot RMS and focal length in mm, wavefront in mm, MTF
 dimensionless), a weight that is large for one kind can be negligible for
 another: a `spot_rms` of 1 µm with weight 3000 contributes ~3e-3, while a
