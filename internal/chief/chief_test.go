@@ -1039,3 +1039,127 @@ func TestStopEntrancePupilIsParaxial(t *testing.T) {
 		t.Errorf("entrance-pupil radius = %v, want paraxial %v", r, wantR)
 	}
 }
+
+// chiefRayForDefinition traces one field of the stopped triplet under a given
+// chief-ray definition ("" = the per-system default).
+func chiefRayForDefinition(t *testing.T, sys types.System, gc *glass.Catalog, fd types.FieldDef, rayDefinition string) Result {
+	t.Helper()
+	pol := types.NewCircularJones(true)
+	res := DetermineChiefRaysGridMode(sys, []types.FieldDef{fd}, 3, 64, gc, pol, 0.00058756, false,
+		types.GridPolar, nil, nil, nil, nil, 0, 0, rayDefinition)
+	if len(res) != 1 {
+		t.Fatalf("definition %q: %d results, want 1", rayDefinition, len(res))
+	}
+	return res[0]
+}
+
+// chiefRayAtZ returns where the chief ray crosses the plane z.
+func chiefRayAtZ(r Result, z float64) types.Vec3 {
+	o := r.ChiefRay.Initial.Origin
+	d := r.ChiefRay.Initial.Direction
+	t := (z - o.Z) / d.Z
+	return types.Vec3{X: o.X + d.X*t, Y: o.Y + d.Y*t, Z: z}
+}
+
+// TestChiefRayDefinitionModes verifies the prescribed-pupil definitions: the
+// default of a stop-specified system is the vignetting centre, which without a
+// vignetting specification is exactly the entrance-pupil centre, and both launch
+// the chief ray through the prescribed pupil-plane point — on the axis for the
+// entrance-pupil centre, at the ellipse decenter for the vignetting centre.
+func TestChiefRayDefinitionModes(t *testing.T) {
+	sys, gc := passThroughTripletSystem()
+	sys.StopSurface = 2
+	const wl = 0.00058756
+	zEP := paraxial.EntrancePupilLocation(sys.Surfaces, sys.StopSurface, wl, gc)
+	rad := paraxial.EntrancePupilRadius(sys.Surfaces, sys.StopSurface, wl, gc)
+	if zEP == 0 || rad == 0 {
+		t.Fatalf("no paraxial entrance pupil (z=%v, r=%v)", zEP, rad)
+	}
+	fd := types.FieldDef{Angle: 10.0, Direction: []float64{0, 1}}
+
+	def := chiefRayForDefinition(t, sys, gc, fd, "")
+	ep := chiefRayForDefinition(t, sys, gc, fd, RayDefinitionEntrancePupilCentre)
+	for i, v := range []struct{ got, want float64 }{
+		{def.ChiefRay.Initial.Origin.X, ep.ChiefRay.Initial.Origin.X},
+		{def.ChiefRay.Initial.Origin.Y, ep.ChiefRay.Initial.Origin.Y},
+	} {
+		if math.Abs(v.got-v.want) > 1e-9 {
+			t.Errorf("default definition origin component %d = %v, want the entrance-pupil-centre value %v", i, v.got, v.want)
+		}
+	}
+	if at := chiefRayAtZ(ep, zEP); math.Abs(at.X) > 1e-9 || math.Abs(at.Y) > 1e-9 {
+		t.Errorf("entrance-pupil-centre chief ray crosses zEP at (%v,%v), want (0,0)", at.X, at.Y)
+	}
+
+	// With a vignetting specification the two prescribed-pupil definitions part
+	// ways: vignetting_centre follows the ellipse centre, entrance_pupil_centre
+	// stays on the axis.
+	vig := fd
+	vig.Vignetting = &types.VignettingDef{
+		DecenterX: 0.4, DecenterY: -0.2, CompressionX: 0.5, CompressionY: 0.5,
+	}
+	vc := chiefRayForDefinition(t, sys, gc, vig, RayDefinitionVignettingCentre)
+	if at := chiefRayAtZ(vc, zEP); math.Abs(at.X-0.4*rad) > 1e-6 || math.Abs(at.Y+0.2*rad) > 1e-6 {
+		t.Errorf("vignetting-centre chief ray crosses zEP at (%v,%v), want the ellipse centre (%v,%v)",
+			at.X, at.Y, 0.4*rad, -0.2*rad)
+	}
+	epVig := chiefRayForDefinition(t, sys, gc, vig, RayDefinitionEntrancePupilCentre)
+	if at := chiefRayAtZ(epVig, zEP); math.Abs(at.X) > 1e-9 || math.Abs(at.Y) > 1e-9 {
+		t.Errorf("entrance-pupil-centre chief ray (vignetted field) crosses zEP at (%v,%v), want (0,0)", at.X, at.Y)
+	}
+}
+
+// TestImageHeightFollowsDefinition checks that an image_height field is solved
+// so that its own chief ray lands on the target height under a prescribed-pupil
+// definition (the centroid definition instead targets the bundle centroid).
+func TestImageHeightFollowsDefinition(t *testing.T) {
+	sys, gc := passThroughTripletSystem()
+	sys.StopSurface = 2
+	fd := types.FieldDef{ImageHeight: 5.0, Direction: []float64{0, 1}}
+	ep := chiefRayForDefinition(t, sys, gc, fd, RayDefinitionEntrancePupilCentre)
+	if math.Abs(ep.ImageHeight.Y-5.0) > 1e-3 {
+		t.Errorf("entrance-pupil-centre image height = %v, want 5", ep.ImageHeight.Y)
+	}
+}
+
+// TestValidateRayDefinition covers the definition/pupil contract: a prescribed
+// pupil (explicit stop or virtual pupil model) accepts every definition, the
+// dynamic pupil only accepts the centroid, unknown names are always rejected,
+// and the library silently falls back to a definition the system can honour.
+func TestValidateRayDefinition(t *testing.T) {
+	virtual := &types.PupilModelConfig{Mode: "virtual_entrance_pupil", Diameter: 10}
+	all := []string{"", RayDefinitionCentroid, RayDefinitionEntrancePupilCentre, RayDefinitionVignettingCentre}
+	for _, def := range all {
+		if err := ValidateRayDefinition(2, nil, def); err != nil {
+			t.Errorf("stop-specified system rejected %q: %v", def, err)
+		}
+		if err := ValidateRayDefinition(0, virtual, def); err != nil {
+			t.Errorf("virtual-pupil system rejected %q: %v", def, err)
+		}
+	}
+	for _, def := range []string{RayDefinitionEntrancePupilCentre, RayDefinitionVignettingCentre} {
+		if err := ValidateRayDefinition(0, nil, def); err == nil {
+			t.Errorf("dynamic-pupil system accepted %q, want an error", def)
+		}
+	}
+	if err := ValidateRayDefinition(2, nil, "chief_ray"); err == nil {
+		t.Error("unknown chief-ray definition accepted, want an error")
+	}
+
+	// Library fallbacks.
+	if got := resolveRayDefinition(0, nil, ""); got != RayDefinitionCentroid {
+		t.Errorf("dynamic default = %q, want %q", got, RayDefinitionCentroid)
+	}
+	if got := resolveRayDefinition(0, nil, RayDefinitionEntrancePupilCentre); got != RayDefinitionCentroid {
+		t.Errorf("dynamic fallback = %q, want %q", got, RayDefinitionCentroid)
+	}
+	if got := resolveRayDefinition(2, nil, ""); got != RayDefinitionVignettingCentre {
+		t.Errorf("stop default = %q, want %q", got, RayDefinitionVignettingCentre)
+	}
+	if got := resolveRayDefinition(0, virtual, ""); got != RayDefinitionVignettingCentre {
+		t.Errorf("virtual-pupil default = %q, want %q", got, RayDefinitionVignettingCentre)
+	}
+	if got := resolveRayDefinition(2, nil, RayDefinitionCentroid); got != RayDefinitionCentroid {
+		t.Errorf("explicit centroid = %q, want %q", got, RayDefinitionCentroid)
+	}
+}

@@ -35,6 +35,9 @@ type Options struct {
 	MinGlassPath float64
 	MarginMM     float64
 	Iterations   int
+	// RayDefinition is the document's chief-ray definition
+	// (chief.chief_ray_definition; "" = the per-system default).
+	RayDefinition string
 }
 
 // FieldResult is one field's vignette report plus its marginal rays.
@@ -80,19 +83,19 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 
 	pol := types.NewCircularJones(true)
 
-	last := chief.DetermineChiefRaysGrid(
+	last := chief.DetermineChiefRaysGridMode(
 		types.System{Surfaces: work, StopSurface: opts.StopSurface},
 		opts.Fields, opts.RefSurface, opts.NumRays, gc, pol, opts.Wavelength,
-		true, opts.GridType, nil, nil, nil, nil, 0, 0,
+		true, opts.GridType, nil, nil, nil, nil, 0, 0, opts.RayDefinition,
 	)
 
 	used := 1
 	for it := 1; it < opts.Iterations; it++ {
 		used = it + 1
-		results := chief.DetermineChiefRaysGrid(
+		results := chief.DetermineChiefRaysGridMode(
 			types.System{Surfaces: work, StopSurface: opts.StopSurface},
 			opts.Fields, opts.RefSurface, opts.NumRays, gc, pol, opts.Wavelength,
-			true, opts.GridType, nil, nil, nil, nil, 0, 0,
+			true, opts.GridType, nil, nil, nil, nil, 0, 0, opts.RayDefinition,
 		)
 		last = results
 

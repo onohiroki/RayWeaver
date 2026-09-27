@@ -416,6 +416,13 @@ type ChiefInput struct {
 	GridType         GridType           `yaml:"grid_type,omitempty"`
 	DumpMap          bool               `yaml:"dump_map,omitempty"`
 	PassThrough      *PassThroughTarget `yaml:"pass_through,omitempty"`
+	// ChiefRayDefinition selects how each field's chief ray is constructed:
+	// entrance_pupil_centre | centroid | vignetting_centre ("" = the
+	// per-system default: vignetting_centre when the pupil position is
+	// prescribed by stop_surface/pupil_model, centroid otherwise). The
+	// entrance_pupil_centre and vignetting_centre definitions need a
+	// prescribed pupil; a pass_through target takes precedence over them.
+	ChiefRayDefinition string `yaml:"chief_ray_definition,omitempty"`
 	// ReferenceWavelength is the system reference wavelength (mm) used for
 	// chief-ray and paraxial calculations. The effective value is written back
 	// by commands that resolve it.

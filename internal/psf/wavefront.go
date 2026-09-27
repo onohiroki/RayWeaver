@@ -52,14 +52,15 @@ type WavefrontStats struct {
 // reference surface.
 func ComputeFieldGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	refSurface, numRays int, wavelength float64, gridType types.GridType,
-	pupilModel *types.PupilModelConfig) (*PupilGrid, error) {
+	pupilModel *types.PupilModelConfig, rayDefinition string) (*PupilGrid, error) {
 	if gridType == "" {
 		gridType = types.GridPolar
 	}
 	// The grid itself is polarization-independent; use a reference RCP.
 	pol := types.NewCircularJones(true)
-	results := chief.DetermineChiefRaysGrid(system, []types.FieldDef{fd}, refSurface,
-		numRays, gc, pol, wavelength, false, gridType, nil, nil, nil, pupilModel, 0, 0)
+	results := chief.DetermineChiefRaysGridMode(system, []types.FieldDef{fd}, refSurface,
+		numRays, gc, pol, wavelength, false, gridType, nil, nil, nil, pupilModel, 0, 0,
+		rayDefinition)
 	if len(results) == 0 {
 		return nil, fmt.Errorf("chief returned no grid for field")
 	}

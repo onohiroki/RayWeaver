@@ -105,15 +105,16 @@ func runVignette(data []byte) {
 	}
 
 	res := vignette.Run(surfaces, vignette.Options{
-		Fields:       fields,
-		RefSurface:   input.Chief.ReferenceSurface,
-		StopSurface:  input.Chief.StopSurface,
-		NumRays:      input.Chief.NumRays,
-		GridType:     input.Chief.GridType,
-		Wavelength:   wlEff,
-		MinGlassPath: minGlassPathEff,
-		MarginMM:     marginMMEff,
-		Iterations:   iterationsEff,
+		Fields:        fields,
+		RefSurface:    input.Chief.ReferenceSurface,
+		StopSurface:   input.Chief.StopSurface,
+		NumRays:       input.Chief.NumRays,
+		GridType:      input.Chief.GridType,
+		Wavelength:    wlEff,
+		MinGlassPath:  minGlassPathEff,
+		MarginMM:      marginMMEff,
+		Iterations:    iterationsEff,
+		RayDefinition: chiefRayDefinition(input),
 	}, gc)
 
 	// Write back the settled diameters and applied min_glass_path values.

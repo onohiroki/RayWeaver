@@ -1886,6 +1886,7 @@ func runChief(data []byte) {
 	epd := fs.Float64("epd", 0, "shorthand for --pupil-model-diameter (mm)")
 	fnum := fs.Float64("fnum", 0, "F-number; sets pupil diameter = EFL / FNUM")
 	epz := fs.Float64("epz", 0, "shorthand for virtual entrance pupil at Z mm (activates virtual_entrance_pupil mode)")
+	rayDefinition := fs.String("chief-ray", "", "chief-ray definition: entrance_pupil_centre | centroid | vignetting_centre (empty = chief.chief_ray_definition)")
 	fs.Parse(expandFanRotationArgs(os.Args[2:]))
 	wlSet := flagWasSet(fs, "wl")
 
@@ -2015,6 +2016,19 @@ func runChief(data []byte) {
 		os.Exit(1)
 	}
 
+	// Chief-ray definition: --chief-ray wins over chief.chief_ray_definition
+	// (principle 2), and is written back when given (principle 3). A value the
+	// system cannot honour — a prescribed-pupil definition without a stop or a
+	// virtual pupil model, or an unknown name — is an error rather than a
+	// silent fallback, so a document never means two different things.
+	if flagWasSet(fs, "chief-ray") {
+		input.Chief.ChiefRayDefinition = *rayDefinition
+	}
+	if err := chief.ValidateRayDefinition(input.Chief.StopSurface, input.Chief.PupilModel, input.Chief.ChiefRayDefinition); err != nil {
+		errOut("Error: %v", err)
+		os.Exit(1)
+	}
+
 	fanCfg := resolveRayFanConfig(*rayFan, *fanPlane, fanRotation)
 
 	// effective dumpMap: --clear-aperture or --marginal-rays implies grid_points
@@ -2023,7 +2037,7 @@ func runChief(data []byte) {
 		dumpMap = true
 	}
 
-	results := chief.DetermineChiefRaysGrid(
+	results := chief.DetermineChiefRaysGridMode(
 		selectedSys,
 		fields,
 		input.Chief.ReferenceSurface,
@@ -2038,6 +2052,7 @@ func runChief(data []byte) {
 		configWavelengths,
 		input.Chief.PupilModel,
 		input.Chief.NumRings, input.Chief.NumSpokes,
+		input.Chief.ChiefRayDefinition,
 	)
 
 	// --- default clear-aperture: size unset-diameter surfaces ---
@@ -2067,10 +2082,11 @@ func runChief(data []byte) {
 	if *clearAperture && len(results) > 0 {
 		if *clearApertureRays > 0 && *clearApertureRays != input.Chief.NumRays {
 			// Re-trace with a denser grid so the beam footprint is accurate.
-			results = chief.DetermineChiefRaysGrid(
+			results = chief.DetermineChiefRaysGridMode(
 				selectedSys, fields, input.Chief.ReferenceSurface, *clearApertureRays,
 				gc, pol, wavelength, dumpMap, input.Chief.GridType, pt, fanCfg, configWavelengths,
 				input.Chief.PupilModel, input.Chief.NumRings, input.Chief.NumSpokes,
+				input.Chief.ChiefRayDefinition,
 			)
 		}
 		// The chief grid points already fill the aperture stop, so trace them

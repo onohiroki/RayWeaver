@@ -55,6 +55,11 @@ type Options struct {
 	// every field). It does not modify the surfaces; 0 = the geometric image
 	// plane.
 	PlaneShift float64
+	// RayDefinition is the document's chief-ray definition
+	// (chief.chief_ray_definition; "" = the per-system default). It selects
+	// how the chief ray — the polarization frame of the traced bundle, and
+	// the reported entrance pupil — is constructed from the pupil grid.
+	RayDefinition string
 }
 
 // Result is one computed PSF with its analysis summary.
@@ -213,7 +218,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 			continue
 		}
 		for _, wl := range wavelengths {
-			pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel)
+			pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel, opts.RayDefinition)
 			if err != nil || len(pg.GridPoints) == 0 {
 				continue
 			}
@@ -359,7 +364,7 @@ func applyConvergence(r *Result, engine *ray.Engine, system types.System, gc *gl
 	co := opts
 	co.NumRays = checkRays
 	co.ConvergeCheck = false
-	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType, co.PupilModel)
+	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType, co.PupilModel, co.RayDefinition)
 	if err != nil || len(pg.GridPoints) == 0 {
 		r.Converged = false
 		r.CheckRays = checkRays
@@ -381,7 +386,7 @@ func applyConvergenceCombined(r *Result, engine *ray.Engine, system types.System
 	co := opts
 	co.NumRays = checkRays
 	co.ConvergeCheck = false
-	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType, co.PupilModel)
+	pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, checkRays, wl, opts.GridType, co.PupilModel, co.RayDefinition)
 	if err != nil || len(pg.GridPoints) == 0 {
 		r.Converged = false
 		r.CheckRays = checkRays
@@ -464,7 +469,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 		if spdCurve.Weight(wl) <= 0 {
 			continue
 		}
-		pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel)
+		pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel, opts.RayDefinition)
 		if err != nil || len(pg.GridPoints) == 0 {
 			continue
 		}

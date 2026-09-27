@@ -238,6 +238,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 		GridSize:         intOrYAML(fl.gridSize, y.gridSize),
 		Polarizations:    polLabels,
 		PupilModel:       pupilModelForConfig(*input),
+		RayDefinition:    chiefRayDefinition(*input),
 	}
 
 	// The focus commands default the convergence labelling OFF (the comparison
@@ -428,7 +429,7 @@ func throughFocusBaseShift(run *focusRun, base string) float64 {
 	bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: weight,
 		NumRays: effectivePSFNumRays(run.psfOpts.NumRays)}
 	optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", run.stopSurface,
-		run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc)
+		run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc, run.psfOpts.RayDefinition)
 	return maxThicknessDelta(before, surfaces)
 }
 
@@ -579,7 +580,7 @@ func computeFocusPlane(run *focusRun, plane string) ([]psf.Result, float64, erro
 		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform",
 			NumRays: effectivePSFNumRays(opts.NumRays)}
 		optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", run.stopSurface,
-			run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc)
+			run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc, opts.RayDefinition)
 		// The solve changes a thickness after its internal Precompute, so the
 		// image-plane Z would otherwise stay stale and psf.Compute would trace
 		// the unsolved plane.

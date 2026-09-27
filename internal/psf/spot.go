@@ -65,7 +65,7 @@ func ComputeSpot(system types.System, gc *glass.Catalog, fields []types.FieldDef
 	for fi, fd := range fields {
 		tx, ty := spotAzimuth(fd.Direction)
 		for _, wl := range wavelengths {
-			pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel)
+			pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel, opts.RayDefinition)
 			if err != nil || len(pg.GridPoints) == 0 {
 				continue
 			}

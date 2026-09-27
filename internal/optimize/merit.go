@@ -138,7 +138,7 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		// UpdatePupils) when available so the DLS base-point and Jacobian
 		// residuals share one role assignment; a nil frozen map falls back to
 		// a fresh classification of the current surfaces.
-		return evaluateKindValue(term.kind, term, surfaces, gc, o.roleTargets[cfg.id])
+		return evaluateKindValue(term.kind, term, surfaces, gc, o.roleTargets[cfg.id], cfg)
 	}
 }
 
@@ -212,7 +212,7 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 	lookup := func(frozen bool, frozenPupilZ *float64) wavefront.Entry {
 		if cache == nil {
 			// No cache: compute directly.
-			entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel)
+			entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel, cfg.rayDefinition)
 			return entry
 		}
 		fz := 0.0
@@ -230,7 +230,7 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 		if e, ok := cache.wavefront[key]; ok {
 			return *e
 		}
-		entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel)
+		entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel, cfg.rayDefinition)
 		cache.wavefront[key] = &entry
 		return entry
 	}
@@ -288,7 +288,7 @@ func wavefrontCoeff(kind string, pab wavefront.Paraboloid) float64 {
 	return 0
 }
 
-func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, frozen map[int]paraxial.ElementRole) float64 {
+func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, frozen map[int]paraxial.ElementRole, cfg *config) float64 {
 	if gc == nil {
 		gc = glass.NewCatalog()
 	}
@@ -313,13 +313,13 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 	case MeritSeidelDistortion:
 		return evaluateSeidel(term.fieldAngle, term.wavelength, surfaces, gc).Distortion
 	case MeritPupilPosition:
-		return evaluatePupilPosition(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
+		return evaluatePupilPosition(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet, cfg.stopSurface, cfg.rayDefinition)
 	case MeritPupilDiameter:
-		return evaluatePupilDiameter(term.fieldAngle, term.wavelength, surfaces, gc)
+		return evaluatePupilDiameter(term.fieldAngle, term.wavelength, surfaces, gc, cfg.stopSurface, cfg.rayDefinition)
 	case MeritVignetting:
-		return evaluateVignetting(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
+		return evaluateVignetting(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet, cfg.stopSurface, cfg.rayDefinition)
 	case MeritClearAperture:
-		return evaluateClearAperture(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
+		return evaluateClearAperture(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet, cfg.stopSurface, cfg.rayDefinition)
 	case MeritEdgeThickness:
 		return evaluateEdgeThickness(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
 	case MeritFocalLength:
@@ -524,17 +524,19 @@ func ComputeOPDRMS(points []dls.IPoint) float64 {
 }
 
 // evaluatePupilPosition returns the Z coordinate of the entrance pupil center
-// for the given field. Returns 0 when the chief ray cannot be traced.
-func evaluatePupilPosition(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int) float64 {
+// for the given field. Returns 0 when the chief ray cannot be traced. The chief
+// pass mirrors the document's own pupil definition (stop surface and chief-ray
+// definition) so the term measures what `chief` reports for the same system.
+func evaluatePupilPosition(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int, stopSurface int, rayDefinition string) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
 	fd := types.FieldDef{Angle: fieldAngle, Direction: []float64{0, 1}}
-	results := chief.DetermineChiefRaysGrid(
-		types.System{Surfaces: surfaces},
+	results := chief.DetermineChiefRaysGridMode(
+		types.System{Surfaces: surfaces, StopSurface: stopSurface},
 		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 16, gc,
 		types.NewCircularJones(true), wavelength, false, types.GridPolar,
-		nil, nil, nil, nil, 0, 0,
+		nil, nil, nil, nil, 0, 0, rayDefinition,
 	)
 	if len(results) == 0 || results[0].EntrancePupil == nil {
 		return 0
@@ -543,16 +545,16 @@ func evaluatePupilPosition(fieldAngle, wavelength float64, surfaces []types.Surf
 }
 
 // evaluatePupilDiameter returns the entrance pupil diameter for the given field.
-func evaluatePupilDiameter(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
+func evaluatePupilDiameter(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, stopSurface int, rayDefinition string) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
 	fd := types.FieldDef{Angle: fieldAngle, Direction: []float64{0, 1}}
-	results := chief.DetermineChiefRaysGrid(
-		types.System{Surfaces: surfaces},
+	results := chief.DetermineChiefRaysGridMode(
+		types.System{Surfaces: surfaces, StopSurface: stopSurface},
 		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 16, gc,
 		types.NewCircularJones(true), wavelength, false, types.GridPolar,
-		nil, nil, nil, nil, 0, 0,
+		nil, nil, nil, nil, 0, 0, rayDefinition,
 	)
 	if len(results) == 0 || results[0].EntrancePupil == nil {
 		return 0
@@ -562,7 +564,7 @@ func evaluatePupilDiameter(fieldAngle, wavelength float64, surfaces []types.Surf
 
 // evaluateVignetting returns the vignetting ratio for the given field and
 // surface. surfaceSet[0] is the surface ID. Returns 0 when not computable.
-func evaluateVignetting(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int) float64 {
+func evaluateVignetting(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int, stopSurface int, rayDefinition string) float64 {
 	if len(surfaceSet) == 0 {
 		return 0
 	}
@@ -584,11 +586,11 @@ func evaluateVignetting(fieldAngle, wavelength float64, surfaces []types.Surface
 		wavelength = types.DefaultWavelength
 	}
 	fd := types.FieldDef{Angle: fieldAngle, Direction: []float64{0, 1}}
-	results := chief.DetermineChiefRaysGrid(
-		types.System{Surfaces: surfaces},
+	results := chief.DetermineChiefRaysGridMode(
+		types.System{Surfaces: surfaces, StopSurface: stopSurface},
 		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 64, gc,
 		types.NewCircularJones(true), wavelength, false, types.GridPolar,
-		nil, nil, nil, nil, 0, 0,
+		nil, nil, nil, nil, 0, 0, rayDefinition,
 	)
 	if len(results) == 0 {
 		return 0
@@ -614,7 +616,7 @@ func evaluateVignetting(fieldAngle, wavelength float64, surfaces []types.Surface
 
 // evaluateClearAperture returns the clear aperture diameter at the given surface
 // for the field's beam envelope. Returns 0 when not computable.
-func evaluateClearAperture(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int) float64 {
+func evaluateClearAperture(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, surfaceSet []int, stopSurface int, rayDefinition string) float64 {
 	if len(surfaceSet) == 0 {
 		return 0
 	}
@@ -623,11 +625,11 @@ func evaluateClearAperture(fieldAngle, wavelength float64, surfaces []types.Surf
 		wavelength = types.DefaultWavelength
 	}
 	fd := types.FieldDef{Angle: fieldAngle, Direction: []float64{0, 1}}
-	results := chief.DetermineChiefRaysGrid(
-		types.System{Surfaces: surfaces},
+	results := chief.DetermineChiefRaysGridMode(
+		types.System{Surfaces: surfaces, StopSurface: stopSurface},
 		[]types.FieldDef{fd}, lastSurfaceID(surfaces), 64, gc,
 		types.NewCircularJones(true), wavelength, false, types.GridPolar,
-		nil, nil, nil, nil, 0, 0,
+		nil, nil, nil, nil, 0, 0, rayDefinition,
 	)
 	if len(results) == 0 {
 		return 0

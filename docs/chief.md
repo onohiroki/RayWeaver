@@ -16,6 +16,7 @@ rayweave chief [flags] < system.yaml
 | `--config ID` | select a config by id (multi-config mode) |
 | `--wl W` | reference wavelength in mm (default `0.00058756`) |
 | `--pass-through N` | constrain the chief ray to pass through `(0,0,0)` (centre) of surface N; overrides the YAML `pass_through.surface` |
+| `--chief-ray MODE` | chief-ray definition `entrance_pupil_centre` \| `centroid` \| `vignetting_centre` (empty = `chief.chief_ray_definition`); written back into the output when given. A definition the system cannot honour (a prescribed pupil without `stop_surface` or a virtual `pupil_model`), or an unknown name, exits 1 |
 | `--marginal-rays` | extract marginal (max/min) rays from the grid points and append them for piping into trace/plot |
 | `--clear-aperture` | trace grid rays through every surface and set `surfaces[].diameter = 2 × max radial extent`, using an entrance-pupil-based beam diameter |
 | `--shrink` | with `--clear-aperture`, also shrink diameters down to the beam footprint (default: only grow); the aperture stop keeps its diameter |
@@ -45,6 +46,8 @@ chief:
       object_z: -500           #   object plane Z (default -1000)
   reference_surface: 8         # surface ID for centroid/image height
   num_rays: 512                # pupil samples (≈ √n × √n)
+  chief_ray_definition: vignetting_centre  # optional: chief-ray definition
+                                           #   entrance_pupil_centre | centroid | vignetting_centre
   grid_type: polar             # pupil grid: polar | square | hex
   dump_map: false              # output per-ray spot data (grid_points)
   wavelength: 0.00058756       # reference wavelength (mm); overridden by --wl
@@ -64,12 +67,39 @@ spanned by the field vector and the optical axis.
 
 ### Chief ray definitions
 
-- **Without `pass_through`** — the chief ray is the ray that passes through the
-  spot centroid on the reference surface. This definition is robust during
-  optimization where the stop may be ill-defined.
+`chief.chief_ray_definition` (or `--chief-ray`) selects how each field's
+object-space chief ray is constructed; a `pass_through` target takes precedence
+over it.
+
+| Definition | The chief ray passes through |
+|---|---|
+| `centroid` | the intensity-weighted centroid of the surviving pupil grid at the reference surface (root-solved origin; robust during optimisation, where the stop may be ill-defined) |
+| `entrance_pupil_centre` | the entrance-pupil centre `(0, 0, z_EP)` — the textbook object-space chief ray of a prescribed pupil (analytic, no search) |
+| `vignetting_centre` | the centre of the field's vignetting ellipse (`fields[].vignetting` decenter); without a vignetting specification it coincides with `entrance_pupil_centre` |
+
+The default depends on whether the document **prescribes the pupil**:
+
+- **Stop-free dynamic pupil** (no `stop_surface`, no virtual `pupil_model`) —
+  the entrance-pupil Z is only known after tracing, so only `centroid` is
+  meaningful: it is the default and the only accepted value. Requesting either
+  prescribed-pupil definition exits 1 with an explanation.
+- **Explicit `stop_surface` or a virtual `pupil_model`** — the default is
+  `vignetting_centre`, so a field without a vignetting specification behaves
+  exactly like `entrance_pupil_centre` while a vignetted field's chief ray
+  follows the transmitted beam's centre.
+
+The prescribed-pupil definitions aim the chief ray at the chosen pupil-plane
+point and trace it, so `image_height` is the image of the object-space chief ray
+of the prescribed pupil rather than the centre of a (possibly vignetted) bundle.
+
 - **With `pass_through`** — the chief ray is the ray from the field that passes
   through the given coordinate on the given surface (the traditional
-  "stop-centre" definition).
+  "stop-centre" definition), whatever the definition says.
+
+```sh
+# Object-space chief ray of the entrance pupil (textbook construction)
+rayweave chief --chief-ray entrance_pupil_centre < lens.yaml | rayweave trace
+```
 
 ### Virtual entrance pupil
 
@@ -98,7 +128,9 @@ Augmented YAML with a `chief_rays[]` section, one entry per field:
 - `field_angle`, `image_height` — the image point of the chief ray
 - `chief_ray` — the chief ray itself (single source of chief-ray geometry;
   `rayweave trace` reads it from here)
-- `entrance_pupil` — radius, and centre when ≥ 2 fields allow stop inference
+- `entrance_pupil` — radius and centre: the paraxial entrance pupil of an
+  explicit stop, the per-field dynamic-pupil crossing, or the virtual pupil
+  plane
 - `spot_stats` — `centroid`, `rms_x`/`rms_y`/`rms_r`, min/max extent,
   `traced_rays`/`missed_rays`
 - `grid_points` (only with `dump_map: true`) — per-ray pupil/image position,
@@ -129,6 +161,9 @@ rayweave chief --clear-aperture --clear-aperture-rays 4000 < lens.yaml \
 
 # Stop-centre chief rays
 rayweave chief --pass-through 5 < lens.yaml | rayweave trace
+
+# Chief ray through the entrance-pupil centre instead of the spot centroid
+rayweave chief --chief-ray entrance_pupil_centre < lens.yaml | rayweave trace
 
 # Virtual entrance pupil at Z=12.5 mm with F/2.5
 rayweave chief --epz 12.5 --fnum 2.5 < lens.yaml | rayweave paraxial

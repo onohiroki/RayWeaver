@@ -307,6 +307,7 @@ func singleEscapeConfig(input types.Input, surfaces []types.Surface, variables [
 		RefSurface:         chiefRefSurface(input),
 		PupilZ:             computePupilZ(input, surfaces, gc),
 		PupilModel:         pupilModelForConfig(input),
+		RayDefinition:      chiefRayDefinition(input),
 		MaxIter:            input.Optimization.MaxIter,
 		Tol:                input.Optimization.Tol,
 		Epsilon:            input.Optimization.Epsilon,
@@ -486,10 +487,11 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 			// centred on the initial pupil and most rays miss the aperture.
 			sys := types.System{Surfaces: surf, StopSurface: stopSurface}
 			pm := effectivePupilModel(inner, x, "config1", pupilModel)
-			results := chief.DetermineChiefRaysGrid(
+			results := chief.DetermineChiefRaysGridMode(
 				sys, fieldDefs, refSurf, validationNumRays, gc,
 				types.NewCircularJones(true), wl,
 				false, types.GridPolar, nil, nil, nil, pm, 0, 0,
+				chiefRayDefinition(input),
 			)
 			for _, r := range results {
 				total := len(r.GridPoints)
@@ -712,6 +714,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			Constraints:         constraints,
 			PupilModel:          input.Chief.PupilModel,
 			Normalization:       input.Optimization.MeritNormalization,
+			RayDefinition:       chiefRayDefinition(input),
 		})
 	}
 	if len(configs) == 0 {
@@ -865,10 +868,11 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			}
 			sys := types.System{Surfaces: surf, StopSurface: primaryStop}
 			pm := effectivePupilModel(inner, x, template[0].ID, pupilModel)
-			results := chief.DetermineChiefRaysGrid(
+			results := chief.DetermineChiefRaysGridMode(
 				sys, fieldDefs, refSurf, validationNumRays, gc,
 				types.NewCircularJones(true), wl,
 				false, types.GridPolar, nil, nil, nil, pm, 0, 0,
+				chiefRayDefinition(input),
 			)
 			for _, r := range results {
 				total := len(r.GridPoints)

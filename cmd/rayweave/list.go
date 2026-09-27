@@ -2025,7 +2025,7 @@ func listFields(input types.Input, format string) {
 
 	pol := polarization(input)
 
-	results := chief.DetermineChiefRaysGrid(
+	results := chief.DetermineChiefRaysGridMode(
 		selectedSys,
 		fields,
 		input.Chief.ReferenceSurface,
@@ -2040,6 +2040,7 @@ func listFields(input types.Input, format string) {
 		nil,
 		input.Chief.PupilModel,
 		input.Chief.NumRings, input.Chief.NumSpokes,
+		chiefRayDefinition(input),
 	)
 
 	// Build rows.

@@ -129,7 +129,7 @@ func runAsphere(data []byte) {
 		pupilZ := computePupilZ(input, surfaces, gc)
 		validations := validateAspheres(surfaces, res.Rankings, gc, cfg.TopK, dlsIterEff, nr,
 			stopSurface, input.Chief.ReferenceSurface, pupilZ, validateFields, wavelengths,
-			polarization(input), input.Chief.GridType, input.Chief.PassThrough)
+			polarization(input), input.Chief.GridType, input.Chief.PassThrough, chiefRayDefinition(input))
 		for i := range res.Rankings {
 			if v, ok := validations[res.Rankings[i].SurfaceID]; ok {
 				res.Rankings[i].Validation = v

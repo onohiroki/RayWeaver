@@ -108,7 +108,7 @@ func runPSF(data []byte) {
 		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform",
 			NumRays: effectivePSFNumRays(bfRays)}
 		optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", input.Chief.StopSurface,
-			effectiveReferenceWavelength(input.Chief), cfgFields, cfgWLs, gc)
+			effectiveReferenceWavelength(input.Chief), cfgFields, cfgWLs, gc, chiefRayDefinition(input))
 		surface.Precompute(surfaces)
 		system.Surfaces = surfaces
 		fmt.Fprintf(os.Stderr, "focus-plane all: image plane shifted by %.6f mm to the all-field best focus\n",
@@ -183,6 +183,7 @@ func runPSF(data []byte) {
 		SpectralCurve:    spectralCurve,
 		SpectralEntries:  spectralEntries,
 		PupilModel:       input.Chief.PupilModel,
+		RayDefinition:    chiefRayDefinition(input),
 	}
 	if input.PSF != nil {
 		opts.ReferenceSurface = intOrYAML(*refSurface, input.PSF.ReferenceSurface)

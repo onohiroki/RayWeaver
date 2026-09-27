@@ -200,7 +200,7 @@ func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []t
 		refWavelength = input.Chief.ReferenceWavelength
 	}
 	bfType := savedBackFocusType(input.Optimization)
-	optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, bfType, stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc)
+	optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, bfType, stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input))
 }
 
 // savedBackFocusType resolves the focus type to use for a saved minimum: the

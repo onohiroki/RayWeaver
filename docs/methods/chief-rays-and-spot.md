@@ -127,15 +127,37 @@ positions on the reference surface:
 cₓ = Σ wᵢ xᵢ / Σ wᵢ ,   wᵢ = (I_s + I_p)/2
 ```
 
-The chief ray is defined in one of two ways:
+The chief ray is defined by `chief.chief_ray_definition` (`--chief-ray`), with
+`pass_through` taking precedence over it:
 
-- **Centroid definition (default):** the ray from the field that passes through
-  the centroid. Its origin is found by a one-dimensional root solve
-  (`searchOriginForTarget`, bracketing + bisection on the traced image height)
-  so that the ray hits the centroid coordinates on the reference surface.
-- **Pass-through definition:** the ray that passes through a given coordinate
-  on a given surface (`--pass-through N` or YAML `pass_through`). The origin
-  (angle case) or direction (height case) is solved the same way.
+- **`centroid` (the default for a stop-free dynamic pupil):** the ray from the
+  field that passes through the centroid. Its origin is found by a
+  one-dimensional root solve (`searchOriginForTarget`, bracketing + bisection on
+  the traced image height) so that the ray hits the centroid coordinates on the
+  reference surface. This is the only definition available when the pupil
+  position itself is discovered from the trace: without a stop or a virtual
+  pupil model, `entrance_pupil_centre` and `vignetting_centre` have no
+  entrance-pupil Z to aim at yet, so they are rejected (`ValidateRayDefinition`,
+  exit 1) rather than silently downgraded.
+- **`entrance_pupil_centre` (with a stop or a virtual pupil):** the ray through
+  the entrance-pupil centre `(0, 0, z_EP)` — the object-space chief ray of a
+  prescribed pupil, taken analytically (no search and no dependence on the
+  trace).
+- **`vignetting_centre` (the default when the pupil is prescribed):** the ray
+  through the centre of the field's vignetting ellipse
+  (`fields[].vignetting` decenter·R in the pupil plane). Without a vignetting
+  specification the decenter is zero, so this coincides with
+  `entrance_pupil_centre` and the default only differs for a field the document
+  marks as vignetted.
+- **`pass_through`:** the ray that passes through a given coordinate on a given
+  surface (`--pass-through N` or YAML `pass_through`). The origin (angle case)
+  or direction (height case) is solved the same way; it overrides the definition
+  for that run.
+
+`""` (no flag, no YAML) resolves to the per-system default above, so the
+selection is a single definition for the whole run either way
+(`resolveRayDefinition`), and `--chief-ray` is written back into the output
+pipeline document when given.
 
 The chief ray is then traced once more for its exact image height.
 

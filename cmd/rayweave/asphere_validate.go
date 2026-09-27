@@ -17,7 +17,7 @@ import (
 // improvement is a faithful, cheap check that the suggested asphere is a real
 // correction rather than an artefact of the OPD-to-sag approximation.
 // It returns a map from surface ID to the validation result.
-func validateAspheres(surfaces []types.Surface, rankings []types.AsphereSurfaceScore, gc *glass.Catalog, topK, dlsIter, numRays int, stopSurface, refSurface int, pupilZ float64, fields []types.FieldItem, wavelengths []float64, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget) map[int]*types.AsphereValidation {
+func validateAspheres(surfaces []types.Surface, rankings []types.AsphereSurfaceScore, gc *glass.Catalog, topK, dlsIter, numRays int, stopSurface, refSurface int, pupilZ float64, fields []types.FieldItem, wavelengths []float64, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget, rayDefinition string) map[int]*types.AsphereValidation {
 	if dlsIter <= 0 {
 		return nil
 	}
@@ -30,7 +30,7 @@ func validateAspheres(surfaces []types.Surface, rankings []types.AsphereSurfaceS
 		if emb == (types.AsphereCoeffs{}) {
 			continue
 		}
-		v := validateOneAsphere(surfaces, rs, emb, gc, dlsIter, numRays, stopSurface, refSurface, pupilZ, fields, wavelengths, pol, gridType, passThrough)
+		v := validateOneAsphere(surfaces, rs, emb, gc, dlsIter, numRays, stopSurface, refSurface, pupilZ, fields, wavelengths, pol, gridType, passThrough, rayDefinition)
 		if v != nil {
 			out[rs.SurfaceID] = v
 		}
@@ -50,14 +50,14 @@ func embeddedCoefficients(rs types.AsphereSurfaceScore) types.AsphereCoeffs {
 
 // validateOneAsphere inserts one surface's embedded asphere and runs a short
 // DLS over only its asphere coefficients.
-func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, coeffs types.AsphereCoeffs, gc *glass.Catalog, dlsIter, numRays int, stopSurface, refSurface int, pupilZ float64, fields []types.FieldItem, wavelengths []float64, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget) *types.AsphereValidation {
+func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, coeffs types.AsphereCoeffs, gc *glass.Catalog, dlsIter, numRays int, stopSurface, refSurface int, pupilZ float64, fields []types.FieldItem, wavelengths []float64, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget, rayDefinition string) *types.AsphereValidation {
 	withAsphere := insertAsphere(surfaces, rs.SurfaceID, coeffs)
 
 	// Recompute the dynamic pupil against the asphered system so the initial
 	// grid centring hits the new surface (the Optimizer's UpdatePupils only
 	// runs after the first merit evaluation).
 	if refSurface > 0 && len(fields) > 0 {
-		if p := dynamicEntrancePupil(withAsphere, chiefFieldDefsFromItems(fields), refSurface, numRays, gc, pol, gridType, passThrough, nil); p != nil {
+		if p := dynamicEntrancePupil(withAsphere, chiefFieldDefsFromItems(fields), refSurface, numRays, gc, pol, gridType, passThrough, nil, rayDefinition); p != nil {
 			pupilZ = p.Center.Z
 		}
 	}
@@ -100,6 +100,7 @@ func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, 
 		ApertureMargin: 1.0,
 		MuConMax:       1e-4,
 		Workers:        2,
+		RayDefinition:  rayDefinition,
 	}
 	opt := optimize.NewOptimizer(cfg)
 	res := opt.Optimize()

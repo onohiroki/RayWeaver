@@ -31,6 +31,11 @@ type Options struct {
 	// entrance-pupil grid is centred on the virtual pupil instead of the
 	// dynamic-pupil / stop-based position.
 	PupilModel *types.PupilModelConfig
+	// RayDefinition is the document's chief-ray definition
+	// (chief.chief_ray_definition; "" = the per-system default). It selects
+	// how the chief ray — whose direction sets the polarization frame of the
+	// traced bundle — is constructed from the pupil grid.
+	RayDefinition string
 }
 
 // SampleData is one sampled wavefront point on the reference surface (global
@@ -205,7 +210,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 		go func(idx int, t task) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			fr, err := computeField(engine, system, gc, t.fd, opts.ReferenceSurface, opts.NumRays, opts.ZernikeMaxOrder, t.wl, t.pol, rayWorkers, opts.PupilModel)
+			fr, err := computeField(engine, system, gc, t.fd, opts.ReferenceSurface, opts.NumRays, opts.ZernikeMaxOrder, t.wl, t.pol, rayWorkers, opts.PupilModel, opts.RayDefinition)
 			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
@@ -257,10 +262,10 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 // analysis (paraboloid, best-fit sphere, Zernike, statistics).
 func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd types.FieldDef,
 	refSurface, numRays, zernikeOrder int, wl float64, p polState, rayWorkers int,
-	pupilModel *types.PupilModelConfig) (FieldResult, error) {
+	pupilModel *types.PupilModelConfig, rayDefinition string) (FieldResult, error) {
 	var fr FieldResult
 
-	pg, err := psf.ComputeFieldGrid(system, gc, fd, refSurface, numRays, wl, types.GridPolar, pupilModel)
+	pg, err := psf.ComputeFieldGrid(system, gc, fd, refSurface, numRays, wl, types.GridPolar, pupilModel, rayDefinition)
 	if err != nil {
 		return fr, err
 	}
