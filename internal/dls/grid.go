@@ -12,9 +12,14 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64) ([]IPoint, map[int]float64) {
+// TraceFieldGrid traces one field's entrance-pupil grid. vig is the field's
+// declared vignetting ellipse (nil = no clip), applied on the grid exactly as
+// the chief / wavefront / psf commands apply it, so the merit measures the
+// delivered vignetted pupil. The glass-path (edge-thickness) check is skipped
+// for the on-axis field, which has no off-axis edge to protect.
+func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64, vig *types.VignettingDef) ([]IPoint, map[int]float64) {
 	skipGlassPath := fieldAngle == 0
-	return traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, workers, types.GridPolar, epdOverride)
+	return traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, workers, types.GridPolar, epdOverride, vig)
 }
 
 // TraceFieldGridExtents traces a pupil grid with aperture and glass-path
@@ -24,7 +29,7 @@ func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopSurface int
 // resolved; the returned extents therefore match the chief --clear-aperture
 // beam envelope.
 func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64) map[int]float64 {
-	_, perSurfMax := traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers, types.GridHex, epdOverride)
+	_, perSurfMax := traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers, types.GridHex, epdOverride, nil)
 	return perSurfMax
 }
 
@@ -101,7 +106,7 @@ func TraceFieldExtents8Rays(gc *glass.Catalog, surfaces []types.Surface, stopSur
 	return perSurfMax
 }
 
-func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int, gridType types.GridType, epdOverride float64) ([]IPoint, map[int]float64) {
+func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int, gridType types.GridType, epdOverride float64, vig *types.VignettingDef) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
@@ -132,6 +137,7 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 		OPLMode:           pupil.OPLScalar,
 		SkipApertureCheck: skipApertureCheck,
 		SkipGlassPath:     skipGlassPathCheck,
+		Vig:               vig,
 	})
 	pupil.Trace(engine, p, surfaces, samples, wavelength, types.NewCircularJones(true), workers)
 

@@ -149,9 +149,9 @@ func TestMeritWavefrontMeasurementConsistency(t *testing.T) {
 			fz = &z
 		}
 		storedEntry, _ := wavefront.AnalyzeField(
-			types.System{Surfaces: meritSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm, chiefRayDefinition(input))
+			types.System{Surfaces: meritSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm, chiefRayDefinition(input), wavefront.FieldOptions{})
 		sizedEntry, _ := wavefront.AnalyzeField(
-			types.System{Surfaces: sizedSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm, chiefRayDefinition(input))
+			types.System{Surfaces: sizedSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm, chiefRayDefinition(input), wavefront.FieldOptions{})
 
 		key := math.Round(angle*10) / 10
 		mrms, has := meritRMS[key]

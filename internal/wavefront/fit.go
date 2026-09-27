@@ -13,6 +13,26 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
+// FieldOptions tunes one field analysis. The zero value reproduces the historical
+// behaviour: the frozen grid's aperture radius is derived from the surfaces
+// (paraxial / fixed-aperture) and the paraboloid is referenced to the per-field
+// best focus.
+type FieldOptions struct {
+	// EPDOverride is the virtual entrance-pupil diameter (mm) the frozen grid
+	// uses for its aperture radius. 0 derives it from the surfaces, which for a
+	// virtual-pupil system is the paraxial/fixed-aperture radius — several times
+	// the prescribed pupil, so the grid samples a sparse annulus instead of the
+	// real pupil (and any declared field vignetting is applied at the wrong
+	// scale). The optimizer passes its applied pupil diameter.
+	EPDOverride float64
+	// PlaneReference references the paraboloid fit to the image plane instead
+	// of the per-field best focus, so its defocus coefficient carries the
+	// delivered image-plane focus error (field curvature plus the system
+	// defocus). The reference-sphere statistics (rms/pv/strehl) keep their
+	// best-focus reference either way.
+	PlaneReference bool
+}
+
 // FitFieldParaboloid computes the least-squares quadratic (paraboloid) fit of
 // the OPD on the reference surface for one (field, wavelength), referencing the
 // OPD to the best-focus point exactly like the full wavefront analysis. It
@@ -25,8 +45,8 @@ import (
 // cfg.pupilZ). When nil the chief dynamic pupil is settled as usual.
 func FitFieldParaboloid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64,
-	pupilModel *types.PupilModelConfig, rayDefinition string) (Paraboloid, error) {
-	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel, rayDefinition)
+	pupilModel *types.PupilModelConfig, rayDefinition string, opts FieldOptions) (Paraboloid, error) {
+	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel, rayDefinition, opts)
 	if err != nil {
 		return Paraboloid{}, err
 	}
@@ -43,7 +63,7 @@ func FitFieldParaboloid(system types.System, gc *glass.Catalog, fd types.FieldDe
 // shared machinery behind FitFieldParaboloid and FitFieldSphereRMS.
 func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64,
-	pupilModel *types.PupilModelConfig, rayDefinition string) (fieldAnalysis, error) {
+	pupilModel *types.PupilModelConfig, rayDefinition string, opts FieldOptions) (fieldAnalysis, error) {
 	if refSurface <= 0 {
 		refSurface = psf.DefaultReferenceSurface(system.Surfaces)
 	}
@@ -60,7 +80,7 @@ func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	var fg *psf.PupilGrid
 	if frozenPupilZ != nil {
 		var err error
-		fg, err = frozenPupilGrid(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, *frozenPupilZ)
+		fg, err = frozenPupilGrid(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, *frozenPupilZ, opts.EPDOverride)
 		if err != nil {
 			return fieldAnalysis{}, err
 		}
@@ -77,7 +97,7 @@ func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 		return fieldAnalysis{}, fmt.Errorf("only %d valid grid rays", stats.Valid)
 	}
 
-	return analyzeSamples(global, system.Surfaces, refSurface, wavelength, gc, 0)
+	return analyzeSamples(global, system.Surfaces, refSurface, wavelength, gc, 0, opts.PlaneReference)
 }
 
 // frozenPupilGrid builds the polar entrance-pupil grid for one field centred on
@@ -85,9 +105,14 @@ func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 // optimization grid (dls.traceGridRays) and the chief command's angle-field
 // grid: parallel rays at the field angle, laterally offset so the aperture sits
 // at pupilZ. Unlike psf.ComputeFieldGrid the dynamic pupil is NOT re-settled.
+//
+// epdOverride is the virtual entrance-pupil diameter (mm) the optimizer has
+// applied for this evaluation; 0 derives the radius from the surfaces (the
+// historical behaviour, which for a virtual-pupil system is the paraxial /
+// fixed-aperture radius instead of the prescribed pupil).
 func frozenPupilGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
-	refSurface, numRays int, wavelength float64, apertureMargin, pupilZ float64) (*psf.PupilGrid, error) {
-	apertureRadius := dls.ApertureRadiusForGrid(system.Surfaces, system.StopSurface, wavelength, gc, apertureMargin, 0)
+	refSurface, numRays int, wavelength float64, apertureMargin, pupilZ, epdOverride float64) (*psf.PupilGrid, error) {
+	apertureRadius := dls.ApertureRadiusForGrid(system.Surfaces, system.StopSurface, wavelength, gc, apertureMargin, epdOverride)
 	if apertureRadius <= 0 {
 		return nil, fmt.Errorf("no entrance-pupil radius for the wavefront grid")
 	}
@@ -137,6 +162,13 @@ type Entry struct {
 	Paraboloid Paraboloid
 	Statistics Statistics
 	Failed     bool
+	// DefocusMM is the equivalent longitudinal image-plane focus error in mm
+	// (2·Defocus·L², L = reference-surface → image-plane distance), i.e. the
+	// delivered defocus expressed as a focus shift. It is only filled for an
+	// image-plane-referenced analysis (FieldOptions.PlaneReference), where the
+	// paraboloid's defocus coefficient carries the field's image-plane focus
+	// error; otherwise it is zero.
+	DefocusMM float64
 }
 
 // AnalyzeField traces the wavefront for one (field, wavelength) on the
@@ -147,13 +179,14 @@ type Entry struct {
 // the given pupil Z (frozen pupil); when nil the dynamic pupil is settled.
 func AnalyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	refSurface, numRays int, wavelength float64, apertureMargin float64,
-	frozenPupilZ *float64, pupilModel *types.PupilModelConfig, rayDefinition string) (Entry, error) {
-	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel, rayDefinition)
+	frozenPupilZ *float64, pupilModel *types.PupilModelConfig, rayDefinition string, opts FieldOptions) (Entry, error) {
+	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel, rayDefinition, opts)
 	if err != nil {
 		return Entry{Failed: true}, err
 	}
 	return Entry{
 		Paraboloid: an.Paraboloid,
 		Statistics: an.Statistics,
+		DefocusMM:  an.DefocusMM,
 	}, nil
 }

@@ -275,7 +275,7 @@ func computeField(engine *ray.Engine, system types.System, gc *glass.Catalog, fd
 		return fr, fmt.Errorf("only %d valid grid rays", stats.Valid)
 	}
 
-	an, err := analyzeSamples(global, system.Surfaces, refSurface, wl, gc, zernikeOrder)
+	an, err := analyzeSamples(global, system.Surfaces, refSurface, wl, gc, zernikeOrder, false)
 	if err != nil {
 		return fr, err
 	}
@@ -297,6 +297,10 @@ type fieldAnalysis struct {
 	Zernike    Zernike
 	Statistics Statistics
 	Data       []SampleData
+	// DefocusMM is the equivalent longitudinal image-plane focus error in mm
+	// for an image-plane-referenced analysis (2·Defocus·L², L the
+	// reference-surface → image-plane distance); zero otherwise.
+	DefocusMM float64
 }
 
 // analyzeSamples runs the wavefront analysis on the traced global samples: it
@@ -307,7 +311,14 @@ type fieldAnalysis struct {
 // zernikeOrder > 0), and the reference-sphere statistics. It is the shared
 // analysis behind both the wavefront command and the optimizer's wavefront
 // merit terms.
-func analyzeSamples(global []psf.WavefrontSample, surfaces []types.Surface, refSurfaceID int, wl float64, gc *glass.Catalog, zernikeOrder int) (fieldAnalysis, error) {
+//
+// planeReference additionally fits the paraboloid (and the Zernike residual)
+// against the image plane instead of the per-field best focus, so the defocus
+// coefficient carries the delivered image-plane focus error — the field
+// curvature plus the system defocus. The reference-sphere statistics
+// (rms/pv/strehl) keep their best-focus reference in both modes. With
+// planeReference false the analysis is bit-for-bit the historical one.
+func analyzeSamples(global []psf.WavefrontSample, surfaces []types.Surface, refSurfaceID int, wl float64, gc *glass.Catalog, zernikeOrder int, planeReference bool) (fieldAnalysis, error) {
 	var an fieldAnalysis
 
 	surface.Precompute(surfaces)
@@ -354,10 +365,22 @@ func analyzeSamples(global []psf.WavefrontSample, surfaces []types.Surface, refS
 	// Using the spot-RMS best focus (the same reference psf --best-focus
 	// evaluates at) keeps the wavefront rms/pv/strehl consistent with the PSF's
 	// best-focus rms_opd/pv_opd and Strehl.
-	opdSamples := make([]psf.WavefrontSample, len(samples))
+	opdBest := make([]psf.WavefrontSample, len(samples))
 	for i, s := range samples {
-		opdSamples[i] = s
-		opdSamples[i].OPL = s.OPL + nImage*lineDist(s.Position, FbestLocal, dir, 0)
+		opdBest[i] = s
+		opdBest[i].OPL = s.OPL + nImage*lineDist(s.Position, FbestLocal, dir, 0)
+	}
+
+	// The paraboloid is fitted against the image plane when planeReference is
+	// set, so its defocus coefficient is the field's image-plane focus error.
+	opdSamples := opdBest
+	if planeReference {
+		FplaneLocal := refG2L.MultiplyPoint(imgVertex)
+		opdSamples = make([]psf.WavefrontSample, len(samples))
+		for i, s := range samples {
+			opdSamples[i] = s
+			opdSamples[i].OPL = s.OPL + nImage*lineDist(s.Position, FplaneLocal, dir, 0)
+		}
 	}
 
 	pab, err := FitParaboloid(opdSamples)
@@ -381,20 +404,30 @@ func analyzeSamples(global []psf.WavefrontSample, surfaces []types.Surface, refS
 
 	// Statistics at best focus: the wavefront error relative to the reference
 	// sphere (piston + tilt + defocus removed; astigmatism retained), the
-	// standard wavefront-aberration definition (matches PSF's rms_opd).
-	refSph, err := FitReferenceSphere(opdSamples)
+	// standard wavefront-aberration definition (matches PSF's rms_opd). Always
+	// best-focus referenced, in both reference modes.
+	refSph, err := FitReferenceSphere(opdBest)
 	if err != nil {
 		return an, err
 	}
-	sphereRes := make([]float64, len(opdSamples))
-	for i, s := range opdSamples {
+	sphereRes := make([]float64, len(opdBest))
+	for i, s := range opdBest {
 		sphereRes[i] = s.OPL - refSph.Eval(s.Position.X, s.Position.Y)
 	}
 	rms := refSph.RMSResidual
 	pv := refSph.PV
-	strehl := exactStrehl(opdSamples, sphereRes, wl)
+	strehl := exactStrehl(opdBest, sphereRes, wl)
 
 	an.Paraboloid = pab
+	if planeReference {
+		// Image-plane focus error in mm: a paraboloid defocus coefficient a
+		// (mm/mm²) sampled over a pupil at distance L corresponds to a
+		// longitudinal focus error δ = 2·a·L². Negative = the delivered plane
+		// sits beyond the field's own best focus (the field is under-focused
+		// at the plane), matching the sign of the focus it has to move back.
+		refDist := refG2L.MultiplyPoint(imgVertex).Dot(dir)
+		an.DefocusMM = 2 * pab.Defocus * refDist * refDist
+	}
 	an.Sphere = Sphere{
 		CenterX:     FbestLocal.X,
 		CenterY:     FbestLocal.Y,

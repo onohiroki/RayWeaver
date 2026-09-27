@@ -219,9 +219,10 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 	// handled by the caller: a frozen failure is cached so the same frozen
 	// key is not retried within the same eval.
 	lookup := func(frozen bool, frozenPupilZ *float64) wavefront.Entry {
+		opts := o.wavefrontOptions(cfg, p)
 		if cache == nil {
 			// No cache: compute directly.
-			entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel, cfg.rayDefinition)
+			entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel, cfg.rayDefinition, opts)
 			return entry
 		}
 		fz := 0.0
@@ -239,7 +240,7 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 		if e, ok := cache.wavefront[key]; ok {
 			return *e
 		}
-		entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel, cfg.rayDefinition)
+		entry, _ := wavefront.AnalyzeField(sys, gc, fd, refSurface, o.numRays, term.wavelength, o.apertureMargin, frozenPupilZ, cfg.pupilModel, cfg.rayDefinition, opts)
 		cache.wavefront[key] = &entry
 		return entry
 	}
@@ -264,8 +265,31 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 		return entry.Statistics.RMS
 	case MeritWavefrontSpherePV:
 		return entry.Statistics.PV
+	case MeritWavefrontDefocus:
+		// With the image plane as the OPD reference the defocus coefficient is
+		// the field's image-plane focus error (field curvature plus the system
+		// defocus); report it as the equivalent longitudinal focus shift in mm
+		// so it is weightable like the chromatic focus terms. With the default
+		// best-focus reference the coefficient is the zonal focus spread inside
+		// the field, in mm/mm².
+		if entry.DefocusMM != 0 {
+			return entry.DefocusMM
+		}
+		return entry.Paraboloid.Defocus
 	default:
 		return wavefrontCoeff(term.kind, entry.Paraboloid)
+	}
+}
+
+// wavefrontOptions builds the per-analysis wavefront options: the applied
+// virtual-entrance-pupil diameter (so the frozen grid samples the prescribed
+// pupil instead of the paraxial/fixed-aperture radius) and the configured OPD
+// reference (the per-field best focus, or the delivered image plane when
+// optimization.wavefront_reference selects it).
+func (o *Optimizer) wavefrontOptions(cfg *config, p appliedPupil) wavefront.FieldOptions {
+	return wavefront.FieldOptions{
+		EPDOverride:    p.dia,
+		PlaneReference: cfg != nil && cfg.wavefrontPlaneRef,
 	}
 }
 

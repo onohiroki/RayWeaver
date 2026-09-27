@@ -671,8 +671,8 @@ func TestTraceFieldGridParallelDeterminism(t *testing.T) {
 	gc := tripletGC()
 	surface.Precompute(surfaces)
 
-	pts1, ext1 := dls.TraceFieldGrid(gc, surfaces, 0, 0, 10.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 1, 0)
-	pts4, ext4 := dls.TraceFieldGrid(gc, surfaces, 0, 0, 10.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 4, 0)
+	pts1, ext1 := dls.TraceFieldGrid(gc, surfaces, 0, 0, 10.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 1, 0, nil)
+	pts4, ext4 := dls.TraceFieldGrid(gc, surfaces, 0, 0, 10.0, []float64{0, 1}, 0.00058756, 1.0, 64, 0, 4, 0, nil)
 
 	if len(pts1) != len(pts4) {
 		t.Fatalf("worker=1 gives %d points, worker=4 gives %d", len(pts1), len(pts4))

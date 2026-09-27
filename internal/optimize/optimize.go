@@ -5,6 +5,7 @@ import (
 	"math"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/hiroki/rayweaver/internal/chief"
@@ -75,6 +76,9 @@ type Config struct {
 	// RayDefinition is the document's chief-ray definition
 	// (chief.chief_ray_definition; "" = the per-system default).
 	RayDefinition string
+	// WavefrontReference selects the OPD reference of the wavefront merit terms:
+	// "" / "best_focus" (default) or "image_plane".
+	WavefrontReference string
 	// GlassAttraction configures the soft-min potential pulling nd/vd toward
 	// real catalog glasses (nil = disabled).
 	GlassAttraction *types.GlassAttractionConfig
@@ -101,6 +105,16 @@ type ConfigInput struct {
 	// RayDefinition is the document's chief-ray definition
 	// (chief.chief_ray_definition; "" = the per-system default).
 	RayDefinition string
+	// WavefrontReference selects the OPD reference of the wavefront merit
+	// terms: "" / "best_focus" (default) or "image_plane" (see
+	// types.OptimizationConfig.WavefrontReference).
+	WavefrontReference string
+}
+
+// planeReference reports whether the wavefront merit terms must reference the
+// delivered image plane instead of the per-field best focus.
+func planeReference(ref string) bool {
+	return strings.EqualFold(strings.TrimSpace(ref), "image_plane")
 }
 
 func effectiveReferenceWavelength(wavelength float64) float64 {
@@ -237,6 +251,11 @@ type config struct {
 	// every chief pass this optimisation makes, so the pupil/chief ray the
 	// solver sees matches what `chief` reports for the same document.
 	rayDefinition string
+	// wavefrontPlaneRef reports optimization.wavefront_reference: image_plane.
+	// The wavefront merit terms then fit their paraboloid against the delivered
+	// image plane instead of the per-field best focus, so the defocus term
+	// carries the image-plane focus error (field curvature + system defocus).
+	wavefrontPlaneRef bool
 	// backFocusSolve is the per-config back-focus solve configuration (nil
 	// when not in use). It is set by SetBackFocusSolve and used by
 	// resolveBackFocusTarget.
@@ -796,12 +815,14 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 		type fieldEntry struct {
 			angle  float64
 			weight float64
+			vig    *types.VignettingDef
 		}
 		var fields []fieldEntry
 		for fi := range cfg.fields {
 			fields = append(fields, fieldEntry{
 				angle:  o.fieldSizingAngle(cfg, &cfg.fields[fi], surfaces, gc, wl),
 				weight: cfg.fields[fi].Weight,
+				vig:    cfg.fields[fi].Vignetting,
 			})
 		}
 		if len(fields) == 0 {
@@ -815,7 +836,7 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 				a := o.termFieldAngle(cfg, term, surfaces, gc)
 				if !seen[a] {
 					seen[a] = true
-					fields = append(fields, fieldEntry{angle: a, weight: 1.0})
+					fields = append(fields, fieldEntry{angle: a, weight: 1.0, vig: o.fieldVignetting(cfg, term)})
 				}
 			}
 		}
@@ -833,7 +854,7 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 			pupilZ := o.gridCentring(cfg, p, fe.angle)
 			points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ,
 				fe.angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays,
-				o.gridRotation, o.gridWorkers(), p.dia)
+				o.gridRotation, o.gridWorkers(), p.dia, fe.vig)
 
 			rms := dls.ComputeSpotRMS(points)
 			if rms <= 0 || rms >= 1e6 {
@@ -1739,6 +1760,8 @@ func NewOptimizer(cfg Config) *Optimizer {
 		constraints:   cfg.Constraints,
 		pupilModel:    cfg.PupilModel,
 		rayDefinition: cfg.RayDefinition,
+
+		wavefrontPlaneRef: planeReference(cfg.WavefrontReference),
 	}
 	// Airy radius for spot-term normalization, evaluated at each term's own
 	// wavelength (0 = fall back to lambda). A single default-wavelength value
@@ -1864,6 +1887,8 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			constraints:   ci.Constraints,
 			pupilModel:    ci.PupilModel,
 			rayDefinition: ci.RayDefinition,
+
+			wavefrontPlaneRef: planeReference(ci.WavefrontReference),
 		}
 		// The Airy radius for spot-term normalization is resolved per term at
 		// the term's own wavelength inside buildMeritTermFromTypes.
@@ -3175,9 +3200,12 @@ func (o *Optimizer) constraintFieldAngle(cfg *config, c types.ConstraintOperand,
 // gridKey identifies a unique pupil-grid trace within a single merit
 // evaluation. Within one evaluation the surfaces, frozen pupil, grid geometry
 // and per-field angle are constant, so every grid merit term sharing a
-// (field angle, wavelength) traces the identical grid.
+// (field, wavelength) traces the identical grid. fieldIndex is part of the key
+// because the field also carries the vignetting ellipse: two fields with the
+// same angle but different declared vignetting must not share a trace.
 type gridKey struct {
 	configID   string
+	fieldIndex int
 	fieldAngle float64
 	wavelength float64
 }
@@ -3220,19 +3248,31 @@ func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surface
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
 	trace := func() []dls.IPoint {
 		pupilZ := o.gridCentring(cfg, p, angle)
-		points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), p.dia)
+		points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), p.dia, o.fieldVignetting(cfg, term))
 		return points
 	}
 	if cache == nil {
 		return trace()
 	}
-	key := gridKey{configID: cfg.id, fieldAngle: angle, wavelength: term.wavelength}
+	key := gridKey{configID: cfg.id, fieldIndex: term.fieldIndex, fieldAngle: angle, wavelength: term.wavelength}
 	if pts, ok := cache.spots[key]; ok {
 		return pts
 	}
 	pts := trace()
 	cache.spots[key] = pts
 	return pts
+}
+
+// fieldVignetting returns the vignetting ellipse declared for a merit term's
+// field, so the grid-trace merit kinds (spot_*, opd_rms, geometric_mtf_*,
+// field_alive, pupil_fill) see the same vignetted pupil the wavefront terms and
+// the chief / psf / wavefront commands use. A term without a field index (or an
+// index outside the config's field list) keeps the full, unclipped pupil.
+func (o *Optimizer) fieldVignetting(cfg *config, term *meritTerm) *types.VignettingDef {
+	if cfg == nil || term.fieldIndex < 0 || term.fieldIndex >= len(cfg.fields) {
+		return nil
+	}
+	return cfg.fields[term.fieldIndex].Vignetting
 }
 
 // precomputeGrids traces all grid merit terms for cfg in parallel, storing the
@@ -3246,6 +3286,7 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 		key   gridKey
 		angle float64
 		wl    float64
+		vig   *types.VignettingDef
 	}
 	seen := make(map[gridKey]bool)
 	var jobs []traceJob
@@ -3254,12 +3295,12 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 			continue
 		}
 		angle := o.termFieldAngle(cfg, st.term, surfaces, gc)
-		key := gridKey{configID: cfg.id, fieldAngle: angle, wavelength: st.term.wavelength}
+		key := gridKey{configID: cfg.id, fieldIndex: st.term.fieldIndex, fieldAngle: angle, wavelength: st.term.wavelength}
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
-		jobs = append(jobs, traceJob{key: key, angle: angle, wl: st.term.wavelength})
+		jobs = append(jobs, traceJob{key: key, angle: angle, wl: st.term.wavelength, vig: o.fieldVignetting(cfg, st.term)})
 	}
 	if len(jobs) == 0 {
 		return
@@ -3285,7 +3326,7 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 			for job := range ch {
 				gridTraceSem <- struct{}{}
 				pupilZ := o.gridCentring(cfg, p, job.angle)
-				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, 1, p.dia)
+				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, 1, p.dia, job.vig)
 				<-gridTraceSem
 				mu.Lock()
 				cache.spots[job.key] = points

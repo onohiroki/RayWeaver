@@ -236,7 +236,10 @@ func evaluateVignettingFactor(surfaces []types.Surface, pupilZ float64, fieldAng
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
-	points, _ := dls.TraceFieldGrid(gc, surfaces, 0, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, 0)
+	// No vignetting ellipse: a constraint operand has no access to the field's
+	// declared fields[].vignetting, so this measures the physical vignetting
+	// (aperture / edge-thickness clipping) of the full prescribed pupil.
+	points, _ := dls.TraceFieldGrid(gc, surfaces, 0, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, 0, nil)
 	if len(points) == 0 {
 		return 0
 	}

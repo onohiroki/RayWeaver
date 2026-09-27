@@ -861,6 +861,18 @@ type OptimizationConfig struct {
 	BackFocusSolve     *BackFocusSolveConfig     `yaml:"back_focus_solve,omitempty"`
 	RegionActive       *RegionActiveConfig       `yaml:"region_active,omitempty"`
 	AdaptiveDamping    *AdaptiveDampingConfig    `yaml:"adaptive_damping,omitempty"`
+	// WavefrontReference selects the reference point the wavefront merit
+	// terms' paraboloid fit is measured against:
+	//
+	//	best_focus   (default) the per-field best focus — the defocus
+	//	             coefficient then measures only the zonal focus spread
+	//	             inside the field and is blind to field curvature
+	//	image_plane  the delivered image plane — the defocus coefficient
+	//	             then carries the image-plane focus error (field
+	//	             curvature plus the system defocus), and the
+	//	             wavefront_defocus term reports it as the equivalent
+	//	             longitudinal focus shift in mm
+	WavefrontReference string `yaml:"wavefront_reference,omitempty"`
 }
 
 // AdaptiveDampingConfig configures per-variable adaptive damping for the DLS

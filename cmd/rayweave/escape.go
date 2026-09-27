@@ -321,6 +321,7 @@ func singleEscapeConfig(input types.Input, surfaces []types.Surface, variables [
 		AdaptiveDamping:    input.Optimization.AdaptiveDamping,
 		PowerSolveSurfaces: gctx.surfaces,
 		Normalization:      input.Optimization.MeritNormalization,
+		WavefrontReference: input.Optimization.WavefrontReference,
 	}
 	if dg := input.Optimization.Degenerate; dg != nil {
 		cfg.SpotDegenerate = dg.SpotValue
@@ -715,6 +716,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			PupilModel:          input.Chief.PupilModel,
 			Normalization:       input.Optimization.MeritNormalization,
 			RayDefinition:       chiefRayDefinition(input),
+			WavefrontReference:  input.Optimization.WavefrontReference,
 		})
 	}
 	if len(configs) == 0 {
