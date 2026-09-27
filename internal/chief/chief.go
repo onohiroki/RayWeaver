@@ -1,12 +1,14 @@
 package chief
 
 import (
+	"fmt"
 	"math"
 	"runtime"
 	"sync"
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
@@ -34,6 +36,79 @@ type Result struct {
 	// ProbeOK reports whether the probe supplied an aperture position (seeding
 	// a single-field pupil and backing crossing failures).
 	ProbeOK bool
+	// EffectiveVignetting is the estimated effective (vignetted) pupil of this
+	// field: the min-area ellipse over the rays that reached the reference
+	// surface, fitted when the beam is clipped below gridSurviveFraction and
+	// applied to the spot-statistics/centroid grid. Nil when the field was not
+	// clipped that heavily or the estimate could not be trusted.
+	EffectiveVignetting *types.VignettingDef
+}
+
+// Chief-ray definition modes (`chief.chief_ray_definition`, `--chief-ray`):
+// how the object-space chief ray of each field is constructed.
+const (
+	// RayDefinitionEntrancePupilCentre launches the chief ray through the
+	// entrance-pupil centre (0, 0, zEP). The object-space chief ray of a
+	// prescribed pupil passes through that point by definition, so this is
+	// the textbook construction.
+	RayDefinitionEntrancePupilCentre = "entrance_pupil_centre"
+	// RayDefinitionCentroid aims the chief ray at the intensity-weighted
+	// centroid of the surviving pupil grid at the reference surface. It is
+	// the only definition available when the pupil position itself is
+	// discovered from the trace (stop-free dynamic pupil).
+	RayDefinitionCentroid = "centroid"
+	// RayDefinitionVignettingCentre launches the chief ray through the
+	// centre of the field's vignetting ellipse (fields[].vignetting
+	// decenter, in the pupil plane). Without a vignetting specification it
+	// coincides with RayDefinitionEntrancePupilCentre.
+	RayDefinitionVignettingCentre = "vignetting_centre"
+)
+
+// PrescribedPupil reports whether the document prescribes the pupil position:
+// an explicit stop makes the entrance pupil the stop's image, and a virtual
+// entrance-pupil model fixes the pupil plane outright. Without either the
+// entrance-pupil Z is only known after tracing — the dynamic pupil settles on
+// the chief-ray centroid — so only RayDefinitionCentroid is meaningful.
+func PrescribedPupil(stopSurface int, pupilModel *types.PupilModelConfig) bool {
+	return stopSurface > 0 || (pupilModel != nil && pupilModel.Mode == "virtual_entrance_pupil")
+}
+
+// ValidateRayDefinition returns a user-facing error when the requested
+// chief-ray definition is unknown or cannot be honoured by this system's
+// pupil definition. An empty request selects the per-system default.
+func ValidateRayDefinition(stopSurface int, pupilModel *types.PupilModelConfig, requested string) error {
+	switch requested {
+	case "", RayDefinitionCentroid:
+		return nil
+	case RayDefinitionEntrancePupilCentre, RayDefinitionVignettingCentre:
+		if !PrescribedPupil(stopSurface, pupilModel) {
+			return fmt.Errorf(
+				"chief-ray definition %q needs a prescribed entrance pupil (set chief.stop_surface, or a virtual chief.pupil_model); without one the pupil is settled from the traced rays, so only %q is allowed",
+				requested, RayDefinitionCentroid)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown chief-ray definition %q (want %s | %s | %s)",
+			requested, RayDefinitionEntrancePupilCentre, RayDefinitionCentroid, RayDefinitionVignettingCentre)
+	}
+}
+
+// resolveRayDefinition maps a requested chief-ray definition onto the one the
+// system can honour: an empty request picks the per-system default (the
+// vignetting centre for a prescribed pupil, the centroid otherwise), and a
+// request the system cannot honour falls back the same way. Callers that show
+// the request to the user should reject it first with ValidateRayDefinition;
+// this function keeps library callers on a single definition per run instead
+// of mixing in an impossible one.
+func resolveRayDefinition(stopSurface int, pupilModel *types.PupilModelConfig, requested string) string {
+	if !PrescribedPupil(stopSurface, pupilModel) {
+		return RayDefinitionCentroid
+	}
+	switch requested {
+	case RayDefinitionEntrancePupilCentre, RayDefinitionCentroid, RayDefinitionVignettingCentre:
+		return requested
+	}
+	return RayDefinitionVignettingCentre
 }
 
 func DetermineChiefRaysGrid(
@@ -52,10 +127,37 @@ func DetermineChiefRaysGrid(
 	pupilModel *types.PupilModelConfig,
 	numRings, numSpokes int,
 ) []Result {
+	return DetermineChiefRaysGridMode(system, fields, refSurfaceID, numRays, gc, pol, wavelength,
+		dumpMap, gridType, passThrough, fanCfg, wavelengths, pupilModel, numRings, numSpokes, "")
+}
+
+// DetermineChiefRaysGridMode is DetermineChiefRaysGrid with an explicit
+// chief-ray definition (RayDefinitionEntrancePupilCentre, RayDefinitionCentroid
+// or RayDefinitionVignettingCentre; "" selects the per-system default, see
+// resolveRayDefinition). A pass_through target takes precedence over the
+// definition: it constrains the chief ray directly, so the field constructors
+// for pass-through runs ignore it.
+func DetermineChiefRaysGridMode(
+	system types.System,
+	fields []types.FieldDef,
+	refSurfaceID int,
+	numRays int,
+	gc *glass.Catalog,
+	pol types.JonesVector,
+	wavelength float64,
+	dumpMap bool,
+	gridType types.GridType,
+	passThrough *types.PassThroughTarget,
+	fanCfg *types.RayFanConfig,
+	wavelengths []float64,
+	pupilModel *types.PupilModelConfig,
+	numRings, numSpokes int,
+	rayDefinition string,
+) []Result {
 	if gridType == "" {
 		gridType = types.GridPolar
 	}
-	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, gridType, passThrough, fanCfg, wavelengths, pupilModel, numRings, numSpokes)
+	return determineChiefRays(system, fields, refSurfaceID, numRays, gc, pol, wavelength, dumpMap, gridType, passThrough, fanCfg, wavelengths, pupilModel, numRings, numSpokes, rayDefinition)
 }
 
 // maxPupilIterations bounds the dynamic-pupil fixed-point loop. The grid is
@@ -92,8 +194,13 @@ func determineChiefRays(
 	wavelengths []float64,
 	pupilModel *types.PupilModelConfig,
 	numRings, numSpokes int,
+	rayDefinition string,
 ) []Result {
 	engine := ray.NewEngine(gc, nil)
+
+	// The definition the system can honour (the requested one when the pupil
+	// is prescribed, else the centroid).
+	rayDefinition = resolveRayDefinition(system.StopSurface, pupilModel, rayDefinition)
 
 	// Virtual entrance pupil mode: use the fixed pupil-model position and
 	// diameter directly.  The chief ray of every field passes through the
@@ -125,7 +232,7 @@ func determineChiefRays(
 			pupilZs[i] = pupilModel.AxialPosition
 		}
 	} else {
-		pupilZs = seedPupilZs(system, fields)
+		pupilZs = seedPupilZs(system, fields, wavelength, gc)
 	}
 
 	dynamic := !virtMode && system.StopSurface <= 0
@@ -145,7 +252,7 @@ func determineChiefRays(
 	if dynamic {
 		for iter := 0; iter < maxPupilIterations; iter++ {
 			results = traceFields(system, engine, fields, refSurfaceID, numRays, apertureRadius,
-				pol, wavelength, dumpMap, gridType, passThrough, fanCfg, pupilZs, numRings, numSpokes)
+				pol, wavelength, dumpMap, gridType, passThrough, fanCfg, pupilZs, numRings, numSpokes, rayDefinition)
 			next := recomputeEntrancePupils(results, pupilZs, engine, system.Surfaces, probeZ, probeOK)
 			changed := false
 			for i := range pupilZs {
@@ -160,10 +267,10 @@ func determineChiefRays(
 		}
 	} else {
 		results = traceFields(system, engine, fields, refSurfaceID, numRays, apertureRadius,
-			pol, wavelength, dumpMap, gridType, passThrough, fanCfg, pupilZs, numRings, numSpokes)
+			pol, wavelength, dumpMap, gridType, passThrough, fanCfg, pupilZs, numRings, numSpokes, rayDefinition)
 	}
 
-	setPupils(results, engine, system.Surfaces, pupilZs, apertureRadius, probeZ, probeOK)
+	setPupils(results, engine, system.Surfaces, pupilZs, apertureRadius)
 
 	for i := range results {
 		results[i].ProbeZ = probeZ
@@ -195,18 +302,18 @@ func determineChiefRays(
 	return results
 }
 
-// seedPupilZs returns the initial per-field entrance pupil Z: the explicit stop
-// surface Z, else the fixed-minimum-aperture surface Z (the tightest
-// auto_aperture: false surface — where the beam is physically limited), else
-// the first surface Z.
-func seedPupilZs(system types.System, fields []types.FieldDef) []float64 {
+// seedPupilZs returns the initial per-field entrance pupil Z: for an explicit
+// stop the paraxial entrance pupil (the stop's image, where the object-space
+// chief ray crosses the axis — not the stop's own plane), else the
+// fixed-minimum-aperture surface Z (the tightest auto_aperture: false surface —
+// where the beam is physically limited), else the first surface Z.
+func seedPupilZs(system types.System, fields []types.FieldDef, wavelength float64, gc *glass.Catalog) []float64 {
 	seed := 0.0
 	if system.StopSurface > 0 {
-		for _, s := range system.Surfaces {
-			if s.ID == system.StopSurface {
-				seed = s.PhysicalZ
-				break
-			}
+		if z, ok := stopEntrancePupilZ(system, wavelength, gc); ok {
+			seed = z
+		} else {
+			seed = physicalStopZ(system)
 		}
 	} else {
 		seed = surface.FixedMinApertureRadiusZ(system.Surfaces)
@@ -219,6 +326,49 @@ func seedPupilZs(system types.System, fields []types.FieldDef) []float64 {
 		zs[i] = seed
 	}
 	return zs
+}
+
+// physicalStopZ returns the explicit stop surface's global vertex Z.
+func physicalStopZ(system types.System) float64 {
+	for _, s := range system.Surfaces {
+		if s.ID == system.StopSurface {
+			return s.PhysicalZ
+		}
+	}
+	return 0
+}
+
+// stopEntrancePupilZ returns the global Z of the entrance pupil for an explicit
+// stop: the paraxial location, measured from surface 0 along the unfolded axis.
+// Chief aims its pupil grid (and reports the entrance-pupil centre) at that
+// global Z, so the location is only usable while the object-side frame is still
+// the global frame — a fold bending the beam before the pupil makes the
+// unfolded coordinate a different axis. Such a pupil returns ok=false and the
+// caller keeps its stop-surface seed instead of aiming along the wrong frame.
+func stopEntrancePupilZ(system types.System, wavelength float64, gc *glass.Catalog) (float64, bool) {
+	return StopEntrancePupilZ(system.Surfaces, system.StopSurface, wavelength, gc)
+}
+
+// StopEntrancePupilZ is the exported, frame-guarded entrance-pupil Z for an
+// explicit stop: the paraxial location measured from surface 0 along the
+// unfolded axis, ok=false while a fold makes that coordinate a different axis.
+// Callers that seed a pupil grid (the optimiser's computePupilZ) use it so the
+// grid they centre matches the one chief reports for the same document.
+func StopEntrancePupilZ(surfaces []types.Surface, stopSurface int, wavelength float64, gc *glass.Catalog) (float64, bool) {
+	loc := paraxial.EntrancePupilLocation(surfaces, stopSurface, wavelength, gc)
+	if loc == 0 {
+		return 0, false
+	}
+	along := 0.0
+	for i := range surfaces {
+		if surfaces[i].Bends() {
+			// The folding vertex plane and everything before it stays in the
+			// global frame; a pupil at or before that plane is global Z.
+			return loc, loc <= along
+		}
+		along += surfaces[i].Thickness
+	}
+	return loc, true
 }
 
 // hasInfiniteConjugateField reports whether any field uses an angle (or image
@@ -317,7 +467,7 @@ func probePupilZ(
 	path := dls.BuildPath(system.Surfaces)
 	_, cy, grid := tracePupilGrid(system, engine, path, numRays, probeR,
 		gc.X, gc.Y, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, false, gridType, nil, numRings, numSpokes)
+		refSurfaceID, pol, wavelength, false, gridType, nil, nil, numRings, numSpokes)
 	survivors := 0
 	for _, gp := range grid {
 		if gp.ImageX != nil {
@@ -368,6 +518,7 @@ func traceFields(
 	fanCfg *types.RayFanConfig,
 	pupilZs []float64,
 	numRings, numSpokes int,
+	rayDefinition string,
 ) []Result {
 	var results []Result
 
@@ -391,14 +542,15 @@ func traceFields(
 		switch {
 		case math.Abs(fd.ImageHeight) > 1e-12:
 			angle := searchAngleForImageHeight(system, engine, fd.ImageHeight,
-				dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType, passThrough, pupilZ, numRings, numSpokes)
+				dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType, passThrough,
+				fd.Vignetting, pupilZ, rayDefinition, numRings, numSpokes)
 			thetaRad := raymath.DegToRad(angle)
 			if passThrough != nil && passThrough.Surface > 0 {
 				result = computeChiefRayAngleGridWithPassThrough(system, engine, path, thetaRad, dx, dy,
 					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough, pupilZ, fd.Vignetting, numRings, numSpokes)
 			} else {
 				result = computeChiefRayAngleGrid(system, engine, path, thetaRad, dx, dy,
-					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting, numRings, numSpokes)
+					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting, rayDefinition, numRings, numSpokes)
 			}
 			result.FieldAngle = angle
 
@@ -412,7 +564,7 @@ func traceFields(
 					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough, fd.Vignetting, numRings, numSpokes)
 			} else {
 				result = computeChiefRayHeightGrid(system, engine, path, fd.Height, dx, dy,
-					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, fd.Vignetting, numRings, numSpokes)
+					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting, rayDefinition, numRings, numSpokes)
 			}
 			result.FieldHeight = fd.Height
 
@@ -423,7 +575,7 @@ func traceFields(
 					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, passThrough, pupilZ, fd.Vignetting, numRings, numSpokes)
 			} else {
 				result = computeChiefRayAngleGrid(system, engine, path, thetaRad, dx, dy,
-					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting, numRings, numSpokes)
+					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting, rayDefinition, numRings, numSpokes)
 			}
 			result.FieldAngle = fd.Angle
 		}
@@ -556,14 +708,15 @@ func recomputeEntrancePupils(results []Result, cur []float64, engine *ray.Engine
 
 // setPupils records the per-field entrance and exit pupils. The entrance pupil
 // is the in-lens chief-ray crossing (the aperture position where each field's
-// chief ray crosses field 0's); field 0's is the mean of the off-axis fields, or
-// the low-angle probe's aperture Z when there are no off-axis fields (the probe
-// only runs for stop-free systems, so field 0's is never left unset there).
+// chief ray crosses field 0's); field 0's is the mean of the off-axis fields,
+// or — for a lone field, which has no mean — its own seed pupil Z (the
+// paraxial entrance pupil of an explicit stop, the probe/crossing Z of the
+// dynamic pupil, the axial position of the virtual pupil).
 // The exit pupil is the image-space crossing of the outgoing segments, accepted
 // only within a plausible window (the outgoing rays are nearly parallel on the
 // image side, so the crossing is ill-conditioned for strongly aberrated designs
 // and is then omitted).
-func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, pupilZs []float64, apertureRadius float64, probeZ float64, probeOK bool) {
+func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, pupilZs []float64, apertureRadius float64) {
 	n := len(results)
 	if n == 0 {
 		return
@@ -588,11 +741,14 @@ func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, p
 		z := entMean / float64(entCnt)
 		results[0].EntrancePupil.Center = chiefAtZ(results[0].ChiefRay, z)
 		results[0].EntrancePupil.Radius = apertureRadius
-	} else if n == 1 && probeOK && results[0].EntrancePupil != nil {
-		// Single-field dynamic pupil: the probe supplies the aperture position.
-		// Previously the entrance-pupil centre was left unset for a lone field,
-		// which centred downstream grids at the origin instead of the aperture.
-		results[0].EntrancePupil.Center = chiefAtZ(results[0].ChiefRay, probeZ)
+	} else if n == 1 && results[0].EntrancePupil != nil {
+		// A lone field has no off-axis mean to fall back on, and a stop
+		// (or virtual pupil) system never runs the low-angle probe: its
+		// own seed is the pupil position — the paraxial entrance pupil
+		// for an explicit stop, the probe/crossing Z for the dynamic
+		// pupil, the fixed axial position for the virtual pupil. Leaving
+		// it unset reported the centre at the origin instead.
+		results[0].EntrancePupil.Center = chiefAtZ(results[0].ChiefRay, pupilZs[0])
 		results[0].EntrancePupil.Radius = apertureRadius
 	}
 
@@ -671,9 +827,19 @@ const gridSurviveFraction = 0.25
 // that same full grid whenever it survives well enough (>= gridSurviveFraction)
 // to define a usable centroid — keeping image height, centroid and RMS about
 // one point. Only a heavily clipped beam (< gridSurviveFraction surviving)
-// falls back to the adaptive radius probe: the centroid target and the stats
-// then come from the reduced, mostly-surviving probe grid, while the emitted
-// grid stays full-aperture for the envelope measurement.
+// needs a reduced probe grid for those two, and the reduced grid is the better
+// of:
+//
+//   - the effective-vignetting ellipse: the min-area ellipse containing every
+//     surviving ray, re-laid over the whole grid (best — it follows an
+//     off-centre, non-circular transmitted beam), reported by the caller as
+//     effective_vignetting; or
+//   - the legacy concentric radius probe, which keeps shrinking the grid
+//     radius until enough rays survive. It stays as the fallback when the
+//     ellipse cannot be fitted or its own grid does not survive as well.
+//
+// The emitted grid stays full-aperture either way for the envelope
+// measurement.
 func centroidGrid(
 	system types.System,
 	engine *ray.Engine,
@@ -690,21 +856,32 @@ func centroidGrid(
 	gridType types.GridType,
 	vig *types.VignettingDef,
 	numRings, numSpokes int,
-) (cx, cy float64, grid, statsGrid []types.GridPoint) {
+) (cx, cy float64, grid, statsGrid []types.GridPoint, effectiveVignetting *types.VignettingDef) {
 	cx, cy, grid = tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
 	if math.Abs(thetaRad) <= 0.0873 { // ≤ ~5°: no vignetting expected
-		return cx, cy, grid, grid
+		return cx, cy, grid, grid, nil
 	}
-	surviving := 0
-	for i := range grid {
-		if grid[i].ImageX != nil {
-			surviving++
+	if float64(tracedRays(grid)) >= float64(numRays)*gridSurviveFraction {
+		return cx, cy, grid, grid, nil
+	}
+	// Heavily clipped: what passes is an off-centre, non-circular effective
+	// pupil, so fit it from the surviving rays and re-lay the stats/centroid
+	// grid over that ellipse. The fit contains every survivor by construction;
+	// it is only accepted when the re-laid grid still survives as well as the
+	// radius probe guarantees, otherwise the probe takes over and no effective
+	// vignetting is reported (never advertise an ellipse the sampling cannot
+	// honour).
+	if eff := fitEffectiveVignetting(grid, pupilCenterX, pupilCenterY, apertureRadius); eff != nil {
+		scx, scy, stats := tracePupilGrid(system, engine, path, numRays, apertureRadius,
+			pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
+			refSurfaceID, pol, wavelength, dumpMap, gridType, vig, eff, numRings, numSpokes)
+		traced := tracedRays(stats)
+		if traced >= minEffectiveVignettingRays &&
+			float64(traced) >= float64(numRays)*gridSurviveFraction {
+			return scx, scy, grid, stats, eff
 		}
-	}
-	if float64(surviving) >= float64(numRays)*gridSurviveFraction {
-		return cx, cy, grid, grid
 	}
 	radius := probeGridRadius(system, engine, path,
 		pupilCenterX, pupilCenterY, zStart, rayDir,
@@ -712,8 +889,19 @@ func centroidGrid(
 		pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
 	scx, scy, stats := tracePupilGrid(system, engine, path, numRays, radius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
-	return scx, scy, grid, stats
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
+	return scx, scy, grid, stats, nil
+}
+
+// tracedRays counts the grid points that reached the reference surface.
+func tracedRays(grid []types.GridPoint) int {
+	n := 0
+	for i := range grid {
+		if grid[i].ImageX != nil {
+			n++
+		}
+	}
+	return n
 }
 
 // probeGridRadius adaptively reduces the grid radius for off-axis fields
@@ -745,7 +933,7 @@ func probeGridRadius(
 	for radius >= minRadius {
 		_, _, grid := tracePupilGrid(system, engine, path, numRays, radius,
 			pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-			refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
+			refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
 		surviving := 0
 		for i := range grid {
 			if grid[i].ImageX != nil {
@@ -762,6 +950,20 @@ func probeGridRadius(
 
 // --- angle-based (infinite conjugate) ---
 
+// chiefRayAim returns the pupil-plane point the chief ray must pass through
+// under a prescribed-pupil definition: the entrance-pupil centre, moved to the
+// centre of the field's vignetting ellipse under vignetting_centre (whose
+// decenter is zero for a field without a vignetting specification, so the two
+// coincide there).
+func chiefRayAim(rayDefinition string, pupilZ, apertureRadius float64, vig *types.VignettingDef) types.Vec3 {
+	aim := types.Vec3{Z: pupilZ}
+	if rayDefinition == RayDefinitionVignettingCentre && vig != nil && !vig.IsZero() {
+		aim.X = vig.DecenterX * apertureRadius
+		aim.Y = vig.DecenterY * apertureRadius
+	}
+	return aim
+}
+
 func computeChiefRayAngleGrid(
 	system types.System,
 	engine *ray.Engine,
@@ -776,6 +978,7 @@ func computeChiefRayAngleGrid(
 	gridType types.GridType,
 	pupilZ float64,
 	vig *types.VignettingDef,
+	rayDefinition string,
 	numRings, numSpokes int,
 ) Result {
 	zStart := -100.0
@@ -795,24 +998,35 @@ func computeChiefRayAngleGrid(
 	gc := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
 	pupilCenterX, pupilCenterY := gc.X, gc.Y
 
-	// One grid serves the centroid target, the spot statistics and the output
-	// grid_points, so the chief ray lands exactly on the measured centroid.
-	cx, cy, grid, statsGrid := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
+	// One grid serves the spot statistics and the output grid_points. The
+	// chief-ray origin follows the definition: the centroid search lands the
+	// ray on the measured intensity centroid of that grid, while a
+	// prescribed-pupil definition takes the analytic wavefront-plane point
+	// whose ray passes through the aim — the object-space chief ray of the
+	// prescribed pupil, with no search and no dependence on the trace.
+	cx, cy, grid, statsGrid, effectiveVignetting := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, refSurfaceID,
 		pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
 
-	originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, refSurfaceID, cy,
-		path, wavelength, pol, engine, system.Surfaces, pupilZ, false,
-		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
-	originX := 0.0
-	if math.Abs(rayDir.X) > 1e-12 {
-		originX = searchOriginForTarget(rayDir.X, rayDir, zStart, refSurfaceID, cx,
-			path, wavelength, pol, engine, system.Surfaces, pupilZ, true,
-			func(sr types.SurfaceResult) float64 { return sr.Position.X })
+	var origin types.Vec3
+	switch rayDefinition {
+	case RayDefinitionEntrancePupilCentre, RayDefinitionVignettingCentre:
+		origin = raymath.WavefrontGridCenter(chiefRayAim(rayDefinition, pupilZ, apertureRadius, vig), rayDir, zStart)
+	default:
+		originY := searchOriginForTarget(rayDir.Y, rayDir, zStart, refSurfaceID, cy,
+			path, wavelength, pol, engine, system.Surfaces, pupilZ, false,
+			func(sr types.SurfaceResult) float64 { return sr.Position.Y })
+		originX := 0.0
+		if math.Abs(rayDir.X) > 1e-12 {
+			originX = searchOriginForTarget(rayDir.X, rayDir, zStart, refSurfaceID, cx,
+				path, wavelength, pol, engine, system.Surfaces, pupilZ, true,
+				func(sr types.SurfaceResult) float64 { return sr.Position.X })
+		}
+		origin = types.Vec3{X: originX, Y: originY, Z: zStart}
 	}
-
-	origin := types.Vec3{X: originX, Y: originY, Z: zStart}
-	return buildResult(engine, system, path, origin, rayDir, refSurfaceID, pol, wavelength, cx, cy, apertureRadius, grid, statsGrid, dumpMap)
+	res := buildResult(engine, system, path, origin, rayDir, refSurfaceID, pol, wavelength, cx, cy, apertureRadius, grid, statsGrid, dumpMap)
+	res.EffectiveVignetting = effectiveVignetting
+	return res
 }
 
 // --- pass-through constrained chief ray (angle-based) ---
@@ -1258,12 +1472,14 @@ func computeChiefRayAngleGridWithPassThrough(
 
 	// One grid serves the centroid target, the spot statistics and the output
 	// grid_points, so the reported image point stays on the measured centroid.
-	cx, cy, grid, statsGrid := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
+	cx, cy, grid, statsGrid, effectiveVignetting := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, refSurfaceID,
 		pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
 
-	return buildResult(engine, system, path, origin, rayDir, refSurfaceID,
+	res := buildResult(engine, system, path, origin, rayDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, statsGrid, dumpMap)
+	res.EffectiveVignetting = effectiveVignetting
+	return res
 }
 
 // --- pass-through constrained chief ray (height-based) ---
@@ -1317,7 +1533,7 @@ func computeChiefRayHeightGridWithPassThrough(
 
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		0, 0, zStart, refinedDir, objectPoint,
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
 
 	return buildResult(engine, system, path, objectPoint, refinedDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, nil, dumpMap)
@@ -1337,7 +1553,9 @@ func computeChiefRayHeightGrid(
 	wavelength float64,
 	dumpMap bool,
 	gridType types.GridType,
+	pupilZ float64,
 	vig *types.VignettingDef,
+	rayDefinition string,
 	numRings, numSpokes int,
 ) Result {
 	objectPoint := types.Vec3{X: height * dx, Y: height * dy, Z: objectZ}
@@ -1355,12 +1573,28 @@ func computeChiefRayHeightGrid(
 	// Sample grid and get centroid.
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		0, 0, zStart, baseDir, objectPoint,
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
 
-	// Refine the direction so the chief ray passes through the centroid at reference surface.
-	refinedDir := searchDirectionForTarget(objectPoint, refSurfaceID, cy, baseDir,
-		path, wavelength, pol, engine, system.Surfaces,
-		func(sr types.SurfaceResult) float64 { return sr.Position.Y })
+	// Refine the direction so the chief ray passes through the centroid at the
+	// reference surface (centroid definition), or take the line through the
+	// prescribed pupil point (entrance-pupil centre / vignetting-ellipse
+	// centre): for a finite-conjugate field the object-space chief ray is the
+	// line from the object point through that pupil-plane point, so no search
+	// is involved.
+	var refinedDir types.Vec3
+	switch rayDefinition {
+	case RayDefinitionEntrancePupilCentre, RayDefinitionVignettingCentre:
+		aim := chiefRayAim(rayDefinition, pupilZ, apertureRadius, vig)
+		refinedDir = types.Vec3{
+			X: aim.X - objectPoint.X,
+			Y: aim.Y - objectPoint.Y,
+			Z: aim.Z - objectPoint.Z,
+		}.Normalize()
+	default:
+		refinedDir = searchDirectionForTarget(objectPoint, refSurfaceID, cy, baseDir,
+			path, wavelength, pol, engine, system.Surfaces,
+			func(sr types.SurfaceResult) float64 { return sr.Position.Y })
+	}
 
 	return buildResult(engine, system, path, objectPoint, refinedDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, nil, dumpMap)
@@ -1698,6 +1932,7 @@ func tracePupilGrid(
 	dumpMap bool,
 	gridType types.GridType,
 	vig *types.VignettingDef,
+	remap *types.VignettingDef,
 	numRings, numSpokes int,
 ) (cx, cy float64, grid []types.GridPoint) {
 	var totalWeight float64
@@ -1726,6 +1961,7 @@ func tracePupilGrid(
 			ZStart:         zStart,
 			OPLMode:        pupil.OPLLaunch,
 			Vig:            vig,
+			Remap:          remap,
 			HeightOrigin:   &rayOrigin,
 		})
 	} else {
@@ -1742,6 +1978,7 @@ func tracePupilGrid(
 			ZStart:         zStart,
 			OPLMode:        pupil.OPLLaunch,
 			Vig:            vig,
+			Remap:          remap,
 		})
 	}
 	pupil.Trace(engine, path, system.Surfaces, samples, wavelength, pol, 0)
@@ -2151,7 +2388,9 @@ func imageHeightForAngle(
 	pol types.JonesVector,
 	wavelength float64,
 	gridType types.GridType,
+	vig *types.VignettingDef,
 	pupilZ float64,
+	rayDefinition string,
 	numRings, numSpokes int,
 ) (float64, bool) {
 	thetaRad := raymath.DegToRad(angleDeg)
@@ -2163,21 +2402,54 @@ func imageHeightForAngle(
 	gc := raymath.WavefrontGridCenter(types.Vec3{Z: pupilZ}, rayDir, zStart)
 	pupilCenterX, pupilCenterY := gc.X, gc.Y
 
+	// The grid the chief computation traces — with the field's vignetting
+	// clip applied, so the angle is solved against the same bundle — decides
+	// whether the field reaches the reference surface at all.
 	cx, cy, grid := tracePupilGrid(system, engine, dls.BuildPath(system.Surfaces), numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, false, gridType, nil, numRings, numSpokes)
-
-	height := cx*dx + cy*dy
+		refSurfaceID, pol, wavelength, false, gridType, vig, nil, numRings, numSpokes)
+	reached := false
 	for _, gp := range grid {
 		if gp.ImageX != nil {
-			return height, true
+			reached = true
+			break
 		}
 	}
-	return 0, false
+	if !reached {
+		return 0, false
+	}
+
+	// A field's image height is the height of its chief ray at the reference
+	// surface under the active definition: the projected centroid (a centroid
+	// chief ray is solved onto exactly that point), or the prescribed-pupil
+	// chief ray's own hit.
+	switch rayDefinition {
+	case RayDefinitionEntrancePupilCentre, RayDefinitionVignettingCentre:
+		origin := raymath.WavefrontGridCenter(chiefRayAim(rayDefinition, pupilZ, apertureRadius, vig), rayDir, zStart)
+		tr := engine.TraceRay(types.Ray{
+			Wavelength: wavelength,
+			Initial:    types.RayState{Origin: origin, Direction: rayDir},
+			Path:       dls.BuildPath(system.Surfaces),
+			Jones:      pol,
+			Lenient:    true,
+		}, system.Surfaces, false)
+		if tr.Error != "" {
+			return 0, false
+		}
+		for _, sr := range tr.Surfaces {
+			if sr.SurfaceID == refSurfaceID {
+				return sr.Position.X*dx + sr.Position.Y*dy, true
+			}
+		}
+		return 0, false
+	default:
+		return cx*dx + cy*dy, true
+	}
 }
 
-// searchAngleForImageHeight finds the field angle (degrees) whose projected
-// centroid (dx*cx + dy*cy) at the reference surface equals targetY.
+// searchAngleForImageHeight finds the field angle (degrees) whose chief ray's
+// image height (dx*cx + dy*cy of the centroid, or of the prescribed-pupil
+// chief ray) at the reference surface equals targetY.
 func searchAngleForImageHeight(
 	system types.System,
 	engine *ray.Engine,
@@ -2189,7 +2461,9 @@ func searchAngleForImageHeight(
 	wavelength float64,
 	gridType types.GridType,
 	passThrough *types.PassThroughTarget,
+	vig *types.VignettingDef,
 	pupilZ float64,
+	rayDefinition string,
 	numRings, numSpokes int,
 ) float64 {
 	heightFn := func(angleDeg float64) (float64, bool) {
@@ -2197,7 +2471,7 @@ func searchAngleForImageHeight(
 			y, ok := imageHeightForAnglePT(system, engine, angleDeg, dx, dy, refSurfaceID, pol, wavelength, passThrough, pupilZ)
 			return y, ok
 		}
-		return imageHeightForAngle(system, engine, angleDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType, pupilZ, numRings, numSpokes)
+		return imageHeightForAngle(system, engine, angleDeg, dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType, vig, pupilZ, rayDefinition, numRings, numSpokes)
 	}
 
 	// Bracket search: start with 0–15° and expand as needed. The target may be

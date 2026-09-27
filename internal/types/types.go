@@ -416,6 +416,13 @@ type ChiefInput struct {
 	GridType         GridType           `yaml:"grid_type,omitempty"`
 	DumpMap          bool               `yaml:"dump_map,omitempty"`
 	PassThrough      *PassThroughTarget `yaml:"pass_through,omitempty"`
+	// ChiefRayDefinition selects how each field's chief ray is constructed:
+	// entrance_pupil_centre | centroid | vignetting_centre ("" = the
+	// per-system default: vignetting_centre when the pupil position is
+	// prescribed by stop_surface/pupil_model, centroid otherwise). The
+	// entrance_pupil_centre and vignetting_centre definitions need a
+	// prescribed pupil; a pass_through target takes precedence over them.
+	ChiefRayDefinition string `yaml:"chief_ray_definition,omitempty"`
 	// ReferenceWavelength is the system reference wavelength (mm) used for
 	// chief-ray and paraxial calculations. The effective value is written back
 	// by commands that resolve it.
@@ -1748,6 +1755,13 @@ type ChiefRayResult struct {
 	// found. Both are informational only.
 	PupilProbe  bool    `yaml:"pupil_probe,omitempty"`
 	PupilProbeZ float64 `yaml:"pupil_probe_z,omitempty"`
+	// EffectiveVignetting is the estimated effective (vignetted) pupil ellipse
+	// of the field — the min-area ellipse containing every ray that reached
+	// the reference surface — in the same convention as fields[].vignetting
+	// (decenter/compression relative to entrance_pupil.radius, rotated by
+	// atan(tangent)). Set only for heavily vignetted fields, whose beam was
+	// measured rather than taken from the nominal pupil.
+	EffectiveVignetting *VignettingDef `yaml:"effective_vignetting,omitempty"`
 }
 
 type Pupil struct {
@@ -1992,8 +2006,9 @@ type PSFConfig struct {
 // and each field's own best focus. MTF holds the `focus mtf` options; PSF
 // holds the `focus psf` options.
 type FocusConfig struct {
-	MTF *FocusMTFConfig `yaml:"mtf,omitempty"`
-	PSF *FocusPSFConfig `yaml:"psf,omitempty"`
+	MTF  *FocusMTFConfig  `yaml:"mtf,omitempty"`
+	PSF  *FocusPSFConfig  `yaml:"psf,omitempty"`
+	Spot *FocusSpotConfig `yaml:"spot,omitempty"`
 }
 
 // FocusMTFConfig configures `focus mtf`: the MTF at the requested spatial
@@ -2053,6 +2068,22 @@ type FocusThroughFocus struct {
 	From  float64 `yaml:"from"`
 	Step  float64 `yaml:"step"`
 	Count int     `yaml:"count"`
+}
+
+// FocusSpotConfig configures `focus spot`: the geometric (ray) spot RMS and its
+// x/y and tangential/sagittal decompositions, compared across the same plane
+// conventions. It needs no Huygens integral, so it is much cheaper than
+// `focus psf`.
+type FocusSpotConfig struct {
+	Wavelengths      []float64 `yaml:"wavelengths,omitempty"`
+	Fields           []int     `yaml:"fields,omitempty"`
+	Planes           []string  `yaml:"planes,omitempty"`
+	NumRays          int       `yaml:"num_rays,omitempty"`
+	Polarization     string    `yaml:"polarization,omitempty"`
+	ReferenceSurface int       `yaml:"reference_surface,omitempty"`
+	// ThroughFocus, when set, replaces the plane comparison with a
+	// through-focus scan around each base plane in Planes (file/all/on_axis).
+	ThroughFocus *FocusThroughFocus `yaml:"through_focus,omitempty"`
 }
 
 // WavefrontConfig configures the `wavefront` subcommand (the `wavefront:`
@@ -2154,7 +2185,42 @@ type PSFResult struct {
 type FocusComparison struct {
 	MTF          *FocusMTFComparison          `yaml:"mtf,omitempty"`
 	PSF          *FocusPSFComparison          `yaml:"psf,omitempty"`
+	Spot         *FocusSpotComparison         `yaml:"spot,omitempty"`
 	ThroughFocus *FocusThroughFocusComparison `yaml:"through_focus,omitempty"`
+}
+
+// FocusSpotComparison is the `focus spot` table: per (field, wavelength) the
+// geometric spot RMS (and its decompositions) under each plane convention.
+type FocusSpotComparison struct {
+	Planes               []string       `yaml:"planes"`
+	FocusPlaneAllShiftMM float64        `yaml:"focus_plane_all_shift_mm,omitempty"`
+	Polarization         string         `yaml:"polarization,omitempty"`
+	Rows                 []FocusSpotRow `yaml:"rows"`
+}
+
+// FocusSpotRow is one (field, wavelength) spot comparison row.
+type FocusSpotRow struct {
+	FieldIndex    int             `yaml:"field_index"`
+	FieldAngle    float64         `yaml:"field_angle"`
+	Wavelength    float64         `yaml:"wavelength"`
+	File          *FocusSpotPlane `yaml:"file,omitempty"`
+	FocusPlaneAll *FocusSpotPlane `yaml:"focus_plane_all,omitempty"`
+	BestFocus     *FocusSpotPlane `yaml:"best_focus,omitempty"`
+}
+
+// FocusSpotPlane is the geometric spot summary at one plane convention. All
+// values are mm (radii about the flux-weighted centroid).
+type FocusSpotPlane struct {
+	SpotRMS   float64 `yaml:"spot_rms"`
+	SpotRMSX  float64 `yaml:"spot_rms_x"`
+	SpotRMSY  float64 `yaml:"spot_rms_y"`
+	SpotRMST  float64 `yaml:"spot_rms_t"`
+	SpotRMSS  float64 `yaml:"spot_rms_s"`
+	CentroidX float64 `yaml:"centroid_x"`
+	CentroidY float64 `yaml:"centroid_y"`
+	// BestFocusShiftMM is the per-field best-focus shift (mm) applied for the
+	// best_focus convention; 0 for the fixed planes.
+	BestFocusShiftMM float64 `yaml:"best_focus_shift_mm,omitempty"`
 }
 
 // FocusThroughFocusComparison is the `focus mtf|psf --through-focus` result: a
@@ -2197,12 +2263,17 @@ type FocusThroughFocusRow struct {
 // for metric == "psf"; the MTF arrays for metric == "mtf".
 type FocusThroughFocusPoint struct {
 	FocusMM           float64   `yaml:"focus_mm"`
-	Strehl            float64   `yaml:"strehl"`
+	Strehl            float64   `yaml:"strehl,omitempty"`
 	FWHMX             float64   `yaml:"fwhm_x,omitempty"`
 	FWHMY             float64   `yaml:"fwhm_y,omitempty"`
 	EncircledEnergy50 float64   `yaml:"encircled_energy_50,omitempty"`
 	CentroidX         float64   `yaml:"centroid_x,omitempty"`
 	CentroidY         float64   `yaml:"centroid_y,omitempty"`
+	SpotRMS           float64   `yaml:"spot_rms,omitempty"`
+	SpotRMSX          float64   `yaml:"spot_rms_x,omitempty"`
+	SpotRMSY          float64   `yaml:"spot_rms_y,omitempty"`
+	SpotRMST          float64   `yaml:"spot_rms_t,omitempty"`
+	SpotRMSS          float64   `yaml:"spot_rms_s,omitempty"`
 	Sagittal          []float64 `yaml:"mtf_sagittal,omitempty"`
 	Tangential        []float64 `yaml:"mtf_tangential,omitempty"`
 }

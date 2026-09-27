@@ -646,11 +646,16 @@ Plane names: `file`, `focus_plane_all` (the single all-field best focus), and
 `best_focus` (each field's own best focus). `focus mtf` adds one
 `MTF<f>(sag/tan)` column per reported frequency.
 
+`focus spot` renders the geometric spot: six metric columns — `spot_rms`,
+`rms_t`, `rms_s`, `rms_x`, `rms_y` and a combined `centroid` (`x,y`) — all mm.
+The `t`/`s` pair is tangential/sagittal (field azimuth), the `x`/`y` pair the
+image-plane axes.
+
 A `through_focus` section (from `focus ... --through-focus FROM,STEP,COUNT`)
 renders one row per (base, field, wavelength, `focus_mm`): a `base` column and a
 `focus_mm` column replace the plane blocks. Bases are `file` / `all` /
-`on_axis`; `focus mtf` adds the MTF pair columns and `focus psf` the FWHM /
-EE50 / centroid columns.
+`on_axis`; `focus mtf` adds the MTF pair columns, `focus psf` the FWHM / EE50 /
+centroid columns, and `focus spot` the six spot columns.
 
 ### CSV
 

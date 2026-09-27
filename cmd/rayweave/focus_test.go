@@ -492,3 +492,103 @@ func TestListFocusThroughFocus(t *testing.T) {
 		t.Errorf("csv missing columns:\n%s", csvText)
 	}
 }
+
+// assertSpotInvariant checks the orthonormal decomposition identity
+// rms² = a² + b².
+func assertSpotInvariant(t *testing.T, rms, a, b float64, label string) {
+	t.Helper()
+	if diff := rms*rms - (a*a + b*b); math.Abs(diff) > 1e-12*math.Max(1, rms*rms) {
+		t.Errorf("spot_rms^2 != %s^2 sum (diff %v)", label, diff)
+	}
+}
+
+// TestFocusSpotComparison verifies `focus spot` reports the geometric spot RMS
+// with its decompositions, satisfies the orthonormal invariant, and writes the
+// focus.spot section back.
+func TestFocusSpotComparison(t *testing.T) {
+	out := runCommand(t, []string{"rayweave", "focus", "spot", "--num-rays", "24"},
+		func() { runFocusSpot([]byte(focusInput("")), []string{"--num-rays", "24"}) })
+	var res types.Output
+	if err := yaml.Unmarshal(out, &res); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if res.FocusComparison == nil || res.FocusComparison.Spot == nil {
+		t.Fatal("focus_comparison.spot missing")
+	}
+	sp := res.FocusComparison.Spot
+	if len(sp.Rows) == 0 {
+		t.Fatal("rows empty")
+	}
+	row := sp.Rows[0]
+	for _, pl := range []*types.FocusSpotPlane{row.File, row.FocusPlaneAll, row.BestFocus} {
+		if pl == nil {
+			t.Fatal("spot plane block missing")
+		}
+		if pl.SpotRMS <= 0 {
+			t.Errorf("spot_rms = %v, want > 0", pl.SpotRMS)
+		}
+		assertSpotInvariant(t, pl.SpotRMS, pl.SpotRMST, pl.SpotRMSS, "t/s")
+		assertSpotInvariant(t, pl.SpotRMS, pl.SpotRMSX, pl.SpotRMSY, "x/y")
+	}
+	if row.BestFocus.BestFocusShiftMM == 0 {
+		t.Error("best_focus_shift_mm = 0, want the per-field best-focus shift")
+	}
+	if res.Focus == nil || res.Focus.Spot == nil {
+		t.Fatal("focus.spot not written back")
+	}
+}
+
+// TestFocusSpotThroughFocus verifies the through-focus geometric spot scan.
+func TestFocusSpotThroughFocus(t *testing.T) {
+	args := []string{"rayweave", "focus", "spot", "--through-focus", "0,0.01,3", "--planes", "file,all", "--num-rays", "24"}
+	out := runCommand(t, args, func() {
+		runFocusSpot([]byte(focusInput("")), []string{"--through-focus", "0,0.01,3", "--planes", "file,all", "--num-rays", "24"})
+	})
+	var res types.Output
+	if err := yaml.Unmarshal(out, &res); err != nil {
+		t.Fatalf("unmarshal output: %v", err)
+	}
+	if res.FocusComparison == nil || res.FocusComparison.ThroughFocus == nil {
+		t.Fatal("focus_comparison.through_focus missing")
+	}
+	tf := res.FocusComparison.ThroughFocus
+	if tf.Metric != "spot" {
+		t.Errorf("metric = %q, want spot", tf.Metric)
+	}
+	if len(tf.Scans) != 2 || tf.Scans[0].Base != "file" || tf.Scans[1].Base != "all" {
+		t.Fatalf("scans = %+v, want bases [file all]", tf.Scans)
+	}
+	for _, s := range tf.Scans {
+		for _, row := range s.Rows {
+			if len(row.Points) != 3 {
+				t.Fatalf("points = %d, want 3", len(row.Points))
+			}
+			for _, p := range row.Points {
+				if p.SpotRMS <= 0 {
+					t.Errorf("spot_rms = %v, want > 0", p.SpotRMS)
+				}
+				assertSpotInvariant(t, p.SpotRMS, p.SpotRMST, p.SpotRMSS, "t/s")
+			}
+		}
+	}
+	if res.Focus == nil || res.Focus.Spot == nil || res.Focus.Spot.ThroughFocus == nil {
+		t.Fatal("focus.spot.through_focus not written back")
+	}
+}
+
+// TestListFocusSpot verifies `list focus` renders the geometric spot comparison
+// (table and csv).
+func TestListFocusSpot(t *testing.T) {
+	pipeline := runCommand(t, []string{"rayweave", "focus", "spot", "--num-rays", "24"},
+		func() { runFocusSpot([]byte(focusInput("")), []string{"--num-rays", "24"}) })
+	text := string(runListFocus(t, pipeline))
+	for _, want := range []string{"spot RMS comparison", "spot_rms", "rms_t", "rms_s", "rms_x", "rms_y"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("list focus spot table missing %q:\n%s", want, text)
+		}
+	}
+	csvText := string(runListFocus(t, pipeline, "--format", "csv"))
+	if !strings.Contains(csvText, "Focus Comparison (spot):") {
+		t.Errorf("csv missing header:\n%s", csvText)
+	}
+}

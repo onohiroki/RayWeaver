@@ -16,10 +16,10 @@ func imagePlaneZ(surfaces []types.Surface) float64 {
 	return surfaces[len(surfaces)-1].PhysicalZ
 }
 
-// imageSpaceIndex returns the refractive index of the medium immediately
+// ImageSpaceIndex returns the refractive index of the medium immediately
 // following the reference surface (the region the wavefront propagates
 // through to reach the image plane).
-func imageSpaceIndex(surfaces []types.Surface, refSurfaceID int, wavelength float64, gc *glass.Catalog) float64 {
+func ImageSpaceIndex(surfaces []types.Surface, refSurfaceID int, wavelength float64, gc *glass.Catalog) float64 {
 	idx := dls.SurfaceIndex(surfaces, refSurfaceID)
 	if idx < 0 || idx >= len(surfaces) {
 		return 1

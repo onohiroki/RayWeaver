@@ -72,6 +72,9 @@ type Config struct {
 	AdaptiveDamping *types.AdaptiveDampingConfig
 	// PupilModel is the virtual entrance pupil configuration (nil when not in use).
 	PupilModel *types.PupilModelConfig
+	// RayDefinition is the document's chief-ray definition
+	// (chief.chief_ray_definition; "" = the per-system default).
+	RayDefinition string
 	// GlassAttraction configures the soft-min potential pulling nd/vd toward
 	// real catalog glasses (nil = disabled).
 	GlassAttraction *types.GlassAttractionConfig
@@ -95,6 +98,9 @@ type ConfigInput struct {
 	RegionActive        *types.RegionActiveConfig
 	PupilModel          *types.PupilModelConfig
 	Normalization       *types.MeritNormalizationConfig
+	// RayDefinition is the document's chief-ray definition
+	// (chief.chief_ray_definition; "" = the per-system default).
+	RayDefinition string
 }
 
 func effectiveReferenceWavelength(wavelength float64) float64 {
@@ -226,6 +232,11 @@ type config struct {
 	// diameter instead of running chief, and applyVariables handles
 	// pupil_model type variables targeting it.
 	pupilModel *types.PupilModelConfig
+	// rayDefinition is the document's chief-ray definition
+	// (chief.chief_ray_definition; "" = the per-system default) passed to
+	// every chief pass this optimisation makes, so the pupil/chief ray the
+	// solver sees matches what `chief` reports for the same document.
+	rayDefinition string
 	// backFocusSolve is the per-config back-focus solve configuration (nil
 	// when not in use). It is set by SetBackFocusSolve and used by
 	// resolveBackFocusTarget.
@@ -1185,10 +1196,11 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 			continue
 		}
 
-		results := chief.DetermineChiefRaysGrid(
+		results := chief.DetermineChiefRaysGridMode(
 			types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
 			cfg.fieldDefs, cfg.refSurface, o.numRays, gc, pol,
 			effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridPolar, nil, nil, nil, nil, 0, 0,
+			cfg.rayDefinition,
 		)
 		for i, r := range results {
 			if r.EntrancePupil == nil {
@@ -1716,16 +1728,17 @@ func powerTargetForSurface(surfaces []types.Surface, gc *glass.Catalog, id int) 
 // entry point).
 func NewOptimizer(cfg Config) *Optimizer {
 	c := config{
-		id:          "config1",
-		weight:      1.0,
-		stopSurface: cfg.StopSurface,
-		refSurface:  cfg.RefSurface,
-		pupilZ:      resolvePupilZ(cfg.Surfaces, cfg.StopSurface, cfg.PupilZ),
-		fieldDefs:   fieldDefsFromItems(cfg.Fields),
-		surfaces:    cfg.Surfaces,
-		fields:      cfg.Fields,
-		constraints: cfg.Constraints,
-		pupilModel:  cfg.PupilModel,
+		id:            "config1",
+		weight:        1.0,
+		stopSurface:   cfg.StopSurface,
+		refSurface:    cfg.RefSurface,
+		pupilZ:        resolvePupilZ(cfg.Surfaces, cfg.StopSurface, cfg.PupilZ),
+		fieldDefs:     fieldDefsFromItems(cfg.Fields),
+		surfaces:      cfg.Surfaces,
+		fields:        cfg.Fields,
+		constraints:   cfg.Constraints,
+		pupilModel:    cfg.PupilModel,
+		rayDefinition: cfg.RayDefinition,
 	}
 	// Airy radius for spot-term normalization, evaluated at each term's own
 	// wavelength (0 = fall back to lambda). A single default-wavelength value
@@ -1839,17 +1852,18 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 	internal := make([]config, len(configs))
 	for i, ci := range configs {
 		c := config{
-			id:          ci.ID,
-			weight:      ci.Weight,
-			stopSurface: ci.StopSurface,
-			refSurface:  ci.RefSurface,
-			pupilZ:      resolvePupilZ(ci.Surfaces, ci.StopSurface, ci.PupilZ),
-			fieldDefs:   fieldDefsFromItems(ci.Fields),
-			surfaces:    ci.Surfaces,
-			fields:      ci.Fields,
-			wavelengths: ci.Wavelengths,
-			constraints: ci.Constraints,
-			pupilModel:  ci.PupilModel,
+			id:            ci.ID,
+			weight:        ci.Weight,
+			stopSurface:   ci.StopSurface,
+			refSurface:    ci.RefSurface,
+			pupilZ:        resolvePupilZ(ci.Surfaces, ci.StopSurface, ci.PupilZ),
+			fieldDefs:     fieldDefsFromItems(ci.Fields),
+			surfaces:      ci.Surfaces,
+			fields:        ci.Fields,
+			wavelengths:   ci.Wavelengths,
+			constraints:   ci.Constraints,
+			pupilModel:    ci.PupilModel,
+			rayDefinition: ci.RayDefinition,
 		}
 		// The Airy radius for spot-term normalization is resolved per term at
 		// the term's own wavelength inside buildMeritTermFromTypes.
@@ -3002,13 +3016,13 @@ func paraxialBackFocusShiftFor(surfaces []types.Surface, stopSurface int, refWav
 // image plane to the wavefront best-focus position (see
 // wavefrontBackFocusShiftFor).
 func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surface, gc *glass.Catalog) float64 {
-	return wavefrontBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.wavelengths, cfg.fieldDefs, gc)
+	return wavefrontBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.wavelengths, cfg.fieldDefs, gc, cfg.rayDefinition)
 }
 
 // wavefrontBackFocusShiftFor computes the image-plane shift needed to bring the
 // image plane to the wavefront best-focus position. A minimal wavefront
 // analysis is run with the configured settings (num_rays, weight_type).
-func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, wavelengths []types.WavelengthItem, fieldDefs []types.FieldDef, gc *glass.Catalog) float64 {
+func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, wavelengths []types.WavelengthItem, fieldDefs []types.FieldDef, gc *glass.Catalog, rayDefinition string) float64 {
 	if bfs == nil || len(surfaces) < 2 {
 		return 0
 	}
@@ -3054,6 +3068,7 @@ func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSo
 		Workers:          1,
 		ZernikeMaxOrder:  0,
 		BestFocus:        &focusCfg,
+		RayDefinition:    rayDefinition,
 	}
 
 	result, err := wavefront.Compute(sys, gc, fields, []float64{wl}, opts)
@@ -3096,7 +3111,7 @@ func backFocusFieldsFor(fieldDefs []types.FieldDef, weightType string) []types.F
 // surface 0 auto-detects the last non-air surface before the image plane.
 // fields are the config's field definitions in order, wavelengths its
 // wavelength list, and stopSurface/refWavelength as in the optimizer.
-func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConfig, bfType string, stopSurface int, refWavelength float64, fields []types.FieldItem, wavelengths []types.WavelengthItem, gc *glass.Catalog) {
+func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConfig, bfType string, stopSurface int, refWavelength float64, fields []types.FieldItem, wavelengths []types.WavelengthItem, gc *glass.Catalog, rayDefinition string) {
 	if cfg == nil || !cfg.Enabled {
 		return
 	}
@@ -3113,7 +3128,7 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 	surface.Precompute(surfaces)
 	var shift float64
 	if bfType == "wavefront" {
-		shift = wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, wavelengths, fieldDefs, gc)
+		shift = wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, wavelengths, fieldDefs, gc, rayDefinition)
 	} else {
 		shift = paraxialBackFocusShiftFor(surfaces, stopSurface, refWavelength, wavelengths, cfg.Wavelength, gc)
 	}

@@ -38,7 +38,7 @@ func TestAsphereValidateReportsImprovement(t *testing.T) {
 	validateFields := asphereFieldsToItems(fields)
 	validations := validateAspheres(surfaces, res.Rankings, gc, cfg.TopK, 10, 32,
 		input.Chief.StopSurface, input.Chief.ReferenceSurface, 0, validateFields, wavelengths,
-		types.NewCircularJones(true), types.GridPolar, nil)
+		types.NewCircularJones(true), types.GridPolar, nil, chiefRayDefinition(input))
 
 	validated := 0
 	for _, r := range res.Rankings {

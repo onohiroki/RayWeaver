@@ -105,15 +105,16 @@ func runVignette(data []byte) {
 	}
 
 	res := vignette.Run(surfaces, vignette.Options{
-		Fields:       fields,
-		RefSurface:   input.Chief.ReferenceSurface,
-		StopSurface:  input.Chief.StopSurface,
-		NumRays:      input.Chief.NumRays,
-		GridType:     input.Chief.GridType,
-		Wavelength:   wlEff,
-		MinGlassPath: minGlassPathEff,
-		MarginMM:     marginMMEff,
-		Iterations:   iterationsEff,
+		Fields:        fields,
+		RefSurface:    input.Chief.ReferenceSurface,
+		StopSurface:   input.Chief.StopSurface,
+		NumRays:       input.Chief.NumRays,
+		GridType:      input.Chief.GridType,
+		Wavelength:    wlEff,
+		MinGlassPath:  minGlassPathEff,
+		MarginMM:      marginMMEff,
+		Iterations:    iterationsEff,
+		RayDefinition: chiefRayDefinition(input),
 	}, gc)
 
 	// Write back the settled diameters and applied min_glass_path values.
@@ -140,6 +141,9 @@ func runVignette(data []byte) {
 			SpotStats:     r.SpotStats,
 			PupilProbe:    r.ProbeOK,
 			PupilProbeZ:   r.ProbeZ,
+			// Nil for a field that was not clipped below the grid's survival
+			// threshold; `omitempty` then leaves it out of the pipeline YAML.
+			EffectiveVignetting: r.EffectiveVignetting,
 		}
 		if input.Chief.DumpMap && len(r.GridPoints) > 0 {
 			cr.GridPoints = r.GridPoints

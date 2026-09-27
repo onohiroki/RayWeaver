@@ -25,8 +25,8 @@ import (
 // cfg.pupilZ). When nil the chief dynamic pupil is settled as usual.
 func FitFieldParaboloid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64,
-	pupilModel *types.PupilModelConfig) (Paraboloid, error) {
-	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel)
+	pupilModel *types.PupilModelConfig, rayDefinition string) (Paraboloid, error) {
+	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel, rayDefinition)
 	if err != nil {
 		return Paraboloid{}, err
 	}
@@ -43,7 +43,7 @@ func FitFieldParaboloid(system types.System, gc *glass.Catalog, fd types.FieldDe
 // shared machinery behind FitFieldParaboloid and FitFieldSphereRMS.
 func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	refSurface, numRays int, wavelength float64, apertureMargin float64, frozenPupilZ *float64,
-	pupilModel *types.PupilModelConfig) (fieldAnalysis, error) {
+	pupilModel *types.PupilModelConfig, rayDefinition string) (fieldAnalysis, error) {
 	if refSurface <= 0 {
 		refSurface = psf.DefaultReferenceSurface(system.Surfaces)
 	}
@@ -65,7 +65,7 @@ func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 			return fieldAnalysis{}, err
 		}
 	} else {
-		pg, err := psf.ComputeFieldGrid(system, gc, fd, refSurface, numRays, wavelength, types.GridPolar, pupilModel)
+		pg, err := psf.ComputeFieldGrid(system, gc, fd, refSurface, numRays, wavelength, types.GridPolar, pupilModel, rayDefinition)
 		if err != nil {
 			return fieldAnalysis{}, err
 		}
@@ -147,8 +147,8 @@ type Entry struct {
 // the given pupil Z (frozen pupil); when nil the dynamic pupil is settled.
 func AnalyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	refSurface, numRays int, wavelength float64, apertureMargin float64,
-	frozenPupilZ *float64, pupilModel *types.PupilModelConfig) (Entry, error) {
-	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel)
+	frozenPupilZ *float64, pupilModel *types.PupilModelConfig, rayDefinition string) (Entry, error) {
+	an, err := analyzeField(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, frozenPupilZ, pupilModel, rayDefinition)
 	if err != nil {
 		return Entry{Failed: true}, err
 	}

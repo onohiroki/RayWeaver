@@ -30,7 +30,7 @@ import (
 func runFocus(data []byte) {
 	args := os.Args[2:]
 	if len(args) == 0 {
-		errOut("Error: focus requires a sub-subcommand: focus mtf | focus psf")
+		errOut("Error: focus requires a sub-subcommand: focus mtf | focus psf | focus spot")
 		os.Exit(1)
 	}
 	switch args[0] {
@@ -38,8 +38,10 @@ func runFocus(data []byte) {
 		runFocusMTF(data, args[1:])
 	case "psf":
 		runFocusPSF(data, args[1:])
+	case "spot":
+		runFocusSpot(data, args[1:])
 	default:
-		errOut("Error: unknown focus sub-subcommand %q (expected mtf | psf)", args[0])
+		errOut("Error: unknown focus sub-subcommand %q (expected mtf | psf | spot)", args[0])
 		os.Exit(1)
 	}
 }
@@ -111,6 +113,17 @@ func focusYAMLFromPSF(c *types.FocusPSFConfig) focusYAML {
 		numRays: c.NumRays, gridSize: c.GridSize, polarization: c.Polarization,
 		referenceSurface: c.ReferenceSurface, convergeCheck: c.ConvergeCheck,
 		throughFocus: c.ThroughFocus,
+	}
+}
+
+func focusYAMLFromSpot(c *types.FocusSpotConfig) focusYAML {
+	if c == nil {
+		return focusYAML{}
+	}
+	return focusYAML{
+		wavelengths: c.Wavelengths, fields: c.Fields, planes: c.Planes,
+		numRays: c.NumRays, polarization: c.Polarization,
+		referenceSurface: c.ReferenceSurface, throughFocus: c.ThroughFocus,
 	}
 }
 
@@ -225,6 +238,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 		GridSize:         intOrYAML(fl.gridSize, y.gridSize),
 		Polarizations:    polLabels,
 		PupilModel:       pupilModelForConfig(*input),
+		RayDefinition:    chiefRayDefinition(*input),
 	}
 
 	// The focus commands default the convergence labelling OFF (the comparison
@@ -415,13 +429,77 @@ func throughFocusBaseShift(run *focusRun, base string) float64 {
 	bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: weight,
 		NumRays: effectivePSFNumRays(run.psfOpts.NumRays)}
 	optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", run.stopSurface,
-		run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc)
+		run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc, run.psfOpts.RayDefinition)
 	return maxThicknessDelta(before, surfaces)
 }
 
+// tfKeyedPoint is one through-focus point with its (field, wavelength,
+// polarization) row key.
+type tfKeyedPoint struct {
+	key        focusKey
+	fieldAngle float64
+	point      types.FocusThroughFocusPoint
+}
+
+// throughFocusPoints evaluates one image plane (o.PlaneShift) for the metric and
+// returns the points keyed by (field, wavelength, polarization). metric is
+// "psf" | "mtf" | "spot".
+func throughFocusPoints(run *focusRun, system types.System, o psf.Options, metric string, focusMM float64, freqs []float64) []tfKeyedPoint {
+	if metric == "spot" {
+		spotRes, err := psf.ComputeSpot(system, run.gc, run.fields, run.wavelengths, o)
+		if err != nil {
+			errOut("Error: %v", err)
+			os.Exit(1)
+		}
+		out := make([]tfKeyedPoint, 0, len(spotRes))
+		for _, r := range spotRes {
+			out = append(out, tfKeyedPoint{
+				key:        focusKey{r.FieldIndex, r.Wavelength, r.Polarization},
+				fieldAngle: r.FieldAngle,
+				point: types.FocusThroughFocusPoint{
+					FocusMM:   focusMM,
+					SpotRMS:   r.SpotRMS,
+					SpotRMSX:  r.SpotRMSX,
+					SpotRMSY:  r.SpotRMSY,
+					SpotRMST:  r.SpotRMST,
+					SpotRMSS:  r.SpotRMSS,
+					CentroidX: r.CentroidX,
+					CentroidY: r.CentroidY,
+				},
+			})
+		}
+		return out
+	}
+	results, err := psf.Compute(system, run.gc, run.fields, run.wavelengths, o)
+	if err != nil {
+		errOut("Error: %v", err)
+		os.Exit(1)
+	}
+	out := make([]tfKeyedPoint, 0, len(results))
+	for _, r := range results {
+		pt := types.FocusThroughFocusPoint{FocusMM: focusMM, Strehl: r.Strehl}
+		if metric == "mtf" {
+			pt.Sagittal = mtfAxisValues(r.MTF, true, freqs)
+			pt.Tangential = mtfAxisValues(r.MTF, false, freqs)
+		} else {
+			pt.FWHMX = r.FWHMX
+			pt.FWHMY = r.FWHMY
+			pt.EncircledEnergy50 = r.Encircled50
+			pt.CentroidX = r.CentroidX
+			pt.CentroidY = r.CentroidY
+		}
+		out = append(out, tfKeyedPoint{
+			key:        focusKey{r.FieldIndex, r.Wavelength, r.Polarization},
+			fieldAngle: r.FieldAngle,
+			point:      pt,
+		})
+	}
+	return out
+}
+
 // computeThroughFocus runs the through-focus scan: Count planes at
-// From + i*Step (mm) around every base plane in run.planes. metric is "psf" or
-// "mtf"; freqs are the MTF frequencies (metric == "mtf").
+// From + i*Step (mm) around every base plane in run.planes. metric is "psf",
+// "mtf" or "spot"; freqs are the MTF frequencies (metric == "mtf").
 func computeThroughFocus(run *focusRun, tf *types.FocusThroughFocus, metric string, freqs []float64) *types.FocusThroughFocusComparison {
 	opts := run.psfOpts
 	if metric == "mtf" {
@@ -446,35 +524,18 @@ func computeThroughFocus(run *focusRun, tf *types.FocusThroughFocus, metric stri
 			focusMM := tf.From + float64(i)*tf.Step
 			o := opts
 			o.PlaneShift = baseShift + focusMM
-			results, err := psf.Compute(system, run.gc, run.fields, run.wavelengths, o)
-			if err != nil {
-				errOut("Error: %v", err)
-				os.Exit(1)
-			}
-			for _, r := range results {
-				k := focusKey{r.FieldIndex, r.Wavelength, r.Polarization}
-				idx, ok := index[k]
+			for _, kp := range throughFocusPoints(run, system, o, metric, focusMM, freqs) {
+				idx, ok := index[kp.key]
 				if !ok {
 					idx = len(scan.Rows)
-					index[k] = idx
+					index[kp.key] = idx
 					scan.Rows = append(scan.Rows, types.FocusThroughFocusRow{
-						FieldIndex: r.FieldIndex,
-						FieldAngle: r.FieldAngle,
-						Wavelength: r.Wavelength,
+						FieldIndex: kp.key.fieldIndex,
+						FieldAngle: kp.fieldAngle,
+						Wavelength: kp.key.wavelength,
 					})
 				}
-				pt := types.FocusThroughFocusPoint{FocusMM: focusMM, Strehl: r.Strehl}
-				if metric == "mtf" {
-					pt.Sagittal = mtfAxisValues(r.MTF, true, freqs)
-					pt.Tangential = mtfAxisValues(r.MTF, false, freqs)
-				} else {
-					pt.FWHMX = r.FWHMX
-					pt.FWHMY = r.FWHMY
-					pt.EncircledEnergy50 = r.Encircled50
-					pt.CentroidX = r.CentroidX
-					pt.CentroidY = r.CentroidY
-				}
-				scan.Rows[idx].Points = append(scan.Rows[idx].Points, pt)
+				scan.Rows[idx].Points = append(scan.Rows[idx].Points, kp.point)
 			}
 		}
 		comp.Scans = append(comp.Scans, scan)
@@ -519,7 +580,7 @@ func computeFocusPlane(run *focusRun, plane string) ([]psf.Result, float64, erro
 		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform",
 			NumRays: effectivePSFNumRays(opts.NumRays)}
 		optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", run.stopSurface,
-			run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc)
+			run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc, opts.RayDefinition)
 		// The solve changes a thickness after its internal Precompute, so the
 		// image-plane Z would otherwise stay stale and psf.Compute would trace
 		// the unsolved plane.
@@ -698,6 +759,163 @@ func runFocusPSF(data []byte, args []string) {
 	writeYAML(&output)
 }
 
+// runFocusSpot implements `focus spot`: the geometric (ray) spot RMS and its
+// x/y and tangential/sagittal decompositions, compared across the plane
+// conventions (or a through-focus scan). It needs no Huygens integral.
+func runFocusSpot(data []byte, args []string) {
+	fs := flag.NewFlagSet("focus spot", flag.ExitOnError)
+	fl := registerFocusFlags(fs)
+	fs.Parse(args)
+
+	input := parseYAML[types.Input](data)
+	setReferenceWavelength(input.Chief)
+	if input.Chief == nil {
+		errOut("Error: 'chief' section is required (for fields)")
+		os.Exit(1)
+	}
+	var spotCfg *types.FocusSpotConfig
+	if input.Focus != nil {
+		spotCfg = input.Focus.Spot
+	}
+	y := focusYAMLFromSpot(spotCfg)
+
+	if tf := resolveThroughFocus(fl, y); tf != nil {
+		run := buildFocusRun(&input, fl, y, parseThroughFocusPlanes)
+		comp := computeThroughFocus(run, tf, "spot", nil)
+		writeBackFocusSpot(&input, run)
+		input.Focus.Spot.ThroughFocus = tf
+		output := types.Output{Input: input, FocusComparison: &types.FocusComparison{ThroughFocus: comp}}
+		withOutputMetadata(&output.Input, "focus spot", subcmdArgs())
+		writeYAML(&output)
+		return
+	}
+
+	run := buildFocusRun(&input, fl, y, parseFocusPlanes)
+
+	byPlane, order, shiftAll, err := computeFocusSpotPlanes(run)
+	if err != nil {
+		errOut("Error: %v", err)
+		os.Exit(1)
+	}
+	rows := buildFocusSpotRows(byPlane, order)
+	if len(rows) == 0 {
+		errOut("Error: no focus comparison rows computed (check fields/wavelengths/planes)")
+		os.Exit(1)
+	}
+
+	comp := &types.FocusSpotComparison{
+		Planes:               focusPlaneLabels(run.planes),
+		FocusPlaneAllShiftMM: shiftAll,
+		Polarization:         strings.Join(run.polLabels, ","),
+		Rows:                 rows,
+	}
+
+	writeBackFocusSpot(&input, run)
+	output := types.Output{Input: input, FocusComparison: &types.FocusComparison{Spot: comp}}
+	withOutputMetadata(&output.Input, "focus spot", subcmdArgs())
+	writeYAML(&output)
+}
+
+// computeFocusSpotPlane evaluates one plane convention for the geometric spot:
+// file (as-is), all (the single all-field best-focus plane shift), or best
+// (each field's own coherent-peak best focus).
+func computeFocusSpotPlane(run *focusRun, plane string) ([]psf.SpotResult, float64, error) {
+	opts := run.psfOpts
+	shift := 0.0
+	switch plane {
+	case "all":
+		shift = throughFocusBaseShift(run, "all")
+		opts.PlaneShift = shift
+	case "best":
+		opts.BestFocus = true
+	}
+	results, err := psf.ComputeSpot(
+		types.System{Surfaces: run.baseSurfaces, StopSurface: run.stopSurface},
+		run.gc, run.fields, run.wavelengths, opts)
+	return results, shift, err
+}
+
+// computeFocusSpotPlanes evaluates every requested plane and indexes the
+// results by (field, wavelength, polarization).
+func computeFocusSpotPlanes(run *focusRun) (map[string]map[focusKey]*psf.SpotResult, []focusKey, float64, error) {
+	byPlane := make(map[string]map[focusKey]*psf.SpotResult, len(run.planes))
+	seen := make(map[focusKey]bool)
+	var order []focusKey
+	shiftAll := 0.0
+	for _, plane := range run.planes {
+		results, shift, err := computeFocusSpotPlane(run, plane)
+		if err != nil {
+			return nil, nil, 0, err
+		}
+		if plane == "all" {
+			shiftAll = shift
+		}
+		m := make(map[focusKey]*psf.SpotResult, len(results))
+		for i := range results {
+			r := &results[i]
+			k := focusKey{r.FieldIndex, r.Wavelength, r.Polarization}
+			m[k] = r
+			if !seen[k] {
+				seen[k] = true
+				order = append(order, k)
+			}
+		}
+		byPlane[plane] = m
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if order[i].fieldIndex != order[j].fieldIndex {
+			return order[i].fieldIndex < order[j].fieldIndex
+		}
+		if order[i].wavelength != order[j].wavelength {
+			return order[i].wavelength < order[j].wavelength
+		}
+		return order[i].pol < order[j].pol
+	})
+	return byPlane, order, shiftAll, nil
+}
+
+// buildFocusSpotRows tabulates the per-plane spot metrics for every key.
+func buildFocusSpotRows(byPlane map[string]map[focusKey]*psf.SpotResult, order []focusKey) []types.FocusSpotRow {
+	rows := make([]types.FocusSpotRow, 0, len(order))
+	for _, k := range order {
+		var ref *psf.SpotResult
+		for _, plane := range []string{"file", "all", "best"} {
+			if r := byPlane[plane][k]; r != nil {
+				ref = r
+				break
+			}
+		}
+		if ref == nil {
+			continue
+		}
+		rows = append(rows, types.FocusSpotRow{
+			FieldIndex:    k.fieldIndex,
+			FieldAngle:    ref.FieldAngle,
+			Wavelength:    k.wavelength,
+			File:          focusSpotPlane(byPlane["file"][k]),
+			FocusPlaneAll: focusSpotPlane(byPlane["all"][k]),
+			BestFocus:     focusSpotPlane(byPlane["best"][k]),
+		})
+	}
+	return rows
+}
+
+func focusSpotPlane(r *psf.SpotResult) *types.FocusSpotPlane {
+	if r == nil {
+		return nil
+	}
+	return &types.FocusSpotPlane{
+		SpotRMS:          r.SpotRMS,
+		SpotRMSX:         r.SpotRMSX,
+		SpotRMSY:         r.SpotRMSY,
+		SpotRMST:         r.SpotRMST,
+		SpotRMSS:         r.SpotRMSS,
+		CentroidX:        r.CentroidX,
+		CentroidY:        r.CentroidY,
+		BestFocusShiftMM: r.BestFocusShift,
+	}
+}
+
 // focusFrequencies resolves the reported spatial frequencies: the flag, else
 // the YAML list, else the 50 lp/mm default.
 func focusFrequencies(flagVal string, cfg *types.FocusMTFConfig) []float64 {
@@ -847,6 +1065,38 @@ func writeBackFocusPSF(input *types.Input, run *focusRun) {
 	c.ConvergeCheck = &run.psfOpts.ConvergeCheck
 }
 
+// writeBackFocusSpot stores the effective `focus spot` options.
+func writeBackFocusSpot(input *types.Input, run *focusRun) {
+	if input.Focus == nil {
+		input.Focus = &types.FocusConfig{}
+	}
+	if input.Focus.Spot == nil {
+		input.Focus.Spot = &types.FocusSpotConfig{}
+	}
+	c := input.Focus.Spot
+	c.Wavelengths = run.wavelengths
+	c.Fields = run.selected
+	c.Planes = run.planes
+	c.Polarization = strings.Join(run.polLabels, ",")
+	c.ReferenceSurface = run.psfOpts.ReferenceSurface
+	c.NumRays = run.psfOpts.NumRays
+}
+
+// focusSpotPlaneEntries lists the present plane blocks of a spot row.
+func focusSpotPlaneEntries(row types.FocusSpotRow) []struct {
+	name  string
+	plane *types.FocusSpotPlane
+} {
+	return []struct {
+		name  string
+		plane *types.FocusSpotPlane
+	}{
+		{"file", row.File},
+		{"focus_plane_all", row.FocusPlaneAll},
+		{"best_focus", row.BestFocus},
+	}
+}
+
 // focusMTFPlaneEntries lists the present plane blocks of a row in canonical
 // order, with their output names.
 func focusMTFPlaneEntries(row types.FocusMTFRow) []struct {
@@ -936,6 +1186,31 @@ func writeFocusPSFTable(w io.Writer, c *types.FocusPSFComparison) {
 	}
 }
 
+// writeFocusSpotTable writes a human-readable geometric-spot comparison to w.
+// Six metric columns: the scalar RMS radius, its tangential/sagittal and x/y
+// decompositions, and the combined centroid (all mm).
+func writeFocusSpotTable(w io.Writer, c *types.FocusSpotComparison) {
+	fmt.Fprintf(w, "focus spot: spot RMS comparison (planes: %s, polarization: %s, mm)\n",
+		strings.Join(c.Planes, ", "), c.Polarization)
+	if c.FocusPlaneAllShiftMM != 0 {
+		fmt.Fprintf(w, "  all-field best-focus shift: %.6f mm\n", c.FocusPlaneAllShiftMM)
+	}
+	fmt.Fprintf(w, "  %-4s %-7s %-9s %-16s %-9s %-9s %-9s %-9s %-9s %-18s\n",
+		"fld", "angle", "wl(nm)", "plane", "spot_rms", "rms_t", "rms_s", "rms_x", "rms_y", "centroid")
+	for _, row := range c.Rows {
+		for _, e := range focusSpotPlaneEntries(row) {
+			if e.plane == nil {
+				continue
+			}
+			fmt.Fprintf(w, "  %-4d %-7.2f %-9.1f %-16s %-9.5f %-9.5f %-9.5f %-9.5f %-9.5f %-18s\n",
+				row.FieldIndex, row.FieldAngle, row.Wavelength*1e6, e.name,
+				e.plane.SpotRMS, e.plane.SpotRMST, e.plane.SpotRMSS,
+				e.plane.SpotRMSX, e.plane.SpotRMSY,
+				fmt.Sprintf("%.4f,%.4f", e.plane.CentroidX, e.plane.CentroidY))
+		}
+	}
+}
+
 // throughFocusBaseNames lists the scan bases in order (file, all, on_axis).
 func throughFocusBaseNames(c *types.FocusThroughFocusComparison) string {
 	names := make([]string, len(c.Scans))
@@ -972,6 +1247,21 @@ func writeFocusThroughFocusTable(w io.Writer, c *types.FocusThroughFocusComparis
 						line += fmt.Sprintf("  %-14s", fmt.Sprintf("%.3f/%.3f", sag, tan))
 					}
 					fmt.Fprintln(w, line)
+				}
+			}
+		}
+		return
+	}
+	if c.Metric == "spot" {
+		fmt.Fprintf(w, "  %-8s %-4s %-7s %-9s %-9s %-9s %-9s %-9s %-9s %-9s %-18s\n",
+			"base", "fld", "angle", "wl(nm)", "focus_mm", "spot_rms", "rms_t", "rms_s", "rms_x", "rms_y", "centroid")
+		for _, s := range c.Scans {
+			for _, row := range s.Rows {
+				for _, p := range row.Points {
+					fmt.Fprintf(w, "  %-8s %-4d %-7.2f %-9.1f %-9.3f %-9.5f %-9.5f %-9.5f %-9.5f %-9.5f %-18s\n",
+						s.Base, row.FieldIndex, row.FieldAngle, row.Wavelength*1e6, p.FocusMM,
+						p.SpotRMS, p.SpotRMST, p.SpotRMSS, p.SpotRMSX, p.SpotRMSY,
+						fmt.Sprintf("%.4f,%.4f", p.CentroidX, p.CentroidY))
 				}
 			}
 		}

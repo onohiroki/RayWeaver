@@ -156,6 +156,7 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 			Constraints:         constraints,
 			PupilModel:          pupilModelForConfig(input),
 			Normalization:       input.Optimization.MeritNormalization,
+			RayDefinition:       chiefRayDefinition(input),
 		})
 	}
 
@@ -174,6 +175,7 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 			Fields:              loadFields(input),
 			Constraints:         input.Optimization.Constraints,
 			PupilModel:          pupilModelForConfig(input),
+			RayDefinition:       chiefRayDefinition(input),
 		}}
 	}
 

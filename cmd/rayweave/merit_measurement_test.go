@@ -115,7 +115,7 @@ func TestMeritWavefrontMeasurementConsistency(t *testing.T) {
 	}
 	optimize.ApplyBackFocusSolve(meritSurfaces, input.Optimization.BackFocusSolve,
 		savedBackFocusType(input.Optimization), stopSurface, refWl0,
-		input.Configs[0].Fields, input.Configs[0].Wavelengths, gc)
+		input.Configs[0].Fields, input.Configs[0].Wavelengths, gc, chiefRayDefinition(input))
 
 	// Tool-sized apertures (FinalApertures) for the comparable column.
 	sizedSurfaces := append([]types.Surface(nil), meritSurfaces...)
@@ -149,9 +149,9 @@ func TestMeritWavefrontMeasurementConsistency(t *testing.T) {
 			fz = &z
 		}
 		storedEntry, _ := wavefront.AnalyzeField(
-			types.System{Surfaces: meritSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm)
+			types.System{Surfaces: meritSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm, chiefRayDefinition(input))
 		sizedEntry, _ := wavefront.AnalyzeField(
-			types.System{Surfaces: sizedSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm)
+			types.System{Surfaces: sizedSurfaces}, gc, fd, refSurf, numRays, refWl, margin, fz, pm, chiefRayDefinition(input))
 
 		key := math.Round(angle*10) / 10
 		mrms, has := meritRMS[key]

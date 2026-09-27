@@ -296,25 +296,42 @@ func applyPupilVariablesMulti(input *types.Input, opt *types.OptimizationConfig,
 }
 
 // computePupilZ returns the entrance pupil Z used to centre grid traces for one
-// config's initial surfaces: the explicit stop surface Z, else the dynamic
-// pupil from a chief pass over the initial surfaces, else 0. It seeds the
-// optimiser's grid centring (the pupil is recomputed during Phase-2 runs).
+// config's initial surfaces: the explicit stop's paraxial entrance pupil (the
+// stop's image — where chief aims its own grid), else the dynamic pupil from a
+// chief pass over the initial surfaces, else 0. It seeds the optimiser's grid
+// centring (the pupil is recomputed during Phase-2 runs).
 func computePupilZ(input types.Input, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if input.Chief == nil {
 		return 0
 	}
 	if input.Chief.StopSurface > 0 {
+		// Match chief: a stop system's pupil is the paraxial entrance pupil, so
+		// the seed and the reported pupil never disagree. The stop's own vertex
+		// Z stays the fallback (a folded object side, or an under-determined
+		// paraxial pupil).
+		if z, ok := chief.StopEntrancePupilZ(surfaces, input.Chief.StopSurface, effectiveReferenceWavelength(input.Chief), gc); ok {
+			return z
+		}
 		for _, s := range surfaces {
 			if s.ID == input.Chief.StopSurface {
 				return s.PhysicalZ
 			}
 		}
 	}
-	pupil := dynamicEntrancePupil(surfaces, chiefFieldDefs(input), input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), input.Chief.GridType, input.Chief.PassThrough, input.Chief.PupilModel)
+	pupil := dynamicEntrancePupil(surfaces, chiefFieldDefs(input), input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), input.Chief.GridType, input.Chief.PassThrough, input.Chief.PupilModel, chiefRayDefinition(input))
 	if pupil != nil {
 		return pupil.Center.Z
 	}
 	return 0
+}
+
+// chiefRayDefinition returns the document's chief-ray definition
+// (chief.chief_ray_definition, "" when the chief section is absent).
+func chiefRayDefinition(input types.Input) string {
+	if input.Chief == nil {
+		return ""
+	}
+	return input.Chief.ChiefRayDefinition
 }
 
 // polarization returns the ray polarization from the input rays section, or a
@@ -396,16 +413,18 @@ func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {
 // given fields and reference surface and returns the first field's entrance
 // pupil (nil when none is found). It derives the pupil for stop-free systems,
 // which have no aperture stop to trace from. A non-nil pupilModel activates the
-// virtual-entrance-pupil path (fixed pupil Z and diameter).
-func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, refSurface, numRays int, gc *glass.Catalog, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget, pupilModel *types.PupilModelConfig) *types.Pupil {
+// virtual-entrance-pupil path (fixed pupil Z and diameter). rayDefinition is
+// the document's chief-ray definition ("" = the per-system default).
+func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, refSurface, numRays int, gc *glass.Catalog, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget, pupilModel *types.PupilModelConfig, rayDefinition string) *types.Pupil {
 	if len(fields) == 0 || len(surfaces) == 0 || refSurface <= 0 {
 		return nil
 	}
 	surface.Precompute(surfaces)
-	results := chief.DetermineChiefRaysGrid(
+	results := chief.DetermineChiefRaysGridMode(
 		types.System{Surfaces: surfaces},
 		fields, refSurface, numRays, gc, pol,
 		types.DefaultWavelength, false, gridType, passThrough, nil, nil, pupilModel, 0, 0,
+		rayDefinition,
 	)
 	for _, r := range results {
 		if r.EntrancePupil != nil {
@@ -431,7 +450,7 @@ func dynamicPupilForInput(input types.Input, configFlag *string, surfaces []type
 			}
 		}
 	}
-	return dynamicEntrancePupil(surfaces, fields, input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), types.GridPolar, nil, input.Chief.PupilModel)
+	return dynamicEntrancePupil(surfaces, fields, input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), types.GridPolar, nil, input.Chief.PupilModel, chiefRayDefinition(input))
 }
 
 // writeYAML marshals a value to stdout, exiting on error.

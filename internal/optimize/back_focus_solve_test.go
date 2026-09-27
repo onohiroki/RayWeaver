@@ -445,7 +445,7 @@ func TestApplyBackFocusSolveClampsNegativeThickness(t *testing.T) {
 		Surface:    7,
 		Wavelength: 0.0005876,
 	}
-	ApplyBackFocusSolve(surfaces, cfg, "paraxial", 0, 0.0005876, fields, wavelengths, gc)
+	ApplyBackFocusSolve(surfaces, cfg, "paraxial", 0, 0.0005876, fields, wavelengths, gc, "")
 	for _, sf := range surfaces {
 		if sf.ID == 7 {
 			if sf.Thickness < 0.1 {
@@ -528,8 +528,8 @@ func TestApplyVariablesSizesAperturesBeforeBackFocus(t *testing.T) {
 		surface.Precompute(s)
 		return s
 	}
-	shSmall := wavefrontBackFocusShiftFor(withDia(2.0), bf, 0, 0, nil, fieldDefs, gc)
-	shLarge := wavefrontBackFocusShiftFor(withDia(40.0), bf, 0, 0, nil, fieldDefs, gc)
+	shSmall := wavefrontBackFocusShiftFor(withDia(2.0), bf, 0, 0, nil, fieldDefs, gc, "")
+	shLarge := wavefrontBackFocusShiftFor(withDia(40.0), bf, 0, 0, nil, fieldDefs, gc, "")
 	if shSmall == shLarge {
 		t.Fatalf("test setup: wavefront back-focus not aperture-sensitive (%.6f)", shSmall)
 	}
