@@ -147,7 +147,9 @@ In addition the output carries:
 
 - updated `configs[].surfaces[].diameter` (and `min_glass_path` where applied),
 - `chief_rays[]` with the settled per-field chief rays, entrance/exit pupils and
-  spot statistics,
+  spot statistics — a field clipped below the grid's 25% survival threshold also
+  carries `effective_vignetting`, its estimated effective pupil (see
+  [chief-rays-and-spot.md](methods/chief-rays-and-spot.md)),
 - `rays[]` with the per-field marginal rays (`marginal_f<N>_Yplus` /
   `marginal_f<N>_Yminus`) plus the polarization, ready for `trace` / `plot`.
 

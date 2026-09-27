@@ -1755,6 +1755,13 @@ type ChiefRayResult struct {
 	// found. Both are informational only.
 	PupilProbe  bool    `yaml:"pupil_probe,omitempty"`
 	PupilProbeZ float64 `yaml:"pupil_probe_z,omitempty"`
+	// EffectiveVignetting is the estimated effective (vignetted) pupil ellipse
+	// of the field — the min-area ellipse containing every ray that reached
+	// the reference surface — in the same convention as fields[].vignetting
+	// (decenter/compression relative to entrance_pupil.radius, rotated by
+	// atan(tangent)). Set only for heavily vignetted fields, whose beam was
+	// measured rather than taken from the nominal pupil.
+	EffectiveVignetting *VignettingDef `yaml:"effective_vignetting,omitempty"`
 }
 
 type Pupil struct {

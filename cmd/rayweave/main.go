@@ -2121,6 +2121,9 @@ func runChief(data []byte) {
 			Wavelengths:   r.Wavelengths,
 			PupilProbe:    r.ProbeOK,
 			PupilProbeZ:   r.ProbeZ,
+			// Nil for a field that was not clipped below the grid's survival
+			// threshold; `omitempty` then leaves it out of the pipeline YAML.
+			EffectiveVignetting: r.EffectiveVignetting,
 		}
 		if dumpMap && len(r.GridPoints) > 0 {
 			cr.GridPoints = r.GridPoints

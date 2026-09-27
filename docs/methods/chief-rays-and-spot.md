@@ -159,7 +159,10 @@ selection is a single definition for the whole run either way
 (`resolveRayDefinition`), and `--chief-ray` is written back into the output
 pipeline document when given.
 
-The chief ray is then traced once more for its exact image height.
+The chief ray is then traced once more for its exact image height. The centroid
+target it is compared against (`cx`, `cy`) is the centroid of the **statistics
+grid**, so for a heavily vignetted field it follows the effective-vignetting
+remap below rather than the nominal full-aperture grid.
 
 ## 5. Spot statistics
 
@@ -174,6 +177,51 @@ plus min/max extents, `traced_rays` (successful) and `missed_rays`. When a
 config defines multiple wavelengths, the same grid origins/directions are
 re-traced at each wavelength and per-wavelength stats are produced (this is how
 the optimizer evaluates polychromatic spot RMS).
+
+### Heavily clipped beams: the effective vignetting ellipse
+
+The full-aperture grid is always the emitted `grid_points` (BeamEnvelope
+re-traces those launch origins to size `auto_aperture` diameters), but the
+statistics and the centroid target above come from it only while at least
+`gridSurviveFraction` (25%) of its rays reach the reference surface. Below that
+the beam that passes is an off-centre, non-circular effective pupil, and `chief`
+estimates it instead of shrinking the grid radius concentrically:
+
+1. **Fit** — the min-area ellipse containing every surviving ray of the full
+   grid, about the surviving bundle's centroid. The orientation is scanned over
+   the convex hull's edge directions, the principal axis and a uniform sweep;
+   for each candidate the exact smallest axis ratio is found by a ternary search
+   on the convex objective `a²·t = maxᵢ(t·uᵢ² + vᵢ²/t)`. The axes are inflated by
+   0.1% (`effectiveVignettingSafety`) so every measured survivor still passes
+   `VignettingDef.Contains` after the round trip through the compressed-axis +
+   `tangent` convention; the reported angle is folded into ±45° (swapping the
+   axes when needed) so `tangent` stays within ±1 instead of running away at the
+   ±90° fold.
+2. **Report** — `chief_rays[].effective_vignetting`, a `VignettingDef` in the
+   same convention as `fields[].vignetting` (decenter/compression relative to
+   `entrance_pupil.radius`, rotated by `atan(tangent)`), so it can be reused as
+   a vignetting specification. It is present only for a clipped field.
+3. **Re-lay** — the statistics/centroid grid is mapped affinely into the
+   ellipse (`pupil.LaunchSpec.Remap`: the full grid, not a thinned one), each
+   cell's `Area` scaled by the map's determinant
+   `(1−compressionₓ)(1−compression_y)`, so all `num_rays` samples measure the
+   beam that actually passes. The declared `fields[].vignetting` clip still
+   applies on top of the remap.
+
+The estimate is only accepted when the re-laid grid itself survives as well as
+the legacy probe guarantees (≥ `gridSurviveFraction` of `num_rays`, and ≥ 8
+survivors for the fit); otherwise the adaptive concentric radius probe
+(`probeGridRadius`, shrinking by 0.8 per step until 25% survive) takes over and
+nothing is reported. A field that is not clipped that heavily never reports an
+`effective_vignetting`.
+
+This matters in practice: for a strongly off-axis field whose transmitted rays
+hug the pupil rim, the survivors lie far from the pupil centre, so a concentric
+probe can shrink away from all of them — `traced_rays: 0`, a zeroed `rms_*` and
+`min`/`max` of ±1e18. The ellipse remap keeps such a field's statistics (and its
+centroid target) meaningful: the 23° field of
+`samples/escape-6elements-init.yaml` goes from `traced_rays: 0` to
+`traced_rays: 254`.
 
 ## 6. Marginal rays
 

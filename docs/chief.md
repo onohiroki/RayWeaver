@@ -133,6 +133,10 @@ Augmented YAML with a `chief_rays[]` section, one entry per field:
   plane
 - `spot_stats` — `centroid`, `rms_x`/`rms_y`/`rms_r`, min/max extent,
   `traced_rays`/`missed_rays`
+- `effective_vignetting` (only for a heavily vignetted field) — the estimated
+  effective pupil as a `VignettingDef` in the same convention as
+  `fields[].vignetting`; see
+  [methods/chief-rays-and-spot.md](methods/chief-rays-and-spot.md)
 - `grid_points` (only with `dump_map: true`) — per-ray pupil/image position,
   intensity, OPL, and the origin/direction for re-tracing
 - `ray_fan` (with `--ray-fan`) — meridional / sagittal / rotated fans

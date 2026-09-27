@@ -36,6 +36,12 @@ type Result struct {
 	// ProbeOK reports whether the probe supplied an aperture position (seeding
 	// a single-field pupil and backing crossing failures).
 	ProbeOK bool
+	// EffectiveVignetting is the estimated effective (vignetted) pupil of this
+	// field: the min-area ellipse over the rays that reached the reference
+	// surface, fitted when the beam is clipped below gridSurviveFraction and
+	// applied to the spot-statistics/centroid grid. Nil when the field was not
+	// clipped that heavily or the estimate could not be trusted.
+	EffectiveVignetting *types.VignettingDef
 }
 
 // Chief-ray definition modes (`chief.chief_ray_definition`, `--chief-ray`):
@@ -461,7 +467,7 @@ func probePupilZ(
 	path := dls.BuildPath(system.Surfaces)
 	_, cy, grid := tracePupilGrid(system, engine, path, numRays, probeR,
 		gc.X, gc.Y, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, false, gridType, nil, numRings, numSpokes)
+		refSurfaceID, pol, wavelength, false, gridType, nil, nil, numRings, numSpokes)
 	survivors := 0
 	for _, gp := range grid {
 		if gp.ImageX != nil {
@@ -821,9 +827,19 @@ const gridSurviveFraction = 0.25
 // that same full grid whenever it survives well enough (>= gridSurviveFraction)
 // to define a usable centroid — keeping image height, centroid and RMS about
 // one point. Only a heavily clipped beam (< gridSurviveFraction surviving)
-// falls back to the adaptive radius probe: the centroid target and the stats
-// then come from the reduced, mostly-surviving probe grid, while the emitted
-// grid stays full-aperture for the envelope measurement.
+// needs a reduced probe grid for those two, and the reduced grid is the better
+// of:
+//
+//   - the effective-vignetting ellipse: the min-area ellipse containing every
+//     surviving ray, re-laid over the whole grid (best — it follows an
+//     off-centre, non-circular transmitted beam), reported by the caller as
+//     effective_vignetting; or
+//   - the legacy concentric radius probe, which keeps shrinking the grid
+//     radius until enough rays survive. It stays as the fallback when the
+//     ellipse cannot be fitted or its own grid does not survive as well.
+//
+// The emitted grid stays full-aperture either way for the envelope
+// measurement.
 func centroidGrid(
 	system types.System,
 	engine *ray.Engine,
@@ -840,21 +856,32 @@ func centroidGrid(
 	gridType types.GridType,
 	vig *types.VignettingDef,
 	numRings, numSpokes int,
-) (cx, cy float64, grid, statsGrid []types.GridPoint) {
+) (cx, cy float64, grid, statsGrid []types.GridPoint, effectiveVignetting *types.VignettingDef) {
 	cx, cy, grid = tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
 	if math.Abs(thetaRad) <= 0.0873 { // ≤ ~5°: no vignetting expected
-		return cx, cy, grid, grid
+		return cx, cy, grid, grid, nil
 	}
-	surviving := 0
-	for i := range grid {
-		if grid[i].ImageX != nil {
-			surviving++
+	if float64(tracedRays(grid)) >= float64(numRays)*gridSurviveFraction {
+		return cx, cy, grid, grid, nil
+	}
+	// Heavily clipped: what passes is an off-centre, non-circular effective
+	// pupil, so fit it from the surviving rays and re-lay the stats/centroid
+	// grid over that ellipse. The fit contains every survivor by construction;
+	// it is only accepted when the re-laid grid still survives as well as the
+	// radius probe guarantees, otherwise the probe takes over and no effective
+	// vignetting is reported (never advertise an ellipse the sampling cannot
+	// honour).
+	if eff := fitEffectiveVignetting(grid, pupilCenterX, pupilCenterY, apertureRadius); eff != nil {
+		scx, scy, stats := tracePupilGrid(system, engine, path, numRays, apertureRadius,
+			pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
+			refSurfaceID, pol, wavelength, dumpMap, gridType, vig, eff, numRings, numSpokes)
+		traced := tracedRays(stats)
+		if traced >= minEffectiveVignettingRays &&
+			float64(traced) >= float64(numRays)*gridSurviveFraction {
+			return scx, scy, grid, stats, eff
 		}
-	}
-	if float64(surviving) >= float64(numRays)*gridSurviveFraction {
-		return cx, cy, grid, grid
 	}
 	radius := probeGridRadius(system, engine, path,
 		pupilCenterX, pupilCenterY, zStart, rayDir,
@@ -862,8 +889,19 @@ func centroidGrid(
 		pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
 	scx, scy, stats := tracePupilGrid(system, engine, path, numRays, radius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
-	return scx, scy, grid, stats
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
+	return scx, scy, grid, stats, nil
+}
+
+// tracedRays counts the grid points that reached the reference surface.
+func tracedRays(grid []types.GridPoint) int {
+	n := 0
+	for i := range grid {
+		if grid[i].ImageX != nil {
+			n++
+		}
+	}
+	return n
 }
 
 // probeGridRadius adaptively reduces the grid radius for off-axis fields
@@ -895,7 +933,7 @@ func probeGridRadius(
 	for radius >= minRadius {
 		_, _, grid := tracePupilGrid(system, engine, path, numRays, radius,
 			pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-			refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
+			refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
 		surviving := 0
 		for i := range grid {
 			if grid[i].ImageX != nil {
@@ -966,7 +1004,7 @@ func computeChiefRayAngleGrid(
 	// prescribed-pupil definition takes the analytic wavefront-plane point
 	// whose ray passes through the aim — the object-space chief ray of the
 	// prescribed pupil, with no search and no dependence on the trace.
-	cx, cy, grid, statsGrid := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
+	cx, cy, grid, statsGrid, effectiveVignetting := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, refSurfaceID,
 		pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
 
@@ -986,7 +1024,9 @@ func computeChiefRayAngleGrid(
 		}
 		origin = types.Vec3{X: originX, Y: originY, Z: zStart}
 	}
-	return buildResult(engine, system, path, origin, rayDir, refSurfaceID, pol, wavelength, cx, cy, apertureRadius, grid, statsGrid, dumpMap)
+	res := buildResult(engine, system, path, origin, rayDir, refSurfaceID, pol, wavelength, cx, cy, apertureRadius, grid, statsGrid, dumpMap)
+	res.EffectiveVignetting = effectiveVignetting
+	return res
 }
 
 // --- pass-through constrained chief ray (angle-based) ---
@@ -1432,12 +1472,14 @@ func computeChiefRayAngleGridWithPassThrough(
 
 	// One grid serves the centroid target, the spot statistics and the output
 	// grid_points, so the reported image point stays on the measured centroid.
-	cx, cy, grid, statsGrid := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
+	cx, cy, grid, statsGrid, effectiveVignetting := centroidGrid(system, engine, path, thetaRad, numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, refSurfaceID,
 		pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
 
-	return buildResult(engine, system, path, origin, rayDir, refSurfaceID,
+	res := buildResult(engine, system, path, origin, rayDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, statsGrid, dumpMap)
+	res.EffectiveVignetting = effectiveVignetting
+	return res
 }
 
 // --- pass-through constrained chief ray (height-based) ---
@@ -1491,7 +1533,7 @@ func computeChiefRayHeightGridWithPassThrough(
 
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		0, 0, zStart, refinedDir, objectPoint,
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
 
 	return buildResult(engine, system, path, objectPoint, refinedDir, refSurfaceID,
 		pol, wavelength, cx, cy, apertureRadius, grid, nil, dumpMap)
@@ -1531,7 +1573,7 @@ func computeChiefRayHeightGrid(
 	// Sample grid and get centroid.
 	cx, cy, grid := tracePupilGrid(system, engine, path, numRays, apertureRadius,
 		0, 0, zStart, baseDir, objectPoint,
-		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, numRings, numSpokes)
+		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
 
 	// Refine the direction so the chief ray passes through the centroid at the
 	// reference surface (centroid definition), or take the line through the
@@ -1890,6 +1932,7 @@ func tracePupilGrid(
 	dumpMap bool,
 	gridType types.GridType,
 	vig *types.VignettingDef,
+	remap *types.VignettingDef,
 	numRings, numSpokes int,
 ) (cx, cy float64, grid []types.GridPoint) {
 	var totalWeight float64
@@ -1918,6 +1961,7 @@ func tracePupilGrid(
 			ZStart:         zStart,
 			OPLMode:        pupil.OPLLaunch,
 			Vig:            vig,
+			Remap:          remap,
 			HeightOrigin:   &rayOrigin,
 		})
 	} else {
@@ -1934,6 +1978,7 @@ func tracePupilGrid(
 			ZStart:         zStart,
 			OPLMode:        pupil.OPLLaunch,
 			Vig:            vig,
+			Remap:          remap,
 		})
 	}
 	pupil.Trace(engine, path, system.Surfaces, samples, wavelength, pol, 0)
@@ -2361,7 +2406,7 @@ func imageHeightForAngle(
 	// whether the field reaches the reference surface at all.
 	cx, cy, grid := tracePupilGrid(system, engine, dls.BuildPath(system.Surfaces), numRays, apertureRadius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
-		refSurfaceID, pol, wavelength, false, gridType, vig, numRings, numSpokes)
+		refSurfaceID, pol, wavelength, false, gridType, vig, nil, numRings, numSpokes)
 	reached := false
 	for _, gp := range grid {
 		if gp.ImageX != nil {

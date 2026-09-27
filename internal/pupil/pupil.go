@@ -1,6 +1,7 @@
 package pupil
 
 import (
+	"math"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -55,6 +56,15 @@ type LaunchSpec struct {
 	// object point: every sample origin is HeightOrigin and its direction
 	// points from there through the grid sample. No OPL delta is applied.
 	HeightOrigin *types.Vec3
+	// Remap, when non-nil, moves every grid point into the ellipse it
+	// describes — centre (DecenterX/Y·ApertureRadius), semi-axes
+	// (1−CompressionX/Y)·ApertureRadius, rotated by atan(Tangent) — before the
+	// launch, so one full grid re-lays over that (measured) effective pupil
+	// instead of a concentric disc of reduced radius. Each cell's Area is
+	// scaled by the map's determinant ((1−CompressionX)·(1−CompressionY)),
+	// keeping the flux weight of the remapped cell. Nil keeps the plain grid;
+	// the vignetting clip below is still applied afterwards.
+	Remap *types.VignettingDef
 }
 
 // Sample is one pupil ray: the absolute launch offset, the launch state, the
@@ -98,18 +108,49 @@ func Launch(spec LaunchSpec) []Sample {
 	pts := raymath.PupilGrid(spec.NumRays, spec.ApertureRadius, spec.GridType, spec.RotationOffset, spec.NumRings, spec.NumSpokes)
 	wavefrontC := types.Vec3{X: spec.CentreX, Y: spec.CentreY, Z: spec.ZStart}
 
+	// Ellipse remap (LaunchSpec.Remap): a grid point p on the nominal pupil
+	// disc (|p| <= ApertureRadius) is moved to the ellipse point
+	// c + R(theta)·((1−Cx)·R·px/R, (1−Cy)·R·py/R), and its cell area is scaled
+	// by the map's determinant (1−Cx)·(1−Cy). A degenerate ellipse (non-positive
+	// semi-axis) launches nothing instead of silently keeping the nominal grid.
+	var (
+		remap                       bool
+		rx, ry, ra, rb, ct, st, det = 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0
+	)
+	if spec.Remap != nil && !spec.Remap.IsZero() && spec.ApertureRadius > 0 {
+		ra = (1 - spec.Remap.CompressionX) * spec.ApertureRadius
+		rb = (1 - spec.Remap.CompressionY) * spec.ApertureRadius
+		if !(ra > 0) || !(rb > 0) {
+			return nil
+		}
+		theta := math.Atan(spec.Remap.Tangent)
+		remap = true
+		rx = spec.Remap.DecenterX * spec.ApertureRadius
+		ry = spec.Remap.DecenterY * spec.ApertureRadius
+		ct, st = math.Cos(theta), math.Sin(theta)
+		det = (ra / spec.ApertureRadius) * (rb / spec.ApertureRadius)
+	}
+
 	var out []Sample
 	for _, p := range pts {
-		if spec.Vig != nil && !spec.Vig.Contains(p.X, p.Y, spec.ApertureRadius) {
+		x, y, area := p.X, p.Y, p.Area
+		if remap {
+			su := p.X / spec.ApertureRadius * ra
+			sv := p.Y / spec.ApertureRadius * rb
+			x = rx + su*ct - sv*st
+			y = ry + su*st + sv*ct
+			area = p.Area * det
+		}
+		if spec.Vig != nil && !spec.Vig.Contains(x, y, spec.ApertureRadius) {
 			continue
 		}
-		px := spec.CentreX + p.X
-		py := spec.CentreY + p.Y
+		px := spec.CentreX + x
+		py := spec.CentreY + y
 
 		s := Sample{
-			PupilX:             p.X,
-			PupilY:             p.Y,
-			Area:               p.Area,
+			PupilX:             x,
+			PupilY:             y,
+			Area:               area,
 			SkipApertureCheck:  spec.SkipApertureCheck,
 			SkipGlassPathCheck: spec.SkipGlassPath,
 		}
