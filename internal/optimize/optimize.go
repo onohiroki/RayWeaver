@@ -1145,7 +1145,13 @@ func resolvePupilZ(surfaces []types.Surface, stopSurface int, pupilZ float64) fl
 }
 
 // fieldDefsFromItems converts the per-config field items into chief field
-// definitions for the dynamic-pupil pass.
+// definitions for the dynamic-pupil, back-focus and aperture-sizing passes.
+//
+// Vignetting is carried across so every one of those passes traces the field's
+// prescribed (vignetted) pupil, exactly like the merit grid and the standalone
+// chief / psf / wavefront commands. Dropping it made the footprint measurement
+// envelope the full pupil while the merit evaluated the vignetted one, so the
+// sized diameters and the traced beams disagreed.
 func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {
 	if len(items) == 0 {
 		return nil
@@ -1156,6 +1162,7 @@ func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {
 			Angle:       f.AngleDeg,
 			ImageHeight: f.ImageHeight,
 			Direction:   []float64{0, 1},
+			Vignetting:  f.Vignetting,
 		}
 	}
 	return out
@@ -3538,18 +3545,20 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 	}
 	extents := make(map[int]float64)
 
-	// The extents are geometric (aperture-clipping skipped), so one
-	// representative wavelength per field is enough for sizing.
-	wl := effectiveReferenceWavelength(cfg.referenceWavelength)
-	if len(cfg.wavelengths) > 0 {
-		wl = cfg.wavelengths[0].Value
-	}
+	// The extents are geometric (aperture-clipping skipped), so one trace per
+	// (field, wavelength) is enough - but every config wavelength has to be
+	// covered, not just one representative. Transverse colour moves the
+	// footprint between the config's wavelengths (measured 0.12 mm at 23 deg
+	// on a 50 mm f/4 six-element), so sizing from a single wavelength can
+	// return a diameter smaller than the same surface's footprint at another
+	// and clip the field the merit evaluates.
+	wls := apertureSizingWavelengths(cfg)
 
 	// Measure every field's beam. Fall back to the grid merit term angles when
 	// the config has no explicit field list.
 	angles := make(map[float64]bool)
 	for fi := range cfg.fields {
-		angles[o.fieldSizingAngle(cfg, &cfg.fields[fi], surfaces, gc, wl)] = true
+		angles[o.fieldSizingAngle(cfg, &cfg.fields[fi], surfaces, gc, wls[0])] = true
 	}
 	if len(angles) == 0 {
 		for ti := range cfg.meritTerms {
@@ -3562,21 +3571,23 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 	}
 
 	for angle := range angles {
-		key := gridKey{configID: cfg.id, fieldAngle: angle, wavelength: wl}
-		var perSurf map[int]float64
-		if cache != nil {
-			if m, ok := cache.extents[key]; ok {
-				perSurf = m
+		for _, wl := range wls {
+			key := gridKey{configID: cfg.id, fieldAngle: angle, wavelength: wl}
+			var perSurf map[int]float64
+			if cache != nil {
+				if m, ok := cache.extents[key]; ok {
+					perSurf = m
+				} else {
+					perSurf = o.fieldExtents(cfg, surfaces, gc, &meritTerm{wavelength: wl}, angle, p)
+					cache.extents[key] = perSurf
+				}
 			} else {
 				perSurf = o.fieldExtents(cfg, surfaces, gc, &meritTerm{wavelength: wl}, angle, p)
-				cache.extents[key] = perSurf
 			}
-		} else {
-			perSurf = o.fieldExtents(cfg, surfaces, gc, &meritTerm{wavelength: wl}, angle, p)
-		}
-		for id, e := range perSurf {
-			if e > extents[id] {
-				extents[id] = e
+			for id, e := range perSurf {
+				if e > extents[id] {
+					extents[id] = e
+				}
 			}
 		}
 	}
@@ -4030,15 +4041,27 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 		pm = &m
 	}
 	pol := types.NewCircularJones(true)
-	results := chief.DetermineChiefRaysGrid(
-		types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
-		cfg.fieldDefs, cfg.refSurface, o.extentRays(512), gc, pol,
-		effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridHex, nil, nil, nil, pm, 0, 0,
-	)
 	engine := ray.NewEngine(gc, nil)
 	surface.Precompute(surfaces)
 	path := dls.BuildPath(surfaces)
-	env := chief.BeamEnvelope(results, engine, surfaces, path, effectiveReferenceWavelength(cfg.referenceWavelength), pol)
+	// Envelope every config wavelength and keep the widest: sizing from the
+	// reference wavelength alone can return a diameter below the same
+	// surface's footprint at another wavelength, which clips the image plane
+	// (the surface with the largest field-dependent extent) and eats into the
+	// prescribed per-field vignetting.
+	env := make(map[int]float64)
+	for _, wl := range apertureSizingWavelengths(cfg) {
+		results := chief.DetermineChiefRaysGrid(
+			types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
+			cfg.fieldDefs, cfg.refSurface, o.extentRays(512), gc, pol,
+			wl, false, types.GridHex, nil, nil, nil, pm, 0, 0,
+		)
+		for id, e := range chief.BeamEnvelope(results, engine, surfaces, path, wl, pol) {
+			if e > env[id] {
+				env[id] = e
+			}
+		}
+	}
 	for i := range surfaces {
 		if !surfaces[i].AutoAperture {
 			continue
@@ -4047,6 +4070,39 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 			surfaces[i].Diameter = 2 * (e + o.apertureMarginMM)
 		}
 	}
+}
+
+// apertureSizingWavelengths returns the wavelengths the auto_aperture sizing
+// must envelope: every wavelength the config declares, plus the reference
+// wavelength when it is not among them. A single representative wavelength is
+// not enough - transverse colour shifts the footprint between wavelengths, and
+// an aperture sized from the narrow one clips the widest.
+func apertureSizingWavelengths(cfg *config) []float64 {
+	ref := effectiveReferenceWavelength(cfg.referenceWavelength)
+	wls := make([]float64, 0, len(cfg.wavelengths)+1)
+	// Fold near-duplicates: documents often declare the reference wavelength
+	// with a slightly different rounding (0.0005876 vs 0.00058756), and
+	// re-tracing it would only cost time. 1e-4 relative is 0.06 nm at the
+	// d-line - far below anything that moves a footprint.
+	covered := func(v float64) bool {
+		for _, w := range wls {
+			if math.Abs(w-v) <= 1e-4*math.Max(math.Abs(w), math.Abs(v)) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, w := range cfg.wavelengths {
+		v := effectiveReferenceWavelength(w.Value)
+		if covered(v) {
+			continue
+		}
+		wls = append(wls, v)
+	}
+	if !covered(ref) {
+		wls = append(wls, ref)
+	}
+	return wls
 }
 
 // FinalConfigs returns the surfaces of every config after applying x, with

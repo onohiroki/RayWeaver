@@ -517,6 +517,17 @@ rayweave query --jsonl --where 'event=="breakdown"' \
 
 - `optimization.aperture_margin` is clamped to ≥ 1.0; smaller values make the
   pupil grid smaller than the aperture and stall DLS.
+- `optimization.aperture_margin_mm` is the physical clearance (mm) added to
+  every sized `auto_aperture` diameter (default `0.4`). The auto-aperture sizing
+  envelopes **every** config wavelength (`apertureSizingWavelengths`), not one
+  representative: transverse colour moves the footprint between wavelengths, and
+  a diameter sized from the narrow one came out below the widest — on a 50 mm
+  f/4 six-element that was 0.12 mm at 23°, enough for the image plane to clip
+  the off-axis bundle and eat into the prescribed per-field vignetting. The
+  clearance covers what remains of that difference, which is why the default is
+  0.4 rather than 0.2. The sizing also carries each field's `vignetting` ellipse
+  (`fieldDefsFromItems`), so it measures the same (vignetted) pupil the merit
+  grid traces.
 - `optimization.jacobian_workers` sets the goroutines used for the finite
   difference Jacobian (default `GOMAXPROCS`). The Jacobian is deterministic:
   the result is identical for any worker count.

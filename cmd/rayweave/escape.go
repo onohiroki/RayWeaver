@@ -282,7 +282,7 @@ func singleEscapeConfig(input types.Input, surfaces []types.Surface, variables [
 	}
 	apertureMarginMM := input.Optimization.ApertureMarginMM
 	if apertureMarginMM <= 0 {
-		apertureMarginMM = 0.2
+		apertureMarginMM = types.DefaultApertureMarginMM
 	}
 
 	stopSurface := 0
@@ -756,7 +756,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	}
 	apertureMarginMM := input.Optimization.ApertureMarginMM
 	if apertureMarginMM <= 0 {
-		apertureMarginMM = 0.2
+		apertureMarginMM = types.DefaultApertureMarginMM
 	}
 	muConMax := input.Optimization.MuConMax
 

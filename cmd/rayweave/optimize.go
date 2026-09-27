@@ -265,7 +265,7 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 	// Physical clearance added to each auto_aperture final diameter (mm).
 	apertureMarginMM := input.Optimization.ApertureMarginMM
 	if apertureMarginMM <= 0 {
-		apertureMarginMM = 0.2
+		apertureMarginMM = types.DefaultApertureMarginMM
 	}
 
 	run.input = input

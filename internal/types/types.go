@@ -62,6 +62,16 @@ const (
 // DefaultWavelength is the fallback design wavelength (587.56 nm) in mm.
 const DefaultWavelength = 0.00058756
 
+// DefaultApertureMarginMM is the physical clearance (mm) added to every sized
+// auto_aperture diameter (optimization.aperture_margin_mm). It has to cover
+// the transverse colour spread between the config's wavelengths plus the
+// difference between the footprint-measurement grid and the merit grid:
+// a surface sized at one wavelength can otherwise come out slightly smaller
+// than the same surface's footprint at another, clipping the image plane (the
+// surface carrying the largest field-dependent extent) and eating into the
+// prescribed per-field vignetting.
+const DefaultApertureMarginMM = 0.4
+
 type JonesVector struct {
 	Ex, Ey complex128
 }
