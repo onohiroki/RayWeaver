@@ -420,26 +420,53 @@ func Compute(
 	return r
 }
 
+// stopEntrancePupil back-traces the paraxial ray from the explicit aperture
+// stop and returns the entrance-pupil axial location (the object-space axis
+// crossing, measured from surface 0's vertex) together with the entrance-pupil
+// radius. ok is false when the system has no explicit stop, the stop has no
+// clear aperture, or the crossing is ill-conditioned (a ray leaving parallel).
+func stopEntrancePupil(surfaces []types.Surface, stopSurface int, wavelength float64, gc *glass.Catalog) (loc, radius float64, ok bool) {
+	stopIdx := stopSurfaceIndex(surfaces, stopSurface)
+	if stopIdx < 0 {
+		return 0, 0, false
+	}
+	stopR := surfaces[stopIdx].Diameter / 2.0
+	if stopR <= 0 {
+		return 0, 0, false
+	}
+	nIndex := resolveIndices(surfaces, wavelength, gc)
+	pupilRay := tracePupilBackward(surfaces, nIndex, stopIdx, 0, 1.0)
+	if math.Abs(pupilRay.U) <= 1e-15 {
+		return 0, 0, false
+	}
+	loc = -pupilRay.Y / pupilRay.U
+	eRay := tracePupilBackward(surfaces, nIndex, stopIdx, stopR, 0)
+	return loc, math.Abs(eRay.Y + eRay.U*loc), true
+}
+
+// EntrancePupilLocation returns the paraxial entrance-pupil Z for a system with
+// an explicit stop: the object-space axis crossing of the ray back-traced from
+// the stop centre, i.e. the same quantity Compute reports as
+// entrance_pupil_location. The entrance pupil is the stop's *image*, so this is
+// generally not the stop's own Z. The location is measured from surface 0's
+// vertex; 0 means it could not be determined (no stop / degenerate crossing).
+func EntrancePupilLocation(surfaces []types.Surface, stopSurface int, wavelength float64, gc *glass.Catalog) float64 {
+	loc, _, ok := stopEntrancePupil(surfaces, stopSurface, wavelength, gc)
+	if !ok {
+		return 0
+	}
+	return loc
+}
+
 // EntrancePupilRadius returns the paraxial entrance-pupil radius for a system,
 // replicating Compute's entrance-pupil section without the glass-role
 // classification, EFL/BFL, exit-pupil, or magnification passes. This makes it
 // suitable for aperture-radius queries in the DLS hot path where only the EPD
 // is needed. The returned radius is at margin 1.0 (no extra safety margin).
 func EntrancePupilRadius(surfaces []types.Surface, stopSurface int, wavelength float64, gc *glass.Catalog) float64 {
-	nIndex := resolveIndices(surfaces, wavelength, gc)
-	stopIdx := stopSurfaceIndex(surfaces, stopSurface)
-
 	// Explicit stop: back-trace the chief and marginal rays from the stop.
-	if stopIdx >= 0 {
-		stopR := surfaces[stopIdx].Diameter / 2.0
-		if stopR > 0 {
-			pupilRay := tracePupilBackward(surfaces, nIndex, stopIdx, 0, 1.0)
-			if math.Abs(pupilRay.U) > 1e-15 {
-				epLoc := -pupilRay.Y / pupilRay.U
-				eRay := tracePupilBackward(surfaces, nIndex, stopIdx, stopR, 0)
-				return math.Abs(eRay.Y + eRay.U*epLoc)
-			}
-		}
+	if _, radius, ok := stopEntrancePupil(surfaces, stopSurface, wavelength, gc); ok {
+		return radius
 	}
 
 	// Stop-free: beam-aware fixed-aperture cap or first-surface estimate.

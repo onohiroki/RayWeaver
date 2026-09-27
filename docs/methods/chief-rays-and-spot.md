@@ -10,7 +10,12 @@ There is no implicit aperture stop: the stop is used only when
 `chief.stop_surface` is set explicitly. With a stop, the **entrance-pupil
 radius** for sampling is the **paraxial entrance-pupil radius** (the stop's
 image), so the F-number is preserved and image-side fixed surfaces that
-comfortably exceed the local beam do not shrink the pupil. Without a stop the
+comfortably exceed the local beam do not shrink the pupil, and the reported
+`entrance_pupil` centre sits on the **paraxial entrance-pupil plane**
+(`paraxial.EntrancePupilLocation`) — the stop's image, not the stop itself.
+That is the value the grid aim and `rayweave paraxial` agree on; reporting the
+stop plane here was a bug (`chief | paraxial` used to disagree with a
+standalone `paraxial` run). Without a stop the
 pupil is **dynamic**: each field's entrance-pupil Z is the in-lens crossing of
 that field's chief ray with field 0's chief ray (the aperture position), and
 `chief` iterates this (≤ 3 passes) until the pupil settles. The grid radius is

@@ -7,6 +7,7 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
@@ -125,7 +126,7 @@ func determineChiefRays(
 			pupilZs[i] = pupilModel.AxialPosition
 		}
 	} else {
-		pupilZs = seedPupilZs(system, fields)
+		pupilZs = seedPupilZs(system, fields, wavelength, gc)
 	}
 
 	dynamic := !virtMode && system.StopSurface <= 0
@@ -163,7 +164,7 @@ func determineChiefRays(
 			pol, wavelength, dumpMap, gridType, passThrough, fanCfg, pupilZs, numRings, numSpokes)
 	}
 
-	setPupils(results, engine, system.Surfaces, pupilZs, apertureRadius, probeZ, probeOK)
+	setPupils(results, engine, system.Surfaces, pupilZs, apertureRadius)
 
 	for i := range results {
 		results[i].ProbeZ = probeZ
@@ -195,18 +196,18 @@ func determineChiefRays(
 	return results
 }
 
-// seedPupilZs returns the initial per-field entrance pupil Z: the explicit stop
-// surface Z, else the fixed-minimum-aperture surface Z (the tightest
-// auto_aperture: false surface — where the beam is physically limited), else
-// the first surface Z.
-func seedPupilZs(system types.System, fields []types.FieldDef) []float64 {
+// seedPupilZs returns the initial per-field entrance pupil Z: for an explicit
+// stop the paraxial entrance pupil (the stop's image, where the object-space
+// chief ray crosses the axis — not the stop's own plane), else the
+// fixed-minimum-aperture surface Z (the tightest auto_aperture: false surface —
+// where the beam is physically limited), else the first surface Z.
+func seedPupilZs(system types.System, fields []types.FieldDef, wavelength float64, gc *glass.Catalog) []float64 {
 	seed := 0.0
 	if system.StopSurface > 0 {
-		for _, s := range system.Surfaces {
-			if s.ID == system.StopSurface {
-				seed = s.PhysicalZ
-				break
-			}
+		if z, ok := stopEntrancePupilZ(system, wavelength, gc); ok {
+			seed = z
+		} else {
+			seed = physicalStopZ(system)
 		}
 	} else {
 		seed = surface.FixedMinApertureRadiusZ(system.Surfaces)
@@ -219,6 +220,49 @@ func seedPupilZs(system types.System, fields []types.FieldDef) []float64 {
 		zs[i] = seed
 	}
 	return zs
+}
+
+// physicalStopZ returns the explicit stop surface's global vertex Z.
+func physicalStopZ(system types.System) float64 {
+	for _, s := range system.Surfaces {
+		if s.ID == system.StopSurface {
+			return s.PhysicalZ
+		}
+	}
+	return 0
+}
+
+// stopEntrancePupilZ returns the global Z of the entrance pupil for an explicit
+// stop: the paraxial location, measured from surface 0 along the unfolded axis.
+// Chief aims its pupil grid (and reports the entrance-pupil centre) at that
+// global Z, so the location is only usable while the object-side frame is still
+// the global frame — a fold bending the beam before the pupil makes the
+// unfolded coordinate a different axis. Such a pupil returns ok=false and the
+// caller keeps its stop-surface seed instead of aiming along the wrong frame.
+func stopEntrancePupilZ(system types.System, wavelength float64, gc *glass.Catalog) (float64, bool) {
+	return StopEntrancePupilZ(system.Surfaces, system.StopSurface, wavelength, gc)
+}
+
+// StopEntrancePupilZ is the exported, frame-guarded entrance-pupil Z for an
+// explicit stop: the paraxial location measured from surface 0 along the
+// unfolded axis, ok=false while a fold makes that coordinate a different axis.
+// Callers that seed a pupil grid (the optimiser's computePupilZ) use it so the
+// grid they centre matches the one chief reports for the same document.
+func StopEntrancePupilZ(surfaces []types.Surface, stopSurface int, wavelength float64, gc *glass.Catalog) (float64, bool) {
+	loc := paraxial.EntrancePupilLocation(surfaces, stopSurface, wavelength, gc)
+	if loc == 0 {
+		return 0, false
+	}
+	along := 0.0
+	for i := range surfaces {
+		if surfaces[i].Bends() {
+			// The folding vertex plane and everything before it stays in the
+			// global frame; a pupil at or before that plane is global Z.
+			return loc, loc <= along
+		}
+		along += surfaces[i].Thickness
+	}
+	return loc, true
 }
 
 // hasInfiniteConjugateField reports whether any field uses an angle (or image
@@ -371,7 +415,7 @@ func traceFields(
 ) []Result {
 	var results []Result
 
-for fi, fd := range fields {
+	for fi, fd := range fields {
 		dx, dy := raymath.FieldAzimuth(fd.Direction)
 
 		path := dls.BuildPath(system.Surfaces)
@@ -556,14 +600,15 @@ func recomputeEntrancePupils(results []Result, cur []float64, engine *ray.Engine
 
 // setPupils records the per-field entrance and exit pupils. The entrance pupil
 // is the in-lens chief-ray crossing (the aperture position where each field's
-// chief ray crosses field 0's); field 0's is the mean of the off-axis fields, or
-// the low-angle probe's aperture Z when there are no off-axis fields (the probe
-// only runs for stop-free systems, so field 0's is never left unset there).
+// chief ray crosses field 0's); field 0's is the mean of the off-axis fields,
+// or — for a lone field, which has no mean — its own seed pupil Z (the
+// paraxial entrance pupil of an explicit stop, the probe/crossing Z of the
+// dynamic pupil, the axial position of the virtual pupil).
 // The exit pupil is the image-space crossing of the outgoing segments, accepted
 // only within a plausible window (the outgoing rays are nearly parallel on the
 // image side, so the crossing is ill-conditioned for strongly aberrated designs
 // and is then omitted).
-func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, pupilZs []float64, apertureRadius float64, probeZ float64, probeOK bool) {
+func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, pupilZs []float64, apertureRadius float64) {
 	n := len(results)
 	if n == 0 {
 		return
@@ -588,11 +633,14 @@ func setPupils(results []Result, engine *ray.Engine, surfaces []types.Surface, p
 		z := entMean / float64(entCnt)
 		results[0].EntrancePupil.Center = chiefAtZ(results[0].ChiefRay, z)
 		results[0].EntrancePupil.Radius = apertureRadius
-	} else if n == 1 && probeOK && results[0].EntrancePupil != nil {
-		// Single-field dynamic pupil: the probe supplies the aperture position.
-		// Previously the entrance-pupil centre was left unset for a lone field,
-		// which centred downstream grids at the origin instead of the aperture.
-		results[0].EntrancePupil.Center = chiefAtZ(results[0].ChiefRay, probeZ)
+	} else if n == 1 && results[0].EntrancePupil != nil {
+		// A lone field has no off-axis mean to fall back on, and a stop
+		// (or virtual pupil) system never runs the low-angle probe: its
+		// own seed is the pupil position — the paraxial entrance pupil
+		// for an explicit stop, the probe/crossing Z for the dynamic
+		// pupil, the fixed axial position for the virtual pupil. Leaving
+		// it unset reported the centre at the origin instead.
+		results[0].EntrancePupil.Center = chiefAtZ(results[0].ChiefRay, pupilZs[0])
 		results[0].EntrancePupil.Radius = apertureRadius
 	}
 

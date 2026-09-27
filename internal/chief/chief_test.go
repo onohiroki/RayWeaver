@@ -6,6 +6,7 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -858,7 +859,7 @@ func TestProbeAxisCrossing(t *testing.T) {
 	}
 	// Use the same seed the dynamic pipeline uses so the probe result and the
 	// integrated single-field run agree.
-	seedZ := seedPupilZs(sys, []types.FieldDef{{Angle: 1.0, Direction: []float64{0, 1}}})[0]
+	seedZ := seedPupilZs(sys, []types.FieldDef{{Angle: 1.0, Direction: []float64{0, 1}}}, wl, gc)[0]
 	probeZ, ok := probePupilZ(sys, engine, 2, 64, apertureRadius, pol, wl, types.GridPolar, seedZ, 0, 0)
 	if !ok {
 		t.Fatal("probePupilZ failed for singlet")
@@ -991,5 +992,50 @@ func TestProbeSkippedForFiniteConjugateAndPassThrough(t *testing.T) {
 	}
 	if constrained[0].ProbeOK {
 		t.Error("pass-through run unexpectedly ran the angle probe")
+	}
+}
+
+// TestStopEntrancePupilIsParaxial guards the entrance-pupil location fix for
+// stop-specified systems. chief seeded (and reported) the stop's own vertex Z
+// as the entrance pupil, so a piped `chief | paraxial` echoed a wrong location
+// and recomputed the entrance-pupil diameter there (-2.3% on the degraded
+// US2645157 triplet). The entrance pupil is the stop's *image*: the reported
+// centre Z must be the paraxial value paraxial itself computes, which is also
+// the plane the object-space chief ray crosses the axis on.
+func TestStopEntrancePupilIsParaxial(t *testing.T) {
+	sys, gc := passThroughTripletSystem()
+	sys.StopSurface = 2
+	pol := types.NewCircularJones(true)
+	const wl = 0.00058756
+
+	wantZ := paraxial.EntrancePupilLocation(sys.Surfaces, sys.StopSurface, wl, gc)
+	if wantZ == 0 {
+		t.Fatal("paraxial returned no entrance-pupil location for the stopped system")
+	}
+	stopZ := 0.0
+	for _, s := range sys.Surfaces {
+		if s.ID == sys.StopSurface {
+			stopZ = s.PhysicalZ
+		}
+	}
+	if math.Abs(wantZ-stopZ) < 1e-9 {
+		t.Fatalf("fixture degenerate: paraxial EP location %v equals the stop plane %v", wantZ, stopZ)
+	}
+
+	results := DetermineChiefRaysGrid(sys, []types.FieldDef{{Angle: 10.0, Direction: []float64{0, 1}}},
+		3, 64, gc, pol, wl, false, types.GridPolar, nil, nil, nil, nil, 0, 0)
+	if len(results) != 1 || results[0].EntrancePupil == nil {
+		t.Fatal("stopped system produced no result / entrance pupil")
+	}
+	got := results[0].EntrancePupil.Center.Z
+	if math.Abs(got-wantZ) > 1e-6 {
+		t.Errorf("entrance-pupil Z = %v, want the paraxial value %v (the stop plane is %v)", got, wantZ, stopZ)
+	}
+
+	// The grid aim and the reported pupil are the same value, so the entrance
+	// pupil radius must stay the paraxial entrance-pupil radius as well.
+	wantR := paraxial.EntrancePupilRadius(sys.Surfaces, sys.StopSurface, wl, gc)
+	if r := results[0].EntrancePupil.Radius; math.Abs(r-wantR) > 1e-6 {
+		t.Errorf("entrance-pupil radius = %v, want paraxial %v", r, wantR)
 	}
 }
