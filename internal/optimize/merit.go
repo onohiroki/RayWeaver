@@ -8,6 +8,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/psf"
+	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -327,9 +328,17 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 	}
 	switch kind {
 	case MeritDistortionPct:
-		return evaluateDistortionPct(term.fieldAngle, term.wavelength, surfaces, gc)
+		var pupilZ float64
+		if cfg != nil {
+			pupilZ = cfg.pupilZ
+		}
+		return evaluateDistortionPct(term.fieldAngle, term.wavelength, surfaces, gc, pupilZ)
 	case MeritLateralColor:
-		return evaluateLateralColor(term.fieldAngle, term.wavelength, term.comparisonWavelength, surfaces, gc)
+		var pupilZ float64
+		if cfg != nil {
+			pupilZ = cfg.pupilZ
+		}
+		return evaluateLateralColor(term.fieldAngle, term.wavelength, term.comparisonWavelength, surfaces, gc, pupilZ)
 	case MeritLongitudinalColor:
 		return evaluateLongitudinalColor(term.wavelength, term.comparisonWavelength, surfaces, gc)
 	case MeritGlassRole:
@@ -463,12 +472,12 @@ func pupilFillValue(ratio float64) float64 {
 }
 
 // evaluateDistortionPct returns the distortion percentage for the term's field.
-func evaluateDistortionPct(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
+func evaluateDistortionPct(fieldAngle, wavelength float64, surfaces []types.Surface, gc *glass.Catalog, pupilZ float64) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
 
-	yChief := traceChiefImageHeight(surfaces, fieldAngle, wavelength, gc)
+	yChief := traceChiefImageHeight(surfaces, fieldAngle, wavelength, gc, pupilZ)
 	if yChief == 0 {
 		return 0
 	}
@@ -483,7 +492,7 @@ func evaluateDistortionPct(fieldAngle, wavelength float64, surfaces []types.Surf
 	return 100.0 * (yChief - yParax) / yParax
 }
 
-func evaluateLateralColor(fieldAngle, wl1, wl2 float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
+func evaluateLateralColor(fieldAngle, wl1, wl2 float64, surfaces []types.Surface, gc *glass.Catalog, pupilZ float64) float64 {
 	if wl1 == 0 {
 		wl1 = types.DefaultWavelength
 	}
@@ -491,8 +500,8 @@ func evaluateLateralColor(fieldAngle, wl1, wl2 float64, surfaces []types.Surface
 		return 0
 	}
 
-	y1 := traceChiefImageHeight(surfaces, fieldAngle, wl1, gc)
-	y2 := traceChiefImageHeight(surfaces, fieldAngle, wl2, gc)
+	y1 := traceChiefImageHeight(surfaces, fieldAngle, wl1, gc, pupilZ)
+	y2 := traceChiefImageHeight(surfaces, fieldAngle, wl2, gc, pupilZ)
 	return y2 - y1
 }
 
@@ -561,7 +570,16 @@ func evaluateSeidel(fieldAngle, wavelength float64, surfaces []types.Surface, gc
 	return paraxial.ComputeSeidel(surfaces, fieldAngle, wavelength, gc)
 }
 
-func traceChiefImageHeight(surfaces []types.Surface, fieldAngleDeg float64, wavelength float64, gc *glass.Catalog) float64 {
+// traceChiefImageHeight returns the image height of the field's chief ray at
+// wavelength.
+//
+// pupilZ, when non-zero, is the config's entrance-pupil Z and the ray is
+// launched through the pupil centre (the wavefront-plane launch the merit grid
+// uses). Without it the ray starts on the optical axis at zStart, which for any
+// non-zero field angle arrives at the lens at 100*tan(theta) — far outside every
+// aperture — so the trace failed and the caller got 0. That made lateral_color
+// silently evaluate to exactly 0 for every angle field.
+func traceChiefImageHeight(surfaces []types.Surface, fieldAngleDeg float64, wavelength float64, gc *glass.Catalog, pupilZ float64) float64 {
 	engine := ray.NewEngine(gc, nil)
 	path := dls.BuildPath(surfaces)
 
@@ -569,6 +587,9 @@ func traceChiefImageHeight(surfaces []types.Surface, fieldAngleDeg float64, wave
 
 	zStart := -100.0
 	origin := types.Vec3{X: 0, Y: 0, Z: zStart}
+	if pupilZ != 0 {
+		origin.X, origin.Y = pupil.GridCentre(dir, pupilZ, zStart)
+	}
 
 	r := types.Ray{
 		Wavelength: wavelength,
