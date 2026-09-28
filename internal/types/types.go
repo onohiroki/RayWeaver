@@ -1079,6 +1079,13 @@ type EscapeConfig struct {
 	// at a time with a cooldown, when pressure builds up. Disabled unless the
 	// section is present with enabled: true.
 	ResourceGuard *ResourceGuardConfig `yaml:"resource_guard,omitempty"`
+	// Stream selects append-only streaming of the pipeline document to stdout
+	// (the default). The settled parts are written when the run starts and one
+	// escape_result.minima entry is appended per discovered solution, so a run
+	// killed mid-way still leaves a readable document behind; false restores
+	// the legacy one-shot write performed after every cycle has finished. See
+	// docs/escape.md.
+	Stream *bool `yaml:"stream,omitempty"`
 }
 
 // ResourceGuardConfig configures the escape resource self-monitor. Every field
@@ -1241,6 +1248,14 @@ type EscapeResult struct {
 	Interrupted      bool             `yaml:"interrupted,omitempty"`
 	Minima           []EscapeMinimum  `yaml:"minima"`
 	InfeasibleBasins []EscapeMinimum  `yaml:"infeasible_basins,omitempty"`
+	// MinimaImprovements carries the final version of every minimum whose point
+	// was replaced in the store during the run (Store.Replace). Each entry's
+	// Index is the position in Minima it supersedes, so a reader takes
+	// minima[i] unless an improvement names i. It is written at completion,
+	// before the top-level configs, because the streamed minima list is
+	// append-only and keeps its first-discovery values; `list escape` already
+	// merges it (see docs/escape.md).
+	MinimaImprovements []EscapeMinimum `yaml:"minima_improvements,omitempty"`
 }
 
 // EscapeParamsInfo records the escape parameter values actually used.

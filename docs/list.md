@@ -704,9 +704,19 @@ serve; any other target is rejected with an error.
 ### Pipeline document
 
 Shows the effective escape parameters, the best solution, the local minima
-(merit-sorted rank, status, `--save` file basename, file directory when all
-minima share one) and the per-minimum element powers. A document written with
-`--keep-infeasible` also lists its infeasible basins:
+(status, `--save` file basename, file directory when all minima share one) and
+the per-minimum element powers. A document written with `--keep-infeasible` also
+lists its infeasible basins:
+
+The minima rows are **ranked by merit (ascending)** and each row's `Index` is
+the position in `escape_result.minima`, so the number shown is the one
+`escape extract --index` takes (ties keep their document order). A one-shot
+document already stores `minima` merit-sorted, which makes this a no-op; a
+**streamed** document stores it in discovery order, and before ranking every
+minimum that a repeat visit improved is replaced by its
+`escape_result.minima_improvements` entry (indexed by the position it
+supersedes), so the table reports each minimum's final merit — a raw `query` on
+`escape_result.minima[]` would show the first-discovery values instead.
 
 ```
 Escape Parameters:
@@ -787,7 +797,7 @@ What is recovered from a run log:
 | Escape Result: Best Merit | best (lowest-merit) `minimum` event, or `escape_complete.best_merit` |
 | Escape Result: Timed Out / Interrupted | `escape_complete`/`done`, else the `timeout` / `interrupt` events |
 | Escape Run | `escape_complete` / `done` (absent when the log was truncated before them) |
-| Local Minima | `minimum` events, aggregated per discovery index and re-ranked by merit; the feasible points only, matching `escape_result.minima` |
+| Local Minima | `minimum` events, aggregated per discovery index and re-ranked by merit; the feasible points only, matching the document's `escape_result.minima` (with `minima_improvements` applied) |
 | Infeasible Basins | the `minimum` events classified `infeasible_basin` (re-ranked by merit, with their `invalid_reason`), or the `escape_complete.infeasible` array |
 | File column / File Directory | `minimum_saved` events (`index` + `file`), present when the run used `--save` |
 | Workers | `worker_done`, `worker_retired`, `timeout`, `interrupted`, `cycle` |

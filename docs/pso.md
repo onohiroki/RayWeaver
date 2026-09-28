@@ -23,6 +23,7 @@ rayweave pso extract --index N < pso-output.yaml
 | `--glass-variables` | auto-generate nd/vd variables for every refractive element |
 | `--index N` | (with `pso extract`) local minimum index to extract |
 | `--keep-infeasible` | include infeasible basins in stdout YAML (default: discard) |
+| `--stream BOOL` | stream the pipeline document to stdout as the run progresses: `true` (default) or `false` for the one-shot write performed after the run |
 | `--swarm-size N` | number of particles per worker (default 30; overrides `optimization.pso.swarm_size`) |
 | `--pso-iterations N` | PSO iterations per cycle (default 40; overrides `optimization.pso.pso_iterations`) |
 | `--constraint-penalty W` | constraint penalty weight (default 1e3; overrides `optimization.pso.constraint_penalty`) |
@@ -30,7 +31,8 @@ rayweave pso extract --index N < pso-output.yaml
 `--glass-dir` is written back into the output's `glass_catalog.directory`.
 `--save` records the per-minimum files in `escape_result.minima[].file`.
 `--swarm-size` / `--pso-iterations` / `--constraint-penalty` are PSO-specific
-flags that override their YAML counterparts.
+flags that override their YAML counterparts. `--stream` is echoed back as
+`optimization.pso.stream` only when the flag is actually given.
 
 The JSONL progress stream is readable with `rayweave list escape`, which detects
 it automatically and adds the per-worker completion table:
@@ -165,6 +167,12 @@ The output reuses `escape_result` for full pipeline compatibility. The best
 solution is written to `configs[].surfaces` and all discovered minima are
 listed in `escape_result.minima[]`. See [escape.md#output](escape.md#output)
 for the full schema.
+
+As with `escape`, the document is appended to stdout while the run progresses
+(`--stream false` restores the one-shot write), so a killed run still leaves
+every minimum discovered so far; the write sequence, the key order it implies
+and `escape_result.minima_improvements` are described in
+[escape.md#streaming-output](escape.md#streaming-output).
 
 `pso extract --index N` works identically to `escape extract --index N`.
 

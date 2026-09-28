@@ -2735,6 +2735,10 @@ func escapeSettings(e *types.EscapeConfig) []propRow {
 	p = appendNumProp(p, "Stall Rel Tol", e.StallRelTol)
 	p = appendBoolPtrProp(p, "Stall Early Stop", e.StallEarlyStop)
 	p = appendNumProp(p, "Initial Perturb", e.InitialPerturb)
+	// Stream is only present when the run set it (an unset flag never writes
+	// the value back), so it is reported the same way as the other pointer
+	// property, Stall Early Stop.
+	p = appendBoolPtrProp(p, "Stream", e.Stream)
 	if len(e.VariableWeights) > 0 {
 		p = append(p, propRow{Name: "Variable Weights", Value: sortedFloatMapJoin(e.VariableWeights)})
 	}
@@ -2765,6 +2769,7 @@ func psoSettings(pso *types.PSOConfig) []propRow {
 		p = appendNumProp(p, "  H Mult", esc.HMult)
 		p = appendNumProp(p, "  W Mult", esc.WMult)
 		p = appendNumProp(p, "  Initial Perturb", esc.InitialPerturb)
+		p = appendBoolPtrProp(p, "  Stream", esc.Stream)
 	}
 	return p
 }
@@ -2812,9 +2817,14 @@ func escapeDataFromOutput(output types.Output) escapeListData {
 
 	// Build minima rows. escape_result.minima lists the feasible solutions;
 	// infeasible basins are a separate list (only present with --keep-infeasible).
-	minima := make([]EscapeMinimumRow, 0, len(esc.Minima))
-	files := make([]string, 0, len(esc.Minima))
-	for _, m := range esc.Minima {
+	// A streamed document writes minima append-only, so it keeps the
+	// first-discovery values there and carries each improved point in
+	// minima_improvements (indexed by the position it supersedes); the improved
+	// entry replaces its row before the list is ranked.
+	entries := effectiveEscapeMinima(esc)
+	minima := make([]EscapeMinimumRow, 0, len(entries))
+	files := make([]string, 0, len(entries))
+	for _, m := range entries {
 		var powers [][]float64
 		for _, f := range m.Features {
 			if len(f.ElementPowers) > 0 {
@@ -2833,6 +2843,13 @@ func escapeDataFromOutput(output types.Output) escapeListData {
 			files = append(files, m.File)
 		}
 	}
+	// Rank by effective merit, ascending. A one-shot document is already in
+	// that order (this is a no-op for it); a streamed document is in discovery
+	// order, so the stable sort is what makes the two render alike, with ties
+	// kept in document order.
+	sort.SliceStable(minima, func(i, j int) bool {
+		return minima[i].Merit < minima[j].Merit
+	})
 
 	var infeasible []EscapeMinimumRow
 	for _, m := range esc.InfeasibleBasins {

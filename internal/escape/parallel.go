@@ -143,6 +143,64 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 	return p
 }
 
+// NumWorkers resolves the escape worker count from the YAML config (default 4).
+// ParallelEscape and ReportParams share it so the reported escape_workers is
+// always the count the run actually uses.
+func NumWorkers(cfg types.EscapeConfig) int {
+	if cfg.EscapeWorkers <= 0 {
+		return 4
+	}
+	return cfg.EscapeWorkers
+}
+
+// MaxCycles resolves the cycle budget from the YAML config (default 10).
+func MaxCycles(cfg types.EscapeConfig) int {
+	if cfg.MaxCycles <= 0 {
+		return 10
+	}
+	return cfg.MaxCycles
+}
+
+// ParamsInfo renders the escape_result.params report for a run. Both the
+// pre-run streaming header (ReportParams) and the completion report
+// (assembleEscapeResult) go through it, so the two cannot drift: the values
+// depend only on the resolved parameters, the worker count and the cycle
+// budget, all of which are known before the search starts.
+func ParamsInfo(p Params, maxSeconds float64, workers, cycles int) types.EscapeParamsInfo {
+	// StallEarlyStop is reported only when on (a nil pointer omits the key), so
+	// an explicitly-off value stays distinguishable from the default.
+	var stallEarlyStop *bool
+	if p.StallEarlyStop {
+		v := true
+		stallEarlyStop = &v
+	}
+	return types.EscapeParamsInfo{
+		HInitial:                     p.H,
+		WInitial:                     p.W,
+		HMult:                        p.HMult,
+		WMult:                        p.WMult,
+		DistanceThreshold:            p.Dt,
+		FingerprintDistanceThreshold: p.DtFp,
+		MaxCycles:                    cycles,
+		EscapeWorkers:                workers,
+		MaxSeconds:                   maxSeconds,
+		EscapeIterFrac:               p.EscapeIterFrac,
+		WSpan:                        p.WSpan,
+		StallWindowFrac:              p.StallWindowFrac,
+		StallRelTol:                  p.StallRelTol,
+		StallEarlyStop:               stallEarlyStop,
+		InitialPerturb:               p.InitialPerturb,
+	}
+}
+
+// ReportParams builds escape_result.params before the run starts, from the
+// YAML config and the model's variable definitions — the same inputs
+// ParallelEscape derives its parameters from, so the streamed header and the
+// completed document report identical values.
+func ReportParams(cfg types.EscapeConfig, variables []dls.VariableInfo) types.EscapeParamsInfo {
+	return ParamsInfo(BuildParams(cfg, variables), cfg.MaxSeconds, NumWorkers(cfg), MaxCycles(cfg))
+}
+
 // ParallelEscape runs the escape loop across escapeWorkers goroutines, each with
 // its own freshly-built model (via the factory) so the shared catalog and
 // surface state stay race-free. All workers share one Store. opts.Progress may
@@ -150,14 +208,8 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunOptions) Result {
 	params := BuildParams(cfg, newModel().Variables())
 
-	numWorkers := cfg.EscapeWorkers
-	if numWorkers <= 0 {
-		numWorkers = 4
-	}
-	maxCycles := cfg.MaxCycles
-	if maxCycles <= 0 {
-		maxCycles = 10
-	}
+	numWorkers := NumWorkers(cfg)
+	maxCycles := MaxCycles(cfg)
 
 	// Soft wall-clock budget shared by all workers. A zero value disables the
 	// limit; expiry is checked between DLS runs, so a running solve always

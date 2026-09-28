@@ -65,6 +65,17 @@ func runEscapeCore(input types.Input, gc *glass.Catalog, verbose bool, logFile s
 	// optimization.mem_limit_mb); the effective value is written back.
 	applyMemLimit(&input, optEscapeMemLimit)
 
+	// Streaming switch (CLI --stream wins over optimization.escape.stream,
+	// else the built-in default is on). Only a flag that was actually given is
+	// written back, so a document that never mentions `stream` stays silent
+	// about it in the output too.
+	if input.Optimization != nil {
+		if enabled, fromFlag := escapeStreamEnabled(input.Optimization.Escape, command); fromFlag && input.Optimization.Escape != nil {
+			v := enabled
+			input.Optimization.Escape.Stream = &v
+		}
+	}
+
 	// Build the per-config glass-phase merit from the config's own terms: the
 	// chromatic terms scaled by power_solve.color_scale plus a cheap geometric
 	// guardrail. The config's explicit merit is never replaced.
@@ -410,6 +421,93 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		return opt
 	}
 
+	// Single-config systems may carry no configs section; default it once so
+	// the minima materialisation and the best-solution write-back share one
+	// config metadata (fields/wavelengths) for the back-focus hard solve. It
+	// runs before the search because a streamed record materialises its minimum
+	// (and so needs outCfg) the moment the point is discovered.
+	if len(input.Configs) == 0 {
+		input.Configs = []types.Config{{
+			ID:     "config1",
+			Name:   "Config1",
+			Weight: 1.0,
+			Active: true,
+		}}
+	}
+	outCfg := &input.Configs[0]
+
+	// Build the escape_result minima against the pristine original surfaces.
+	cfgID := "config1"
+	if input.Configs[0].ID != "" {
+		cfgID = input.Configs[0].ID
+	}
+
+	var saveStem, saveExt string
+	if saveBase != "" {
+		saveStem, saveExt = splitSaveBase(saveBase)
+	}
+
+	// buildMinimum materialises one minimum into its escape_result entry.
+	// position is the index inside escape_result.minima (discovery order when
+	// streamed, merit order in the one-shot output); storeIdx is the discovery
+	// index the --save file name carries. The whole entry is built here so the
+	// streamed records and the completed document agree by construction.
+	buildMinimum := func(position, storeIdx int, p escape.Point) types.EscapeMinimum {
+		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
+		// Register the optimised nd/vd model glasses so the element powers use
+		// the values at this minimum, not the original catalogue entries.
+		for _, g := range newGlasses {
+			gc.Add(g)
+		}
+		// Element powers come from the variable-only projection, matching the
+		// fingerprint the escape store used during the run.
+		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
+		// Then bring the surfaces to the prescription the optimizer evaluated
+		// (back-focus hard solve + sized auto apertures), so `escape extract`
+		// agrees with the --save file for the same index.
+		applySavedBackFocusSolve(input, outCfg, surf, gc)
+		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
+		m := types.EscapeMinimum{
+			Index:     position,
+			Merit:     p.Merit,
+			Surfaces:  surf,
+			Variables: buildSingleVarStates(variables, p.X),
+			Features: []types.ConfigFeatures{{
+				ID:            cfgID,
+				ElementPowers: powers,
+			}},
+		}
+		if saveBase != "" {
+			m.File = fmt.Sprintf("%s%d%s", saveStem, storeIdx, saveExt)
+		}
+		return m
+	}
+
+	// buildInfeasible is the same materialisation for an infeasible basin,
+	// which carries its classification and no --save file name. position is the
+	// index inside escape_result.infeasible_basins.
+	buildInfeasible := func(position int, p escape.Point) types.EscapeMinimum {
+		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
+		for _, g := range newGlasses {
+			gc.Add(g)
+		}
+		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
+		applySavedBackFocusSolve(input, outCfg, surf, gc)
+		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
+		return types.EscapeMinimum{
+			Index:         position,
+			Merit:         p.Merit,
+			Status:        types.EscapeMinimumStatus(statusString(p.Status)),
+			InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
+			Surfaces:      surf,
+			Variables:     buildSingleVarStates(variables, p.X),
+			Features: []types.ConfigFeatures{{
+				ID:            cfgID,
+				ElementPowers: powers,
+			}},
+		}
+	}
+
 	var onRecord escape.RecordHandler
 	var saver *escapeFileSaver
 	if saveBase != "" {
@@ -524,6 +622,24 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		}
 	}
 
+	// Streaming output (default): the settled top-level part of the document is
+	// written now and one escape_result.minima entry follows each discovered
+	// solution, so a run killed mid-way still leaves a readable document.
+	// metadata is stamped here, which makes created_at the run start.
+	var st *escapeStream
+	if enabled, _ := escapeStreamEnabled(input.Optimization.Escape, command); enabled {
+		st = newEscapeStream(os.Stdout, escapeStreamTails{chief: hasPupilModelVariables(variables)})
+		inner := onRecord
+		onRecord = func(idx int, p escape.Point, isNew bool, version int) {
+			if inner != nil {
+				inner(idx, p, isNew, version)
+			}
+			st.record(idx, p, isNew, buildMinimum)
+		}
+		withOutputMetadata(&input, command, subcmdArgs())
+		st.header(input, escape.ReportParams(*input.Optimization.Escape, factory().Variables()))
+	}
+
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
 		Progress:    progress,
 		OnRecord:    onRecord,
@@ -549,83 +665,21 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		progress.Event("error", map[string]any{"message": saver.err.Error()})
 	}
 
-	// Build the escape_result minima against the pristine original surfaces.
-	cfgID := "config1"
-	if len(input.Configs) > 0 && input.Configs[0].ID != "" {
-		cfgID = input.Configs[0].ID
-	}
-
-	var saveStem, saveExt string
-	if saveBase != "" {
-		saveStem, saveExt = splitSaveBase(saveBase)
-	}
-
-	// Single-config systems may carry no configs section; default it once so
-	// the minima materialisation and the best-solution write-back share one
-	// config metadata (fields/wavelengths) for the back-focus hard solve.
-	if len(input.Configs) == 0 {
-		input.Configs = []types.Config{{
-			ID:     "config1",
-			Name:   "Config1",
-			Weight: 1.0,
-			Active: true,
-		}}
-	}
-	outCfg := &input.Configs[0]
-
-	minima := make([]types.EscapeMinimum, len(res.Minima))
-	for i, p := range res.Minima {
-		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
-		// Register the optimised nd/vd model glasses so the element powers use
-		// the values at this minimum, not the original catalogue entries.
-		for _, g := range newGlasses {
-			gc.Add(g)
-		}
-		// Element powers come from the variable-only projection, matching the
-		// fingerprint the escape store used during the run.
-		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
-		// Then bring the surfaces to the prescription the optimizer evaluated
-		// (back-focus hard solve + sized auto apertures), so `escape extract`
-		// agrees with the --save file for the same index.
-		applySavedBackFocusSolve(input, outCfg, surf, gc)
-		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
-		minima[i] = types.EscapeMinimum{
-			Index:     i,
-			Merit:     p.Merit,
-			Surfaces:  surf,
-			Variables: buildSingleVarStates(variables, p.X),
-			Features: []types.ConfigFeatures{{
-				ID:            cfgID,
-				ElementPowers: powers,
-			}},
-		}
-		if saveBase != "" {
-			minima[i].File = fmt.Sprintf("%s%d%s", saveStem, res.MinimaIdx[i], saveExt)
+	// The streamed records already carry the feasible minima; the one-shot
+	// output builds them here, in merit order (buildMinimum is shared, so both
+	// forms produce identical entries).
+	var minima []types.EscapeMinimum
+	if st == nil {
+		minima = make([]types.EscapeMinimum, len(res.Minima))
+		for i, p := range res.Minima {
+			minima[i] = buildMinimum(i, res.MinimaIdx[i], p)
 		}
 	}
 
 	// Build infeasible basins list.
 	infeasibleMinima := make([]types.EscapeMinimum, len(res.InfeasibleBasins))
 	for i, p := range res.InfeasibleBasins {
-		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
-		for _, g := range newGlasses {
-			gc.Add(g)
-		}
-		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
-		applySavedBackFocusSolve(input, outCfg, surf, gc)
-		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
-		infeasibleMinima[i] = types.EscapeMinimum{
-			Index:         i,
-			Merit:         p.Merit,
-			Status:        types.EscapeMinimumStatus(statusString(p.Status)),
-			InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
-			Surfaces:      surf,
-			Variables:     buildSingleVarStates(variables, p.X),
-			Features: []types.ConfigFeatures{{
-				ID:            cfgID,
-				ElementPowers: powers,
-			}},
-		}
+		infeasibleMinima[i] = buildInfeasible(i, p)
 	}
 
 	// Apply the best solution to the top-level surfaces (pipeline-compatible).
@@ -655,6 +709,27 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	// Discard infeasible basins from output unless --keep-infeasible is set.
 	if !keepInfeasible {
 		infeasibleMinima = nil
+	}
+
+	// Streamed run: the feasible minima are already in the document, so only
+	// the run outcome, the improved points and the deferred top-level keys
+	// remain to be written — configs carries the best solution and must be
+	// written after it has been applied, not before the search started.
+	if st != nil {
+		reportEscape(res, progress)
+		st.complete(streamCompletion{
+			BestIndex:          bestStreamIndex(res, st),
+			BestMerit:          res.BestMerit,
+			TimedOut:           res.TimedOut,
+			Interrupted:        res.Interrupted,
+			InfeasibleBasins:   infeasibleMinima,
+			MinimaImprovements: st.improvements(res, buildMinimum),
+		}, streamTailKeys(input, st))
+		if err := st.Err(); err != nil {
+			progress.Event("error", map[string]any{"message": err.Error()})
+			errOut("Error writing streamed escape output: %v", err)
+		}
+		return
 	}
 
 	escResult := assembleEscapeResult(res, minima, infeasibleMinima)
@@ -809,6 +884,74 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	template := make([]types.Config, len(input.Configs))
 	copy(template, input.Configs)
 
+	var saveStem, saveExt string
+	if saveBase != "" {
+		saveStem, saveExt = splitSaveBase(saveBase)
+	}
+
+	// projectMulti materialises one point's per-config surfaces for an
+	// escape_result entry: element powers from the variable-only projection
+	// (the run-time fingerprint), then the prescription the optimizer
+	// evaluated — back-focus hard solve + sized auto apertures — so
+	// `escape extract` agrees with the --save file for the same index.
+	projectMulti := func(p escape.Point) ([]types.Config, []types.ConfigFeatures) {
+		configSurfaces := applyEscapeMulti(template, input.Optimization, p.X)
+		apertures := finalAperturesAt(factory, p.X)
+		var cfgs []types.Config
+		var features []types.ConfigFeatures
+		for ci := range template {
+			if s, ok := configSurfaces[template[ci].ID]; ok {
+				c := template[ci]
+				c.Surfaces = s
+				powers := paraxial.ElementPowers(s, paraxial.DLine, gc)
+				applySavedBackFocusSolve(input, &c, s, gc)
+				applyApertures(s, apertures[template[ci].ID])
+				cfgs = append(cfgs, c)
+				features = append(features, types.ConfigFeatures{
+					ID:            template[ci].ID,
+					ElementPowers: powers,
+				})
+			}
+		}
+		return cfgs, features
+	}
+
+	// buildMinimum materialises one minimum into its escape_result entry.
+	// position is the index inside escape_result.minima (discovery order when
+	// streamed, merit order in the one-shot output); storeIdx is the discovery
+	// index the --save file name carries. It is shared by the streamed records
+	// and the completed document, so both forms produce identical entries.
+	buildMinimum := func(position, storeIdx int, p escape.Point) types.EscapeMinimum {
+		cfgs, features := projectMulti(p)
+		m := types.EscapeMinimum{
+			Index:     position,
+			Merit:     p.Merit,
+			Configs:   cfgs,
+			Variables: buildMultiVarStates(input.Optimization, p.X),
+			Features:  features,
+		}
+		if saveBase != "" {
+			m.File = fmt.Sprintf("%s%d%s", saveStem, storeIdx, saveExt)
+		}
+		return m
+	}
+
+	// buildInfeasible is the same materialisation for an infeasible basin,
+	// which carries its classification and no --save file name. position is the
+	// index inside escape_result.infeasible_basins.
+	buildInfeasible := func(position int, p escape.Point) types.EscapeMinimum {
+		cfgs, features := projectMulti(p)
+		return types.EscapeMinimum{
+			Index:         position,
+			Merit:         p.Merit,
+			Status:        types.EscapeMinimumStatus(statusString(p.Status)),
+			InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
+			Configs:       cfgs,
+			Variables:     buildMultiVarStates(input.Optimization, p.X),
+			Features:      features,
+		}
+	}
+
 	// Design fingerprint across every config: concatenated thin-lens element
 	// powers at a variable vector.
 	fingerprint := func(x []float64) []float64 {
@@ -904,6 +1047,24 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		}
 	}
 
+	// Streaming output (default): the settled top-level part of the document is
+	// written now and one escape_result.minima entry follows each discovered
+	// solution, so a run killed mid-way still leaves a readable document.
+	// metadata is stamped here, which makes created_at the run start.
+	var st *escapeStream
+	if enabled, _ := escapeStreamEnabled(input.Optimization.Escape, command); enabled {
+		st = newEscapeStream(os.Stdout, escapeStreamTails{chief: hasPupilModelVariablesMulti(input.Optimization)})
+		inner := onRecord
+		onRecord = func(idx int, p escape.Point, isNew bool, version int) {
+			if inner != nil {
+				inner(idx, p, isNew, version)
+			}
+			st.record(idx, p, isNew, buildMinimum)
+		}
+		withOutputMetadata(&input, command, subcmdArgs())
+		st.header(input, escape.ReportParams(*input.Optimization.Escape, factory().Variables()))
+	}
+
 	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
 		Progress:    progress,
 		OnRecord:    onRecord,
@@ -929,78 +1090,21 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		progress.Event("error", map[string]any{"message": saver.err.Error()})
 	}
 
-	var saveStem, saveExt string
-	if saveBase != "" {
-		saveStem, saveExt = splitSaveBase(saveBase)
-	}
-
-	minima := make([]types.EscapeMinimum, len(res.Minima))
-	for i, p := range res.Minima {
-		configSurfaces := applyEscapeMulti(template, input.Optimization, p.X)
-		apertures := finalAperturesAt(factory, p.X)
-		var cfgs []types.Config
-		var features []types.ConfigFeatures
-		for ci := range template {
-			if s, ok := configSurfaces[template[ci].ID]; ok {
-				c := template[ci]
-				c.Surfaces = s
-				// Element powers from the variable-only projection (the
-				// run-time fingerprint), then bring the surfaces to the
-				// prescription the optimizer evaluated — back-focus hard solve
-				// + sized auto apertures — so `escape extract` agrees with
-				// the --save file for the same index.
-				powers := paraxial.ElementPowers(s, paraxial.DLine, gc)
-				applySavedBackFocusSolve(input, &c, s, gc)
-				applyApertures(s, apertures[template[ci].ID])
-				cfgs = append(cfgs, c)
-				features = append(features, types.ConfigFeatures{
-					ID:            template[ci].ID,
-					ElementPowers: powers,
-				})
-			}
-		}
-		minima[i] = types.EscapeMinimum{
-			Index:     i,
-			Merit:     p.Merit,
-			Configs:   cfgs,
-			Variables: buildMultiVarStates(input.Optimization, p.X),
-			Features:  features,
-		}
-		if saveBase != "" {
-			minima[i].File = fmt.Sprintf("%s%d%s", saveStem, res.MinimaIdx[i], saveExt)
+	// The streamed records already carry the feasible minima; the one-shot
+	// output builds them here, in merit order (buildMinimum is shared, so both
+	// forms produce identical entries).
+	var minima []types.EscapeMinimum
+	if st == nil {
+		minima = make([]types.EscapeMinimum, len(res.Minima))
+		for i, p := range res.Minima {
+			minima[i] = buildMinimum(i, res.MinimaIdx[i], p)
 		}
 	}
 
 	// Build infeasible basins list.
 	infeasibleMinima := make([]types.EscapeMinimum, len(res.InfeasibleBasins))
 	for i, p := range res.InfeasibleBasins {
-		configSurfaces := applyEscapeMulti(template, input.Optimization, p.X)
-		apertures := finalAperturesAt(factory, p.X)
-		var cfgs []types.Config
-		var features []types.ConfigFeatures
-		for ci := range template {
-			if s, ok := configSurfaces[template[ci].ID]; ok {
-				c := template[ci]
-				c.Surfaces = s
-				powers := paraxial.ElementPowers(s, paraxial.DLine, gc)
-				applySavedBackFocusSolve(input, &c, s, gc)
-				applyApertures(s, apertures[template[ci].ID])
-				cfgs = append(cfgs, c)
-				features = append(features, types.ConfigFeatures{
-					ID:            template[ci].ID,
-					ElementPowers: powers,
-				})
-			}
-		}
-		infeasibleMinima[i] = types.EscapeMinimum{
-			Index:         i,
-			Merit:         p.Merit,
-			Status:        types.EscapeMinimumStatus(statusString(p.Status)),
-			InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
-			Configs:       cfgs,
-			Variables:     buildMultiVarStates(input.Optimization, p.X),
-			Features:      features,
-		}
+		infeasibleMinima[i] = buildInfeasible(i, p)
 	}
 
 	// Apply the best solution to the top-level configs.
@@ -1025,6 +1129,27 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		infeasibleMinima = nil
 	}
 
+	// Streamed run: the feasible minima are already in the document, so only
+	// the run outcome, the improved points and the deferred top-level keys
+	// remain to be written — configs carry the best solution and must be
+	// written after it has been applied, not before the search started.
+	if st != nil {
+		reportEscape(res, progress)
+		st.complete(streamCompletion{
+			BestIndex:          bestStreamIndex(res, st),
+			BestMerit:          res.BestMerit,
+			TimedOut:           res.TimedOut,
+			Interrupted:        res.Interrupted,
+			InfeasibleBasins:   infeasibleMinima,
+			MinimaImprovements: st.improvements(res, buildMinimum),
+		}, streamTailKeys(input, st))
+		if err := st.Err(); err != nil {
+			progress.Event("error", map[string]any{"message": err.Error()})
+			errOut("Error writing streamed escape output: %v", err)
+		}
+		return
+	}
+
 	escapeResult := assembleEscapeResult(res, minima, infeasibleMinima)
 	reportEscape(res, progress)
 	writeEscapeOutput(input, escapeResult, command)
@@ -1035,23 +1160,9 @@ func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum, infea
 	return &types.EscapeResult{
 		BestIndex: res.BestIdx,
 		BestMerit: res.BestMerit,
-		Params: types.EscapeParamsInfo{
-			HInitial:                     res.Params.H,
-			WInitial:                     res.Params.W,
-			HMult:                        res.Params.HMult,
-			WMult:                        res.Params.WMult,
-			DistanceThreshold:            res.Params.Dt,
-			FingerprintDistanceThreshold: res.Params.DtFp,
-			MaxCycles:                    res.Cycles,
-			EscapeWorkers:                res.Workers,
-			MaxSeconds:                   res.MaxSeconds,
-			EscapeIterFrac:               res.Params.EscapeIterFrac,
-			WSpan:                        res.Params.WSpan,
-			StallWindowFrac:              res.Params.StallWindowFrac,
-			StallRelTol:                  res.Params.StallRelTol,
-			StallEarlyStop:               boolPtr(res.Params.StallEarlyStop),
-			InitialPerturb:               res.Params.InitialPerturb,
-		},
+		// Shared with the streaming header (escape.ReportParams): the params
+		// block is identical whether it is written before or after the run.
+		Params:           escape.ParamsInfo(res.Params, res.MaxSeconds, res.Workers, res.Cycles),
 		TimedOut:         res.TimedOut,
 		Interrupted:      res.Interrupted,
 		Minima:           minima,
@@ -1475,6 +1586,32 @@ func writeEscapeOutput(input types.Input, escResult *types.EscapeResult, command
 	writeYAML(&output)
 }
 
+// effectiveEscapeMinima returns escape_result.minima with the improved entries
+// applied: a streamed document keeps its first-discovery values in minima (the
+// list is written append-only) and carries each replacement in
+// minima_improvements, whose Index is the position it supersedes. Readers that
+// want the solutions as the run ended with them — `list escape` and
+// `escape extract` — go through here. A document without improvements (every
+// one-shot output, and every streamed run in which no point was replaced) is
+// returned unchanged.
+func effectiveEscapeMinima(esc *types.EscapeResult) []types.EscapeMinimum {
+	if esc == nil || len(esc.MinimaImprovements) == 0 {
+		var minima []types.EscapeMinimum
+		if esc != nil {
+			minima = esc.Minima
+		}
+		return minima
+	}
+	out := make([]types.EscapeMinimum, len(esc.Minima))
+	copy(out, esc.Minima)
+	for _, imp := range esc.MinimaImprovements {
+		if imp.Index >= 0 && imp.Index < len(out) {
+			out[imp.Index] = imp
+		}
+	}
+	return out
+}
+
 // runEscapeExtract pulls one local minimum out of a previous escape/PSO output
 // and emits a clean lens YAML with that minimum as the top-level solution. The
 // command name is stamped into metadata.tool.command.
@@ -1488,7 +1625,10 @@ func runEscapeExtract(data []byte, index int, command string) {
 		errOut("Error: index %d out of range (minima count: %d)", index, len(output.EscapeResult.Minima))
 		os.Exit(1)
 	}
-	min := output.EscapeResult.Minima[index]
+	// A streamed document keeps its first-discovery values in minima (the list
+	// is append-only) and carries the replacements in minima_improvements, so
+	// extract must take the improved entry to agree with best_merit.
+	min := effectiveEscapeMinima(output.EscapeResult)[index]
 
 	if len(min.Configs) > 0 {
 		for i := range output.Configs {
@@ -1515,15 +1655,6 @@ func runEscapeExtract(data []byte, index int, command string) {
 
 	withOutputMetadata(&output.Input, command, subcmdArgs())
 	writeYAML(&output)
-}
-
-// boolPtr returns a pointer to b (nil when b is false), so the escape config
-// can distinguish "explicitly off" from "defaulted on" in the output report.
-func boolPtr(b bool) *bool {
-	if !b {
-		return nil
-	}
-	return &b
 }
 
 // parseEscapeExtractFlags parses `--index N` for the extract subcommand.

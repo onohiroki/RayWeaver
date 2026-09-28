@@ -141,12 +141,14 @@ func main() {
 			fs.BoolVar(&optEscapeGlassVariables, "glass-variables", false, "auto-generate nd/vd optimization variables for every refractive lens element (the merit is left unchanged)")
 			fs.BoolVar(&optEscapeKeepInfeasible, "keep-infeasible", false, "include infeasible basins in stdout YAML (default: discard)")
 			fs.BoolVar(&optEscapeDebug, "debug", false, "emit all DLS-internal JSONL events (iter, final, adaptive_damping, mode_change) plus enriched cycle diagnostics")
+			fs.StringVar(&optEscapeStream, "stream", "", "stream the pipeline document to stdout as the run progresses: true (default) or false for the one-shot write after the run")
 			fs.StringVar(&optEscapeCPUProfile, "cpuprofile", "", "write a CPU profile (pprof) to FILE")
 			fs.StringVar(&optEscapeMemProfile, "memprofile", "", "write a heap profile (pprof) to FILE at exit")
 			fs.StringVar(&optEscapeGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
 			fs.IntVar(&optEscapeGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
 			fs.StringVar(&optEscapeMemLimit, "mem-limit", "", "cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1 (unlimited); default optimization.mem_limit_mb")
 			fs.Parse(args[1:])
+			optEscapeStreamSet = flagWasSet(fs, "stream")
 		}
 	}
 
@@ -182,6 +184,7 @@ func main() {
 			fs.StringVar(&optPSOPowerSolveSurfaces, "power-solve-surfaces", "", "comma-separated surface IDs for the power-preserving solve")
 			fs.BoolVar(&optPSOGlassVariables, "glass-variables", false, "auto-generate nd/vd optimization variables for every refractive lens element")
 			fs.BoolVar(&optPSOKeepInfeasible, "keep-infeasible", false, "include infeasible basins in stdout YAML (default: discard)")
+			fs.StringVar(&optPSOStream, "stream", "", "stream the pipeline document to stdout as the run progresses: true (default) or false for the one-shot write after the run")
 			fs.IntVar(&optPSOSwarmSize, "swarm-size", 0, "number of particles per worker (overrides optimization.pso.swarm_size)")
 			fs.IntVar(&optPSOIterations, "pso-iterations", 0, "PSO iterations per cycle (overrides optimization.pso.pso_iterations)")
 			fs.Float64Var(&optPSOConstraintPenalty, "constraint-penalty", 0, "constraint penalty weight (overrides optimization.pso.constraint_penalty)")
@@ -191,6 +194,7 @@ func main() {
 			fs.IntVar(&optPSOGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
 			fs.StringVar(&optPSOMemLimit, "mem-limit", "", "cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1 (unlimited); default optimization.mem_limit_mb")
 			fs.Parse(args[1:])
+			optPSOStreamSet = flagWasSet(fs, "stream")
 		}
 	}
 
@@ -332,6 +336,19 @@ func applyGCPercent(gogc int) {
 var (
 	optEscapeMemLimit string
 	optPSOMemLimit    string
+)
+
+// --stream (escape/pso) takes an explicit true/false value — the flag package's
+// built-in bool flags only accept the `--stream=false` spelling, and the
+// documented form is `--stream false` — so the raw string travels here with
+// its "was it given?" state: an unset flag must not override the input YAML
+// (see escapeStreamEnabled). escape and pso parse their own flag sets; only
+// one of the pairs is ever set per run.
+var (
+	optEscapeStream    string
+	optEscapeStreamSet bool
+	optPSOStream       string
+	optPSOStreamSet    bool
 )
 
 // applyMemLimit applies the Go soft memory limit (runtime/debug.SetMemoryLimit)
@@ -808,7 +825,7 @@ immediately (exit 1).
  `)
 	case "escape":
 		fmt.Print(`Usage: rayweave escape [--verbose] [--log FILE] [--save FILE]
-                     [--keep-infeasible] [--power-solve]
+                     [--keep-infeasible] [--stream BOOL] [--power-solve]
                      [--power-solve-surfaces SURFACES]
                      [--glass-variables] [--glass-dir DIR] < input.yaml
        rayweave escape extract --index N < escape-output.yaml
@@ -836,6 +853,12 @@ Options:
                    atomic, so a killed process never loses already-found minima.
   --keep-infeasible include infeasible basins in stdout YAML and --save files
                    (default: feasible minima only)
+  --stream BOOL     stream the pipeline document to stdout as the run progresses
+                   (default on): the settled top-level part is written first,
+                   then one escape_result.minima entry per discovered solution,
+                   so a run killed mid-way still leaves a readable document.
+                   --stream=false (or optimization.escape.stream: false)
+                   restores the one-shot write performed after the run.
   --power-solve    insert the power-preserving glass phase between each escape
                    and clean DLS (holds element powers fixed while the glasses
                    are rebalanced)
@@ -914,7 +937,7 @@ every discovered local minimum with its full surfaces.
  `)
 	case "pso":
 		fmt.Print(`Usage: rayweave pso [--verbose] [--log FILE] [--save FILE]
-                     [--keep-infeasible] [--power-solve]
+                     [--keep-infeasible] [--stream BOOL] [--power-solve]
                      [--power-solve-surfaces SURFACES]
                      [--glass-variables] [--glass-dir DIR]
                      [--swarm-size N] [--pso-iterations N]
@@ -931,6 +954,7 @@ Options:
   --log FILE       write the full JSONL progress stream to FILE
   --save FILE      save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...
   --keep-infeasible include infeasible basins in stdout YAML (default: discard)
+  --stream BOOL     stream the pipeline document to stdout as the run progresses (default on); --stream=false restores the one-shot write after the run
   --power-solve    insert the power-preserving glass phase between each PSO and clean DLS
   --power-solve-surfaces SURFACES
                    comma-separated surface IDs for the power-preserving solve

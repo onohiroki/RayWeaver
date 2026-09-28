@@ -7,7 +7,7 @@ minimum, pushing the next DLS run out of the valley to discover other local
 minima.
 
 ```
-rayweave escape [--verbose] [--log FILE] [--save FILE] [--glass-dir DIR] < input.yaml
+rayweave escape [--verbose] [--log FILE] [--save FILE] [--stream BOOL] [--glass-dir DIR] < input.yaml
 rayweave escape extract --index N < escape-output.yaml
 ```
 
@@ -16,6 +16,7 @@ rayweave escape extract --index N < escape-output.yaml
 | Flag | Description |
 |---|---|
 | `--glass-dir DIR` | AGF glass catalog directory |
+| `--stream BOOL` | stream the pipeline document to stdout as the run progresses: `true` (default) or `false` for the one-shot write performed after the run (see [Streaming output](#streaming-output)) |
 | `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `escaped`, `recorded`, `best_merit`, `cycles`, `escapes`, `minima`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves) |
 | `--log FILE` | write the **full** JSONL progress stream to `FILE` (same fields as before — full-precision floats, RFC3339 `time`, `elapsed` seconds, `status`/`signal`/`timed_out`/`interrupted` included — with keys in the same fixed order followed by the remaining keys alphabetically) |
 | `--save FILE` | save every discovered local minimum to `FILE0.yaml`, `FILE1.yaml`, … (see [Saving minima](#saving-minima)) |
@@ -29,7 +30,9 @@ rayweave escape extract --index N < escape-output.yaml
 (CLI/YAML rule); `--save` records the per-minimum files in
 `escape_result.minima[].file`; `--verbose` / `--log` are run-stream flags;
 `--power-solve` / `--power-solve-surfaces` echo the effective
-`power_solve` config into the output.
+`power_solve` config into the output; `--stream` is written back as
+`optimization.escape.stream` **only when the flag is given**, so an unset flag
+never overrides the input YAML.
 
 DLS-internal events are never emitted during escape: the per-iteration `iter`,
 per-solve `final`, `adaptive_damping` and `mode_change` records that
@@ -40,7 +43,10 @@ of the options). The progress stream is the single output channel — each
 Sub-commands:
 
 - `escape` (default) — run the global optimization loop
-- `escape extract --index N` — extract local minimum N as a clean lens YAML
+- `escape extract --index N` — extract local minimum N as a clean lens YAML.
+  `N` is a position in the document's `minima` list, and the improved entry for
+  that position (`minima_improvements`, when present) is applied, so the
+  extracted lens is that minimum's final version
 
 ## Input YAML — `optimization.escape`
 
@@ -72,6 +78,7 @@ optimization:
     stall_rel_tol: 1e-4     # stalled-early-stop relative merit threshold
     stall_early_stop: true  # stalled-early-stop in the escape phase (clean phase never stalls)
     initial_perturb: 0.05   # normalised amplitude spreading parallel workers' start points
+    stream: true            # append the pipeline document to stdout as the run progresses
 ```
 
 ### Escape parameters
@@ -135,6 +142,10 @@ workers drift toward different basins. `initial_perturb` (default 0.05, in the
 normalised variable space) seeds the paralllel workers at slightly different
 start points. With the default `initial_perturb` all workers converge toward the
 same basin, so this is usually the first knob to raise.
+
+`stream` (default `true`) selects how the pipeline document reaches stdout:
+incrementally while the run progresses, or in one write after it (see
+[Streaming output](#streaming-output)). `--stream true|false` overrides it.
 
 ### Power-preserving glass phase
 
@@ -305,8 +316,9 @@ three escalating stages, and the first two still complete normally
 1. **First signal** — graceful stop. The signal is reported (a human line on
    stderr plus a JSONL `interrupt` event in the `--verbose`/`--log` stream), the
    shared context is cancelled, workers finish the current DLS run and stop at
-   the next cycle boundary, every discovered minimum is saved, the stdout YAML
-   is still written with `interrupted: true`, and the process exits 0.
+   the next cycle boundary, every discovered minimum is saved, the completion is
+   appended to the streaming stdout document with `interrupted: true` (or the
+   one-shot YAML is written when streaming is off), and the process exits 0.
 2. **Second signal** — mid-DLS stop. A JSONL `interrupt_dls` event is emitted
    and the running DLS solve is aborted within one iteration (at the iteration
    top, after the pupil update, inside the line search, and between Jacobian
@@ -315,7 +327,11 @@ three escalating stages, and the first two still complete normally
 3. **Third signal** — force quit with exit 1.
 
 Because every minimum is written atomically as it is found, even a hard kill
-never loses already-discovered minima.
+never loses already-discovered minima. With streaming on (the default) the
+stdout document itself is also written as the run progresses, so a hard kill
+leaves a truncated — but still readable — document holding every minimum found
+so far (see [Streaming output](#streaming-output)); the completion block
+(`best_index`, `best_merit`, `configs`, …) is the part a force-quit run loses.
 
 ### Saving minima
 
@@ -390,8 +406,6 @@ discovered local minimum with its full surfaces and variable values:
 escape_result:
   best_index: 0
   best_merit: ...
-  timed_out: false              # true if the search was cut short by max_seconds
-  interrupted: false            # true if a SIGINT/SIGTERM stopped the search
   params:
     h_initial: ...
     w_initial: ...
@@ -407,6 +421,8 @@ escape_result:
     stall_rel_tol: ...
     stall_early_stop: ...
     initial_perturb: ...
+  timed_out: false              # true if the search was cut short by max_seconds
+  interrupted: false            # true if a SIGINT/SIGTERM stopped the search
   minima:
     - index: 0
       merit: ...
@@ -424,6 +440,13 @@ escape_result:
       invalid_reason: insufficient_field_throughput
       surfaces: [...]
       variables: [...]
+  minima_improvements:          # only present when a minimum was improved (default: absent)
+    - index: 0
+      merit: ...                # the better merit a repeat visit achieved
+      file: result0.yaml
+      features: [...]
+      surfaces: [...]
+      variables: [...]
 ```
 
 `features` is a compact fingerprint of each minimum for comparing minima
@@ -434,8 +457,92 @@ element in air; mirrors are single-surface elements with power `-2n/R`). A
 single-config run has exactly one entry. `merit` stays at the minimum level as
 the objective scalar; other feature values can be added per config later.
 
+`minima` holds one entry per discovered solution and each `index` is the
+entry's position in that list. The list order depends on how the document was
+written — a streamed document keeps **discovery order**, a one-shot document is
+sorted **by merit** (see [Streaming output](#streaming-output)) — and
+`best_index` is always a position in the document's own list, so
+`minima[best_index]` — after applying the improvement for that index, if any —
+carries `best_merit`. That is exactly what
+`escape extract --index $(query -r escape_result.best_index)` relies on.
+
+`minima_improvements` carries the final version of every minimum whose point was
+replaced during the run (a repeat visit that reached a better merit,
+`Store.Replace`): each entry's `index` is the position in `minima` it supersedes,
+and the whole entry (`merit`, `surfaces`, `variables`, `features`, `file`) is the
+replacement, not a delta — take `minima[i]` unless an improvement names `i`.
+`list escape` applies these substitutions for you (and then ranks the rows by
+effective merit); a raw `query` on `escape_result.minima[]` does not, so it shows
+the first-discovery values of a streamed document.
+
 A concise summary is printed to stderr (never stdout, so the YAML pipeline
 stays intact).
+
+## Streaming output
+
+The pipeline document is written to stdout **as the run progresses** instead of
+being assembled at the end, so a run killed mid-flight — the third signal,
+`kill -9`, an OOM kill, a lost shell — leaves a file holding every minimum found
+so far rather than an empty one. Streaming is on by default; `--stream false` or
+`optimization.escape.stream: false` restores the previous one-shot write.
+
+The result is still **one YAML document** with no `---` separator, and every
+write is a whole block, so the file parses after any write boundary:
+
+```sh
+rayweave escape < lens.yaml > out.yaml           # written incrementally
+rayweave escape --stream false < lens.yaml > out.yaml   # one-shot, as before
+```
+
+### Write sequence
+
+| # | When | Content |
+|---|---|---|
+| 1 | run start | header: every input key **except** those the run still computes — `configs` always (the best solution lands there), `chief` when a `pupil_model_*` variable rewrites `chief.pupil_model` — plus the literal `escape_result:` with its `params` block (resolved before the search starts) and the `minima:` list opener |
+| 2 | each discovered minimum | one `minima` entry, appended under the store lock (infeasible points are never streamed, so they appear only with the completion) |
+| 3 | run end | the `escape_result` completion: `best_index`, `best_merit`, `timed_out` / `interrupted` when true, `infeasible_basins` with `--keep-infeasible`, and `minima_improvements` |
+| 4 | run end | the deferred top-level keys: `configs` (best solution applied, back-focus solved, apertures sized) and `chief`, when it was deferred |
+
+### Key order
+
+The values are the same as the one-shot document's; only two orders change,
+because a YAML key may be defined once and a stream can only be appended to:
+
+- **top level** — the deferred keys come last: `metadata, glass_catalog,
+  optimization, chief, escape_result, configs` instead of `metadata,
+  glass_catalog, configs, optimization, chief, escape_result`.
+- **`escape_result`** — written in write order: `params`, `minima`, then
+  `best_index`, `best_merit`, the outcome flags, `infeasible_basins` and
+  `minima_improvements`.
+
+Compare two documents by value, not by layout (`yq -o=json … | jq -S` does it),
+and never by line numbers.
+
+### `minima` order and `best_index`
+
+A streamed document's `minima` is **discovery-ordered** (the list is
+append-only), so each entry's `index` — and `best_index` — is a position in that
+list. The one-shot document writes `minima` **sorted by merit**, which makes its
+`best_index` the first entry whenever any minimum exists. In both cases
+`best_index` addresses the document's own list, so
+`escape extract --index <best_index>` yields the best solution either way.
+
+Because the append-only list keeps the first-discovery values, a minimum that a
+repeat visit improved appears there with its old merit; the final value lives in
+`minima_improvements` at the position it supersedes. `list escape` merges the
+two before ranking; a raw `query` on `escape_result.minima[]` does not.
+
+### Reading a document mid-run
+
+`list escape`, `query` and `escape extract` work on a half-finished document —
+it already carries `metadata`, `optimization`, `chief`, `escape_result` and
+`minima`. Targets that need `configs` (`list surfaces`, `list paraxial`, the
+merit tables) and the tracing commands (`trace`, `plot`, `psf`, …) do not, until
+the completion writes it. A force-quit run also loses the completion block, so
+`best_index` / `best_merit` / `configs` may be absent from a killed document.
+
+`--stream` is echoed back as `optimization.escape.stream` only when the flag is
+actually given, so an unset flag never overrides the input YAML.
 
 ## Examples
 
