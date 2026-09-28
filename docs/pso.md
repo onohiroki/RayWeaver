@@ -32,6 +32,18 @@ rayweave pso extract --index N < pso-output.yaml
 `--swarm-size` / `--pso-iterations` / `--constraint-penalty` are PSO-specific
 flags that override their YAML counterparts.
 
+The JSONL progress stream is readable with `rayweave list escape`, which detects
+it automatically and adds the per-worker completion table:
+
+```sh
+rayweave pso --log run.jsonl < lens.yaml > out.yaml
+rayweave list escape < run.jsonl
+```
+
+See [escape.md](escape.md#reading-a-run-log) for what a run log can and cannot
+show, and [list.md §11](list.md#11-escape-section--escapepso-global-search-results)
+for the full output shape.
+
 ## Input YAML — `optimization.pso`
 
 ```yaml

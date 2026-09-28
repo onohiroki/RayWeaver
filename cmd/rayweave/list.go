@@ -350,6 +350,70 @@ type EscapeMinimumRow struct {
 	ElementPowers [][]float64 `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
 }
 
+// escapeRunInfo is the run-level aggregate recovered from an escape/pso JSONL
+// run log (the `escape_complete` / `done` events). It is absent for a pipeline
+// document, which carries no record of how the run progressed.
+type escapeRunInfo struct {
+	Workers int     `json:"workers,omitempty" yaml:"workers,omitempty"`
+	Cycles  int     `json:"cycles,omitempty" yaml:"cycles,omitempty"`
+	Escapes int     `json:"escapes,omitempty" yaml:"escapes,omitempty"`
+	Minima  int     `json:"minima_count,omitempty" yaml:"minima_count,omitempty"`
+	Elapsed float64 `json:"elapsed_s,omitempty" yaml:"elapsed_s,omitempty"`
+}
+
+// EscapeWorkerRow is one worker's lifecycle summary for `list escape`. It is
+// recovered only from an escape/pso JSONL run log: Status is the completion
+// state (completed / timeout / interrupted / retired), Cycles the number of
+// cycles the worker reached before finishing, Escaped/Recorded its escape and
+// minimum-recording counts, BestMerit the best merit it reached, Elapsed the
+// seconds from run start to its completion event, and Reason the
+// resource-guard retirement reason.
+type EscapeWorkerRow struct {
+	Worker    int      `json:"worker" yaml:"worker"`
+	Status    string   `json:"status" yaml:"status"`
+	Cycles    int      `json:"cycles,omitempty" yaml:"cycles,omitempty"`
+	Escaped   int      `json:"escaped,omitempty" yaml:"escaped,omitempty"`
+	Recorded  int      `json:"recorded,omitempty" yaml:"recorded,omitempty"`
+	BestMerit *float64 `json:"best_merit,omitempty" yaml:"best_merit,omitempty"`
+	Elapsed   float64  `json:"elapsed_s,omitempty" yaml:"elapsed_s,omitempty"`
+	Reason    string   `json:"reason,omitempty" yaml:"reason,omitempty"`
+}
+
+// EscapeEventRow is one run-level event of an escape/pso run log (only
+// recovered from a run log, since a pipeline document does not record how the
+// run progressed). Event is the JSONL event name; Detail summarises it — the
+// OS signal for the `interrupt` / `interrupt_dls` stages, the memory-limit
+// action for `memory_limit`, the retired worker for `worker_retire`, the
+// measured resource state for `resource`, and the message for `error`;
+// Elapsed is the seconds from run start.
+type EscapeEventRow struct {
+	Event   string   `json:"event" yaml:"event"`
+	Detail  string   `json:"detail,omitempty" yaml:"detail,omitempty"`
+	Elapsed *float64 `json:"elapsed_s,omitempty" yaml:"elapsed_s,omitempty"`
+}
+
+// escapeListData is the render input of `list escape`, shared by the pipeline
+// (YAML) reader and the escape/pso JSONL run-log reader so both render through
+// one code path. Run, Workers and Events are only populated from a run log;
+// Found is false when the input carried no escape result at all.
+type escapeListData struct {
+	Found bool
+	// FromLog marks data recovered from an escape/pso JSONL run log. Such a
+	// log carries no --save file names and no element powers, so the File
+	// column of the minima table is dropped for it.
+	FromLog     bool
+	Params      []propRow
+	Minima      []EscapeMinimumRow
+	BestIndex   int
+	BestMerit   float64
+	FileDir     string
+	TimedOut    bool
+	Interrupted bool
+	Run         *escapeRunInfo
+	Workers     []EscapeWorkerRow
+	Events      []EscapeEventRow
+}
+
 // escapeListOutput is the structured (yaml/json) shape of `list escape`.
 type escapeListOutput struct {
 	Params      []propRow          `json:"params,omitempty" yaml:"params,omitempty"`
@@ -359,6 +423,9 @@ type escapeListOutput struct {
 	FileDir     string             `json:"file_directory,omitempty" yaml:"file_directory,omitempty"`
 	TimedOut    bool               `json:"timed_out,omitempty" yaml:"timed_out,omitempty"`
 	Interrupted bool               `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
+	Run         *escapeRunInfo     `json:"run,omitempty" yaml:"run,omitempty"`
+	Workers     []EscapeWorkerRow  `json:"workers,omitempty" yaml:"workers,omitempty"`
+	Events      []EscapeEventRow   `json:"events,omitempty" yaml:"events,omitempty"`
 }
 
 // runList implements the `list` subcommand: a read-only, human-readable
@@ -387,6 +454,14 @@ func runList(data []byte) {
 	default:
 		errOut("Error: unknown --format %q (supported: table, yaml, json, csv)", *format)
 		os.Exit(1)
+	}
+
+	// An escape/pso JSONL run log is detected before any YAML parsing: it
+	// carries no system definition, so only the escape target can be served
+	// from it (a bare `list < run.jsonl` therefore lists the escape run).
+	if looksLikeEscapeJSONL(data) {
+		runListEscapeLog(data, args.positional, *format)
+		return
 	}
 
 	// defaultListTargets is the target set of the bare `list` invocation; the
@@ -2715,23 +2790,20 @@ func escapeParamsSettings(p *types.EscapeParamsInfo) []propRow {
 }
 
 // listEscape renders the escape-function global optimisation results from
-// output.escape_result: parameters, the list of local minima (index, merit,
-// file basename) and per-minimum element powers.
+// output.escape_result (the pipeline document produced by escape/pso).
 func listEscape(output types.Output, format string) {
+	renderEscapeList(escapeDataFromOutput(output), format)
+}
+
+// escapeDataFromOutput flattens output.escape_result into the shared
+// escapeListData render input: the effective escape parameters, the file
+// directory shared by all minima, and one row per local minimum (merit-sorted
+// rank index, status, --save file basename and per-config element powers).
+func escapeDataFromOutput(output types.Output) escapeListData {
 	esc := output.EscapeResult
 	if esc == nil {
-		switch format {
-		case "yaml":
-			os.Stdout.Write([]byte("params: []\n"))
-		case "json":
-			fmt.Println(`{"params":[]}`)
-		default:
-			fmt.Println("Escape: (no escape result)")
-		}
-		return
+		return escapeListData{}
 	}
-
-	params := escapeParamsSettings(&esc.Params)
 
 	// Determine common file directory (only when all minima share one).
 	fileDir := ""
@@ -2773,16 +2845,98 @@ func listEscape(output types.Output, format string) {
 		})
 	}
 
+	return escapeListData{
+		Found:       true,
+		Params:      escapeParamsSettings(&esc.Params),
+		Minima:      minima,
+		BestIndex:   esc.BestIndex,
+		BestMerit:   esc.BestMerit,
+		FileDir:     fileDir,
+		TimedOut:    esc.TimedOut,
+		Interrupted: esc.Interrupted,
+	}
+}
+
+// escapeRunSettings flattens a run-log aggregate into key-value rows.
+func escapeRunSettings(r *escapeRunInfo) []propRow {
+	var rows []propRow
+	rows = appendIntProp(rows, "Workers", r.Workers)
+	rows = appendIntProp(rows, "Cycles", r.Cycles)
+	rows = appendIntProp(rows, "Escapes", r.Escapes)
+	rows = appendIntProp(rows, "Minima", r.Minima)
+	rows = appendNumProp(rows, "Run Elapsed", r.Elapsed)
+	return rows
+}
+
+// escapeWorkerStatus maps a worker's completion flags onto its display state.
+// The precedence follows how the escape loop stops a worker: an explicit
+// resource-guard retirement outranks an interrupt, which outranks the wall
+// clock budget; anything else finished its cycles normally.
+func escapeWorkerStatus(w *escapeLogWorker) string {
+	switch {
+	case w.retired:
+		return "retired"
+	case w.interrupted:
+		return "interrupted"
+	case w.timedOut:
+		return "timeout"
+	}
+	return "completed"
+}
+
+// workerRow converts the accumulated log record into a display row.
+func workerRow(w *escapeLogWorker) EscapeWorkerRow {
+	row := EscapeWorkerRow{
+		Worker:   w.id,
+		Status:   escapeWorkerStatus(w),
+		Cycles:   w.maxCycle + 1,
+		Escaped:  w.escaped,
+		Recorded: w.recorded,
+		Elapsed:  w.elapsed,
+		Reason:   w.reason,
+	}
+	if w.maxCycle < 0 {
+		row.Cycles = 0
+	}
+	if w.hasBest {
+		m := w.best
+		row.BestMerit = &m
+	}
+	return row
+}
+
+// renderEscapeList prints the escape listing in the requested format. The
+// input is source-agnostic: escapeDataFromOutput fills it from a pipeline
+// document, buildEscapeListDataFromLog from an escape/pso JSONL run log.
+func renderEscapeList(d escapeListData, format string) {
+	if !d.Found {
+		switch format {
+		case "yaml":
+			os.Stdout.Write([]byte("params: []\n"))
+		case "json":
+			fmt.Println(`{"params":[]}`)
+		default:
+			fmt.Println("Escape: (no escape result)")
+		}
+		return
+	}
+
+	params := d.Params
+	minima := d.Minima
+
 	switch format {
 	case "yaml":
 		outData, err := yaml.Marshal(escapeListOutput{
 			Params:      params,
 			Minima:      minima,
-			BestIndex:   esc.BestIndex,
-			BestMerit:   esc.BestMerit,
-			FileDir:     fileDir,
-			TimedOut:    esc.TimedOut,
-			Interrupted: esc.Interrupted,
+			BestIndex:   d.BestIndex,
+			BestMerit:   d.BestMerit,
+			FileDir:     d.FileDir,
+			TimedOut:    d.TimedOut,
+			Interrupted: d.Interrupted,
+			Run:         d.Run,
+			Workers:     d.Workers,
+			Events:      d.Events,
 		})
 		if err != nil {
 			errOut("Error marshaling list output: %v", err)
@@ -2793,11 +2947,14 @@ func listEscape(output types.Output, format string) {
 		outData, err := json.MarshalIndent(escapeListOutput{
 			Params:      params,
 			Minima:      minima,
-			BestIndex:   esc.BestIndex,
-			BestMerit:   esc.BestMerit,
-			FileDir:     fileDir,
-			TimedOut:    esc.TimedOut,
-			Interrupted: esc.Interrupted,
+			BestIndex:   d.BestIndex,
+			BestMerit:   d.BestMerit,
+			FileDir:     d.FileDir,
+			TimedOut:    d.TimedOut,
+			Interrupted: d.Interrupted,
+			Run:         d.Run,
+			Workers:     d.Workers,
+			Events:      d.Events,
 		}, "", "  ")
 		if err != nil {
 			errOut("Error marshaling list output: %v", err)
@@ -2807,16 +2964,27 @@ func listEscape(output types.Output, format string) {
 		fmt.Println()
 	case "csv":
 		printPropsSection("Escape Parameters:", params)
+		if d.Run != nil {
+			fmt.Println()
+			printPropsSection("Escape Run:", escapeRunSettings(d.Run))
+		}
 		if len(minima) > 0 {
 			fmt.Println("Local Minima:")
-			fmt.Println("index,merit,status,file")
+			header := []string{"index", "merit", "status"}
+			if !d.FromLog {
+				header = append(header, "file")
+			}
+			fmt.Println(strings.Join(quoteCSV(header), ","))
 			for _, m := range minima {
-				fmt.Println(strings.Join(quoteCSV([]string{
+				cells := []string{
 					strconv.Itoa(m.Index),
 					strconv.FormatFloat(m.Merit, 'g', -1, 64),
 					m.Status,
-					m.File,
-				}), ","))
+				}
+				if !d.FromLog {
+					cells = append(cells, m.File)
+				}
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
 			}
 		}
 		if hasAnyElementPowers(minima) {
@@ -2844,24 +3012,54 @@ func listEscape(output types.Output, format string) {
 				}
 			}
 		}
+		if len(d.Workers) > 0 {
+			fmt.Println()
+			fmt.Println("Workers:")
+			fmt.Println("worker,status,cycles,escaped,recorded,best_merit,elapsed_s,reason")
+			for _, w := range d.Workers {
+				cells := []string{
+					strconv.Itoa(w.Worker),
+					w.Status,
+					strconv.Itoa(w.Cycles),
+					strconv.Itoa(w.Escaped),
+					strconv.Itoa(w.Recorded),
+					optionalFloatCSV(w.BestMerit),
+					optionalFloatCSV(&w.Elapsed),
+					w.Reason,
+				}
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
+		}
+		if len(d.Events) > 0 {
+			fmt.Println()
+			fmt.Println("Log Events:")
+			fmt.Println("event,detail,elapsed_s")
+			for _, e := range d.Events {
+				cells := []string{e.Event, e.Detail, optionalFloatCSV(e.Elapsed)}
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
+		}
 	default: // "table"
 		// Build escape result props.
 		var resultProps []propRow
-		resultProps = appendIntProp(resultProps, "Best Index", esc.BestIndex)
-		resultProps = appendNumProp(resultProps, "Best Merit", esc.BestMerit)
-		if fileDir != "" {
-			resultProps = appendStrProp(resultProps, "File Directory", fileDir)
+		resultProps = appendIntProp(resultProps, "Best Index", d.BestIndex)
+		resultProps = appendNumProp(resultProps, "Best Merit", d.BestMerit)
+		if d.FileDir != "" {
+			resultProps = appendStrProp(resultProps, "File Directory", d.FileDir)
 		}
-		if esc.TimedOut {
-			resultProps = appendBoolTrueProp(resultProps, "Timed Out", esc.TimedOut)
+		if d.TimedOut {
+			resultProps = appendBoolTrueProp(resultProps, "Timed Out", d.TimedOut)
 		}
-		if esc.Interrupted {
-			resultProps = appendBoolTrueProp(resultProps, "Interrupted", esc.Interrupted)
+		if d.Interrupted {
+			resultProps = appendBoolTrueProp(resultProps, "Interrupted", d.Interrupted)
 		}
 
 		printPropsSection("Escape Parameters:", params)
 		if len(resultProps) > 0 {
 			printPropsSection("Escape Result:", resultProps)
+		}
+		if d.Run != nil {
+			printPropsSection("Escape Run:", escapeRunSettings(d.Run))
 		}
 
 		if len(minima) > 0 {
@@ -2870,13 +3068,17 @@ func listEscape(output types.Output, format string) {
 				{header: "Index", right: true},
 				{header: "Merit", right: true},
 				{header: "Status"},
-				{header: "File"},
+			}
+			if !d.FromLog {
+				cols = append(cols, tableColumn{header: "File"})
 			}
 			for _, m := range minima {
 				cols[0].cells = append(cols[0].cells, strconv.Itoa(m.Index))
 				cols[1].cells = append(cols[1].cells, formatTableFloat(m.Merit))
 				cols[2].cells = append(cols[2].cells, m.Status)
-				cols[3].cells = append(cols[3].cells, m.File)
+				if !d.FromLog {
+					cols[3].cells = append(cols[3].cells, m.File)
+				}
 			}
 			fmt.Print(renderTable(cols))
 			fmt.Println()
@@ -2910,7 +3112,72 @@ func listEscape(output types.Output, format string) {
 			fmt.Print(renderTable(numCols))
 			fmt.Println()
 		}
+
+		if len(d.Workers) > 0 {
+			fmt.Println("Workers:")
+			cols := []tableColumn{
+				{header: "Worker", right: true},
+				{header: "Status"},
+				{header: "Cycles", right: true},
+				{header: "Escaped", right: true},
+				{header: "Recorded", right: true},
+				{header: "Best Merit", right: true},
+				{header: "Elapsed[s]", right: true},
+			}
+			if hasAnyWorkerReason(d.Workers) {
+				cols = append(cols, tableColumn{header: "Reason"})
+			}
+			for _, w := range d.Workers {
+				cols[0].cells = append(cols[0].cells, strconv.Itoa(w.Worker))
+				cols[1].cells = append(cols[1].cells, w.Status)
+				cols[2].cells = append(cols[2].cells, strconv.Itoa(w.Cycles))
+				cols[3].cells = append(cols[3].cells, strconv.Itoa(w.Escaped))
+				cols[4].cells = append(cols[4].cells, strconv.Itoa(w.Recorded))
+				cols[5].cells = append(cols[5].cells, formatOptionalFloat(w.BestMerit))
+				cols[6].cells = append(cols[6].cells, formatTableFloat(w.Elapsed))
+				if hasAnyWorkerReason(d.Workers) {
+					cell := w.Reason
+					if cell == "" {
+						cell = "-"
+					}
+					cols[7].cells = append(cols[7].cells, cell)
+				}
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
+		}
+
+		if len(d.Events) > 0 {
+			fmt.Println("Log Events:")
+			cols := []tableColumn{
+				{header: "Event"},
+				{header: "Detail"},
+				{header: "Elapsed[s]", right: true},
+			}
+			for _, e := range d.Events {
+				detail := e.Detail
+				if detail == "" {
+					detail = "-"
+				}
+				cols[0].cells = append(cols[0].cells, e.Event)
+				cols[1].cells = append(cols[1].cells, detail)
+				cols[2].cells = append(cols[2].cells, formatOptionalFloat(e.Elapsed))
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
+		}
 	}
+}
+
+// hasAnyWorkerReason reports whether any worker carries a retirement reason
+// (the Reason column is dropped when none do).
+func hasAnyWorkerReason(workers []EscapeWorkerRow) bool {
+	for _, w := range workers {
+		if w.Reason != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // fileBase returns the basename of a file path, or "-" when empty.

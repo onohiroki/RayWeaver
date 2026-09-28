@@ -455,6 +455,45 @@ rayweave escape extract --index 1 < escape-result.yaml \
 # List the discovered minima
 rayweave query --each 'escape_result.minima[]:index,merit' \
   --printf '  [%d] merit=%.6e' < escape-result.yaml
+
+# List the same results from the JSONL run log (auto-detected), which also
+# reports when each worker finished and why
+rayweave escape --log run.jsonl < samples/escape-demo.yaml > escape-result.yaml
+rayweave list escape < run.jsonl
+```
+
+## Reading a run log
+
+`--log FILE` and the `--verbose` stream are JSON Lines, and `rayweave list escape`
+reads them directly: piping the log back in reproduces the same listing as the
+pipeline document (escape parameters, run aggregate, local minima) and adds a
+per-worker completion table (state, cycles, escapes, recordings, best merit,
+elapsed time, retirement reason). The format detection is automatic, so no flag
+is needed:
+
+```sh
+rayweave escape --verbose --log run.jsonl < lens.yaml > out.yaml
+rayweave list escape < run.jsonl            # table
+rayweave list escape --format csv < run.jsonl
+rayweave query --jsonl --where 'event=="minimum"' -r merit < run.jsonl   # raw events
+```
+
+A run log records what happened, not the design, so the per-minimum `--save`
+file names and the element powers are not recoverable from it — use the pipeline
+document (`out.yaml`) or the saved `FILE<n>.yaml` for those. The compact
+`--verbose` stream also drops every field outside the fixed key order
+(`min_status`, `retired`, `timed_out`, `interrupted`, `reason`, and the
+`Log Events` details such as `signal` and `message`), so a full `--log` file is
+needed to classify the minima, the workers and the events. See
+[list.md §11](list.md#11-escape-section--escapepso-global-search-results).
+
+The `Log Events` section of `list escape` is the quickest way to see why a run
+ended — every signal the process received and which stage it stopped at:
+
+```sh
+rayweave escape --log run.jsonl < lens.yaml > out.yaml &
+sleep 300; kill -TERM %1
+rayweave list escape < run.jsonl        # Log Events: interrupt | terminated
 ```
 
 The sample script `samples/escape-demo.bash` runs the same pipeline end to end:

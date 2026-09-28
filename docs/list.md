@@ -73,7 +73,7 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
 | `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, comparison_wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
 | `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables/variable links, `merit_schedule`, and the sub-configs (`escape`, `glass_hull`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
-| `escape` | Escape-function global optimisation results (requires `escape` output). Shows escape parameters, discovered local minima, per-minimum element powers, and the best solution. |
+| `escape` | Escape-function global optimisation results. Reads either the `escape_result` section of an `escape`/`pso` pipeline document or, detected automatically, an escape/pso JSONL run log (`--log FILE` / a captured `--verbose` stream), showing escape parameters, the run aggregate, discovered local minima, per-minimum element powers (pipeline document only) and the per-worker completion list (run log only). See [§11](#11-escape-section--escapepso-global-search-results). |
 | `focus` | Image-plane comparison results from the `focus_comparison` section (requires `focus mtf` / `focus psf` output). Auto-detects the MTF/PSF sub-section and renders the per-(field, wavelength) × plane table. |
 
 Default (no target arguments): `surfaces glasses paraxial fields`. The
@@ -95,6 +95,7 @@ rayweave list default < lens.yaml             # same as the bare invocation
 rayweave list default merit < lens.yaml       # default targets, then merit
 rayweave list all < lens.yaml                 # all targets, implies --auto-aperture --all-glasses --roles
 rayweave list optimization < lens.yaml        # optimizer configuration
+rayweave list escape < run.jsonl              # escape/pso run log (auto-detected)
 rayweave chief | rayweave trace | rayweave list rays
 rayweave optimize < lens.yaml | rayweave list merit         # + optimization result
 rayweave optimize < lens.yaml | rayweave list optimization  # + optimization result
@@ -674,7 +675,223 @@ under `focus_comparison`; the `json` output uses the same key names as the YAML
 
 ---
 
-## 11. Output formats
+## 11. Escape section — escape/pso global-search results
+
+The `escape` target renders the results of a previous `escape` / `pso` run. It
+accepts **two kinds of input, detected automatically**:
+
+- a **pipeline document** — the `escape_result` section written to stdout by
+  `escape` / `pso` (the usual `rayweave escape … | rayweave list escape` pipe);
+- an **escape/pso JSONL run log** — the file written by `escape --log FILE` /
+  `pso --log FILE`, or the `--verbose` stream captured from stderr.
+
+A run log is recognised when every non-empty line is a JSON object and at least
+one carries one of the event names the search emits (`params`, `start`, `cycle`,
+`minimum`, `worker_done`, `worker_retired`, `timeout`, `interrupt`,
+`interrupt_dls`, `done`, `escape_complete`, the `pso_*` events, …). A pipeline
+document and an `optimize --log` stream never match.
+
+```sh
+rayweave escape --log run.jsonl --save minima < lens.yaml > out.yaml
+rayweave list escape < out.yaml        # pipeline document
+rayweave list escape < run.jsonl       # run log
+rayweave list < run.jsonl              # a bare list defaults to the escape target
+```
+
+A run log carries no system definition, so `escape` is the only target it can
+serve; any other target is rejected with an error.
+
+### Pipeline document
+
+Shows the effective escape parameters, the best solution, the local minima
+(merit-sorted rank, status, `--save` file basename, file directory when all
+minima share one) and the per-minimum element powers:
+
+```
+Escape Parameters:
+Property                 Value
+Max Cycles                   2
+Escape Workers              2
+Distance Threshold  0.150000
+H Initial           0.500000
+...
+
+Escape Result:
+Property           Value
+Best Merit  2.6688e-04
+File Directory  /tmp/esc
+
+Local Minima:
+Index       Merit  Status  File
+    0  2.6688e-04          minima0.yaml
+    1    0.025995          minima1.yaml
+
+Element Powers:
+Index  Config  Element 1  Element 2  Element 3
+    0       0  0.059673  -0.115466   0.083749
+```
+
+### Run log
+
+The progress stream records what happened, not the design, so the log listing
+reproduces the same sections from the data it does carry and adds three that
+only exist in a log: the run aggregate, the per-worker completion list and the
+run-level event log.
+
+```
+Escape Parameters:
+Property               Value
+Max Cycles                 2
+Escape Workers             2
+Distance Threshold  0.150000
+H Initial           0.500000
+W Initial           0.400000
+H Mult              2.000000
+W Mult              1.300000
+
+Escape Result:
+Property         Value
+Best Merit  2.6688e-04
+
+Escape Run:
+Property        Value
+Workers             2
+Cycles             2
+Escapes            4
+Minima              2
+Run Elapsed  0.971095
+
+Local Minima:
+Index       Merit  Status
+    0  2.6688e-04  feasible_local_minimum
+    1    0.025995  feasible_local_minimum
+
+Workers:
+Worker  Status     Cycles  Escaped  Recorded  Best Merit  Elapsed[s]
+     0  completed       2        2         2           -  0.797353
+     1  completed       2        2         1           -  0.947846
+```
+
+What is recovered from a run log:
+
+| Section | Source events |
+|---|---|
+| Escape Parameters: Max Cycles / Escape Workers / Max Seconds | `start` |
+| Escape Parameters: Distance Threshold / H, W Initial / H, W Mult | `params` |
+| Escape Result: Best Merit | best (lowest-merit) `minimum` event, or `escape_complete.best_merit` |
+| Escape Result: Timed Out / Interrupted | `escape_complete`/`done`, else the `timeout` / `interrupt` events |
+| Escape Run | `escape_complete` / `done` (absent when the log was truncated before them) |
+| Local Minima | `minimum` events, aggregated per discovery index and re-ranked by merit; infeasible basins and evaluation failures are dropped, matching `escape_result.minima` |
+| Workers | `worker_done`, `worker_retired`, `timeout`, `interrupted`, `cycle` |
+| Log Events | `interrupt`, `interrupt_dls`, `force_quit`, `memory_limit`, `worker_retire`, `resource`, `error` |
+
+Workers columns: the completion state (`completed`, `timeout`, `interrupted`,
+`retired` — a retirement outranks an interrupt, which outranks the time budget),
+the number of cycles the worker reached, its escape and minimum-recording
+counts, the best merit it reached, the seconds from run start to its completion
+event, and the resource-guard retirement reason. The `Best Merit` and `Reason`
+columns are omitted when no worker has them.
+
+### Log Events
+
+`Log Events` lists the run-level events of the log in the order they were
+recorded, with the seconds from run start. It is the section that explains *how*
+a run ended:
+
+```
+Log Events:
+Event          Detail                                          Elapsed[s]
+interrupt      terminated                                        3.003952
+interrupt_dls  terminated                                       12.410337
+memory_limit   tighten heap_pressure 2048→1536 MB                 60.412639
+worker_retire  worker 2 reason=heap_ceiling cycle=3              23.212378
+error          save minima0.yaml: write failed, no space left    12.523104
+force_quit     -                                               135.000000
+```
+
+| Event | Detail |
+|---|---|
+| `interrupt` / `interrupt_dls` | the OS signal (`interrupt`, `terminated`) — the first and second `SIGINT`/`SIGTERM` stages |
+| `force_quit` | — (the third signal, an immediate exit 1) |
+| `memory_limit` | the memory-limit action, its reason and the move, e.g. `tighten heap_pressure 2048→1536 MB` |
+| `worker_retire` | the resource guard's decision: `worker N reason=… cycle=M` |
+| `resource` | a periodic resource sample: `heap=… MB pressure=… compaction=…/s` |
+| `error` | the error message |
+
+The section is omitted when the log recorded none of these events, so a
+completed run without a resource guard and a pipeline document both leave it
+out. `resource` samples are periodic, so a guarded run can list many rows; use
+`rayweave query --jsonl` for the raw metrics of a specific event.
+
+### Structured output
+
+`--format yaml` / `--format json` use the same shape as the pipeline document,
+with `run`, `workers` and `events` added and the log-only fields omitted:
+
+```yaml
+params:
+    - name: Max Cycles
+      value: "2"
+    ...
+minima:
+    - index: 0
+      merit: 0.00026687664351083754
+      status: feasible_local_minimum
+best_index: 0
+best_merit: 0.00026687664351083754
+run:
+    workers: 2
+    cycles: 2
+    escapes: 4
+    minima_count: 2
+    elapsed_s: 0.971095125
+workers:
+    - worker: 0
+      status: completed
+      cycles: 2
+      escaped: 2
+      recorded: 2
+      elapsed_s: 0.797353125
+events:
+    - event: interrupt
+      detail: terminated
+      elapsed_s: 3.003952
+    - event: memory_limit
+      detail: tighten heap_pressure 2048→1536 MB
+      elapsed_s: 60.412639
+```
+
+`--format csv` adds an `Escape Run:` block, a `Workers:` block
+(`worker,status,cycles,escaped,recorded,best_merit,elapsed_s,reason`) and a
+`Log Events:` block (`event,detail,elapsed_s`); for a run log the `Local Minima`
+header drops its `file` column.
+
+### What a run log cannot show
+
+The progress stream carries no design data, so these are unavailable and the
+corresponding columns/sections are simply absent — this is a property of the
+log, not a failure to read it:
+
+- the per-minimum `--save` file names (the `File` column) and the file
+  directory;
+- the per-minimum **element powers** (the `Element Powers` section) — use the
+  pipeline document or the saved `FILE<n>.yaml` for those;
+- the escape tuning parameters outside the `params` event (`escape_iter_frac`,
+  `w_span`, `stall_*`, `initial_perturb`, `fingerprint_distance_threshold`, the
+  variable weights), which are shown for a pipeline document and skipped here.
+
+The compact `--verbose` stream additionally drops every field outside the fixed
+key order, so `min_status`, `retired`, `timed_out`, `interrupted` and `reason`
+are only recoverable from a full `--log` file — and the same applies to the
+`Log Events` details (`signal`, `message`, the guard reasons and the resource
+metrics), leaving only the event names. Without them the listing degrades
+gracefully: minima are shown as classified feasible, and every worker as
+`completed`. The compact clock `e` (`HH:MM`) is still used for the elapsed
+column, at minute resolution.
+
+---
+
+## 12. Output formats
 
 ### Table (default)
 
@@ -751,7 +968,7 @@ rayweave list --format json < lens.yaml
 
 ---
 
-## 12. Examples
+## 13. Examples
 
 ```sh
 # Full listing (surfaces + glasses + paraxial + fields)
@@ -799,6 +1016,13 @@ rayweave optimize < lens.yaml | rayweave list merit
 
 # Optimizer configuration (solver, variables, sub-configs)
 rayweave list optimization < lens.yaml
+
+# Escape/pso results from the pipeline document
+rayweave escape --save minima < lens.yaml | rayweave list escape
+
+# Escape/pso results reconstructed from the JSONL run log (adds the worker list)
+rayweave escape --log run.jsonl < lens.yaml > out.yaml
+rayweave list escape < run.jsonl
 
 # Focus plane comparison results (MTF/PSF, from focus mtf/focus psf)
 rayweave focus psf --planes all,best < lens.yaml | rayweave list focus

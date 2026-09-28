@@ -1571,11 +1571,23 @@ and implies --auto-aperture, --all-glasses, and --roles):
              config constraints, else inherited from optimization.constraints).
               When piped from optimize, also shows the optimization result
               (status, iterations, active mode, metric value).
-  escape     escape-function global optimisation results (requires escape
-             output). Shows escape parameters (h_initial, w_initial,
-             max_cycles, etc.), the list of discovered local minima (index,
-             merit, file), per-minimum element powers, and the best solution.
-             File directory is shown when all minima share the same path.
+  escape     escape-function global optimisation results. Reads either the
+             escape_result section of an escape/pso pipeline document or, when
+             the input is detected to be an escape/pso JSONL run log (a --log
+             file or a captured --verbose stream), the equivalent information
+             reconstructed from the log: escape parameters, the run aggregate
+             (workers, cycles, escapes, minima, run elapsed), the local minima
+             (merit-sorted rank and classification), and a worker table with
+             each worker's completion state (completed / timeout / interrupted /
+             retired), cycles reached, escape and recording counts, best merit,
+             elapsed time and retirement reason. It also lists the run-level
+             log events (Log Events): the signals the process received with the
+             stage they stopped at (interrupt / interrupt_dls / force_quit), the
+             resource-guard actions and samples, and errors. From a pipeline
+             document the per-minimum file names and element powers are shown as
+             well (file directory when all minima share the same path); a run log
+             carries no design data, and a compact --verbose log omits the
+             classification fields.
   focus      image-plane comparison results from focus_comparison (requires
              focus mtf / focus psf / focus spot output). Auto-detects the mtf,
              psf, spot or through_focus sub-section and renders the per-(field,
@@ -1642,6 +1654,8 @@ Examples:
   rayweave list surfaces glasses < lens.yaml
   rayweave list paraxial < lens.yaml
   rayweave list paraxial --roles < lens.yaml
+  rayweave escape --log run.jsonl < lens.yaml > out.yaml
+  rayweave list escape < run.jsonl
   rayweave trace single --origin 0,5,-100 --angle-yz 5 < lens.yaml | rayweave list rays
   rayweave chief | rayweave trace | rayweave list rays --summary
   rayweave focus psf --planes all,best < lens.yaml | rayweave list focus
