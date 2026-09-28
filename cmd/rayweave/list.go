@@ -341,11 +341,13 @@ type optimizationListOutput struct {
 	OptResult       *OptimizationResultSummary `json:"opt_result,omitempty" yaml:"opt_result,omitempty"`
 }
 
-// EscapeMinimumRow is one local minimum for `list escape`.
+// EscapeMinimumRow is one local minimum for `list escape`. Reason carries the
+// invalid reason of an infeasible basin (the feasible list never has one).
 type EscapeMinimumRow struct {
 	Index         int         `json:"index" yaml:"index"`
 	Merit         float64     `json:"merit" yaml:"merit"`
 	Status        string      `json:"status,omitempty" yaml:"status,omitempty"`
+	Reason        string      `json:"reason,omitempty" yaml:"reason,omitempty"`
 	File          string      `json:"file,omitempty" yaml:"file,omitempty"`
 	ElementPowers [][]float64 `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
 }
@@ -394,38 +396,41 @@ type EscapeEventRow struct {
 
 // escapeListData is the render input of `list escape`, shared by the pipeline
 // (YAML) reader and the escape/pso JSONL run-log reader so both render through
-// one code path. Run, Workers and Events are only populated from a run log;
-// Found is false when the input carried no escape result at all.
+// one code path. Run, Workers, Events and the file names of InfeasibleBasins
+// are only populated from a run log; Found is false when the input carried no
+// escape result at all.
 type escapeListData struct {
 	Found bool
 	// FromLog marks data recovered from an escape/pso JSONL run log. Such a
-	// log carries no --save file names and no element powers, so the File
-	// column of the minima table is dropped for it.
-	FromLog     bool
-	Params      []propRow
-	Minima      []EscapeMinimumRow
-	BestIndex   int
-	BestMerit   float64
-	FileDir     string
-	TimedOut    bool
-	Interrupted bool
-	Run         *escapeRunInfo
-	Workers     []EscapeWorkerRow
-	Events      []EscapeEventRow
+	// log may carry no --save file names, in which case the File column of the
+	// minima tables is dropped for it.
+	FromLog          bool
+	Params           []propRow
+	Minima           []EscapeMinimumRow
+	InfeasibleBasins []EscapeMinimumRow
+	BestIndex        int
+	BestMerit        float64
+	FileDir          string
+	TimedOut         bool
+	Interrupted      bool
+	Run              *escapeRunInfo
+	Workers          []EscapeWorkerRow
+	Events           []EscapeEventRow
 }
 
 // escapeListOutput is the structured (yaml/json) shape of `list escape`.
 type escapeListOutput struct {
-	Params      []propRow          `json:"params,omitempty" yaml:"params,omitempty"`
-	Minima      []EscapeMinimumRow `json:"minima,omitempty" yaml:"minima,omitempty"`
-	BestIndex   int                `json:"best_index" yaml:"best_index"`
-	BestMerit   float64            `json:"best_merit" yaml:"best_merit"`
-	FileDir     string             `json:"file_directory,omitempty" yaml:"file_directory,omitempty"`
-	TimedOut    bool               `json:"timed_out,omitempty" yaml:"timed_out,omitempty"`
-	Interrupted bool               `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
-	Run         *escapeRunInfo     `json:"run,omitempty" yaml:"run,omitempty"`
-	Workers     []EscapeWorkerRow  `json:"workers,omitempty" yaml:"workers,omitempty"`
-	Events      []EscapeEventRow   `json:"events,omitempty" yaml:"events,omitempty"`
+	Params           []propRow          `json:"params,omitempty" yaml:"params,omitempty"`
+	Minima           []EscapeMinimumRow `json:"minima,omitempty" yaml:"minima,omitempty"`
+	InfeasibleBasins []EscapeMinimumRow `json:"infeasible_basins,omitempty" yaml:"infeasible_basins,omitempty"`
+	BestIndex        int                `json:"best_index" yaml:"best_index"`
+	BestMerit        float64            `json:"best_merit" yaml:"best_merit"`
+	FileDir          string             `json:"file_directory,omitempty" yaml:"file_directory,omitempty"`
+	TimedOut         bool               `json:"timed_out,omitempty" yaml:"timed_out,omitempty"`
+	Interrupted      bool               `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
+	Run              *escapeRunInfo     `json:"run,omitempty" yaml:"run,omitempty"`
+	Workers          []EscapeWorkerRow  `json:"workers,omitempty" yaml:"workers,omitempty"`
+	Events           []EscapeEventRow   `json:"events,omitempty" yaml:"events,omitempty"`
 }
 
 // runList implements the `list` subcommand: a read-only, human-readable
@@ -2805,30 +2810,10 @@ func escapeDataFromOutput(output types.Output) escapeListData {
 		return escapeListData{}
 	}
 
-	// Determine common file directory (only when all minima share one).
-	fileDir := ""
-	if len(esc.Minima) > 0 {
-		dir := ""
-		same := true
-		for i, m := range esc.Minima {
-			if m.File == "" {
-				continue
-			}
-			d := filepath.Dir(m.File)
-			if i == 0 || dir == "" {
-				dir = d
-			} else if d != dir {
-				same = false
-				break
-			}
-		}
-		if same && dir != "" {
-			fileDir = dir
-		}
-	}
-
-	// Build minima rows.
+	// Build minima rows. escape_result.minima lists the feasible solutions;
+	// infeasible basins are a separate list (only present with --keep-infeasible).
 	minima := make([]EscapeMinimumRow, 0, len(esc.Minima))
+	files := make([]string, 0, len(esc.Minima))
 	for _, m := range esc.Minima {
 		var powers [][]float64
 		for _, f := range m.Features {
@@ -2840,21 +2825,65 @@ func escapeDataFromOutput(output types.Output) escapeListData {
 			Index:         m.Index,
 			Merit:         m.Merit,
 			Status:        string(m.Status),
+			Reason:        string(m.InvalidReason),
 			File:          fileBase(m.File),
 			ElementPowers: powers,
 		})
+		if m.File != "" {
+			files = append(files, m.File)
+		}
+	}
+
+	var infeasible []EscapeMinimumRow
+	for _, m := range esc.InfeasibleBasins {
+		infeasible = append(infeasible, EscapeMinimumRow{
+			Index:  m.Index,
+			Merit:  m.Merit,
+			Status: string(m.Status),
+			Reason: string(m.InvalidReason),
+			File:   fileBase(m.File),
+		})
+		if m.File != "" {
+			files = append(files, m.File)
+		}
 	}
 
 	return escapeListData{
-		Found:       true,
-		Params:      escapeParamsSettings(&esc.Params),
-		Minima:      minima,
-		BestIndex:   esc.BestIndex,
-		BestMerit:   esc.BestMerit,
-		FileDir:     fileDir,
-		TimedOut:    esc.TimedOut,
-		Interrupted: esc.Interrupted,
+		Found:            true,
+		Params:           escapeParamsSettings(&esc.Params),
+		Minima:           minima,
+		InfeasibleBasins: infeasible,
+		BestIndex:        esc.BestIndex,
+		BestMerit:        esc.BestMerit,
+		FileDir:          commonFileDir(files),
+		TimedOut:         esc.TimedOut,
+		Interrupted:      esc.Interrupted,
 	}
+}
+
+// commonFileDir returns the directory shared by every non-empty path, or "" when
+// none is set, they disagree, or they all sit in the working directory (whose
+// reported "." carries no information).
+func commonFileDir(paths []string) string {
+	dir := ""
+	seen := false
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		d := filepath.Dir(p)
+		if d == "." {
+			d = ""
+		}
+		if !seen {
+			dir, seen = d, true
+			continue
+		}
+		if d != dir {
+			return ""
+		}
+	}
+	return dir
 }
 
 // escapeRunSettings flattens a run-log aggregate into key-value rows.
@@ -2927,16 +2956,17 @@ func renderEscapeList(d escapeListData, format string) {
 	switch format {
 	case "yaml":
 		outData, err := yaml.Marshal(escapeListOutput{
-			Params:      params,
-			Minima:      minima,
-			BestIndex:   d.BestIndex,
-			BestMerit:   d.BestMerit,
-			FileDir:     d.FileDir,
-			TimedOut:    d.TimedOut,
-			Interrupted: d.Interrupted,
-			Run:         d.Run,
-			Workers:     d.Workers,
-			Events:      d.Events,
+			Params:           params,
+			Minima:           minima,
+			InfeasibleBasins: d.InfeasibleBasins,
+			BestIndex:        d.BestIndex,
+			BestMerit:        d.BestMerit,
+			FileDir:          d.FileDir,
+			TimedOut:         d.TimedOut,
+			Interrupted:      d.Interrupted,
+			Run:              d.Run,
+			Workers:          d.Workers,
+			Events:           d.Events,
 		})
 		if err != nil {
 			errOut("Error marshaling list output: %v", err)
@@ -2945,16 +2975,17 @@ func renderEscapeList(d escapeListData, format string) {
 		os.Stdout.Write(outData)
 	case "json":
 		outData, err := json.MarshalIndent(escapeListOutput{
-			Params:      params,
-			Minima:      minima,
-			BestIndex:   d.BestIndex,
-			BestMerit:   d.BestMerit,
-			FileDir:     d.FileDir,
-			TimedOut:    d.TimedOut,
-			Interrupted: d.Interrupted,
-			Run:         d.Run,
-			Workers:     d.Workers,
-			Events:      d.Events,
+			Params:           params,
+			Minima:           minima,
+			InfeasibleBasins: d.InfeasibleBasins,
+			BestIndex:        d.BestIndex,
+			BestMerit:        d.BestMerit,
+			FileDir:          d.FileDir,
+			TimedOut:         d.TimedOut,
+			Interrupted:      d.Interrupted,
+			Run:              d.Run,
+			Workers:          d.Workers,
+			Events:           d.Events,
 		}, "", "  ")
 		if err != nil {
 			errOut("Error marshaling list output: %v", err)
@@ -2971,7 +3002,8 @@ func renderEscapeList(d escapeListData, format string) {
 		if len(minima) > 0 {
 			fmt.Println("Local Minima:")
 			header := []string{"index", "merit", "status"}
-			if !d.FromLog {
+			showFile := escapeShowFileColumn(d, minima)
+			if showFile {
 				header = append(header, "file")
 			}
 			fmt.Println(strings.Join(quoteCSV(header), ","))
@@ -2981,9 +3013,31 @@ func renderEscapeList(d escapeListData, format string) {
 					strconv.FormatFloat(m.Merit, 'g', -1, 64),
 					m.Status,
 				}
-				if !d.FromLog {
+				if showFile {
 					cells = append(cells, m.File)
 				}
+				fmt.Println(strings.Join(quoteCSV(cells), ","))
+			}
+		}
+		if len(d.InfeasibleBasins) > 0 {
+			fmt.Println()
+			fmt.Println("Infeasible Basins:")
+			showFile := hasAnySavedFile(d.InfeasibleBasins)
+			header := []string{"index", "merit"}
+			if showFile {
+				header = append(header, "file")
+			}
+			header = append(header, "reason")
+			fmt.Println(strings.Join(quoteCSV(header), ","))
+			for _, m := range d.InfeasibleBasins {
+				cells := []string{
+					strconv.Itoa(m.Index),
+					strconv.FormatFloat(m.Merit, 'g', -1, 64),
+				}
+				if showFile {
+					cells = append(cells, m.File)
+				}
+				cells = append(cells, m.Reason)
 				fmt.Println(strings.Join(quoteCSV(cells), ","))
 			}
 		}
@@ -3064,21 +3118,51 @@ func renderEscapeList(d escapeListData, format string) {
 
 		if len(minima) > 0 {
 			fmt.Println("Local Minima:")
+			showFile := escapeShowFileColumn(d, minima)
 			cols := []tableColumn{
 				{header: "Index", right: true},
 				{header: "Merit", right: true},
 				{header: "Status"},
 			}
-			if !d.FromLog {
+			if showFile {
 				cols = append(cols, tableColumn{header: "File"})
 			}
 			for _, m := range minima {
 				cols[0].cells = append(cols[0].cells, strconv.Itoa(m.Index))
 				cols[1].cells = append(cols[1].cells, formatTableFloat(m.Merit))
 				cols[2].cells = append(cols[2].cells, m.Status)
-				if !d.FromLog {
+				if showFile {
 					cols[3].cells = append(cols[3].cells, m.File)
 				}
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
+		}
+
+		if len(d.InfeasibleBasins) > 0 {
+			fmt.Println("Infeasible Basins:")
+			showFile := hasAnySavedFile(d.InfeasibleBasins)
+			cols := []tableColumn{
+				{header: "Index", right: true},
+				{header: "Merit", right: true},
+			}
+			fileCol := len(cols)
+			if showFile {
+				cols = append(cols, tableColumn{header: "File"})
+			}
+			reasonCol := len(cols)
+			cols = append(cols, tableColumn{header: "Reason"})
+			for _, m := range d.InfeasibleBasins {
+				cols[0].cells = append(cols[0].cells, strconv.Itoa(m.Index))
+				cols[1].cells = append(cols[1].cells, formatTableFloat(m.Merit))
+				if showFile {
+					cols[fileCol].cells = append(cols[fileCol].cells, m.File)
+				}
+				reason := m.Reason
+				if reason == "" {
+					reason = "-"
+				}
+				cols[reasonCol].cells = append(cols[reasonCol].cells, reason)
 			}
 			fmt.Print(renderTable(cols))
 			fmt.Println()
@@ -3178,6 +3262,23 @@ func hasAnyWorkerReason(workers []EscapeWorkerRow) bool {
 		}
 	}
 	return false
+}
+
+// hasAnySavedFile reports whether any row recovered a --save file name.
+func hasAnySavedFile(rows []EscapeMinimumRow) bool {
+	for _, r := range rows {
+		if r.File != "" && r.File != "-" {
+			return true
+		}
+	}
+	return false
+}
+
+// escapeShowFileColumn reports whether the minima table carries a File column.
+// A pipeline document always shows it (a run without --save renders as "-");
+// a run log shows it only when its minimum_saved events yielded file names.
+func escapeShowFileColumn(d escapeListData, rows []EscapeMinimumRow) bool {
+	return !d.FromLog || hasAnySavedFile(rows)
 }
 
 // fileBase returns the basename of a file path, or "-" when empty.

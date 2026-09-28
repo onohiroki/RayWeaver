@@ -478,13 +478,17 @@ rayweave list escape --format csv < run.jsonl
 rayweave query --jsonl --where 'event=="minimum"' -r merit < run.jsonl   # raw events
 ```
 
-A run log records what happened, not the design, so the per-minimum `--save`
-file names and the element powers are not recoverable from it — use the pipeline
-document (`out.yaml`) or the saved `FILE<n>.yaml` for those. The compact
-`--verbose` stream also drops every field outside the fixed key order
-(`min_status`, `retired`, `timed_out`, `interrupted`, `reason`, and the
-`Log Events` details such as `signal` and `message`), so a full `--log` file is
-needed to classify the minima, the workers and the events. See
+A run log records what happened, not the design, so the per-minimum **element
+powers** are not recoverable from it — use the pipeline document (`out.yaml`) or
+the saved `FILE<n>.yaml` for those. Everything else is: the minima's `--save`
+file names come from the `minimum_saved` events (no filesystem lookup), the
+infeasible basins are always present in the log even when the document hides
+them, and the run log also lists the signals, guard actions and errors. The
+compact `--verbose` stream drops every field outside the fixed key order
+(`min_status`, `invalid_reason`, `retired`, `timed_out`, `interrupted`,
+`reason`, `file`, and the `Log Events` details such as `signal` and `message`),
+so a full `--log` file is needed to classify the minima, the basins and the
+events. See
 [list.md §11](list.md#11-escape-section--escapepso-global-search-results).
 
 The `Log Events` section of `list escape` is the quickest way to see why a run

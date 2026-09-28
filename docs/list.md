@@ -705,7 +705,8 @@ serve; any other target is rejected with an error.
 
 Shows the effective escape parameters, the best solution, the local minima
 (merit-sorted rank, status, `--save` file basename, file directory when all
-minima share one) and the per-minimum element powers:
+minima share one) and the per-minimum element powers. A document written with
+`--keep-infeasible` also lists its infeasible basins:
 
 ```
 Escape Parameters:
@@ -729,14 +730,19 @@ Index       Merit  Status  File
 Element Powers:
 Index  Config  Element 1  Element 2  Element 3
     0       0  0.059673  -0.115466   0.083749
+
+Infeasible Basins:
+Index     Merit  Reason
+    0   0.152937  insufficient_field_throughput
 ```
 
 ### Run log
 
 The progress stream records what happened, not the design, so the log listing
-reproduces the same sections from the data it does carry and adds three that
-only exist in a log: the run aggregate, the per-worker completion list and the
-run-level event log.
+reproduces the same sections from the data it does carry and adds four that
+only exist in a log: the run aggregate, the per-worker completion list, the
+infeasible basins (a document hides them unless `--keep-infeasible` was used,
+while the log always has them) and the run-level event log.
 
 ```
 Escape Parameters:
@@ -781,9 +787,52 @@ What is recovered from a run log:
 | Escape Result: Best Merit | best (lowest-merit) `minimum` event, or `escape_complete.best_merit` |
 | Escape Result: Timed Out / Interrupted | `escape_complete`/`done`, else the `timeout` / `interrupt` events |
 | Escape Run | `escape_complete` / `done` (absent when the log was truncated before them) |
-| Local Minima | `minimum` events, aggregated per discovery index and re-ranked by merit; infeasible basins and evaluation failures are dropped, matching `escape_result.minima` |
+| Local Minima | `minimum` events, aggregated per discovery index and re-ranked by merit; the feasible points only, matching `escape_result.minima` |
+| Infeasible Basins | the `minimum` events classified `infeasible_basin` (re-ranked by merit, with their `invalid_reason`), or the `escape_complete.infeasible` array |
+| File column / File Directory | `minimum_saved` events (`index` + `file`), present when the run used `--save` |
 | Workers | `worker_done`, `worker_retired`, `timeout`, `interrupted`, `cycle` |
 | Log Events | `interrupt`, `interrupt_dls`, `force_quit`, `memory_limit`, `worker_retire`, `resource`, `error` |
+
+### Infeasible basins
+
+A converged point that violates a constraint is an **infeasible basin**: a
+region of variable space where the design is broken, which the search still
+records (with an escape bump) but does not offer as a solution. It is a separate
+list, exactly as in the pipeline document, so a run that found only basins still
+reports what it discovered — and never promotes one of them to `Best Merit`:
+
+```
+Infeasible Basins:
+Index        Merit  File           Reason
+    0  1228.739842  v40-min6.yaml  glass_hull_violation
+    1   1.2680e+04  v40-min7.yaml  glass_hull_violation
+    2   3.4446e+04  v40-min4.yaml  glass_hull_violation
+    3   8.1347e+04  v40-min0.yaml  glass_hull_violation
+    4   1.4958e+05  v40-min5.yaml  glass_hull_violation
+    5   8.4393e+05  v40-min3.yaml  insufficient_field_throughput
+    6   2.4140e+06  v40-min2.yaml  glass_hull_violation
+    7   2.9022e+06  v40-min1.yaml  glass_hull_violation
+```
+
+A pipeline document lists them too when it was written with `--keep-infeasible`
+(`escape_result.infeasible_basins[]`). Note that the document records the saved
+file name of its **feasible** minima only, so on the document path the basins
+have no file column.
+
+### Recovered file names
+
+The `File` column is recovered from the log itself, not from looking at the
+filesystem: every `--save` write emits a `minimum_saved` event carrying the
+`index` (the discovery number of the minimum, the same one the `minimum` events
+use) and the `file` it wrote. The latest event for an index wins, so an improved
+minimum keeps its live `FILE N.yaml` (the archived `FILE N.<version>.yaml` is
+not reported).
+
+Two conditions: the run must have used `--save` (otherwise no `minimum_saved`
+event exists), and the stream must be a full `--log` — the compact `--verbose`
+stream drops `file`. When no file is recovered the column is omitted entirely.
+`File Directory` appears in the `Escape Result` section when every saved file
+sits in one real directory (a working-directory-relative name reports nothing).
 
 Workers columns: the completion state (`completed`, `timeout`, `interrupted`,
 `retired` — a retirement outranks an interrupt, which outranks the time budget),
@@ -837,6 +886,12 @@ minima:
     - index: 0
       merit: 0.00026687664351083754
       status: feasible_local_minimum
+      file: minima0.yaml
+infeasible_basins:
+    - index: 0
+      merit: 0.15293706031950147
+      status: infeasible_basin
+      reason: insufficient_field_throughput
 best_index: 0
 best_merit: 0.00026687664351083754
 run:
@@ -862,31 +917,33 @@ events:
 ```
 
 `--format csv` adds an `Escape Run:` block, a `Workers:` block
-(`worker,status,cycles,escaped,recorded,best_merit,elapsed_s,reason`) and a
-`Log Events:` block (`event,detail,elapsed_s`); for a run log the `Local Minima`
-header drops its `file` column.
+(`worker,status,cycles,escaped,recorded,best_merit,elapsed_s,reason`), an
+`Infeasible Basins:` block (`index,merit[,file],reason`) and a `Log Events:`
+block (`event,detail,elapsed_s`); for a run log the `Local Minima` header drops
+its `file` column when no file name was recovered.
 
 ### What a run log cannot show
 
-The progress stream carries no design data, so these are unavailable and the
+The progress stream records no design data, so these are unavailable and the
 corresponding columns/sections are simply absent — this is a property of the
 log, not a failure to read it:
 
-- the per-minimum `--save` file names (the `File` column) and the file
-  directory;
 - the per-minimum **element powers** (the `Element Powers` section) — use the
   pipeline document or the saved `FILE<n>.yaml` for those;
 - the escape tuning parameters outside the `params` event (`escape_iter_frac`,
   `w_span`, `stall_*`, `initial_perturb`, `fingerprint_distance_threshold`, the
-  variable weights), which are shown for a pipeline document and skipped here.
+  variable weights), which are shown for a pipeline document and skipped here;
+- the saved file names when the run used no `--save` (or came from a compact
+  stream — see [Recovered file names](#recovered-file-names)).
 
 The compact `--verbose` stream additionally drops every field outside the fixed
-key order, so `min_status`, `retired`, `timed_out`, `interrupted` and `reason`
-are only recoverable from a full `--log` file — and the same applies to the
-`Log Events` details (`signal`, `message`, the guard reasons and the resource
-metrics), leaving only the event names. Without them the listing degrades
-gracefully: minima are shown as classified feasible, and every worker as
-`completed`. The compact clock `e` (`HH:MM`) is still used for the elapsed
+key order, so `min_status`, `invalid_reason`, `retired`, `timed_out`,
+`interrupted` and `reason` are only recoverable from a full `--log` file — and
+the same applies to the `Log Events` details (`signal`, `message`, the guard
+reasons and the resource metrics), leaving only the event names. Without them
+the listing degrades gracefully: minima are shown as classified feasible (so
+basins land in `Local Minima` rather than `Infeasible Basins`), and every worker
+as `completed`. The compact clock `e` (`HH:MM`) is still used for the elapsed
 column, at minute resolution.
 
 ---

@@ -1583,11 +1583,14 @@ and implies --auto-aperture, --all-glasses, and --roles):
              elapsed time and retirement reason. It also lists the run-level
              log events (Log Events): the signals the process received with the
              stage they stopped at (interrupt / interrupt_dls / force_quit), the
-             resource-guard actions and samples, and errors. From a pipeline
-             document the per-minimum file names and element powers are shown as
-             well (file directory when all minima share the same path); a run log
-             carries no design data, and a compact --verbose log omits the
-             classification fields.
+             resource-guard actions and samples, and errors. Infeasible basins
+             are a separate list (a document shows them only with
+             --keep-infeasible; a run log always has them) and never count as
+             the best solution. From a pipeline document the per-minimum file
+             names and element powers are shown as well (file directory when all
+             minima share the same path); a run log recovers the file names
+             from its minimum_saved events, and a compact --verbose log omits
+             the classification fields.
   focus      image-plane comparison results from focus_comparison (requires
              focus mtf / focus psf / focus spot output). Auto-detects the mtf,
              psf, spot or through_focus sub-section and renders the per-(field,

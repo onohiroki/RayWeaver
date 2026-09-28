@@ -88,11 +88,14 @@ func looksLikeEscapeJSONL(data []byte) bool {
 // escapeLogMinimum is the aggregated record of one store entry, keyed in the
 // log by its discovery index (the `--save` FILE<n> number), not by the
 // merit-sorted rank used by escape_result.minima[]. order is the first-seen
-// order, the tiebreaker when two entries share a merit.
+// order, the tiebreaker when two entries share a merit. reason and file come
+// from the invalid_reason and (for a --save run) minimum_saved events.
 type escapeLogMinimum struct {
 	merit    float64
 	hasMerit bool
 	status   string
+	reason   string
+	file     string
 	order    int
 }
 
@@ -253,8 +256,14 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 	var completeBest float64
 	var haveCompleteBest bool
 	var completeMinima []EscapeMinimumRow
+	var completeInfeasible []EscapeMinimumRow
 
 	minima := map[int]*escapeLogMinimum{}
+	// savedFiles maps a store (discovery) index to the --save file last written
+	// for it. The saver reports it per record, so an improved minimum replaces
+	// its earlier name; the mapping is applied after the scan because the
+	// minimum_saved event precedes the matching minimum event.
+	savedFiles := map[int]string{}
 	workers := map[int]*escapeLogWorker{}
 	var minOrder int
 
@@ -338,7 +347,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 				d.Interrupted = true
 			}
 			run.Elapsed = elapsed
-			// escape_complete repeats the merit-sorted minima; it is the
+			// escape_complete repeats the merit-sorted minima; they are the
 			// fallback when the `minimum` events are absent (a log captured
 			// without them carries no classification).
 			if arr, ok := rec["minima"].([]any); ok {
@@ -351,11 +360,37 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 					completeMinima = append(completeMinima, EscapeMinimumRow{Index: i, Merit: merit})
 				}
 			}
+			if arr, ok := rec["infeasible"].([]any); ok {
+				for i, item := range arr {
+					m, ok := item.(map[string]any)
+					if !ok {
+						continue
+					}
+					merit, _ := asNum(m["merit"])
+					reason, _ := m["reason"].(string)
+					completeInfeasible = append(completeInfeasible, EscapeMinimumRow{
+						Index:  i,
+						Merit:  merit,
+						Status: string(types.StatusInfeasibleBasin),
+						Reason: reason,
+					})
+				}
+			}
+
+		case "minimum_saved":
+			// The saver reports the exact file it just wrote, keyed by the
+			// store index the minimum events use too.
+			idx, ok := asNum(rec["index"])
+			file, hasFile := rec["file"].(string)
+			if ok && hasFile && file != "" {
+				savedFiles[int(idx)] = file
+			}
 
 		case "minimum":
 			idx, _ := asNum(rec["index"])
 			merit, _ := asNum(rec["merit"])
 			status, _ := rec["min_status"].(string)
+			reason, _ := rec["invalid_reason"].(string)
 			key := int(idx)
 			m, ok := minima[key]
 			if !ok {
@@ -365,9 +400,9 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 			}
 			switch {
 			case !m.hasMerit || merit < m.merit:
-				m.merit, m.hasMerit, m.status = merit, true, status
+				m.merit, m.hasMerit, m.status, m.reason = merit, true, status, reason
 			case m.status == "":
-				m.status = status
+				m.status, m.reason = status, reason
 			}
 
 		case "cycle":
@@ -435,28 +470,56 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 		}
 	}
 
-	// Minima: merit-sorted rank, feasible points only (matching
-	// escape_result.minima, which lists solutions and hides infeasible basins).
-	var recs []*escapeLogMinimum
-	for _, m := range minima {
-		switch types.EscapeMinimumStatus(m.status) {
-		case types.StatusInfeasibleBasin, types.StatusEvaluationFailure:
+	// Split the discovered points the way the pipeline document does:
+	// escape_result.minima lists the feasible solutions, the infeasible basins
+	// are a separate list. Both are re-ranked by merit; the --save file a
+	// minimum_saved event reported travels with its point.
+	var feasible, infeasible []*escapeLogMinimum
+	var files []string
+	for key, m := range minima {
+		if file := savedFiles[key]; file != "" {
+			m.file = file
+			files = append(files, file)
+		}
+		if types.EscapeMinimumStatus(m.status) == types.StatusInfeasibleBasin {
+			infeasible = append(infeasible, m)
 			continue
 		}
-		recs = append(recs, m)
+		feasible = append(feasible, m)
 	}
-	sort.Slice(recs, func(i, j int) bool {
-		if recs[i].merit != recs[j].merit {
-			return recs[i].merit < recs[j].merit
+	byMerit := func(recs []*escapeLogMinimum) {
+		sort.Slice(recs, func(i, j int) bool {
+			if recs[i].merit != recs[j].merit {
+				return recs[i].merit < recs[j].merit
+			}
+			return recs[i].order < recs[j].order
+		})
+	}
+	byMerit(feasible)
+	byMerit(infeasible)
+
+	minimaRows := make([]EscapeMinimumRow, 0, len(feasible))
+	for i, m := range feasible {
+		rows := EscapeMinimumRow{Index: i, Merit: m.merit, Status: m.status}
+		if m.file != "" {
+			rows.File = fileBase(m.file)
 		}
-		return recs[i].order < recs[j].order
-	})
-	minimaRows := make([]EscapeMinimumRow, 0, len(recs))
-	for i, m := range recs {
-		minimaRows = append(minimaRows, EscapeMinimumRow{Index: i, Merit: m.merit, Status: m.status})
+		minimaRows = append(minimaRows, rows)
 	}
 	if len(minimaRows) == 0 {
 		minimaRows = completeMinima
+	}
+
+	infeasibleRows := make([]EscapeMinimumRow, 0, len(infeasible))
+	for i, m := range infeasible {
+		row := EscapeMinimumRow{Index: i, Merit: m.merit, Status: m.status, Reason: m.reason}
+		if m.file != "" {
+			row.File = fileBase(m.file)
+		}
+		infeasibleRows = append(infeasibleRows, row)
+	}
+	if len(infeasibleRows) == 0 {
+		infeasibleRows = completeInfeasible
 	}
 
 	// Workers: ascending worker id, so the table reads in launch order.
@@ -487,6 +550,8 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 	}
 	d.Params = escapeParamsSettings(&params)
 	d.Minima = minimaRows
+	d.InfeasibleBasins = infeasibleRows
+	d.FileDir = commonFileDir(files)
 	d.Workers = workerRows
 	return d
 }

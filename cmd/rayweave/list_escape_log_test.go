@@ -88,6 +88,243 @@ const escapeSignalLogFixture = `{"elapsed":0.2,"time":"2026-09-28T10:00:00Z","ev
 {"elapsed":14.0,"time":"2026-09-28T10:00:14Z","event":"force_quit"}
 `
 
+// escapeInfeasibleLogFixture is a full `--log` stream of a run stopped by one
+// signal that recorded only infeasible basins (`--save --keep-infeasible`, so
+// every basin has a saved file). Mirrors the shape that used to render an
+// empty listing: feasible solutions are kept separate from the basins.
+const escapeInfeasibleLogFixture = `{"elapsed":0.2,"time":"2026-09-28T10:00:00Z","event":"start","max_cycles":40,"workers":8,"max_seconds":28800}
+{"elapsed":875.1,"time":"2026-09-28T10:14:35Z","event":"minimum_saved","index":0,"file":"v40-min0.yaml","merit":81347.3,"new":true,"version":0}
+{"elapsed":875.1,"time":"2026-09-28T10:14:35Z","event":"minimum","cycle":0,"worker":7,"index":0,"kind":"new","merit":81347.3,"min_status":"infeasible_basin","invalid_reason":"glass_hull_violation"}
+{"elapsed":967.4,"time":"2026-09-28T10:16:07Z","event":"minimum_saved","index":1,"file":"v40-min1.yaml","merit":2413964.6,"new":true,"version":0}
+{"elapsed":967.4,"time":"2026-09-28T10:16:07Z","event":"minimum","cycle":0,"worker":6,"index":1,"kind":"new","merit":2413964.6,"min_status":"infeasible_basin","invalid_reason":"glass_hull_violation"}
+{"elapsed":1156.0,"time":"2026-09-28T10:19:16Z","event":"minimum_saved","index":2,"file":"v40-min2.yaml","merit":843930.6,"new":true,"version":0}
+{"elapsed":1156.0,"time":"2026-09-28T10:19:16Z","event":"minimum","cycle":0,"worker":4,"index":2,"kind":"new","merit":843930.6,"min_status":"infeasible_basin","invalid_reason":"insufficient_field_throughput"}
+{"elapsed":3908.4,"time":"2026-09-28T11:05:08Z","event":"interrupt","signal":"terminated"}
+`
+
+func TestListEscapeFromLogInfeasibleOnly(t *testing.T) {
+	out := runListEscapeLogCLI(t, escapeInfeasibleLogFixture, "--format", "json")
+	var doc struct {
+		BestMerit        float64 `json:"best_merit"`
+		FileDir          string  `json:"file_directory"`
+		Minima           []struct{}
+		InfeasibleBasins []struct {
+			Index  int     `json:"index"`
+			Merit  float64 `json:"merit"`
+			Status string  `json:"status"`
+			Reason string  `json:"reason"`
+			File   string  `json:"file"`
+		} `json:"infeasible_basins"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	// The whole run found no feasible solution: the listing must still report
+	// what it discovered, and must not claim a best merit.
+	if len(doc.Minima) != 0 {
+		t.Errorf("minima = %+v, want none", doc.Minima)
+	}
+	if doc.BestMerit != 0 {
+		t.Errorf("best_merit = %v, want 0 (no feasible minimum)", doc.BestMerit)
+	}
+	if len(doc.InfeasibleBasins) != 3 {
+		t.Fatalf("infeasible_basins = %d, want 3: %+v", len(doc.InfeasibleBasins), doc.InfeasibleBasins)
+	}
+	// Re-ranked by merit, so the saved discovery indices are permuted.
+	want := []struct {
+		merit  float64
+		reason string
+		file   string
+	}{
+		{81347.3, "glass_hull_violation", "v40-min0.yaml"},
+		{843930.6, "insufficient_field_throughput", "v40-min2.yaml"},
+		{2413964.6, "glass_hull_violation", "v40-min1.yaml"},
+	}
+	for i, w := range want {
+		got := doc.InfeasibleBasins[i]
+		if got.Index != i {
+			t.Errorf("basins[%d].index = %d, want %d", i, got.Index, i)
+		}
+		if got.Merit != w.merit {
+			t.Errorf("basins[%d].merit = %v, want %v", i, got.Merit, w.merit)
+		}
+		if got.Status != "infeasible_basin" {
+			t.Errorf("basins[%d].status = %q, want infeasible_basin", i, got.Status)
+		}
+		if got.Reason != w.reason {
+			t.Errorf("basins[%d].reason = %q, want %q", i, got.Reason, w.reason)
+		}
+		if got.File != w.file {
+			t.Errorf("basins[%d].file = %q, want %q (from minimum_saved)", i, got.File, w.file)
+		}
+	}
+	// Relative --save names share the working directory, which carries no
+	// information, so no File Directory is reported.
+	if doc.FileDir != "" {
+		t.Errorf("file_directory = %q, want empty", doc.FileDir)
+	}
+}
+
+func TestListEscapeFromLogInfeasibleTable(t *testing.T) {
+	out := runListEscapeLogCLI(t, escapeInfeasibleLogFixture)
+	text := string(out)
+	if strings.Contains(text, "Local Minima:") {
+		t.Errorf("no feasible minimum was found, so Local Minima must be absent:\n%s", text)
+	}
+	for _, want := range []string{
+		"Infeasible Basins:",
+		"Reason",
+		"File",
+		"v40-min0.yaml",
+		"glass_hull_violation",
+		"insufficient_field_throughput",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("table output missing %q:\n%s", want, text)
+		}
+	}
+	// Best Merit stays absent rather than reporting an infeasible point.
+	if strings.Contains(text, "Best Merit") {
+		t.Errorf("best merit must not be reported for an infeasible-only run:\n%s", text)
+	}
+
+	csvOut := runListEscapeLogCLI(t, escapeInfeasibleLogFixture, "--format", "csv")
+	csvText := string(csvOut)
+	if !strings.Contains(csvText, "Infeasible Basins:\nindex,merit,file,reason\n") {
+		t.Errorf("csv basins header wrong:\n%s", csvText)
+	}
+	if !strings.Contains(csvText, "0,81347.3,v40-min0.yaml,glass_hull_violation") {
+		t.Errorf("csv basin row wrong:\n%s", csvText)
+	}
+}
+
+// escapeMixedLogFixture mixes one feasible solution (improved once) with two
+// infeasible basins; only the feasible one is saved (--save without
+// --keep-infeasible), so the two lists disagree about file names.
+const escapeMixedLogFixture = `{"elapsed":0.2,"event":"start","max_cycles":10,"workers":2}
+{"elapsed":1.0,"event":"minimum_saved","index":0,"file":"/tmp/esc/minima0.yaml","merit":0.004,"new":true,"version":0}
+{"elapsed":1.0,"event":"minimum","cycle":0,"worker":0,"index":0,"kind":"new","merit":0.004,"min_status":"feasible_local_minimum"}
+{"elapsed":2.0,"event":"minimum","cycle":0,"worker":1,"index":1,"kind":"new","merit":0.05,"min_status":"infeasible_basin","invalid_reason":"aperture_clipping"}
+{"elapsed":3.0,"event":"minimum_saved","index":0,"file":"/tmp/esc/minima0.yaml","merit":0.001,"new":false,"version":1}
+{"elapsed":3.0,"event":"minimum","cycle":1,"worker":0,"index":0,"kind":"improved","merit":0.001,"min_status":"feasible_local_minimum"}
+{"elapsed":4.0,"event":"escape_complete","workers":2,"cycles":10,"escapes":2,"minima_count":1,"best_merit":0.001,"minima":[{"index":0,"merit":0.001,"best":true}]}
+`
+
+func TestListEscapeFromLogMixedFeasibleAndInfeasible(t *testing.T) {
+	out := runListEscapeLogCLI(t, escapeMixedLogFixture, "--format", "json")
+	var doc struct {
+		FileDir   string  `json:"file_directory"`
+		BestMerit float64 `json:"best_merit"`
+		Minima    []struct {
+			Index int     `json:"index"`
+			Merit float64 `json:"merit"`
+			File  string  `json:"file"`
+		} `json:"minima"`
+		InfeasibleBasins []struct {
+			Index  int     `json:"index"`
+			Merit  float64 `json:"merit"`
+			Reason string  `json:"reason"`
+			File   string  `json:"file"`
+		} `json:"infeasible_basins"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	// The improved merit replaces the first one; the file name survives.
+	if len(doc.Minima) != 1 || doc.Minima[0].Merit != 0.001 || doc.Minima[0].File != "minima0.yaml" {
+		t.Fatalf("minima = %+v, want one improved row keeping its file", doc.Minima)
+	}
+	if doc.BestMerit != 0.001 {
+		t.Errorf("best_merit = %v, want 0.001", doc.BestMerit)
+	}
+	// The basins were not saved (--save without --keep-infeasible), so they
+	// carry no file and the File column is dropped for that table.
+	if len(doc.InfeasibleBasins) != 1 {
+		t.Fatalf("infeasible_basins = %+v, want one", doc.InfeasibleBasins)
+	}
+	if doc.InfeasibleBasins[0].Reason != "aperture_clipping" {
+		t.Errorf("basins[0].reason = %q", doc.InfeasibleBasins[0].Reason)
+	}
+	if doc.InfeasibleBasins[0].File != "" {
+		t.Errorf("basins[0].file = %q, want empty (never written)", doc.InfeasibleBasins[0].File)
+	}
+	if doc.FileDir != "/tmp/esc" {
+		t.Errorf("file_directory = %q, want /tmp/esc", doc.FileDir)
+	}
+
+	text := string(runListEscapeLogCLI(t, escapeMixedLogFixture))
+	// The minima table gains a File column (recovered), the basins table does
+	// not (nothing saved for them).
+	if !strings.Contains(text, "Infeasible Basins:\nIndex     Merit  Reason") {
+		t.Errorf("basin table should not show a File column:\n%s", text)
+	}
+	if !strings.Contains(text, "0.001000  feasible_local_minimum  minima0.yaml") {
+		t.Errorf("minima table should show the recovered file:\n%s", text)
+	}
+}
+
+func TestListEscapeFromLogInfeasibleFallback(t *testing.T) {
+	// Without `minimum` events the escape_complete summary supplies both
+	// lists (the basins array carries index, merit and reason).
+	log := `{"elapsed":0.2,"event":"start","max_cycles":10,"workers":2}
+{"elapsed":9.0,"event":"escape_complete","workers":2,"cycles":10,"escapes":12,"minima_count":1,"best_merit":0.002,"minima":[{"index":0,"merit":0.002,"best":true}],"infeasible_basins":2,"infeasible":[{"index":0,"merit":9.5,"reason":"geometry_violation"},{"index":1,"merit":3.25,"reason":"ray_trace_failure"}]}
+`
+	out := runListEscapeLogCLI(t, log, "--format", "json")
+	var doc struct {
+		Minima           []struct{ Merit float64 } `json:"minima"`
+		InfeasibleBasins []struct {
+			Merit  float64 `json:"merit"`
+			Reason string  `json:"reason"`
+		} `json:"infeasible_basins"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(doc.Minima) != 1 || doc.Minima[0].Merit != 0.002 {
+		t.Fatalf("minima = %+v", doc.Minima)
+	}
+	if len(doc.InfeasibleBasins) != 2 {
+		t.Fatalf("infeasible_basins = %+v, want the escape_complete fallback", doc.InfeasibleBasins)
+	}
+	if doc.InfeasibleBasins[0].Merit != 9.5 || doc.InfeasibleBasins[0].Reason != "geometry_violation" {
+		t.Errorf("basins[0] = %+v", doc.InfeasibleBasins[0])
+	}
+}
+
+func TestListEscapeFromPipelineInfeasibleBasins(t *testing.T) {
+	// A pipeline document written with --keep-infeasible carries the basins in
+	// escape_result.infeasible_basins; they are listed the same way.
+	pipeline := `escape_result:
+  best_index: 0
+  best_merit: 0.002
+  minima:
+    - index: 0
+      merit: 0.002
+      status: feasible_local_minimum
+      file: /tmp/esc/minima0.yaml
+  infeasible_basins:
+    - index: 0
+      merit: 5.5
+      status: infeasible_basin
+      invalid_reason: glass_hull_violation
+    - index: 1
+      merit: 7.5
+      status: infeasible_basin
+      invalid_reason: ray_trace_failure
+`
+	text := string(runListEscapeLogCLI(t, pipeline))
+	if !strings.Contains(text, "Infeasible Basins:") {
+		t.Fatalf("pipeline basins section missing:\n%s", text)
+	}
+	if !strings.Contains(text, "glass_hull_violation") || !strings.Contains(text, "ray_trace_failure") {
+		t.Errorf("pipeline basin reasons missing:\n%s", text)
+	}
+	// The feasible list keeps its element powers and file column unchanged.
+	if !strings.Contains(text, "Element Powers:") && !strings.Contains(text, "minima0.yaml") {
+		t.Errorf("pipeline minima listing changed:\n%s", text)
+	}
+}
+
 func TestListEscapeFromLogEvents(t *testing.T) {
 	out := runListEscapeLogCLI(t, escapeSignalLogFixture, "--format", "json")
 	var doc struct {
