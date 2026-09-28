@@ -343,13 +343,19 @@ type optimizationListOutput struct {
 
 // EscapeMinimumRow is one local minimum for `list escape`. Reason carries the
 // invalid reason of an infeasible basin (the feasible list never has one).
+// Variables is the minimum's variable values (name/param/after, the nd/vd
+// states a glass-changing run carries) and, like ElementPowers, exists only
+// for a pipeline document — a run log records no design data. Both are
+// structured (yaml/json) output only: the table and csv renderers build their
+// cells explicitly and ignore them.
 type EscapeMinimumRow struct {
-	Index         int         `json:"index" yaml:"index"`
-	Merit         float64     `json:"merit" yaml:"merit"`
-	Status        string      `json:"status,omitempty" yaml:"status,omitempty"`
-	Reason        string      `json:"reason,omitempty" yaml:"reason,omitempty"`
-	File          string      `json:"file,omitempty" yaml:"file,omitempty"`
-	ElementPowers [][]float64 `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
+	Index         int                    `json:"index" yaml:"index"`
+	Merit         float64                `json:"merit" yaml:"merit"`
+	Status        string                 `json:"status,omitempty" yaml:"status,omitempty"`
+	Reason        string                 `json:"reason,omitempty" yaml:"reason,omitempty"`
+	File          string                 `json:"file,omitempty" yaml:"file,omitempty"`
+	ElementPowers [][]float64            `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
+	Variables     []types.EscapeVarState `json:"variables,omitempty" yaml:"variables,omitempty"`
 }
 
 // escapeRunInfo is the run-level aggregate recovered from an escape/pso JSONL
@@ -2808,7 +2814,8 @@ func listEscape(output types.Output, format string) {
 // escapeDataFromOutput flattens output.escape_result into the shared
 // escapeListData render input: the effective escape parameters, the file
 // directory shared by all minima, and one row per local minimum (merit-sorted
-// rank index, status, --save file basename and per-config element powers).
+// rank index, status, --save file basename, per-config element powers and the
+// minimum's variable values).
 func escapeDataFromOutput(output types.Output) escapeListData {
 	esc := output.EscapeResult
 	if esc == nil {
@@ -2838,6 +2845,7 @@ func escapeDataFromOutput(output types.Output) escapeListData {
 			Reason:        string(m.InvalidReason),
 			File:          fileBase(m.File),
 			ElementPowers: powers,
+			Variables:     m.Variables,
 		})
 		if m.File != "" {
 			files = append(files, m.File)
@@ -2854,11 +2862,12 @@ func escapeDataFromOutput(output types.Output) escapeListData {
 	var infeasible []EscapeMinimumRow
 	for _, m := range esc.InfeasibleBasins {
 		infeasible = append(infeasible, EscapeMinimumRow{
-			Index:  m.Index,
-			Merit:  m.Merit,
-			Status: string(m.Status),
-			Reason: string(m.InvalidReason),
-			File:   fileBase(m.File),
+			Index:     m.Index,
+			Merit:     m.Merit,
+			Status:    string(m.Status),
+			Reason:    string(m.InvalidReason),
+			File:      fileBase(m.File),
+			Variables: m.Variables,
 		})
 		if m.File != "" {
 			files = append(files, m.File)

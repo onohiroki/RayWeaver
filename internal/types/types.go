@@ -1356,13 +1356,15 @@ type EscapeMinimum struct {
 	Features      []ConfigFeatures    `yaml:"features,omitempty"`
 }
 
-// EscapeVarState records the variable values at a local minimum.
+// EscapeVarState records the variable values at a local minimum. The json tags
+// mirror the yaml ones so `list escape --format json` renders the same keys as
+// `--format yaml` (the pipeline document itself is YAML-only).
 type EscapeVarState struct {
-	Name   string  `yaml:"name"`
-	Config string  `yaml:"config,omitempty"`
-	Surf   int     `yaml:"surf,omitempty"`
-	Param  string  `yaml:"param"`
-	After  float64 `yaml:"after"`
+	Name   string  `json:"name" yaml:"name"`
+	Config string  `json:"config,omitempty" yaml:"config,omitempty"`
+	Surf   int     `json:"surf,omitempty" yaml:"surf,omitempty"`
+	Param  string  `json:"param" yaml:"param"`
+	After  float64 `json:"after" yaml:"after"`
 }
 
 // EscapeMinimumInfo records escape-minimum metadata carried in a saved YAML

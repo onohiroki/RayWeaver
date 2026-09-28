@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -338,12 +339,17 @@ func TestBestStreamIndex(t *testing.T) {
 // takes). A one-shot document, already merit-ordered and without
 // improvements, renders unchanged.
 func TestEffectiveEscapeMinimaAndListOrder(t *testing.T) {
+	// The minimum's variable values ride along into the list rows, which is
+	// what lets a consumer (the escape demo) read the glass nd/vd from
+	// `list escape --format yaml` instead of the raw escape_result.
+	vars := []types.EscapeVarState{{Name: "s1_vd", Param: "vd", After: 64.5}}
 	minimum := func(index int, merit float64) types.EscapeMinimum {
 		return types.EscapeMinimum{
-			Index:    index,
-			Merit:    merit,
-			Surfaces: []types.Surface{{ID: 1, Curvature: 0.01}},
-			Features: []types.ConfigFeatures{{ID: "config1", ElementPowers: []float64{1, -1}}},
+			Index:     index,
+			Merit:     merit,
+			Surfaces:  []types.Surface{{ID: 1, Curvature: 0.01}},
+			Variables: vars,
+			Features:  []types.ConfigFeatures{{ID: "config1", ElementPowers: []float64{1, -1}}},
 		}
 	}
 	// Discovery order, with positions 1 and 2 improved by the run.
@@ -365,9 +371,9 @@ func TestEffectiveEscapeMinimaAndListOrder(t *testing.T) {
 	rows := escapeDataFromOutput(streamed).Minima
 	// fileBase renders an unset --save file as the table's "-" placeholder.
 	wantRows := []EscapeMinimumRow{
-		{Index: 1, Merit: 0.05, File: "-", ElementPowers: [][]float64{{1, -1}}},
-		{Index: 2, Merit: 0.1, File: "-", ElementPowers: [][]float64{{1, -1}}},
-		{Index: 0, Merit: 0.8, File: "-", ElementPowers: [][]float64{{1, -1}}},
+		{Index: 1, Merit: 0.05, File: "-", ElementPowers: [][]float64{{1, -1}}, Variables: vars},
+		{Index: 2, Merit: 0.1, File: "-", ElementPowers: [][]float64{{1, -1}}, Variables: vars},
+		{Index: 0, Merit: 0.8, File: "-", ElementPowers: [][]float64{{1, -1}}, Variables: vars},
 	}
 	if !reflect.DeepEqual(rows, wantRows) {
 		t.Errorf("list rows = %+v, want %+v", rows, wantRows)
@@ -387,11 +393,72 @@ func TestEffectiveEscapeMinimaAndListOrder(t *testing.T) {
 	}}
 	rows = escapeDataFromOutput(oneShot).Minima
 	if !reflect.DeepEqual(rows, []EscapeMinimumRow{
-		{Index: 0, Merit: 0.05, File: "-", ElementPowers: [][]float64{{1, -1}}},
-		{Index: 1, Merit: 0.1, File: "-", ElementPowers: [][]float64{{1, -1}}},
-		{Index: 2, Merit: 0.8, File: "-", ElementPowers: [][]float64{{1, -1}}},
+		{Index: 0, Merit: 0.05, File: "-", ElementPowers: [][]float64{{1, -1}}, Variables: vars},
+		{Index: 1, Merit: 0.1, File: "-", ElementPowers: [][]float64{{1, -1}}, Variables: vars},
+		{Index: 2, Merit: 0.8, File: "-", ElementPowers: [][]float64{{1, -1}}, Variables: vars},
 	}) {
 		t.Errorf("one-shot rows changed by the sort: %+v", rows)
+	}
+}
+
+// TestEscapeListStructuredVariables pins the structured (yaml/json) shape of a
+// minima row: the minimum's variable values are exported under `variables`
+// with the same key names in both formats, and the key disappears when a row
+// carries none (a run log records no design data).
+func TestEscapeListStructuredVariables(t *testing.T) {
+	doc := types.Output{EscapeResult: &types.EscapeResult{
+		BestIndex: 0,
+		BestMerit: 0.05,
+		Minima: []types.EscapeMinimum{{
+			Index:     0,
+			Merit:     0.05,
+			Variables: []types.EscapeVarState{{Name: "s3_vd", Config: "config1", Param: "vd", After: 47.5}},
+		}},
+	}}
+	out := escapeListOutput{
+		Minima:    escapeDataFromOutput(doc).Minima,
+		BestIndex: doc.EscapeResult.BestIndex,
+		BestMerit: doc.EscapeResult.BestMerit,
+	}
+
+	ym, err := yaml.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal yaml: %v", err)
+	}
+	var back escapeListOutput
+	if err := yaml.Unmarshal(ym, &back); err != nil {
+		t.Fatalf("list yaml does not parse: %v", err)
+	}
+	if len(back.Minima) != 1 || len(back.Minima[0].Variables) != 1 ||
+		back.Minima[0].Variables[0] != out.Minima[0].Variables[0] {
+		t.Errorf("yaml round trip lost the variables: %s", ym)
+	}
+
+	jm, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal json: %v", err)
+	}
+	for _, want := range []string{`"variables":[{"name":"s3_vd","config":"config1","param":"vd","after":47.5}]`} {
+		if !strings.Contains(string(jm), want) {
+			t.Errorf("json output = %s, want it to contain %s", jm, want)
+		}
+	}
+
+	// A row without variables drops the key entirely.
+	empty := escapeListOutput{Minima: []EscapeMinimumRow{{Index: 0, Merit: 1}}}
+	ym, err = yaml.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal empty yaml: %v", err)
+	}
+	if strings.Contains(string(ym), "variables") {
+		t.Errorf("yaml output carries an empty variables key:\n%s", ym)
+	}
+	jm, err = json.Marshal(empty)
+	if err != nil {
+		t.Fatalf("marshal empty json: %v", err)
+	}
+	if strings.Contains(string(jm), "variables") {
+		t.Errorf("json output carries an empty variables key: %s", jm)
 	}
 }
 

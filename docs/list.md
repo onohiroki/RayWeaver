@@ -73,7 +73,7 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
 | `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, comparison_wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
 | `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables/variable links, `merit_schedule`, and the sub-configs (`escape`, `glass_hull`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
-| `escape` | Escape-function global optimisation results. Reads either the `escape_result` section of an `escape`/`pso` pipeline document or, detected automatically, an escape/pso JSONL run log (`--log FILE` / a captured `--verbose` stream), showing escape parameters, the run aggregate, discovered local minima, per-minimum element powers (pipeline document only) and the per-worker completion list (run log only). See [§11](#11-escape-section--escapepso-global-search-results). |
+| `escape` | Escape-function global optimisation results. Reads either the `escape_result` section of an `escape`/`pso` pipeline document or, detected automatically, an escape/pso JSONL run log (`--log FILE` / a captured `--verbose` stream), showing escape parameters, the run aggregate, discovered local minima with their per-minimum element powers and variable values (both from a pipeline document; the variables only in structured output), and the per-worker completion list (run log only). See [§11](#11-escape-section--escapepso-global-search-results). |
 | `focus` | Image-plane comparison results from the `focus_comparison` section (requires `focus mtf` / `focus psf` output). Auto-detects the MTF/PSF sub-section and renders the per-(field, wavelength) × plane table. |
 
 Default (no target arguments): `surfaces glasses paraxial fields`. The
@@ -718,6 +718,14 @@ minimum that a repeat visit improved is replaced by its
 supersedes), so the table reports each minimum's final merit — a raw `query` on
 `escape_result.minima[]` would show the first-discovery values instead.
 
+A script that renders the minima ranking (tables, charts, per-solution gates)
+should therefore read this target's structured output instead of reaching into
+`escape_result`: `--format yaml` carries `params`, the `minima` rows (`index`,
+`merit`, `status`, `reason`, `file`, `element_powers` and — from a pipeline
+document — `variables`, the minimum's name/param/after variable values, e.g.
+the nd/vd a glass-changing run settled on), `infeasible_basins`, `best_index`
+and `best_merit`, which is everything the ranking display needs.
+
 ```
 Escape Parameters:
 Property                 Value
@@ -885,7 +893,10 @@ out. `resource` samples are periodic, so a guarded run can list many rows; use
 ### Structured output
 
 `--format yaml` / `--format json` use the same shape as the pipeline document,
-with `run`, `workers` and `events` added and the log-only fields omitted:
+with `run`, `workers` and `events` added and the log-only fields omitted
+(`element_powers` and `variables` on a minima row are the reverse: they come
+from the document and are absent for a log — see
+[What a run log cannot show](#what-a-run-log-cannot-show)):
 
 ```yaml
 params:
@@ -897,6 +908,10 @@ minima:
       merit: 0.00026687664351083754
       status: feasible_local_minimum
       file: minima0.yaml
+      variables:
+        - name: s3_vd
+          param: vd
+          after: 47.5
 infeasible_basins:
     - index: 0
       merit: 0.15293706031950147
@@ -940,6 +955,9 @@ log, not a failure to read it:
 
 - the per-minimum **element powers** (the `Element Powers` section) — use the
   pipeline document or the saved `FILE<n>.yaml` for those;
+- the per-minimum **variable values** (`minima[].variables` in the structured
+  output) — same sources: the log records the merit of a minimum, not the
+  point that produced it;
 - the escape tuning parameters outside the `params` event (`escape_iter_frac`,
   `w_span`, `stall_*`, `initial_perturb`, `fingerprint_distance_threshold`, the
   variable weights), which are shown for a pipeline document and skipped here;

@@ -473,7 +473,11 @@ and the whole entry (`merit`, `surfaces`, `variables`, `features`, `file`) is th
 replacement, not a delta — take `minima[i]` unless an improvement names `i`.
 `list escape` applies these substitutions for you (and then ranks the rows by
 effective merit); a raw `query` on `escape_result.minima[]` does not, so it shows
-the first-discovery values of a streamed document.
+the first-discovery values of a streamed document. Its structured output
+(`list escape --format yaml`) is the ranking a script should read instead of
+the raw section: `minima[]` rows with `index`, `merit`, `status`, `file`,
+`element_powers` and `variables`, plus `best_index` / `best_merit` — the way
+`samples/escape-demo.bash` renders its minima summary, chart and glass gate.
 
 A concise summary is printed to stderr (never stdout, so the YAML pipeline
 stays intact).

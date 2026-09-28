@@ -18,6 +18,9 @@ set -euo pipefail
 #   1. escape                  : global search with merit_schedule
 #                                (spot_phase -> wavefront_phase step switch
 #                                at merit_ratio=0.1) -> <prefix>result.yaml
+#                                the minima ranking below is rendered from
+#                                `rayweave list escape --format yaml` of that
+#                                document -> <prefix>escape-list.yaml
 #   2. PSF verification        : per-field Strehl at best focus (RCP+LCP, d
 #                                line) -> table; the demo gates on every field
 #                                reaching >= 0.5
@@ -42,6 +45,13 @@ set -euo pipefail
 #
 # How to read the result
 #   - Best merit is the lowest DLS merit among the discovered minima.
+#   - <prefix>escape-list.yaml is `list escape --format yaml`: every minimum's
+#     final merit, ranked ascending, with the improved entries substituted and
+#     the element powers / variable values (nd/vd) of each solution. The
+#     summary table, the element-powers chart and the glass gate read it, so
+#     the ranking stays correct for a streamed document too. The lines are in
+#     merit order; a row's `index` — printed as [i] — is the position in
+#     `escape_result.minima`, i.e. the number `escape extract --index` takes.
 #   - The result YAML holds every minimum's full surfaces; use
 #     `escape extract --index N` to re-optimise from a chosen one. With
 #     --save the per-minimum clean lens files are already on disk.
@@ -88,15 +98,20 @@ case "$LENS" in
 esac
 RESULT="$OUTDIR/${PREFIX}result.yaml"
 RESULT_FILE="$OUTDIR/${PREFIX}result.txt"
+# `list escape --format yaml` of RESULT: the merit-ranked minima index the
+# summary table, the element-powers chart and the glass gate all read.
+LIST="$OUTDIR/${PREFIX}escape-list.yaml"
 
 if [ "$CLEAN" = true ]; then
   echo "=== Cleaning up generated files ==="
   rm -f "$OUTDIR"/escape-demo-result.yaml "$OUTDIR"/escape-demo-result.txt
+  rm -f "$OUTDIR"/escape-demo-escape-list.yaml
   rm -f "$OUTDIR"/escape-demo-init.png "$OUTDIR"/escape-demo-best.png "$OUTDIR"/escape-demo-min1.png "$OUTDIR"/escape-demo-min1.yaml
   rm -f "$OUTDIR"/escape-demo-best.yaml "$OUTDIR"/escape-demo-psf.yaml
   rm -f "$OUTDIR"/escape-demo-element-powers.png "$OUTDIR"/escape-demo-6elements-element-powers.png
   rm -f "$OUTDIR"/escape-demo-element-powers.dat "$OUTDIR"/escape-demo-6elements-element-powers.dat
   rm -f "$OUTDIR"/escape-demo-6elements-result.yaml "$OUTDIR"/escape-demo-6elements-result.txt
+  rm -f "$OUTDIR"/escape-demo-6elements-escape-list.yaml
   rm -f "$OUTDIR"/escape-demo-6elements-progress.jsonl
   rm -f "$OUTDIR"/escape-demo-6elements-min*.yaml
   rm -f "$OUTDIR"/escape-demo-6elements-init.png "$OUTDIR"/escape-demo-6elements-best.png
@@ -131,6 +146,15 @@ cat >> "$RESULT_FILE" <<EOF
 - The '*' marks the best minimum. $(basename "$RESULT") contains the full
   surfaces of every minimum; \`escape extract --index N\` pulls one out
   (e.g. ${PREFIX}min1.yaml) to re-optimise from.
+- The minima summary above is rendered from ${PREFIX}escape-list.yaml, the
+  \`list escape --format yaml\` listing of the result: its rows carry every
+  minimum's final merit (an improved minimum's latest value, substituted for
+  the first-discovery one) ranked ascending, plus the element powers and the
+  variable values of that solution. The lines are in merit order, and each
+  line's [i] is that minimum's position in escape_result.minima — the number
+  \`escape extract --index\` takes (the two coincide for a one-shot document
+  but not necessarily for a streamed one, which is written in discovery
+  order).
 - \`element_powers\` (per minimum, per config) is the thin-lens power of each
   lens element at the d-line — a fingerprint for comparing the minima against
   each other.
@@ -177,21 +201,24 @@ plot_element_powers() {
   fi
 
   local nmin nel
-  nmin=$("$RAYWEAVE" query --len escape_result.minima < "$RESULT" 2>/dev/null || echo 0)
-  if [[ -z "$nmin" || "$nmin" -eq 0 ]]; then
-    echo "  (element-powers chart skipped: no minima in result)"
+  # $LIST is `list escape --format yaml`: rows ranked by merit, so i is both
+  # the chart's series index and the rank. query --len reports -1 when the key
+  # is absent, hence the -le 0 guards.
+  nmin=$("$RAYWEAVE" query --len minima < "$LIST" 2>/dev/null || echo 0)
+  if [[ -z "$nmin" || "$nmin" -le 0 ]]; then
+    echo "  (element-powers chart skipped: no minima in list)"
     return 0
   fi
-  nel=$("$RAYWEAVE" query --len escape_result.minima[0].features[0].element_powers < "$RESULT" 2>/dev/null || echo 6)
-  if [[ -z "$nel" || "$nel" -eq 0 ]]; then nel=6; fi
+  nel=$("$RAYWEAVE" query --len 'minima[0].element_powers[0]' < "$LIST" 2>/dev/null || echo 6)
+  if [[ -z "$nel" || "$nel" -le 0 ]]; then nel=6; fi
 
   # One row per (minimum, element): idx merit element_index power
   : > "$data"
   local i e merit p
   for ((i=0; i<nmin; i++)); do
-    merit=$("$RAYWEAVE" query -r "escape_result.minima[$i].merit" < "$RESULT")
+    merit=$("$RAYWEAVE" query -r "minima[$i].merit" < "$LIST")
     for ((e=0; e<nel; e++)); do
-      p=$("$RAYWEAVE" query -r "escape_result.minima[$i].features[0].element_powers[$e]" < "$RESULT")
+      p=$("$RAYWEAVE" query -r "minima[$i].element_powers[0][$e]" < "$LIST")
       echo "$i $merit $e $p" >> "$data"
     done
   done
@@ -233,12 +260,16 @@ if [[ -n "$SAVE_BASE" ]]; then
   ESCAPE_ARGS+=(--save "$SAVE_BASE")
 fi
 $RAYWEAVE escape "${ESCAPE_ARGS[@]}" < "$YAML" > "$RESULT"
+# The minima ranking (final merits, improved entries substituted, ascending)
+# rendered by `list escape`; every read below goes through it.
+$RAYWEAVE list escape --format yaml < "$RESULT" > "$LIST"
+echo "Written: $LIST (minima ranking from \`list escape --format yaml\`)"
 echo
 
 echo "--- Local minima summary ---"
 {
-  BEST_IDX=$($RAYWEAVE query -r escape_result.best_index < "$RESULT")
-  BEST_MERIT=$($RAYWEAVE query --printf '%.6e' escape_result.best_merit < "$RESULT")
+  BEST_IDX=$($RAYWEAVE query -r best_index < "$LIST")
+  BEST_MERIT=$($RAYWEAVE query --printf '%.6e' best_merit < "$LIST")
   echo "  Best index: $BEST_IDX  Best merit: $BEST_MERIT"
   # Glass surfaces of the double-Gauss (inline model glasses): the first
   # surface of each element carries its nd/vd. Shown as vd per element so the
@@ -250,15 +281,21 @@ echo "--- Local minima summary ---"
   else
     GLASS_VARS="s1_sk18_vd s3_sf12_vd s5_sk18_vd s8_sk18_vd s10_sf12_vd s12_sk18_vd"
   fi
-  $RAYWEAVE query --each 'escape_result.minima[]:index,merit' --printf '%d %.6e' < "$RESULT" \
+  # The rows of $LIST are ranked by merit, so the loop position (pos) walks
+  # them in rank order while idx — the row's `index` field, printed as [idx] —
+  # is the position in escape_result.minima, i.e. the number
+  # `escape extract --index` takes. They differ as soon as the ranking is not
+  # the document order (a streamed document is in discovery order).
+  pos=0
+  $RAYWEAVE query --each 'minima[]:index,merit' --printf '%d %.6e' < "$LIST" \
     | while read -r idx merit; do
         mark=" "
         [ "$idx" = "$BEST_IDX" ] && mark="*"
-        powers=$($RAYWEAVE query --each "escape_result.minima[$idx].features[0].element_powers[]" \
-          --printf '%.4g' < "$RESULT" | paste -sd ',' -)
+        powers=$($RAYWEAVE query --each "minima[$pos].element_powers[0][]" \
+          --printf '%.4g' < "$LIST" | paste -sd ',' -)
         glass=""
         for vn in $GLASS_VARS; do
-          vd=$($RAYWEAVE query -r "escape_result.minima[$idx].variables[name=\"$vn\"].after" < "$RESULT")
+          vd=$($RAYWEAVE query -r "minima[$pos].variables[name=\"$vn\"].after" < "$LIST")
           if [[ -n "$vd" && "$vd" != "-1" ]]; then
             fl=" "
             $RAYWEAVE query --gate "v < 45" --set v="$vd" < /dev/null > /dev/null 2>&1 && fl="."
@@ -266,11 +303,12 @@ echo "--- Local minima summary ---"
           fi
         done
         if [[ -n "$SAVE_BASE" ]]; then
-          file=$(basename "$($RAYWEAVE query -r "escape_result.minima[$idx].file" < "$RESULT")")
+          file=$($RAYWEAVE query -r "minima[$pos].file" < "$LIST")
           printf "  %s[%s] merit=%s  file=%s  element_powers=%s  vd[1 3 5 8 10 12]=%s\n" "$mark" "$idx" "$merit" "$file" "$powers" "$glass"
         else
           printf "  %s[%s] merit=%s  element_powers=%s  vd[1 3 5 8 10 12]=%s\n" "$mark" "$idx" "$merit" "$powers" "$glass"
         fi
+        pos=$((pos + 1))
       done
 } | tee "$RESULT_FILE"
 echo
@@ -289,11 +327,12 @@ if [ "$LENS" = "6elements" ]; then
     echo "  glass_dls phases run: ${GPHASES:-0}"
   fi
   echo "--- Glass-change gate (glass optimized per element) ---"
-  NMIN=$($RAYWEAVE query --len escape_result.minima < "$RESULT")
+  NMIN=$($RAYWEAVE query --len minima < "$LIST")
   GATE_GLASS_OK=false
   if [ "${NMIN:-0}" -ge 2 ]; then
-    VD0=$($RAYWEAVE query -r 'escape_result.minima[0].variables[name="s3_sf12_vd"].after' < "$RESULT")
-    VD1=$($RAYWEAVE query -r 'escape_result.minima[1].variables[name="s3_sf12_vd"].after' < "$RESULT")
+    # minima[0] / minima[1] are the best two solutions of the ranking.
+    VD0=$($RAYWEAVE query -r 'minima[0].variables[name="s3_sf12_vd"].after' < "$LIST")
+    VD1=$($RAYWEAVE query -r 'minima[1].variables[name="s3_sf12_vd"].after' < "$LIST")
     if [[ -n "$VD0" && -n "$VD1" && "$VD0" != "$VD1" ]]; then
       GATE_GLASS_OK=true
       echo "  S3 vd differs between minima: $VD0 vs $VD1"
@@ -307,7 +346,7 @@ if [ "$LENS" = "6elements" ]; then
   echo
 fi
 
-BEST_IDX=$($RAYWEAVE query -r escape_result.best_index < "$RESULT")
+BEST_IDX=$($RAYWEAVE query -r best_index < "$LIST")
 $RAYWEAVE escape extract --index "$BEST_IDX" < "$RESULT" > "$OUTDIR/${PREFIX}best.yaml"
 echo "Written: $OUTDIR/${PREFIX}best.yaml (best minimum $BEST_IDX)"
 echo
@@ -357,7 +396,7 @@ if [[ -n "$SAVE_BASE" ]]; then
   ls -1 "$OUTDIR"/${PREFIX}min[0-9]*.yaml 2>/dev/null | sed 's#.*/##' | sed 's/^/    /' || true
 else
   echo "=== Extracting a local minimum ==="
-  NMIN=$($RAYWEAVE query --len escape_result.minima < "$RESULT" 2>/dev/null || echo 0)
+  NMIN=$($RAYWEAVE query --len minima < "$LIST" 2>/dev/null || echo 0)
   if [[ "${NMIN:-0}" -ge 2 ]]; then
     IDX=1
   else
