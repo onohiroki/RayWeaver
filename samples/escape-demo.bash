@@ -184,10 +184,11 @@ fi
 trap append_interpretation EXIT
 
 # ── Element-powers chart: one offset line per local minimum ──
-# Reads the result YAML and draws a PNG whose vertical axis is merit (log
-# scale); each minimum's element_powers are a polyline offset from its merit
-# baseline. Requires gnuplot (fallback to /opt/homebrew/bin) and the rayweave
-# binary (RAYWEAVE). Silently returns when gnuplot is absent.
+# Reads the `list escape --format yaml` listing and draws a PNG whose vertical
+# axis is merit (log scale); each minimum's element_powers are a polyline
+# offset from its merit baseline. Requires gnuplot (fallback to
+# /opt/homebrew/bin) and the rayweave binary (RAYWEAVE). Silently returns when
+# gnuplot is absent.
 plot_element_powers() {
   local out="$1"
   local data="$OUTDIR/${PREFIX}element-powers.dat"
@@ -330,9 +331,13 @@ if [ "$LENS" = "6elements" ]; then
   NMIN=$($RAYWEAVE query --len minima < "$LIST")
   GATE_GLASS_OK=false
   if [ "${NMIN:-0}" -ge 2 ]; then
-    # minima[0] / minima[1] are the best two solutions of the ranking.
-    VD0=$($RAYWEAVE query -r 'minima[0].variables[name="s3_sf12_vd"].after' < "$LIST")
-    VD1=$($RAYWEAVE query -r 'minima[1].variables[name="s3_sf12_vd"].after' < "$LIST")
+    # minima[0] / minima[1] are the best two solutions of the ranking. The
+    # 6elements glass variables follow the escape-6elements-init.yaml
+    # convention s<N>_vd, so the surface-3 dispersion is s3_vd (the triplet's
+    # s3_sf12_vd does not exist in this input — reading it returned -1 for
+    # both sides and the gate could never fire).
+    VD0=$($RAYWEAVE query -r 'minima[0].variables[name="s3_vd"].after' < "$LIST")
+    VD1=$($RAYWEAVE query -r 'minima[1].variables[name="s3_vd"].after' < "$LIST")
     if [[ -n "$VD0" && -n "$VD1" && "$VD0" != "$VD1" ]]; then
       GATE_GLASS_OK=true
       echo "  S3 vd differs between minima: $VD0 vs $VD1"
