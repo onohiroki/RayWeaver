@@ -87,6 +87,7 @@ Per-subcommand usage manuals live in [`docs/`](docs/):
 | [docs/psf.md](docs/psf.md) | point-spread function via direct vector Huygens integration |
 | [docs/focus.md](docs/focus.md) | image-plane comparison of MTF/PSF across focus conventions |
 | [docs/query.md](docs/query.md) | YAML/JSONL selector |
+| [docs/rwrun.md](docs/rwrun.md) | `rwrun` companion binary: start a long run detached so an AI agent's shell teardown cannot kill it |
 | [docs/windows.md](docs/windows.md) | Windows usage: Go/PowerShell 7.2+ install, `rayweaver.exe` build, bash demos |
 
 The numerical methods behind the analyses and optimizations are described
@@ -94,6 +95,25 @@ separately in [`docs/methods/`](docs/methods/README.md) (ray tracing, chief-ray
 and spot computation, paraxial optics, merit functions, DLS, escape functions,
 glass dispersion, thin-film TMM, asphere candidate selection, point-spread
 function via vector Huygens integration, and EFL scaling).
+
+### Long runs and AI agents
+
+An optimization run routinely takes hours, but an AI coding agent (OpenCode, an
+editor agent) owns the shell it launches commands in and periodically releases
+the workspace, deleting the background task and signalling the process group —
+which kills the run and empties its stdout report. `rwrun`
+(`cmd/rwrun/`, no build needed) starts the command in its own session so the
+process survives, and returns immediately:
+
+```sh
+go run ./cmd/rwrun -n v42 -i v42-escape-input.yaml -o v42-result.yaml \
+    -e v42-stderr.jsonl -- escape --verbose --keep-infeasible \
+    --log v42-progress.jsonl --save v42-min
+go run ./cmd/rwrun -status -n v42     # pid, elapsed, artefact sizes
+go run ./cmd/rwrun -stop   -n v42     # SIGTERM twice — keeps the report document
+```
+
+See [docs/rwrun.md](docs/rwrun.md).
 
 ## Pipeline examples
 

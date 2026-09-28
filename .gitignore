@@ -13,7 +13,9 @@
 *.zmx
 *.len
 *.seq
+*.exe
 /rayweave
+/rwrun
 /target/
 
 .opencode/

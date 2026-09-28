@@ -29,6 +29,7 @@ system → ray bundle → quantities
 | [focus.md](focus.md) | `rayweave focus` | image-plane comparison of MTF/PSF across focus conventions |
 | [wavefront.md](wavefront.md) | `rayweave wavefront` | wavefront analysis: paraboloid, best-focus sphere, Fringe-Zernike, best image plane |
 | [query.md](query.md) | `rayweave query` | read-only YAML/JSONL selector for pipelines |
+| [rwrun.md](rwrun.md) | _companion binary_ `cmd/rwrun` | start a long run detached, so an AI agent's shell teardown cannot kill it |
 
 ## Calculation methods
 
