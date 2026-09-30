@@ -7,6 +7,7 @@ This document describes the implementation of contrast optimization in RayWeaver
 | 1 | **Direct Complex Sum** | `geometric_mtf_sag`, `geometric_mtf_tan` | Implemented |
 | 2a | **Wavefront Shift** | `wavefront_shift_sag`, `wavefront_shift_tan` | Implemented |
 | 2b | **Wavefront Pair Phase** | `wavefront_pair_phase` | Implemented |
+| 3 | **Diffraction MTF (Huygens)** | `diffraction_mtf_sag`, `diffraction_mtf_tan` | Implemented |
 
 ---
 
@@ -204,18 +205,94 @@ merit:
 
 ---
 
+## 4A. Phase 3 — Diffraction MTF (Huygens Integral)
+
+### 4A.1 Principle
+
+Phases 1–2b are geometric: they read the MTF off ray coordinates and never
+integrate a wave. Phase 3 is the in-optimization counterpart of the gate
+measurement (`focus mtf --frequencies F`): it traces the field's entrance
+pupil, propagates the polarized wavefront to the reference surface, integrates
+it on the delivered flat image plane with the direct vector Huygens integral
+and reads the MTF at the term's frequency off that PSF — the same window, the
+same image-grid auto-enlargement rule and the same FFT the `psf` command
+reports. A term value and a reported value are therefore the same number for
+the same state, which the geometric kinds cannot claim (they overstate the
+diffraction MTF by ~2.8× near the hinge).
+
+### 4A.2 Merit Operand
+
+| Kind | Description | Parameters |
+|---|---|---|
+| `diffraction_mtf_sag` | Sagittal diffraction MTF at specified frequency | `frequency` (lp/mm), `target` (0..1) |
+| `diffraction_mtf_tan` | Tangential diffraction MTF at specified frequency | `frequency` (lp/mm), `target` (0..1) |
+
+The same hinge residual as Phase 1 applies — `max(0, target − MTF)` — so a
+design already at the gate is never pushed to buy MTF it does not need. An
+unevaluable term (no PSF can be formed) yields 0, i.e. the full target
+deficit: the solver is pushed toward a state where a PSF exists at all
+instead of being fed a fabricated number.
+
+### 4A.3 Sampling
+
+The gate runs at 1600 rays; the merit defaults to 128. The merit needs the
+same *kind* of pupil sampling, not the same photon budget — the MTF-vs-rays
+sensitivity at a resolved 10 c/mm hinge is far below the gate tolerance once
+the pupil is open. Sampling is configured YAML-only under
+`optimization.diffraction_mtf` (zero values select the built-in defaults):
+
+```yaml
+optimization:
+  diffraction_mtf:
+    num_rays: 128        # entrance-pupil grid rays (default 128)
+    grid_size: 64        # image-grid pixels before auto-enlargement (default 64)
+    max_grid: 256        # cap on the auto-enlarged grid (default 256)
+    polarizations: [RCP+LCP]   # incoherent average (default [RCP+LCP])
+```
+
+`max_grid` is a pixel-count cap only: the window — and therefore the
+frequency spacing `df = 1/(2·half)` — is untouched, so the 10 c/mm bin is
+preserved. The cap only binds when the natural grid exceeds it, i.e. when
+`spotRMS > 64·Airy ≈ 0.043 mm`, where the Gaussian estimate of MTF(10) is
+already below ~0.19 — under every gate threshold. In the well-corrected
+regime the window is diffraction-sized and the grid stays at `grid_size`, so
+the term is bit-identical to the standalone measurement. `polarizations:
+[RCP]` halves the cost on an all-refractive system (the two circular states
+give identical intensity maps) once that equivalence has been verified for the
+system at hand.
+
+### 4A.4 Computation Flow
+
+```
+DLS iteration
+  └─ evaluateKindTerm(diffraction_mtf_sag/tan)
+       └─ diffractionMTFValues  ── per-evaluation cache keyed (field, wavelength, frequency)
+            └─ computeDiffractionMTF
+                 ├─ frozen pupil Z (per-iteration, shared with the wavefront terms)
+                 │    └─ fallback: dynamic pupil
+                 ├─ psf.FrozenPupilGrid → psf.TraceWavefront (polarized, to the reference surface)
+                 ├─ psf.DefaultImageGrid → capImageGrid(max_grid)
+                 ├─ direct vector Huygens integral (per polarization state)
+                 └─ psf.ComputeMTF → sagittal / tangential at term.frequency
+```
+
+Both axes come from one evaluation, so a sag+tan term pair on the same field
+shares one pupil trace and one Huygens integration.
+
+---
+
 ## 5. Comparison
 
-| Feature | Phase 1 (gMTF) | Phase 2a (Wavefront Shift) | Phase 2b (Wavefront Pair) |
-|---|---|---|---|
-| **Input** | Image-plane (X, Y) | Pupil (PupilX, PupilY, OPL) | Pupil (PupilX, PupilY, OPL) |
-| **Frequency** | Directly specified | Directly specified | Not specified (fixed pairs) |
-| **Direction** | S/T independent | S/T independent | S/T/D simultaneous |
-| **Residual** | Hinge: `max(0, target - MTF)` | Squared: `Σ(δW)²` | Squared: `Σ(Δφ)²` |
-| **Target** | Required | Not used | Not used |
-| **Pair finding** | N/A | Nearest-neighbor (spatial hash) | Fixed reference points |
-| **Extra cost** | None | Pair search O(N) | 9-point lookup O(1) |
-| **Use case** | Specific MTF target | Specific frequency optimization | Broad wavefront quality |
+| Feature | Phase 1 (gMTF) | Phase 2a (Wavefront Shift) | Phase 2b (Wavefront Pair) | Phase 3 (Diffraction MTF) |
+|---|---|---|---|---|
+| **Input** | Image-plane (X, Y) | Pupil (PupilX, PupilY, OPL) | Pupil (PupilX, PupilY, OPL) | Wavefront → Huygens PSF |
+| **Frequency** | Directly specified | Directly specified | Not specified (fixed pairs) | Directly specified |
+| **Direction** | S/T independent | S/T independent | S/T/D simultaneous | S/T independent |
+| **Residual** | Hinge: `max(0, target - MTF)` | Squared: `Σ(δW)²` | Squared: `Σ(Δφ)²` | Hinge: `max(0, target - MTF)` |
+| **Target** | Required | Not used | Not used | Required |
+| **Pair finding** | N/A | Nearest-neighbor (spatial hash) | Fixed reference points | N/A |
+| **Extra cost** | None | Pair search O(N) | 9-point lookup O(1) | One Huygens integral per field |
+| **Use case** | Specific MTF target | Specific frequency optimization | Broad wavefront quality | Gate-exact MTF target |
 
 ---
 
@@ -227,9 +304,12 @@ merit:
 | `internal/dls/grid.go` | 2a/2b | Populate `PupilX/PupilY` from `Sample` |
 | `internal/dls/mtf.go` | 1/2a/2b | `ComputeGeometricMTF`, `ComputeWavefrontShift`, `ComputeWavefrontPairPhase` |
 | `internal/dls/mtf_test.go` | 1 | Unit tests for `ComputeGeometricMTF` |
-| `internal/optimize/merit.go` | 1/2a/2b | Constants + evaluation cases |
-| `internal/optimize/optimize.go` | 1/2a/2b | `meritTerm.frequency`, `isGridKind` |
-| `internal/types/types.go` | 1 | `MeritTerm.Frequency` field |
+| `internal/optimize/merit.go` | 1/2a/2b/3 | Constants + evaluation cases |
+| `internal/optimize/optimize.go` | 1/2a/2b/3 | `meritTerm.frequency`, `isGridKind`, `isTraceKind` |
+| `internal/types/types.go` | 1/3 | `MeritTerm.Frequency`, `DiffractionMTFConfig` |
+| `internal/psf/diffraction.go` | 3 | `FrozenPupilGrid`, `ComputeDiffractionMTF`, `capImageGrid` |
+| `internal/psf/diffraction_cap_test.go` | 3 | Unit tests for `capImageGrid` |
+| `internal/optimize/diffraction_mtf_test.go` | 3 | Routing, hinge and cache-sharing tests |
 
 ---
 

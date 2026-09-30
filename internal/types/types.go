@@ -880,8 +880,11 @@ type OptimizationConfig struct {
 	Degenerate         *DegenerateConfig         `yaml:"degenerate,omitempty"`
 	PowerSolve         *PowerSolveConfig         `yaml:"power_solve,omitempty"`
 	BackFocusSolve     *BackFocusSolveConfig     `yaml:"back_focus_solve,omitempty"`
-	RegionActive       *RegionActiveConfig       `yaml:"region_active,omitempty"`
-	AdaptiveDamping    *AdaptiveDampingConfig    `yaml:"adaptive_damping,omitempty"`
+	// DiffractionMTF configures the diffraction_mtf_sag / diffraction_mtf_tan
+	// merit kinds (nil = built-in defaults).
+	DiffractionMTF  *DiffractionMTFConfig  `yaml:"diffraction_mtf,omitempty"`
+	RegionActive    *RegionActiveConfig    `yaml:"region_active,omitempty"`
+	AdaptiveDamping *AdaptiveDampingConfig `yaml:"adaptive_damping,omitempty"`
 	// WavefrontReference selects the reference point the wavefront merit
 	// terms' paraboloid fit is measured against:
 	//
@@ -995,6 +998,34 @@ type PowerSolveConfig struct {
 	// terms (Seidel / focal_length / glass_role) stay in the merit as a guardrail
 	// against layout collapse. Zero or negative uses the built-in default.
 	ColorScale float64 `yaml:"color_scale,omitempty"`
+}
+
+// DiffractionMTFConfig configures the diffraction_mtf_sag / diffraction_mtf_tan
+// merit kinds: the in-optimization counterpart of the `focus mtf` gate
+// measurement. Each term traces its field into the reference surface, runs the
+// vector Huygens integral on the delivered image plane and reads the MTF at the
+// term's `frequency` off that PSF — the same window, image-grid auto-enlargement
+// and FFT the `psf` command reports, so a term value equals the reported value
+// for the same state. Zero values select the built-in defaults.
+type DiffractionMTFConfig struct {
+	// NumRays is the entrance-pupil grid ray count (0 = 128, vs the gate's
+	// 1600: the merit needs the same kind of sampling, not the same photon
+	// budget — the MTF-vs-rays sensitivity at a resolved 10 c/mm hinge is far
+	// below the gate tolerance once the pupil is fully open).
+	NumRays int `yaml:"num_rays,omitempty"`
+	// GridSize is the image-grid pixel count before auto-enlargement
+	// (0 = the psf default of 64).
+	GridSize int `yaml:"grid_size,omitempty"`
+	// MaxGrid caps the auto-enlarged image grid (0 = the psf default, a
+	// negative value disables the cap). Only the pixel count is capped — the
+	// window is kept, since truncating the PSF would apply a box window whose
+	// sinc first zero falsely zeroes the low-frequency MTF.
+	MaxGrid int `yaml:"max_grid,omitempty"`
+	// Polarizations lists the input polarization labels whose intensities are
+	// averaged incoherently (0 = [RCP+LCP], matching a gate run that asks for
+	// both circular states; [RCP] halves the cost once that equivalence has
+	// been verified for the system at hand).
+	Polarizations []string `yaml:"polarizations,omitempty"`
 }
 
 // BackFocusSolveConfig configures the back-focus solve: the thickness of a
@@ -1241,6 +1272,32 @@ type OptimizationResult struct {
 	// Snap reports the discrete nd/vd-to-catalog result (present only for
 	// the `optimize snap` subcommand).
 	Snap *SnapResult `yaml:"snap,omitempty"`
+	// BackFocus reports what the in-run back-focus hard solve did (present
+	// only when optimization.back_focus_solve is enabled). It is the
+	// run-level answer to "did the image plane actually follow the design?":
+	// method is the solve that produced the last adjustment (paraxial also
+	// marks a wavefront fallback), fields_dropped lists the fields a partial
+	// wavefront solve could not analyse, failures counts the total failures
+	// over the run.
+	BackFocus *BackFocusDiagnostics `yaml:"back_focus,omitempty"`
+}
+
+// BackFocusDiagnostics is the run-level report of the back-focus hard solve.
+type BackFocusDiagnostics struct {
+	// Method is the solve type of the last adjustment: "wavefront" or
+	// "paraxial" ("paraxial" also marks a wavefront failure that fell back).
+	Method string `yaml:"method,omitempty"`
+	// ShiftMM is the last applied image-plane shift (mm).
+	ShiftMM float64 `yaml:"shift_mm,omitempty"`
+	// FieldsUsed is the number of fields the last wavefront solve combined
+	// (0 for a paraxial solve).
+	FieldsUsed int `yaml:"fields_used,omitempty"`
+	// FieldsDropped lists the fields the last wavefront solve had to skip
+	// (degenerate pupil grid, failed fit), in analysis order.
+	FieldsDropped []string `yaml:"fields_dropped,omitempty"`
+	// Failures counts the wavefront solves that failed entirely and fell
+	// back to the paraxial focus over the run.
+	Failures int `yaml:"failures,omitempty"`
 }
 
 // ConstraintMeasurement records the final measured value and residual of one

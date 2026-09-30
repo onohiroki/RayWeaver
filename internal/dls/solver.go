@@ -473,7 +473,7 @@ func Solve(m Model) Result {
 		if opts.Logger != nil {
 			currVars := make([]float64, nVars)
 			for i := range nVars {
-				currVars[i] = variables[i].Min + xNorm[i]*scales[i]
+				currVars[i] = denormValue(i, xNorm[i], variables, scales)
 			}
 			var constr []ConstraintState
 			if hasConstraints {
@@ -602,7 +602,7 @@ func Solve(m Model) Result {
 	if opts.Logger != nil {
 		finalVars := make([]float64, nVars)
 		for i := range nVars {
-			finalVars[i] = variables[i].Min + bestXNorm[i]*scales[i]
+			finalVars[i] = denormValue(i, bestXNorm[i], variables, scales)
 		}
 		finalStepNorm := 0.0
 		if lastDelta != nil {
@@ -626,7 +626,7 @@ func Solve(m Model) Result {
 		vars[i] = VariableState{
 			Name:  vi.Name,
 			Param: vi.Param,
-			After: vi.Min + bestXNorm[i]*scales[i],
+			After: denormValue(i, bestXNorm[i], variables, scales),
 		}
 	}
 
@@ -645,7 +645,8 @@ func Solve(m Model) Result {
 // parallel and produces bit-identical results regardless of worker count.
 //
 // When centralDiff is true, central differences are used:
-//   J[i][j] = (r(x+ε·e_j) - r(x-ε·e_j)) / (2ε)
+//
+//	J[i][j] = (r(x+ε·e_j) - r(x-ε·e_j)) / (2ε)
 //
 // Otherwise, forward differences are used:
 //
@@ -688,6 +689,16 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 
 	if centralDiff {
 		column := func(j int) {
+			// A fixed variable (Max <= Min) has no physical range to
+			// differentiate across: the perturbation would be applied to an
+			// out-of-pin value while the pinned design never moves, giving a
+			// spurious non-zero column that the LM step then follows (the
+			// normalized coordinate drifts and, with the 1.0 scale fallback,
+			// delivers a physical value past the pin). Leave the column zero:
+			// the row is then governed by the damping term alone.
+			if variables[j].Max <= variables[j].Min {
+				return
+			}
 			xPlus := make([]float64, nVars)
 			xMinus := make([]float64, nVars)
 			copy(xPlus, xPhys)
@@ -722,6 +733,9 @@ func computeJacobians(m Model, xNorm []float64, variables []VariableInfo, scales
 		}
 	} else {
 		column := func(j int) {
+			if variables[j].Max <= variables[j].Min {
+				return
+			}
 			xPert := make([]float64, nVars)
 			copy(xPert, xPhys)
 			xPert[j] += epsilon * scales[j]
@@ -899,10 +913,23 @@ func buildAugmentedActive(J_opt [][]float64, r_opt []float64, J_con [][]float64,
 	return JAug, rAug
 }
 
+// denormValue converts one normalized coordinate back to physical space. A
+// fixed variable (Max <= Min) is pinned to Min: its normalized coordinate is
+// meaningless because the scale fallback is 1.0 (see Run), so letting it run
+// delivers a value beyond the pin — observed as vp_dia declared min 12.5 max
+// 12.5 yet delivered at 13.34 mm, i.e. the delivered entrance pupil disagreed
+// with the design's EPD.
+func denormValue(i int, n float64, variables []VariableInfo, scales []float64) float64 {
+	if variables[i].Max <= variables[i].Min {
+		return variables[i].Min
+	}
+	return variables[i].Min + n*scales[i]
+}
+
 func denormalize(n []float64, variables []VariableInfo, scales []float64) []float64 {
 	x := make([]float64, len(n))
 	for i := range n {
-		x[i] = variables[i].Min + n[i]*scales[i]
+		x[i] = denormValue(i, n[i], variables, scales)
 	}
 	return x
 }

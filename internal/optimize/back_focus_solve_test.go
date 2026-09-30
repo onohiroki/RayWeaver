@@ -536,10 +536,10 @@ func TestApplyVariablesSizesAperturesBeforeBackFocus(t *testing.T) {
 	if errSmall != nil {
 		// The 2 mm aperture clips the grid down to a degenerate fit: the solve
 		// reports it now (the pre-fix behaviour was the same 0, silently).
-		shSmall = 0
+		shSmall.ShiftMM = 0
 	}
-	if shSmall == shLarge {
-		t.Fatalf("test setup: wavefront back-focus not aperture-sensitive (%.6f)", shSmall)
+	if shSmall.ShiftMM == shLarge.ShiftMM {
+		t.Fatalf("test setup: wavefront back-focus not aperture-sensitive (%.6f)", shSmall.ShiftMM)
 	}
 
 	mk := func(stored float64) *Optimizer {

@@ -340,6 +340,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	if input.Optimization.BackFocusSolve != nil && input.Optimization.BackFocusSolve.Enabled {
 		opt.SetBackFocusSolve(input.Optimization.BackFocusSolve)
 	}
+	opt.SetDiffractionMTF(input.Optimization.DiffractionMTF)
 	if input.Optimization.GlassAttraction != nil {
 		opt.SetGlassAttraction(input.Optimization.GlassAttraction, gc)
 	}
@@ -539,6 +540,9 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	}
 	if ga := opt.GlassAttractionDiagnostics(finalX); ga != nil {
 		optResults.GlassAttraction = ga
+	}
+	if bf := opt.BackFocusDiagnostics(); bf != nil {
+		optResults.BackFocus = bf
 	}
 	output.OptResults = optResults
 

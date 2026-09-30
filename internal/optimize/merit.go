@@ -71,7 +71,21 @@ const (
 	// The residual is hinge-style: max(0, target - MTF), so only under-performance is penalized.
 	MeritGeometricMTFSag = "geometric_mtf_sag"
 	MeritGeometricMTFTan = "geometric_mtf_tan"
+
+	// Diffraction MTF merit kinds: the gate's own measurement — the vector
+	// Huygens integral on the delivered image plane followed by the FFT/MTF
+	// the `psf` / `focus mtf` commands report — evaluated inside the merit at
+	// the term's `frequency`. Hinge-style like the geometric kinds: only
+	// under-performance against `target` is penalised.
+	MeritDiffractionMTFSag = "diffraction_mtf_sag"
+	MeritDiffractionMTFTan = "diffraction_mtf_tan"
 )
+
+// isDiffractionKind reports whether a merit kind is a diffraction-MTF term
+// (one psf trace + Huygens integration + FFT per field/wavelength/frequency).
+func isDiffractionKind(kind string) bool {
+	return kind == MeritDiffractionMTFSag || kind == MeritDiffractionMTFTan
+}
 
 // evaluateKindTerm evaluates a non-spot merit term for the given config,
 // returning 0 for unknown kinds. The per-evaluation grid cache is shared with
@@ -116,6 +130,20 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 			return term.target
 		}
 		return tan
+	case MeritDiffractionMTFSag, MeritDiffractionMTFTan:
+		sag, tan := o.diffractionMTFValues(cfg, term, surfaces, gc, cache, p)
+		val := sag
+		if term.kind == MeritDiffractionMTFTan {
+			val = tan
+		}
+		// Same hinge as the geometric kinds: clamping at the target makes
+		// (val-target)^2 = max(0, target-MTF)^2, so a design already at the
+		// gate is never pushed to buy MTF it does not need. An unevaluable
+		// term yields 0, i.e. the full target deficit.
+		if val >= term.target {
+			return term.target
+		}
+		return val
 	case dls.MeritWavefrontShiftSag:
 		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 		if len(points) == 0 {
@@ -179,29 +207,9 @@ func isWavefrontKind(kind string) bool {
 // pupil otherwise. A degenerate fit (no grid, too few valid rays) returns the
 // bounded degenerate penalty so the solver is pushed away rather than misled.
 func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
-	refSurface := cfg.refSurface
-	if refSurface <= 0 || refSurface >= surfaces[len(surfaces)-1].ID {
-		// The wavefront reference surface must lie before the image plane: a
-		// chief reference surface set to the image plane (the conventional
-		// last surface) is not a valid wavefront sampling surface. Fall back
-		// to the last optical surface, exactly like the standalone `wavefront`
-		// command's default.
-		refSurface = psf.DefaultReferenceSurface(surfaces)
-	}
+	refSurface := wavefrontRefSurface(cfg, surfaces)
 	angle := o.termFieldAngle(cfg, term, surfaces, gc)
-	fd := types.FieldDef{Angle: angle, Direction: []float64{0, 1}}
-	// Carry the term's field declared vignetting (and direction) into the
-	// pupil-grid clip, matching the standalone `wavefront` command. Without it
-	// a heavily vignetted off-axis corner samples the full pupil and the fit
-	// collapses (< 6 valid rays). A negative fieldIndex (unset) keeps the
-	// legacy no-clip behaviour.
-	if term.fieldIndex >= 0 && cfg != nil && term.fieldIndex < len(cfg.fields) {
-		f := &cfg.fields[term.fieldIndex]
-		fd.Vignetting = f.Vignetting
-		if dx, dy, ok := fieldDir(f.Direction); ok {
-			fd.Direction = []float64{dx, dy}
-		}
-	}
+	fd := meritFieldDef(cfg, term, angle)
 	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
 
 	// Pupil Z for the term's own field: the per-call virtual-pupil position
@@ -280,6 +288,149 @@ func (o *Optimizer) evaluateWavefrontTerm(cfg *config, term *meritTerm, surfaces
 	default:
 		return wavefrontCoeff(term.kind, entry.Paraboloid)
 	}
+}
+
+// defaultDiffractionPolarizations is the diffraction-MTF default polarization:
+// RCP+LCP, the same incoherent average `focus mtf --polarization RCP+LCP`
+// reports. On an all-refractive system the two circular states give identical
+// intensity maps, so optimization.diffraction_mtf.polarizations: [RCP] halves
+// the cost without changing the value — but only after that equivalence has
+// been checked for the system at hand.
+var defaultDiffractionPolarizations = []string{string(types.PolRCPLCP)}
+
+// diffractionSettings is the resolved sampling of the diffraction MTF merit
+// kinds (optimization.diffraction_mtf; zero values mean built-in defaults).
+type diffractionSettings struct {
+	numRays       int
+	gridSize      int
+	maxGrid       int
+	polarizations []string
+}
+
+// diffractionSampling resolves the configured sampling for the current run.
+// num_rays 128 rather than the gate's 1600: the merit needs the same kind of
+// pupil sampling, not the same photon budget, and the MTF-vs-rays sensitivity
+// at the 10 c/mm hinge is far below the gate tolerance once the pupil is open.
+func (o *Optimizer) diffractionSampling() diffractionSettings {
+	out := diffractionSettings{
+		numRays:       128,
+		gridSize:      64, // psf's own default
+		maxGrid:       psf.DefaultDiffractionMaxGrid,
+		polarizations: defaultDiffractionPolarizations,
+	}
+	s := o.diffractionCfg
+	if s == nil {
+		return out
+	}
+	if s.NumRays > 0 {
+		out.numRays = s.NumRays
+	}
+	if s.GridSize > 0 {
+		out.gridSize = s.GridSize
+	}
+	if s.MaxGrid != 0 {
+		out.maxGrid = s.MaxGrid
+	}
+	if len(s.Polarizations) > 0 {
+		out.polarizations = s.Polarizations
+	}
+	return out
+}
+
+// meritFieldDef builds the FieldDef a wavefront / diffraction trace uses for a
+// merit term: the term's resolved angle, the field's declared vignetting and
+// the field's image-plane direction. Without the vignetting a heavily
+// vignetted off-axis corner samples the full pupil and the analysis collapses;
+// a term without a field index (or an index outside the field list) keeps the
+// legacy full-pupil, +Y behaviour.
+func meritFieldDef(cfg *config, term *meritTerm, angle float64) types.FieldDef {
+	fd := types.FieldDef{Angle: angle, Direction: []float64{0, 1}}
+	if term.fieldIndex >= 0 && cfg != nil && term.fieldIndex < len(cfg.fields) {
+		f := &cfg.fields[term.fieldIndex]
+		fd.Vignetting = f.Vignetting
+		if dx, dy, ok := fieldDir(f.Direction); ok {
+			fd.Direction = []float64{dx, dy}
+		}
+	}
+	return fd
+}
+
+// wavefrontRefSurface resolves the surface the wavefront / diffraction traces
+// sample: the config's reference surface when it lies before the image plane,
+// else the last optical surface (a chief reference surface set to the
+// conventional image plane is not a valid sampling surface) — the same rule
+// the standalone `wavefront` and `psf` commands apply.
+func wavefrontRefSurface(cfg *config, surfaces []types.Surface) int {
+	refSurface := 0
+	if cfg != nil {
+		refSurface = cfg.refSurface
+	}
+	if refSurface <= 0 || refSurface >= surfaces[len(surfaces)-1].ID {
+		return psf.DefaultReferenceSurface(surfaces)
+	}
+	return refSurface
+}
+
+// diffractionMTFValues returns the sagittal/tangential diffraction MTF of the
+// term's (field, wavelength) at the term's frequency. Both axes come from one
+// evaluation, so a sag+tan term pair on the same field shares one pupil trace
+// and one Huygens integration through the per-evaluation cache.
+func (o *Optimizer) diffractionMTFValues(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) (float64, float64) {
+	if cache == nil {
+		return o.computeDiffractionMTF(cfg, term, surfaces, gc, p)
+	}
+	key := diffractionMTFKey{
+		gridKey: gridKey{
+			configID:   cfg.id,
+			fieldIndex: term.fieldIndex,
+			fieldAngle: o.termFieldAngle(cfg, term, surfaces, gc),
+			wavelength: term.wavelength,
+		},
+		frequency: term.frequency,
+	}
+	if v, ok := cache.diffraction[key]; ok {
+		return v.sag, v.tan
+	}
+	sag, tan := o.computeDiffractionMTF(cfg, term, surfaces, gc, p)
+	cache.diffraction[key] = diffractionMTFValue{sag: sag, tan: tan}
+	return sag, tan
+}
+
+// computeDiffractionMTF traces and evaluates one term's field. The frozen
+// pupil (per-iteration, so the DLS base point and its Jacobian perturbations
+// share one entrance pupil, exactly like the wavefront terms) is tried first,
+// the dynamic pupil second. A failure returns 0 for both axes: under the
+// hinge that is the full target deficit, so the solver is pushed toward a
+// state where a PSF can be formed at all instead of being fed a fabricated
+// number.
+func (o *Optimizer) computeDiffractionMTF(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, p appliedPupil) (float64, float64) {
+	sampling := o.diffractionSampling()
+	angle := o.termFieldAngle(cfg, term, surfaces, gc)
+	fd := meritFieldDef(cfg, term, angle)
+	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
+	frozenZ := o.gridCentring(cfg, p, angle)
+	opts := psf.DiffractionMTFOptions{
+		Wavelength:       term.wavelength,
+		Frequency:        term.frequency,
+		ReferenceSurface: wavefrontRefSurface(cfg, surfaces),
+		NumRays:          sampling.numRays,
+		GridSize:         sampling.gridSize,
+		MaxGrid:          sampling.maxGrid,
+		Polarizations:    sampling.polarizations,
+		ApertureMargin:   o.apertureMargin,
+		EPDOverride:      p.dia,
+		PupilModel:       cfg.pupilModel,
+		RayDefinition:    cfg.rayDefinition,
+		Workers:          o.gridWorkers(),
+	}
+	res, err := psf.ComputeDiffractionMTF(sys, gc, fd, &frozenZ, opts)
+	if err != nil {
+		res, err = psf.ComputeDiffractionMTF(sys, gc, fd, nil, opts)
+	}
+	if err != nil {
+		return 0, 0
+	}
+	return res.Sagittal, res.Tangential
 }
 
 // wavefrontOptions builds the per-analysis wavefront options: the applied

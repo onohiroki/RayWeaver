@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/constraint"
@@ -864,7 +865,7 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 			seen := make(map[float64]bool)
 			for ti := range cfg.meritTerms {
 				term := &cfg.meritTerms[ti]
-				if !isGridTraceKind(term.kind) {
+				if !isTraceKind(term.kind) {
 					continue
 				}
 				a := o.termFieldAngle(cfg, term, surfaces, gc)
@@ -1414,11 +1415,21 @@ type Optimizer struct {
 	// updateGlassRoles, so the base-point and Jacobian residuals share one role
 	// assignment — the same frozen-per-iteration convention as the pupil.
 	roleTargets map[string]map[int]paraxial.ElementRole
-	// backFocusWarnOnce emits at most one warning per optimizer when the
-	// wavefront back-focus solve fails during a solve: applyBackFocusSolve
-	// runs at the top of every DLS iteration, so an unguarded warning would
-	// flood stderr while still leaving the image plane stale.
-	backFocusWarnOnce sync.Once
+	// backFocusStats aggregates what the in-run back-focus hard solve did for
+	// opt_results.back_focus: the last method and shift, the fields a partial
+	// wavefront solve had to drop, and the total failure count (every one of
+	// which fell back to the paraxial solve). applyBackFocusSolve runs from
+	// applyVariables, which the DLS Jacobian sweep calls concurrently for
+	// every column, so all access takes the mutex.
+	backFocusStats backFocusDiagnostics
+	// backFocusWarnings throttles the back-focus warnings: the solve runs for
+	// every Jacobian column, so an unguarded warning would flood stderr. The
+	// first three events are always reported, then one in 50.
+	backFocusWarnings atomic.Int64
+	// diffractionCfg is optimization.diffraction_mtf, the sampling of the
+	// diffraction_mtf_sag/tan merit kinds (nil = built-in defaults). Set by
+	// SetDiffractionMTF before the run, read-only afterwards.
+	diffractionCfg *types.DiffractionMTFConfig
 	// Bounded penalties for merit terms that cannot be evaluated. Defaults:
 	// spot 0.1, opd 0.01, wavefront 0.001 (mm).
 	spotDegenerate      float64
@@ -1735,6 +1746,14 @@ func (o *Optimizer) SetPowerSolve(solveSurfaces []int) {
 // built-in class defaults (no YAML configuration needed).
 func (o *Optimizer) SetAdaptiveDamping(cfg *types.AdaptiveDampingConfig) {
 	o.adaptiveDamping = cfg
+}
+
+// SetDiffractionMTF configures the sampling of the diffraction_mtf_sag /
+// diffraction_mtf_tan merit kinds (optimization.diffraction_mtf). A nil
+// config keeps the built-in defaults: 128 entrance-pupil rays, the psf image
+// grid rules capped at psf.DefaultDiffractionMaxGrid, RCP+LCP polarization.
+func (o *Optimizer) SetDiffractionMTF(cfg *types.DiffractionMTFConfig) {
+	o.diffractionCfg = cfg
 }
 
 // SetBackFocusSolve configures the back-focus solve. When enabled, the
@@ -3040,29 +3059,40 @@ func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surfac
 			if idx < 0 {
 				continue
 			}
+			var shift float64
 			switch o.currentBackFocusType {
 			case "wavefront":
-				shift, bfErr := o.wavefrontBackFocusShift(cfg, surfaces, gc)
+				out, bfErr := o.wavefrontBackFocusShift(cfg, surfaces, gc)
 				if bfErr != nil {
-					// Reported once: the image plane keeps its current
-					// thickness rather than jumping to an unverified focus.
-					o.backFocusWarnOnce.Do(func() {
-						Warnf("warning: %v; the image plane keeps its current thickness", bfErr)
-					})
+					// The field-tolerant solve already dropped every
+					// degenerate field, so this is a total failure. Falling
+					// back to the cheap paraxial solve keeps the image plane
+					// at least at the design focus; leaving it stale ships a
+					// system tens of mm out of focus while the merit keeps
+					// improving against the wrong plane.
+					shift = o.paraxialBackFocusShift(cfg, surfaces, gc)
+					o.backFocusStats.record("paraxial", shift, 0, nil, true)
+					o.backFocusWarn(bfErr, "paraxial focus applied")
+				} else {
+					shift = out.ShiftMM
+					o.backFocusStats.record("wavefront", out.ShiftMM, out.FieldsUsed, out.FieldsDropped, false)
+					if len(out.FieldsDropped) > 0 {
+						o.backFocusWarn(
+							fmt.Errorf("%d of %d field(s) dropped: %s",
+								len(out.FieldsDropped), out.FieldsUsed+len(out.FieldsDropped),
+								strings.Join(out.FieldsDropped, "; ")),
+							"wavefront best focus of the surviving fields applied")
+					}
 				}
-				newThk := surfaces[idx].Thickness + shift
-				if newThk < 0.1 {
-					newThk = 0.1
-				}
-				surfaces[idx].Thickness = newThk
 			default: // "paraxial"
-				shift := o.paraxialBackFocusShift(cfg, surfaces, gc)
-				newThk := surfaces[idx].Thickness + shift
-				if newThk < 0.1 {
-					newThk = 0.1
-				}
-				surfaces[idx].Thickness = newThk
+				shift = o.paraxialBackFocusShift(cfg, surfaces, gc)
+				o.backFocusStats.record("paraxial", shift, 0, nil, false)
 			}
+			newThk := surfaces[idx].Thickness + shift
+			if newThk < 0.1 {
+				newThk = 0.1
+			}
+			surfaces[idx].Thickness = newThk
 		}
 	}
 }
@@ -3133,20 +3163,89 @@ func paraxialBackFocusShiftFor(surfaces []types.Surface, stopSurface int, refWav
 	return desiredImageZ - currentImageZ
 }
 
+// backFocusOutcome is one wavefront back-focus solve's report: the shift it
+// applied and which of the requested fields actually contributed to it.
+type backFocusOutcome struct {
+	ShiftMM       float64
+	FieldsUsed    int
+	FieldsDropped []string
+}
+
+// backFocusDiagnostics accumulates the in-run back-focus solve outcomes. It is
+// embedded in the Optimizer and guarded by its mutex because the solve runs
+// from applyVariables, which the DLS Jacobian sweep calls concurrently for
+// every column.
+type backFocusDiagnostics struct {
+	mu sync.Mutex
+	v  types.BackFocusDiagnostics
+}
+
+// record stores one solve's outcome. failed marks a wavefront solve that broke
+// down entirely and fell back to the paraxial focus.
+func (d *backFocusDiagnostics) record(method string, shift float64, used int, dropped []string, failed bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.v.Method = method
+	d.v.ShiftMM = shift
+	d.v.FieldsUsed = used
+	d.v.FieldsDropped = append(d.v.FieldsDropped[:0], dropped...)
+	if failed {
+		d.v.Failures++
+	}
+}
+
+// snapshot returns a copy safe to hand to the result document.
+func (d *backFocusDiagnostics) snapshot() types.BackFocusDiagnostics {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	out := d.v
+	out.FieldsDropped = append([]string(nil), d.v.FieldsDropped...)
+	return out
+}
+
+// BackFocusDiagnostics returns the run-level back-focus solve report for
+// opt_results.back_focus, or nil when the solve is not configured.
+func (o *Optimizer) BackFocusDiagnostics() *types.BackFocusDiagnostics {
+	if o.backFocusSolve == nil || !o.backFocusSolve.Enabled {
+		return nil
+	}
+	snap := o.backFocusStats.snapshot()
+	return &snap
+}
+
+// backFocusWarn reports a back-focus solve problem (a dropped field set or a
+// total failure that fell back) without flooding stderr: the first three
+// events are always shown, then one in 50, each carrying its sequence number
+// so a long run still shows progress.
+func (o *Optimizer) backFocusWarn(err error, action string) {
+	n := o.backFocusWarnings.Add(1)
+	if n > 3 && n%50 != 0 {
+		return
+	}
+	Warnf("back_focus: %v; %s (event %d)", err, action, n)
+}
+
 // wavefrontBackFocusShift computes the image-plane shift needed to bring the
 // image plane to the wavefront best-focus position (see
 // wavefrontBackFocusShiftFor). An error means the wavefront could not be
-// evaluated; the shift is then 0 and the caller reports the failure.
-func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surface, gc *glass.Catalog) (float64, error) {
+// evaluated for *any* field; the shift is then 0 and the caller falls back.
+func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surface, gc *glass.Catalog) (backFocusOutcome, error) {
 	return wavefrontBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.wavelengths, cfg.fieldDefs, gc, cfg.rayDefinition, cfg.pupilModel)
 }
 
 // wavefrontBackFocusShiftFor computes the image-plane shift needed to bring the
 // image plane to the wavefront best-focus position. A minimal wavefront
 // analysis is run with the configured settings (num_rays, weight_type). It
-// returns an error when the wavefront analysis cannot be evaluated (a
-// degenerate pupil grid, a failed paraboloid fit, ...); the caller must
-// surface that instead of silently keeping a stale image plane.
+// returns an error when *no* field could be analysed (a degenerate pupil grid,
+// a failed paraboloid fit, ...); the caller must surface that instead of
+// silently keeping a stale image plane.
+//
+// The analysis runs with Options.Partial: a single degenerate field — a
+// clipped off-axis bundle under a tight aperture, a singular fit — is dropped
+// and reported in the outcome's FieldsDropped instead of failing the whole
+// solve, so the image plane still follows the fields that did analyse. Only a
+// total failure (every field degenerate) returns an error, which the caller
+// turns into a paraxial fallback.
 //
 // pupilModel is the document's virtual entrance pupil: it must be forwarded so
 // the solve samples the same bundle the merit grid, `psf`, `wavefront` and the
@@ -3154,9 +3253,9 @@ func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surfac
 // pupil, which a stopped-down or tightly auto-apertured system clips down to a
 // degenerate sample set (observed as "paraboloid fit: singular normal matrix"
 // on a 6-element whose deliverable apertures were sized for the real pupil).
-func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, wavelengths []types.WavelengthItem, fieldDefs []types.FieldDef, gc *glass.Catalog, rayDefinition string, pupilModel *types.PupilModelConfig) (float64, error) {
+func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, wavelengths []types.WavelengthItem, fieldDefs []types.FieldDef, gc *glass.Catalog, rayDefinition string, pupilModel *types.PupilModelConfig) (backFocusOutcome, error) {
 	if bfs == nil || len(surfaces) < 2 {
-		return 0, nil
+		return backFocusOutcome{}, nil
 	}
 	wl := bfs.Wavelength
 	if wl <= 0 {
@@ -3202,16 +3301,26 @@ func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSo
 		BestFocus:        &focusCfg,
 		PupilModel:       pupilModel,
 		RayDefinition:    rayDefinition,
+		// Field-tolerant: one degenerate field is dropped (and reported),
+		// not fatal. An error here therefore means every field failed.
+		Partial: true,
 	}
 
 	result, err := wavefront.Compute(sys, gc, fields, []float64{wl}, opts)
 	if err != nil {
-		return 0, fmt.Errorf("back-focus wavefront solve at %.3f nm: %w", wl*1e6, err)
+		return backFocusOutcome{}, fmt.Errorf("back-focus wavefront solve at %.3f nm: %w", wl*1e6, err)
 	}
 	if result == nil || result.BestFocus == nil {
-		return 0, fmt.Errorf("back-focus wavefront solve at %.3f nm: no best focus returned", wl*1e6)
+		return backFocusOutcome{}, fmt.Errorf("back-focus wavefront solve at %.3f nm: no best focus returned", wl*1e6)
 	}
-	return result.BestFocus.ShiftMM, nil
+	out := backFocusOutcome{
+		ShiftMM:    result.BestFocus.ShiftMM,
+		FieldsUsed: len(result.BestFocus.PerField),
+	}
+	for _, e := range result.Errors {
+		out.FieldsDropped = append(out.FieldsDropped, e.Error())
+	}
+	return out, nil
 }
 
 // backFocusFieldsFor selects the fields used by the back-focus wavefront solve
@@ -3273,11 +3382,18 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 	surface.Precompute(surfaces)
 	var shift float64
 	if bfType == "wavefront" {
-		var err error
-		shift, err = wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, wavelengths, fieldDefs, gc, rayDefinition, pupilModel)
+		out, err := wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, wavelengths, fieldDefs, gc, rayDefinition, pupilModel)
 		if err != nil {
 			Warnf("warning: %v; the image plane keeps its current thickness", err)
 			return false
+		}
+		shift = out.ShiftMM
+		if len(out.FieldsDropped) > 0 {
+			// Partial solve: the shift is the weighted best focus of the
+			// surviving fields. Worth stating — the persisted plane is not
+			// the one every field would have asked for.
+			Warnf("back_focus: %d of %d field(s) dropped (%s); the wavefront best focus of the surviving fields was applied",
+				len(out.FieldsDropped), out.FieldsUsed+len(out.FieldsDropped), strings.Join(out.FieldsDropped, "; "))
 		}
 	} else {
 		shift = paraxialBackFocusShiftFor(surfaces, stopSurface, refWavelength, wavelengths, cfg.Wavelength, gc)
@@ -3345,6 +3461,23 @@ type evalGridCache struct {
 	spots     map[gridKey][]dls.IPoint
 	extents   map[gridKey]map[int]float64
 	wavefront map[wfKey]*wavefront.Entry
+	// diffraction caches the diffraction-MTF sagittal/tangential pair per
+	// (field, wavelength, frequency): one trace + Huygens integration feeds a
+	// sag+tan term pair.
+	diffraction map[diffractionMTFKey]diffractionMTFValue
+}
+
+// diffractionMTFKey identifies one diffraction-MTF evaluation: the same pupil
+// key as a spot grid plus the term's spatial frequency (a second term at
+// another frequency needs its own FFT).
+type diffractionMTFKey struct {
+	gridKey
+	frequency float64
+}
+
+// diffractionMTFValue is the cached sagittal/tangential pair.
+type diffractionMTFValue struct {
+	sag, tan float64
 }
 
 // wfKey identifies a wavefront analysis within a single merit evaluation.
@@ -3361,9 +3494,10 @@ type wfKey struct {
 
 func newEvalGridCache() *evalGridCache {
 	return &evalGridCache{
-		spots:     make(map[gridKey][]dls.IPoint),
-		extents:   make(map[gridKey]map[int]float64),
-		wavefront: make(map[wfKey]*wavefront.Entry),
+		spots:       make(map[gridKey][]dls.IPoint),
+		extents:     make(map[gridKey]map[int]float64),
+		wavefront:   make(map[wfKey]*wavefront.Entry),
+		diffraction: make(map[diffractionMTFKey]diffractionMTFValue),
 	}
 }
 
@@ -3481,8 +3615,7 @@ func isGridKind(kind string) bool {
 // isGridTraceKind reports whether the merit kind needs a pupil-grid trace,
 // either directly (the grid/spot kinds) or through a dedicated grid-consuming
 // evaluator (the wavefront shift / pair-phase kinds). It is the predicate for
-// the grid precompute and the angle-fallback loops, which must see every
-// trace-consuming term even when isGridKind is false.
+// the grid precompute, which fills the shared spot cache.
 func isGridTraceKind(kind string) bool {
 	switch kind {
 	case dls.MeritWavefrontShiftSag, dls.MeritWavefrontShiftTan, dls.MeritWavefrontPairPhase,
@@ -3490,6 +3623,16 @@ func isGridTraceKind(kind string) bool {
 		return true
 	}
 	return isGridKind(kind)
+}
+
+// isTraceKind reports whether a merit kind consumes a per-field pupil trace —
+// the shared grid machinery or the diffraction-MTF tracer, which samples to
+// the reference surface instead of the image plane and therefore must not go
+// through the grid precompute. It is the predicate for the angle-fallback
+// loops, which must see every trace-consuming term even when a config carries
+// no field list.
+func isTraceKind(kind string) bool {
+	return isGridTraceKind(kind) || isDiffractionKind(kind)
 }
 
 // evaluateGridKind traces the pupil grid for a grid merit term and returns the
@@ -3682,7 +3825,7 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 	if len(angles) == 0 {
 		for ti := range cfg.meritTerms {
 			term := &cfg.meritTerms[ti]
-			if !isGridTraceKind(term.kind) {
+			if !isTraceKind(term.kind) {
 				continue
 			}
 			angles[o.termFieldAngle(cfg, term, surfaces, gc)] = true

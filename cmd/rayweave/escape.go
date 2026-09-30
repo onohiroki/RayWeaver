@@ -409,6 +409,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		if input.Optimization.BackFocusSolve != nil && input.Optimization.BackFocusSolve.Enabled {
 			opt.SetBackFocusSolve(input.Optimization.BackFocusSolve)
 		}
+		opt.SetDiffractionMTF(input.Optimization.DiffractionMTF)
 		if input.Optimization.MeritSchedule != nil {
 			opt.SetMeritSchedule(input.Optimization.MeritSchedule)
 		}
@@ -854,6 +855,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		if input.Optimization.BackFocusSolve != nil && input.Optimization.BackFocusSolve.Enabled {
 			opt.SetBackFocusSolve(input.Optimization.BackFocusSolve)
 		}
+		opt.SetDiffractionMTF(input.Optimization.DiffractionMTF)
 		if input.Optimization.MeritSchedule != nil {
 			opt.SetMeritSchedule(input.Optimization.MeritSchedule)
 		}

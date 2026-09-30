@@ -20,9 +20,9 @@ type ImageGridSpec struct {
 // FieldGrid is the computed complex electric field on the flat image plane,
 // stored row-major (index = y*NX + x).
 type FieldGrid struct {
-	Spec     ImageGridSpec
-	Ex, Ey   []complex128
-	Ez       []complex128
+	Spec      ImageGridSpec
+	Ex, Ey    []complex128
+	Ez        []complex128
 	Intensity []float64
 }
 
@@ -159,6 +159,10 @@ type fieldPair struct {
 // sample) and shared between the actual and ideal phases of each pair. All
 // pairs are processed by the same pool, so the CPU is fully utilised across
 // them without oversubscription. workers 0 = runtime.NumCPU().
+//
+// A pair with a nil ideal grid (the diffraction-MTF path, which needs no
+// diffraction-limited reference) skips the ideal phase entirely, saving the
+// second complex accumulation of the inner loop.
 func computePairs(pairs []fieldPair, imagePlaneZ, nImage, wavelength float64,
 	spec ImageGridSpec, workers int) {
 	if len(pairs) == 0 || spec.NX == 0 || spec.NY == 0 {
@@ -169,6 +173,9 @@ func computePairs(pairs []fieldPair, imagePlaneZ, nImage, wavelength float64,
 	// Precompute each pair's ideal OPL reference once.
 	idealOPL := make([][]float64, len(pairs))
 	for pi := range pairs {
+		if pairs[pi].ideal == nil {
+			continue
+		}
 		idealOPL[pi] = make([]float64, len(pairs[pi].samples))
 		for si, s := range pairs[pi].samples {
 			idealOPL[pi][si] = -nImage * s.Position.Subtract(pairs[pi].center).Length()
@@ -209,6 +216,7 @@ func computePairs(pairs []fieldPair, imagePlaneZ, nImage, wavelength float64,
 					idx := j*spec.NX + i
 					for pi := range pairs {
 						pr := &pairs[pi]
+						withIdeal := pr.ideal != nil
 						var ax, ay, az, ix, iy, iz complex128
 						for si, s := range pr.samples {
 							Rvec := p.Subtract(s.Position)
@@ -230,6 +238,9 @@ func computePairs(pairs []fieldPair, imagePlaneZ, nImage, wavelength float64,
 							ay += cfA * s.Field.Y
 							az += cfA * s.Field.Z
 
+							if !withIdeal {
+								continue
+							}
 							// ideal phase (shared geometry)
 							phaseI := k * (idealOPL[pi][si] + nImage*R)
 							cfI := complex((w*math.Cos(phaseI))/wavelength, (w*math.Sin(phaseI))/wavelength)
@@ -241,6 +252,9 @@ func computePairs(pairs []fieldPair, imagePlaneZ, nImage, wavelength float64,
 						pr.actual.Ey[idx] = ay
 						pr.actual.Ez[idx] = az
 						pr.actual.Intensity[idx] = absSq(ax) + absSq(ay) + absSq(az)
+						if !withIdeal {
+							continue
+						}
 						pr.ideal.Ex[idx] = ix
 						pr.ideal.Ey[idx] = iy
 						pr.ideal.Ez[idx] = iz

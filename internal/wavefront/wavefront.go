@@ -36,6 +36,29 @@ type Options struct {
 	// how the chief ray — whose direction sets the polarization frame of the
 	// traced bundle — is constructed from the pupil grid.
 	RayDefinition string
+	// Partial continues past a failing (field, wavelength, polarization) task:
+	// the failure is recorded in Result.Errors and its result is omitted
+	// instead of aborting the whole analysis, and Compute only returns an
+	// error when every task failed. The optimizer's back-focus solve sets it,
+	// because a single degenerate field (a clipped off-axis bundle, a
+	// singular paraboloid fit) must not stall the image plane for the whole
+	// run — the shift is then taken from the fields that did analyse.
+	Partial bool
+}
+
+// FieldError records one (field, wavelength, polarization) task that failed
+// while Options.Partial was set.
+type FieldError struct {
+	FieldIndex   int
+	FieldAngle   float64
+	Wavelength   float64
+	Polarization string
+	Err          error
+}
+
+// Error renders the failure the same way the all-or-nothing path labels it.
+func (e FieldError) Error() string {
+	return fmt.Sprintf("field %d @ %.6f nm: %v", e.FieldIndex, e.Wavelength*1e6, e.Err)
 }
 
 // SampleData is one sampled wavefront point on the reference surface (global
@@ -92,7 +115,10 @@ type BestFocusOut struct {
 
 // Result is the complete wavefront analysis of one config.
 type Result struct {
-	Fields    []FieldResult
+	Fields []FieldResult
+	// Errors holds the tasks that failed under Options.Partial, sorted like
+	// Fields. Empty for an all-or-nothing analysis (any failure aborts it).
+	Errors    []FieldError
 	BestFocus *BestFocusOut
 }
 
@@ -199,6 +225,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 	sem := make(chan struct{}, opts.Workers)
 	var mu sync.Mutex
 	var firstErr error
+	var taskErrs []FieldError
 	rayWorkers := runtime.NumCPU() / opts.Workers
 	if rayWorkers < 1 {
 		rayWorkers = 1
@@ -213,7 +240,16 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 			fr, err := computeField(engine, system, gc, t.fd, opts.ReferenceSurface, opts.NumRays, opts.ZernikeMaxOrder, t.wl, t.pol, rayWorkers, opts.PupilModel, opts.RayDefinition)
 			if err != nil {
 				mu.Lock()
-				if firstErr == nil {
+				switch {
+				case opts.Partial:
+					taskErrs = append(taskErrs, FieldError{
+						FieldIndex:   t.fi,
+						FieldAngle:   t.fd.Angle,
+						Wavelength:   t.wl,
+						Polarization: t.pol.label,
+						Err:          err,
+					})
+				case firstErr == nil:
 					firstErr = fmt.Errorf("field %d @ %.6f nm: %v", t.fi, t.wl*1e6, err)
 				}
 				mu.Unlock()
@@ -233,6 +269,30 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 	if firstErr != nil {
 		return nil, firstErr
 	}
+	if len(taskErrs) > 0 {
+		// Partial: drop the failed tasks' zero-valued slots (no consumer must
+		// ever see a phantom field 0 / wavelength 0 entry) and sort the
+		// failures alongside the results.
+		sort.Slice(taskErrs, func(a, b int) bool {
+			if taskErrs[a].FieldIndex != taskErrs[b].FieldIndex {
+				return taskErrs[a].FieldIndex < taskErrs[b].FieldIndex
+			}
+			if taskErrs[a].Wavelength != taskErrs[b].Wavelength {
+				return taskErrs[a].Wavelength < taskErrs[b].Wavelength
+			}
+			return taskErrs[a].Polarization < taskErrs[b].Polarization
+		})
+		kept := make([]FieldResult, 0, len(results)-len(taskErrs))
+		for _, r := range results {
+			if r.Polarization != "" {
+				kept = append(kept, r)
+			}
+		}
+		if len(kept) == 0 {
+			return nil, fmt.Errorf("every wavefront field task failed (%d); first: %v", len(taskErrs), taskErrs[0])
+		}
+		results = kept
+	}
 
 	// Deterministic order: field index, then wavelength, then polarization.
 	sort.SliceStable(results, func(a, b int) bool {
@@ -245,9 +305,9 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 		return results[a].Polarization < results[b].Polarization
 	})
 
-	out := &Result{Fields: results}
+	out := &Result{Fields: results, Errors: taskErrs}
 	if opts.BestFocus != nil {
-		bf, err := computeBestFocus(results, imagePlaneZ, *opts.BestFocus)
+		bf, err := computeBestFocus(results, imagePlaneZ, *opts.BestFocus, len(fields))
 		if err != nil {
 			return nil, err
 		}
@@ -467,7 +527,14 @@ func toLocalFrame(samples []psf.WavefrontSample, g2l types.Mat4) []psf.Wavefront
 // each field the first (design) wavelength's result is used. The weighted
 // focus distance minus the current reference-surface → image-plane distance is
 // the image-plane shift to apply.
-func computeBestFocus(results []FieldResult, imagePlaneZ float64, cfg FocusConfig) (*BestFocusOut, error) {
+//
+// expectedFields is the number of fields the analysis was asked for; when it
+// exceeds the number of surviving results (Options.Partial dropped some) the
+// custom per-field weights are re-indexed onto the survivors instead of
+// failing the length check, so a partial analysis still yields a weighted
+// best focus. A weight list that does not match the requested field count for
+// any other reason keeps failing, as before.
+func computeBestFocus(results []FieldResult, imagePlaneZ float64, cfg FocusConfig, expectedFields int) (*BestFocusOut, error) {
 	// First result per field index (results are sorted by field, wavelength).
 	var focusZ []float64
 	var fieldIdx []int
@@ -479,6 +546,16 @@ func computeBestFocus(results []FieldResult, imagePlaneZ float64, cfg FocusConfi
 		seen[r.FieldIndex] = true
 		focusZ = append(focusZ, r.Sphere.CenterZ)
 		fieldIdx = append(fieldIdx, r.FieldIndex)
+	}
+	if cfg.WeightType == "custom" && len(cfg.CustomWeights) == expectedFields &&
+		len(focusZ) != expectedFields && len(focusZ) > 0 {
+		picked := make([]float64, 0, len(focusZ))
+		for _, fi := range fieldIdx {
+			if fi >= 0 && fi < len(cfg.CustomWeights) {
+				picked = append(picked, cfg.CustomWeights[fi])
+			}
+		}
+		cfg.CustomWeights = picked
 	}
 	fr, err := ComputeBestFocus(focusZ, fieldIdx, cfg)
 	if err != nil {

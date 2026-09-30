@@ -231,7 +231,9 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 
 	// ① Detect EvaluateMeritBoth: single ray-trace pass for escaped + inner merit.
 	var bothFn func([]float64) (float64, float64)
-	if bfn, ok := model.(interface{ EvaluateMeritBoth([]float64) (float64, float64) }); ok {
+	if bfn, ok := model.(interface {
+		EvaluateMeritBoth([]float64) (float64, float64)
+	}); ok {
 		bothFn = bfn.EvaluateMeritBoth
 	}
 
@@ -368,14 +370,14 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		// Emit pso_iter every 10 iterations for progress tracking.
 		if e.progress != nil && (iter+1)%10 == 0 {
 			e.progress("pso_iter", map[string]any{
-				"iter":         iter + 1,
-				"gbest_merit":  gbestFit,
-				"gbest_true":   gbestTrueFit,
-				"swarm_mean":   swarmSum / float64(swarmSize),
-				"swarm_min":    swarmMin,
-				"swarm_max":    swarmMax,
-				"restarts":     restarts,
-				"phase":        "pso",
+				"iter":        iter + 1,
+				"gbest_merit": gbestFit,
+				"gbest_true":  gbestTrueFit,
+				"swarm_mean":  swarmSum / float64(swarmSize),
+				"swarm_min":   swarmMin,
+				"swarm_max":   swarmMax,
+				"restarts":    restarts,
+				"phase":       "pso",
 			})
 		}
 
@@ -500,10 +502,17 @@ func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, sc
 	}
 }
 
-// denormalize converts from [0, 1] normalized space to physical space.
+// denormalize converts from [0, 1] normalized space to physical space. A fixed
+// variable (Max <= Min) is pinned to Min: its normalized coordinate is
+// meaningless because the scale fallback is 1.0, and letting it run delivers a
+// value beyond the pin (see dls.denormValue).
 func denormalize(norm []float64, variables []dls.VariableInfo, scales []float64) []float64 {
 	phys := make([]float64, len(norm))
 	for i := range phys {
+		if variables[i].Max <= variables[i].Min {
+			phys[i] = variables[i].Min
+			continue
+		}
 		phys[i] = variables[i].Min + norm[i]*scales[i]
 	}
 	return phys

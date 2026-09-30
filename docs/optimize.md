@@ -442,6 +442,18 @@ wavelength, and `weight_type` selects the fields combined into the focus
 determination (`on_axis_only` default, `uniform`, or `custom` with
 `custom_weights`). The setting is YAML-only (no CLI flag).
 
+#### Partial solves: a degenerate field is dropped, not the whole solve
+
+The wavefront solve is **partial**: a field whose wavefront cannot be analysed
+(a clipped off-axis bundle under a tight aperture — the "only 0 valid grid
+rays" / "paraboloid fit: singular normal matrix" failure) is dropped and
+reported, and the solve still returns the best focus of the fields that did
+analyse. Only when *every* field fails does the solve fall back to the paraxial
+shift, so the image plane is never left stale while the merit keeps improving
+against it. Dropped fields are counted in `opt_results.back_focus`
+(`fields_used` / `fields_dropped` / `failures`) and reported on stderr
+(throttled: the first three, then one in fifty).
+
 #### Dynamic type switching (`back_focus_solve.schedule`)
 
 When a merit schedule is active, the back-focus type can switch between
@@ -547,6 +559,13 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   asphere, etc.), and accept/reject history. This gives high-sensitivity
   variables stronger damping while letting low-sensitivity variables move more
   freely.
+- A variable declared `min == max` (pinned) never leaves its pin. The
+  normalized-space scale falls back to `1.0` when the span is non-positive, so
+  an unguarded LM step walked the normalized coordinate freely and
+  `denormalize` handed out `Min + n·1.0` — observed as `vp_dia` declared
+  `min: 12.5 max: 12.5` yet delivered at 13.34 mm, i.e. the shipped entrance
+  pupil disagreed with the design's EPD. The solver now pins such variables to
+  `Min` and zeroes their Jacobian column.
 - Grid traces for different (field, wavelength) pairs within a single merit
   evaluation are now parallelised across CPU cores.
 - `configs[].ray_paths` is render-only metadata; the optimizer ignores it.

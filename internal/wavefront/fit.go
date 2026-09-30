@@ -4,12 +4,9 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/psf"
-	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/ray"
-	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -80,7 +77,7 @@ func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	var fg *psf.PupilGrid
 	if frozenPupilZ != nil {
 		var err error
-		fg, err = frozenPupilGrid(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, *frozenPupilZ, opts.EPDOverride)
+		fg, err = psf.FrozenPupilGrid(system, gc, fd, refSurface, numRays, wavelength, apertureMargin, *frozenPupilZ, opts.EPDOverride)
 		if err != nil {
 			return fieldAnalysis{}, err
 		}
@@ -98,60 +95,6 @@ func analyzeField(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	}
 
 	return analyzeSamples(global, system.Surfaces, refSurface, wavelength, gc, 0, opts.PlaneReference)
-}
-
-// frozenPupilGrid builds the polar entrance-pupil grid for one field centred on
-// a caller-frozen pupil Z. The ray directions and grid layout replicate the
-// optimization grid (dls.traceGridRays) and the chief command's angle-field
-// grid: parallel rays at the field angle, laterally offset so the aperture sits
-// at pupilZ. Unlike psf.ComputeFieldGrid the dynamic pupil is NOT re-settled.
-//
-// epdOverride is the virtual entrance-pupil diameter (mm) the optimizer has
-// applied for this evaluation; 0 derives the radius from the surfaces (the
-// historical behaviour, which for a virtual-pupil system is the paraxial /
-// fixed-aperture radius instead of the prescribed pupil).
-func frozenPupilGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
-	refSurface, numRays int, wavelength float64, apertureMargin, pupilZ, epdOverride float64) (*psf.PupilGrid, error) {
-	apertureRadius := dls.ApertureRadiusForGrid(system.Surfaces, system.StopSurface, wavelength, gc, apertureMargin, epdOverride)
-	if apertureRadius <= 0 {
-		return nil, fmt.Errorf("no entrance-pupil radius for the wavefront grid")
-	}
-
-	rayDir := raymath.DirectionFromField(fd.Angle, fd.Direction)
-
-	zStart := -100.0
-	pupilOffsetX, pupilOffsetY := pupil.GridCentre(rayDir, pupilZ, zStart)
-
-	var vig *types.VignettingDef
-	if fd.Vignetting != nil && !fd.Vignetting.IsZero() {
-		vig = fd.Vignetting
-	}
-	samples := pupil.Launch(pupil.LaunchSpec{
-		NumRays:        numRays,
-		GridType:       types.GridPolar,
-		ApertureRadius: apertureRadius,
-		RayDir:         rayDir,
-		CentreX:        pupilOffsetX,
-		CentreY:        pupilOffsetY,
-		ZStart:         zStart,
-		OPLMode:        pupil.OPLLaunch,
-		Vig:            vig,
-	})
-	grid := make([]types.GridPoint, len(samples))
-	for i, s := range samples {
-		grid[i] = types.GridPoint{
-			PupilX:    s.PupilX,
-			PupilY:    s.PupilY,
-			Origin:    s.Origin,
-			Direction: s.Dir,
-		}
-	}
-
-	return &psf.PupilGrid{
-		GridPoints:    grid,
-		ChiefDir:      rayDir,
-		EntrancePupil: &types.Pupil{Center: types.Vec3{X: pupilOffsetX, Y: pupilOffsetY, Z: pupilZ}},
-	}, nil
 }
 
 // Entry is the cached result of a wavefront analysis for one (field,
