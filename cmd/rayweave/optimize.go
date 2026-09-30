@@ -647,6 +647,15 @@ func runOptimizeSnap(data []byte, glassDir string) {
 // hull only constrains nd/vd glass variables (hullPairs), so a run without
 // glass variables is unaffected even with the hull active.
 //
+// Two penalty-shape knobs are resolved onto the hull itself:
+//
+//   - guard_band (default 0.01, 0 disables): the penalty aims at a hull shrunk
+//     by this fraction of the hull radius, so the DLS balance point rests that
+//     far inside the true hull (feasibility stays judged on the true hull).
+//   - escape_weight_factor (default 0.1): scales the whole hull-penalty term
+//     during the escape exploration phase so the search can cross the hull
+//     barrier; the glass/clean phases keep full strength.
+//
 // The geometry is selected by glass_hull.source:
 //
 //   - "union" (default, or empty): the built-in full real-glass hull unioned
@@ -696,6 +705,21 @@ func resolveGlassHull(cfg *types.GlassHullConfig, out **glass.ConvexHull, gc *gl
 		if cfg.Weight > 0 {
 			weight = cfg.Weight
 		}
+	}
+	if *out != nil {
+		// Guard band: default on (0.01 of the hull radius); an explicit 0
+		// disables it. Escape factor: default 0.1; an explicit value is
+		// honored (0 falls back to the same default).
+		guard := 0.01
+		if cfg != nil && cfg.GuardBand != nil && *cfg.GuardBand >= 0 {
+			guard = *cfg.GuardBand
+		}
+		factor := 0.1
+		if cfg != nil && cfg.EscapeWeightFactor != nil && *cfg.EscapeWeightFactor > 0 {
+			factor = *cfg.EscapeWeightFactor
+		}
+		(*out).SetGuardBand(guard)
+		(*out).SetEscapeWeightFactor(factor)
 	}
 	return margin, weight
 }

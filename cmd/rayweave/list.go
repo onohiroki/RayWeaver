@@ -2745,6 +2745,8 @@ func escapeSettings(e *types.EscapeConfig) []propRow {
 	// the value back), so it is reported the same way as the other pointer
 	// property, Stall Early Stop.
 	p = appendBoolPtrProp(p, "Stream", e.Stream)
+	p = appendBoolPtrProp(p, "Hull Rescue", e.HullRescue)
+	p = appendNumProp(p, "Hull Rescue Iter Frac", e.HullRescueIterFrac)
 	if len(e.VariableWeights) > 0 {
 		p = append(p, propRow{Name: "Variable Weights", Value: sortedFloatMapJoin(e.VariableWeights)})
 	}
@@ -3984,6 +3986,12 @@ func listOptimization(input types.Input, output types.Output, format string) {
 			p = appendStrProp(p, "Source", source)
 			p = appendNumProp(p, "Margin", gh.Margin)
 			p = appendNumProp(p, "Weight", gh.Weight)
+			if gh.GuardBand != nil {
+				p = appendNumProp(p, "Guard Band", *gh.GuardBand)
+			}
+			if gh.EscapeWeightFactor != nil {
+				p = appendNumProp(p, "Escape Weight Factor", *gh.EscapeWeightFactor)
+			}
 			if len(gh.Glasses) > 0 {
 				p = appendIntProp(p, "Glasses", len(gh.Glasses))
 			}

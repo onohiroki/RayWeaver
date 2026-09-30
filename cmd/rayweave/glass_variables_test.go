@@ -261,6 +261,50 @@ func TestResolveGlassHullSourceModes(t *testing.T) {
 	}
 }
 
+// TestResolveGlassHullGuardAndFactor: the guard band and the escape
+// weight factor are applied to the resolved hull with their defaults
+// (0.01 / 0.1) and explicit config overrides, while an explicit
+// guard_band: 0 disables the guard.
+func TestResolveGlassHullGuardAndFactor(t *testing.T) {
+	testCat := glass.NewCatalog()
+	testCat.Add(types.Glass{Key: "N-BK7", ND: 1.5168, VD: 64.17})
+	testCat.Add(types.Glass{Key: "N-SF2", ND: 1.64769, VD: 33.82})
+
+	// Defaults: guard band on at 0.01, escape factor 0.1.
+	var dflt *glass.ConvexHull
+	resolveGlassHull(nil, &dflt, testCat)
+	if dflt == nil {
+		t.Fatal("default: hull should be set")
+	}
+	if got := dflt.GuardBand(); got != 0.01 {
+		t.Errorf("default guard band = %v, want 0.01", got)
+	}
+	if got := dflt.EscapeWeightFactor(); got != 0.1 {
+		t.Errorf("default escape weight factor = %v, want 0.1", got)
+	}
+
+	// Explicit overrides (including guard_band: 0 to disable).
+	guardOff := 0.0
+	cfg := &types.GlassHullConfig{
+		Enabled:            true,
+		GuardBand:          &guardOff,
+		EscapeWeightFactor: float64Ptr(0.5),
+	}
+	var h *glass.ConvexHull
+	resolveGlassHull(cfg, &h, testCat)
+	if h == nil {
+		t.Fatal("enabled: hull should be set")
+	}
+	if got := h.GuardBand(); got != 0 {
+		t.Errorf("explicit guard_band 0 = %v, want 0 (disabled)", got)
+	}
+	if got := h.EscapeWeightFactor(); got != 0.5 {
+		t.Errorf("explicit escape_weight_factor = %v, want 0.5", got)
+	}
+}
+
+func float64Ptr(v float64) *float64 { return &v }
+
 func abs(f float64) float64 {
 	if f < 0 {
 		return -f

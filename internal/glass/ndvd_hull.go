@@ -48,6 +48,18 @@ type ConvexHull struct {
 	enabled    bool
 	weight     float64
 	references []HullReference // grouped catalogue metadata for diagnostics
+	// guardBand, as a fraction of the hull radius, shrinks the hull the
+	// penalty aims at (capped at half the centroid's clearance to the
+	// boundary so the guarded zone stays a shell): the penalty landscape
+	// (band and outside ramp) is evaluated against a hull shrunk by that
+	// distance, so the DLS balance point rests inside the true hull while
+	// the feasibility check (Contains) stays on the true hull. 0 = no
+	// guard. Applied through resolveGlassHull (default 0.01).
+	guardBand float64
+	// escapeFactor scales the escape-phase hull penalty (see
+	// Optimizer.hullPhaseFactor); 0 = no phase scaling. Applied through
+	// resolveGlassHull (default 0.1).
+	escapeFactor float64
 }
 
 // hullHalfSpace is one facet of the hull in half-space form: a point p is
@@ -416,6 +428,39 @@ func (h *ConvexHull) Penalty(nd, vd, margin, weight float64) float64 {
 		d = dBaryDist
 	}
 
+	// Guard band: within guardDist of the boundary (measured with the raw
+	// dPlane metric, capped at half the centroid's clearance so the guarded
+	// zone stays a shell around the boundary instead of swallowing the hull),
+	// evaluate the penalty against a hull shrunk by guardDist. The smooth
+	// band and the outside ramp then both start guardDist inside the true
+	// hull, so the DLS balance point (which sits at the ramp onset) rests
+	// inside the hull while the feasibility check (Contains) stays on the
+	// true hull. The raw metric is used because the inside depth metric
+	// (barycentric coordinate) has no raw-unit scale to shift by.
+	if h.guardBand > 0 {
+		guardDist := radius * h.guardBand
+		if clear := signedDistanceToHullBoundary(h.hull, cx, cy); clear > 0 {
+			if cap := 0.5 * clear; guardDist > cap {
+				guardDist = cap
+			}
+		} else {
+			guardDist = 0
+		}
+		if dPlane < guardDist {
+			d = dPlane - guardDist
+		}
+	}
+
+	// Exact real-catalog points stay zero-penalty so snapped values are
+	// stable. Checked before the ramp branch so a guard-shifted landscape
+	// cannot slam a glass sitting on a catalog point (including hull
+	// vertices, which lie on the true boundary).
+	for _, p := range h.points {
+		if math.Abs(p.nd-nd) < 1e-3 && math.Abs(p.vd-vd) < 1e-3 {
+			return 0
+		}
+	}
+
 	offset := radius * hullBoundaryOffset * scaledMargin
 	if offset <= 1e-12 {
 		offset = 1e-12
@@ -448,12 +493,6 @@ func (h *ConvexHull) Penalty(nd, vd, margin, weight float64) float64 {
 	}
 	penalty := t * t * (3 - 2*t)
 
-	for _, p := range h.points {
-		if math.Abs(p.nd-nd) < 1e-3 && math.Abs(p.vd-vd) < 1e-3 {
-			return 0
-		}
-	}
-
 	return weight * penalty
 }
 
@@ -477,7 +516,8 @@ func (h *ConvexHull) inBounds(nd, vd float64) bool {
 	return true
 }
 
-// signedDistanceToHullBoundary returns a signed distance: negative = inside the hull.
+// signedDistanceToHullBoundary returns a signed distance: positive = inside
+// the hull, negative = outside (the same convention as barycentricCoords).
 func signedDistanceToHullBoundary(hull []ndvdPoint, nd, vd float64) float64 {
 	if len(hull) < 3 {
 		return 1.0
@@ -565,6 +605,31 @@ func pointToSegmentDistSigned(ax, ay, bx, by, px, py float64) float64 {
 func (h *ConvexHull) Enabled() bool {
 	return h.enabled
 }
+
+// SetGuardBand sets the guard band as a fraction of the hull radius (see the
+// guardBand field). Values below 0 are clamped to 0.
+func (h *ConvexHull) SetGuardBand(f float64) {
+	if f < 0 {
+		f = 0
+	}
+	h.guardBand = f
+}
+
+// GuardBand returns the guard-band fraction of the hull radius.
+func (h *ConvexHull) GuardBand() float64 { return h.guardBand }
+
+// SetEscapeWeightFactor sets the escape-phase penalty scale (see the
+// escapeFactor field). Values below 0 are clamped to 0.
+func (h *ConvexHull) SetEscapeWeightFactor(f float64) {
+	if f < 0 {
+		f = 0
+	}
+	h.escapeFactor = f
+}
+
+// EscapeWeightFactor returns the escape-phase penalty scale (0 = no phase
+// scaling).
+func (h *ConvexHull) EscapeWeightFactor() float64 { return h.escapeFactor }
 
 // References returns the catalogue metadata for the reference points.
 func (h *ConvexHull) References() []HullReference {

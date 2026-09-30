@@ -232,6 +232,14 @@ func isConverged(status string) bool {
 	return strings.HasPrefix(status, "converged")
 }
 
+// hullRescuer is the optional capability an inner dls.Model implements to
+// repair a point whose glass lies outside the real-glass convex hull (the
+// Optimizer's RescueGlassHull). Structural typing keeps the escape package
+// decoupled from the concrete model.
+type hullRescuer interface {
+	RescueGlassHull(x []float64) ([]float64, bool)
+}
+
 // acceptable reports whether the DLS run reached a usable stopping point: it
 // converged, or ran out of iterations while producing a finite, sane merit.
 // A truly broken solve (all rays missing, degenerate evaluation) shows up as
@@ -641,6 +649,63 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			})
 			currentX = c.perturb(trueX, cyc, restartAmp)
 			continue
+		}
+
+		// Glass-hull rescue: project the offending nd/vd pairs back onto the
+		// real-glass hull (inner model's RescueGlassHull capability) and
+		// re-run a short clean DLS from there. A result that passes
+		// validation replaces the point and is recorded as a feasible
+		// minimum, so the cycle produces a solution instead of an infeasible
+		// basin; otherwise the original classification (and its escape bump)
+		// is kept. Skipped when the run is stopping or out of time.
+		if status == MinStatusInfeasibleBasin && invalidReason == ReasonGlassHullViolation &&
+			c.params.HullRescue && !c.timeUp() && !hardStopped(c.hardStop) {
+			if rs, isRescuer := c.wrapper.inner.(hullRescuer); isRescuer {
+				if projected, ok := rs.RescueGlassHull(trueX); ok {
+					c.wrapper.SetEscapes(nil)
+					rescueStart := make([]float64, len(projected))
+					copy(rescueStart, projected)
+					c.wrapper.SetStartX(rescueStart)
+					c.wrapper.SetPhase(PhaseClean) // full hull weight for the re-solve
+					c.wrapper.SetRescueMode(true)
+					c.wrapper.SetStop(c.stopCh())
+					c.setPhase("hull_rescue", cyc)
+					c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
+					rescueRes := dls.Solve(c.wrapper)
+					c.wrapper.SetRescueMode(false)
+					rescueX := extractX(rescueRes)
+					if rescueRes.Status == dls.StatusInterrupted {
+						c.recordInterrupted(rescueRes, cyc, "hull_rescue")
+						c.stopped = true
+						break
+					}
+					fields := map[string]any{
+						"cycle":      cyc,
+						"worker":     c.workerID,
+						"phase":      "hull_rescue",
+						"dls_status": rescueRes.Status,
+					}
+					if c.acceptable(rescueRes.Status, rescueX) {
+						rescueMerit := c.wrapper.InnerMerit(rescueX)
+						rst, rreason := c.validateFn(rescueX, rescueMerit, c.wrapper.inner)
+						if rst == MinStatusFeasibleLocalMinimum {
+							trueX = rescueX
+							trueMerit = rescueMerit
+							status = rst
+							invalidReason = rreason
+							fields["status"] = "accepted"
+							fields["merit"] = rescueMerit
+						} else {
+							fields["status"] = "rejected"
+							fields["min_status"] = statusString(rst)
+							fields["invalid_reason"] = reasonString(rreason)
+						}
+					} else {
+						fields["status"] = "rejected"
+					}
+					c.progress.Event("cycle", fields)
+				}
+			}
 		}
 
 		if c.store.IsNew(trueX) {

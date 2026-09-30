@@ -122,6 +122,12 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 	if cfg.StallEarlyStop != nil {
 		p.StallEarlyStop = *cfg.StallEarlyStop
 	}
+	if cfg.HullRescue != nil {
+		p.HullRescue = *cfg.HullRescue
+	}
+	if cfg.HullRescueIterFrac > 0 {
+		p.HullRescueIterFrac = cfg.HullRescueIterFrac
+	}
 
 	p.Weights = make([]float64, len(variables))
 	p.Scales = make([]float64, len(variables))

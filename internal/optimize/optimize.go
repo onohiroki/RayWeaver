@@ -433,8 +433,31 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 // SetEscapePhase sets the numeric phase metric used by the "phase" schedule
 // metric.  The escape.Wrapper forwards the current escape-cycle phase
 // (PhaseEscape=0, PhaseGlassSolve=0.5, PhaseClean=1) through this setter so
-// the merit schedule can switch mode weights at phase boundaries.
-func (o *Optimizer) SetEscapePhase(p float64) { o.phase = p }
+// the merit schedule can switch mode weights at phase boundaries. It also
+// activates phase-dependent hull weighting (hullPhaseFactor): a plain
+// optimize run never calls this, so its hull penalty always runs at full
+// strength.
+func (o *Optimizer) SetEscapePhase(p float64) {
+	o.phase = p
+	o.phaseActive = true
+}
+
+// hullPhaseFactor scales the hull-penalty term for the current escape-cycle
+// phase. During escape exploration (phase < 0.5) the term is multiplied by
+// the hull's escape_weight_factor (default 0.1), softening the real-glass
+// wall so the search can cross it between basins; the glass (0.5) and clean
+// (1) phases keep full strength, so a converged point is pushed back inside
+// the hull. Hulls without a configured factor (tests, non-escape paths) and
+// plain optimize runs (phaseActive false) are unaffected (factor 1).
+func (o *Optimizer) hullPhaseFactor() float64 {
+	if o.hull == nil || !o.phaseActive || o.phase >= 0.5 {
+		return 1
+	}
+	if f := o.hull.EscapeWeightFactor(); f > 0 {
+		return f
+	}
+	return 1
+}
 
 // SetGlassAttraction configures the soft-min potential pulling nd/vd toward
 // real catalog glasses. Call after NewOptimizer and before SetMeritSchedule
@@ -1043,6 +1066,45 @@ func (o *Optimizer) variableSurfaceSet(i int) []int {
 	return nil
 }
 
+// RescueGlassHull projects every nd/vd glass pair that lies outside the
+// real-glass convex hull back onto the hull (ConvexHull.EnforceBounds: anchor
+// on the most-violated facet, nudged just inside) and returns the repaired
+// vector. x is not mutated. ok is false when the hull is absent or every pair
+// is already contained, so callers keep the original point unchanged. This is
+// the escape cycle's hull-rescue repair step (matched via its structural
+// interface): a converged-but-outside point starts the rescue DLS from the
+// nearest feasible glass state instead of being discarded as an infeasible
+// basin.
+func (o *Optimizer) RescueGlassHull(x []float64) ([]float64, bool) {
+	if o.hull == nil || !o.hull.Enabled() || len(o.hullPairs) == 0 {
+		return nil, false
+	}
+	var out []float64
+	changed := false
+	for _, pair := range o.hullPairs {
+		if pair.ndIndex < 0 || pair.ndIndex >= len(x) || pair.vdIndex < 0 || pair.vdIndex >= len(x) {
+			continue
+		}
+		nd := x[pair.ndIndex]
+		vd := x[pair.vdIndex]
+		if o.hull.Contains(nd, vd) {
+			continue
+		}
+		if out == nil {
+			out = make([]float64, len(x))
+			copy(out, x)
+		}
+		n2, v2 := o.hull.EnforceBounds(nd, vd)
+		out[pair.ndIndex] = n2
+		out[pair.vdIndex] = v2
+		changed = true
+	}
+	if !changed {
+		return nil, false
+	}
+	return out, true
+}
+
 // SnapVariables replaces each declared nd/vd glass variable in x with the
 // nearest real catalog glass (normalised nd/vd distance) and returns the
 // snapped vector plus a per-pair record. The catalog is taken from the
@@ -1353,7 +1415,11 @@ type Optimizer struct {
 	modeWeights   map[string]float64
 	// phase holds the current escape-cycle phase metric (0=escape, 0.5=glass,
 	// 1=clean), forwarded by the escape.Wrapper for the "phase" schedule metric.
+	// phaseActive marks that SetEscapePhase has been called (i.e. an escape
+	// cycle drives this optimizer); a plain optimize run never sets it and
+	// therefore keeps full-strength hull penalty in every evaluation.
 	phase            float64
+	phaseActive      bool
 	initialMerit     float64
 	initialSpotRatio float64 // initial spot_diffraction ratio for normalisation
 	modeChanges      int
@@ -3692,8 +3758,9 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 	}
 
 	if o.hull != nil && !o.skipHull {
+		hf := o.hullPhaseFactor()
 		for _, pair := range o.hullPairs {
-			merit += o.hull.Penalty(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight)
+			merit += hf * o.hull.Penalty(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight)
 		}
 	}
 	if o.catalogField != nil && o.catalogField.CatalogFieldCount() > 0 && !o.skipAttraction && o.attractionWeight > 0 {
@@ -3768,9 +3835,10 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 	// --verbose breakdown previously disagreed with the DLS merit whenever the
 	// hull or the attraction was active).
 	if o.hull != nil && !o.skipHull {
+		hf := o.hullPhaseFactor()
 		hullPenalty := 0.0
 		for _, pair := range o.hullPairs {
-			hullPenalty += o.hull.Penalty(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight)
+			hullPenalty += hf * o.hull.Penalty(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight)
 		}
 		out["hull"] = hullPenalty
 		objTotal += hullPenalty
@@ -3820,8 +3888,11 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 	}
 
 	if o.hull != nil && !o.skipHull {
+		// sqrt of the phase factor so that residual² equals the scaled merit
+		// contribution added by EvaluateMerit/MeritBreakdown.
+		hf := math.Sqrt(o.hullPhaseFactor())
 		for _, pair := range o.hullPairs {
-			allR = append(allR, o.hull.Residual(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight))
+			allR = append(allR, hf*o.hull.Residual(x[pair.ndIndex], x[pair.vdIndex], o.hullMargin, o.hullWeight))
 		}
 	}
 	if o.catalogField != nil && o.catalogField.CatalogFieldCount() > 0 && !o.skipAttraction && o.attractionWeight > 0 {

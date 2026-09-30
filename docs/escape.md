@@ -79,6 +79,8 @@ optimization:
     stall_early_stop: true  # stalled-early-stop in the escape phase (clean phase never stalls)
     initial_perturb: 0.05   # normalised amplitude spreading parallel workers' start points
     stream: true            # append the pipeline document to stdout as the run progresses
+    hull_rescue: true       # project a hull-violating point onto the glass hull and re-solve
+    hull_rescue_iter_frac: 0.25 # rescue re-solve MaxIter as a fraction of the full budget
 ```
 
 ### Escape parameters
@@ -390,11 +392,52 @@ The invalid reason is reported per basin:
 | `severe_vignetting` | intermediate vignetting caused catastrophic beam loss |
 | `geometry_violation` | negative thickness or other surface-geometry error |
 | `numerical_failure` | merit is NaN or Inf |
+| `glass_hull_violation` | a converged nd/vd pair lies outside the real-glass convex hull (see below) |
 
 By default infeasible basins are discarded from the stdout YAML. Pass
 `--keep-infeasible` to include them as `escape_result.infeasible_basins[]`
 (useful for diagnosing broken regions of variable space). The `--save` flag
 **never** includes infeasible basins.
+
+### Real-glass hull: guard band, escape weight, rescue
+
+Glass variables are constrained to the real-glass convex hull by a smooth
+penalty (`optimization.glass_hull`, on by default; see `docs/optimize.md`).
+The penalty's smooth band is centred on the hull boundary, so an outward
+optical gradient can park the DLS balance point slightly **outside** the hull,
+where the point then fails validation with `invalid_reason:
+glass_hull_violation` — real runs recorded several such minima (e.g. the
+v40 campaign's `list escape` output was dominated by
+`glass_hull_violation` entries). Three mechanisms keep escape solutions on
+real glass without turning the hull into a hard wall:
+
+1. **Guard band** (`optimization.glass_hull.guard_band`, default `0.01`,
+   `0` disables): the penalty landscape (smooth band and outside ramp) is
+   evaluated against a hull shrunk by `guard_band × hull radius` — capped at
+   half the centroid's clearance to the boundary, so the guarded zone stays a
+   shell around the edge and the deep interior landscape is untouched — which
+   moves the ramp onset, and with it the DLS balance point, **inside** the
+   true hull. The feasibility check (`Contains`, used by the escape
+   validator) stays on the true hull, and exact catalogue points/vertices
+   remain at zero penalty.
+2. **Escape-phase weight** (`optimization.glass_hull.escape_weight_factor`,
+   default `0.1`): during the escape exploration phase the whole hull-penalty
+   term is scaled by this factor (the `glass_dls` and clean phases, and a
+   plain `optimize` run, keep full strength), so an escape bump can still
+   carry the search across the soft hull wall into a different basin while
+   the full-weight phases keep the settle-down on real glass. Residuals scale
+   by `sqrt(factor)` so `Σ residual² == merit` still holds.
+3. **Hull rescue** (`escape.hull_rescue`, default `true`): a converged point
+   that fails validation with `glass_hull_violation` is projected back onto
+   the hull (the optimizer's `RescueGlassHull` hull **projection**, not a
+   catalogue snap) and re-solved with a short clean DLS
+   (`hull_rescue_iter_frac` of the full budget, default `0.25`, floor 50
+   iterations) and re-validated; a point that passes is recorded as a
+   **feasible** minimum instead of an infeasible basin. The cycle event
+   stream carries it as `"phase": "hull_rescue"` with
+   `status: accepted|rejected`. The rescue is skipped when the run is
+   stopping or out of time; a re-solve that fails validation keeps the
+   original classification and its escape bump.
 
 ## Output
 

@@ -69,25 +69,35 @@ type Params struct {
 	StallRelTol     float64 // stalled-early-stop relative merit threshold (0 = 1e-4)
 	StallEarlyStop  bool    // enable stalled-early-stop in the escape phase (clean phase never stalls)
 	InitialPerturb  float64 // normalised amplitude spreading parallel workers (0 = 0.05)
+	// HullRescue enables the glass-hull rescue: a point classified as a hull
+	// violation is projected back onto the hull (via the inner model's
+	// RescueGlassHull capability) and re-solved with a short clean DLS; a
+	// result that passes validation is recorded as a feasible minimum.
+	HullRescue bool
+	// HullRescueIterFrac is the rescue DLS MaxIter as a fraction of the full
+	// budget (0 = 0.25).
+	HullRescueIterFrac float64
 }
 
 // DefaultParams returns the literature-recommended starting values adapted to
 // the normalised variable space.
 func DefaultParams() Params {
 	return Params{
-		H:               0.1,
-		W:               0.5,
-		HMult:           2.0,
-		WMult:           1.3,
-		Dt:              0.1,
-		DtFp:            0,
-		EscapeIterFrac:  1.0 / 3.0,
-		GlassIterFrac:   1.0 / 3.0,
-		WSpan:           2.0,
-		StallWindowFrac: 0.2,
-		StallRelTol:     1e-4,
-		StallEarlyStop:  true,
-		InitialPerturb:  0.05,
+		H:                  0.1,
+		W:                  0.5,
+		HMult:              2.0,
+		WMult:              1.3,
+		Dt:                 0.1,
+		DtFp:               0,
+		EscapeIterFrac:     1.0 / 3.0,
+		GlassIterFrac:      1.0 / 3.0,
+		WSpan:              2.0,
+		StallWindowFrac:    0.2,
+		StallRelTol:        1e-4,
+		StallEarlyStop:     true,
+		InitialPerturb:     0.05,
+		HullRescue:         true,
+		HullRescueIterFrac: 0.25,
 	}
 }
 
@@ -150,6 +160,7 @@ type Wrapper struct {
 	stop         <-chan struct{}
 	glassPhase   bool        // insert the power-preserving glass phase between escape and clean DLS
 	inGlassPhase bool        // the inner model is currently in the glass phase
+	rescueMode   bool        // the next solve is the glass-hull rescue re-solve (reduced MaxIter)
 	phaseLog     PhaseSetter // optional DLS logger phase context forwarder
 }
 
@@ -257,6 +268,18 @@ func (w *Wrapper) Options() dls.Options {
 			opts.MaxIter = max(50, int(float64(opts.MaxIter)*w.params.GlassIterFrac))
 		}
 	}
+	// The glass-hull rescue re-solve runs under PhaseClean but on a reduced
+	// budget: it only needs to settle the projected glass back into the local
+	// minimum, not explore.
+	if w.rescueMode {
+		frac := w.params.HullRescueIterFrac
+		if frac <= 0 {
+			frac = 0.25
+		}
+		if opts.MaxIter > 3 {
+			opts.MaxIter = max(50, int(float64(opts.MaxIter)*frac))
+		}
+	}
 	// The power-preserving glass phase is a plain DLS (no escape bumps).
 	opts.DisableStallEscape = true
 	return opts
@@ -282,6 +305,20 @@ func (w *Wrapper) SetPhase(p Phase) {
 		w.inGlassPhase = true
 	}
 	w.phase = p
+	// Forward the phase to the inner model immediately (in addition to
+	// ensurePhaseWeights), so phase-dependent merit shaping (the "phase"
+	// schedule metric and the hull escape_weight_factor) is never stale even
+	// for solve paths that skip ensurePhaseWeights (the PSO explorer).
+	if pe, ok := w.inner.(interface{ SetEscapePhase(float64) }); ok {
+		pe.SetEscapePhase(w.phaseMetric())
+	}
+}
+
+// SetRescueMode marks the next solve as the glass-hull rescue re-solve, which
+// Options() runs on a reduced iteration budget. Always pair with a false call
+// after the solve returns.
+func (w *Wrapper) SetRescueMode(on bool) {
+	w.rescueMode = on
 }
 
 // SetGlassPhase enables or disables the power-preserving glass phase between

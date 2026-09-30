@@ -556,7 +556,16 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   ∪ the loaded catalogue/AGF), `builtin` (built-in region only), `catalog` (the
   loaded catalogue only) or `explicit` (an explicit `glasses:` `{nd, vd}` list,
   ≥3 points). `catalog`/`explicit` fall back to `builtin` when they cannot form
-  a hull.
+  a hull. Two further settings tune the soft constraint itself:
+  `guard_band` (default `0.01`, `0` disables) evaluates the penalty against a
+  hull shrunk by `guard_band × hull radius` — capped at half the centroid's
+  clearance so the guarded zone stays a shell around the boundary — so the
+  penalty's ramp onset, and with it the DLS balance point, rests **inside**
+  the true hull instead of just outside it (exact catalogue points stay at
+  zero penalty); `escape_weight_factor` (default `0.1`) scales the whole
+  hull-penalty term during an `escape` run's exploration phase only (the
+  glass/clean phases and a plain `optimize` run keep full strength), letting
+  escape bumps still cross the soft wall — see `docs/escape.md`.
 - A `SIGINT`/`SIGTERM` stops the solve gracefully (`interrupted: true`, exit 0):
   the first signal interrupts the running DLS within one iteration and writes
   the best point found so far to stdout; the second force-quits (exit 1).

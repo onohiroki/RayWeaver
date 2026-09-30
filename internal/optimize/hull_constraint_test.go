@@ -159,3 +159,117 @@ func TestConvexHullEnforceBoundsAnchors(t *testing.T) {
 		t.Errorf("enforced point (%f,%f) should be contained by the hull", nd, vd)
 	}
 }
+
+// TestRescueGlassHullProjectsOutside: the escape cycle's hull-rescue repair
+// projects an outside nd/vd pair back onto the hull without mutating the
+// input vector (the caller keeps the original point when ok is false).
+func TestRescueGlassHullProjectsOutside(t *testing.T) {
+	opt := buildHullTestOptimizer(t)
+	x := []float64{2.5, 80.0}
+	out, ok := opt.RescueGlassHull(x)
+	if !ok {
+		t.Fatal("expected an exterior point to be rescued")
+	}
+	if x[0] != 2.5 || x[1] != 80.0 {
+		t.Errorf("RescueGlassHull mutated the input: %v", x)
+	}
+	if len(out) != len(x) {
+		t.Fatalf("rescued vector length = %d, want %d", len(out), len(x))
+	}
+	if !opt.hull.Contains(out[0], out[1]) {
+		t.Errorf("rescued glass (%v, %v) still outside the hull", out[0], out[1])
+	}
+}
+
+// TestRescueGlassHullNoop: contained points (and hull-less / pair-less
+// optimizers) report ok=false so the caller keeps the original point.
+func TestRescueGlassHullNoop(t *testing.T) {
+	opt := buildHullTestOptimizer(t)
+	if out, ok := opt.RescueGlassHull([]float64{1.60, 48.0}); ok {
+		t.Errorf("interior point needs no rescue, got %v", out)
+	}
+
+	noHull := buildHullTestOptimizer(t)
+	noHull.hull = nil
+	if out, ok := noHull.RescueGlassHull([]float64{2.5, 80.0}); ok {
+		t.Errorf("hull-less optimizer should not rescue, got %v", out)
+	}
+
+	noPairs := buildHullTestOptimizer(t)
+	noPairs.hullPairs = nil
+	if out, ok := noPairs.RescueGlassHull([]float64{2.5, 80.0}); ok {
+		t.Errorf("pair-less optimizer should not rescue, got %v", out)
+	}
+}
+
+// TestHullEscapePhaseFactor: the hull penalty keeps full weight outside an
+// escape run (phaseActive false — a plain optimize run never calls
+// SetEscapePhase) and during the glass (0.5) and clean (1) phases, and is
+// scaled by the hull's escape_weight_factor only during escape exploration
+// (phase 0). Hulls without a configured factor are never scaled.
+func TestHullEscapePhaseFactor(t *testing.T) {
+	opt := buildHullTestOptimizer(t)
+	// No SetEscapePhase call: full strength.
+	if got := opt.hullPhaseFactor(); got != 1 {
+		t.Errorf("before SetEscapePhase factor = %v, want 1", got)
+	}
+	// Escape phase but the hull has no configured factor: still full.
+	opt.SetEscapePhase(0)
+	if got := opt.hullPhaseFactor(); got != 1 {
+		t.Errorf("escape phase without configured factor = %v, want 1", got)
+	}
+	opt.hull.SetEscapeWeightFactor(0.1)
+	if got := opt.hullPhaseFactor(); got != 0.1 {
+		t.Errorf("escape phase factor = %v, want 0.1", got)
+	}
+	opt.SetEscapePhase(0.5)
+	if got := opt.hullPhaseFactor(); got != 1 {
+		t.Errorf("glass phase factor = %v, want 1", got)
+	}
+	opt.SetEscapePhase(1)
+	if got := opt.hullPhaseFactor(); got != 1 {
+		t.Errorf("clean phase factor = %v, want 1", got)
+	}
+
+	// A plain optimize run (SetEscapePhase never called) stays at full
+	// strength even when the hull carries a factor.
+	plain := buildHullTestOptimizer(t)
+	plain.hull.SetEscapeWeightFactor(0.1)
+	if got := plain.hullPhaseFactor(); got != 1 {
+		t.Errorf("plain optimize factor = %v, want 1", got)
+	}
+}
+
+// TestEscapePhaseScalesHullMerit: behavioural check of the factor at the
+// merit/residual sites — during escape the hull term (and the squared hull
+// residual) is multiplied by escape_weight_factor, otherwise it is full.
+func TestEscapePhaseScalesHullMerit(t *testing.T) {
+	opt := buildHullTestOptimizer(t)
+	opt.hull.SetEscapeWeightFactor(0.1)
+	x := []float64{2.5, 80.0} // outside the hull: nonzero penalty
+
+	base := opt.MeritBreakdown(x)["hull"]
+	if base <= 0 {
+		t.Fatalf("expected nonzero hull penalty at an exterior point, got %v", base)
+	}
+
+	opt.SetEscapePhase(0) // escape exploration
+	escapeHull := opt.MeritBreakdown(x)["hull"]
+	if math.Abs(escapeHull-0.1*base) > 1e-9*math.Max(1, base) {
+		t.Errorf("escape-phase hull term = %v, want %v", escapeHull, 0.1*base)
+	}
+	// The squared hull residual must equal the scaled merit contribution.
+	r := opt.ComputeResiduals(x)
+	if len(r) == 0 {
+		t.Fatal("expected residuals")
+	}
+	hullR := r[len(r)-1]
+	if math.Abs(hullR*hullR-escapeHull) > 1e-9*math.Max(1, escapeHull) {
+		t.Errorf("hull residual² = %v, want %v (escape-scaled)", hullR*hullR, escapeHull)
+	}
+
+	opt.SetEscapePhase(1) // clean: full strength
+	if got := opt.MeritBreakdown(x)["hull"]; math.Abs(got-base) > 1e-9*math.Max(1, base) {
+		t.Errorf("clean-phase hull term = %v, want %v", got, base)
+	}
+}

@@ -761,6 +761,17 @@ type GlassHullConfig struct {
 	Weight  float64           `yaml:"weight,omitempty"`
 	Source  string            `yaml:"source,omitempty"`  // union (default) | builtin | catalog | explicit
 	Glasses []GlassHullVertex `yaml:"glasses,omitempty"` // explicit mode: >= 3 required
+	// GuardBand shrinks the hull used by the penalty by this fraction of the
+	// hull radius, so the penalty's balance point sits that far inside the
+	// true hull while feasibility is still judged against the true hull.
+	// nil (absent) = default 0.01 (on); an explicit 0 disables it.
+	GuardBand *float64 `yaml:"guard_band,omitempty"`
+	// EscapeWeightFactor scales the whole hull-penalty term during the
+	// escape exploration phase (0 = escape, 0.5 = glass, 1 = clean), so the
+	// search may cross the hull barrier between basins while the glass/clean
+	// phases keep full wall strength. nil or 0 = default 0.1; 1 disables the
+	// phase scaling.
+	EscapeWeightFactor *float64 `yaml:"escape_weight_factor,omitempty"`
 }
 
 // GlassHullVertex is an explicit (nd, vd) point for the hull.
@@ -1086,6 +1097,15 @@ type EscapeConfig struct {
 	// the legacy one-shot write performed after every cycle has finished. See
 	// docs/escape.md.
 	Stream *bool `yaml:"stream,omitempty"`
+	// HullRescue enables the glass-hull rescue: a converged point classified
+	// as a hull violation is projected back onto the hull (nearest facet,
+	// nudged inside) and re-solved with a short clean DLS; a result that
+	// passes validation is recorded as a feasible minimum instead of an
+	// infeasible basin. nil = default on; false disables it.
+	HullRescue *bool `yaml:"hull_rescue,omitempty"`
+	// HullRescueIterFrac is the rescue DLS MaxIter as a fraction of the full
+	// budget (default 0.25). 0 = default.
+	HullRescueIterFrac float64 `yaml:"hull_rescue_iter_frac,omitempty"`
 }
 
 // ResourceGuardConfig configures the escape resource self-monitor. Every field
