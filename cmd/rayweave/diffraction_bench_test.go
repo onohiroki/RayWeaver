@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -61,21 +62,26 @@ func TestDiffractionMTFBench(t *testing.T) {
 	type setting struct {
 		numRays, gridSize, maxGrid int
 		pols                       []string
+		label                      string
 	}
+	// The "gate" row is the standalone measurement the deliverable is judged by
+	// (1600 rays, uncapped grid). The rest is the sampling sweep that fixes the
+	// merit's own defaults: how the MTF at the hinge converges with the number
+	// of effective pupil samples, what the pixel cap costs, and whether the
+	// single polarization matches the RCP+LCP average.
 	settings := []setting{
-		{numRays: 64, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 128, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 160, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 200, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 256, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 300, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 400, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 1600, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 128, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
-		{numRays: 200, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
-		{numRays: 256, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
-		{numRays: 400, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
-		{numRays: 1600, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
+		{label: "gate", numRays: 1600, gridSize: 64, maxGrid: -1, pols: []string{"RCP+LCP"}},
+		{label: "", numRays: 64, gridSize: 64, maxGrid: psf.DefaultDiffractionMaxGrid, pols: []string{"RCP+LCP"}},
+		{label: "", numRays: 128, gridSize: 64, maxGrid: psf.DefaultDiffractionMaxGrid, pols: []string{"RCP+LCP"}},
+		{label: "", numRays: 200, gridSize: 64, maxGrid: psf.DefaultDiffractionMaxGrid, pols: []string{"RCP+LCP"}},
+		{label: "", numRays: 256, gridSize: 64, maxGrid: psf.DefaultDiffractionMaxGrid, pols: []string{"RCP+LCP"}},
+		{label: "", numRays: 300, gridSize: 64, maxGrid: psf.DefaultDiffractionMaxGrid, pols: []string{"RCP+LCP"}},
+		{label: "", numRays: 400, gridSize: 64, maxGrid: psf.DefaultDiffractionMaxGrid, pols: []string{"RCP+LCP"}},
+		{label: "", numRays: 128, gridSize: 64, maxGrid: psf.DefaultDiffractionMaxGrid, pols: []string{"RCP"}},
+		{label: "", numRays: 400, gridSize: 64, maxGrid: psf.DefaultDiffractionMaxGrid, pols: []string{"RCP"}},
+		{label: "", numRays: 400, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
+		{label: "", numRays: 400, gridSize: 64, maxGrid: 512, pols: []string{"RCP"}},
+		{label: "", numRays: 400, gridSize: 64, maxGrid: -1, pols: []string{"RCP"}},
 	}
 
 	for _, angle := range angles {
@@ -96,13 +102,35 @@ func TestDiffractionMTFBench(t *testing.T) {
 			frozenZ = fg.EntrancePupil.Center.Z
 		}
 		z := frozenZ
-		t.Logf("angle %.2f°: frozen pupil Z = %.4f", angle, z)
+		// The optimizer's vignetting compensation (optimize.vignettedNumRays):
+		// the pupil builders clip the nominal grid against the ellipse, so a
+		// vignetted field needs proportionally more launch rays to reach the
+		// target number of SURVIVING samples. Report both so the sweep shows the
+		// configuration the merit actually runs.
+		area := 1.0
+		if v := fd.Vignetting; v != nil && !v.IsZero() {
+			area = (1 - v.CompressionX) * (1 - v.CompressionY)
+		}
+		launch := func(target int) int {
+			if area <= 0 || area >= 1 {
+				return target
+			}
+			return int(math.Ceil(float64(target) / area))
+		}
+		t.Logf("angle %.2f°: frozen pupil Z = %.4f, vignetting area %.3f", angle, z, area)
 
 		for _, s := range settings {
+			// The "gate" row is the standalone measurement: it launches exactly
+			// what the gate asks for with no vignetting compensation and no
+			// pixel cap, so it is the reference the merit must track.
+			numRays := launch(s.numRays)
+			if s.label == "gate" {
+				numRays = s.numRays
+			}
 			opts := psf.DiffractionMTFOptions{
 				Wavelength:     wl,
 				Frequency:      freq,
-				NumRays:        s.numRays,
+				NumRays:        numRays,
 				GridSize:       s.gridSize,
 				MaxGrid:        s.maxGrid,
 				Polarizations:  s.pols,
@@ -118,11 +146,11 @@ func TestDiffractionMTFBench(t *testing.T) {
 			res, err := psf.ComputeDiffractionMTF(sys, gc, fd, &z, opts)
 			el := time.Since(start)
 			if err != nil {
-				t.Logf("  rays=%-4d grid<=%-4d pols=%-8s  ERROR: %v", s.numRays, s.maxGrid, s.pols, err)
+				t.Logf("  %-4s rays=%-4d grid<=%-4d pols=%-8s  ERROR: %v", s.label, numRays, s.maxGrid, s.pols, err)
 				continue
 			}
-			t.Logf("  rays=%-4d grid<=%-4d pols=%-8s  %-8s  grid=%d half=%.3fmm valid=%d  sag=%.5f tan=%.5f",
-				s.numRays, s.maxGrid, s.pols, el.Round(time.Millisecond), res.GridSize, res.HalfWidth, res.Valid,
+			t.Logf("  %-4s rays=%-4d grid<=%-4d pols=%-8s  %-8s  grid=%d half=%.3fmm valid=%d  sag=%.5f tan=%.5f",
+				s.label, numRays, s.maxGrid, s.pols, el.Round(time.Millisecond), res.GridSize, res.HalfWidth, res.Valid,
 				res.Sagittal, res.Tangential)
 		}
 	}
