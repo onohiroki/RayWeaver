@@ -18,6 +18,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/coating"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
@@ -1725,6 +1726,10 @@ func readStdin() ([]byte, error) {
 
 func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coating.Catalog) {
 	glass.Warnf = errOut
+	// Optimisation warnings (a back-focus solve that could not be evaluated,
+	// ...) go through the tagged stderr writer so a piped run still shows
+	// which stage reported them.
+	optimize.Warnf = errOut
 	gc := glass.NewCatalog()
 	if input.GlassCatalog == nil {
 		input.GlassCatalog = &types.GlassCatalog{}

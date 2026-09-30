@@ -445,7 +445,7 @@ func TestApplyBackFocusSolveClampsNegativeThickness(t *testing.T) {
 		Surface:    7,
 		Wavelength: 0.0005876,
 	}
-	ApplyBackFocusSolve(surfaces, cfg, "paraxial", 0, 0.0005876, fields, wavelengths, gc, "")
+	ApplyBackFocusSolve(surfaces, cfg, "paraxial", 0, 0.0005876, fields, wavelengths, gc, "", nil)
 	for _, sf := range surfaces {
 		if sf.ID == 7 {
 			if sf.Thickness < 0.1 {
@@ -528,8 +528,16 @@ func TestApplyVariablesSizesAperturesBeforeBackFocus(t *testing.T) {
 		surface.Precompute(s)
 		return s
 	}
-	shSmall := wavefrontBackFocusShiftFor(withDia(2.0), bf, 0, 0, nil, fieldDefs, gc, "")
-	shLarge := wavefrontBackFocusShiftFor(withDia(40.0), bf, 0, 0, nil, fieldDefs, gc, "")
+	shSmall, errSmall := wavefrontBackFocusShiftFor(withDia(2.0), bf, 0, 0, nil, fieldDefs, gc, "", nil)
+	shLarge, errLarge := wavefrontBackFocusShiftFor(withDia(40.0), bf, 0, 0, nil, fieldDefs, gc, "", nil)
+	if errLarge != nil {
+		t.Fatalf("test setup: wavefront back-focus failed on the large-aperture system: %v", errLarge)
+	}
+	if errSmall != nil {
+		// The 2 mm aperture clips the grid down to a degenerate fit: the solve
+		// reports it now (the pre-fix behaviour was the same 0, silently).
+		shSmall = 0
+	}
 	if shSmall == shLarge {
 		t.Fatalf("test setup: wavefront back-focus not aperture-sensitive (%.6f)", shSmall)
 	}

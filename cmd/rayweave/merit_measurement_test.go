@@ -115,7 +115,7 @@ func TestMeritWavefrontMeasurementConsistency(t *testing.T) {
 	}
 	optimize.ApplyBackFocusSolve(meritSurfaces, input.Optimization.BackFocusSolve,
 		savedBackFocusType(input.Optimization), stopSurface, refWl0,
-		input.Configs[0].Fields, input.Configs[0].Wavelengths, gc, chiefRayDefinition(input))
+		input.Configs[0].Fields, input.Configs[0].Wavelengths, gc, chiefRayDefinition(input), nil)
 
 	// Tool-sized apertures (FinalApertures) for the comparable column.
 	sizedSurfaces := append([]types.Surface(nil), meritSurfaces...)

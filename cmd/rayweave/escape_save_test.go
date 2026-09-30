@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/escape"
+	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
@@ -217,5 +219,59 @@ func TestMaterializeSizesAperturesBeforeBackFocus(t *testing.T) {
 		if s.ID == 1 && math.Abs(s.Diameter-40.0) > 1e-9 {
 			t.Errorf("surface 1 diameter = %v, want the sized 40.0", s.Diameter)
 		}
+	}
+}
+
+// captureOptimizeWarnings redirects the optimize package warning hook for the
+// duration of a test and collects everything reported through it.
+func captureOptimizeWarnings(t *testing.T) *[]string {
+	t.Helper()
+	got := &[]string{}
+	prev := optimize.Warnf
+	optimize.Warnf = func(format string, args ...interface{}) {
+		*got = append(*got, fmt.Sprintf(format, args...))
+	}
+	t.Cleanup(func() { optimize.Warnf = prev })
+	return got
+}
+
+// TestSavedMinimumNeverShipsAStaleImagePlane covers the save-path half of the
+// silent back-focus failure: when the wavefront analysis cannot be evaluated
+// (a pupil grid clipped down to a degenerate fit - the "singular normal
+// matrix" a tight auto-aperture produced on the 6-element v44 minima), the
+// save path must still move the image plane using the paraxial focus and say
+// so. The pre-fix behaviour applied a 0 mm shift in silence, so the recorded
+// minimum kept the input image plane while the merit had solved another one -
+// and `escape extract` copies these surfaces verbatim into the deliverable.
+func TestSavedMinimumNeverShipsAStaleImagePlane(t *testing.T) {
+	input := parseYAML[types.Input](([]byte)(backFocusOrderInput()))
+	for i := range input.Configs[0].Surfaces {
+		if input.Configs[0].Surfaces[i].ID == 1 {
+			// Close the entrance down until the wavefront fit cannot run.
+			input.Configs[0].Surfaces[i].Diameter = 0.4
+		}
+	}
+	gc, _ := loadCatalogs(&input, "")
+	warnings := captureOptimizeWarnings(t)
+	empty := ""
+	surfaces := configSurfaces(input.Configs, &empty)
+	surface.Precompute(surfaces)
+	before := targetThickness(surfaces)
+
+	applySavedBackFocusSolve(input, &input.Configs[0], surfaces, gc)
+	after := targetThickness(surfaces)
+
+	if math.IsNaN(after) {
+		t.Fatal("back-focus target surface not found")
+	}
+	if after == before {
+		t.Errorf("image plane still at the input plane (%.6f mm): the failed wavefront solve was swallowed", before)
+	}
+	joined := strings.Join(*warnings, "\n")
+	if !strings.Contains(joined, "back-focus wavefront solve") {
+		t.Errorf("expected the wavefront failure to be reported, got: %v", *warnings)
+	}
+	if !strings.Contains(joined, "paraxial focus") {
+		t.Errorf("expected the paraxial fallback to be reported, got: %v", *warnings)
 	}
 }

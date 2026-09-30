@@ -3,6 +3,7 @@ package optimize
 import (
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
@@ -20,6 +21,16 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/wavefront"
 )
+
+// Warnf reports a non-fatal optimisation warning to stderr. The cmd/rayweave
+// binary wires it to its own stderr writer (main.go, like glass.Warnf); the
+// default writes to os.Stderr so a library caller still sees the problem.
+// Failures that used to be silent (a back-focus solve that cannot evaluate
+// the wavefront) must stay visible: silently leaving a stale image plane is
+// how an extracted minimum ships a lens that is tens of mm out of focus.
+var Warnf = func(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
+}
 
 // Config is the single-configuration optimisation input. It is an adapter
 // over the unified Optimizer: the configuration becomes config "config1" and
@@ -1403,6 +1414,11 @@ type Optimizer struct {
 	// updateGlassRoles, so the base-point and Jacobian residuals share one role
 	// assignment — the same frozen-per-iteration convention as the pupil.
 	roleTargets map[string]map[int]paraxial.ElementRole
+	// backFocusWarnOnce emits at most one warning per optimizer when the
+	// wavefront back-focus solve fails during a solve: applyBackFocusSolve
+	// runs at the top of every DLS iteration, so an unguarded warning would
+	// flood stderr while still leaving the image plane stale.
+	backFocusWarnOnce sync.Once
 	// Bounded penalties for merit terms that cannot be evaluated. Defaults:
 	// spot 0.1, opd 0.01, wavefront 0.001 (mm).
 	spotDegenerate      float64
@@ -3026,7 +3042,14 @@ func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surfac
 			}
 			switch o.currentBackFocusType {
 			case "wavefront":
-				shift := o.wavefrontBackFocusShift(cfg, surfaces, gc)
+				shift, bfErr := o.wavefrontBackFocusShift(cfg, surfaces, gc)
+				if bfErr != nil {
+					// Reported once: the image plane keeps its current
+					// thickness rather than jumping to an unverified focus.
+					o.backFocusWarnOnce.Do(func() {
+						Warnf("warning: %v; the image plane keeps its current thickness", bfErr)
+					})
+				}
 				newThk := surfaces[idx].Thickness + shift
 				if newThk < 0.1 {
 					newThk = 0.1
@@ -3112,17 +3135,28 @@ func paraxialBackFocusShiftFor(surfaces []types.Surface, stopSurface int, refWav
 
 // wavefrontBackFocusShift computes the image-plane shift needed to bring the
 // image plane to the wavefront best-focus position (see
-// wavefrontBackFocusShiftFor).
-func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surface, gc *glass.Catalog) float64 {
-	return wavefrontBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.wavelengths, cfg.fieldDefs, gc, cfg.rayDefinition)
+// wavefrontBackFocusShiftFor). An error means the wavefront could not be
+// evaluated; the shift is then 0 and the caller reports the failure.
+func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surface, gc *glass.Catalog) (float64, error) {
+	return wavefrontBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.wavelengths, cfg.fieldDefs, gc, cfg.rayDefinition, cfg.pupilModel)
 }
 
 // wavefrontBackFocusShiftFor computes the image-plane shift needed to bring the
 // image plane to the wavefront best-focus position. A minimal wavefront
-// analysis is run with the configured settings (num_rays, weight_type).
-func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, wavelengths []types.WavelengthItem, fieldDefs []types.FieldDef, gc *glass.Catalog, rayDefinition string) float64 {
+// analysis is run with the configured settings (num_rays, weight_type). It
+// returns an error when the wavefront analysis cannot be evaluated (a
+// degenerate pupil grid, a failed paraboloid fit, ...); the caller must
+// surface that instead of silently keeping a stale image plane.
+//
+// pupilModel is the document's virtual entrance pupil: it must be forwarded so
+// the solve samples the same bundle the merit grid, `psf`, `wavefront` and the
+// gate evaluation use. Without it wavefront falls back to its stop/dynamic
+// pupil, which a stopped-down or tightly auto-apertured system clips down to a
+// degenerate sample set (observed as "paraboloid fit: singular normal matrix"
+// on a 6-element whose deliverable apertures were sized for the real pupil).
+func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, wavelengths []types.WavelengthItem, fieldDefs []types.FieldDef, gc *glass.Catalog, rayDefinition string, pupilModel *types.PupilModelConfig) (float64, error) {
 	if bfs == nil || len(surfaces) < 2 {
-		return 0
+		return 0, nil
 	}
 	wl := bfs.Wavelength
 	if wl <= 0 {
@@ -3166,14 +3200,18 @@ func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSo
 		Workers:          1,
 		ZernikeMaxOrder:  0,
 		BestFocus:        &focusCfg,
+		PupilModel:       pupilModel,
 		RayDefinition:    rayDefinition,
 	}
 
 	result, err := wavefront.Compute(sys, gc, fields, []float64{wl}, opts)
-	if err != nil || result.BestFocus == nil {
-		return 0
+	if err != nil {
+		return 0, fmt.Errorf("back-focus wavefront solve at %.3f nm: %w", wl*1e6, err)
 	}
-	return result.BestFocus.ShiftMM
+	if result == nil || result.BestFocus == nil {
+		return 0, fmt.Errorf("back-focus wavefront solve at %.3f nm: no best focus returned", wl*1e6)
+	}
+	return result.BestFocus.ShiftMM, nil
 }
 
 // backFocusFieldsFor selects the fields used by the back-focus wavefront solve
@@ -3209,24 +3247,38 @@ func backFocusFieldsFor(fieldDefs []types.FieldDef, weightType string) []types.F
 // surface 0 auto-detects the last non-air surface before the image plane.
 // fields are the config's field definitions in order, wavelengths its
 // wavelength list, and stopSurface/refWavelength as in the optimizer.
-func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConfig, bfType string, stopSurface int, refWavelength float64, fields []types.FieldItem, wavelengths []types.WavelengthItem, gc *glass.Catalog, rayDefinition string) {
+// pupilModel is the document's virtual entrance pupil (nil when unused); it is
+// forwarded to the wavefront analysis so the solve samples the same bundle the
+// merit grid and the psf/wavefront commands do.
+//
+// It returns true when the solve ran and a shift was applied, false when it
+// was not applicable (cfg nil/disabled, no resolvable target) or when the
+// wavefront analysis failed — a failure is reported through Warnf instead of
+// being silently swallowed, because the caller then ships the unshifted image
+// plane it was given.
+func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConfig, bfType string, stopSurface int, refWavelength float64, fields []types.FieldItem, wavelengths []types.WavelengthItem, gc *glass.Catalog, rayDefinition string, pupilModel *types.PupilModelConfig) bool {
 	if cfg == nil || !cfg.Enabled {
-		return
+		return false
 	}
 	targetID := resolveBackFocusTargetID(surfaces, cfg, gc)
 	if targetID < 0 {
-		return
+		return false
 	}
 	idx := surfaceIndex(surfaces, targetID)
 	if idx < 0 {
-		return
+		return false
 	}
 	fieldDefs := fieldDefsFromItems(fields)
 	// paraxial.Compute / wavefront.Compute expect freshly precomputed radii.
 	surface.Precompute(surfaces)
 	var shift float64
 	if bfType == "wavefront" {
-		shift = wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, wavelengths, fieldDefs, gc, rayDefinition)
+		var err error
+		shift, err = wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, wavelengths, fieldDefs, gc, rayDefinition, pupilModel)
+		if err != nil {
+			Warnf("warning: %v; the image plane keeps its current thickness", err)
+			return false
+		}
 	} else {
 		shift = paraxialBackFocusShiftFor(surfaces, stopSurface, refWavelength, wavelengths, cfg.Wavelength, gc)
 	}
@@ -3235,6 +3287,7 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 		newThk = 0.1
 	}
 	surfaces[idx].Thickness = newThk
+	return true
 }
 
 // restoreDiameters resets auto_aperture surfaces to their initial diameters

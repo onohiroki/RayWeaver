@@ -195,12 +195,27 @@ func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []t
 		return
 	}
 	stopSurface, refWavelength := 0, 0.0
+	var pupilModel *types.PupilModelConfig
 	if input.Chief != nil {
 		stopSurface = input.Chief.StopSurface
 		refWavelength = input.Chief.ReferenceWavelength
+		pupilModel = input.Chief.PupilModel
 	}
 	bfType := savedBackFocusType(input.Optimization)
-	optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, bfType, stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input))
+	solved := optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, bfType,
+		stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel)
+	if !solved && bfType == "wavefront" {
+		// A recorded minimum must never ship the plane it was recorded with:
+		// `escape extract` copies these surfaces verbatim, so a wavefront
+		// failure would leave an image plane tens of mm out of focus in the
+		// deliverable. The paraxial focus is cheap and always evaluable, so it
+		// is the fallback (the failure itself was already reported by
+		// ApplyBackFocusSolve).
+		if optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, "paraxial",
+			stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel) {
+			optimize.Warnf("warning: back-focus solve used the paraxial focus for a recorded minimum")
+		}
+	}
 }
 
 // savedBackFocusType resolves the focus type to use for a saved minimum: the

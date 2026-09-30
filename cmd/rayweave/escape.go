@@ -462,11 +462,12 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		// Element powers come from the variable-only projection, matching the
 		// fingerprint the escape store used during the run.
 		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
-		// Then bring the surfaces to the prescription the optimizer evaluated
-		// (back-focus hard solve + sized auto apertures), so `escape extract`
-		// agrees with the --save file for the same index.
-		applySavedBackFocusSolve(input, outCfg, surf, gc)
+		// Then bring the surfaces to the prescription the optimizer evaluated,
+		// apertures first: the sized diameters are the beam the solve has to
+		// focus (the same order materializeSingleInput uses), so
+		// `escape extract` agrees with the --save file for the same index.
 		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
+		applySavedBackFocusSolve(input, outCfg, surf, gc)
 		m := types.EscapeMinimum{
 			Index:     position,
 			Merit:     p.Merit,
@@ -492,8 +493,8 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 			gc.Add(g)
 		}
 		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
-		applySavedBackFocusSolve(input, outCfg, surf, gc)
 		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
+		applySavedBackFocusSolve(input, outCfg, surf, gc)
 		return types.EscapeMinimum{
 			Index:         position,
 			Merit:         p.Merit,
@@ -696,10 +697,11 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	// Keep the pipeline output consistent with the saved minima: the
 	// variable-only projection would otherwise retain the template image
 	// plane and the stale stored diameters, diverging from both the saved
-	// minimum file and what the merit evaluated.
+	// minimum file and what the merit evaluated. Apertures go first so the
+	// back-focus solve focuses the sized beam that is shipped.
 	if len(res.Minima) > 0 {
-		applySavedBackFocusSolve(input, outCfg, input.Configs[0].Surfaces, gc)
 		applyApertures(input.Configs[0].Surfaces, finalAperturesAt(factory, res.Minima[res.BestIdx].X)["config1"])
+		applySavedBackFocusSolve(input, outCfg, input.Configs[0].Surfaces, gc)
 	}
 
 	for _, g := range bestGlasses {
