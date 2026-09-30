@@ -63,16 +63,19 @@ func TestDiffractionMTFBench(t *testing.T) {
 		pols                       []string
 	}
 	settings := []setting{
-		{numRays: 64, gridSize: 64, maxGrid: 512, pols: []string{"RCP+LCP"}},
-		{numRays: 128, gridSize: 64, maxGrid: 512, pols: []string{"RCP+LCP"}},
-		{numRays: 128, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 128, gridSize: 64, maxGrid: 128, pols: []string{"RCP+LCP"}},
 		{numRays: 64, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 64, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
-		{numRays: 128, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
+		{numRays: 128, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
+		{numRays: 160, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
+		{numRays: 200, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
+		{numRays: 256, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
+		{numRays: 300, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
 		{numRays: 400, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
-		{numRays: 1600, gridSize: 64, maxGrid: 512, pols: []string{"RCP+LCP"}},
-		{numRays: 128, gridSize: 64, maxGrid: -1, pols: []string{"RCP+LCP"}},
+		{numRays: 1600, gridSize: 64, maxGrid: 256, pols: []string{"RCP+LCP"}},
+		{numRays: 128, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
+		{numRays: 200, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
+		{numRays: 256, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
+		{numRays: 400, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
+		{numRays: 1600, gridSize: 64, maxGrid: 256, pols: []string{"RCP"}},
 	}
 
 	for _, angle := range angles {

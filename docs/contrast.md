@@ -235,31 +235,60 @@ instead of being fed a fabricated number.
 
 ### 4A.3 Sampling
 
-The gate runs at 1600 rays; the merit defaults to 128. The merit needs the
-same *kind* of pupil sampling, not the same photon budget — the MTF-vs-rays
-sensitivity at a resolved 10 c/mm hinge is far below the gate tolerance once
-the pupil is open. Sampling is configured YAML-only under
-`optimization.diffraction_mtf` (zero values select the built-in defaults):
+The gate runs at 1600 rays; the merit defaults to 400 **effective** samples
+per field. The merit needs the same *kind* of pupil sampling, not the same
+photon budget — but the floor is not low, because the MTF error from an
+under-sampled pupil is large near the hinge. Measured on a diffraction-limited
+triplet at 10 c/mm against the 1600-ray gate value (0.907 / 0.907):
+
+| effective samples | sagittal | tangential |
+|---|---|---|
+| 64 | 0.693 | 0.685 |
+| 128 | 0.703 | 0.703 |
+| 256 | 0.838 | 0.840 |
+| **400 (default)** | **0.902** | **0.904** |
+| 1600 (gate) | 0.907 | 0.907 |
+
+128 samples read ~0.20 *below* the gate, so a hinge at target 0.50 would have
+been satisfied at a true MTF of ~0.30. 400 is within 0.005-0.02.
+
+`num_rays` is the count of samples that **survive** the pupil, not the nominal
+grid size. Both pupil-grid builders clip the full nominal grid against a
+field's prescribed vignetting ellipse rather than re-laying the grid into it,
+so a nominal count would silently under-sample a vignetted field in proportion
+to its area (measured: 400 nominal gives 360 effective at 80% area). The
+optimizer therefore launches `ceil(num_rays / area)` nominal rays, saturating
+at four times the target so a near-dead ellipse cannot ask for a million rays.
+
+Sampling is configured YAML-only under `optimization.diffraction_mtf` (zero
+values select the built-in defaults):
 
 ```yaml
 optimization:
   diffraction_mtf:
-    num_rays: 128        # entrance-pupil grid rays (default 128)
+    num_rays: 400        # effective (surviving) samples per field (default 400)
     grid_size: 64        # image-grid pixels before auto-enlargement (default 64)
-    max_grid: 256        # cap on the auto-enlarged grid (default 256)
+    max_grid: 128        # cap on the auto-enlarged grid (default 128)
     polarizations: [RCP+LCP]   # incoherent average (default [RCP+LCP])
 ```
 
-`max_grid` is a pixel-count cap only: the window — and therefore the
-frequency spacing `df = 1/(2·half)` — is untouched, so the 10 c/mm bin is
-preserved. The cap only binds when the natural grid exceeds it, i.e. when
-`spotRMS > 64·Airy ≈ 0.043 mm`, where the Gaussian estimate of MTF(10) is
-already below ~0.19 — under every gate threshold. In the well-corrected
-regime the window is diffraction-sized and the grid stays at `grid_size`, so
-the term is bit-identical to the standalone measurement. `polarizations:
-[RCP]` halves the cost on an all-refractive system (the two circular states
-give identical intensity maps) once that equivalence has been verified for the
-system at hand.
+`max_grid` is a pixel-count cap only: the window — and therefore the frequency
+spacing `df = 1/(2*half)` — is untouched, so the 10 c/mm bin is preserved. In
+the spot-driven regime `half = 3*spotRMS`, so the grid always spans `6*half/n`
+cells per RMS radius whatever the spot size: the PSF stays amply resolved while
+the Airy-core rule the cap replaces is irrelevant for a spot tens of Airy disks
+wide. The cap binds only when the natural grid exceeds it (`half > 32*Airy`
+≈ 0.022 mm at 128), where the Gaussian estimate `exp(-987*spotRMS^2)` of MTF(10)
+is already at or below ~0.62, and the grid's Nyquist frequency stays far above
+the frequency the gate reads. Measured cost on a 6-element at 10 c/mm (128
+rays, RCP+LCP): 230 ms at 512, 60 ms at 256, 18 ms at 128 — each halving is a
+~4x saving. In the well-corrected regime the window is diffraction-sized, the
+grid stays at 64, and the term is identical to the standalone measurement.
+
+`polarizations: [RCP]` is 1.7x cheaper than `[RCP+LCP]`. On an all-refractive
+system the two circular states give identical intensity maps, so the values
+agree at every ray count (verified on a triplet and a 6-element), but that is a
+property of the system, not of the code — check it before relying on it.
 
 ### 4A.4 Computation Flow
 
@@ -275,6 +304,10 @@ DLS iteration
                  ├─ direct vector Huygens integral (per polarization state)
                  └─ psf.ComputeMTF → sagittal / tangential at term.frequency
 ```
+
+The launch count is the vignetting-compensated one
+(`vignettedNumRays(num_rays, field.vignetting)`), so a field with a prescribed
+ellipse is sampled as densely as an unclipped one.
 
 Both axes come from one evaluation, so a sag+tan term pair on the same field
 shares one pupil trace and one Huygens integration.

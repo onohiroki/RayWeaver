@@ -308,12 +308,25 @@ type diffractionSettings struct {
 }
 
 // diffractionSampling resolves the configured sampling for the current run.
-// num_rays 128 rather than the gate's 1600: the merit needs the same kind of
-// pupil sampling, not the same photon budget, and the MTF-vs-rays sensitivity
-// at the 10 c/mm hinge is far below the gate tolerance once the pupil is open.
+//
+// num_rays is the target number of EFFECTIVE (surviving) wavefront samples, not
+// the nominal grid size: computeDiffractionMTF compensates for the field's
+// vignetting ellipse so every field is sampled alike (see
+// vignettedNumRays). 400 rather than the gate's 1600: the merit needs the same
+// kind of pupil sampling, not the same photon budget. Measured on a
+// diffraction-limited triplet at 10 c/mm (gate = 1600 rays), the sagittal /
+// tangential read was
+//
+//	64 → 0.693/0.685    200 → 0.772/0.776    400 → 0.902/0.904
+//	128 → 0.703/0.703   256 → 0.838/0.840   1600 → 0.907/0.907
+//
+// so 128 rays - the previous default - reads ~0.20 BELOW the gate near the
+// hinge: the hinge at target 0.50 would have been satisfied at a true MTF of
+// ~0.30. 400 is within 0.005-0.02 of the 1600-ray value, which is the accuracy
+// the gate tolerance needs; 300 still reads 0.04-0.06 low.
 func (o *Optimizer) diffractionSampling() diffractionSettings {
 	out := diffractionSettings{
-		numRays:       128,
+		numRays:       400,
 		gridSize:      64, // psf's own default
 		maxGrid:       psf.DefaultDiffractionMaxGrid,
 		polarizations: defaultDiffractionPolarizations,
@@ -396,6 +409,42 @@ func (o *Optimizer) diffractionMTFValues(cfg *config, term *meritTerm, surfaces 
 	return sag, tan
 }
 
+// maxVignettedNumRaysFactor bounds the vignetting compensation of
+// vignettedNumRays. A near-dead ellipse (area 1e-3) would otherwise ask for a
+// million launch rays to reach the target sample count; past a few times the
+// target the extra rays buy nothing anyway (the pupil_fill term is what drives
+// a clipped field back to health), so the compensation saturates here.
+const maxVignettedNumRaysFactor = 4
+
+// vignettedNumRays returns the nominal entrance-pupil ray count to launch for a
+// field whose vignetting ellipse keeps the fraction area of the nominal pupil,
+// so that roughly `target` samples survive the clip.
+//
+// Both pupil-grid builders (psf.FrozenPupilGrid and psf.ComputeFieldGrid) clip
+// the full nominal grid against the ellipse rather than re-laying the grid into
+// it, so without this a vignetted field is sampled in proportion to its area —
+// measured on a 6-element at num_rays 400: 400 valid at the full field against
+// 360 at 80% area. The MTF error from an under-sampled pupil is large near the
+// hinge (see diffractionSampling), so the sample count - not the grid size - is
+// what the prescribed vignetting must not silently eat.
+func vignettedNumRays(target int, vig *types.VignettingDef) int {
+	if target <= 0 || vig == nil || vig.IsZero() {
+		return target
+	}
+	area := (1 - vig.CompressionX) * (1 - vig.CompressionY)
+	if area <= 0 {
+		return target
+	}
+	if area >= 1 {
+		return target
+	}
+	n := int(math.Ceil(float64(target) / area))
+	if max := target * maxVignettedNumRaysFactor; n > max {
+		return max
+	}
+	return n
+}
+
 // computeDiffractionMTF traces and evaluates one term's field. The frozen
 // pupil (per-iteration, so the DLS base point and its Jacobian perturbations
 // share one entrance pupil, exactly like the wavefront terms) is tried first,
@@ -413,7 +462,7 @@ func (o *Optimizer) computeDiffractionMTF(cfg *config, term *meritTerm, surfaces
 		Wavelength:       term.wavelength,
 		Frequency:        term.frequency,
 		ReferenceSurface: wavefrontRefSurface(cfg, surfaces),
-		NumRays:          sampling.numRays,
+		NumRays:          vignettedNumRays(sampling.numRays, fd.Vignetting),
 		GridSize:         sampling.gridSize,
 		MaxGrid:          sampling.maxGrid,
 		Polarizations:    sampling.polarizations,

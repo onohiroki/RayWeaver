@@ -58,6 +58,48 @@ func (f *diffractionFixture) eval(term *meritTerm) float64 {
 	return f.opt.evaluateKindTerm(f.opt.primaryConfig(), term, f.opt.primaryConfig().surfaces, f.gc, f.cache, appliedPupil{})
 }
 
+// TestVignettedNumRaysTargetsSurvivingSamples pins the vignetting compensation.
+// Both pupil-grid builders clip the full nominal grid against the prescribed
+// ellipse rather than re-laying the grid into it, so a nominal ray count is not
+// a sample count: a field whose ellipse keeps 50% of the nominal pupil gets half
+// the effective samples, and the MTF error from an under-sampled pupil is ~0.20
+// near the hinge (see diffractionSampling). The target is therefore the
+// surviving count, and the compensation saturates so a near-dead ellipse cannot
+// ask for a million launch rays.
+func TestVignettedNumRaysTargetsSurvivingSamples(t *testing.T) {
+	const target = 400
+	cases := []struct {
+		name string
+		vig  *types.VignettingDef
+		want int
+	}{
+		{"no vignetting", nil, target},
+		{"zero def is no vignetting", &types.VignettingDef{}, target},
+		{"unclipped", &types.VignettingDef{DecenterX: 0.2, CompressionX: 0, CompressionY: 0}, target},
+		{"mild clip", &types.VignettingDef{CompressionX: 0.02, CompressionY: 0.02}, 417},
+		{"our 23 deg ellipse", &types.VignettingDef{CompressionX: 0, CompressionY: 0.5}, 800},
+		{"11.5 deg ellipse", &types.VignettingDef{CompressionX: 0, CompressionY: 0.25}, 534},
+		{"half in both axes", &types.VignettingDef{CompressionX: 0.5, CompressionY: 0.5}, 1600},
+	}
+	for _, c := range cases {
+		if got := vignettedNumRays(target, c.vig); got != c.want {
+			t.Errorf("%s: vignettedNumRays(%d, %+v) = %d, want %d", c.name, target, c.vig, got, c.want)
+		}
+	}
+	// Saturation: a 0.1%-area pupil would ask for 400 000 rays without the cap.
+	dead := &types.VignettingDef{CompressionX: 0.99, CompressionY: 0.99}
+	if got, want := vignettedNumRays(target, dead), target*maxVignettedNumRaysFactor; got != want {
+		t.Errorf("near-dead ellipse: got %d, want the saturated %d", got, want)
+	}
+	// A degenerate ellipse keeps nothing; there is nothing to scale up for.
+	if got := vignettedNumRays(target, &types.VignettingDef{CompressionY: 1}); got != target {
+		t.Errorf("degenerate ellipse: got %d, want %d (unchanged)", got, target)
+	}
+	if got := vignettedNumRays(0, nil); got != 0 {
+		t.Errorf("vignettedNumRays(0, nil) = %d, want 0", got)
+	}
+}
+
 // TestDiffractionMTFKindsRouteToDiffractionEvaluator guards the routing: the
 // diffraction kinds consume a pupil trace but have their own evaluator. Listing
 // them in isGridKind would silently evaluate them as spot_rms (whose switch has

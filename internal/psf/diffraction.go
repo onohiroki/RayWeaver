@@ -76,15 +76,19 @@ func FrozenPupilGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 //
 // The cap is a pixel-count cap only: the window (and therefore df, the
 // frequency spacing 1/(2·half)) is untouched, and in the spot-driven regime
-// half = 3·spotRMS so the grid spans 6·half/n = 256 cells per RMS radius
-// whatever the spot size — the PSF stays amply resolved while the Airy-core
-// rule it replaces is irrelevant for a spot tens of Airy disks wide. Measured
-// on a 6-element at 10 c/mm (rays 128, RCP+LCP): 230 ms at 512, 60 ms at 256,
-// 18 ms at 128. The cap only binds when the natural grid exceeds 256, i.e.
-// spotRMS > 64·Airy ≈ 0.043 mm, where the Gaussian estimate of MTF(10) is
-// already below ~0.19 — under every gate threshold — so the value it refines
-// is not the value the gate judges.
-const DefaultDiffractionMaxGrid = 256
+// half = 3·spotRMS so the grid spans 6·half/n cells per RMS radius whatever the
+// spot size — the PSF stays amply resolved while the Airy-core rule it replaces
+// is irrelevant for a spot tens of Airy disks wide. Measured on a 6-element at
+// 10 c/mm (rays 128, RCP+LCP): 230 ms at 512, 60 ms at 256, 18 ms at 128, so
+// each halving is a ~4x saving. The cap only binds when the natural grid
+// exceeds it, i.e. when half > n/4·Airy: at 128 that is 32·Airy ≈ 0.022 mm,
+// where the Gaussian estimate exp(-987·spotRMS²) of MTF(10) is already at or
+// below 0.62, and the grid's Nyquist frequency 1/(2·dx) = n/(2·half) is still
+// ≫ the 10 c/mm the gate reads (half is the window, so a coarser grid buys
+// frequency headroom, not a frequency error). The value the cap coarsens is
+// therefore not the value the gate judges; a well-corrected design, whose window
+// is diffraction-sized, keeps GridSize and never reaches it.
+const DefaultDiffractionMaxGrid = 128
 
 // DiffractionMTFOptions configures ComputeDiffractionMTF. The zero value
 // reproduces the `psf` / `focus mtf` defaults for a single frequency on the

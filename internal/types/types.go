@@ -1008,10 +1008,15 @@ type PowerSolveConfig struct {
 // and FFT the `psf` command reports, so a term value equals the reported value
 // for the same state. Zero values select the built-in defaults.
 type DiffractionMTFConfig struct {
-	// NumRays is the entrance-pupil grid ray count (0 = 128, vs the gate's
-	// 1600: the merit needs the same kind of sampling, not the same photon
-	// budget — the MTF-vs-rays sensitivity at a resolved 10 c/mm hinge is far
-	// below the gate tolerance once the pupil is fully open).
+	// NumRays is the target number of EFFECTIVE wavefront samples per field
+	// (0 = 400, vs the gate's 1600: the merit needs the same kind of pupil
+	// sampling, not the same photon budget). It is the count of samples that
+	// SURVIVE the pupil, not the nominal grid size: a field with a prescribed
+	// vignetting ellipse keeps only a fraction of the nominal pupil, so the
+	// optimizer launches proportionally more to hit this target (saturating at
+	// four times it). Measured on a diffraction-limited triplet at 10 c/mm,
+	// 128 effective samples read ~0.20 below the 1600-ray gate value while 400
+	// read within 0.005-0.02.
 	NumRays int `yaml:"num_rays,omitempty"`
 	// GridSize is the image-grid pixel count before auto-enlargement
 	// (0 = the psf default of 64).
