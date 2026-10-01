@@ -6,7 +6,7 @@ This document describes the implementation of contrast optimization in RayWeaver
 |---|---|---|---|
 | 1 | **Direct Complex Sum** | `geometric_mtf_sag`, `geometric_mtf_tan` | Implemented |
 | 2a | **Wavefront Shift** | `wavefront_shift_sag`, `wavefront_shift_tan` | Implemented |
-| 2b | **Wavefront Pair Phase** | `wavefront_pair_phase` | Implemented |
+| 2b | **Wavefront Pair Phase** | `wavefront_pair_phase` | Registered, inert in the DLS path (§4.7) |
 | 3 | **Diffraction MTF (Huygens)** | `diffraction_mtf_sag`, `diffraction_mtf_tan` | Implemented |
 
 ---
@@ -172,6 +172,14 @@ pupil sample set; the fit is then skipped rather than trusted.
 
 This approach evaluates the wavefront structure at **9 fixed pupil reference points** and minimizes the weighted sum of squared phase differences between symmetric pairs. Unlike wavefront shift, the pairs are fixed (not frequency-dependent), providing a direction-inclusive wavefront quality metric.
 
+> **The kind is registered but measures nothing in the DLS path.** Its reference
+> radii are exactly `r` and `r/√2` on the axes and diagonals, while a traced polar
+> grid places its outer ring at `rings/(rings+1)·r` and its spokes at `2πj/spokes`,
+> and the lookup is an exact coordinate match — so no reference point lands on a
+> sample and the value is 0 for every state. Verified on a traced 6-element:
+> 0.000000 against a live `spot_rms` of 0.001529 on the same grid. §4.7 has the
+> detail; making it usable is a redesign of the reference radii, not a fix.
+
 ### 4.2 Reference Points
 
 9 points on the unit pupil:
@@ -228,6 +236,23 @@ merit:
       wavelength: 0.00058756
       weight: 500
 ```
+
+### 4.7 Why it reads 0
+
+`ComputeWavefrontPairPhase` builds a spatial hash of the pupil samples keyed on
+`round(PupilX·1000), round(PupilY·1000)` and then looks up each reference point's
+exact coordinate. A traced grid is polar: its rings sit at `i/(rings+1)·r`, so the
+outermost sample is at `rings/(rings+1)·r` and **never** at `r`, and its spokes
+sit at `2πj/spokes`, so `±r/√2` is only hit by luck. Every lookup misses, no pair
+is formed, and the function returns its documented "0 if no valid pairs found".
+
+The same exact-key pairing used to disable Phase 2a as well, where it was worse
+because the displacement there is a genuine fraction of the pupil rather than a
+fixed set of radii — see §3.4 for what replaced it. `wavefront_pair_phase` is
+left as it is because making it live means choosing reference radii and
+directions that exist on a traced grid, or interpolating onto them: a redesign of
+the kind rather than a repair of it. Nothing in the repository uses it, so the
+dead path costs nothing.
 
 ---
 
@@ -347,11 +372,12 @@ shares one pupil trace and one Huygens integration.
 | **Input** | Image-plane (X, Y) | Pupil (PupilX, PupilY, OPL) | Pupil (PupilX, PupilY, OPL) | Wavefront → Huygens PSF |
 | **Frequency** | Directly specified | Directly specified | Not specified (fixed pairs) | Directly specified |
 | **Direction** | S/T independent | S/T independent | S/T/D simultaneous | S/T independent |
-| **Residual** | Hinge: `max(0, target - MTF)` | Squared: `Σ(δW)²` | Squared: `Σ(Δφ)²` | Hinge: `max(0, target - MTF)` |
+| **Residual** | Hinge: `max(0, target - MTF)` | Variance: `Var(δW)` over a reference sphere | Squared: `Σ(Δφ)²` | Hinge: `max(0, target - MTF)` |
 | **Target** | Required | Not used | Not used | Required |
-| **Pair finding** | N/A | Nearest-neighbor (spatial hash) | Fixed reference points | N/A |
-| **Extra cost** | None | Pair search O(N) | 9-point lookup O(1) | One Huygens integral per field |
-| **Use case** | Specific MTF target | Specific frequency optimization | Broad wavefront quality | Gate-exact MTF target |
+| **Sees defocus** | Yes (via the spot spread) | No — removed by the reference sphere | No (piston + tilt only) | Yes |
+| **Pair finding** | N/A | Delaunay interpolation of the displaced pupil point | Fixed reference points (exact match — misses) | N/A |
+| **Extra cost** | None | 1 triangulation + 1 interpolation per field (~1 ms) | 9-point lookup O(1) | One Huygens integral per field (~60 ms) |
+| **Use case** | Specific MTF target | Specific frequency optimization | Broad wavefront quality (inert) | Gate-exact MTF target |
 
 ---
 
@@ -363,6 +389,8 @@ shares one pupil trace and one Huygens integration.
 | `internal/dls/grid.go` | 2a/2b | Populate `PupilX/PupilY` from `Sample` |
 | `internal/dls/mtf.go` | 1/2a/2b | `ComputeGeometricMTF`, `ComputeWavefrontShift`, `ComputeWavefrontPairPhase` |
 | `internal/dls/mtf_test.go` | 1 | Unit tests for `ComputeGeometricMTF` |
+| `internal/dls/wavefront_shift_test.go` | 2a | Reference sphere, frequency weighting, pupil-overlap and degeneracy tests |
+| `internal/optimize/merit_routing_test.go` | 2a | Routing, non-inertness and shear-scale tests |
 | `internal/optimize/merit.go` | 1/2a/2b/3 | Constants + evaluation cases |
 | `internal/optimize/optimize.go` | 1/2a/2b/3 | `meritTerm.frequency`, `isGridKind`, `isTraceKind` |
 | `internal/types/types.go` | 1/3 | `MeritTerm.Frequency`, `DiffractionMTFConfig` |
