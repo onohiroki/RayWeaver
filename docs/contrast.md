@@ -74,21 +74,27 @@ merit:
 
 ### 3.1 Principle
 
-Wavefront shift maximizes MTF at a specific frequency by minimizing the **wavefront difference between pupil-shifted ray pairs**. For spatial frequency `ν`, the corresponding pupil shift is:
+Wavefront shift raises the MTF at a specific frequency by driving down the **wavefront difference between pupil-shifted ray pairs**. The incoherent OTF is the autocorrelation of the pupil function, so the path difference between two pupil samples one *displacement* apart carries the whole frequency content. For spatial frequency `ν` that displacement is
 
 ```
-Δu = ν · λ · 2    (normalized pupil coordinates)
+s = ν · λ · z        (pupil plane, z = the pupil-to-image path scale)
 ```
 
-The merit function is the weighted sum of squared wavefront differences:
+which in entrance-pupil coordinates is `ν · λ · R_ent/NA`; for an infinite conjugate the working F-number collapses that to `ν · λ · EFL`. The optimizer supplies that length as the shear scale, so `frequency` is a genuine spatial frequency in lp/mm.
+
+The merit is the weighted **variance** of the path differences over a reference-sphere-referenced wavefront `W`:
 
 ```
-MF = Σ w_i (OPL_i - OPL_j)²
+MF = Σ w_i (ΔW_i - <ΔW>)² / Σ w_i,   w_i = Area_i × Intensity_i
+ΔW_i = W(PupilX_i, PupilY_i) - W(PupilX_i - s, PupilY_i)   [sag]
+     = W(PupilX_i, PupilY_i) - W(PupilX_i, PupilY_i - s)   [tan]
 ```
 
-where `j` is the nearest grid point to the shifted position `(PupilX_i - Δu, PupilY_i)` (sagittal) or `(PupilX_i, PupilY_i - Δu)` (tangential).
+`W` is the OPL with a constant, a tilt and a radial quadratic removed — the same three terms `wavefront_sphere_rms` removes. That subtraction is not cosmetic: the focusing of a converging bundle is itself a quadratic in the pupil, its sheared difference is therefore *linear*, and a statistic that did not remove it would measure where the focus is rather than how well the wavefront is formed (an ideal lens would score a large residual and the solver would walk the image plane). Removing the tilt is equally required — a displaced PSF has the same MTF magnitude, so the tilt must not be charged — and the piston cancels in the difference anyway.
 
-This is equivalent to minimizing the phase variance of the pupil autocorrelation at shift `Δu`, which maximizes the MTF at frequency `ν`.
+For a small aberration `|OTF(ν)| ≈ 1 - ½·Var(2π·ΔW/λ)`, so minimising `MF` maximises the MTF at `ν`. Because the sheared difference of a smooth wavefront is proportional to `s` and the statistic is a variance, the reading is weighted as `s²` — it is a frequency-specific proxy, not another spot size.
+
+What survives the reference sphere is the same aberration set `wavefront_sphere_rms` keeps: **astigmatism, spherical aberration and coma**. **Defocus is the exception** — it is one of the removed quadratics, and that is not a limitation of the estimator but of what an OTF at a best-focus plane can see: the delivered-plane gate is measured at the plane the back-focus solve picks, so the residual defocus there is small by construction, and the per-field defocus that field curvature is made of is carried by the `wavefront_defocus` terms (one per field, also cheap). Use those for curvature, not these.
 
 ### 3.2 Merit Operand
 
@@ -97,7 +103,7 @@ This is equivalent to minimizing the phase variance of the pupil autocorrelation
 | `wavefront_shift_sag` | Sagittal wavefront shift merit | `frequency` (lp/mm), `wavelength` |
 | `wavefront_shift_tan` | Tangential wavefront shift merit | `frequency` (lp/mm), `wavelength` |
 
-No `target` — the optimizer minimizes the sum of squared wavefront differences directly. Lower merit = higher MTF.
+No `target` — the optimizer minimizes the variance directly. Lower merit = higher MTF.
 
 ### 3.3 YAML Configuration
 
@@ -122,21 +128,41 @@ merit:
 ```
 DLS iteration
   └─ traceGridRays() → IPoint[] (with PupilX, PupilY, OPL, Area, Intensity)
-       └─ ComputeWavefrontShift(points, frequency, wavelength, apertureRadius, direction)
-            ├─ Δu = frequency × wavelength × 2  (normalized shift)
-            ├─ Build spatial hash: discretized (PupilX, PupilY) → index
+       └─ ComputeWavefrontShift(points, frequency, wavelength, shearScale, direction)
+            ├─ s = frequency × wavelength × shearScale   (mm, the pupil displacement)
+            ├─ Remove the reference sphere: weighted least-squares fit of
+            │     c0 + c1·x + c2·y + c3·(x²+y²) over the pupil, subtracted in place
+            ├─ mesh.Triangulate(PupilX, PupilY) → Delaunay + vertex→triangle index
             ├─ For each valid point i:
-            │     (sx, sy) = (PupilX_i - Δu, PupilY_i)  [sag] or (PupilX_i, PupilY_i - Δu) [tan]
-            │     j = nearest grid point to (sx, sy)
-            │     If j found and OK:
-            │         δW = OPL_i - OPL_j
-            │         merit += Area_i × Intensity_i × δW²
-            └─ Return merit
+            │     (sx, sy) = (PupilX_i - s, PupilY_i)  [sag] or (PupilX_i, PupilY_i - s) [tan]
+            │     Locate the triangle containing (sx, sy) by scanning the triangles
+            │     incident to the nearest sample (for a Delaunay triangulation the
+            │     nearest site is always a vertex of the containing triangle, so the
+            │     search is complete). Outside the triangulation → no pupil overlap at
+            │     this displacement → the pair is dropped.
+            │     δW = W_i - W_interpolated(sx, sy)
+            │     merit += Area_i × Intensity_i × δW²
+            ├─ Return the weighted variance of δW (merit)
+            └─ 0 when no pair survives (past the cutoff, s ≥ the pupil diameter)
 ```
+
+The interpolation matters: the displaced point is a real displacement now, not a
+sub-cell offset, so a nearest-neighbour key match finds nothing on a polar grid.
+That is what made the kind inert until this revision — it paired samples by exact
+0.001 mm key equality, which no traced grid satisfies, and reported 0 for every
+state (measured 0.000000 against a live `spot_rms` of 0.001529 on the same
+design). The old shear was the dimensionless constant 2 subtracted from the
+millimetre-scale `PupilX`, which on a stop-free f/3.9 system under-shot the
+requested displacement by ~24x, so `frequency: 10` acted on a 0.4 lp/mm shear.
 
 ### 3.5 Data Requirements
 
-`IPoint` must include `PupilX/PupilY` (relative pupil coordinates). These are populated from `pupil.Sample` during grid tracing.
+`IPoint` must include `PupilX/PupilY` (relative pupil coordinates, in mm — the
+grid is scaled by the aperture radius) plus `OPL`, `Area` and `Intensity`. These
+are populated from `pupil.Sample` during grid tracing.
+
+The four-term reference-sphere fit is degenerate for a collinear or coincident
+pupil sample set; the fit is then skipped rather than trusted.
 
 ---
 

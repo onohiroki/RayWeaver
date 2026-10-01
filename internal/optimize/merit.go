@@ -149,15 +149,15 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		if len(points) == 0 {
 			return 0
 		}
-		apR := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, term.wavelength, gc, o.apertureMargin, p.dia)
-		return dls.ComputeWavefrontShift(points, term.frequency, term.wavelength, apR, "sag")
+		scale := o.wavefrontShearScale(cfg, surfaces, gc, term.wavelength)
+		return dls.ComputeWavefrontShift(points, term.frequency, term.wavelength, scale, "sag")
 	case dls.MeritWavefrontShiftTan:
 		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 		if len(points) == 0 {
 			return 0
 		}
-		apR := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, term.wavelength, gc, o.apertureMargin, p.dia)
-		return dls.ComputeWavefrontShift(points, term.frequency, term.wavelength, apR, "tan")
+		scale := o.wavefrontShearScale(cfg, surfaces, gc, term.wavelength)
+		return dls.ComputeWavefrontShift(points, term.frequency, term.wavelength, scale, "tan")
 	case dls.MeritWavefrontPairPhase:
 		points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 		if len(points) == 0 {

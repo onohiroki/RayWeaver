@@ -1346,6 +1346,40 @@ func (o *Optimizer) updateGlassRoles(configSurfaces map[string][]types.Surface, 
 	}
 }
 
+// wavefrontShearScale returns the length, in mm, that converts a spatial frequency
+// in lp/mm into the entrance-pupil displacement at which the pupil
+// autocorrelation — and therefore the OTF — is read (dls.ComputeWavefrontShift).
+//
+// The displacement is s = ν·λ·R_ent/NA, and for an infinite conjugate the working
+// F-number is F# = EFL/EPD, so NA = R_ent/EFL and the scale collapses to the EFL.
+// It is therefore the EFL that is read, not a ratio of two pupil quantities: the
+// paraxial entrance-pupil radius is an estimate that ignores a virtual entrance
+// pupil (a stop-free system reported an 118 mm EPD where the design prescribes
+// 12.5 mm, i.e. an NA nine times too large and a shear nine times too short), while
+// the EFL depends only on the powered surfaces. A finite conjugate picks up the
+// magnification, since its working F-number is EFL/(EPD·M).
+//
+// Zero when the focal length is unavailable, which makes the wavefront-shift kinds
+// report no value rather than a wrong one.
+func (o *Optimizer) wavefrontShearScale(cfg *config, surfaces []types.Surface, gc *glass.Catalog, wavelength float64) float64 {
+	wl := wavelength
+	if wl <= 0 {
+		wl = effectiveReferenceWavelength(cfg.referenceWavelength)
+	}
+	if wl <= 0 {
+		return 0
+	}
+	pr := paraxial.Compute(types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}, wl, gc, 0, nil)
+	efl := math.Abs(pr.FocalLength)
+	if efl <= 0 {
+		return 0
+	}
+	if m := math.Abs(pr.Magnification); m > 1e-9 {
+		return 2 * efl / m
+	}
+	return efl
+}
+
 type Optimizer struct {
 	configs          []config
 	variables        []Variable
