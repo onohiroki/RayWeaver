@@ -12,6 +12,7 @@ instead.
 | [chief-rays-and-spot.md](chief-rays-and-spot.md) | pupil grids, centroid chief ray, spot statistics, ray fans, clear aperture |
 | [paraxial.md](paraxial.md) | first-order ray trace, cardinal points, entrance/exit pupils, f/# |
 | [merit-functions.md](merit-functions.md) | merit terms (spot RMS, distortion, colour, Seidel, OPD RMS), weights |
+| [../merit-and-constraints.md](../merit-and-constraints.md) | consolidated catalog of every merit term and constraint (setting, effect, computation) |
 | [dls-optimization.md](dls-optimization.md) | damped least squares: normalised variables, finite-difference Jacobian, augmented-Lagrangian constraints, damping control |
 | [region-active.md](region-active.md) | Okudaira Region Active Method: Lagrange-multiplier-based dynamic active-set with hysteresis for inequality constraints |
 | [escape-function.md](escape-function.md) | escape-function global optimization |

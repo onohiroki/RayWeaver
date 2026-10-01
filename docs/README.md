@@ -23,6 +23,7 @@ system → ray bundle → quantities
 | [plot.md](plot.md) | `rayweave plot` | SVG / PNG cross-section diagrams |
 | [scale.md](scale.md) | `rayweave scale` | scale a system so its EFL matches a target |
 | [optimize.md](optimize.md) | `rayweave optimize` | DLS (damped least squares) local optimization |
+| [merit-and-constraints.md](merit-and-constraints.md) | _optimization reference_ | consolidated catalog of configurable merit terms and constraints (setting, effect, computation) |
 | [escape.md](escape.md) | `rayweave escape` | escape-function global optimization |
 | [asphere.md](asphere.md) | `rayweave asphere` | rank candidate surfaces for asphere introduction and estimate initial coefficients |
 | [psf.md](psf.md) | `rayweave psf` | point-spread function on the flat image plane via direct vector Huygens integration |

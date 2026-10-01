@@ -211,6 +211,11 @@ A `CONF` operand selects which config's merit terms are active for each rule.
 
 ### Merit kinds
 
+The full catalog of merit terms — every kind, its setting syntax, its effect and
+its computation — is in
+[merit-and-constraints.md](merit-and-constraints.md). The table below is the
+quick summary.
+
 | Kind | Quantity minimized |
 |---|---|
 | `spot_rms` | RMS spot radius on the reference surface |
@@ -495,7 +500,8 @@ supported (satisfiable targets converge; an unreachable target is reported with
 a warning). `edge_thickness` constraints take the back surface via
 `back_surface`; when it is omitted the next surface in system order is used.
 Constraints are enforced with an augmented-Lagrangian penalty inside
-the DLS solve.
+the DLS solve. The full constraint catalog — kinds, measures, fields and
+computation — is in [merit-and-constraints.md](merit-and-constraints.md).
 
 ## Output
 
