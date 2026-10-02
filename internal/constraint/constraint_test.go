@@ -40,17 +40,17 @@ func TestBeamMeasuresOnAxis(t *testing.T) {
 	surface.Precompute(surfaces)
 
 	for _, id := range []int{1, 2, 3} {
-		clearance := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: id, Active: true}, surfaces, 0, gc, 16, 1.0, 0, 0)
+		clearance := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: id, Active: true}, surfaces, 0, gc, 16, 1.0, 0, 0, 0)
 		if clearance <= 0 {
 			t.Errorf("field 0 surface %d beam_clearance = %v, want > 0", id, clearance)
 		}
-		diameter := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamDiameter, Surface: id, Active: true}, surfaces, 0, gc, 16, 1.0, 0, 0)
+		diameter := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamDiameter, Surface: id, Active: true}, surfaces, 0, gc, 16, 1.0, 0, 0, 0)
 		if diameter <= 0 {
 			t.Errorf("field 0 surface %d beam_diameter = %v, want > 0", id, diameter)
 		}
 	}
 
-	if vf := Evaluate(types.ConstraintOperand{Measure: types.MeasureVignettingFactor, Active: true}, surfaces, 0, gc, 16, 1.0, 0, 0); vf != 1.0 {
+	if vf := Evaluate(types.ConstraintOperand{Measure: types.MeasureVignettingFactor, Active: true}, surfaces, 0, gc, 16, 1.0, 0, 0, 0); vf != 1.0 {
 		t.Errorf("field 0 vignetting_factor = %v, want 1.0", vf)
 	}
 }
@@ -60,17 +60,17 @@ func TestBeamMeasuresClipped(t *testing.T) {
 	surfaces := clippedSystem()
 	surface.Precompute(surfaces)
 
-	clearance := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: 2, Active: true}, surfaces, 20, gc, 16, 1.0, 0, 0)
+	clearance := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: 2, Active: true}, surfaces, 20, gc, 16, 1.0, 0, 0, 0)
 	if clearance >= 0 {
 		t.Errorf("field 20 surface 2 beam_clearance = %v, want < 0", clearance)
 	}
 
-	diameter := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamDiameter, Surface: 2, Active: true}, surfaces, 20, gc, 16, 1.0, 0, 0)
+	diameter := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamDiameter, Surface: 2, Active: true}, surfaces, 20, gc, 16, 1.0, 0, 0, 0)
 	if diameter <= surfaceDiameter(surfaces, 2) {
 		t.Errorf("field 20 surface 2 beam_diameter = %v, want > %v (surface aperture)", diameter, surfaceDiameter(surfaces, 2))
 	}
 
-	if vf := Evaluate(types.ConstraintOperand{Measure: types.MeasureVignettingFactor, Active: true}, surfaces, 20, gc, 16, 1.0, 0, 0); vf >= 1.0 {
+	if vf := Evaluate(types.ConstraintOperand{Measure: types.MeasureVignettingFactor, Active: true}, surfaces, 20, gc, 16, 1.0, 0, 0, 0); vf >= 1.0 {
 		t.Errorf("field 20 vignetting_factor = %v, want < 1.0", vf)
 	}
 }
@@ -82,8 +82,8 @@ func TestBeamMeasuresConsistent(t *testing.T) {
 
 	for _, field := range []float64{0, 10, 20} {
 		for _, id := range []int{1, 2, 3} {
-			clearance := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: id, Active: true}, surfaces, field, gc, 16, 1.0, 0, 0)
-			diameter := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamDiameter, Surface: id, Active: true}, surfaces, field, gc, 16, 1.0, 0, 0)
+			clearance := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: id, Active: true}, surfaces, field, gc, 16, 1.0, 0, 0, 0)
+			diameter := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamDiameter, Surface: id, Active: true}, surfaces, field, gc, 16, 1.0, 0, 0, 0)
 			want := surfaceDiameter(surfaces, id)/2 - diameter/2
 			if math.Abs(clearance-want) > 1e-9 {
 				t.Errorf("field %.0f surface %d: clearance %.6f != dia/2 - beam/2 = %.6f", field, id, clearance, want)
@@ -102,14 +102,14 @@ func TestBeamMeasuresWideningAperture(t *testing.T) {
 	wide[1].Diameter = 14.0
 	surface.Precompute(wide)
 
-	cBase := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: 2, Active: true}, base, 10, gc, 16, 1.0, 0, 0)
-	cWide := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: 2, Active: true}, wide, 10, gc, 16, 1.0, 0, 0)
+	cBase := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: 2, Active: true}, base, 10, gc, 16, 1.0, 0, 0, 0)
+	cWide := Evaluate(types.ConstraintOperand{Measure: types.MeasureBeamClearance, Surface: 2, Active: true}, wide, 10, gc, 16, 1.0, 0, 0, 0)
 	if math.Abs((cWide-cBase)-2.0) > 1e-6 {
 		t.Errorf("clearance increase on widening aperture = %v, want 2.0", cWide-cBase)
 	}
 
-	vBase := Evaluate(types.ConstraintOperand{Measure: types.MeasureVignettingFactor, Active: true}, base, 20, gc, 16, 1.0, 0, 0)
-	vWide := Evaluate(types.ConstraintOperand{Measure: types.MeasureVignettingFactor, Active: true}, wide, 20, gc, 16, 1.0, 0, 0)
+	vBase := Evaluate(types.ConstraintOperand{Measure: types.MeasureVignettingFactor, Active: true}, base, 20, gc, 16, 1.0, 0, 0, 0)
+	vWide := Evaluate(types.ConstraintOperand{Measure: types.MeasureVignettingFactor, Active: true}, wide, 20, gc, 16, 1.0, 0, 0, 0)
 	if vWide < vBase {
 		t.Errorf("vignetting_factor decreased after widening aperture: %v -> %v", vBase, vWide)
 	}
@@ -125,7 +125,7 @@ func TestNewMeasuresInactive(t *testing.T) {
 		{Measure: types.MeasureVignettingFactor, Active: false},
 		{Measure: types.MeasureBeamDiameter, Surface: 2, Active: false},
 	} {
-		if v := Evaluate(op, surfaces, 10.0, gc, 16, 1.0, 0, 0); v != 0 {
+		if v := Evaluate(op, surfaces, 10.0, gc, 16, 1.0, 0, 0, 0); v != 0 {
 			t.Errorf("inactive %s returned %v, want 0", op.Measure, v)
 		}
 	}
@@ -141,16 +141,15 @@ func TestEdgeThicknessBackSurface(t *testing.T) {
 	}
 	surface.Precompute(surfaces)
 
-	// edge = front.Thickness + sag(back) - sag(front) at h = 10.
-	h := 10.0
-	sag := func(c float64) float64 {
+	// edge = front.Thickness + sag(back) - sag(front) at h = min(diam)/2 = 10.
+	sag := func(c, h float64) float64 {
 		if c == 0 {
 			return 0
 		}
 		R := 1 / c
 		return h * h / (R * (1 + math.Sqrt(1-h*h/(R*R))))
 	}
-	want := 5.0 + sag(-0.01) - sag(0.01)
+	want := 5.0 + sag(-0.01, 10.0) - sag(0.01, 10.0)
 
 	op := types.ConstraintOperand{
 		Kind:        types.ConstraintInequalityLower,
@@ -161,9 +160,21 @@ func TestEdgeThicknessBackSurface(t *testing.T) {
 		Weight:      1.0,
 		Active:      true,
 	}
-	got := evaluateEdgeThickness(surfaces, op.Surface, op.BackSurface)
+	got := evaluateEdgeThickness(surfaces, op.Surface, op.BackSurface, nil, 0, 0)
 	if math.Abs(got-want) > 1e-9 {
 		t.Errorf("evaluateEdgeThickness(s1,s2) = %v, want %v", got, want)
+	}
+
+	// A prescribed entrance pupil wider than the physical rim floors the
+	// measurement height, so shrinking an auto_aperture below the beam can no
+	// longer shrink the sagitta the band is tested against.
+	epd := 24.0
+	floored := 5.0 + sag(-0.01, epd/2) - sag(0.01, epd/2)
+	if got := evaluateEdgeThickness(surfaces, op.Surface, op.BackSurface, nil, 0, epd); math.Abs(got-floored) > 1e-9 {
+		t.Errorf("evaluateEdgeThickness(s1,s2) with epd %v = %v, want %v", epd, got, floored)
+	}
+	if floored >= want {
+		t.Errorf("the pupil floor must lower the measured edge: %v (floored) vs %v (rim)", floored, want)
 	}
 }
 
@@ -192,7 +203,7 @@ func TestEdgeThicknessAutoDerivesBackSurface(t *testing.T) {
 		{ID: 4, Type: types.Sphere, Curvature: -0.01, Thickness: 100.0, Material: types.Material{}, Diameter: 20.0},
 		{ID: 5, Type: types.Sphere, Curvature: 0, Thickness: 0.0, Material: types.Material{}, Diameter: 20.0},
 	}
-	want := evaluateEdgeThickness(surfaces, 2, 4)
+	want := evaluateEdgeThickness(surfaces, 2, 4, nil, 0, 0)
 	op := types.ConstraintOperand{
 		Kind:    types.ConstraintInequalityLower,
 		Measure: types.MeasureEdgeThickness,
@@ -201,7 +212,7 @@ func TestEdgeThicknessAutoDerivesBackSurface(t *testing.T) {
 		Weight:  1.0,
 		Active:  true,
 	}
-	got := Evaluate(op, surfaces, 0, nil, 0, 0, 0, 0)
+	got := Evaluate(op, surfaces, 0, nil, 0, 0, 0, 0, 0)
 	if math.Abs(got-want) > 1e-12 {
 		t.Errorf("Evaluate(edge_thickness, surface 2) = %v, want %v (auto back surface 4)", got, want)
 	}

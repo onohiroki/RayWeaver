@@ -2534,7 +2534,7 @@ func (o *Optimizer) UpdateRegionActiveSet(x []float64) {
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle))
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle), p.dia)
 			err := constraint.ComputeError(c.Kind, value, c)
 			violations[i] = err // raw violation (before weighting)
 		}
@@ -4156,7 +4156,7 @@ func (o *Optimizer) ComputeConstraints(x []float64) []float64 {
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle))
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle), p.dia)
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {
@@ -4211,7 +4211,7 @@ func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []Constr
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle))
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle), p.dia)
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {
@@ -4255,7 +4255,7 @@ func (o *Optimizer) FinalConstraintMeasurements(x []float64) []types.ConstraintM
 				continue
 			}
 			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
-			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle))
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle), p.dia)
 			err := constraint.ComputeError(c.Kind, value, c)
 			w := c.Weight
 			if w <= 0 {

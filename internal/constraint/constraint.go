@@ -12,7 +12,12 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle float64, gc *glass.Catalog, numRays int, apertureMargin float64, stopSurface int, pupilZ float64) float64 {
+// Evaluate evaluates one constraint operand against the current system.
+// epd is the prescribed entrance-pupil diameter the caller already resolved
+// (the virtual entrance pupil's diameter, or 0 to fall back to the paraxial
+// entrance pupil). It only feeds the edge_thickness measure, which needs to
+// know where the beam actually reaches the element.
+func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle float64, gc *glass.Catalog, numRays int, apertureMargin float64, stopSurface int, pupilZ float64, epd float64) float64 {
 	if !op.Active {
 		return 0
 	}
@@ -41,7 +46,7 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 			// (slice) order, which is what front.Thickness is measured to.
 			backID = nextSurfaceID(surfaces, op.Surface)
 		}
-		return evaluateEdgeThickness(surfaces, op.Surface, backID)
+		return evaluateEdgeThickness(surfaces, op.Surface, backID, gc, stopSurface, epd)
 	case types.MeasureFNumber:
 		return evaluateFNumber(surfaces, gc, stopSurface)
 	case types.MeasureBeamClearance:
@@ -276,7 +281,19 @@ func nextSurfaceID(surfaces []types.Surface, frontID int) int {
 	return surfaces[idx+1].ID
 }
 
-func evaluateEdgeThickness(surfaces []types.Surface, frontID, backID int) float64 {
+// evaluateEdgeThickness returns the edge thickness of the element between
+// frontID and backID, measured at the larger of the element's physical rim
+// min(front, back diameter)/2 and the prescribed entrance-pupil radius.
+//
+// The rim alone was not enough: every auto_aperture diameter is an optimisation
+// variable, so the solver could shrink it and make the sagitta height - and with
+// it the required thickness - disappear, while the beam still lands further out
+// than the rim the band was being measured at. Flooring the height by the pupil
+// keeps the constraint measuring the edge the light actually crosses. A design
+// whose rim already reaches beyond the pupil is unaffected, so the extra floor
+// only ever fires when an aperture has been drawn in below the beam.
+// Returns 0 when either surface is unknown.
+func evaluateEdgeThickness(surfaces []types.Surface, frontID, backID int, gc *glass.Catalog, stopSurface int, epd float64) float64 {
 	var front, back *types.Surface
 	for i := range surfaces {
 		if surfaces[i].ID == frontID {
@@ -292,7 +309,28 @@ func evaluateEdgeThickness(surfaces []types.Surface, frontID, backID int) float6
 
 	center := front.Thickness
 	h := math.Min(front.Diameter, back.Diameter) / 2.0
+	if r := prescribedPupilRadius(surfaces, gc, stopSurface, epd); r > h {
+		h = r
+	}
 	return center + sagitta(back.Curvature, h) - sagitta(front.Curvature, h)
+}
+
+// prescribedPupilRadius is the radius at which the prescribed beam reaches the
+// element. The caller's explicit entrance-pupil diameter wins (the virtual
+// entrance pupil resolves it once per evaluation and needs no catalogue), else
+// the paraxial entrance pupil; 0 when neither is available, which leaves the
+// physical rim as the measurement height.
+func prescribedPupilRadius(surfaces []types.Surface, gc *glass.Catalog, stopSurface int, epd float64) float64 {
+	if epd > 0 {
+		return epd / 2
+	}
+	if gc == nil {
+		return 0
+	}
+	if r := paraxial.EntrancePupilRadius(surfaces, stopSurface, types.DefaultWavelength, gc); r > 0 {
+		return r
+	}
+	return 0
 }
 
 func evaluateFNumber(surfaces []types.Surface, gc *glass.Catalog, stopSurface int) float64 {
