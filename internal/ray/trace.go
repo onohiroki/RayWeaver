@@ -228,7 +228,13 @@ func (e *Engine) TraceRayInto(ray types.Ray, surfaces []types.Surface, detail bo
 			Z: localOrigin.Z + localDir.Z*t,
 		}
 
-		if currentSurf.Diameter > 0 && !skipAperture && !(skipAutoAperture && currentSurf.AutoAperture) && !(skipGlassPath && currentSurf.AutoAperture) {
+		// Only the explicit skip flags relax this test. skipGlassPath gates the
+		// min_glass_path test below (dls.TraceFieldGrid raises it for the
+		// on-axis field, which has no off-axis edge to protect); letting it
+		// exempt auto_aperture surfaces here too silently disabled the clear
+		// aperture check on axis, so a merit grid could not see an
+		// auto_aperture surface clipping the on-axis bundle.
+		if currentSurf.Diameter > 0 && !skipAperture && !(skipAutoAperture && currentSurf.AutoAperture) {
 			h := math.Sqrt(hitPoint.X*hitPoint.X + hitPoint.Y*hitPoint.Y)
 			if h > currentSurf.Diameter/2 {
 				if ray.Lenient {
