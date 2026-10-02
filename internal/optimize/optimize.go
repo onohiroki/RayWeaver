@@ -1618,9 +1618,58 @@ func (o *Optimizer) SetGlassMerit(configID string, terms []types.MeritTerm) {
 // the start of the phase (the escape-DLS result). The variable dimension is
 // unchanged, so the escape store/distance semantics stay intact.
 func (o *Optimizer) EnterGlassPhase(x []float64) {
+	// Reported before lockNonGlassVariables: the lock itself gives every
+	// non-glass variable Min==Max, which would make the check below see a
+	// "fixed" curvature variable that is only pinned for the phase.
+	o.warnUnsettledPowerSolve()
+	// Re-anchor the power-preserving solve at the phase entry first: the
+	// powers to hold are those of the incoming lens (the escape-DLS result x),
+	// not the run-initial snapshot SetPowerSolve took. Anchoring at the run
+	// start would pin the layout to the pre-escape state while the glass
+	// optimises against the post-escape one, so applyVariables would hand the
+	// solve a chimeric lens and the delivered (solve-off) document would drift
+	// far outside its target band.
+	o.reanchorPowerSolve(x)
 	o.powerSolveEnabled = true
 	o.lockNonGlassVariables(x)
 	o.glassMeritActive = true
+}
+
+// reanchorPowerSolve recomputes every power-solve entry's target thin-lens
+// power from the lens described by x (solve off), so the glass phase holds the
+// element powers of the state it actually starts from. It is called by
+// EnterGlassPhase before the solve is enabled, which makes the materialisation
+// below the solve-off lens.
+//
+// applyVariables' bookkeeping is saved and restored: this materialisation is
+// an implementation detail of the re-anchor, not a solve, so it must not
+// appear in the run's back-focus diagnostics. A no-op when no solve surfaces
+// are configured (the plain optimize path).
+func (o *Optimizer) reanchorPowerSolve(x []float64) {
+	if len(o.powerSolve) == 0 {
+		return
+	}
+	savedStats := o.backFocusStats.snapshot()
+	wasEnabled := o.powerSolveEnabled
+	o.powerSolveEnabled = false
+	cfgSurfaces, tempGC, _ := o.applyVariables(x)
+	o.powerSolveEnabled = wasEnabled
+	o.backFocusStats.restore(savedStats)
+
+	gc := effectiveGC(o.gc, tempGC)
+	for cid, entries := range o.powerSolve {
+		surfaces, ok := cfgSurfaces[cid]
+		if !ok {
+			continue
+		}
+		// entries shares its backing array with o.powerSolve, so the write
+		// lands on the stored entry.
+		for i := range entries {
+			if phi, ok := powerTargetForSurface(surfaces, gc, entries[i].solveID); ok {
+				entries[i].targetPhi = phi
+			}
+		}
+	}
 }
 
 // ExitGlassPhase ends the glass phase: it disables the power-preserving solve,
@@ -1631,6 +1680,178 @@ func (o *Optimizer) ExitGlassPhase() {
 	o.unlockVariables()
 	o.glassMeritActive = false
 }
+
+// SettlePowerSolve returns a copy of x with every power-solve surface's
+// curvature variable rewritten to the power-preserving curvature the solve
+// applies at x. A solve-off evaluation of the result therefore reproduces the
+// element powers the glass phase held, so the glass result carries its power
+// compensation into the clean phase instead of dropping it at the phase
+// boundary: without this the element powers jump by the nd-induced d-line
+// drift as soon as ExitGlassPhase disables the solve, and the colour-only
+// glass result hands the clean phase a different lens than the one it judged.
+//
+// The solve is materialised temporarily (and the previous enabled state is
+// restored), so the method works whether it is called inside or after the
+// phase; when the phase's Min==Max locks are in effect the clamp uses the
+// remembered original bounds, not the locked ones. A solve surface driven by a
+// fixed variable (Min >= Max) or with no declared curvature variable has
+// nowhere to write, so it is left untouched (SetPowerSolve warns about that
+// configuration). x is returned unchanged when no solve is configured.
+func (o *Optimizer) SettlePowerSolve(x []float64) []float64 {
+	if len(o.powerSolve) == 0 || len(x) != len(o.variables) {
+		return x
+	}
+	savedStats := o.backFocusStats.snapshot()
+	wasEnabled := o.powerSolveEnabled
+	o.powerSolveEnabled = true
+	cfgSurfaces, _, _ := o.applyVariables(x)
+	o.powerSolveEnabled = wasEnabled
+	o.backFocusStats.restore(savedStats)
+
+	out := append([]float64(nil), x...)
+	for cid, entries := range o.powerSolve {
+		surfaces, ok := cfgSurfaces[cid]
+		if !ok {
+			continue
+		}
+		for _, e := range entries {
+			idx := surfaceIndex(surfaces, e.solveID)
+			if idx < 0 {
+				continue
+			}
+			cSolved := surfaces[idx].Curvature
+			for i := range o.variables {
+				v := &o.variables[i]
+				lo, hi := o.variableBounds(i)
+				if lo >= hi {
+					continue // fixed variable: no freedom to settle into
+				}
+				apply := func(param string, scale, offset float64) {
+					val, ok := varValueForCurvature(param, cSolved)
+					if !ok {
+						return
+					}
+					out[i] = clampVar((val-offset)/scale, lo, hi)
+				}
+				if v.IsShared {
+					for _, b := range v.Bindings {
+						if b.Config != cid || b.ID != e.solveID {
+							continue
+						}
+						scale := b.Scale
+						if scale == 0 {
+							scale = 1.0
+						}
+						apply(b.Param, scale, b.Offset)
+					}
+					continue
+				}
+				if v.Config == cid && v.SurfaceID == e.solveID {
+					apply(v.Param, 1.0, 0)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// variableBounds returns the bounds variable i should be clamped against:
+// the original Min/Max while the glass phase's Min==Max locks are in effect
+// (pinnedMin/pinnedMax), the live Min/Max otherwise.
+func (o *Optimizer) variableBounds(i int) (lo, hi float64) {
+	if o.pinnedMin != nil && len(o.pinnedMin) == len(o.variables) {
+		return o.pinnedMin[i], o.pinnedMax[i]
+	}
+	return o.variables[i].Min, o.variables[i].Max
+}
+
+// clampVar keeps v inside [lo, hi].
+func clampVar(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// varValueForCurvature converts a surface curvature into the value a variable
+// controlling that surface must hold: a "curvature" variable takes it
+// directly, a "radius" variable carries the reciprocal. ok is false for any
+// other parameter (the surface is not curvature-controlled by that variable).
+func varValueForCurvature(param string, c float64) (value float64, ok bool) {
+	switch param {
+	case "curvature":
+		return c, true
+	case "radius":
+		if c == 0 {
+			// A zero curvature has no finite radius; the caller clamps the
+			// sentinel to the variable's bound.
+			return math.MaxFloat64, true
+		}
+		return 1.0 / c, true
+	}
+	return 0, false
+}
+
+// hasFreeCurvatureVar reports whether some optimisation variable drives the
+// curvature of surface surfaceID in config cid over a non-empty range.
+func (o *Optimizer) hasFreeCurvatureVar(cid string, surfaceID int) bool {
+	for i := range o.variables {
+		v := &o.variables[i]
+		if v.Param != "curvature" && v.Param != "radius" {
+			continue
+		}
+		if v.Min >= v.Max {
+			continue
+		}
+		if v.IsShared {
+			for _, b := range v.Bindings {
+				if b.Config == cid && b.ID == surfaceID && (b.Param == "curvature" || b.Param == "radius") {
+					return true
+				}
+			}
+			continue
+		}
+		if v.Config == cid && v.SurfaceID == surfaceID {
+			return true
+		}
+	}
+	return false
+}
+
+// warnUnsettledPowerSolve reports power-solve surfaces that no free curvature
+// variable drives. The escape glass phase settles the solve's curvature
+// compensation back into the variable vector (SettlePowerSolve) so the clean
+// phase inherits the power-preserved lens; a surface whose curvature variable
+// is fixed (Min == Max) or undeclared has nowhere to write, so its element
+// power drifts the moment the phase ends. It is called from EnterGlassPhase
+// rather than SetPowerSolve: a plain optimize run keeps the solve on for its
+// whole life and never hits the problem, while only a run that actually runs a
+// glass phase can. Messages are deduplicated process-wide because escape
+// builds one Optimizer per worker from a single shared document.
+func (o *Optimizer) warnUnsettledPowerSolve() {
+	for cid, entries := range o.powerSolve {
+		for _, e := range entries {
+			if o.hasFreeCurvatureVar(cid, e.solveID) {
+				continue
+			}
+			msg := fmt.Sprintf("power_solve: surface %d (%s) has no free curvature variable "+
+				"(fixed or undeclared); the glass-phase power compensation cannot be carried "+
+				"into the clean phase, so that element's power will drift when the solve is "+
+				"disabled", e.solveID, cid)
+			if _, dup := powerSolveWarningSeen.LoadOrStore(msg, struct{}{}); dup {
+				continue
+			}
+			Warnf("%s", msg)
+		}
+	}
+}
+
+// powerSolveWarningSeen deduplicates the power-settle warning across the
+// per-worker Optimizers of an escape run.
+var powerSolveWarningSeen sync.Map
 
 // lockNonGlassVariables pins every variable not in the glass-free set (nd/vd)
 // to its current value x[i] by setting Min==Max, remembering the originals for
@@ -3237,6 +3458,17 @@ func (d *backFocusDiagnostics) snapshot() types.BackFocusDiagnostics {
 	return out
 }
 
+// restore replaces the recorded values with a previous snapshot. Used to undo
+// the bookkeeping of a speculative materialisation (one that runs
+// applyVariables purely to read a lens — see reanchorPowerSolve and
+// SettlePowerSolve — rather than to report a solve).
+func (d *backFocusDiagnostics) restore(v types.BackFocusDiagnostics) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	v.FieldsDropped = append([]string(nil), v.FieldsDropped...)
+	d.v = v
+}
+
 // BackFocusDiagnostics returns the run-level back-focus solve report for
 // opt_results.back_focus, or nil when the solve is not configured.
 func (o *Optimizer) BackFocusDiagnostics() *types.BackFocusDiagnostics {
@@ -4003,18 +4235,6 @@ func (o *Optimizer) EvaluateMerit(x []float64) float64 {
 		}
 	}
 	return merit
-}
-
-// EvaluateMainMerit evaluates the ordinary (non-glass) merit at x regardless
-// of the current glassMeritActive flag.  Used by the escape cycle to check
-// whether the glass phase regressed the layout merit.
-func (o *Optimizer) EvaluateMainMerit(x []float64) float64 {
-	if !o.glassMeritActive {
-		return o.EvaluateMerit(x)
-	}
-	o.glassMeritActive = false
-	defer func() { o.glassMeritActive = true }()
-	return o.EvaluateMerit(x)
 }
 
 // MeritBreakdown evaluates the merit at x and returns the contribution of

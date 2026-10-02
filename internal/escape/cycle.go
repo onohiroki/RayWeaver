@@ -461,30 +461,49 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 				c.stopped = true
 				break
 			}
+			// The colour (glass) merits must be read while the glass phase is
+			// still active: leaving it swaps the merit back to the ordinary one.
+			startGlass := c.wrapper.InnerMerit(escapedX) // colour merit at the phase entry
+			endGlass := glassRes.AfterMerit
+			// Leave the glass phase *before* judging it. The acceptance test has
+			// to run on the solve-off lens the clean phase will actually inherit,
+			// not on the solve-on materialisation the glass phase optimised (which
+			// carries the power solve's curvature overwrite, so its merit says
+			// nothing about the document that gets delivered).
+			c.wrapper.SetPhase(PhaseClean)
+
 			if c.acceptable(glassRes.Status, glassX) {
-				// Reject the glass phase if it regressed the layout merit
-				// or failed to improve the colour merit.
-				startMain := c.wrapper.evaluateMainMerit(escapedX)
-				endMain := c.wrapper.evaluateMainMerit(glassX)
-				startGlass := c.wrapper.InnerMerit(escapedX) // colour merit during glass phase
-				endGlass := glassRes.AfterMerit
+				// Carry the power-preserving solve's curvature compensation into
+				// the variable vector: without it the solve-off clean start would
+				// drop the compensation and the element powers would jump by the
+				// nd-induced d-line drift the glass phase introduced.
+				settled := c.wrapper.SettlePowerSolve(glassX)
+				// Reject the glass phase if it regressed the layout merit or
+				// failed to improve the colour merit. Both layout merits are the
+				// ordinary (solve-off) merit of the lens the clean DLS will start
+				// from, under one set of clean-phase weights, so the comparison is
+				// an apples-to-apples read of what the clean phase inherits.
+				c.wrapper.SetStartX(escapedX)
+				c.wrapper.ensurePhaseWeights()
+				startMain := c.wrapper.InnerMerit(escapedX)
+				endMain := c.wrapper.InnerMerit(settled)
 				mainOK := endMain <= startMain*1.5 || startMain < 1e-10
 				glassImproved := endGlass < startGlass*0.99 || startGlass < 1e-10
 				if mainOK && glassImproved {
-					cleanStart = glassX
+					cleanStart = settled
 					fields := map[string]any{
 						"cycle":        cyc,
 						"worker":       c.workerID,
 						"phase":        "glass_dls",
 						"status":       "accepted",
 						"dls_status":   glassRes.Status,
-						"merit":        c.wrapper.InnerMerit(glassX),
+						"merit":        endMain,
 						"main_before":  startMain,
 						"main_after":   endMain,
 						"glass_before": startGlass,
 						"glass_after":  endGlass,
 					}
-					enrich(fields, c.debugCycleFields(glassX, glassRes, "glass_dls"))
+					enrich(fields, c.debugCycleFields(settled, glassRes, "glass_dls"))
 					c.progress.Event("cycle", fields)
 				} else {
 					fields := map[string]any{
@@ -495,6 +514,8 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 						"dls_status": glassRes.Status,
 						"reason":     fmt.Sprintf("mainMerit %.1f→%.1f (x%.2f) glassMerit %.4f→%.4f", startMain, endMain, endMain/startMain, startGlass, endGlass),
 					}
+					// Rejected: the settled vector was not used, so the debug
+					// dump shows the raw glass result the phase produced.
 					enrich(fields, c.debugCycleFields(glassX, glassRes, "glass_dls"))
 					c.progress.Event("cycle", fields)
 				}
@@ -516,7 +537,9 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		cleanStartCopy := make([]float64, len(cleanStart))
 		copy(cleanStartCopy, cleanStart)
 		c.wrapper.SetStartX(cleanStartCopy)
-		c.wrapper.SetPhase(PhaseClean) // leaves the glass phase (restores the variables)
+		// The glass phase was already left above when one ran; this is a no-op
+		// then and the phase switch (escape → clean) for the no-glass-phase case.
+		c.wrapper.SetPhase(PhaseClean)
 		c.wrapper.SetStop(c.stopCh())
 		c.setPhase("clean_dls", cyc)
 		c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit

@@ -1,7 +1,10 @@
 package optimize
 
 import (
+	"fmt"
 	"math"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/paraxial"
@@ -43,9 +46,9 @@ func TestPowerSolvePreservesElementPowers(t *testing.T) {
 		)
 	}
 	cfg := Config{
-		Surfaces:          powerSolveTripletSurfaces(),
-		GlassCatalog:      gc,
-		Variables:         vars,
+		Surfaces:           powerSolveTripletSurfaces(),
+		GlassCatalog:       gc,
+		Variables:          vars,
 		PowerSolveSurfaces: []int{2, 4, 7},
 	}
 	opt := NewOptimizer(cfg)
@@ -111,9 +114,9 @@ func TestGlassPhaseLocksNonGlassAndPreservesPower(t *testing.T) {
 		)
 	}
 	cfg := Config{
-		Surfaces:          powerSolveTripletSurfaces(),
-		GlassCatalog:      gc,
-		Variables:         vars,
+		Surfaces:           powerSolveTripletSurfaces(),
+		GlassCatalog:       gc,
+		Variables:          vars,
 		PowerSolveSurfaces: []int{2, 4, 7},
 	}
 	opt := NewOptimizer(cfg)
@@ -145,8 +148,13 @@ func TestGlassPhaseLocksNonGlassAndPreservesPower(t *testing.T) {
 		}
 	}
 
-	// Snapshot expected element powers at the pre-phase state (power-solve off).
+	// Snapshot the expected element powers at the pre-phase state with the
+	// solve genuinely off. EnterGlassPhase re-anchors the solve at the entry
+	// state, so these (not the run-initial snapshot SetPowerSolve took) are the
+	// powers the glass phase must preserve.
+	opt.SetPowerSolveEnabled(false)
 	preSurf, preGC, _ := opt.applyVariables(x)
+	opt.SetPowerSolveEnabled(true)
 	eff := effectiveGC(gc, preGC)
 	for _, s := range preSurf {
 		surface.Precompute(s)
@@ -155,6 +163,16 @@ func TestGlassPhaseLocksNonGlassAndPreservesPower(t *testing.T) {
 	if s := preSurf["config1"]; true {
 		for _, id := range []int{1, 3, 6} {
 			targets[id] = paraxial.ElementPowerForSurface(s, paraxial.DLine, eff, id)
+		}
+	}
+	// The entry powers must differ from the run-initial ones, or this test
+	// could not tell an entry-anchored solve from a run-initial-anchored one.
+	runSurf := powerSolveTripletSurfaces()
+	surface.Precompute(runSurf)
+	for _, id := range []int{1, 3, 6} {
+		runPhi := paraxial.ElementPowerForSurface(runSurf, paraxial.DLine, gc, id)
+		if math.Abs(targets[id]-runPhi) < 1e-6 {
+			t.Fatalf("test is not discriminating: entry power %d (%v) equals the run-initial power", id, targets[id])
 		}
 	}
 
@@ -213,5 +231,169 @@ func TestGlassPhaseLocksNonGlassAndPreservesPower(t *testing.T) {
 		if paramByVar[i] == "curvature" && vi[i].Min == vi[i].Max {
 			t.Errorf("curvature var not restored after ExitGlassPhase")
 		}
+	}
+}
+
+// TestSettlePowerSolveCarriesCompensation covers the escape cycle's settle step
+// (G3): after a glass phase has moved the dispersions the power-preserving solve
+// has overwritten the solve surfaces' curvatures, and a solve-off evaluation of
+// the phase result drops that overwrite. SettlePowerSolve must rewrite the
+// controlling curvature variables so a solve-off evaluation of the returned
+// vector reproduces the element powers the phase held — that vector is what the
+// clean DLS starts from.
+func TestSettlePowerSolveCarriesCompensation(t *testing.T) {
+	gc := tripletGC()
+	var vars []Variable
+	for _, id := range []int{2, 4, 7} {
+		vars = append(vars, Variable{Name: "c_back", SurfaceID: id, Param: "curvature", Min: -0.5, Max: 0.5, Config: "config1"})
+	}
+	for _, id := range []int{1, 3, 6} {
+		vars = append(vars,
+			Variable{Name: "nd", SurfaceID: id, Param: "nd", Min: 1.4, Max: 2.0, Config: "config1"},
+			Variable{Name: "vd", SurfaceID: id, Param: "vd", Min: 20, Max: 90, Config: "config1"},
+		)
+	}
+	opt := NewOptimizer(Config{
+		Surfaces:           powerSolveTripletSurfaces(),
+		GlassCatalog:       gc,
+		Variables:          vars,
+		PowerSolveSurfaces: []int{2, 4, 7},
+	})
+
+	// entry: a post-escape layout (back curvatures moved off the run start).
+	// glassResult: the same layout after the glass phase pushed the dispersions.
+	entry := make([]float64, len(vars))
+	glassResult := make([]float64, len(vars))
+	for i := range vars {
+		switch vars[i].Param {
+		case "curvature":
+			entry[i], glassResult[i] = 0.1, 0.1
+		case "nd":
+			entry[i], glassResult[i] = 1.6, 2.0
+		case "vd":
+			entry[i], glassResult[i] = 60, 25
+		}
+	}
+
+	// EnterGlassPhase re-anchors the solve on the entry powers; leaving the
+	// phase restores the bounds and switches the solve off, which is the state
+	// the clean phase inherits and the only state this test may read.
+	opt.EnterGlassPhase(entry)
+	opt.ExitGlassPhase()
+
+	powers := func(x []float64) map[int]float64 {
+		surfaces, tempGC, _ := opt.applyVariables(x)
+		eff := effectiveGC(gc, tempGC)
+		out := map[int]float64{}
+		for _, id := range []int{1, 3, 6} {
+			out[id] = paraxial.ElementPowerCurvature(surfaces["config1"], eff, id)
+		}
+		return out
+	}
+
+	entryPhi := powers(entry)
+	drifted := powers(glassResult)
+	for _, id := range []int{1, 3, 6} {
+		if math.Abs(drifted[id]-entryPhi[id]) < 1e-6 {
+			t.Errorf("test is not discriminating: element %d power unchanged by the glass move (entry %v, drifted %v)",
+				id, entryPhi[id], drifted[id])
+		}
+	}
+
+	settled := opt.SettlePowerSolve(glassResult)
+	if len(settled) != len(glassResult) {
+		t.Fatalf("settled length = %d, want %d", len(settled), len(glassResult))
+	}
+	changed := false
+	for i := range glassResult {
+		if settled[i] != glassResult[i] {
+			changed = true
+		}
+	}
+	if !changed {
+		t.Fatal("SettlePowerSolve returned x unchanged; the compensation was not written back")
+	}
+
+	got := powers(settled)
+	for _, id := range []int{1, 3, 6} {
+		if math.Abs(got[id]-entryPhi[id]) > 1e-9 {
+			t.Errorf("element %d power after settling = %v, want the entry power %v (unsettled %v)",
+				id, got[id], entryPhi[id], drifted[id])
+		}
+	}
+
+	// Only the solve surfaces' curvature slots may move: the glasses are the
+	// phase's own result and the other curvature variables are untouched.
+	for i := range vars {
+		switch vars[i].Param {
+		case "nd", "vd":
+			if settled[i] != glassResult[i] {
+				t.Errorf("settled[%d] (%s) moved from %v to %v; only curvature slots should change",
+					i, vars[i].Param, glassResult[i], settled[i])
+			}
+		default:
+			if settled[i] < vars[i].Min || settled[i] > vars[i].Max {
+				t.Errorf("settled[%d] (%s) = %v outside [%v, %v]", i, vars[i].Param, settled[i], vars[i].Min, vars[i].Max)
+			}
+		}
+	}
+}
+
+// TestSettlePowerSolveNoopWithoutSolve: with no power_solve configured the
+// method must hand the vector back untouched (the plain optimize and
+// no-glass-phase paths reach it through the wrapper).
+func TestSettlePowerSolveNoopWithoutSolve(t *testing.T) {
+	gc := tripletGC()
+	vars := []Variable{{Name: "c_back", SurfaceID: 2, Param: "curvature", Min: -0.5, Max: 0.5, Config: "config1"}}
+	opt := NewOptimizer(Config{Surfaces: powerSolveTripletSurfaces(), GlassCatalog: gc, Variables: vars})
+	in := []float64{0.1}
+	out := opt.SettlePowerSolve(in)
+	if len(out) != 1 || out[0] != 0.1 {
+		t.Fatalf("SettlePowerSolve = %v, want %v unchanged", out, in)
+	}
+}
+
+// TestGlassPhaseWarnsWithoutFreeCurvatureVariable: a power-solve surface whose
+// curvature variable is fixed (Min == Max) has nowhere to write the
+// compensation, so entering the glass phase must say so instead of letting the
+// element power drift silently when the solve turns off. The check runs before
+// the phase's own Min==Max lock, or it would fire on every healthy document.
+func TestGlassPhaseWarnsWithoutFreeCurvatureVariable(t *testing.T) {
+	gc := tripletGC()
+	vars := []Variable{
+		{Name: "c2_fixed", SurfaceID: 2, Param: "curvature", Min: 0.01, Max: 0.01, Config: "config1"},
+		{Name: "nd", SurfaceID: 1, Param: "nd", Min: 1.4, Max: 2.0, Config: "config1"},
+		{Name: "vd", SurfaceID: 1, Param: "vd", Min: 20, Max: 90, Config: "config1"},
+	}
+	opt := NewOptimizer(Config{
+		Surfaces:           powerSolveTripletSurfaces(),
+		GlassCatalog:       gc,
+		Variables:          vars,
+		PowerSolveSurfaces: []int{2},
+	})
+
+	// Clear the process-wide dedupe so this assertion is order-independent.
+	powerSolveWarningSeen = sync.Map{}
+	var got []string
+	saved := Warnf
+	Warnf = func(format string, args ...interface{}) {
+		got = append(got, fmt.Sprintf(format, args...))
+	}
+	defer func() { Warnf = saved }()
+
+	opt.EnterGlassPhase(make([]float64, len(vars)))
+	if len(got) != 1 {
+		t.Fatalf("warnings = %d (%v), want exactly 1", len(got), got)
+	}
+	if !strings.Contains(got[0], "surface 2") || !strings.Contains(got[0], "no free curvature variable") {
+		t.Errorf("warning does not identify the unsettled solve surface: %q", got[0])
+	}
+	opt.ExitGlassPhase()
+
+	// A second entry must not repeat it (one document, one problem).
+	got = nil
+	opt.EnterGlassPhase(make([]float64, len(vars)))
+	if len(got) != 0 {
+		t.Errorf("duplicate warning on re-entry: %v", got)
 	}
 }

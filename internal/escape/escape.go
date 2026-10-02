@@ -147,6 +147,17 @@ type glassPhaseable interface {
 	ExitGlassPhase()
 }
 
+// powerSettler is the optional capability an inner dls.Model may implement to
+// carry the power-preserving solve's curvature compensation into the variable
+// vector: during the glass phase applyPowerSolve overwrites the solve
+// surfaces' curvatures, and a solve-off evaluation of the same x would drop
+// that compensation. SettlePowerSolve returns an equivalent vector whose
+// solve-off evaluation reproduces the element powers the phase held, so the
+// clean phase starts from the lens the glass phase actually produced.
+type powerSettler interface {
+	SettlePowerSolve(x []float64) []float64
+}
+
 // Wrapper implements dls.Model by delegating to an inner model and adding a
 // smooth escape residual for every recorded local minimum. Passing a nil or
 // empty escape list makes the wrapper behave exactly like the inner model
@@ -347,6 +358,21 @@ func (w *Wrapper) GlassPhaseEnabled() bool {
 	return w.glassPhase
 }
 
+// SettlePowerSolve returns a copy of x with the power-preserving solve's
+// curvature compensation written into the controlling variable slots, so a
+// solve-off evaluation reproduces the element powers the glass phase held.
+// Call it while the glass phase is active (its variable bounds are still
+// pinned, which the inner clamps against the remembered originals) or right
+// after SetPhase(PhaseClean) has left it; both give the same result. x is
+// returned unchanged when the inner model does not implement the capability
+// (no power solve configured).
+func (w *Wrapper) SettlePowerSolve(x []float64) []float64 {
+	if s, ok := w.inner.(powerSettler); ok {
+		return s.SettlePowerSolve(x)
+	}
+	return x
+}
+
 // SetLightApertureSizing enables or disables the light aperture sizing mode
 // on the inner Optimizer. When enabled, the hex-grid ray count for
 // auto-aperture beam-extent measurement is reduced from max(numRays, 256)
@@ -519,17 +545,4 @@ func (w *Wrapper) EvaluateMeritBoth(x []float64) (escapedMerit, innerMerit float
 	escapedMerit = inner + w.EscapeMerit(x)
 	innerMerit = inner
 	return
-}
-
-// evaluateMainMerit evaluates the ordinary (non-glass) merit at x even when
-// the glass phase is active.  Returns innerMerit(x) if the inner model does
-// not support EvaluateMainMerit (fallback for non-Optimizer inners).
-func (w *Wrapper) evaluateMainMerit(x []float64) float64 {
-	type mainMeritEvaluator interface {
-		EvaluateMainMerit([]float64) float64
-	}
-	if m, ok := w.inner.(mainMeritEvaluator); ok {
-		return m.EvaluateMainMerit(x)
-	}
-	return w.inner.EvaluateMerit(x)
 }
