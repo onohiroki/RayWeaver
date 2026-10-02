@@ -240,12 +240,17 @@ type config struct {
 	// pupilZs holds the per-field dynamic entrance pupil Z keyed by field
 	// angle (degrees), refreshed by UpdatePupils. Grids for off-axis fields
 	// must be centred on their own pupil, not the field-0 one.
-	pupilZs     map[float64]float64
-	fieldDefs   []types.FieldDef
-	surfaces    []types.Surface
-	fields      []types.FieldItem
-	wavelengths []types.WavelengthItem
-	meritTerms  []meritTerm
+	pupilZs map[float64]float64
+	// pupilResolved reports whether pupilZ (and pupilZs) hold a pupil actually
+	// resolved for this config rather than the struct's zero default. 0 mm is
+	// a legal entrance-pupil Z (the virtual pupil range crosses it), so
+	// consumers test this flag — via resolvedPupilZ — and never the value.
+	pupilResolved bool
+	fieldDefs     []types.FieldDef
+	surfaces      []types.Surface
+	fields        []types.FieldItem
+	wavelengths   []types.WavelengthItem
+	meritTerms    []meritTerm
 	// meritModes holds the config's named merit-mode term lists (from
 	// configs[].merit_modes). Nil when the config uses its fixed merit.
 	meritModes map[string][]meritTerm
@@ -1218,6 +1223,21 @@ func resolvePupilZ(surfaces []types.Surface, stopSurface int, pupilZ float64) fl
 	return pupilZ
 }
 
+// seedPupilResolved seeds config.pupilResolved at construction, before the
+// first UpdatePupils. An explicit stop and a virtual entrance pupil model are
+// structural guarantees — the virtual check comes first because such a pupil's
+// axial_position may legitimately be exactly 0 mm, which is the whole point of
+// this flag. What remains is chief's dynamic-pupil probe, which reports both
+// "failed" and "resolved onto 0 mm" as a zero result; the failure keeps the
+// historical no-pupil launch, and the other is corrected the moment the first
+// iteration resolves a pupil.
+func seedPupilResolved(stopSurface int, pupilZ float64, pupilModel *types.PupilModelConfig) bool {
+	if pupilModel != nil && pupilModel.Mode == "virtual_entrance_pupil" {
+		return true
+	}
+	return stopSurface > 0 || pupilZ != 0
+}
+
 // fieldDefsFromItems converts the per-config field items into chief field
 // definitions for the dynamic-pupil, back-focus and aperture-sizing passes.
 //
@@ -1294,7 +1314,10 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 			for _, fd := range cfg.fieldDefs {
 				cfg.pupilZs[fd.Angle] = p.z
 			}
+			// The mode, not the value, says a pupil is in use: a virtual
+			// entrance pupil at Z=0 is resolved like any other position.
 			cfg.pupilZ = p.z
+			cfg.pupilResolved = true
 			continue
 		}
 
@@ -1316,6 +1339,9 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 			}
 			if i == 0 {
 				cfg.pupilZ = r.EntrancePupil.Center.Z
+				// The probe reported a pupil: resolved even when it sits at
+				// exactly 0 mm (a value must never decide presence).
+				cfg.pupilResolved = true
 			}
 		}
 	}
@@ -2117,6 +2143,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		stopSurface:   cfg.StopSurface,
 		refSurface:    cfg.RefSurface,
 		pupilZ:        resolvePupilZ(cfg.Surfaces, cfg.StopSurface, cfg.PupilZ),
+		pupilResolved: seedPupilResolved(cfg.StopSurface, cfg.PupilZ, cfg.PupilModel),
 		fieldDefs:     fieldDefsFromItems(cfg.Fields),
 		surfaces:      cfg.Surfaces,
 		fields:        cfg.Fields,
@@ -2243,6 +2270,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			stopSurface:   ci.StopSurface,
 			refSurface:    ci.RefSurface,
 			pupilZ:        resolvePupilZ(ci.Surfaces, ci.StopSurface, ci.PupilZ),
+			pupilResolved: seedPupilResolved(ci.StopSurface, ci.PupilZ, ci.PupilModel),
 			fieldDefs:     fieldDefsFromItems(ci.Fields),
 			surfaces:      ci.Surfaces,
 			fields:        ci.Fields,
@@ -2900,14 +2928,20 @@ func effectiveGC(base, temp *glass.Catalog) *glass.Catalog {
 // traces read these values instead of the frozen Optimizer state so the
 // pupil position/diameter follow the variables with consistent derivatives.
 type appliedPupil struct {
-	z   float64 // entrance-pupil Z (virtual mode); 0 keeps the frozen centring
-	dia float64 // entrance-pupil diameter EPD override; 0 = standard paraxial sizing
+	// active reports whether the virtual entrance pupil is in use for this
+	// evaluation. It is derived from the model's mode, never from z: 0 mm is
+	// a perfectly valid pupil position (and the -20..+50 sweep crosses it),
+	// so z must never be used as an "unset" sentinel.
+	active bool
+	z      float64 // entrance-pupil Z (virtual mode); valid only when active
+	dia    float64 // entrance-pupil diameter EPD override; 0 = standard paraxial sizing
 }
 
 // pupilFromModel extracts the per-call pupil values from a model config.
 func pupilFromModel(m *types.PupilModelConfig) appliedPupil {
 	var p appliedPupil
 	if m != nil && m.Mode == "virtual_entrance_pupil" {
+		p.active = true
 		p.z = m.AxialPosition
 		if m.Diameter > 0 {
 			p.dia = m.Diameter
@@ -2921,7 +2955,7 @@ func pupilFromModel(m *types.PupilModelConfig) appliedPupil {
 // exactly — no dynamic-pupil noise — so derivatives stay consistent), else the
 // frozen per-iteration dynamic pupil (per-field override when resolved).
 func (o *Optimizer) gridCentring(cfg *config, p appliedPupil, angle float64) float64 {
-	if p.z != 0 {
+	if p.active {
 		return p.z
 	}
 	z := cfg.pupilZ
@@ -2996,6 +3030,12 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 		switch v.Param {
 		case "pupil_model_axial_position":
 			if p, ok := pupils[v.Config]; ok {
+				// The variable exists to drive the virtual entrance pupil, so
+				// mark the per-call pupil active as well: presence must not be
+				// inferred from z. A config whose model is absent still gets
+				// its grid centred on the variable's value, exactly as before
+				// whenever that value was non-zero.
+				p.active = true
 				p.z = val
 				pupils[v.Config] = p
 			}
@@ -3097,6 +3137,9 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 		switch lk.Param {
 		case "pupil_model_axial_position":
 			if p, ok := pupils[lk.Config]; ok {
+				// Same contract as the direct variable: mark the per-call
+				// pupil active so z=0 stays a usable position.
+				p.active = true
 				p.z = val
 				pupils[lk.Config] = p
 			}
@@ -4553,7 +4596,7 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 	// one and reject minima as insufficient_field_throughput. The x-applied
 	// model mirrors FinalPupilModels.
 	var pm *types.PupilModelConfig
-	if cfg.pupilModel != nil && p.z != 0 {
+	if cfg.pupilModel != nil && p.active {
 		m := *cfg.pupilModel
 		m.AxialPosition = p.z
 		if p.dia > 0 {
@@ -4651,7 +4694,7 @@ func (o *Optimizer) FinalPupilModels(x []float64) map[string]types.PupilModelCon
 			continue
 		}
 		m := *cfg.pupilModel
-		if p.z != 0 {
+		if p.active {
 			m.AxialPosition = p.z
 		}
 		if p.dia > 0 {

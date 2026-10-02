@@ -29,14 +29,14 @@ func TestLateralColorNonZero(t *testing.T) {
 	const wl1, wl2 = 0.0004861, 0.0006563
 
 	// Without a pupil (the historical axis launch) the trace misses the lens.
-	if got := evaluateLateralColor(fieldAngle, wl1, wl2, surfs, gc, 0); got != 0 {
+	if got := evaluateLateralColor(fieldAngle, wl1, wl2, surfs, gc, nil); got != 0 {
 		t.Errorf("lateral_color with no pupil = %v, want 0 (the axis launch misses the lens)", got)
 	}
 
 	// With the entrance-pupil Z the chief ray reaches the image plane and the
 	// term reports a real (non-zero) transverse colour.
 	pupilZ := 2.0
-	got := evaluateLateralColor(fieldAngle, wl1, wl2, surfs, gc, pupilZ)
+	got := evaluateLateralColor(fieldAngle, wl1, wl2, surfs, gc, &pupilZ)
 	if got == 0 {
 		t.Fatal("lateral_color with the entrance pupil = 0: the term is still inert")
 	}
@@ -46,12 +46,12 @@ func TestLateralColorNonZero(t *testing.T) {
 		t.Errorf("lateral_color = %v mm, implausibly large for a singlet at 15 deg", got)
 	}
 	// The chief ray itself must now reach the image plane.
-	if h := traceChiefImageHeight(surfs, fieldAngle, wl1, gc, pupilZ); h == 0 {
+	if h := traceChiefImageHeight(surfs, fieldAngle, wl1, gc, &pupilZ); h == 0 {
 		t.Error("chief image height = 0 with the entrance pupil: the ray is still failing")
 	}
 
 	// The merit path must pass the config's pupil Z through.
-	cfg := &config{id: "c", pupilZ: pupilZ}
+	cfg := &config{id: "c", pupilZ: pupilZ, pupilResolved: true}
 	term := &meritTerm{kind: MeritLateralColor, fieldAngle: fieldAngle, wavelength: wl1, comparisonWavelength: wl2}
 	if v := evaluateKindValue(MeritLateralColor, term, surfs, gc, nil, cfg); v == 0 {
 		t.Error("evaluateKindValue(lateral_color) = 0 with a config pupil Z")
