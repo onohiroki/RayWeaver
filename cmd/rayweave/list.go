@@ -392,12 +392,26 @@ type EscapeWorkerRow struct {
 // run progressed). Event is the JSONL event name; Detail summarises it — the
 // OS signal for the `interrupt` / `interrupt_dls` stages, the memory-limit
 // action for `memory_limit`, the retired worker for `worker_retire`, the
-// measured resource state for `resource`, and the message for `error`;
-// Elapsed is the seconds from run start.
+// measured resource state for `resource`, the message for `error` and for a
+// `warn`; Elapsed is the seconds from run start (of the first occurrence when
+// rows were folded). Count is how many log rows this one row summarises: it is
+// set for the events that fold when they repeat (`warn`) and left 0, hence
+// omitted, for the rest, which are always single occurrences.
 type EscapeEventRow struct {
 	Event   string   `json:"event" yaml:"event"`
 	Detail  string   `json:"detail,omitempty" yaml:"detail,omitempty"`
 	Elapsed *float64 `json:"elapsed_s,omitempty" yaml:"elapsed_s,omitempty"`
+	Count   int      `json:"count,omitempty" yaml:"count,omitempty"`
+}
+
+// detailCell renders Detail for a human-readable table or CSV cell: a row that
+// summarises more than one occurrence appends the total as (×N). The
+// structured (json/yaml) formats carry Count as its own field instead.
+func (r EscapeEventRow) detailCell() string {
+	if r.Count > 1 {
+		return fmt.Sprintf("%s (×%d)", r.Detail, r.Count)
+	}
+	return r.Detail
 }
 
 // escapeListData is the render input of `list escape`, shared by the pipeline
@@ -3117,7 +3131,7 @@ func renderEscapeList(d escapeListData, format string) {
 			fmt.Println("Log Events:")
 			fmt.Println("event,detail,elapsed_s")
 			for _, e := range d.Events {
-				cells := []string{e.Event, e.Detail, optionalFloatCSV(e.Elapsed)}
+				cells := []string{e.Event, e.detailCell(), optionalFloatCSV(e.Elapsed)}
 				fmt.Println(strings.Join(quoteCSV(cells), ","))
 			}
 		}
@@ -3267,7 +3281,7 @@ func renderEscapeList(d escapeListData, format string) {
 				{header: "Elapsed[s]", right: true},
 			}
 			for _, e := range d.Events {
-				detail := e.Detail
+				detail := e.detailCell()
 				if detail == "" {
 					detail = "-"
 				}

@@ -445,6 +445,95 @@ func TestListEscapeFromLogEventsCompact(t *testing.T) {
 	}
 }
 
+// escapeWarnLogFixture is a captured --verbose stream whose optimizer warnings
+// have become structured "warn" events: consecutive copies of one message
+// differ only in the throttle sequence the warning appends as " (event N)".
+const escapeWarnLogFixture = `{"e":"00:00","t":"10:00:00","event":"start","max_cycles":1.00000e+01,"workers":1.00000e+00}
+{"e":"00:01","t":"10:00:01","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 3 valid grid rays; wavefront best focus of the surviving fields applied (event 1)"}
+{"e":"00:02","t":"10:00:02","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 3 valid grid rays; wavefront best focus of the surviving fields applied (event 2)"}
+{"e":"00:03","t":"10:00:03","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 0 valid grid rays; wavefront best focus of the surviving fields applied (event 3)"}
+{"e":"00:04","t":"10:00:04","event":"interrupt"}
+{"e":"00:05","t":"10:00:05","event":"escape_complete","workers":1,"cycles":1,"escapes":1,"minima_count":0,"best_merit":1.0,"timed_out":false,"interrupted":true}
+`
+
+func TestListEscapeWarnEventsFolded(t *testing.T) {
+	if !looksLikeEscapeJSONL([]byte(escapeWarnLogFixture)) {
+		t.Fatal("a stream carrying warn events was not recognised as a run log")
+	}
+
+	out := runListEscapeLogCLI(t, escapeWarnLogFixture, "--format", "json")
+	var doc struct {
+		Events []struct {
+			Event   string   `json:"event"`
+			Detail  string   `json:"detail"`
+			Elapsed *float64 `json:"elapsed_s"`
+			Count   int      `json:"count"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+
+	// Two identical messages fold into one row; the message that differs keeps
+	// its own row, then the interrupt follows.
+	if len(doc.Events) != 3 {
+		t.Fatalf("events = %d, want 3: %+v", len(doc.Events), doc.Events)
+	}
+	warn0, warn1, interrupt := doc.Events[0], doc.Events[1], doc.Events[2]
+	if warn0.Event != runEventWarn || warn1.Event != runEventWarn {
+		t.Fatalf("events[0..1] = %q / %q, want warn / warn", warn0.Event, warn1.Event)
+	}
+	if warn0.Count != 2 {
+		t.Errorf("events[0].count = %d, want 2 log rows summarised", warn0.Count)
+	}
+	if !strings.Contains(warn0.Detail, "only 3 valid grid rays") {
+		t.Errorf("events[0].detail = %q, want the first occurrence's message", warn0.Detail)
+	}
+	if warn0.Elapsed == nil || *warn0.Elapsed != 60 {
+		t.Errorf("events[0].elapsed_s = %v, want 60 (the first occurrence's time, e=00:01)",
+			formatOptionalFloat(warn0.Elapsed))
+	}
+	if warn1.Count != 1 {
+		t.Errorf("events[1].count = %d, want 1 (an unfolded warn reports its lone occurrence)", warn1.Count)
+	}
+	if !strings.Contains(warn1.Detail, "only 0 valid grid rays") {
+		t.Errorf("events[1].detail = %q, want the differing message", warn1.Detail)
+	}
+	if interrupt.Event != "interrupt" {
+		t.Errorf("events[2] = %+v, want the interrupt that followed the warnings", interrupt)
+	}
+
+	// The human-readable formats show the fold as (×N) in the Detail cell.
+	table := string(runListEscapeLogCLI(t, escapeWarnLogFixture))
+	if !strings.Contains(table, "(×2)") {
+		t.Errorf("table output missing the fold count (×2):\n%s", table)
+	}
+	csv := string(runListEscapeLogCLI(t, escapeWarnLogFixture, "--format", "csv"))
+	if !strings.Contains(csv, "warn,") || !strings.Contains(csv, "(×2)") {
+		t.Errorf("csv output missing the folded warn row:\n%s", csv)
+	}
+}
+
+func TestRunEventKey(t *testing.T) {
+	// Only a trailing " (event N)" is stripped, and only when N is all digits.
+	cases := []struct{ in, want string }{
+		{"a warning (event 1)", "a warning"},
+		{"a warning (event 12345)", "a warning"},
+		{"a warning (event 1) (event 2)", "a warning (event 1)"},
+		{"a warning (event)", "a warning (event)"},
+		{"a warning (event )", "a warning (event )"},
+		{"a warning (event x1)", "a warning (event x1)"},
+		{"a (event 2) b (event 3)", "a (event 2) b"},
+		{"event 7", "event 7"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := runEventKey(c.in); got != c.want {
+			t.Errorf("runEventKey(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestListEscapeNoEventsForCleanLog(t *testing.T) {
 	// A log without any run-level event must not gain an empty section.
 	out := runListEscapeLogCLI(t, escapeLogFixture, "--format", "json")

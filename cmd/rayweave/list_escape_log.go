@@ -114,12 +114,17 @@ type escapeLogWorker struct {
 	timedOut    bool
 }
 
+// runEventWarn is the structured warning event: every non-fatal message the
+// optimizer and the glass package report through their Warnf sinks becomes one
+// of these while a progress stream is active (see runEscapeCore).
+const runEventWarn = "warn"
+
 // escapeLogRunEvents are the run-level events `list escape` lists verbatim
 // (with a one-line Detail) in its Log Events section, in the order the log
 // recorded them: the three signal-handling stages, the resource guard's actions
-// and samples, and the run's error report. The compact --verbose stream drops
-// every field outside the fixed key order, so only the event name survives
-// there (and `resource` samples carry nothing at all).
+// and samples, the run's error report and the structured warnings. The compact
+// --verbose stream drops every field outside the fixed key order, so only the
+// event name survives there (and `resource` samples carry nothing at all).
 var escapeLogRunEvents = map[string]bool{
 	"interrupt":     true,
 	"interrupt_dls": true,
@@ -128,6 +133,7 @@ var escapeLogRunEvents = map[string]bool{
 	"worker_retire": true,
 	"resource":      true,
 	"error":         true,
+	runEventWarn:    true,
 }
 
 // elapsedSeconds reads an event's run-relative time. A full `--log` stream
@@ -210,8 +216,58 @@ func escapeEventDetail(name string, rec map[string]any) string {
 		return strings.Join(parts, " ")
 	case "error":
 		return str("message")
+	case runEventWarn:
+		return str("message")
 	}
 	return ""
+}
+
+// escapeLogFoldEvents are the run-level events whose repeated occurrences are
+// folded into a single Log Events row (see foldRunEvent). Only `warn` qualifies:
+// a recurring diagnostic would otherwise contribute one table row per
+// occurrence — tens of thousands on a long run — while the sampled/resource and
+// signal events are rare and each carries its own state.
+var escapeLogFoldEvents = map[string]bool{runEventWarn: true}
+
+// foldRunEvent appends one run-level event row, folding it into the row just
+// recorded when it repeats the same event with the same message. The row keeps
+// the first occurrence's message and elapsed time, and Count carries how many
+// log rows it summarises (always >= 1 for a foldable event, so a lone warning
+// reports 1 and a folded run reports its total).
+func foldRunEvent(events []EscapeEventRow, row EscapeEventRow) []EscapeEventRow {
+	if !escapeLogFoldEvents[row.Event] {
+		return append(events, row)
+	}
+	row.Count = 1
+	if n := len(events); n > 0 && events[n-1].Event == row.Event &&
+		runEventKey(events[n-1].Detail) == runEventKey(row.Detail) {
+		events[n-1].Count++
+		return events
+	}
+	return append(events, row)
+}
+
+// runEventKey normalises a run-level event detail for the fold comparison. The
+// back-focus warning appends its throttle sequence as a trailing " (event N)",
+// which is what differs between consecutive copies of one otherwise identical
+// message; dropping that suffix lets them compare equal. Any other detail — or
+// one without a numeric sequence in the expected shape — is returned unchanged.
+func runEventKey(detail string) string {
+	const prefix = " (event "
+	i := strings.LastIndex(detail, prefix)
+	if i < 0 || !strings.HasSuffix(detail, ")") {
+		return detail
+	}
+	seq := detail[i+len(prefix) : len(detail)-1]
+	if seq == "" {
+		return detail
+	}
+	for _, c := range seq {
+		if c < '0' || c > '9' {
+			return detail
+		}
+	}
+	return detail[:i]
 }
 
 // runListEscapeLog renders `list escape` for an escape/pso JSONL run log. The
@@ -295,7 +351,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 		// Every run-level event is listed in log order, including the ones
 		// whose payload also drives the summary below.
 		if escapeLogRunEvents[name] {
-			d.Events = append(d.Events, EscapeEventRow{
+			d.Events = foldRunEvent(d.Events, EscapeEventRow{
 				Event:   name,
 				Detail:  escapeEventDetail(name, rec),
 				Elapsed: elapsedSeconds(rec),

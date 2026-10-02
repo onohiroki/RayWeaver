@@ -809,7 +809,7 @@ What is recovered from a run log:
 | Infeasible Basins | the `minimum` events classified `infeasible_basin` (re-ranked by merit, with their `invalid_reason`), or the `escape_complete.infeasible` array |
 | File column / File Directory | `minimum_saved` events (`index` + `file`), present when the run used `--save` |
 | Workers | `worker_done`, `worker_retired`, `timeout`, `interrupted`, `cycle` |
-| Log Events | `interrupt`, `interrupt_dls`, `force_quit`, `memory_limit`, `worker_retire`, `resource`, `error` |
+| Log Events | `interrupt`, `interrupt_dls`, `force_quit`, `memory_limit`, `worker_retire`, `resource`, `error`, `warn` |
 
 ### Infeasible basins
 
@@ -884,6 +884,26 @@ force_quit     -                                               135.000000
 | `worker_retire` | the resource guard's decision: `worker N reason=… cycle=M` |
 | `resource` | a periodic resource sample: `heap=… MB pressure=… compaction=…/s` |
 | `error` | the error message |
+| `warn` | the warning text, e.g. `back_focus: 1 of 5 field(s) dropped: …` |
+
+**Repeated warnings are folded into one row.** A warning that recurs with the
+same text — the back-focus solve reports the fields it dropped on every throttled
+evaluation, which on a long run is tens of thousands of times — would otherwise
+dominate the section, so consecutive copies of one message become a single row
+carrying how many they were:
+
+```
+Log Events:
+Event   Detail                                                                   Elapsed[s]
+warn    back_focus: 1 of 5 field(s) dropped: field 4 @ 587.6 nm: only 3 … (×8710)  60.412639
+```
+
+The comparison ignores the trailing `(event N)` throttle counter the warning
+appends, which is the only thing that differs between copies of one message; the
+row keeps the first occurrence's message and elapsed time. The `count` field of
+the structured (`--format json`/`yaml`) output carries the total, and only `warn`
+is folded — every other run-level event is rare and reports its own state, so
+each stays a row of its own.
 
 The section is omitted when the log recorded none of these events, so a
 completed run without a resource guard and a pipeline document both leave it
@@ -967,12 +987,14 @@ log, not a failure to read it:
 The compact `--verbose` stream additionally drops every field outside the fixed
 key order, so `min_status`, `invalid_reason`, `retired`, `timed_out`,
 `interrupted` and `reason` are only recoverable from a full `--log` file — and
-the same applies to the `Log Events` details (`signal`, `message`, the guard
-reasons and the resource metrics), leaving only the event names. Without them
-the listing degrades gracefully: minima are shown as classified feasible (so
-basins land in `Local Minima` rather than `Infeasible Basins`), and every worker
-as `completed`. The compact clock `e` (`HH:MM`) is still used for the elapsed
-column, at minute resolution.
+the same applies to the `Log Events` details of `interrupt`/`error` (the `signal`
+and the `error` message), the guard reasons and the resource metrics, leaving
+only the event names. A `warn` row keeps its text in both streams: `message` is
+part of the fixed key order precisely so the compact stream still carries what
+the warning said. Without the dropped fields the listing degrades gracefully:
+minima are shown as classified feasible (so basins land in `Local Minima` rather
+than `Infeasible Basins`), and every worker as `completed`. The compact clock `e`
+(`HH:MM`) is still used for the elapsed column, at minute resolution.
 
 ---
 

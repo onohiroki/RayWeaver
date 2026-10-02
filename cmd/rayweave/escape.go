@@ -47,20 +47,26 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	psu := effectivePowerSolve(input, powerSolve, powerSolveSurfaces)
 	input.Optimization.PowerSolve = psu
 
+	// Create the reporter (and the warning bridge it installs) before the
+	// catalog is loaded: an AGF warning raised during that load has to land in
+	// the stream, or it is the one plain-text line in a JSONL capture.
+	progress, finishProgress := newEscapeProgress(verbose, logFile)
+	defer finishProgress()
+
 	gc, _ := loadCatalogs(&input, glassDir)
 	writeBackGlassDir(&input, glassDir)
 	if glassVariables {
 		applyGlassVariables(&input, gc)
 	}
 
-	runEscapeCore(input, gc, verbose, logFile, saveBase, keepInfeasible, debug, "escape", newExplorer)
+	runEscapeCore(input, gc, progress, saveBase, keepInfeasible, debug, "escape", newExplorer)
 }
 
 // runEscapeCore is the shared escape/PSO execution path. It accepts an
 // already-parsed input (so callers like runPSO can modify it first) plus the
 // loaded glass catalog, and handles progress logging, signal handling, single/
 // multi-config dispatch, output, and result validation.
-func runEscapeCore(input types.Input, gc *glass.Catalog, verbose bool, logFile string, saveBase string, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
+func runEscapeCore(input types.Input, gc *glass.Catalog, progress *escape.Progress, saveBase string, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	// Apply the Go soft memory limit (CLI --mem-limit wins over
 	// optimization.mem_limit_mb); the effective value is written back.
 	applyMemLimit(&input, optEscapeMemLimit)
@@ -80,26 +86,6 @@ func runEscapeCore(input types.Input, gc *glass.Catalog, verbose bool, logFile s
 	// chromatic terms scaled by power_solve.color_scale plus a cheap geometric
 	// guardrail. The config's explicit merit is never replaced.
 	gctx := buildGlassPhaseContext(&input)
-
-	progress := escape.NewProgress()
-	var logFiles []*os.File
-	if verbose {
-		progress.AddCompactWriter(os.Stderr)
-	}
-	if logFile != "" {
-		f, err := os.Create(logFile)
-		if err != nil {
-			errOut("Error creating log file: %v", err)
-			os.Exit(1)
-		}
-		logFiles = append(logFiles, f)
-		progress.AddWriter(f)
-	}
-	defer func() {
-		for _, f := range logFiles {
-			f.Close()
-		}
-	}()
 
 	// DLS-internal events (iter / final / adaptive_damping / mode_change) are
 	// suppressed during escape unless --debug is set. With --debug, a debugLogger
@@ -1536,6 +1522,77 @@ func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.Esc
 		varIdx++
 	}
 	return states
+}
+
+// newEscapeProgress builds the reporter for one escape/pso run and, when a
+// stream was requested, points the optimizer's and the glass package's Warnf
+// sinks at it for the lifetime of the returned finish function.
+//
+// It must be created *before* the glass catalog is loaded: the sinks default to
+// a tagged plain-text line on stderr — the very stream the compact --verbose
+// JSONL uses — so any warning raised before the reporter exists would be the
+// one human-readable line in an otherwise JSONL capture, which `list escape`,
+// jq and query --jsonl all reject. Bridged, a warning becomes a structured
+// "warn" event on every registered stream, the --log file included. With
+// neither --verbose nor --log there is no stream, so the sinks are left alone
+// and warnings keep their plain tagged stderr form rather than being dropped.
+func newEscapeProgress(verbose bool, logFile string) (progress *escape.Progress, finish func()) {
+	progress = escape.NewProgress()
+	if verbose {
+		progress.AddCompactWriter(os.Stderr)
+	}
+	var logFiles []*os.File
+	if logFile != "" {
+		f, err := os.Create(logFile)
+		if err != nil {
+			errOut("Error creating log file: %v", err)
+			os.Exit(1)
+		}
+		logFiles = append(logFiles, f)
+		progress.AddWriter(f)
+	}
+	// The swap must happen *now*, so the restore is bound to a variable before
+	// it is deferred: `defer routeWarningsToProgress(...)` alone would defer
+	// the swap itself until the run had finished.
+	routed := verbose || logFile != ""
+	restoreWarnings := func() {}
+	if routed {
+		restoreWarnings = routeWarningsToProgress(progress, verbose)
+		warnSinksRouted = true
+	}
+	return progress, func() {
+		if routed {
+			warnSinksRouted = false
+		}
+		restoreWarnings()
+		for _, f := range logFiles {
+			f.Close()
+		}
+	}
+}
+
+// routeWarningsToProgress points the optimizer's and the glass package's
+// Warnf sinks at the progress reporter for as long as the returned restore
+// function is not called (newEscapeProgress holds it for the whole run).
+//
+// A warning is always reported as a structured "warn" event on every registered
+// stream, so `--log` records what the run had to say as well. streamOnStderr
+// says whether stderr itself is carrying the JSONL (`--verbose`): only then is
+// the tagged plain-text form suppressed, because there it would be the one
+// unparseable line in the capture — with `--log` alone stderr is not a stream,
+// so the human-readable line stays and nothing goes silent.
+func routeWarningsToProgress(progress *escape.Progress, streamOnStderr bool) (restore func()) {
+	report := func(format string, args ...any) {
+		progress.Warnf(format, args...)
+		if !streamOnStderr {
+			errOut(format, args...)
+		}
+	}
+	prevOptWarn, prevGlassWarn := optimize.Warnf, glass.Warnf
+	optimize.Warnf, glass.Warnf = report, report
+	return func() {
+		optimize.Warnf, glass.Warnf = prevOptWarn, prevGlassWarn
+	}
 }
 
 // reportEscape emits a single JSONL "escape_complete" event with the full

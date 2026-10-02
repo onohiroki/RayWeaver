@@ -85,6 +85,18 @@ func (p *Progress) Event(name string, fields map[string]any) {
 	}
 }
 
+// Warnf reports a non-fatal warning as a structured "warn" event carrying the
+// formatted text under "message". Routing a warning through the reporter is
+// what keeps a --verbose / --log stream pure JSONL: the optimizer's and the
+// glass package's Warnf sinks otherwise write tagged plain-text lines straight
+// to stderr, interleaving them with the compact JSONL and breaking
+// `rayweave list escape` (and jq, and query --jsonl) on a captured stream. A
+// nil receiver and an empty writer list are both no-ops, so the caller must
+// keep the plain-text sink whenever no writer is registered.
+func (p *Progress) Warnf(format string, args ...any) {
+	p.Event("warn", map[string]any{"message": fmt.Sprintf(format, args...)})
+}
+
 // eventKeyOrder is the fixed key presentation order shared by the full and
 // compact streams.
 var eventKeyOrder = []string{
@@ -97,6 +109,9 @@ var eventKeyOrder = []string{
 	"swarm_mean", "swarm_min", "swarm_max",
 	"swarm_size", "n_vars", "pso_iterations", "inertia",
 	"has_both_fn", "skip_constraints", "light_aperture", "reinitialized",
+	// Structured warning text (event "warn"); listed last because only that
+	// event carries it and its position shifts nothing else.
+	"message",
 }
 
 func inEventKeyOrder(k string) bool {

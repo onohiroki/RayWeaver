@@ -805,6 +805,44 @@ func TestProgressCompactAndFullStreams(t *testing.T) {
 	}
 }
 
+// A warning routed through Progress.Warnf must survive both streams: the
+// compact writer keeps only the fixed key order, so without an explicit
+// "message" entry there a --verbose capture would hold a bare
+// {"event":"warn"} line carrying no text at all.
+func TestProgressWarnfKeepsMessageInBothStreams(t *testing.T) {
+	var full, compact bytes.Buffer
+	p := NewProgress()
+	p.AddWriter(&full)
+	p.AddCompactWriter(&compact)
+	p.Warnf("back_focus: %d of %d field(s) dropped", 1, 5)
+
+	for _, tc := range []struct {
+		name string
+		buf  *bytes.Buffer
+	}{{"full", &full}, {"compact", &compact}} {
+		var ev struct {
+			Event   string `json:"event"`
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(bytes.TrimSpace(tc.buf.Bytes()), &ev); err != nil {
+			t.Fatalf("%s json.Unmarshal: %v (%s)", tc.name, err, tc.buf.String())
+		}
+		if ev.Event != "warn" {
+			t.Errorf("%s event = %q, want warn", tc.name, ev.Event)
+		}
+		if ev.Message != "back_focus: 1 of 5 field(s) dropped" {
+			t.Errorf("%s message = %q, want the formatted warning text", tc.name, ev.Message)
+		}
+	}
+	if strings.Contains(compact.String(), "elapsed") || strings.Contains(compact.String(), `"time"`) {
+		t.Errorf("compact warn line kept full-stream keys: %s", compact.String())
+	}
+
+	// With no writer registered the call is a no-op, never a panic: the caller
+	// only installs this sink while a stream exists.
+	NewProgress().Warnf("dropped: %v", "silently")
+}
+
 func TestProgressCompactAllEvents(t *testing.T) {
 	var full, compact bytes.Buffer
 	p := NewProgress()

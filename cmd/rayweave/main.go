@@ -31,6 +31,15 @@ import (
 // to the right pipeline stage (e.g. "rayweave[chief]:").
 var currentCmd string
 
+// warnSinksRouted marks that the Warnf sinks of the optimize and glass
+// packages currently point at a progress stream rather than at the tagged
+// stderr writer (escape/pso with --verbose or --log, see newEscapeProgress).
+// loadCatalogs installs the default sink and has to leave a routed one alone —
+// it runs after the reporter is created, so overwriting there would both drop
+// the warnings raised during the catalog load out of the stream and un-route
+// every later warning.
+var warnSinksRouted bool
+
 // errOut writes a tagged line to stderr. The tag identifies the subcommand
 // that produced the message, which is essential when commands are piped
 // (e.g. "rayweave chief | rayweave trace | rayweave plot").
@@ -1725,11 +1734,18 @@ func readStdin() ([]byte, error) {
 }
 
 func loadCatalogs(input *types.Input, glassDir ...string) (*glass.Catalog, *coating.Catalog) {
-	glass.Warnf = errOut
-	// Optimisation warnings (a back-focus solve that could not be evaluated,
-	// ...) go through the tagged stderr writer so a piped run still shows
-	// which stage reported them.
-	optimize.Warnf = errOut
+	// escape/pso route these sinks into their progress stream (see
+	// newEscapeProgress) *before* the catalog is loaded, so an AGF warning
+	// raised here lands in the JSONL capture instead of being the one
+	// plain-text line of it. The stream owns them until its finish runs; every
+	// other command gets the tagged stderr writer.
+	if !warnSinksRouted {
+		glass.Warnf = errOut
+		// Optimisation warnings (a back-focus solve that could not be
+		// evaluated, ...) go through the tagged stderr writer so a piped run
+		// still shows which stage reported them.
+		optimize.Warnf = errOut
+	}
 	gc := glass.NewCatalog()
 	if input.GlassCatalog == nil {
 		input.GlassCatalog = &types.GlassCatalog{}

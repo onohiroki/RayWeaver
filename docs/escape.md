@@ -17,7 +17,7 @@ rayweave escape extract --index N < escape-output.yaml
 |---|---|
 | `--glass-dir DIR` | AGF glass catalog directory |
 | `--stream BOOL` | stream the pipeline document to stdout as the run progresses: `true` (default) or `false` for the one-shot write performed after the run (see [Streaming output](#streaming-output)) |
-| `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `escaped`, `recorded`, `best_merit`, `cycles`, `escapes`, `minima`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves) |
+| `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `escaped`, `recorded`, `best_merit`, `cycles`, `escapes`, `minima`, `message`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves. While a stream is active the optimizer's and the glass package's non-fatal warnings are routed into it as `warn` events carrying `message`, instead of the tagged plain-text lines they would otherwise write to stderr next to the JSONL — so a captured `--verbose` stream stays pure JSON Lines and `list escape`, `jq` and `query --jsonl` can all read it) |
 | `--log FILE` | write the **full** JSONL progress stream to `FILE` (same fields as before — full-precision floats, RFC3339 `time`, `elapsed` seconds, `status`/`signal`/`timed_out`/`interrupted` included — with keys in the same fixed order followed by the remaining keys alphabetically) |
 | `--save FILE` | save every discovered local minimum to `FILE0.yaml`, `FILE1.yaml`, … (see [Saving minima](#saving-minima)) |
 | `--power-solve` | insert the power-preserving glass phase between each escape and clean DLS: locks every variable except the glass dispersions, emphasises the config's chromatic merit terms (scaled by `power_solve.color_scale`), keeps a cheap geometric guardrail, and holds the element powers fixed |
@@ -637,12 +637,13 @@ powers** are not recoverable from it — use the pipeline document (`out.yaml`) 
 the saved `FILE<n>.yaml` for those. Everything else is: the minima's `--save`
 file names come from the `minimum_saved` events (no filesystem lookup), the
 infeasible basins are always present in the log even when the document hides
-them, and the run log also lists the signals, guard actions and errors. The
-compact `--verbose` stream drops every field outside the fixed key order
-(`min_status`, `invalid_reason`, `retired`, `timed_out`, `interrupted`,
-`reason`, `file`, and the `Log Events` details such as `signal` and `message`),
-so a full `--log` file is needed to classify the minima, the basins and the
-events. See
+them, and the run log also lists the signals, guard actions, errors and
+warnings. The compact `--verbose` stream drops every field outside the fixed key
+order (`min_status`, `invalid_reason`, `retired`, `timed_out`, `interrupted`,
+`reason`, `file`, and the `Log Events` details such as `signal` and the `error`
+message), so a full `--log` file is needed to classify the minima, the basins and
+those events — a `warn` row keeps its text either way, since `message` is part of
+the fixed key order. See
 [list.md §11](list.md#11-escape-section--escapepso-global-search-results).
 
 The `Log Events` section of `list escape` is the quickest way to see why a run

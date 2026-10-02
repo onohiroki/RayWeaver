@@ -47,6 +47,12 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 	psu := effectivePowerSolve(input, powerSolve, powerSolveSurfaces)
 	input.Optimization.PowerSolve = psu
 
+	// Create the reporter (and the warning bridge it installs) before the
+	// catalog is loaded: an AGF warning raised during that load has to land in
+	// the stream, or it is the one plain-text line in a JSONL capture.
+	progress, finishProgress := newEscapeProgress(verbose, logFile)
+	defer finishProgress()
+
 	gc, _ := loadCatalogs(&input, glassDir)
 	writeBackGlassDir(&input, glassDir)
 	if glassVariables {
@@ -70,7 +76,7 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 
 	// Delegate to the shared escape core with the PSO explorer factory. The
 	// command name is stamped into the output metadata as "pso".
-	runEscapeCore(input, gc, verbose, logFile, saveBase, keepInfeasible, false, "pso", newExplorer)
+	runEscapeCore(input, gc, progress, saveBase, keepInfeasible, false, "pso", newExplorer)
 }
 
 // buildPSOConfig translates the PSOConfig (with CLI overrides already applied)
