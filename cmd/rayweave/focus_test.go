@@ -592,3 +592,46 @@ func TestListFocusSpot(t *testing.T) {
 		t.Errorf("csv missing header:\n%s", csvText)
 	}
 }
+
+// TestFocusAllSolveSeedsFromDocument pins the `all` plane's back-focus
+// configuration: the target surface, reference surface and wavelength come from
+// the document's optimization.back_focus_solve — the solve a saved
+// escape/optimize minimum carries — while the weight type stays the command's
+// convention and the ray count follows the command's effective --num-rays. With
+// an empty config the wavelength fell back to configs[].wavelengths[0], i.e. the
+// F line of a standard [F, d, C] list, so focus_plane_all_shift_mm was measured
+// against a plane the deliverable never had (observed: 0.148 mm against the
+// document's d-line plane for a v49 escape minimum).
+func TestFocusAllSolveSeedsFromDocument(t *testing.T) {
+	run := &focusRun{
+		refWavelength: 0.0005876,
+		bfSolve: &types.BackFocusSolveConfig{
+			Enabled: true, Type: "wavefront", Surface: 12, ReferenceSurface: 12,
+			NumRays: 128, Wavelength: 0.0005876, WeightType: "on_axis_only",
+		},
+	}
+	bf := run.allFieldSolve("uniform")
+	if bf.Surface != 12 || bf.ReferenceSurface != 12 {
+		t.Errorf("target/reference = %d/%d, want the document's 12/12", bf.Surface, bf.ReferenceSurface)
+	}
+	if bf.Wavelength != 0.0005876 {
+		t.Errorf("wavelength = %v, want the document's 0.0005876", bf.Wavelength)
+	}
+	if !bf.Enabled || bf.Type != "wavefront" {
+		t.Errorf("enabled/type = %v/%q, want true/wavefront", bf.Enabled, bf.Type)
+	}
+	if bf.WeightType != "uniform" {
+		t.Errorf("weight_type = %q, want the command's convention uniform, not the document's %q",
+			bf.WeightType, run.bfSolve.WeightType)
+	}
+	if bf.NumRays == 128 {
+		t.Error("num_rays came from the document: the command's effective --num-rays must win")
+	}
+
+	// No back-focus section: the reference wavelength is still used, so the
+	// solve never depends on which wavelength the config happens to list first.
+	bare := (&focusRun{refWavelength: 0.0005876}).allFieldSolve("uniform")
+	if bare.Wavelength != 0.0005876 {
+		t.Errorf("no-section wavelength = %v, want the reference 0.0005876", bare.Wavelength)
+	}
+}

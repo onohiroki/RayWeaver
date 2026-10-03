@@ -101,14 +101,26 @@ func runPSF(data []byte) {
 		// Sample the back-focus solve with the same pupil grid the PSF/MTF is
 		// evaluated at (CLI > YAML > psf.Compute's default); the solve's
 		// coherent-peak objective is sampling-sensitive for aberrated fields.
+		// Target surface, reference surface and wavelength come from the
+		// document's optimization.back_focus_solve so `all` is the plane a
+		// saved escape/optimize minimum carries — otherwise the shift reported
+		// here is measured against a plane the deliverable never had.
 		bfRays := *numRays
 		if input.PSF != nil {
 			bfRays = intOrYAML(*numRays, input.PSF.NumRays)
 		}
 		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform",
 			NumRays: effectivePSFNumRays(bfRays)}
+		if src := backFocusSolveOf(&input); src != nil {
+			bf.Surface = src.Surface
+			bf.ReferenceSurface = src.ReferenceSurface
+			bf.Wavelength = src.Wavelength
+		}
+		if bf.Wavelength <= 0 {
+			bf.Wavelength = effectiveReferenceWavelength(input.Chief)
+		}
 		optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", input.Chief.StopSurface,
-			effectiveReferenceWavelength(input.Chief), cfgFields, cfgWLs, gc, chiefRayDefinition(input),
+			bf.Wavelength, cfgFields, cfgWLs, gc, chiefRayDefinition(input),
 			input.Chief.PupilModel)
 		surface.Precompute(surfaces)
 		system.Surfaces = surfaces

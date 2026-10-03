@@ -57,11 +57,11 @@ func TestBackFocusSolveForwardsVirtualPupil(t *testing.T) {
 
 	// Premise: the pupil model changes what the wavefront analysis sees, so
 	// dropping it would be observable (and, on a clipped system, fatal).
-	plain, err := wavefrontBackFocusShiftFor(backFocusApertureTriplet(40), bf, 0, 0, nil, fieldDefs, gc, "", nil)
+	plain, err := wavefrontBackFocusShiftFor(backFocusApertureTriplet(40), bf, 0, 0, fieldDefs, gc, "", nil)
 	if err != nil {
 		t.Fatalf("test setup: plain wavefront solve failed: %v", err)
 	}
-	pupilShift, err := wavefrontBackFocusShiftFor(backFocusApertureTriplet(40), bf, 0, 0, nil, fieldDefs, gc, "", pupil)
+	pupilShift, err := wavefrontBackFocusShiftFor(backFocusApertureTriplet(40), bf, 0, 0, fieldDefs, gc, "", pupil)
 	if err != nil {
 		t.Fatalf("test setup: virtual-pupil wavefront solve failed: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestBackFocusPartialSolveKeepsTheSurvivingFields(t *testing.T) {
 	both := []types.FieldDef{{Angle: 0}, {Angle: 16}}
 	surfaces := backFocusApertureTriplet(2.0)
 
-	out, err := wavefrontBackFocusShiftFor(surfaces, bf, 0, 0, nil, both, gc, "", nil)
+	out, err := wavefrontBackFocusShiftFor(surfaces, bf, 0, 0, both, gc, "", nil)
 	if err != nil {
 		t.Fatalf("partial solve reported a total failure although one field may analyse: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestBackFocusPartialSolveKeepsTheSurvivingFields(t *testing.T) {
 	if len(survivor) == 0 {
 		t.Fatalf("every field was dropped but the solve reported success: %v", out.FieldsDropped)
 	}
-	alone, err := wavefrontBackFocusShiftFor(surfaces, bf, 0, 0, nil, survivor, gc, "", nil)
+	alone, err := wavefrontBackFocusShiftFor(surfaces, bf, 0, 0, survivor, gc, "", nil)
 	if err != nil {
 		t.Fatalf("surviving-field solve failed: %v", err)
 	}

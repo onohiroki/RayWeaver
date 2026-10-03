@@ -528,8 +528,8 @@ func TestApplyVariablesSizesAperturesBeforeBackFocus(t *testing.T) {
 		surface.Precompute(s)
 		return s
 	}
-	shSmall, errSmall := wavefrontBackFocusShiftFor(withDia(2.0), bf, 0, 0, nil, fieldDefs, gc, "", nil)
-	shLarge, errLarge := wavefrontBackFocusShiftFor(withDia(40.0), bf, 0, 0, nil, fieldDefs, gc, "", nil)
+	shSmall, errSmall := wavefrontBackFocusShiftFor(withDia(2.0), bf, 0, 0, fieldDefs, gc, "", nil)
+	shLarge, errLarge := wavefrontBackFocusShiftFor(withDia(40.0), bf, 0, 0, fieldDefs, gc, "", nil)
 	if errLarge != nil {
 		t.Fatalf("test setup: wavefront back-focus failed on the large-aperture system: %v", errLarge)
 	}
@@ -571,5 +571,26 @@ func TestApplyVariablesSizesAperturesBeforeBackFocus(t *testing.T) {
 	if math.Abs(smallThk-largeThk) > 1e-9 {
 		t.Errorf("solved plane depends on the stored auto_aperture diameter: %.6f vs %.6f (must use the sized diameter)",
 			smallThk, largeThk)
+	}
+}
+
+// TestBackFocusWavelengthDefault pins the documented default of
+// back_focus_solve.wavelength (types: "default: d-line"): the configured value,
+// else the configuration's reference wavelength, else the d-line. The config's
+// wavelength *list* must not participate — preferring its first entry selected
+// the F line of a standard [F, d, C] list and put the image plane at a
+// different focus from the one the reference wavelength asks for.
+func TestBackFocusWavelengthDefault(t *testing.T) {
+	if got := backFocusWavelength(&types.BackFocusSolveConfig{Wavelength: 0.0006328}, 0.0005876); got != 0.0006328 {
+		t.Errorf("configured wavelength: got %v, want 0.0006328", got)
+	}
+	if got := backFocusWavelength(&types.BackFocusSolveConfig{}, 0.0005876); got != 0.0005876 {
+		t.Errorf("unset wavelength: got %v, want the reference 0.0005876", got)
+	}
+	if got := backFocusWavelength(&types.BackFocusSolveConfig{}, 0); got != types.DefaultWavelength {
+		t.Errorf("unset wavelength and reference: got %v, want the d-line default %v", got, types.DefaultWavelength)
+	}
+	if got := backFocusWavelength(nil, 0.0004861); got != 0.0004861 {
+		t.Errorf("nil config: got %v, want the reference 0.0004861", got)
 	}
 }

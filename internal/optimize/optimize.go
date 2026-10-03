@@ -3539,12 +3539,29 @@ func (o *Optimizer) backFocusWarn(err error, action string) {
 // wavefrontBackFocusShiftFor). An error means the wavefront could not be
 // evaluated for *any* field; the shift is then 0 and the caller falls back.
 func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surface, gc *glass.Catalog) (backFocusOutcome, error) {
-	return wavefrontBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.wavelengths, cfg.fieldDefs, gc, cfg.rayDefinition, cfg.pupilModel)
+	return wavefrontBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.fieldDefs, gc, cfg.rayDefinition, cfg.pupilModel)
+}
+
+// backFocusWavelength resolves the wavelength a wavefront back-focus solve is
+// evaluated at: the configured value, else the configuration's reference
+// wavelength, else the d-line (types.BackFocusSolveConfig.Wavelength's
+// documented default). The config's wavelength *list* deliberately does not
+// participate: preferring its first entry optimised the plane at whatever
+// wavelength the document happened to list first — the F line of a standard
+// [F, d, C] list — a different focus from the one the reference wavelength
+// asks for, so `focus --planes all` reported a shift against a plane the
+// deliverable never carried.
+func backFocusWavelength(bfs *types.BackFocusSolveConfig, refWavelength float64) float64 {
+	if bfs != nil && bfs.Wavelength > 0 {
+		return bfs.Wavelength
+	}
+	return effectiveReferenceWavelength(refWavelength)
 }
 
 // wavefrontBackFocusShiftFor computes the image-plane shift needed to bring the
 // image plane to the wavefront best-focus position. A minimal wavefront
-// analysis is run with the configured settings (num_rays, weight_type). It
+// analysis is run with the configured settings (num_rays, weight_type) at
+// backFocusWavelength. It
 // returns an error when *no* field could be analysed (a degenerate pupil grid,
 // a failed paraboloid fit, ...); the caller must surface that instead of
 // silently keeping a stale image plane.
@@ -3562,20 +3579,11 @@ func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surfac
 // pupil, which a stopped-down or tightly auto-apertured system clips down to a
 // degenerate sample set (observed as "paraboloid fit: singular normal matrix"
 // on a 6-element whose deliverable apertures were sized for the real pupil).
-func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, wavelengths []types.WavelengthItem, fieldDefs []types.FieldDef, gc *glass.Catalog, rayDefinition string, pupilModel *types.PupilModelConfig) (backFocusOutcome, error) {
+func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, fieldDefs []types.FieldDef, gc *glass.Catalog, rayDefinition string, pupilModel *types.PupilModelConfig) (backFocusOutcome, error) {
 	if bfs == nil || len(surfaces) < 2 {
 		return backFocusOutcome{}, nil
 	}
-	wl := bfs.Wavelength
-	if wl <= 0 {
-		wl = effectiveReferenceWavelength(refWavelength)
-		if len(wavelengths) > 0 {
-			wl = wavelengths[0].Value
-		}
-		if wl <= 0 {
-			wl = types.DefaultWavelength
-		}
-	}
+	wl := backFocusWavelength(bfs, refWavelength)
 	refSurf := bfs.ReferenceSurface
 	if refSurf <= 0 {
 		refSurf = psf.DefaultReferenceSurface(surfaces)
@@ -3691,7 +3699,7 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 	surface.Precompute(surfaces)
 	var shift float64
 	if bfType == "wavefront" {
-		out, err := wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, wavelengths, fieldDefs, gc, rayDefinition, pupilModel)
+		out, err := wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, fieldDefs, gc, rayDefinition, pupilModel)
 		if err != nil {
 			Warnf("warning: %v; the image plane keeps its current thickness", err)
 			return false

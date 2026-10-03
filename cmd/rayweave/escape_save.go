@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -202,6 +203,7 @@ func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []t
 		pupilModel = input.Chief.PupilModel
 	}
 	bfType := savedBackFocusType(input.Optimization)
+	before := append([]types.Surface(nil), surfaces...)
 	solved := optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, bfType,
 		stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel)
 	if !solved && bfType == "wavefront" {
@@ -215,7 +217,50 @@ func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []t
 			stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel) {
 			optimize.Warnf("warning: back-focus solve used the paraxial focus for a recorded minimum")
 		}
+		return
 	}
+	if solved && bfType == "wavefront" {
+		warnIfBackFocusSamplingUnstable(input, cfg, before, surfaces, stopSurface, refWavelength, gc, pupilModel)
+	}
+}
+
+// backFocusSamplingToleranceMM is the image-plane shift difference between the
+// configured ray count and twice it above which the wavefront back-focus solve
+// counts as sampling-unstable.
+const backFocusSamplingToleranceMM = 0.05
+
+// warnIfBackFocusSamplingUnstable re-runs the wavefront back-focus solve at
+// twice the configured ray count from the same starting plane. The solve
+// maximises the coherent PSF peak, which is sampling-sensitive for aberrated
+// field sets: at back_focus_solve.num_rays 128 the search can settle on a
+// different extremum than at 200+, quietly shipping a minimum ~0.3 mm out of
+// focus while every other gate still passes (the delivered MTF collapses).
+// This runs once per recorded minimum, so the extra wavefront solve is free.
+func warnIfBackFocusSamplingUnstable(input types.Input, cfg *types.Config, before, applied []types.Surface, stopSurface int, refWavelength float64, gc *glass.Catalog, pupilModel *types.PupilModelConfig) {
+	src := input.Optimization.BackFocusSolve
+	// Above this the doubling is too expensive to be worth probing, and a
+	// system that is unstable at 4000 rays has a different problem.
+	if src.NumRays > 2000 {
+		return
+	}
+	probe := *src
+	if probe.NumRays > 0 {
+		probe.NumRays *= 2
+	} else {
+		probe.NumRays = 400 // twice wavefrontBackFocusShiftFor's 200 default
+	}
+	retry := append([]types.Surface(nil), before...)
+	if !optimize.ApplyBackFocusSolve(retry, &probe, "wavefront", stopSurface, refWavelength,
+		cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel) {
+		return
+	}
+	appliedShift := maxThicknessDelta(before, applied)
+	altShift := maxThicknessDelta(before, retry)
+	if math.Abs(altShift-appliedShift) <= backFocusSamplingToleranceMM {
+		return
+	}
+	optimize.Warnf("warning: back-focus solve is sampling-unstable: the image plane moves %.4f mm at num_rays %d but %.4f mm at %d rays (tolerance %.2f mm); raise optimization.back_focus_solve.num_rays so the recorded minimum is not shipped out of focus",
+		appliedShift, src.NumRays, altShift, probe.NumRays, backFocusSamplingToleranceMM)
 }
 
 // savedBackFocusType resolves the focus type to use for a saved minimum: the

@@ -135,12 +135,48 @@ type focusRun struct {
 	refWavelength  float64
 	cfgFields      []types.FieldItem
 	cfgWavelengths []types.WavelengthItem
-	fields         []types.FieldDef
-	selected       []int
-	wavelengths    []float64
-	polLabels      []string
-	planes         []string
-	psfOpts        psf.Options
+	// bfSolve is the document's optimization.back_focus_solve (nil when the
+	// document does not declare one), so the `all` plane is solved the same way
+	// a saved escape/optimize minimum was.
+	bfSolve     *types.BackFocusSolveConfig
+	fields      []types.FieldDef
+	selected    []int
+	wavelengths []float64
+	polLabels   []string
+	planes      []string
+	psfOpts     psf.Options
+}
+
+// backFocusSolveOf returns the document's back-focus solve configuration, or
+// nil when it declares none.
+func backFocusSolveOf(input *types.Input) *types.BackFocusSolveConfig {
+	if input == nil || input.Optimization == nil {
+		return nil
+	}
+	return input.Optimization.BackFocusSolve
+}
+
+// allFieldSolve builds the wavefront back-focus configuration behind the `all`
+// plane convention. It is seeded from the document's optimization.back_focus_solve
+// — target surface, reference surface, wavelength — because that is the solve a
+// saved escape/optimize minimum carries, and reporting the `all` plane from a
+// different one measures a plane the deliverable never had (the document's own
+// num_rays is deliberately not taken: the command's effective --num-rays wins so
+// the solve samples the grid the comparison is evaluated at). The weight type
+// stays the caller's convention ("uniform" for `all`, "on_axis_only" for the
+// on-axis base of a through-focus scan) rather than the document's.
+func (run *focusRun) allFieldSolve(weightType string) *types.BackFocusSolveConfig {
+	bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: weightType,
+		NumRays: effectivePSFNumRays(run.psfOpts.NumRays)}
+	if src := run.bfSolve; src != nil {
+		bf.Surface = src.Surface
+		bf.ReferenceSurface = src.ReferenceSurface
+		bf.Wavelength = src.Wavelength
+	}
+	if bf.Wavelength <= 0 {
+		bf.Wavelength = run.refWavelength
+	}
+	return bf
 }
 
 // focusKey identifies one (field, wavelength, polarization) row.
@@ -187,6 +223,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 		cfgFields = input.Configs[cfgIdx].Fields
 		cfgWLs = input.Configs[cfgIdx].Wavelengths
 	}
+	bfSolve := backFocusSolveOf(input)
 	// A hand-written single-config document carries its fields in chief.fields,
 	// not configs[].fields. The all-field back-focus solve needs the field list,
 	// so fall back to the chief fields rather than silently solving a zero-field
@@ -262,6 +299,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 		refWavelength:  refWavelength,
 		cfgFields:      cfgFields,
 		cfgWavelengths: cfgWLs,
+		bfSolve:        bfSolve,
 		fields:         fields,
 		selected:       selected,
 		wavelengths:    wavelengths,
@@ -426,8 +464,7 @@ func throughFocusBaseShift(run *focusRun, base string) float64 {
 	}
 	surfaces := append([]types.Surface(nil), run.baseSurfaces...)
 	before := append([]types.Surface(nil), surfaces...)
-	bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: weight,
-		NumRays: effectivePSFNumRays(run.psfOpts.NumRays)}
+	bf := run.allFieldSolve(weight)
 	optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", run.stopSurface,
 		run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc, run.psfOpts.RayDefinition,
 		run.psfOpts.PupilModel)
@@ -577,9 +614,10 @@ func computeFocusPlane(run *focusRun, plane string) ([]psf.Result, float64, erro
 		before := append([]types.Surface(nil), surfaces...)
 		// Sample the back-focus solve with the same pupil grid the comparison
 		// is evaluated at (CLI > YAML > psf default); the solve's coherent-peak
-		// objective is sampling-sensitive for aberrated fields.
-		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform",
-			NumRays: effectivePSFNumRays(opts.NumRays)}
+		// objective is sampling-sensitive for aberrated fields. The rest of the
+		// configuration (target surface, reference surface, wavelength) comes
+		// from the document so `all` is the plane a saved minimum carries.
+		bf := run.allFieldSolve("uniform")
 		optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", run.stopSurface,
 			run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc, opts.RayDefinition,
 			opts.PupilModel)
