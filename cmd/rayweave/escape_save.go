@@ -224,10 +224,38 @@ func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []t
 	}
 }
 
-// backFocusSamplingToleranceMM is the image-plane shift difference between the
-// configured ray count and twice it above which the wavefront back-focus solve
-// counts as sampling-unstable.
-const backFocusSamplingToleranceMM = 0.05
+// back-focus sampling-stability probe.
+const (
+	// backFocusSamplingToleranceMM is the image-plane shift difference between
+	// the configured ray count and twice it above which the wavefront
+	// back-focus solve counts as sampling-unstable.
+	backFocusSamplingToleranceMM = 0.05
+	// backFocusSamplingRelTolerance is that tolerance as a fraction of the
+	// larger of the two shifts. A solve that already moves the plane by
+	// several mm can afford a proportionally larger disagreement - the peak
+	// search's own resolution scales with it - while a solve whose shift is
+	// near zero is judged on the absolute value alone, which is exactly the
+	// failure being caught: 0.03 mm at 128 rays against 0.30 mm at 400 on a
+	// v49 minimum (a different extremum), as opposed to -5.885 against
+	// -5.951 mm (1.1%, the same extremum).
+	backFocusSamplingRelTolerance = 0.02
+)
+
+// backFocusSamplingUnstable reports whether the plane solved at the configured
+// ray count and the plane solved at twice it disagree beyond tolerance.
+func backFocusSamplingUnstable(applied, probe float64) bool {
+	tol := backFocusSamplingToleranceMM
+	if rel := backFocusSamplingRelTolerance * math.Max(math.Abs(applied), math.Abs(probe)); rel > tol {
+		tol = rel
+	}
+	return math.Abs(probe-applied) > tol
+}
+
+// backFocusSamplingWarned dedupes the warning: a minimum is materialised twice
+// per record (the standalone --save file and the aggregated document), so
+// without this the identical message is emitted twice within the same
+// millisecond.
+var backFocusSamplingWarned sync.Map
 
 // warnIfBackFocusSamplingUnstable re-runs the wavefront back-focus solve at
 // twice the configured ray count from the same starting plane. The solve
@@ -256,11 +284,16 @@ func warnIfBackFocusSamplingUnstable(input types.Input, cfg *types.Config, befor
 	}
 	appliedShift := maxThicknessDelta(before, applied)
 	altShift := maxThicknessDelta(before, retry)
-	if math.Abs(altShift-appliedShift) <= backFocusSamplingToleranceMM {
+	if !backFocusSamplingUnstable(appliedShift, altShift) {
 		return
 	}
-	optimize.Warnf("warning: back-focus solve is sampling-unstable: the image plane moves %.4f mm at num_rays %d but %.4f mm at %d rays (tolerance %.2f mm); raise optimization.back_focus_solve.num_rays so the recorded minimum is not shipped out of focus",
-		appliedShift, src.NumRays, altShift, probe.NumRays, backFocusSamplingToleranceMM)
+	msg := fmt.Sprintf(
+		"warning: back-focus solve is sampling-unstable: the image plane moves %.4f mm at num_rays %d but %.4f mm at %d rays (tolerance %.2f mm or 2%% of the larger shift); raise optimization.back_focus_solve.num_rays so the recorded minimum is not shipped out of focus",
+		appliedShift, src.NumRays, altShift, probe.NumRays,
+		math.Max(backFocusSamplingToleranceMM, backFocusSamplingRelTolerance*math.Max(math.Abs(appliedShift), math.Abs(altShift))))
+	if _, loaded := backFocusSamplingWarned.LoadOrStore(msg, struct{}{}); !loaded {
+		optimize.Warnf("%s", msg)
+	}
 }
 
 // savedBackFocusType resolves the focus type to use for a saved minimum: the

@@ -275,3 +275,29 @@ func TestSavedMinimumNeverShipsAStaleImagePlane(t *testing.T) {
 		t.Errorf("expected the paraxial fallback to be reported, got: %v", *warnings)
 	}
 }
+
+// TestBackFocusSamplingUnstable pins the probe's classification. The v49
+// failure it exists to catch (0.032 mm of shift at 128 rays against 0.287 at
+// 400 - a different coherent-peak extremum) must warn, while a disagreement
+// that is merely proportional to a large shift (the v50 smoke's -5.885 mm at
+// 400 rays against -5.951 at 800: 1.1%, the same extremum) must not.
+func TestBackFocusSamplingUnstable(t *testing.T) {
+	cases := []struct {
+		name           string
+		applied, probe float64
+		wantUnstable   bool
+	}{
+		{"identical", 0.297, 0.297, false},
+		{"v49 num_rays 128 vs 400", 0.0321, 0.2870, true},
+		{"v50 smoke 400 vs 800", -5.8848, -5.9509, false},
+		{"small shift, absolute floor", 0.0, 0.06, true},
+		{"below absolute floor", 0.10, 0.14, false},
+		{"converged tail", 0.284, 0.297, false},
+	}
+	for _, c := range cases {
+		if got := backFocusSamplingUnstable(c.applied, c.probe); got != c.wantUnstable {
+			t.Errorf("%s: applied=%.4f probe=%.4f -> unstable=%v, want %v",
+				c.name, c.applied, c.probe, got, c.wantUnstable)
+		}
+	}
+}
