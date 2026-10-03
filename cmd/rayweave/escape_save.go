@@ -219,8 +219,64 @@ func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []t
 		}
 		return
 	}
-	if solved && bfType == "wavefront" {
-		warnIfBackFocusSamplingUnstable(input, cfg, before, surfaces, stopSurface, refWavelength, gc, pupilModel)
+	if !solved {
+		return
+	}
+
+	// The probe compares first applications, so take the configured-rays shift
+	// before the fixed-point iteration below re-runs the solve.
+	firstShift := maxThicknessDelta(before, surfaces)
+	if bfType == "wavefront" {
+		if math.Abs(firstShift) > backFocusFixedPointToleranceMM {
+			iterateBackFocusToFixedPoint(input, cfg, surfaces, stopSurface, refWavelength, gc, pupilModel)
+		}
+		warnIfBackFocusSamplingUnstable(input, cfg, before, firstShift, stopSurface, refWavelength, gc, pupilModel)
+	}
+}
+
+// backFocusFixedPointToleranceMM is the per-pass image-plane move below which
+// the wavefront back-focus solve counts as settled.
+const backFocusFixedPointToleranceMM = 0.01
+
+// backFocusMaxPasses bounds the *additional* applications so a map that does
+// not converge cannot wander (the initial application in the caller counts as
+// pass 0).
+const backFocusMaxPasses = 3
+
+// iterateBackFocusToFixedPoint re-applies the wavefront back-focus solve until
+// it stops moving the image plane.
+//
+// The solve is a fixed-point map, not a one-shot correction: it derives the
+// dynamic pupil and the best-focus search from the surfaces it is handed, so
+// applying it to the materialised (pre-solve) surfaces lands short of its own
+// optimum. Observed on a v50 smoke minimum: one application left the plane
+// 0.149 mm from the point where re-solving from it returns 2.5e-7 mm. The
+// document would be delivered out of focus under its own `all`-plane
+// convention even though the solve ran.
+//
+// The save path already re-derives what the DLS could not know — the
+// auto-aperture diameters are re-sized after the solve (see
+// materializeSingleInput) — so delivering the solve's fixed point rather than
+// its first shot is the same kind of correction: the recorded merit is a
+// search statistic, the document is the deliverable.
+func iterateBackFocusToFixedPoint(input types.Input, cfg *types.Config, surfaces []types.Surface, stopSurface int, refWavelength float64, gc *glass.Catalog, pupilModel *types.PupilModelConfig) {
+	shift := 0.0
+	settled := false
+	for pass := 1; pass <= backFocusMaxPasses; pass++ {
+		snap := append([]types.Surface(nil), surfaces...)
+		if !optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, "wavefront",
+			stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel) {
+			return
+		}
+		shift = maxThicknessDelta(snap, surfaces)
+		if math.Abs(shift) <= backFocusFixedPointToleranceMM {
+			settled = true
+			break
+		}
+	}
+	if !settled {
+		optimize.Warnf("warning: back-focus solve did not settle after %d passes (%.4f mm still moving); the recorded minimum's image plane is not at its own fixed point",
+			backFocusMaxPasses, shift)
 	}
 }
 
@@ -264,7 +320,7 @@ var backFocusSamplingWarned sync.Map
 // different extremum than at 200+, quietly shipping a minimum ~0.3 mm out of
 // focus while every other gate still passes (the delivered MTF collapses).
 // This runs once per recorded minimum, so the extra wavefront solve is free.
-func warnIfBackFocusSamplingUnstable(input types.Input, cfg *types.Config, before, applied []types.Surface, stopSurface int, refWavelength float64, gc *glass.Catalog, pupilModel *types.PupilModelConfig) {
+func warnIfBackFocusSamplingUnstable(input types.Input, cfg *types.Config, before []types.Surface, appliedShift float64, stopSurface int, refWavelength float64, gc *glass.Catalog, pupilModel *types.PupilModelConfig) {
 	src := input.Optimization.BackFocusSolve
 	// Above this the doubling is too expensive to be worth probing, and a
 	// system that is unstable at 4000 rays has a different problem.
@@ -282,7 +338,6 @@ func warnIfBackFocusSamplingUnstable(input types.Input, cfg *types.Config, befor
 		cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel) {
 		return
 	}
-	appliedShift := maxThicknessDelta(before, applied)
 	altShift := maxThicknessDelta(before, retry)
 	if !backFocusSamplingUnstable(appliedShift, altShift) {
 		return

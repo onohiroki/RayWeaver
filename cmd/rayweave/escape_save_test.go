@@ -301,3 +301,39 @@ func TestBackFocusSamplingUnstable(t *testing.T) {
 		}
 	}
 }
+
+// TestSavedBackFocusLandsOnItsFixedPoint pins the save path's iteration: the
+// wavefront solve derives its pupil and its best-focus search from the surfaces
+// it is handed, so one application to the materialised (pre-solve) surfaces
+// lands short of the point where re-solving from the delivered plane returns
+// ~0. Measured on a v50 smoke minimum: the gap was 0.149 mm, i.e. the document
+// was delivered out of focus under its own `all`-plane convention even though
+// the solve had run. focusInput's singlet sits ~50 mm out of focus, so the
+// first application moves the plane a long way and a missing iteration shows up
+// as a large residual.
+func TestSavedBackFocusLandsOnItsFixedPoint(t *testing.T) {
+	input := parseYAML[types.Input]([]byte(focusInput("")))
+	input.Optimization = &types.OptimizationConfig{
+		BackFocusSolve: &types.BackFocusSolveConfig{
+			Enabled: true, Type: "wavefront", WeightType: "uniform", NumRays: 32,
+		},
+	}
+	gc, _ := loadCatalogs(&input, "")
+	empty := ""
+	surfaces := configSurfaces(input.Configs, &empty)
+	surface.Precompute(surfaces)
+
+	work := append([]types.Surface(nil), surfaces...)
+	applySavedBackFocusSolve(input, &input.Configs[0], work, gc)
+
+	again := append([]types.Surface(nil), work...)
+	if !optimize.ApplyBackFocusSolve(again, input.Optimization.BackFocusSolve, "wavefront", 0, 0,
+		input.Configs[0].Fields, input.Configs[0].Wavelengths, gc, chiefRayDefinition(input), nil) {
+		t.Fatal("test setup: the follow-up wavefront solve did not run")
+	}
+	residual := math.Abs(maxThicknessDelta(work, again))
+	if residual > backFocusFixedPointToleranceMM {
+		t.Errorf("delivered image plane is %.4f mm from the solve's fixed point (tolerance %.3f mm): the save path must iterate until it settles",
+			residual, backFocusFixedPointToleranceMM)
+	}
+}
