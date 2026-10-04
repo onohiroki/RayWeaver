@@ -152,7 +152,12 @@ func materializeSingleInput(input types.Input, surfaces []types.Surface, variabl
 	}
 	surf, newGlasses := applyEscapeX(surfaces, variables, x, gc)
 	applyApertures(surf, apertures)
-	applySavedBackFocusSolve(input, &out.Configs[0], surf, gc)
+	// The solve focuses this minimum's own virtual pupil, not the declared one:
+	// axial_position/diameter are optimisation variables, and a plane solved at
+	// the declared z lands up to 0.8 mm from the minimum's best focus (v50:
+	// restoring the declared 15 mm made the saved plane its fixed point to
+	// 1e-8 mm while the document's own 19.71 mm asked for 0.30 mm of travel).
+	applySavedBackFocusSolve(out, &out.Configs[0], surf, gc, pupilModelForX(&out, variables, x))
 	out.Configs[0].Surfaces = surf
 	applyPupilVariables(&out, variables, x)
 	if len(newGlasses) > 0 && out.GlassCatalog != nil {
@@ -171,10 +176,12 @@ func materializeMultiInput(input types.Input, opt *types.OptimizationConfig, x [
 	out := cloneChiefForOutput(input)
 	out.Configs = append([]types.Config{}, input.Configs...)
 	configSurfaces := applyEscapeMulti(input.Configs, opt, x)
+	// This minimum's own virtual pupil (see materializeSingleInput).
+	pupil := pupilModelForXMulti(&out, opt, x)
 	for i := range out.Configs {
 		if s, ok := configSurfaces[out.Configs[i].ID]; ok {
 			applyApertures(s, apertures[out.Configs[i].ID])
-			applySavedBackFocusSolve(input, &out.Configs[i], s, gc)
+			applySavedBackFocusSolve(input, &out.Configs[i], s, gc, pupil)
 			out.Configs[i].Surfaces = s
 		}
 	}
@@ -188,7 +195,14 @@ func materializeMultiInput(input types.Input, opt *types.OptimizationConfig, x [
 // otherwise keep the template thickness). It mirrors the optimizer's solve type
 // selection using the merit schedule's terminal phase (weight_to == 1), so the
 // saved minima land on the wavefront best focus the run ends on.
-func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []types.Surface, gc *glass.Catalog) {
+//
+// pupilModel is the minimum's own virtual entrance pupil — input's declared
+// model with that minimum's pupil-model variables applied (pupilModelForX /
+// pupilModelForInput). It is a parameter, not read from input, precisely
+// because the declared model is only the seed: taking it from input focused
+// every minimum's plane at the declared z while the document it ships carries
+// the optimised one (the v50 vp_z sweep, 15 declared against 7.7..28.8 saved).
+func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []types.Surface, gc *glass.Catalog, pupilModel *types.PupilModelConfig) {
 	if input.Optimization == nil || input.Optimization.BackFocusSolve == nil || !input.Optimization.BackFocusSolve.Enabled {
 		return
 	}
@@ -196,11 +210,9 @@ func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []t
 		return
 	}
 	stopSurface, refWavelength := 0, 0.0
-	var pupilModel *types.PupilModelConfig
 	if input.Chief != nil {
 		stopSurface = input.Chief.StopSurface
 		refWavelength = input.Chief.ReferenceWavelength
-		pupilModel = input.Chief.PupilModel
 	}
 	bfType := savedBackFocusType(input.Optimization)
 	before := append([]types.Surface(nil), surfaces...)

@@ -3256,7 +3256,9 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 
 	// Apply the back-focus solve after the power-preserving solve so the
 	// target surface thickness reflects the final paraxial/wavefront focus.
-	o.applyBackFocusSolve(configSurfaces, gc)
+	// The pupils map carries this evaluation's pupil-model variables, so the
+	// solve focuses the same bundle the merit grid just traced.
+	o.applyBackFocusSolve(configSurfaces, pupils, gc)
 
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
@@ -3334,7 +3336,7 @@ func (o *Optimizer) applyPowerSolve(configSurfaces map[string][]types.Surface, g
 // thickness accordingly. For wavefront type it runs a minimal wavefront
 // analysis and applies the best-focus shift. It is called from applyVariables
 // (pure) after applyPowerSolve and before Precompute.
-func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surface, gc *glass.Catalog) {
+func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surface, pupils map[string]appliedPupil, gc *glass.Catalog) {
 	if o.backFocusSolve == nil || len(o.backFocusTargets) == 0 {
 		return
 	}
@@ -3360,7 +3362,7 @@ func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surfac
 			var shift float64
 			switch o.currentBackFocusType {
 			case "wavefront":
-				out, bfErr := o.wavefrontBackFocusShift(cfg, surfaces, gc)
+				out, bfErr := o.wavefrontBackFocusShift(cfg, surfaces, pupils[cfg.id], gc)
 				if bfErr != nil {
 					// The field-tolerant solve already dropped every
 					// degenerate field, so this is a total failure. Falling
@@ -3538,8 +3540,46 @@ func (o *Optimizer) backFocusWarn(err error, action string) {
 // image plane to the wavefront best-focus position (see
 // wavefrontBackFocusShiftFor). An error means the wavefront could not be
 // evaluated for *any* field; the shift is then 0 and the caller falls back.
-func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surface, gc *glass.Catalog) (backFocusOutcome, error) {
-	return wavefrontBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.fieldDefs, gc, cfg.rayDefinition, cfg.pupilModel)
+// backFocusPupilModel resolves the virtual entrance pupil one back-focus solve
+// must sample for a given evaluation: the config's declared model with that
+// evaluation's pupil-model variable values (appliedPupil) on top.
+//
+// The declared model is only the seed — axial_position is an optimisation
+// variable (the vp_z demo sweeps -20..+50 mm) — and every consumer of the
+// pupil already reads the variable's value: the merit grid (gridCentring), the
+// diffraction MTF (frozenZ/EPDOverride) and, post-run, `psf`, `wavefront` and
+// the gate evaluation of the delivered document. Solving the plane at the
+// declared z therefore focused a *different* bundle than the one the merit
+// evaluated and the deliverable ships: measured on the v50 minima, the saved
+// plane was the declared-15 mm fixed point to 1e-8 mm while the document's own
+// pupil asked for 0.01..0.77 mm of travel, and applying that travel moved the
+// on-axis MTF10 of the second-best minimum from 0.164 to 0.887.
+//
+// Returns nil only when the document declares no pupil model and this
+// evaluation has no active pupil (the "no virtual pupil" case), which keeps the
+// solve's behaviour identical to a plain wavefront analysis.
+func backFocusPupilModel(cfg *config, p appliedPupil) *types.PupilModelConfig {
+	if cfg.pupilModel == nil && !p.active {
+		return nil
+	}
+	var m types.PupilModelConfig
+	if cfg.pupilModel != nil {
+		m = *cfg.pupilModel
+	}
+	if p.active {
+		m.Mode = "virtual_entrance_pupil"
+		m.AxialPosition = p.z
+	}
+	if p.dia > 0 {
+		m.Diameter = p.dia
+	}
+	return &m
+}
+
+// wavefrontBackFocusShift solves the image plane for this evaluation's pupil
+// (see backFocusPupilModel).
+func (o *Optimizer) wavefrontBackFocusShift(cfg *config, surfaces []types.Surface, p appliedPupil, gc *glass.Catalog) (backFocusOutcome, error) {
+	return wavefrontBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.fieldDefs, gc, cfg.rayDefinition, backFocusPupilModel(cfg, p))
 }
 
 // backFocusWavelength resolves the wavelength a wavefront back-focus solve is
@@ -3573,12 +3613,14 @@ func backFocusWavelength(bfs *types.BackFocusSolveConfig, refWavelength float64)
 // total failure (every field degenerate) returns an error, which the caller
 // turns into a paraxial fallback.
 //
-// pupilModel is the document's virtual entrance pupil: it must be forwarded so
-// the solve samples the same bundle the merit grid, `psf`, `wavefront` and the
-// gate evaluation use. Without it wavefront falls back to its stop/dynamic
-// pupil, which a stopped-down or tightly auto-apertured system clips down to a
-// degenerate sample set (observed as "paraboloid fit: singular normal matrix"
-// on a 6-element whose deliverable apertures were sized for the real pupil).
+// pupilModel is the virtual entrance pupil the analysis must sample: the
+// document's model with the current pupil-model variables applied (see
+// backFocusPupilModel). It must be forwarded so the solve samples the same
+// bundle the merit grid, `psf`, `wavefront` and the gate evaluation use.
+// Without it wavefront falls back to its stop/dynamic pupil, which a
+// stopped-down or tightly auto-apertured system clips down to a degenerate
+// sample set (observed as "paraboloid fit: singular normal matrix" on a
+// 6-element whose deliverable apertures were sized for the real pupil).
 func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, fieldDefs []types.FieldDef, gc *glass.Catalog, rayDefinition string, pupilModel *types.PupilModelConfig) (backFocusOutcome, error) {
 	if bfs == nil || len(surfaces) < 2 {
 		return backFocusOutcome{}, nil

@@ -92,6 +92,128 @@ func TestBackFocusSolveForwardsVirtualPupil(t *testing.T) {
 	}
 }
 
+// TestBackFocusPupilModelFollowsTheVariable pins the resolver used by the
+// in-run solve: the pupil a back-focus solve samples is the document's model
+// with *this evaluation's* pupil-model variable values on top, never the
+// declared model alone. axial_position/diameter are optimisation variables
+// (the vp_z demo sweeps -20..+50 mm), so the declared value is only the seed.
+func TestBackFocusPupilModelFollowsTheVariable(t *testing.T) {
+	declared := &types.PupilModelConfig{
+		Mode: "virtual_entrance_pupil", AxialPosition: 15, Diameter: 12.5,
+	}
+	cfg := &config{pupilModel: declared}
+
+	got := backFocusPupilModel(cfg, appliedPupil{active: true, z: 22.57, dia: 11})
+	if got == nil {
+		t.Fatal("an active pupil produced no model for the solve")
+	}
+	if got.AxialPosition != 22.57 {
+		t.Errorf("solve pupil axial_position = %v, want the variable's 22.57", got.AxialPosition)
+	}
+	if got.Diameter != 11 {
+		t.Errorf("solve pupil diameter = %v, want the variable's 11", got.Diameter)
+	}
+	if declared.AxialPosition != 15 || declared.Diameter != 12.5 {
+		t.Errorf("the declared model was mutated: %+v, want 15/12.5", declared)
+	}
+
+	// No active pupil for this evaluation: the declared model still is what
+	// the analysis samples (a document without variables, or one whose values
+	// never landed).
+	if got := backFocusPupilModel(cfg, appliedPupil{z: 99}); got == nil || got.AxialPosition != 15 {
+		t.Errorf("inactive pupil must keep the declared model, got %+v", got)
+	}
+
+	// An active variable with no declared model (a pupil model that exists
+	// only in the optimisation vector): build a virtual one.
+	bare := backFocusPupilModel(&config{}, appliedPupil{active: true, z: -7, dia: 9})
+	if bare == nil || bare.Mode != "virtual_entrance_pupil" || bare.AxialPosition != -7 || bare.Diameter != 9 {
+		t.Errorf("variable-only pupil = %+v, want a virtual model at -7/9", bare)
+	}
+
+	// Neither present: nil, so the solve falls back to the plain wavefront
+	// analysis exactly as it did before virtual pupils existed.
+	if m := backFocusPupilModel(&config{}, appliedPupil{}); m != nil {
+		t.Errorf("no pupil anywhere produced %+v, want nil", m)
+	}
+}
+
+// TestBackFocusSolveFollowsThePupilVariable is the solver-side half of the
+// stale-pupil defect: within a run, the image plane must be solved for the
+// pupil-model *variables of the current evaluation*, because that is the
+// bundle the merit grid, `psf`, `wavefront` and the gate all trace. Passing
+// the declared model focused every iteration for the seed z instead; on the
+// v50 vp_z sweep (declared 15, saved 7.7..28.8) that delivered minima
+// 0.01..0.77 mm from their own best focus.
+//
+// The fixture is an off-axis field, which is what makes the plane depend on
+// the pupil *position* at all: an on-axis bundle is invariant under a z slide,
+// an off-axis one's footprint moves with it.
+func TestBackFocusSolveFollowsThePupilVariable(t *testing.T) {
+	const declaredZ, variableZ = -2.0, -20.0
+
+	gc := zeroPupilGC()
+	base := zeroPupilSurfaces()
+	fields := []types.FieldItem{{ID: 1, AngleDeg: 16, Weight: 1}}
+	bf := &types.BackFocusSolveConfig{
+		Enabled: true, Type: "wavefront", WeightType: "uniform", NumRays: 32,
+	}
+
+	// Reference planes over the pre-solve surfaces: applyVariables performs
+	// exactly one solve and touches nothing else here (no auto_aperture, no
+	// power solve), so these are the values the solver must reproduce.
+	solveAt := func(z float64) float64 {
+		work := append([]types.Surface(nil), base...)
+		surface.Precompute(work)
+		if !ApplyBackFocusSolve(work, bf, "wavefront", 0, 0, fields, nil, gc, "",
+			&types.PupilModelConfig{Mode: "virtual_entrance_pupil", AxialPosition: z, Diameter: 10}) {
+			t.Fatalf("test setup: the reference solve at pupil z=%v failed", z)
+		}
+		return backFocusTargetThickness(work, 2)
+	}
+	want := solveAt(variableZ)
+	declaredPlane := solveAt(declaredZ)
+	if math.Abs(want-declaredPlane) < 1e-3 {
+		t.Fatalf("test setup: the fixture is not pupil-sensitive (%.6f at both %v and %v)",
+			want, declaredZ, variableZ)
+	}
+
+	opt := NewOptimizer(Config{
+		Surfaces:     base,
+		GlassCatalog: gc,
+		Variables: []Variable{
+			{Name: "pmz", SurfaceID: 0, Param: "pupil_model_axial_position", Min: -40, Max: 50},
+		},
+		PupilModel: &types.PupilModelConfig{
+			Mode: "virtual_entrance_pupil", AxialPosition: declaredZ, Diameter: 10,
+		},
+		Fields: fields,
+		MeritTerms: []MeritTerm{{
+			FieldAngle: 16, FieldWeight: 1, Wavelength: 0.00058756, WavWeight: 1, Weight: 1,
+		}},
+		NumRays: 24,
+	})
+	opt.SetBackFocusSolve(bf)
+	entries := opt.backFocusTargets["config1"]
+	if len(entries) == 0 || entries[0].solveID != 2 {
+		t.Fatalf("back-focus target = %+v, want the singlet's rear surface 2", entries)
+	}
+
+	x := opt.getInitialState()
+	if x[0] != declaredZ {
+		t.Fatalf("initial axial_position = %v, want the declared %v", x[0], declaredZ)
+	}
+	x[0] = variableZ
+
+	surfMap, _, _ := opt.applyVariables(x)
+	got := backFocusTargetThickness(surfMap["config1"], 2)
+
+	if math.Abs(got-want) > 1e-9 {
+		t.Errorf("solved plane = %.9f, want %.9f (the variable's own pupil); solving at the declared %v would give %.9f — the pupil-model variable would be ignored",
+			got, want, declaredZ, declaredPlane)
+	}
+}
+
 // captureOptimizeWarnings redirects the package warning hook for the duration
 // of the test and collects everything reported through it.
 func captureOptimizeWarnings(t *testing.T) *[]string {

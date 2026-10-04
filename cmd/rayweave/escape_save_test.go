@@ -163,6 +163,45 @@ configs:
 `
 }
 
+// backFocusPupilInput is backFocusOrderInput's virtual-pupil sibling: a singlet
+// under a *declared* virtual entrance pupil whose axial_position is an
+// optimisation variable, with an off-axis field so the solved plane genuinely
+// depends on the pupil position (an on-axis bundle is invariant under a z
+// slide, an off-axis one's footprint moves with it). It exercises the save
+// path's pupil plumbing. The image plane is deliberately 60 mm across: a 16°
+// field lands 27.7 mm off-axis there, so a 30 mm plane vignettes every ray of
+// the bundle the solve is asked to analyse.
+func backFocusPupilInput() string {
+	return `glass_catalog:
+  entries:
+    - {type: model, name: N-BK7, nd: 1.5168, vd: 64.17}
+chief:
+  fields:
+    - {angle: 16, direction: [0, 1]}
+  reference_surface: 3
+  num_rays: 24
+  pupil_model:
+    mode: virtual_entrance_pupil
+    axial_position: -2.0
+    diameter: 10.0
+optimization:
+  back_focus_solve:
+    enabled: true
+    type: wavefront
+    weight_type: uniform
+    num_rays: 32
+configs:
+  - id: cfg1
+    active: true
+    fields:
+      - {id: 0, angle_deg: 16, weight: 1}
+    surfaces:
+      - {id: 1, type: sphere, radius: 50.0, thickness: 5.0, material: N-BK7, diameter: 30.0}
+      - {id: 2, type: sphere, radius: -50.0, thickness: 100.0, material: AIR, diameter: 30.0}
+      - {id: 3, type: sphere, radius: 0, thickness: 0, material: AIR, diameter: 60.0}
+`
+}
+
 // targetThickness returns the thickness of the back-focus target (here the
 // last non-air surface before the image plane) of a surface list.
 func targetThickness(surfaces []types.Surface) float64 {
@@ -196,12 +235,12 @@ func TestMaterializeSizesAperturesBeforeBackFocus(t *testing.T) {
 	// Correct order: size, then solve.
 	right := append([]types.Surface(nil), surfaces...)
 	applyApertures(right, sized)
-	applySavedBackFocusSolve(input, &input.Configs[0], right, gc)
+	applySavedBackFocusSolve(input, &input.Configs[0], right, gc, pupilModelForInput(&input))
 	rightThk := targetThickness(right)
 
 	// Legacy order: solve, then size.
 	wrong := append([]types.Surface(nil), surfaces...)
-	applySavedBackFocusSolve(input, &input.Configs[0], wrong, gc)
+	applySavedBackFocusSolve(input, &input.Configs[0], wrong, gc, pupilModelForInput(&input))
 	applyApertures(wrong, sized)
 	wrongThk := targetThickness(wrong)
 
@@ -258,7 +297,7 @@ func TestSavedMinimumNeverShipsAStaleImagePlane(t *testing.T) {
 	surface.Precompute(surfaces)
 	before := targetThickness(surfaces)
 
-	applySavedBackFocusSolve(input, &input.Configs[0], surfaces, gc)
+	applySavedBackFocusSolve(input, &input.Configs[0], surfaces, gc, pupilModelForInput(&input))
 	after := targetThickness(surfaces)
 
 	if math.IsNaN(after) {
@@ -324,7 +363,7 @@ func TestSavedBackFocusLandsOnItsFixedPoint(t *testing.T) {
 	surface.Precompute(surfaces)
 
 	work := append([]types.Surface(nil), surfaces...)
-	applySavedBackFocusSolve(input, &input.Configs[0], work, gc)
+	applySavedBackFocusSolve(input, &input.Configs[0], work, gc, pupilModelForInput(&input))
 
 	again := append([]types.Surface(nil), work...)
 	if !optimize.ApplyBackFocusSolve(again, input.Optimization.BackFocusSolve, "wavefront", 0, 0,
@@ -335,5 +374,69 @@ func TestSavedBackFocusLandsOnItsFixedPoint(t *testing.T) {
 	if residual > backFocusFixedPointToleranceMM {
 		t.Errorf("delivered image plane is %.4f mm from the solve's fixed point (tolerance %.3f mm): the save path must iterate until it settles",
 			residual, backFocusFixedPointToleranceMM)
+	}
+}
+
+// TestSavedMinimumSolvesWithItsOwnPupil pins the save path's pupil plumbing:
+// axial_position is an optimisation variable, so a materialised minimum must
+// have its image plane solved for *its* pupil, not for the document's declared
+// one. The pre-fix code read input.Chief.PupilModel inside
+// applySavedBackFocusSolve, so every --save file was focused for the declared
+// z while the file itself carried the optimised one (v50: declared 15 against
+// saved 7.7..28.8 — the delivered plane sat 0.01..0.77 mm from its own best
+// focus, 0.30 mm on the second-best minimum).
+//
+// The pin is the delivered document's own fixed point: re-solving it under
+// the pupil it carries must be a no-op, while re-solving it under the declared
+// pupil must move a long way (that contrast is what the defect looked like).
+func TestSavedMinimumSolvesWithItsOwnPupil(t *testing.T) {
+	const declaredZ, variableZ = -2.0, -20.0
+
+	input := parseYAML[types.Input]([]byte(backFocusPupilInput()))
+	gc, _ := loadCatalogs(&input, "")
+	empty := ""
+	surfaces := configSurfaces(input.Configs, &empty)
+	surface.Precompute(surfaces)
+
+	variables := []optimize.Variable{
+		{Name: "pmz", SurfaceID: 0, Param: "pupil_model_axial_position", Min: -40, Max: 50},
+	}
+	got := materializeSingleInput(input, surfaces, variables, []float64{variableZ}, gc, nil)
+
+	if pupilModelForInput(&got) == nil {
+		t.Fatal("the saved document carries no pupil model")
+	}
+	if got.Chief.PupilModel.AxialPosition != variableZ {
+		t.Errorf("saved axial_position = %v, want the minimum's %v",
+			got.Chief.PupilModel.AxialPosition, variableZ)
+	}
+
+	solveAgain := func(pupil *types.PupilModelConfig) (float64, bool) {
+		work := append([]types.Surface(nil), got.Configs[0].Surfaces...)
+		ok := optimize.ApplyBackFocusSolve(work, input.Optimization.BackFocusSolve, "wavefront", 0, 0,
+			input.Configs[0].Fields, input.Configs[0].Wavelengths, gc, chiefRayDefinition(input), pupil)
+		return math.Abs(maxThicknessDelta(got.Configs[0].Surfaces, work)), ok
+	}
+
+	own, ok := solveAgain(pupilModelForInput(&got))
+	if !ok {
+		t.Fatal("test setup: the follow-up wavefront solve did not run")
+	}
+	if own > backFocusFixedPointToleranceMM {
+		t.Errorf("delivered plane is %.4f mm from its own pupil's fixed point (tolerance %.3f mm): the save path solved at the declared pupil",
+			own, backFocusFixedPointToleranceMM)
+	}
+
+	declared, ok := solveAgain(&types.PupilModelConfig{
+		Mode:          "virtual_entrance_pupil",
+		AxialPosition: declaredZ,
+		Diameter:      input.Chief.PupilModel.Diameter,
+	})
+	if !ok {
+		t.Fatal("test setup: the declared-pupil follow-up solve did not run")
+	}
+	if declared <= backFocusFixedPointToleranceMM {
+		t.Fatalf("test setup: the fixture is not pupil-sensitive (declared-pupil residual %.4f mm)",
+			declared)
 	}
 }

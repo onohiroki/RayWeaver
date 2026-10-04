@@ -231,41 +231,90 @@ func cloneChiefForOutput(input types.Input) types.Input {
 	return input
 }
 
-// applyPupilVariables writes the virtual-entrance-pupil variables of x into
-// the input's chief pupil model, so pipeline outputs (escape minima files and
-// final results) carry the optimised pupil position/diameter. Single-config
-// variables come from the flat optimize.Variable list (params
-// pupil_model_axial_position / pupil_model_diameter).
-func applyPupilVariables(input *types.Input, variables []optimize.Variable, x []float64) {
+// pupilModelForInput returns the document's virtual entrance pupil, or nil when
+// it declares none.
+func pupilModelForInput(input *types.Input) *types.PupilModelConfig {
+	if input == nil || input.Chief == nil {
+		return nil
+	}
+	return input.Chief.PupilModel
+}
+
+// resolvedPupilModel copies base with the pupil-model variables of x applied
+// (axial_position / diameter). It returns nil only when the document declares
+// no pupil model and x carries none — the "no virtual pupil" case, which must
+// stay indistinguishable from a document that never mentioned a pupil model.
+// base is never mutated.
+func resolvedPupilModel(base *types.PupilModelConfig, variables []optimize.Variable, x []float64) *types.PupilModelConfig {
+	var out *types.PupilModelConfig
+	if base != nil {
+		cp := *base
+		out = &cp
+	}
 	for i, v := range variables {
 		if i >= len(x) {
-			return
+			return out
 		}
 		switch v.Param {
 		case "pupil_model_axial_position", "pupil_model_diameter":
 		default:
 			continue
 		}
-		if input.Chief == nil {
-			input.Chief = &types.ChiefInput{}
-		}
-		if input.Chief.PupilModel == nil {
-			input.Chief.PupilModel = &types.PupilModelConfig{Mode: "virtual_entrance_pupil"}
+		if out == nil {
+			out = &types.PupilModelConfig{Mode: "virtual_entrance_pupil"}
 		}
 		if v.Param == "pupil_model_axial_position" {
-			input.Chief.PupilModel.AxialPosition = x[i]
+			out.AxialPosition = x[i]
 		} else {
-			input.Chief.PupilModel.Diameter = x[i]
+			out.Diameter = x[i]
 		}
 	}
+	return out
 }
 
-// applyPupilVariablesMulti writes the pupil-model local variables of the flat
-// multi-config vector x into the shared chief pupil model (the pipeline YAML
-// carries one top-level pupil_model, shared by every config). The index
-// mirrors applyEscapeMulti's active-only ordering (shared variables first,
-// then local variables).
-func applyPupilVariablesMulti(input *types.Input, opt *types.OptimizationConfig, x []float64) {
+// pupilModelForX returns the virtual entrance pupil of the minimum x
+// materialises: the document's declared model with x's pupil-model values on
+// top. A solve handed this model focuses the bundle the deliverable actually
+// declares — the declared model alone is only the seed, because
+// axial_position/diameter are optimisation variables (passing the declared one
+// moved a v50 minimum's delivered plane 0.30 mm from its own best focus).
+func pupilModelForX(input *types.Input, variables []optimize.Variable, x []float64) *types.PupilModelConfig {
+	return resolvedPupilModel(pupilModelForInput(input), variables, x)
+}
+
+// applyPupilVariables writes the virtual-entrance-pupil variables of x into
+// the input's chief pupil model, so pipeline outputs (escape minima files and
+// final results) carry the optimised pupil position/diameter. Single-config
+// variables come from the flat optimize.Variable list (params
+// pupil_model_axial_position / pupil_model_diameter).
+func applyPupilVariables(input *types.Input, variables []optimize.Variable, x []float64) {
+	base := pupilModelForInput(input)
+	m := resolvedPupilModel(base, variables, x)
+	if m == nil {
+		return
+	}
+	if base != nil {
+		// Write the values in place: the model may be shared with a caller
+		// that already holds the pointer (the optimizer's config).
+		*base = *m
+		return
+	}
+	if input.Chief == nil {
+		input.Chief = &types.ChiefInput{}
+	}
+	input.Chief.PupilModel = m
+}
+
+// resolvedPupilModelMulti is resolvedPupilModel for the multi-config flat
+// vector: the index mirrors applyEscapeMulti's active-only ordering (shared
+// variables first, then local variables) and the pipeline YAML carries one
+// top-level pupil_model, shared by every config.
+func resolvedPupilModelMulti(base *types.PupilModelConfig, opt *types.OptimizationConfig, x []float64) *types.PupilModelConfig {
+	var out *types.PupilModelConfig
+	if base != nil {
+		cp := *base
+		out = &cp
+	}
 	varIdx := 0
 	for _, sv := range opt.SharedVariables {
 		if !sv.Active {
@@ -278,21 +327,46 @@ func applyPupilVariablesMulti(input *types.Input, opt *types.OptimizationConfig,
 			continue
 		}
 		if varIdx < len(x) && lv.Target.Type == "pupil_model" {
-			if input.Chief == nil {
-				input.Chief = &types.ChiefInput{}
-			}
-			if input.Chief.PupilModel == nil {
-				input.Chief.PupilModel = &types.PupilModelConfig{Mode: "virtual_entrance_pupil"}
+			if out == nil {
+				out = &types.PupilModelConfig{Mode: "virtual_entrance_pupil"}
 			}
 			switch lv.Target.Param {
 			case "axial_position":
-				input.Chief.PupilModel.AxialPosition = x[varIdx]
+				out.AxialPosition = x[varIdx]
 			case "diameter":
-				input.Chief.PupilModel.Diameter = x[varIdx]
+				out.Diameter = x[varIdx]
 			}
 		}
 		varIdx++
 	}
+	return out
+}
+
+// pupilModelForXMulti is pupilModelForX for a multi-config document: the
+// minimum's own virtual entrance pupil (see pupilModelForX).
+func pupilModelForXMulti(input *types.Input, opt *types.OptimizationConfig, x []float64) *types.PupilModelConfig {
+	return resolvedPupilModelMulti(pupilModelForInput(input), opt, x)
+}
+
+// applyPupilVariablesMulti writes the pupil-model local variables of the flat
+// multi-config vector x into the shared chief pupil model (the pipeline YAML
+// carries one top-level pupil_model, shared by every config). The index
+// mirrors applyEscapeMulti's active-only ordering (shared variables first,
+// then local variables).
+func applyPupilVariablesMulti(input *types.Input, opt *types.OptimizationConfig, x []float64) {
+	base := pupilModelForInput(input)
+	m := resolvedPupilModelMulti(base, opt, x)
+	if m == nil {
+		return
+	}
+	if base != nil {
+		*base = *m
+		return
+	}
+	if input.Chief == nil {
+		input.Chief = &types.ChiefInput{}
+	}
+	input.Chief.PupilModel = m
 }
 
 // computePupilZ returns the entrance pupil Z used to centre grid traces for one
