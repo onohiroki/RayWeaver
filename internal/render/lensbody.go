@@ -154,11 +154,20 @@ func validAtHeight(surf types.Surface, h float64) bool {
 //     surface — except for negative curvature radii where the mirror-image
 //     geometry makes surface 2 the carrier.  The chamfer geometry depends on
 //     the curvature sign:
-//   - Positive curvature: when the carrier edge is closer to the image
-//     plane (zChamfer >= zOther), the edge extends from the carrier in the
-//     +Z direction by the edge thickness (minimum 1 mm), drops vertically
-//     to the Y-midpoint, then connects diagonally to the other edge.
-//     Otherwise the classic midpoint-Z chamfer is used.
+//   - Positive curvature, free (non-cemented) surfaces: when the carrier edge
+//     is closer to the image plane (zChamfer >= zOther), the taller surface's
+//     rim is the element's physical edge, so the edge is drawn as the real
+//     edge: an axial land at the carrier height running from the carrier rim
+//     back to the other surface's rim, then a radial shoulder to the other
+//     rim's height. A +Z flange here would draw a face perpendicular to the
+//     axis outside the element, since the carrier rim is already the most +Z
+//     point of the body. Otherwise (zChamfer < zOther) the classic
+//     midpoint-Z chamfer is used.
+//   - Positive curvature with a cemented surface (and cemented negative
+//     curvature): the edge extends from the carrier in the +Z direction by the
+//     edge thickness (minimum 1 mm), drops vertically to the Y-midpoint, then
+//     connects diagonally to the other edge; otherwise the classic
+//     midpoint-Z chamfer is used.
 //   - Negative curvature (c1 < 0, non-cemented): the carrier is surface
 //     2.  When Z1 < Z2 (R2's edge lies on the +Z side of R1's edge,
 //     e.g. a tight concave R1 with a looser R2): classic midpoint
@@ -299,6 +308,17 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 			direction = -1.0
 		}
 		if (zChamfer-zOther)*direction >= 0 {
+			if direction > 0 && !e.r1Cemented && !e.r2Cemented {
+				// Positive curvature: the taller surface's rim is the
+				// element's physical edge. Draw the edge land at the carrier
+				// height from the carrier rim back to the other rim, then a
+				// shoulder down to the other rim height. The former +Z 1 mm
+				// flange drew a face perpendicular to the axis outside the
+				// element (its own rim was already the most +Z point).
+				ee.topPts = []vec2{p2Top, vec2{X: zOther, Y: hChamfer}, p1Top}
+				ee.bottomPts = []vec2{p1Bot, vec2{X: zOther, Y: -hChamfer}, p2Bot}
+				return ee
+			}
 			chamferZ := zChamfer + direction*1.0
 			chamferY := (h1eff + h2eff) / 2
 			ee.topPts = []vec2{p2Top, vec2{X: chamferZ, Y: chamferY}, vec2{X: chamferZ, Y: hChamfer}, p1Top}
