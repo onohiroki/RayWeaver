@@ -610,8 +610,9 @@ func fieldAliveThreshold(target float64) float64 {
 
 // residualTarget returns the target the merit residual (value−target)² uses.
 // For field_alive the term's `target` is the aliveness *threshold* (documented
-// in AGENTS.md: "default threshold is 0.3; override with target on the merit
-// term"), not a value to drive toward: the residual must be the plain deficit,
+// in docs/merit-and-constraints.md: "default threshold is 0.3; override with
+// target on the merit term"), not a value to drive toward: the residual must be
+// the plain deficit,
 // so a nonzero target must not be subtracted or the term would reward a field
 // that is closer to dead (a target of 0.9 would minimise at ratio 0). All other
 // kinds use their target directly.

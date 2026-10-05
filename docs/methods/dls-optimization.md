@@ -72,6 +72,32 @@ independent perturbed evaluation. `optimization.jacobian_workers` sets the
 goroutine count (default `GOMAXPROCS`), and because each column is written to
 its own slice, the result is **bit-identical for any worker count**.
 
+### 2a. Determinism requirements
+
+Identical Jacobians are only half of a reproducible run — the residual
+evaluations feeding them must be order-stable too. Three invariants hold:
+
+- **`applyVariables` must stay pure**: it may not mutate the `Optimizer` (no
+  cached state, no side effects), otherwise the perturbed evaluations would no
+  longer start from the same state and the "independent columns" property would
+  break.
+- **The Delaunay triangulation** (`internal/mesh.Triangulate`) sorts the cavity's
+  boundary edges before rebuilding it. Go map iteration order is randomized, and
+  for (near-)cocircular points the Bowyer-Watson rebuild would otherwise pick a
+  different — equally valid — triangulation on every run, feeding different
+  triangle-area weights into every wavefront/PSF fit and making the whole DLS
+  run non-reproducible. Regression test:
+  `internal/mesh/mesh_test.go` (`TestTriangulateDeterministic`).
+- **The wavefront-sample sort** (`psf.TraceWavefront`) orders the
+  completion-order-traced samples by their intrinsic entrance-pupil launch
+  coordinates, with an index tiebreak — `sort.Slice` is not stable — so the
+  Huygens summation order, and with it the floating-point result, is independent
+  of the worker count.
+
+The chief grid trace writes each result back into its grid-ordered slot
+(`pupil.Trace`), so grid accumulations and `dump_map`'s `grid_points` are stable
+for any worker count as well.
+
 ## 3. Gauss–Newton step with damping
 
 At each iteration the solver forms the normal equations

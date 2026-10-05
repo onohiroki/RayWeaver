@@ -46,7 +46,12 @@ Augmented YAML with a `paraxial_result:` section:
 | `first_principal_point` | mm from first surface |
 | `second_principal_focus` | BFL in mm from last surface |
 | `second_principal_point` | mm from last surface |
-| `element_roles` | per-lens-element glass-role classification (`surface_ids`, `phi`, `y`, `w`, `role`, `vd_target`, `nd_target`) — the same judgement the optimizer's `glass_role` merit kind uses |
+| `element_roles` | per-lens-element glass-role classification (`surface_ids`, `phi`, `y`, `w`, `role` = `dominant`\|`compensating`\|`neutral`, `nd_target`, `vd_target`, plus `nd_actual`/`vd_actual`) — the same judgement the optimizer's `glass_role` merit kind uses |
+
+`element_roles` is always populated: it is computed from the surface groups
+before the marginal-ray trace's early returns, so it is present even when that
+trace degenerates. (`internal/paraxial.GlassRoles` maps its records onto
+`types.ElementRole`, because the `types` package cannot import `paraxial`.)
 
 ## Examples
 

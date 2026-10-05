@@ -271,7 +271,8 @@ func reportStatus(pidfile, output, errPath string) error {
 	return nil
 }
 
-// doStop implements the two-stage graceful stop documented in AGENTS.md: the
+// doStop implements the two-stage graceful stop documented in docs/escape.md
+// ("Interrupting the search") and docs/rwrun.md: the
 // first signal cancels the context and lets the running DLS finish (minutes on a
 // large system, and the stdout document is only written after ParallelEscape
 // returns), the second aborts that DLS within one iteration so the run still

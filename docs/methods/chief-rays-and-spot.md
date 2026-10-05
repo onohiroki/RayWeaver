@@ -258,13 +258,13 @@ vignetting report fewer points than the requested `num_rays`.
 
 `--clear-aperture` re-traces the grid rays (a denser grid with
 `--clear-aperture-rays`) through every surface and records the maximum `|X|` or
-`|Y|` at each surface. Each surface's `diameter` is set to `2 × max(|X|,|Y|)`:
-
-- default: only **grow** diameters (never shrink the aperture stop or the
-  reference surface);
-- with `--shrink`: also shrink diameters down to the footprint, adding
-  `--clear-aperture-margin-mm` clearance on each side; the stop keeps its
-  diameter.
+`|Y|` at each surface (`chief.BeamEnvelope`, traced with the auto-aperture
+checks skipped so a stale, undersized input diameter never truncates the
+footprint). Each `auto_aperture: true` surface's `diameter` is then **set** to
+`2 × max(|X|,|Y|) + 2 × --clear-aperture-margin-mm` (default 0.2 mm) — a plain
+assignment, so diameters both **grow and shrink** to the beam. Skipped: the
+reference surface (`chief.reference_surface`), the stop surface when
+`chief.stop_surface` is set, and every `auto_aperture: false` surface.
 
 `--preserve-rays` keeps the user's existing `rays` section (aperture adjustment
 only, chief rays omitted from the output).

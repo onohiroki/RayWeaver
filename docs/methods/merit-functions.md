@@ -151,7 +151,9 @@ pupil_fill  = (1 − ratio) / ratio            # unbounded (capped at 999)
 `field_alive` is a bounded aliveness guardrail (default threshold 0.3, override
 with `target`). Its `target` is the **threshold only** — the residual is the
 plain deficit — so a high threshold penalises any fill below it rather than
-rewarding a dead field. `pupil_fill` is its unbounded counterpart: the spot/OPD
+rewarding a dead field. Its residual is bounded by `threshold`, so it needs a
+large weight to matter next to the spot/OPD residuals: **5000–10000** is the
+working range (calibrate against `optimize --verbose`'s per-term breakdown). `pupil_fill` is its unbounded counterpart: the spot/OPD
 kinds are
 computed on the **surviving** rays only, so clipping the pupil shrinks their
 residual and a design could otherwise trade a dead periphery for a smaller

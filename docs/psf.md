@@ -50,9 +50,13 @@ single flat exit pupil would break down.
 | `--fields I1,I2,...` | field indices to compute (default: all fields in the `chief` section) |
 | `--wavelengths W1,...` | wavelengths in mm (default: selected config wavelengths, else reference wavelength) |
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` (unpolarised average) |
-| `--psf-workers N` | parallel workers for the Huygens integral and wavefront tracing (default: GOMAXPROCS) |
+| `--spectral S` | polychromatic ("white") PSF: `D65` (default when given) \| `FLAT` (YAML `psf.spectral_curve`; without it the PSF is monochromatic at the selected wavelengths) |
+| `--psf-workers N` | parallel workers for the Huygens integral and wavefront tracing (default: GOMAXPROCS; YAML `psf.huygens_workers`) |
 | `--max-freq N` | MTF frequency cap in cycles/mm (default: `psf.mtf_config.max_frequency`, else the Nyquist) |
-| `--best-focus` | evaluate each field at its **best-focus image plane**: the plane shift maximizing the coherent PSF peak (the plane of greatest peak-ratio Strehl) is applied per field before the Huygens integral, removing field-curvature defocus |
+| `--mtf-spectral S` | SPD weighting for the polychromatic MTF: `D65` (default when given) \| `FLAT` (YAML `psf.mtf_config.spectral_curve`, independent of `--spectral`) |
+| `--mtf-combination S` | how wavelengths are combined for the MTF: `intensity` (default) \| `otf` (YAML `psf.mtf_config.combination_method`; recorded and written back — with an MTF spectral curve set the polychromatic MTF is always the complex-OTF average, see [methods/psf.md §5.4](methods/psf.md)) |
+| `--best-focus` | evaluate each field at its **best-focus image plane**: the plane shift maximizing the coherent PSF peak (the plane of greatest peak-ratio Strehl, seeded by the geometric spot-RMS focus) is applied per field before the Huygens integral, removing field-curvature defocus |
+| `--focus-plane ''\|all` | evaluate at a common plane instead of the input one: `all` moves the image plane to the **single all-field best focus** (the uniform-weighted wavefront back-focus solve, i.e. the plane a saved `escape`/`optimize` minimum carries) before the Huygens integral; the applied shift is reported on stderr so the pipeline document on stdout stays clean. Empty (default) keeps the input plane. Action flag — no `psf:` counterpart, nothing is written back |
 | `--converge-check BOOL` | label sampling convergence by re-evaluating each result at a higher ray count (**on by default**; use `--converge-check false` to disable) |
 | `--converge-tol T` | relative Strehl change threshold for convergence (default 0.10) |
 | `--yaml FILE` | write full structured data to FILE, one index-suffixed file per result (`FILE_0.yaml`, `FILE_1.yaml`, …) |
@@ -113,9 +117,14 @@ psf:
   fields: [0, 1]              # field indices (default: all)
   wavelengths: [0.00058756]   # mm (default: selected config wavelengths)
   polarization: "RCP+LCP"     # RCP | LCP | X | Y | RCP+LCP
+  spectral_curve: D65         # polychromatic ("white") PSF: D65 | FLAT (absent = monochromatic)
   best_focus: false           # per-field best-focus image plane (default: fixed plane)
   converge_check: true        # label sampling convergence (default: on)
   converge_tol: 0.10          # relative Strehl change threshold (default 0.10)
+  mtf_config:
+    max_frequency: 200        # cycles/mm (0/absent = Nyquist)
+    spectral_curve: D65       # MTF polychromatic weighting, independent of spectral_curve
+    combination_method: intensity   # intensity (default) | otf
 ```
 
 ## Output

@@ -72,7 +72,7 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `fields` | Field-of-view definitions from `chief.fields[]` (or `configs[].fields[]` as fallback). Shows each field's type (`angle`, `image_height`, `height`) with input values from the YAML and computed values (actual angle, image height) from the real-ray chief trace. When input and computed values match, only one is shown; when they differ (e.g. `image_height` mode where the angle is solved iteratively), both are shown as `input (computed)`. |
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
 | `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, comparison_wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
-| `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables/variable links, `merit_schedule`, and the sub-configs (`escape`, `glass_hull`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
+| `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables/variable links, `merit_schedule`, and the sub-configs (`escape`, `pso`, `glass_hull`, `glass_attraction`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
 | `escape` | Escape-function global optimisation results. Reads either the `escape_result` section of an `escape`/`pso` pipeline document or, detected automatically, an escape/pso JSONL run log (`--log FILE` / a captured `--verbose` stream), showing escape parameters, the run aggregate, discovered local minima with their per-minimum element powers and variable values (both from a pipeline document; the variables only in structured output), and the per-worker completion list (run log only). See [§11](#11-escape-section--escapepso-global-search-results). |
 | `focus` | Image-plane comparison results from the `focus_comparison` section (requires `focus mtf` / `focus psf` output). Auto-detects the MTF/PSF sub-section and renders the per-(field, wavelength) × plane table. |
 
@@ -528,7 +528,7 @@ rayweave optimize < lens.yaml | rayweave list optimization
 | Local Variables | `optimization.local_variables[]` | When local variables exist |
 | Variable Links | `optimization.variable_links[]` | When variable links exist |
 | Merit Schedule | `optimization.merit_schedule` | When a schedule is configured |
-| Escape / Glass Hull / Degenerate / Power Solve / Region Active / Adaptive Damping | sub-configs | Each only when present |
+| Escape / PSO / Glass Hull / Glass Attraction / Degenerate / Power Solve / Region Active / Adaptive Damping | sub-configs | Each only when present |
 | Optimization Result | `output.opt_results` | Only when piped from optimize |
 | Spot Flatness | `output.opt_results.spot_flatness` | Only when a `spot_flatness` / `spot_astigmatism` term was evaluated |
 

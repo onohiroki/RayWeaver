@@ -25,7 +25,9 @@ RayWeaver is a CLI ray tracing engine for optical systems, written in Go.
 go build -o rayweave ./cmd/rayweave/
 ```
 
-No external dependencies beyond `gopkg.in/yaml.v3`.
+Two external modules, both vendored through the module cache: `gopkg.in/yaml.v3`
+(the YAML pipeline format) and `golang.org/x/image` (PNG output). See
+[Dependencies](#dependencies).
 
 Windows usage is covered in [docs/windows.md](docs/windows.md): installing Go
 and PowerShell 7.2+ (the recommended shell), the `rayweaver.exe` build, and

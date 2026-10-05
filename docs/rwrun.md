@@ -121,7 +121,9 @@ when in doubt.
 go run ./cmd/rwrun -stop -n v42
 ```
 
-`escape` stops in three escalating stages (see AGENTS.md), and the first stage is
+`escape` stops in three escalating stages (see
+[escape.md § Interrupting the search](escape.md#interrupting-the-search)), and
+the first stage is
 slow: it cancels the context and the workers finish the running DLS solve, which
 can take minutes on a large system. The stdout document is written only after
 `ParallelEscape` returns. So:

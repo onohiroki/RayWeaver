@@ -1133,6 +1133,8 @@ simultaneously correct the shared (common) OPD across fields while penalising
 inter-field conflict, manufacturing difficulty and optimisation instability.
 
 Options:
+  --rings N               polar cell radial rings (default 8)
+  --angles N              polar cell angular sectors (default 16)
   --t-bins N              beam-frame tangential bins (default 8)
   --pupil-samples N       pupil grid radial samples (default 21)
   --sensitivity-samples N sensitivity trace radial samples (default 9; 0 = analytic proxy)
@@ -1149,6 +1151,10 @@ Options:
                           asphere --validate --apply < lens.yaml | chief | trace | plot
   --dls-iter N            DLS iterations per validated surface (default 20, with --validate)
   --num-rays N            pupil grid rays for validation DLS (default 64)
+  --diagnostics LIST      extra diagnostics: opd (OPD map), focus (T/S focus channel)
+                          (empty = none; see diagnostics: in asphere_candidate)
+  --focus-samples N       rays per T/S fan for the focus channel (default 17)
+  --focus-fans LIST       focus channel fans: tangential,sagittal (default both)
   --config ID             select config by id (multi-config mode)
   --glass-dir DIR         AGF glass catalog directory
 
@@ -1175,6 +1181,11 @@ with the asphere_candidate: section:
     apply: false                # insert the top validated asphere (--apply)
     validation_dls_iter: 20     # --dls-iter
     validation_num_rays: 64     # --num-rays
+    diagnostics: []             # opd | focus (extra output channels)
+    focus_samples: 17           # rays per T/S fan (focus channel)
+    focus_fans: []              # empty = tangential + sagittal
+    cell_rings: 8               # polar cell rings (--rings)
+    cell_angles: 16             # polar cell sectors (--angles)
      score_weights: {common: 0.30, unique: 0.10, fit: 0.20, sensitivity: 0.15,
                      conflict: 0.10, asym: 0.10, manufacturing: 0.05}
 
@@ -1220,6 +1231,7 @@ Options:
   --wavelengths W1,...  wavelengths in mm (default: chief wavelengths,
                          else 587.56 nm)
   --polarization S    RCP (default) | LCP | X | Y | RCP+LCP
+  --spectral S        polychromatic ("white") PSF: D65 (default) | FLAT
   --psf-workers N     parallel workers for the Huygens integral and wavefront
                          tracing (default: GOMAXPROCS)
   --max-freq N        MTF frequency cap in cycles/mm (default:
@@ -1228,9 +1240,14 @@ Options:
                          (independent of PSF spectral)
   --mtf-combination S MTF combination method: intensity (default) | otf
   --best-focus        evaluate each field at its best-focus image plane
-                         (the spot-RMS-minimizing shift, as in wavefront), so a
-                         field-curved system's defocus-dominated fixed-plane
-                         Strehl is replaced by the wavefront-quality number
+                         (the shift maximizing the coherent PSF peak, seeded by
+                         the geometric spot-RMS focus), so a field-curved
+                         system's defocus-dominated fixed-plane Strehl is
+                         replaced by the wavefront-quality number
+  --focus-plane ''|all  evaluate at a common image plane instead of the input
+                         one: 'all' moves it to the single all-field best focus
+                         (the uniform-weighted wavefront back-focus solve) and
+                         reports the applied shift on stderr
   --converge-check BOOL  label sampling convergence by re-evaluating each result
                          at a higher ray count (on by default; --converge-check
                          false skips the 1.5x re-evaluation)
@@ -1252,6 +1269,7 @@ Input YAML — psf section (optional; flags override):
     fields: [0, 1]
     wavelengths: [0.00058756, 0.00048613]
     polarization: "RCP+LCP"
+    spectral_curve: D65
     best_focus: false
     mtf_config:
       max_frequency: 200

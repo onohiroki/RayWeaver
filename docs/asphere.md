@@ -22,6 +22,7 @@ It reads standard system YAML, writes pipeline-compatible YAML with an
 |---|---|
 | `--rings N` | polar cell radial rings (default 8) |
 | `--angles N` | polar cell angular sectors (default 16) |
+| `--t-bins N` | beam-frame tangential bins (default 8; YAML `asphere_candidate.t_bins`) |
 | `--pupil-samples N` | pupil grid radial samples per (field, wavelength) (default 21) |
 | `--sensitivity-samples N` | pupil grid radial samples for the measured sensitivity pass (default 9; `0` disables the measured pass and falls back to the analytic index-contrast proxy) |
 | `--top-k N` | number of top-ranked surfaces to fit (default 3) |
@@ -32,6 +33,9 @@ It reads standard system YAML, writes pipeline-compatible YAML with an
 | `--apply` | insert the top-ranked DLS-validated asphere onto its surface and output the modified system (implies `--validate`) |
 | `--dls-iter N` | DLS iterations per validated surface (default 20, with `--validate`) |
 | `--num-rays N` | pupil grid rays for the validation DLS (default 64) |
+| `--diagnostics L` | comma-separated extra diagnostics to emit: `opd` (per-candidate OPD map) and/or `focus` (tangential/sagittal focus channel); empty (default) = no extra data (YAML `asphere_candidate.diagnostics`) |
+| `--focus-samples N` | rays per T/S fan for the `focus` diagnostic (default 17; YAML `focus_samples`) |
+| `--focus-fans L` | comma-separated fans for the `focus` diagnostic: `tangential,sagittal` (default both; YAML `focus_fans`) |
 | `--config ID` | select config by id (multi-config mode) |
 | `--glass-dir DIR` | AGF glass catalog directory |
 

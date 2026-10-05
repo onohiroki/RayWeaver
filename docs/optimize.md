@@ -130,6 +130,27 @@ skipped by `power_solve`'s snapshot when both are declared, so the variable
 wins. Adaptive damping treats `power` like curvature (sensitivity power 1.20,
 multiplier 1.50).
 
+#### Glass (`nd` / `vd`) variables and catalogue write-back
+
+An `nd` or `vd` variable targets the surface's `material`
+(see [glass-catalog.md](glass-catalog.md) for the two material forms), and the
+optimised value is materialised differently for the two:
+
+- **Inline model glass** (`material: {nd: …, vd: …}`) — updated in place; the
+  material keeps no `key`.
+- **Catalogue reference** (`material: {key: …}`) — optimised through an
+  **in-flight catalogue override** on the optimizer (`glassOverrides`): the base
+  catalogue is never mutated, so a shared key cannot leak its optimised
+  dispersion into an unrelated document or into a later run. At output,
+  `MaterializeGlassEntries` / `FinalConfigs` rewrite **every surface sharing
+  that key** as the optimised **inline** model glass (`{nd, vd}`, `key`
+  removed). No new entry is appended to `glass_catalog`, and other surfaces
+  using the same key are updated with it.
+
+So an optimised keyed glass leaves the run as a self-contained inline model,
+and re-running the output document reproduces the same dispersion without
+consulting the AGF files.
+
 ## Input — multi-config mode
 
 Multi-config mode is auto-detected when `shared_variables`, `local_variables`,
@@ -208,6 +229,35 @@ configs:
 
 Merit terms are evaluated per config and summed weighted by the config `weight`.
 A `CONF` operand selects which config's merit terms are active for each rule.
+
+### Variable links
+
+`optimization.variable_links[]` declares dependent variables whose value is
+**computed** from another variable — a shared, local, or earlier link:
+
+```yaml
+optimization:
+  variable_links:
+    - name: s5_curvature           # concave/convex symmetry: s5 = -s1
+      target: {type: surface, id: 5, param: curvature}
+      source: s1_curvature
+      relation: {scale: -1.0}      # value = scale * source + offset
+      active: true
+```
+
+- `value = relation.scale * source + relation.offset` (defaults `scale: 1`,
+  `offset: 0`).
+- Links **do not occupy the optimisation vector**: they are not varied, not
+  finite-differenced and not counted in the variable-space dimension (the
+  escape store/distance semantics therefore see only the independent
+  variables). Their values are derived inside `applyVariables`, after every
+  independent variable has been applied.
+- Links are processed in **definition order**, so a link may reference another
+  link that appears earlier in the list (chained relationships).
+
+Typical uses: concave/convex surface symmetry (`scale: -1`), cross-config
+parameter coupling (`source: cfg1_s1`, `relation: {scale: 0.5}`), and chained
+relationships (`source: another_link`).
 
 ### Merit kinds
 
@@ -552,6 +602,16 @@ rayweave query --jsonl --where 'event=="breakdown"' \
 
 ## Notes
 
+- **The dynamic pupil follows the lens.** `optimize` / `escape` seed each
+  config's grid centring from the dynamic pupil at startup, and the DLS solver
+  calls the optional `dls.PupilUpdater` (`Optimizer.UpdatePupils`) at the top of
+  every iteration, so the aperture position moves with the lens while staying
+  frozen for the duration of one iteration — the base-point residuals and the
+  Jacobian columns then share the same pupil, which is what keeps the
+  derivatives consistent. A config is skipped unless `chief.reference_surface`
+  is set **and** it declares fields (`chief.fields` / `configs[].fields`); in
+  `virtual_entrance_pupil` mode the model's `axial_position` / `diameter` are
+  used directly and the chief-ray iteration is skipped.
 - `optimization.aperture_margin` is clamped to ≥ 1.0; smaller values make the
   pupil grid smaller than the aperture and stall DLS.
 - `optimization.aperture_margin_mm` is the physical clearance (mm) added to

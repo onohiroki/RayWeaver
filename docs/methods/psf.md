@@ -102,6 +102,14 @@ of the sum of the areas of the triangles that touch it. Vignetted samples are
 excluded from the triangulation, so the weights automatically reflect the true
 pupil support.
 
+The triangulation itself is reproducible: the Bowyer–Watson cavity rebuild
+sorts its boundary edges before emitting the new triangles. Go's map iteration
+order is randomised, and for (near-)cocircular points it would otherwise pick a
+different — equally valid — triangulation on every run, feeding different
+`ΔA_j` into every wavefront/PSF fit and making the whole result (and any DLS
+run on top of it) non-reproducible. Regression test:
+`internal/mesh/mesh_test.go` (`TestTriangulateDeterministic`).
+
 ## 3. Vector Huygens integral
 
 The complex field at an image-plane point `P` is the coherent sum of secondary

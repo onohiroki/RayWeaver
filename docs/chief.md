@@ -18,9 +18,8 @@ rayweave chief [flags] < system.yaml
 | `--pass-through N` | constrain the chief ray to pass through `(0,0,0)` (centre) of surface N; overrides the YAML `pass_through.surface` |
 | `--chief-ray MODE` | chief-ray definition `entrance_pupil_centre` \| `centroid` \| `vignetting_centre` (empty = `chief.chief_ray_definition`); written back into the output when given. A definition the system cannot honour (a prescribed pupil without `stop_surface` or a virtual `pupil_model`), or an unknown name, exits 1 |
 | `--marginal-rays` | extract marginal (max/min) rays from the grid points and append them for piping into trace/plot |
-| `--clear-aperture` | trace grid rays through every surface and set `surfaces[].diameter = 2 × max radial extent`, using an entrance-pupil-based beam diameter |
-| `--shrink` | with `--clear-aperture`, also shrink diameters down to the beam footprint (default: only grow); the aperture stop keeps its diameter |
-| `--clear-aperture-margin-mm` | with `--clear-aperture --shrink`, extra clearance added to each side of the footprint (mm, default 0.2) |
+| `--clear-aperture` | trace the chief pupil grid through every surface and **set** each `auto_aperture: true` surface's `diameter = 2 × max radial extent + 2 × margin`. Because it is an assignment, diameters both **grow and shrink** to the beam footprint. The footprint comes from `chief.BeamEnvelope`, traced with the auto-aperture checks skipped, so a stale/undersized input diameter never truncates the measurement. The **reference surface** (`chief.reference_surface`), the stop surface (when `chief.stop_surface` is set) and every `auto_aperture: false` surface are skipped — a document whose reference surface is the image plane therefore cannot be re-sized this way (use the optimizer's own sizing pass for that) |
+| `--clear-aperture-margin-mm` | with `--clear-aperture`, extra clearance added to each side of the beam footprint (mm, default 0.2) |
 | `--clear-aperture-rays` | ray count for `--clear-aperture` beam tracing (0 = use `chief.num_rays`; use a dense grid for accurate footprints) |
 | `--preserve-rays` | with `--clear-aperture`, keep the existing `rays` section instead of replacing it with chief rays, and omit `chief_rays` from the output (aperture adjustment only) |
 | `--ray-fan` | compute ray fan (transverse aberration) for each field (YZ + XZ planes) |

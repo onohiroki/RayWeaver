@@ -12,6 +12,7 @@ system → ray bundle → quantities
 | Manual | Subcommand | Purpose |
 |---|---|---|
 | [format.md](format.md) | _document format_ | top-level `metadata` block and pipeline document shape |
+| [glass-catalog.md](glass-catalog.md) | _material reference_ | glass (material) forms on surfaces, AGF + inline catalogue loading, precedence, manufacturer priority |
 | [import.md](import.md) | `rayweave import` | convert ZEMAX / OSLO / CODE V files to RayWeaver YAML |
 | [export.md](export.md) | `rayweave export` | write RayWeaver YAML back out as ZEMAX / CODE V / OSLO files |
 | [list.md](list.md) | `rayweave list` | read-only listing of system data (surfaces, glasses, asphere coefficients, thickness differences, paraxial properties, ray trace results) |
@@ -24,12 +25,15 @@ system → ray bundle → quantities
 | [scale.md](scale.md) | `rayweave scale` | scale a system so its EFL matches a target |
 | [optimize.md](optimize.md) | `rayweave optimize` | DLS (damped least squares) local optimization |
 | [merit-and-constraints.md](merit-and-constraints.md) | _optimization reference_ | consolidated catalog of configurable merit terms and constraints (setting, effect, computation) |
+| [contrast.md](contrast.md) | _optimization reference_ | contrast optimization: geometric MTF, wavefront-shift and diffraction (Huygens) MTF merit kinds |
 | [escape.md](escape.md) | `rayweave escape` | escape-function global optimization |
+| [pso.md](pso.md) | `rayweave pso` | particle-swarm escape-function global optimization (same cycle and output as `escape`) |
 | [asphere.md](asphere.md) | `rayweave asphere` | rank candidate surfaces for asphere introduction and estimate initial coefficients |
 | [psf.md](psf.md) | `rayweave psf` | point-spread function on the flat image plane via direct vector Huygens integration |
 | [focus.md](focus.md) | `rayweave focus` | image-plane comparison of MTF/PSF across focus conventions |
 | [wavefront.md](wavefront.md) | `rayweave wavefront` | wavefront analysis: paraboloid, best-focus sphere, Fringe-Zernike, best image plane |
 | [query.md](query.md) | `rayweave query` | read-only YAML/JSONL selector for pipelines |
+| [clean.md](clean.md) | `rayweave clean` | strip calculation results from a pipeline document, back to a loadable input |
 | [rwrun.md](rwrun.md) | _companion binary_ `cmd/rwrun` | start a long run detached, so an AI agent's shell teardown cannot kill it |
 
 ## Calculation methods
@@ -40,11 +44,14 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
 
 - [methods/README.md](methods/README.md) — index and glossary
 - [methods/ray-tracing.md](methods/ray-tracing.md) — sequential surface-by-surface tracing, Snell's law, aspheres, Fresnel, folds, TIR
+- [methods/pupil-grids.md](methods/pupil-grids.md) — entrance-pupil grid generation and grid-ray tracing: Launch/Trace, wavefront-plane launch, OPL normalisation, determinism
 - [methods/chief-rays-and-spot.md](methods/chief-rays-and-spot.md) — pupil grids, centroid chief ray, spot statistics, ray fans, clear aperture
 - [methods/paraxial.md](methods/paraxial.md) — first-order ray trace, cardinal points, entrance/exit pupils, f/#
 - [methods/merit-functions.md](methods/merit-functions.md) — merit terms (spot RMS, distortion, colour, Seidel, OPD RMS) and weighting
 - [methods/dls-optimization.md](methods/dls-optimization.md) — damped least squares, Jacobian, augmented-Lagrangian constraints, damping control
+- [methods/region-active.md](methods/region-active.md) — Okudaira Region Active Method: dynamic active-set with hysteresis for inequality constraints
 - [methods/escape-function.md](methods/escape-function.md) — escape-function global optimization
+- [methods/pso.md](methods/pso.md) — particle-swarm phase of the `pso` escape cycle
 - [methods/glass-dispersion.md](methods/glass-dispersion.md) — Sellmeier / Schott / Cauchy / nd-vd models, glass hull
 - [methods/thin-film-tmm.md](methods/thin-film-tmm.md) — transfer-matrix method for coatings
 - [methods/asphere-candidates.md](methods/asphere-candidates.md) — asphere candidate ranking, initial sag estimation, measured sensitivity, DLS validation
