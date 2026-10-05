@@ -530,6 +530,7 @@ rayweave optimize < lens.yaml | rayweave list optimization
 | Merit Schedule | `optimization.merit_schedule` | When a schedule is configured |
 | Escape / Glass Hull / Degenerate / Power Solve / Region Active / Adaptive Damping | sub-configs | Each only when present |
 | Optimization Result | `output.opt_results` | Only when piped from optimize |
+| Spot Flatness | `output.opt_results.spot_flatness` | Only when a `spot_flatness` / `spot_astigmatism` term was evaluated |
 
 ### Table format
 
@@ -612,6 +613,30 @@ Iterations         38
 Fields: `Status`, `Iterations`, `Active Mode`, `Mode Weights` (sorted `k=v`
 pairs), `Mode Changes`, `Metric Value`, `Effective Num Rays`, `Interrupted`,
 `Reason` — each only when present.
+
+### Spot Flatness (piped)
+
+When a `spot_flatness` / `spot_astigmatism` term was evaluated, `opt_results`
+also carries `spot_flatness[]` — one row per (config, field, wavelength) of the
+spot-slope decomposition — and `list optimization` prints it as its own table
+(it is a table rather than a key-value list, so it is not folded into
+Optimization Result):
+
+```
+Spot Flatness:
+Config  Field  Angle[deg]  Wl[mm]  Defocus[mm]  Flatness[mm]  Astig[mm]  Residual[mm]  Rays  OK
+config0      0         0 5.876e-4      -0.4127       0.6181    0.0203       0.0031    64 true
+config0      1        16 5.876e-4      -1.0308      -0.4013    0.1462       0.0119    64 true
+```
+
+`Defocus` is the field's own equivalent focus shift from the delivered plane
+(positive = the plane must move +z), `Flatness` the same value minus the
+field-weighted mean over `config.fields` (what the merit term penalises),
+`Astig` the traceless-symmetric deviation (focal separation = 2×), `Residual`
+the higher-order spot content the linear fit does not explain, and `OK` marks a
+degenerate fit (all values then 0). `--format csv` emits the same columns as a
+`Spot Flatness:` section; yaml/json carry `opt_result.spot_flatness`.
+`rayweave clean` drops the whole `opt_results` section with it.
 
 ---
 

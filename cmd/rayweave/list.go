@@ -325,6 +325,11 @@ type OptimizationResultSummary struct {
 	Reason           string                       `json:"reason,omitempty" yaml:"reason,omitempty"`
 	GlassAttraction  *types.GlassAttractionResult `json:"glass_attraction,omitempty" yaml:"glass_attraction,omitempty"`
 	Snap             *types.SnapResult            `json:"snap,omitempty" yaml:"snap,omitempty"`
+	// SpotFlatness is the spot-slope diagnostic the spot_flatness /
+	// spot_astigmatism terms produce (one row per config, field and
+	// wavelength). It is a table, not a key-value list, so the renderer prints
+	// it as its own section.
+	SpotFlatness []types.SpotFlatnessRow `json:"spot_flatness,omitempty" yaml:"spot_flatness,omitempty"`
 }
 
 // optimizationListOutput is the structured (yaml/json) shape of
@@ -4096,6 +4101,7 @@ func listOptimization(input types.Input, output types.Output, format string) {
 			Reason:           or.Reason,
 			GlassAttraction:  or.GlassAttraction,
 			Snap:             or.Snap,
+			SpotFlatness:     or.SpotFlatness,
 		}
 	}
 
@@ -4152,6 +4158,14 @@ func listOptimization(input types.Input, output types.Output, format string) {
 			}
 		}
 		return p
+	}
+
+	// spotFlat is the piped spot-slope diagnostic (output.opt_results.
+	// spot_flatness), one row per (config, field, wavelength): a table rather
+	// than a key-value list, so it gets its own section.
+	var spotFlat []types.SpotFlatnessRow
+	if optResult != nil {
+		spotFlat = optResult.SpotFlatness
 	}
 
 	// scheduleTitle builds the "Merit Schedule (...)" header suffix.
@@ -4280,6 +4294,19 @@ func listOptimization(input types.Input, output types.Output, format string) {
 				fmt.Println(strings.Join(quoteCSV([]string{r.Name, r.Value}), ","))
 			}
 		}
+		if len(spotFlat) > 0 {
+			fmt.Println()
+			fmt.Println("Spot Flatness:")
+			fmt.Println("config,field,angle_deg,wavelength_mm,defocus_mm,flatness_mm,astig_mm,residual_mm,rays,ok")
+			for _, r := range spotFlat {
+				f := func(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
+				fmt.Println(strings.Join(quoteCSV([]string{
+					r.Config, strconv.Itoa(r.Field), f(r.AngleDeg), f(r.Wavelength),
+					f(r.DefocusMM), f(r.FlatnessMM), f(r.AstigMM), f(r.ResidualMM),
+					strconv.Itoa(r.Rays), strconv.FormatBool(r.OK),
+				}), ","))
+			}
+		}
 	default: // "table"
 		title := "Optimization:"
 		if opt != nil && opt.Method != "" {
@@ -4373,6 +4400,35 @@ func listOptimization(input types.Input, output types.Output, format string) {
 		}
 		if p := optResultProps(); len(p) > 0 {
 			printPropsSection("Optimization Result:", p)
+		}
+		if len(spotFlat) > 0 {
+			fmt.Println("Spot Flatness:")
+			cols := []tableColumn{
+				{header: "Config"},
+				{header: "Field", right: true},
+				{header: "Angle[deg]", right: true},
+				{header: "Wl[mm]", right: true},
+				{header: "Defocus[mm]", right: true},
+				{header: "Flatness[mm]", right: true},
+				{header: "Astig[mm]", right: true},
+				{header: "Residual[mm]", right: true},
+				{header: "Rays", right: true},
+				{header: "OK"},
+			}
+			for _, r := range spotFlat {
+				cols[0].cells = append(cols[0].cells, r.Config)
+				cols[1].cells = append(cols[1].cells, strconv.Itoa(r.Field))
+				cols[2].cells = append(cols[2].cells, formatTableFloat(r.AngleDeg))
+				cols[3].cells = append(cols[3].cells, formatTableFloat(r.Wavelength))
+				cols[4].cells = append(cols[4].cells, formatTableFloat(r.DefocusMM))
+				cols[5].cells = append(cols[5].cells, formatTableFloat(r.FlatnessMM))
+				cols[6].cells = append(cols[6].cells, formatTableFloat(r.AstigMM))
+				cols[7].cells = append(cols[7].cells, formatTableFloat(r.ResidualMM))
+				cols[8].cells = append(cols[8].cells, strconv.Itoa(r.Rays))
+				cols[9].cells = append(cols[9].cells, strconv.FormatBool(r.OK))
+			}
+			fmt.Print(renderTable(cols))
+			fmt.Println()
 		}
 	}
 }

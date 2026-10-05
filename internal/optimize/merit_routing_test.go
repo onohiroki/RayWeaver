@@ -26,8 +26,10 @@ func TestWavefrontShiftKindsRouteToDedicatedEvaluator(t *testing.T) {
 			t.Errorf("isGridTraceKind(%q) = false; the kind still needs a grid trace", k)
 		}
 	}
-	// Spot kinds stay grid kinds (and trace kinds).
-	for _, k := range []string{"", dls.MeritSpotRMS, dls.MeritSpotRMST} {
+	// Spot kinds stay grid kinds (and trace kinds), including the two
+	// spot-slope kinds that derive the field curvature / astigmatism from the
+	// same grid.
+	for _, k := range []string{"", dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotFlatness, dls.MeritSpotAstigmatism} {
 		if !isGridKind(k) || !isGridTraceKind(k) {
 			t.Errorf("spot kind %q must be both a grid kind and a trace kind", k)
 		}

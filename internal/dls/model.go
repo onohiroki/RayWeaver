@@ -9,6 +9,13 @@ const (
 	MeritSpotRMSWorst = "spot_rms_worst"
 	MeritSpotWeighted = "spot_rms_weighted"
 	MeritSpotEERadius = "spot_ee_radius"
+	// MeritSpotFlatness / MeritSpotAstigmatism are the spot-slope
+	// decomposition kinds (see internal/dls.SpotDecomp): the image-plane
+	// displacement field d(rho) = A*rho is split into the radial part
+	// (equivalent longitudinal focus shift of the field) and the traceless
+	// symmetric part (astigmatic line-foci deviation), both reported in mm.
+	MeritSpotFlatness    = "spot_flatness"
+	MeritSpotAstigmatism = "spot_astigmatism"
 )
 
 // StatusInterrupted is the solver status returned when the Stop channel is
@@ -216,10 +223,10 @@ type DampingClassStats struct {
 // DampingSummary carries class-aggregated adaptive damping diagnostics for
 // one DLS iteration, replacing the per-variable dump with a compact summary.
 type DampingSummary struct {
-	Classes  map[string]DampingClassStats `json:"classes"`
-	DMin     float64                      `json:"d_min"`
-	DMax     float64                      `json:"d_max"`
-	DMean    float64                      `json:"d_mean"`
+	Classes map[string]DampingClassStats `json:"classes"`
+	DMin    float64                      `json:"d_min"`
+	DMax    float64                      `json:"d_max"`
+	DMean   float64                      `json:"d_mean"`
 }
 
 // DampingLogger is an optional Logger capability: report class-aggregated

@@ -1285,6 +1285,13 @@ type OptimizationResult struct {
 	// wavefront solve could not analyse, failures counts the total failures
 	// over the run.
 	BackFocus *BackFocusDiagnostics `yaml:"back_focus,omitempty"`
+	// SpotFlatness reports the per-field spot-slope decomposition at the final
+	// point (present only when the merit carries a spot_flatness or
+	// spot_astigmatism term): each field's equivalent focus deviation from the
+	// delivered image plane, the mean-subtracted flatness the term penalises,
+	// and the astigmatic line-foci deviation — the spot-side read of the field
+	// curvature a gate measures with a through-focus sweep.
+	SpotFlatness []SpotFlatnessRow `yaml:"spot_flatness,omitempty"`
 }
 
 // BackFocusDiagnostics is the run-level report of the back-focus hard solve.
@@ -1303,6 +1310,39 @@ type BackFocusDiagnostics struct {
 	// Failures counts the wavefront solves that failed entirely and fell
 	// back to the paraxial focus over the run.
 	Failures int `yaml:"failures,omitempty"`
+}
+
+// SpotFlatnessRow reports one (config, field, wavelength) row of the spot-slope
+// decomposition at the final point of an optimisation run: the flux-weighted
+// least-squares fit d(rho) = A*rho of the image-plane displacement against the
+// entrance-pupil coordinate, converted to equivalent longitudinal focus shifts
+// with the paraxial focus scale B = R_marginal/NA' (mm).
+type SpotFlatnessRow struct {
+	Config string `yaml:"config,omitempty"`
+	Field  int    `yaml:"field"`
+	// AngleDeg is the field angle the row was traced at (resolved for
+	// image-height fields).
+	AngleDeg   float64 `yaml:"angle_deg"`
+	Wavelength float64 `yaml:"wavelength"`
+	// DefocusMM is the equivalent longitudinal shift of this field's own best
+	// focus relative to the delivered image plane: positive means the focus
+	// lies further from the lens, i.e. the plane must move +z to reach it.
+	DefocusMM float64 `yaml:"defocus_mm"`
+	// FlatnessMM is DefocusMM minus the field-weighted mean over the config's
+	// fields at this wavelength — exactly what the spot_flatness term
+	// penalises, and the spot-side counterpart of a through-focus
+	// field-curvature measurement (0 for a single-field config).
+	FlatnessMM float64 `yaml:"flatness_mm"`
+	// AstigMM is the per-focus astigmatic deviation: the two line foci sit at
+	// +/- AstigMM about the mean focus, i.e. 2*AstigMM apart.
+	AstigMM float64 `yaml:"astig_mm"`
+	// ResidualMM is the flux-weighted RMS displacement the linear fit does not
+	// explain (the field's higher-order spot content), in mm.
+	ResidualMM float64 `yaml:"residual_mm"`
+	// Rays is the number of surviving grid rays the fit used; OK is false when
+	// the grid could not be fitted (degenerate pupil), all values then zero.
+	Rays int  `yaml:"rays"`
+	OK   bool `yaml:"ok"`
 }
 
 // ConstraintMeasurement records the final measured value and residual of one

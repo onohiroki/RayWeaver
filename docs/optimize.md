@@ -223,6 +223,8 @@ quick summary.
 | `spot_rms_worst` | `max`(tangential RMS, sagittal RMS) |
 | `spot_rms_weighted` | flux-weighted (pupil-cell-area × intensity) RMS spot |
 | `spot_ee_radius` | encircled-energy radius (`fraction` on the term, default 0.8) |
+| `spot_flatness` | field curvature as a spot: the field's equivalent focus shift `δz` (mm) minus the mean `δz` over `config.fields` at that wavelength — a common defocus is `back_focus_solve`'s business, only the spread is penalised |
+| `spot_astigmatism` | astigmatic focal deviation (mm) from the same linear spot fit (target 0; focal separation = 2× the value) |
 | `opd_rms` | RMS optical path difference across the pupil |
 | `field_alive` | bounded pupil-aliveness deficit `max(0, threshold − valid/total)`; `target` sets the **threshold** only (default 0.3) — the residual is the plain deficit, so a high threshold never rewards a dead field |
 | `pupil_fill` | unbounded pupil-fill deficit `(1 − ratio)/ratio` (capped at 999); defeats the "clip the pupil to shrink the survivor-only residual" incentive |
@@ -390,6 +392,10 @@ comparable:
   diffraction-limited spot normalizes to 1: `spot_rms` / `spot_rms_t` /
   `spot_rms_s` / `spot_rms_worst` / `spot_rms_weighted` / `spot_ee_radius`. When
   the NA cannot be computed it falls back to the wavelength.
+- **Focus-shift kinds** (`spot_flatness`, `spot_astigmatism`) use `2λ/NA²`, the
+  plane shift that puts one wave of defocus at the pupil edge (NA recovered from
+  the Airy radius as above): the normalized residual is "waves of curvature",
+  comparable with the wavefront family. Fallback: the wavelength.
 - **Other length-valued kinds** use the term's wavelength (mm), i.e. the
   residual is measured in **waves**: `wavefront_rms_residual` /
   `wavefront_sphere_rms` / `wavefront_sphere_pv`, `opd_rms`,
@@ -606,7 +612,7 @@ search). The penalties are configured per metric category:
 ```yaml
 optimization:
   degenerate:
-    spot_value: 0.1          # mm; spot_rms / spot_rms_t/s/worst / weighted / ee_radius
+    spot_value: 0.1          # mm; spot_rms / spot_rms_t/s/worst / weighted / ee_radius / flatness / astigmatism
     opd_value: 1.0e-2        # mm; opd_rms
     wavefront_value: 1.0e-2  # mm; wavefront_* paraboloid kinds
 ```

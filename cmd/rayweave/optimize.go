@@ -544,6 +544,12 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	if bf := opt.BackFocusDiagnostics(); bf != nil {
 		optResults.BackFocus = bf
 	}
+	// Report the spot-slope decomposition the spot_flatness /
+	// spot_astigmatism terms optimised (per-field focus and astigmatism in
+	// mm), so the run's field curvature can be read straight from the result.
+	if rows := opt.SpotFlatnessDiagnostics(finalX); len(rows) > 0 {
+		optResults.SpotFlatness = rows
+	}
 	output.OptResults = optResults
 
 	writeYAML(&output)

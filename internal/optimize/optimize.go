@@ -2485,6 +2485,9 @@ func normScaleFor(kind string, explicitScale, wavelength, airyMM float64, norm *
 //   - spot-size kinds use the diffraction-limited Airy radius 0.61·λ/NA (so a
 //     diffraction-limited spot normalizes to 1), falling back to the wavelength
 //     when the NA is unavailable;
+//   - equivalent-focus-shift kinds (spot_flatness / spot_astigmatism, values in
+//     mm of image-plane shift) use the shift that puts one wave of defocus at
+//     the pupil edge, 2λ/NA²;
 //   - other length-valued aberration kinds (wavefront RMS/PV, OPD RMS,
 //     chromatic focal/image shift) use the term's wavelength in mm, so the
 //     value is measured in waves;
@@ -2512,6 +2515,24 @@ func normalizationScale(kind string, wavelengthMM, airyMM float64, scales map[st
 		}
 		return 1.0
 	}
+	if isFocusShiftScaledKind(kind) {
+		// The value is an equivalent longitudinal image-plane shift, so its
+		// natural scale is the shift that puts one wave of defocus at the pupil
+		// edge: edge OPD = dz*NA^2/2 (waves) = dz*NA^2/(2*lambda) = 1 gives
+		// dz = 2*lambda/NA^2, with NA recovered from the Airy radius
+		// (NA = 0.61*lambda/airy). Falls back to the wavelength like the other
+		// length-valued kinds when the NA is unavailable.
+		if airyMM > 0 && wavelengthMM > 0 {
+			na := 0.61 * wavelengthMM / airyMM
+			if na > 0 {
+				return 2 * wavelengthMM / (na * na)
+			}
+		}
+		if wavelengthMM > 0 {
+			return wavelengthMM
+		}
+		return 1.0
+	}
 	if isWaveScaledKind(kind) && wavelengthMM > 0 {
 		return wavelengthMM
 	}
@@ -2524,6 +2545,17 @@ func isSpotScaledKind(kind string) bool {
 	switch kind {
 	case dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
 		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius:
+		return true
+	}
+	return false
+}
+
+// isFocusShiftScaledKind reports whether a merit kind's value is an equivalent
+// longitudinal image-plane shift in mm whose natural normalization is the
+// plane shift that puts one wave of defocus at the pupil edge (2λ/NA²).
+func isFocusShiftScaledKind(kind string) bool {
+	switch kind {
+	case dls.MeritSpotFlatness, dls.MeritSpotAstigmatism:
 		return true
 	}
 	return false
@@ -3824,6 +3856,21 @@ type evalGridCache struct {
 	// (field, wavelength, frequency): one trace + Huygens integration feeds a
 	// sag+tan term pair.
 	diffraction map[diffractionMTFKey]diffractionMTFValue
+	// spotScales memoises the paraxial focus scale B (mm) per (config,
+	// wavelength) — a pure function of the evaluation's surfaces — used to turn
+	// a spot slope into an equivalent plane shift (spot_flatness /
+	// spot_astigmatism).
+	spotScales map[flatKey]float64
+	// spotMeans memoises the field-weighted mean defocus (mm) per (config,
+	// wavelength) that spot_flatness measures against.
+	spotMeans map[flatKey]float64
+}
+
+// flatKey identifies an across-field combination within one merit evaluation:
+// the spot_flatness reference plane is per (config, wavelength).
+type flatKey struct {
+	configID   string
+	wavelength float64
 }
 
 // diffractionMTFKey identifies one diffraction-MTF evaluation: the same pupil
@@ -3857,6 +3904,8 @@ func newEvalGridCache() *evalGridCache {
 		extents:     make(map[gridKey]map[int]float64),
 		wavefront:   make(map[wfKey]*wavefront.Entry),
 		diffraction: make(map[diffractionMTFKey]diffractionMTFValue),
+		spotScales:  make(map[flatKey]float64),
+		spotMeans:   make(map[flatKey]float64),
 	}
 }
 
@@ -3909,17 +3958,30 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 	}
 	seen := make(map[gridKey]bool)
 	var jobs []traceJob
+	enqueue := func(t *meritTerm) {
+		angle := o.termFieldAngle(cfg, t, surfaces, gc)
+		key := gridKey{configID: cfg.id, fieldIndex: t.fieldIndex, fieldAngle: angle, wavelength: t.wavelength}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		jobs = append(jobs, traceJob{key: key, angle: angle, wl: t.wavelength, vig: o.fieldVignetting(cfg, t)})
+	}
 	for _, st := range o.scheduledTerms(cfg) {
 		if !isGridTraceKind(st.term.kind) {
 			continue
 		}
-		angle := o.termFieldAngle(cfg, st.term, surfaces, gc)
-		key := gridKey{configID: cfg.id, fieldIndex: st.term.fieldIndex, fieldAngle: angle, wavelength: st.term.wavelength}
-		if seen[key] {
-			continue
+		enqueue(st.term)
+		// spot_flatness measures its own field against the mean over ALL of the
+		// config's fields at the same wavelength, so those grids are needed as
+		// well: pre-trace them here (in parallel) rather than letting the mean
+		// pull them one at a time from inside the term evaluation.
+		if st.term.kind == dls.MeritSpotFlatness {
+			for i := range cfg.fields {
+				t := flatnessFieldTerm(cfg, st.term, i)
+				enqueue(&t)
+			}
 		}
-		seen[key] = true
-		jobs = append(jobs, traceJob{key: key, angle: angle, wl: st.term.wavelength, vig: o.fieldVignetting(cfg, st.term)})
 	}
 	if len(jobs) == 0 {
 		return
@@ -3965,7 +4027,8 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 func isGridKind(kind string) bool {
 	switch kind {
 	case "", dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
-		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius:
+		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius,
+		dls.MeritSpotFlatness, dls.MeritSpotAstigmatism:
 		return true
 	}
 	return false
@@ -4019,6 +4082,18 @@ func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []ty
 		val = dls.ComputeSpotWeightedRMS(points)
 	case dls.MeritSpotEERadius:
 		val = dls.ComputeSpotEERadius(points, term.fraction)
+	case dls.MeritSpotFlatness:
+		fit := o.spotFitFromPoints(cfg, term, points, surfaces, gc, cache)
+		if !fit.ok {
+			return o.spotDegenerate
+		}
+		val = fit.defocusMM - o.spotFlatMean(cfg, term, fit.defocusMM, surfaces, gc, cache, p)
+	case dls.MeritSpotAstigmatism:
+		fit := o.spotFitFromPoints(cfg, term, points, surfaces, gc, cache)
+		if !fit.ok {
+			return o.spotDegenerate
+		}
+		val = fit.astigMM
 	default:
 		val = dls.ComputeSpotRMS(points)
 	}
@@ -4026,6 +4101,262 @@ func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []ty
 		return o.spotDegenerate
 	}
 	return val
+}
+
+// spotFit is one (field, wavelength) spot-slope decomposition expressed as
+// equivalent longitudinal focus quantities in mm: the field's own best-focus
+// shift from the delivered image plane and the astigmatic line-foci deviation.
+type spotFit struct {
+	defocusMM float64
+	astigMM   float64
+	residual  float64
+	rays      int
+	ok        bool
+}
+
+// spotFitFromPoints converts a traced pupil grid's spot-slope decomposition
+// (dls.ComputeSpotDecomp) into the equivalent longitudinal focus quantities:
+// dz = slope * B with the paraxial focus scale B (see spotFocusScale). A
+// degenerate fit (too few surviving rays, effectively collinear pupil) or an
+// unresolvable scale yields ok = false, which the caller reports as the
+// bounded degenerate penalty like every other grid kind.
+func (o *Optimizer) spotFitFromPoints(cfg *config, term *meritTerm, points []dls.IPoint, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache) spotFit {
+	d := dls.ComputeSpotDecomp(points)
+	if !d.OK {
+		return spotFit{}
+	}
+	b := o.spotFocusScale(cfg, surfaces, gc, term.wavelength, cache)
+	if !(b > 0) {
+		return spotFit{}
+	}
+	return spotFit{
+		defocusMM: d.Defocus * b,
+		astigMM:   d.Astig * b,
+		residual:  d.Residual,
+		rays:      d.Count,
+		ok:        true,
+	}
+}
+
+// spotFitFor is spotFitFromPoints for an arbitrary term of the config: it
+// traces (or fetches from the evaluation cache) that term's pupil grid first.
+// The across-field mean of spot_flatness and the diagnostics both need the fit
+// of fields that may carry no merit term of their own.
+func (o *Optimizer) spotFitFor(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) spotFit {
+	points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+	return o.spotFitFromPoints(cfg, term, points, surfaces, gc, cache)
+}
+
+// spotFocusScale returns the paraxial focus scale B = R_marginal/NA' (mm): the
+// distance over which the entrance-pupil bundle converges to the paraxial
+// focus, and therefore the conversion from a spot slope (mm of image
+// displacement per mm of entrance-pupil coordinate) to the equivalent
+// longitudinal plane shift. A plane displaced by dz moves a ray entering the
+// pupil at height rho by dz*rho*NA'/R, so dz = slope*R/NA'.
+//
+// R and NA' come from the same paraxial marginal ray: paraxial.Compute defines
+// ImageSpaceNA as EntrancePupilDiameter/(2*|EFL|), so B evaluates to |EFL|;
+// the ratio form is kept because it stays correct should the NA ever become
+// the true finite-conjugate marginal angle. A virtual entrance pupil is
+// resolved exactly like airyRadiusMM does (EPD = diameter, NA = EPD/(2*EFL)),
+// so the scale follows the pupil the grid is actually launched from. The
+// focal length is the last resort; 0 means no scale is available and the term
+// reports the degenerate penalty.
+func (o *Optimizer) spotFocusScale(cfg *config, surfaces []types.Surface, gc *glass.Catalog, wavelength float64, cache *evalGridCache) float64 {
+	wl := wavelength
+	if wl <= 0 {
+		wl = effectiveReferenceWavelength(cfg.referenceWavelength)
+	}
+	if wl <= 0 || len(surfaces) == 0 {
+		return 0
+	}
+	key := flatKey{configID: cfg.id, wavelength: wl}
+	if cache != nil {
+		if b, ok := cache.spotScales[key]; ok {
+			return b
+		}
+	}
+	if gc == nil {
+		gc = glass.NewCatalog()
+	}
+	pr := paraxial.Compute(types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}, wl, gc, 0, nil)
+	na := pr.ImageSpaceNA
+	if na <= 0 {
+		na = pr.InfConjImageSpaceNA
+	}
+	epd := pr.EntrancePupilDiameter
+	efl := math.Abs(pr.FocalLength)
+	if cfg.pupilModel != nil && cfg.pupilModel.Mode == "virtual_entrance_pupil" && cfg.pupilModel.Diameter > 0 {
+		epd = cfg.pupilModel.Diameter
+		if efl > 1e-9 {
+			na = epd / (2 * efl)
+		}
+	}
+	b := 0.0
+	if na > 0 && epd > 0 {
+		b = (epd / 2) / na
+	} else if efl > 1e-9 {
+		b = efl
+	}
+	if cache != nil {
+		cache.spotScales[key] = b
+	}
+	return b
+}
+
+// flatnessFieldTerm clones a spot_flatness term for config field i so the
+// across-field mean is traced with that field's own angle (or image height),
+// vignetting ellipse and direction — the same state gridForTerm uses for the
+// field's own terms, hence the shared cache key.
+func flatnessFieldTerm(cfg *config, base *meritTerm, i int) meritTerm {
+	t := *base
+	t.fieldIndex = i
+	t.useImageHeight = false
+	t.imageHeight = 0
+	t.fieldAngle = 0
+	f := cfg.fields[i]
+	if f.AngleDeg != 0 || f.ImageHeight == 0 {
+		t.fieldAngle = f.AngleDeg
+	} else {
+		t.useImageHeight = true
+		t.imageHeight = f.ImageHeight
+	}
+	t.fieldWeight = 1.0
+	if f.Weight > 0 {
+		t.fieldWeight = f.Weight
+	}
+	if dx, dy, ok := fieldDir(f.Direction); ok {
+		t.fieldDirX, t.fieldDirY = dx, dy
+	}
+	return t
+}
+
+// spotFlatMean returns the field-weighted mean defocus (mm) across a config's
+// fields at the term's wavelength: the reference plane spot_flatness measures
+// against, so a defocus common to every field — the part back_focus_solve owns
+// — cancels and only the field-to-field spread (field curvature) is pushed.
+// Fields whose grid cannot be fitted are skipped. A config that declares no
+// fields, or whose fields are all unanalyzable while the term's own field is
+// undeclared, falls back to the term's own defocus, which makes the
+// mean-subtracted value 0: with a single field there is no curvature to
+// measure.
+func (o *Optimizer) spotFlatMean(cfg *config, term *meritTerm, own float64, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
+	key := flatKey{configID: cfg.id, wavelength: term.wavelength}
+	if cache != nil {
+		if m, ok := cache.spotMeans[key]; ok {
+			return m
+		}
+	}
+	var sum, wsum float64
+	for i := range cfg.fields {
+		t := flatnessFieldTerm(cfg, term, i)
+		fit := o.spotFitFor(cfg, &t, surfaces, gc, cache, p)
+		if !fit.ok {
+			continue
+		}
+		sum += t.fieldWeight * fit.defocusMM
+		wsum += t.fieldWeight
+	}
+	mean := own
+	if wsum > 0 {
+		mean = sum / wsum
+		if cache != nil {
+			// Only the config-field mean is shared: the own-field fallback
+			// depends on the asking term.
+			cache.spotMeans[key] = mean
+		}
+	}
+	return mean
+}
+
+// spotSlopeWavelengths returns, in declaration order, every wavelength a
+// config's spot_flatness / spot_astigmatism terms use (fixed merit terms and
+// every merit mode alike), so the diagnostics cover what the run optimised.
+func (o *Optimizer) spotSlopeWavelengths(cfg *config) []float64 {
+	var wls []float64
+	seen := make(map[float64]bool)
+	scan := func(terms []meritTerm) {
+		for i := range terms {
+			k := terms[i].kind
+			if k != dls.MeritSpotFlatness && k != dls.MeritSpotAstigmatism {
+				continue
+			}
+			wl := terms[i].wavelength
+			if seen[wl] {
+				continue
+			}
+			seen[wl] = true
+			wls = append(wls, wl)
+		}
+	}
+	scan(cfg.meritTerms)
+	for _, terms := range cfg.meritModes {
+		scan(terms)
+	}
+	return wls
+}
+
+// SpotFlatnessDiagnostics evaluates the spot-slope decomposition for every
+// (config, field, wavelength) a spot_flatness / spot_astigmatism merit term
+// covers, at the given variable state: the exact numbers the terms see,
+// reported in mm (equivalent focus deviation from the delivered image plane,
+// its mean-subtracted flatness, the astigmatic line-foci deviation and the
+// unexplained residual) so a run's field curvature can be read off — and
+// compared with a gate's through-focus measurement — without re-measuring.
+// Returns nil when the merit declares neither kind.
+func (o *Optimizer) SpotFlatnessDiagnostics(x []float64) []types.SpotFlatnessRow {
+	type need struct {
+		cfg *config
+		wls []float64
+	}
+	var needs []need
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		wls := o.spotSlopeWavelengths(cfg)
+		if len(wls) == 0 || len(cfg.fields) == 0 {
+			continue
+		}
+		needs = append(needs, need{cfg: cfg, wls: wls})
+	}
+	if len(needs) == 0 {
+		return nil
+	}
+
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+	cache := newEvalGridCache()
+	var rows []types.SpotFlatnessRow
+	for _, n := range needs {
+		cfg := n.cfg
+		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc, cache, p)
+		for _, wl := range n.wls {
+			base := meritTerm{kind: dls.MeritSpotFlatness, fieldIndex: -1, wavelength: wl}
+			mean := o.spotFlatMean(cfg, &base, 0, surfaces, gc, cache, p)
+			for fi := range cfg.fields {
+				t := flatnessFieldTerm(cfg, &base, fi)
+				fit := o.spotFitFor(cfg, &t, surfaces, gc, cache, p)
+				row := types.SpotFlatnessRow{
+					Config:     cfg.id,
+					Field:      cfg.fields[fi].ID,
+					AngleDeg:   o.termFieldAngle(cfg, &t, surfaces, gc),
+					Wavelength: wl,
+					OK:         fit.ok,
+					Rays:       fit.rays,
+				}
+				if fit.ok {
+					row.DefocusMM = fit.defocusMM
+					row.FlatnessMM = fit.defocusMM - mean
+					row.AstigMM = fit.astigMM
+					row.ResidualMM = fit.residual
+				}
+				rows = append(rows, row)
+			}
+		}
+	}
+	return rows
 }
 
 // gridWorkers returns the number of goroutines for grid-ray parallelism. The

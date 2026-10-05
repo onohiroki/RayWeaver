@@ -30,6 +30,8 @@ small). Weighting lets the designer balance fields, wavelengths and configs
 | `spot_rms_t` / `spot_rms_s` / `spot_rms_worst` | flux-weighted tangential / sagittal spot RMS and their maximum (see below) |
 | `spot_rms_weighted` | flux-weighted (pupil-cell-area × intensity) RMS spot size |
 | `spot_ee_radius` | encircled-energy radius (EE fraction via `fraction`, default 0.8) |
+| `spot_flatness` | equivalent focus shift `δz` (mm) minus the mean over `config.fields` at that wavelength — the field-curvature **spread** (see below) |
+| `spot_astigmatism` | astigmatic focal deviation (mm) from the same linear spot fit, target 0 |
 | `opd_rms` | RMS optical path difference across the pupil grid |
 | `field_alive` | bounded pupil-aliveness deficit `max(0, threshold − valid/total)`; `target` is the **threshold** only (default 0.3) — the residual is the plain deficit |
 | `pupil_fill` | unbounded pupil-fill deficit `(1 − ratio)/ratio` (capped at 999), so partial clipping cannot be traded against a smaller survivor-only residual |
@@ -82,6 +84,46 @@ All grid-based kinds contribute `(value − target)²`, so `target: 0` minimises
 them and a non-zero target drives them to that value — except `field_alive`,
 whose `target` is an aliveness threshold and whose residual target is always 0
 (see [field_alive / pupil_fill](#field_alive--pupil_fill)).
+
+### spot-slope kinds (spot_flatness / spot_astigmatism)
+
+These two reuse the same pupil grid but fit the spot's **linear displacement
+field** instead of its size: a flux-weighted (cell area × transmitted intensity)
+least-squares fit of `d(ρ) = A·ρ + t`, where `d` is the ray's image-plane
+intersection relative to the flux-weighted centroid and `ρ` its entrance-pupil
+coordinate in mm. The intercept is estimated and removed (so a chief-ray offset
+leaks into neither), and the antisymmetric part of `A` (image rotation) is
+excluded, leaving
+
+```
+Defocus = trace(A)/2                              isotropic part
+Astig   = hypot((A11−A22)/2, (A12+A21)/2)         traceless symmetric part
+```
+
+Both are converted to an equivalent longitudinal focus shift with the paraxial
+focus scale `B = R_marginal/NA′ ≡ |EFL|`: a plane displaced by `dz` moves a
+pupil ray at height `ρ` by `dz·ρ·NA′/R`, hence `δz = Defocus·B`, and the two
+astigmatic line foci sit at `±Astig·B`. The conversion is exact for an
+aberration-free bundle; on an uncorrected field the tangential and sagittal
+bundles converge at different rates, biasing each field's `δz` by roughly
+`astig/B`.
+
+- **`spot_flatness`** subtracts the field-weighted mean of `δz` over
+  `config.fields` at the term's wavelength, so the term measures the **spread
+  across fields** (the field curvature) and leaves the common defocus to
+  `back_focus_solve` / the `focus psf --planes file,all` gate. A config with no
+  declared fields has no curvature to measure and evaluates to 0.
+- **`spot_astigmatism`** is the absolute traceless-symmetric magnitude
+  (residual target 0; focal separation = 2× the reported value). Being
+  traceless, it is invariant under a shift of the delivered image plane.
+
+Both contribute `(value − target)²` like the other grid kinds. A fit that
+degenerates (fewer than four accepted rays, zero total weight, a
+one-dimensional surviving pupil) reports the bounded spot penalty. The
+`optimize` result carries `opt_results.spot_flatness[]` (per config/field/
+wavelength: `defocus_mm`, `flatness_mm`, `astig_mm`, `residual_mm`, `rays`,
+`ok`) — `defocus_mm` is the *unsubtracted* `δz`, so the absolute plane offset
+stays visible next to the penalised spread.
 
 ### opd_rms
 

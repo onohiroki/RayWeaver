@@ -16,12 +16,30 @@ import (
 )
 
 const (
-	MeritSpotRMS           = "spot_rms"
-	MeritSpotRMST          = "spot_rms_t"
-	MeritSpotRMSS          = "spot_rms_s"
-	MeritSpotRMSWorst      = "spot_rms_worst"
-	MeritSpotWeightedRMS   = "spot_rms_weighted"
-	MeritSpotEERadius      = "spot_ee_radius"
+	MeritSpotRMS         = "spot_rms"
+	MeritSpotRMST        = "spot_rms_t"
+	MeritSpotRMSS        = "spot_rms_s"
+	MeritSpotRMSWorst    = "spot_rms_worst"
+	MeritSpotWeightedRMS = "spot_rms_weighted"
+	MeritSpotEERadius    = "spot_ee_radius"
+	// MeritSpotFlatness penalises field curvature straight from the geometric
+	// spot: the flux-weighted least-squares fit d(rho) = A*rho of the
+	// image-plane displacement against the entrance-pupil coordinate gives the
+	// field's equivalent longitudinal focus shift dz = trace(A)/2 * B (mm, the
+	// same quantity the gate measures as field curvature, and the spot-side
+	// counterpart of wavefront_defocus with wavefront_reference: image_plane).
+	// The term's value is that shift minus the field-weighted mean over the
+	// config's fields at the term's wavelength, so a common defocus (the part
+	// back_focus_solve owns) cancels and only the field-to-field spread is
+	// pushed. A config without declared fields has no curvature to measure and
+	// the term reads 0.
+	MeritSpotFlatness = "spot_flatness"
+	// MeritSpotAstigmatism is the traceless symmetric part of the same fit:
+	// the deviation of the two astigmatic line foci from the mean focus (mm),
+	// i.e. half their separation. It replaces wavefront_astigmatism at the
+	// cost of the spot grid already traced for the spot kinds instead of a
+	// wavefront trace.
+	MeritSpotAstigmatism   = "spot_astigmatism"
 	MeritDistortionPct     = "distortion_pct"
 	MeritLateralColor      = "lateral_color"
 	MeritLongitudinalColor = "longitudinal_color"

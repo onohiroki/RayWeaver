@@ -185,10 +185,14 @@ intensity** (Fresnel/TMM losses), falling back to area, then to equal weight.
 | `spot_rms_worst` | `max(RMS_T, RMS_S)` |
 | `spot_rms_weighted` | Flux-weighted RMS about the flux-weighted centroid |
 | `spot_ee_radius` | Radius about the flux-weighted centroid enclosing the flux `fraction` (default 0.8) |
+| `spot_flatness` | Field-curvature defocus: the field's equivalent focus shift `δz` (mm) **minus the mean `δz` over `config.fields` at that wavelength** |
+| `spot_astigmatism` | Astigmatic focal deviation (mm): `hypot` of the traceless-symmetric part of the same linear fit, converted with the focus scale (focal separation = 2× the value) |
 
 ```yaml
 - {kind: spot_rms_weighted, field: 1, wavelength: 0.0005876, weight: 1.0}
 - {kind: spot_ee_radius,     field: 2, wavelength: 0.0005876, fraction: 0.8, weight: 1.0}
+- {kind: spot_flatness,      field: 1, wavelength: 0.0005876, weight: 4000}
+- {kind: spot_astigmatism,   field: 1, wavelength: 0.0005876, weight: 4000}
 ```
 
 **Why the off-axis kinds exist.** Plain `spot_rms` is rotationally symmetric
@@ -203,6 +207,46 @@ area-weighted spot statistics are computed about the flux-weighted centroid (the
 same statistics `chief` and `vignette` report). The residual is
 `(value − target)²`; a `target` of 0 (the default) minimizes the spot, a non-zero
 target drives the spot to that size. Degenerate grid → bounded spot penalty.
+
+#### `spot_flatness` / `spot_astigmatism` — the spot-slope kinds
+
+Both fit the **linear displacement field** of the traced spot by flux-weighted
+least squares (cell area × transmitted intensity, intercept removed so a
+chief-ray offset cannot leak in):
+
+```
+d(ρ) = A·ρ + t            ρ = entrance-pupil coordinate (mm)
+Defocus = trace(A)/2                              isotropic part
+Astig   = hypot((A11−A22)/2, (A12+A21)/2)         traceless symmetric part
+```
+
+and convert the slope to a longitudinal plane displacement with the **paraxial
+focus scale `B = R_marginal/NA′ ≡ |EFL|`** (`paraxial.Compute` defines
+`ImageSpaceNA = EPD/(2·|EFL|)`): a plane displaced by `dz` moves a pupil ray at
+height `ρ` by `dz·ρ·NA′/R`, hence `δz = Defocus·B` and the two astigmatic line
+foci sit at `±Astig·B`. `B` is exact for an aberration-free bundle; on an
+uncorrected field the tangential and sagittal bundles converge at different
+rates, which biases each field's `δz` by roughly `astig/B` — negligible on a
+corrected design, and, because it enters every field the same way, a weight
+factor rather than a bias in the mean-subtracted residual.
+
+- **`spot_flatness`** reports `δz − mean(δz)` over `config.fields` at the term's
+  wavelength (field weights included). The subtracted mean is the *common*
+  defocus that `back_focus_solve` owns and that the `focus psf --planes file,all`
+  gate measures separately — only the **spread across fields** (the field
+  curvature) is penalised. A config that declares no fields has no curvature to
+  measure and the term evaluates to 0.
+- **`spot_astigmatism`** is the absolute traceless-symmetric magnitude (target
+  0), a plane-invariant quantity: a common plane shift cannot create or remove
+  it.
+
+The companion diagnostics (`optimize` writes `opt_results.spot_flatness[]`,
+one row per (config, field, wavelength): `defocus_mm`, `flatness_mm`,
+`astig_mm`, `residual_mm`, `rays`, `ok`) report the *unsubtracted* `δz` next to
+the value the merit uses, so the absolute plane offset and the penalised spread
+can be compared directly. `residual_mm` is the higher-order spot content the
+linear model does not explain. Degenerate grid or unusable scale → bounded spot
+penalty.
 
 ### 3.2 Pupil-coverage kinds
 
@@ -578,6 +622,11 @@ comparable across kinds with different units:
   `spot_ee_radius`) use the diffraction-limited Airy radius `0.61·λ/NA`, so a
   diffraction-limited spot normalizes to 1 (falls back to the wavelength when
   the NA is unavailable).
+- **Focus-shift kinds** (`spot_flatness`, `spot_astigmatism`) use `2λ/NA²` — the
+  plane shift that puts one wave of defocus at the pupil edge (NA recovered from
+  the Airy radius as above, falling back to the wavelength): a design at the
+  diffraction limit has field curvature / astigmatism at that scale, so the
+  normalized residual is "waves of curvature" just like the wavefront family.
 - **Other length-valued kinds** (`opd_rms`, `wavefront_rms_residual`,
   `wavefront_sphere_rms`, `wavefront_sphere_pv`, `longitudinal_color`,
   `lateral_color`) use the term's wavelength (mm), i.e. the residual is measured
@@ -689,7 +738,7 @@ merit and stalled the line search):
 ```yaml
 optimization:
   degenerate:
-    spot_value: 0.1          # mm; spot_rms*, spot_ee_radius
+    spot_value: 0.1          # mm; spot_rms*, spot_ee_radius, spot_flatness, spot_astigmatism
     opd_value: 1.0e-2        # mm; opd_rms
     wavefront_value: 1.0e-2  # mm; wavefront_* kinds
 ```
@@ -813,6 +862,8 @@ per-config constraints when present, else `optimization.constraints` (marked
 | `spot_rms_worst` | attack worst axis | `field`, `target` | `max(RMS_T, RMS_S)` |
 | `spot_rms_weighted` | energy-weighted RMS | `field`, `target` | flux-weighted RMS |
 | `spot_ee_radius` | tail-insensitive spot | `field`, `fraction` | EE radius |
+| `spot_flatness` | field curvature as a spot | `field` | `δz − mean(δz)` over `config.fields` (mm) |
+| `spot_astigmatism` | astigmatism as a spot | `field`, `target` | traceless-symmetric focal deviation (mm) |
 | `field_alive` | keep fields alive | `field`, `target`=threshold | bounded deficit |
 | `pupil_fill` | defeat pupil clipping | `field` | `(1−ratio)/ratio` |
 | `opd_rms` | minimize OPD | `field` | RMS OPL deviation |
