@@ -194,7 +194,7 @@ func materializeMultiInput(input types.Input, opt *types.OptimizationConfig, x [
 // optimizer evaluated (the escape's variable-only materialization would
 // otherwise keep the template thickness). It mirrors the optimizer's solve type
 // selection using the merit schedule's terminal phase (weight_to == 1), so the
-// saved minima land on the wavefront best focus the run ends on.
+// saved minima land on the wavefront/spot best focus the run ends on.
 //
 // pupilModel is the minimum's own virtual entrance pupil — input's declared
 // model with that minimum's pupil-model variables applied (pupilModelForX /
@@ -218,9 +218,9 @@ func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []t
 	before := append([]types.Surface(nil), surfaces...)
 	solved := optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, bfType,
 		stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel)
-	if !solved && bfType == "wavefront" {
+	if !solved && realRayFocusType(bfType) {
 		// A recorded minimum must never ship the plane it was recorded with:
-		// `escape extract` copies these surfaces verbatim, so a wavefront
+		// `escape extract` copies these surfaces verbatim, so a wavefront/spot
 		// failure would leave an image plane tens of mm out of focus in the
 		// deliverable. The paraxial focus is cheap and always evaluable, so it
 		// is the fallback (the failure itself was already reported by
@@ -238,12 +238,21 @@ func applySavedBackFocusSolve(input types.Input, cfg *types.Config, surfaces []t
 	// The probe compares first applications, so take the configured-rays shift
 	// before the fixed-point iteration below re-runs the solve.
 	firstShift := maxThicknessDelta(before, surfaces)
-	if bfType == "wavefront" {
+	if realRayFocusType(bfType) {
 		if math.Abs(firstShift) > backFocusFixedPointToleranceMM {
-			iterateBackFocusToFixedPoint(input, cfg, surfaces, stopSurface, refWavelength, gc, pupilModel)
+			iterateBackFocusToFixedPoint(input, cfg, surfaces, bfType, stopSurface, refWavelength, gc, pupilModel)
 		}
-		warnIfBackFocusSamplingUnstable(input, cfg, before, firstShift, stopSurface, refWavelength, gc, pupilModel)
+		warnIfBackFocusSamplingUnstable(input, cfg, before, firstShift, bfType, stopSurface, refWavelength, gc, pupilModel)
 	}
+}
+
+// realRayFocusType reports whether bfType is one of the two real-ray
+// back-focus solves. Both derive their plane from a pupil-grid trace, so both
+// are fixed-point maps worth iterating to convergence on the save path and both
+// are worth the sampling-stability probe; the paraxial solve is neither (it is
+// analytic and exact at any sampling).
+func realRayFocusType(bfType string) bool {
+	return bfType == "wavefront" || bfType == "spot"
 }
 
 // backFocusFixedPointToleranceMM is the per-pass image-plane move below which
@@ -255,8 +264,8 @@ const backFocusFixedPointToleranceMM = 0.01
 // pass 0).
 const backFocusMaxPasses = 3
 
-// iterateBackFocusToFixedPoint re-applies the wavefront back-focus solve until
-// it stops moving the image plane.
+// iterateBackFocusToFixedPoint re-applies the wavefront / spot back-focus solve
+// until it stops moving the image plane.
 //
 // The solve is a fixed-point map, not a one-shot correction: it derives the
 // dynamic pupil and the best-focus search from the surfaces it is handed, so
@@ -271,12 +280,12 @@ const backFocusMaxPasses = 3
 // materializeSingleInput) — so delivering the solve's fixed point rather than
 // its first shot is the same kind of correction: the recorded merit is a
 // search statistic, the document is the deliverable.
-func iterateBackFocusToFixedPoint(input types.Input, cfg *types.Config, surfaces []types.Surface, stopSurface int, refWavelength float64, gc *glass.Catalog, pupilModel *types.PupilModelConfig) {
+func iterateBackFocusToFixedPoint(input types.Input, cfg *types.Config, surfaces []types.Surface, bfType string, stopSurface int, refWavelength float64, gc *glass.Catalog, pupilModel *types.PupilModelConfig) {
 	shift := 0.0
 	settled := false
 	for pass := 1; pass <= backFocusMaxPasses; pass++ {
 		snap := append([]types.Surface(nil), surfaces...)
-		if !optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, "wavefront",
+		if !optimize.ApplyBackFocusSolve(surfaces, input.Optimization.BackFocusSolve, bfType,
 			stopSurface, refWavelength, cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel) {
 			return
 		}
@@ -325,14 +334,16 @@ func backFocusSamplingUnstable(applied, probe float64) bool {
 // millisecond.
 var backFocusSamplingWarned sync.Map
 
-// warnIfBackFocusSamplingUnstable re-runs the wavefront back-focus solve at
-// twice the configured ray count from the same starting plane. The solve
-// maximises the coherent PSF peak, which is sampling-sensitive for aberrated
-// field sets: at back_focus_solve.num_rays 128 the search can settle on a
-// different extremum than at 200+, quietly shipping a minimum ~0.3 mm out of
-// focus while every other gate still passes (the delivered MTF collapses).
-// This runs once per recorded minimum, so the extra wavefront solve is free.
-func warnIfBackFocusSamplingUnstable(input types.Input, cfg *types.Config, before []types.Surface, appliedShift float64, stopSurface int, refWavelength float64, gc *glass.Catalog, pupilModel *types.PupilModelConfig) {
+// warnIfBackFocusSamplingUnstable re-runs the wavefront / spot back-focus
+// solve at twice the configured ray count from the same starting plane. The
+// wavefront solve maximises the coherent PSF peak, which is sampling-sensitive
+// for aberrated field sets: at back_focus_solve.num_rays 128 the search can
+// settle on a different extremum than at 200+, quietly shipping a minimum
+// ~0.3 mm out of focus while every other gate still passes (the delivered MTF
+// collapses). The spot solve is a closed-form quadratic of the traced rays and
+// is far more stable, but it reads the same sampling, so it is probed the same
+// way. This runs once per recorded minimum, so the extra solve is free.
+func warnIfBackFocusSamplingUnstable(input types.Input, cfg *types.Config, before []types.Surface, appliedShift float64, bfType string, stopSurface int, refWavelength float64, gc *glass.Catalog, pupilModel *types.PupilModelConfig) {
 	src := input.Optimization.BackFocusSolve
 	// Above this the doubling is too expensive to be worth probing, and a
 	// system that is unstable at 4000 rays has a different problem.
@@ -343,10 +354,10 @@ func warnIfBackFocusSamplingUnstable(input types.Input, cfg *types.Config, befor
 	if probe.NumRays > 0 {
 		probe.NumRays *= 2
 	} else {
-		probe.NumRays = 400 // twice wavefrontBackFocusShiftFor's 200 default
+		probe.NumRays = 400 // twice the 200-ray default of the real-ray solves
 	}
 	retry := append([]types.Surface(nil), before...)
-	if !optimize.ApplyBackFocusSolve(retry, &probe, "wavefront", stopSurface, refWavelength,
+	if !optimize.ApplyBackFocusSolve(retry, &probe, bfType, stopSurface, refWavelength,
 		cfg.Fields, cfg.Wavelengths, gc, chiefRayDefinition(input), pupilModel) {
 		return
 	}

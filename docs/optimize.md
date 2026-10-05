@@ -361,8 +361,8 @@ escape phase and a full local mode during the clean phase). The active
 mode is reported in the output (`opt_results.active_mode`) and the
 per-iteration weights as JSONL `weights` events.
 
-A mode may also carry a `back_focus_type` (`paraxial` / `wavefront`) so the
-conditional schedule drives the
+A mode may also carry a `back_focus_type` (`paraxial` / `spot` / `wavefront`) so
+the conditional schedule drives the
 [back-focus solve](#back-focus-solve-optimizationback_focus_solve) type — see
 that section for the dynamic switching.
 
@@ -416,20 +416,20 @@ term's contribution at the final point (see [Logs and `query`](#logs-and-query))
 
 A **hard solve** that keeps the image plane at the desired focus during
 optimization: after every variable application (and after `power_solve`) the
-target surface's thickness is adjusted so the paraxial or wavefront best focus
-coincides with the image plane. It is the back-focus analogue of the `power`
-variable / `power_solve` family, and runs per config, so a multi-config zoom
-pins each config's own back focus.
+target surface's thickness is adjusted so the paraxial, spot-RMS or wavefront
+best focus coincides with the image plane. It is the back-focus analogue of the
+`power` variable / `power_solve` family, and runs per config, so a multi-config
+zoom pins each config's own back focus.
 
 ```yaml
 optimization:
   back_focus_solve:
     enabled: true
-    type: paraxial             # paraxial (default) | wavefront
+    type: paraxial             # paraxial (default) | spot | wavefront
     surface: 8                 # 0 = auto-detect (back air gap of the last powered element)
-    reference_surface: 0       # wavefront only; 0 = last optical surface
-    num_rays: 200              # wavefront only
-    wavelength: 0.0005876      # wavefront only; default = config reference wavelength
+    reference_surface: 0       # spot / wavefront only; 0 = last optical surface
+    num_rays: 200              # spot / wavefront only (pupil-grid rays per field)
+    wavelength: 0.0005876      # spot / wavefront only; default = config reference wavelength
     weight_type: on_axis_only  # on_axis_only (default) | uniform | custom
     custom_weights: [1.0, 0.5] # weight_type: custom
 ```
@@ -442,22 +442,34 @@ is skipped, so the gap chosen is the one *before* it and the downstream block
 must exist; an invalid ID disables the solve.
 
 - `type: paraxial` shifts the image plane to the paraxial second principal focus
-  (`paraxial.Compute`, `SecondPrincipalFocus`) — fast.
+  (`paraxial.Compute`, `SecondPrincipalFocus`) — fast, but blind to real-ray
+  aberration (it ignores spherical aberration, field curvature and vignetting).
+- `type: spot` places the plane at the **geometric spot-RMS minimum**
+  (`psf.SpotFocusShift`: the flux-weighted spot radius² summed over the selected
+  fields, minimised in closed form) — a real-ray focus without the wavefront
+  solve's cost: the spot radius is an exact quadratic of the plane, so one
+  pupil-grid trace per field yields the minimiser, instead of the ~20
+  evaluations of the coherent-peak search. Intermediate in accuracy and cost.
 - `type: wavefront` references the wavefront to the **best-focus point**
   (`wavefront.Compute` with `BestFocus`, sphere center from the coherent-PSF-peak
   maximization) — accurate but far more expensive.
 
-For the wavefront type, `reference_surface: 0` uses the last optical surface,
-`num_rays` defaults to 200, `wavelength` defaults to the config reference
-wavelength, and `weight_type` selects the fields combined into the focus
-determination (`on_axis_only` default, `uniform`, or `custom` with
-`custom_weights`). The setting is YAML-only (no CLI flag).
+For the `spot` and `wavefront` types, `reference_surface: 0` uses the last
+optical surface, `num_rays` defaults to 200 (the pupil-grid rays traced per
+field and wavelength), `wavelength` defaults to the config reference wavelength,
+and `weight_type` selects the fields combined into the focus determination
+(`on_axis_only` default, `uniform`, or `custom` with `custom_weights`). For
+`spot` that combination is the plane minimising `Σ w_field · spot RMS²` over the
+selected fields — every field measured about its own centroid, so a field with a
+larger aberration floor does not drag the plane; its weight only scales its
+contribution. The setting is YAML-only (no CLI flag); an unknown `type` is
+reported once and falls back to the paraxial solve.
 
 #### Partial solves: a degenerate field is dropped, not the whole solve
 
-The wavefront solve is **partial**: a field whose wavefront cannot be analysed
-(a clipped off-axis bundle under a tight aperture — the "only 0 valid grid
-rays" / "paraboloid fit: singular normal matrix" failure) is dropped and
+The `spot` and `wavefront` solves are **partial**: a field whose bundle cannot
+be sampled (a clipped off-axis bundle under a tight aperture — the "only 0 valid
+grid rays" / "paraboloid fit: singular normal matrix" failure) is dropped and
 reported, and the solve still returns the best focus of the fields that did
 analyse. Only when *every* field fails does the solve fall back to the paraxial
 shift, so the image plane is never left stale while the merit keeps improving
@@ -468,9 +480,10 @@ against it. Dropped fields are counted in `opt_results.back_focus`
 #### Dynamic type switching (`back_focus_solve.schedule`)
 
 When a merit schedule is active, the back-focus type can switch between
-`paraxial` and `wavefront` as the optimization progresses — e.g. track the focus
-cheaply with the paraxial solve while aberrations dominate, then switch to the
-wavefront solve near the diffraction limit:
+`paraxial`, `spot` and `wavefront` as the optimization progresses — e.g. track
+the focus cheaply with the paraxial solve while aberrations dominate, use the
+real-ray `spot` minimum once the geometric spot is the meaningful focus, and
+switch to the wavefront solve near the diffraction limit:
 
 ```yaml
 optimization:
@@ -489,9 +502,9 @@ optimization:
       dominant_threshold: 0.5
 ```
 
-Each mode may carry a `back_focus_type` (`paraxial` / `wavefront` / unset). At
-the top of every DLS iteration the optimizer finds the dominant mode; if its
-weight reaches `dominant_threshold` (default 0.5) and it declares a
+Each mode may carry a `back_focus_type` (`paraxial` / `spot` / `wavefront` /
+unset). At the top of every DLS iteration the optimizer finds the dominant mode;
+if its weight reaches `dominant_threshold` (default 0.5) and it declares a
 `back_focus_type`, that type is used, otherwise the static `type` is the
 fallback. The switch is a hard change (no blending) and, like the mode weights,
 is frozen for the iteration. Modes without `back_focus_type` fall back to the

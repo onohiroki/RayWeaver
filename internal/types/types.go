@@ -596,7 +596,7 @@ type MeritScheduleMode struct {
 	WeightTo   float64 `yaml:"weight_to"`
 	// BackFocusType selects the back-focus solve type when this mode is
 	// dominant (weight >= dominant_threshold). Valid values: "paraxial",
-	// "wavefront", or "" (use the fixed type from back_focus_solve).
+	// "spot", "wavefront", or "" (use the fixed type from back_focus_solve).
 	BackFocusType string `yaml:"back_focus_type,omitempty"`
 }
 
@@ -1035,33 +1035,37 @@ type DiffractionMTFConfig struct {
 
 // BackFocusSolveConfig configures the back-focus solve: the thickness of a
 // target surface is adjusted after every variable application so the image
-// plane stays at the desired focus position. Two modes are available:
-// paraxial (fast, paraxial trace) and wavefront (accurate, best-focus shift
-// from wavefront analysis). This is analogous to PowerSolveConfig but for
-// the image-plane distance instead of element power.
+// plane stays at the desired focus position. Three modes are available:
+// paraxial (fast, paraxial trace), spot (real rays, geometric spot-RMS
+// minimum) and wavefront (most accurate, best-focus shift from the coherent
+// peak search). This is analogous to PowerSolveConfig but for the image-plane
+// distance instead of element power.
 type BackFocusSolveConfig struct {
 	Enabled bool `yaml:"enabled,omitempty"`
 	// Surface is the ID of the surface whose thickness will be adjusted.
 	// 0 (default) means auto-detect: the last lens surface before the image
 	// plane (skipping air-gap / filter surfaces).
 	Surface int `yaml:"surface,omitempty"`
-	// Type selects the focus computation method: "paraxial" (default) or
-	// "wavefront".
+	// Type selects the focus computation method: "paraxial" (default),
+	// "spot" (geometric spot-RMS minimum) or "wavefront" (coherent best
+	// focus).
 	Type string `yaml:"type,omitempty"`
-	// ReferenceSurface for wavefront type (default: last optical surface).
+	// ReferenceSurface for the wavefront and spot types (default: last
+	// optical surface).
 	ReferenceSurface int `yaml:"reference_surface,omitempty"`
-	// NumRays for wavefront type (default: 200).
+	// NumRays for the wavefront and spot types (default: 200): the
+	// pupil-grid rays traced per field and wavelength.
 	NumRays int `yaml:"num_rays,omitempty"`
-	// Wavelength for wavefront type (default: d-line).
+	// Wavelength for the wavefront and spot types (default: d-line).
 	Wavelength float64 `yaml:"wavelength,omitempty"`
-	// WeightType for wavefront type: "on_axis_only" (default, fast),
-	// "uniform" (all fields equal), or "custom" (CustomWeights).
+	// WeightType for the wavefront and spot types: "on_axis_only" (default,
+	// fast), "uniform" (all fields equal), or "custom" (CustomWeights).
 	WeightType string `yaml:"weight_type,omitempty"`
 	// CustomWeights are the per-field weights when WeightType == "custom".
 	CustomWeights []float64 `yaml:"custom_weights,omitempty"`
-	// Schedule controls dynamic switching between "paraxial" and "wavefront"
-	// types based on the merit schedule's dominant mode. nil disables dynamic
-	// switching (the static Type is used).
+	// Schedule controls dynamic switching between the "paraxial", "spot" and
+	// "wavefront" types based on the merit schedule's dominant mode. nil
+	// disables dynamic switching (the static Type is used).
 	Schedule *BackFocusScheduleConfig `yaml:"schedule,omitempty"`
 }
 

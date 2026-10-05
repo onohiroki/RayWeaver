@@ -719,8 +719,8 @@ weights and metric are recomputed once per iteration and **frozen**, and are
 reported as `opt_results.active_mode` / `mode_weights` / `mode_changes` and as
 JSONL `{"event":"weights"}` records.
 
-A mode may also carry `back_focus_type: paraxial|wavefront`: when that mode is
-dominant (its weight reaches `back_focus_solve.schedule.dominant_threshold`,
+A mode may also carry `back_focus_type: paraxial|spot|wavefront`: when that mode
+is dominant (its weight reaches `back_focus_solve.schedule.dominant_threshold`,
 default 0.5) the hard back-focus solve switches to that type (hard switch, frozen
 per iteration). See
 [optimize.md](optimize.md#back-focus-solve-optimizationback_focus_solve) and

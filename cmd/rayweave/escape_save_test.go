@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/escape"
+	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -258,6 +259,63 @@ func TestMaterializeSizesAperturesBeforeBackFocus(t *testing.T) {
 		if s.ID == 1 && math.Abs(s.Diameter-40.0) > 1e-9 {
 			t.Errorf("surface 1 diameter = %v, want the sized 40.0", s.Diameter)
 		}
+	}
+}
+
+// TestApplySavedBackFocusSolveSpotType covers the save path for the spot solve:
+// a recorded minimum must ship a plane within 0.5 mm of what the wavefront
+// solve delivers (both are real-ray solves of the same bundle), and that plane
+// must be a fixed point of the spot solve itself, so `escape extract` does not
+// re-solve it somewhere else.
+func TestApplySavedBackFocusSolveSpotType(t *testing.T) {
+	spotDoc := strings.Replace(backFocusOrderInput(), "type: wavefront", "type: spot", 1)
+	spotDoc = strings.Replace(spotDoc, "num_rays: 32", "num_rays: 128", 1)
+	if !strings.Contains(spotDoc, "num_rays: 128") {
+		t.Fatal("test setup: fixture carries no back_focus num_rays to raise")
+	}
+	if spotDoc == backFocusOrderInput() {
+		t.Fatal("test setup: fixture carries no wavefront type to replace")
+	}
+
+	load := func(doc string) (types.Input, *glass.Catalog) {
+		in := parseYAML[types.Input]([]byte(doc))
+		gc, _ := loadCatalogs(&in, "")
+		return in, gc
+	}
+	spotInput, spotGC := load(spotDoc)
+	waveInput, waveGC := load(backFocusOrderInput())
+	// Capture after loadCatalogs: it rewires optimize.Warnf to the tagged
+	// stderr writer, which would silently undo an earlier capture.
+	warns := captureOptimizeWarnings(t)
+
+	solve := func(input types.Input, gc *glass.Catalog) (surfaces []types.Surface, orig, solved float64) {
+		empty := ""
+		surfaces = configSurfaces(input.Configs, &empty)
+		surface.Precompute(surfaces)
+		orig = targetThickness(surfaces)
+		applySavedBackFocusSolve(input, &input.Configs[0], surfaces, gc, pupilModelForInput(&input))
+		return surfaces, orig, targetThickness(surfaces)
+	}
+
+	spotSurfaces, orig, spotThk := solve(spotInput, spotGC)
+	if math.Abs(spotThk-orig) < 1e-6 {
+		t.Fatalf("the spot solve did not move the image plane (thickness %v)", spotThk)
+	}
+	for _, w := range *warns {
+		if strings.Contains(w, "sampling-unstable") {
+			t.Errorf("the spot solve at 128 rays must be sampling-stable, got: %s", w)
+		}
+	}
+	_, _, waveThk := solve(waveInput, waveGC)
+	if math.Abs(spotThk-waveThk) > 0.5 {
+		t.Errorf("spot image distance %.4f mm and wavefront %.4f mm disagree by more than 0.5 mm", spotThk, waveThk)
+	}
+
+	// Fixed point: applying the same solve again to the already-solved
+	// document must leave the plane where it is.
+	applySavedBackFocusSolve(spotInput, &spotInput.Configs[0], spotSurfaces, spotGC, pupilModelForInput(&spotInput))
+	if got := targetThickness(spotSurfaces); math.Abs(got-spotThk) > 0.05 {
+		t.Errorf("the solved plane is not a fixed point: %.6f -> %.6f mm", spotThk, got)
 	}
 }
 

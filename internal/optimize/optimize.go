@@ -422,6 +422,9 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 	}
 	o.modeWeights = make(map[string]float64, len(s.Modes))
 	for _, m := range s.Modes {
+		if !backFocusTypeValid(m.BackFocusType) {
+			Warnf("warning: merit_schedule mode %q back_focus_type %q is not a known solve type (paraxial | wavefront | spot); the static back_focus_solve.type is used", m.Name, m.BackFocusType)
+		}
 		ms.modes = append(ms.modes, scheduleMode{name: m.Name, weightFrom: m.WeightFrom, weightTo: m.WeightTo, backFocusType: m.BackFocusType})
 		o.modeWeights[m.Name] = 0
 	}
@@ -699,7 +702,9 @@ func (o *Optimizer) updateBackFocusType() {
 	}
 	// Default to the fixed type.
 	fallback := o.backFocusSolve.Type
-	if fallback == "" {
+	if fallback == "" || !backFocusTypeValid(fallback) {
+		// An unknown type was already reported by SetBackFocusSolve; the
+		// paraxial branch is what actually runs, so name it.
 		fallback = "paraxial"
 	}
 	if o.backFocusSchedule == nil || o.meritSchedule == nil {
@@ -715,7 +720,10 @@ func (o *Optimizer) updateBackFocusType() {
 	}
 	if bestWeight >= threshold {
 		for _, m := range o.meritSchedule.modes {
-			if m.name == bestMode && m.backFocusType != "" {
+			// An unknown mode type cannot be honoured: it would silently
+			// select the paraxial branch, so fall back to the static type
+			// instead (SetMeritSchedule has already reported it once).
+			if m.name == bestMode && m.backFocusType != "" && backFocusTypeValid(m.backFocusType) {
 				o.currentBackFocusType = m.backFocusType
 				return
 			}
@@ -2037,16 +2045,33 @@ func (o *Optimizer) SetDiffractionMTF(cfg *types.DiffractionMTFConfig) {
 	o.diffractionCfg = cfg
 }
 
+// backFocusTypeValid reports whether t names a known back-focus solve type.
+// The empty string is valid: it means "unset" and resolves to the paraxial
+// default. An unknown value would otherwise silently select the paraxial
+// branch of the switch while the document claims another method, which is why
+// the configured values are validated once at configuration time.
+func backFocusTypeValid(t string) bool {
+	switch t {
+	case "", "paraxial", "wavefront", "spot":
+		return true
+	}
+	return false
+}
+
 // SetBackFocusSolve configures the back-focus solve. When enabled, the
 // thickness of the target surface is adjusted after every variable application
-// so the image plane stays at the desired focus position (paraxial or
-// wavefront-based). The target surface defaults to the last lens surface
-// before the image plane (auto-detect); a positive Surface value overrides it.
+// so the image plane stays at the desired focus position (paraxial,
+// wavefront- or spot-based). The target surface defaults to the last lens
+// surface before the image plane (auto-detect); a positive Surface value
+// overrides it.
 func (o *Optimizer) SetBackFocusSolve(cfg *types.BackFocusSolveConfig) {
 	if cfg == nil || !cfg.Enabled {
 		return
 	}
 	o.backFocusSolve = cfg
+	if !backFocusTypeValid(cfg.Type) {
+		Warnf("warning: optimization.back_focus_solve.type %q is not a known solve type (paraxial | wavefront | spot); the paraxial solve is used", cfg.Type)
+	}
 
 	targets := make(map[string][]backFocusSolveEntry, len(o.configs))
 	for ci := range o.configs {
@@ -3287,7 +3312,7 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 	}
 
 	// Apply the back-focus solve after the power-preserving solve so the
-	// target surface thickness reflects the final paraxial/wavefront focus.
+	// target surface thickness reflects the final paraxial/spot/wavefront focus.
 	// The pupils map carries this evaluation's pupil-model variables, so the
 	// solve focuses the same bundle the merit grid just traced.
 	o.applyBackFocusSolve(configSurfaces, pupils, gc)
@@ -3366,8 +3391,9 @@ func (o *Optimizer) applyPowerSolve(configSurfaces map[string][]types.Surface, g
 // plane stays at the desired focus position. For paraxial type it computes the
 // finite-conjugate image position from the paraxial trace and adjusts the
 // thickness accordingly. For wavefront type it runs a minimal wavefront
-// analysis and applies the best-focus shift. It is called from applyVariables
-// (pure) after applyPowerSolve and before Precompute.
+// analysis and applies the best-focus shift; for spot type it runs the
+// geometric spot-RMS solve (psf.SpotFocusShift). It is called from
+// applyVariables (pure) after applyPowerSolve and before Precompute.
 func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surface, pupils map[string]appliedPupil, gc *glass.Catalog) {
 	if o.backFocusSolve == nil || len(o.backFocusTargets) == 0 {
 		return
@@ -3414,6 +3440,25 @@ func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surfac
 								len(out.FieldsDropped), out.FieldsUsed+len(out.FieldsDropped),
 								strings.Join(out.FieldsDropped, "; ")),
 							"wavefront best focus of the surviving fields applied")
+					}
+				}
+			case "spot":
+				// The geometric spot-RMS solve: same partial/fallback
+				// contract as the wavefront case, cheaper per evaluation.
+				out, bfErr := o.spotBackFocusShift(cfg, surfaces, pupils[cfg.id], gc)
+				if bfErr != nil {
+					shift = o.paraxialBackFocusShift(cfg, surfaces, gc)
+					o.backFocusStats.record("paraxial", shift, 0, nil, true)
+					o.backFocusWarn(bfErr, "paraxial focus applied")
+				} else {
+					shift = out.ShiftMM
+					o.backFocusStats.record("spot", out.ShiftMM, out.FieldsUsed, out.FieldsDropped, false)
+					if len(out.FieldsDropped) > 0 {
+						o.backFocusWarn(
+							fmt.Errorf("%d of %d field(s) dropped: %s",
+								len(out.FieldsDropped), out.FieldsUsed+len(out.FieldsDropped),
+								strings.Join(out.FieldsDropped, "; ")),
+							"spot best focus of the surviving fields applied")
 					}
 				}
 			default: // "paraxial"
@@ -3714,8 +3759,79 @@ func wavefrontBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSo
 	return out, nil
 }
 
-// backFocusFieldsFor selects the fields used by the back-focus wavefront solve
-// from the config's field definitions and the configured weight type.
+// spotBackFocusShift solves the image plane for this evaluation's pupil with
+// the geometric spot-RMS solve (see backFocusPupilModel).
+func (o *Optimizer) spotBackFocusShift(cfg *config, surfaces []types.Surface, p appliedPupil, gc *glass.Catalog) (backFocusOutcome, error) {
+	return spotBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength, cfg.fieldDefs, gc, cfg.rayDefinition, backFocusPupilModel(cfg, p))
+}
+
+// spotBackFocusShiftFor computes the image-plane shift needed to bring the
+// image plane to the geometric spot-RMS minimum (psf.SpotFocusShift): the
+// plane minimising the weighted flux-weighted spot radius² summed over the
+// selected fields at backFocusWavelength. It is the cheap middle member of the
+// back-focus family — a real-ray focus (so it tracks aberration, vignetting and
+// field curvature, unlike the paraxial solve) without the coherent peak search
+// of the wavefront solve: the spot radius is an exact quadratic of the plane,
+// so one pupil-grid trace per field gives the minimiser in closed form.
+//
+// Field selection (weight_type) and the combination weights are the wavefront
+// solve's: on_axis_only picks the on-axis field, uniform weighs every selected
+// field equally, custom passes CustomWeights through (a length mismatch is an
+// error, as in wavefront.ComputeBestFocus). pupilModel is forwarded for the
+// same reason as in the wavefront solve — the solve must sample the bundle the
+// merit grid, `psf` and the gate evaluation use.
+//
+// An error means *no* field could be sampled (or the bundle is afocal); the
+// caller falls back to the paraxial focus exactly as it does for a failed
+// wavefront solve. A field that cannot be sampled is otherwise dropped and
+// reported in the outcome's FieldsDropped (partial solve).
+func spotBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int, refWavelength float64, fieldDefs []types.FieldDef, gc *glass.Catalog, rayDefinition string, pupilModel *types.PupilModelConfig) (backFocusOutcome, error) {
+	if bfs == nil || len(surfaces) < 2 {
+		return backFocusOutcome{}, nil
+	}
+	wl := backFocusWavelength(bfs, refWavelength)
+	refSurf := bfs.ReferenceSurface
+	if refSurf <= 0 {
+		refSurf = psf.DefaultReferenceSurface(surfaces)
+	}
+	numRays := bfs.NumRays
+	if numRays <= 0 {
+		numRays = 200
+	}
+
+	fields := backFocusFieldsFor(fieldDefs, bfs.WeightType)
+	var weights []float64
+	switch bfs.WeightType {
+	case "custom":
+		if len(bfs.CustomWeights) != len(fields) {
+			return backFocusOutcome{}, fmt.Errorf("back-focus spot solve at %.3f nm: %d custom weights for %d fields",
+				wl*1e6, len(bfs.CustomWeights), len(fields))
+		}
+		weights = bfs.CustomWeights
+	default: // "uniform", "on_axis_only" and empty: equal weights
+	}
+
+	sys := types.System{Surfaces: surfaces, StopSurface: stopSurface}
+	res, err := psf.SpotFocusShift(sys, gc, fields, []float64{wl}, weights, psf.Options{
+		ReferenceSurface: refSurf,
+		NumRays:          numRays,
+		Workers:          1,
+		PupilModel:       pupilModel,
+		RayDefinition:    rayDefinition,
+	})
+	if err != nil {
+		return backFocusOutcome{}, fmt.Errorf("back-focus spot solve at %.3f nm: %w", wl*1e6, err)
+	}
+	return backFocusOutcome{
+		ShiftMM:       res.ShiftMM,
+		FieldsUsed:    res.FieldsUsed,
+		FieldsDropped: res.FieldsDropped,
+	}, nil
+}
+
+// backFocusFieldsFor selects the fields used by the back-focus spot and
+// wavefront solves from the config's field definitions and the configured
+// weight type.
 func backFocusFieldsFor(fieldDefs []types.FieldDef, weightType string) []types.FieldDef {
 	switch weightType {
 	case "uniform":
@@ -3741,10 +3857,11 @@ func backFocusFieldsFor(fieldDefs []types.FieldDef, weightType string) []types.F
 
 // ApplyBackFocusSolve adjusts the target surface's thickness in place so the
 // image plane sits at the back-focus position for the given solve type
-// ("paraxial" or "wavefront"). It is the exported, schedule-free counterpart of
-// the optimizer's back-focus hard solve, used to persist the same image plane
-// the escape evaluated into its saved minima. cfg nil or disabled is a no-op;
-// surface 0 auto-detects the last non-air surface before the image plane.
+// ("paraxial", "wavefront" or "spot"). It is the exported, schedule-free
+// counterpart of the optimizer's back-focus hard solve, used to persist the
+// same image plane the escape evaluated into its saved minima. cfg nil or
+// disabled is a no-op; surface 0 auto-detects the last non-air surface before
+// the image plane.
 // fields are the config's field definitions in order, wavelengths its
 // wavelength list, and stopSurface/refWavelength as in the optimizer.
 // pupilModel is the document's virtual entrance pupil (nil when unused); it is
@@ -3753,9 +3870,9 @@ func backFocusFieldsFor(fieldDefs []types.FieldDef, weightType string) []types.F
 //
 // It returns true when the solve ran and a shift was applied, false when it
 // was not applicable (cfg nil/disabled, no resolvable target) or when the
-// wavefront analysis failed — a failure is reported through Warnf instead of
-// being silently swallowed, because the caller then ships the unshifted image
-// plane it was given.
+// wavefront / spot analysis failed — a failure is reported through Warnf
+// instead of being silently swallowed, because the caller then ships the
+// unshifted image plane it was given.
 func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConfig, bfType string, stopSurface int, refWavelength float64, fields []types.FieldItem, wavelengths []types.WavelengthItem, gc *glass.Catalog, rayDefinition string, pupilModel *types.PupilModelConfig) bool {
 	if cfg == nil || !cfg.Enabled {
 		return false
@@ -3772,8 +3889,18 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 	// paraxial.Compute / wavefront.Compute expect freshly precomputed radii.
 	surface.Precompute(surfaces)
 	var shift float64
-	if bfType == "wavefront" {
-		out, err := wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, fieldDefs, gc, rayDefinition, pupilModel)
+	switch bfType {
+	case "wavefront", "spot":
+		// Both real-ray solves share the partial contract: a degenerate
+		// field set is dropped and reported, a total failure leaves the
+		// plane untouched (and is reported here instead of being swallowed).
+		var out backFocusOutcome
+		var err error
+		if bfType == "wavefront" {
+			out, err = wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, fieldDefs, gc, rayDefinition, pupilModel)
+		} else {
+			out, err = spotBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, fieldDefs, gc, rayDefinition, pupilModel)
+		}
 		if err != nil {
 			Warnf("warning: %v; the image plane keeps its current thickness", err)
 			return false
@@ -3783,10 +3910,10 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 			// Partial solve: the shift is the weighted best focus of the
 			// surviving fields. Worth stating — the persisted plane is not
 			// the one every field would have asked for.
-			Warnf("back_focus: %d of %d field(s) dropped (%s); the wavefront best focus of the surviving fields was applied",
-				len(out.FieldsDropped), out.FieldsUsed+len(out.FieldsDropped), strings.Join(out.FieldsDropped, "; "))
+			Warnf("back_focus: %d of %d field(s) dropped (%s); the %s best focus of the surviving fields was applied",
+				len(out.FieldsDropped), out.FieldsUsed+len(out.FieldsDropped), strings.Join(out.FieldsDropped, "; "), bfType)
 		}
-	} else {
+	default: // "paraxial" (also the fallback for an unknown type)
 		shift = paraxialBackFocusShiftFor(surfaces, stopSurface, refWavelength, wavelengths, cfg.Wavelength, gc)
 	}
 	newThk := surfaces[idx].Thickness + shift

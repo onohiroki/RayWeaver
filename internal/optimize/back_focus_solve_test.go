@@ -1,9 +1,13 @@
 package optimize
 
 import (
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/psf"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -592,5 +596,228 @@ func TestBackFocusWavelengthDefault(t *testing.T) {
 	}
 	if got := backFocusWavelength(nil, 0.0004861); got != 0.0004861 {
 		t.Errorf("nil config: got %v, want the reference 0.0004861", got)
+	}
+}
+
+// spotRMSOnImagePlane evaluates the flux-weighted on-axis spot radius at the
+// system's current image plane — the metric `type: spot` minimises.
+func spotRMSOnImagePlane(t *testing.T, surfaces []types.Surface, gc *glass.Catalog, numRays int) float64 {
+	t.Helper()
+	surface.Precompute(surfaces)
+	res, err := psf.ComputeSpot(types.System{Surfaces: surfaces}, gc,
+		[]types.FieldDef{{Angle: 0, Direction: []float64{0, 1}}},
+		[]float64{0.0005876}, psf.Options{NumRays: numRays})
+	if err != nil {
+		t.Fatalf("ComputeSpot: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatal("ComputeSpot returned no result")
+	}
+	return res[0].SpotRMS
+}
+
+// TestApplyBackFocusSolveSpotType drives the exported solve on a triplet whose
+// image plane sits 3 mm past focus and checks the property the type exists
+// for: the plane it returns really is a geometric spot minimum (the spot is
+// smaller afterwards), and it lands back near the design image distance.
+func TestApplyBackFocusSolveSpotType(t *testing.T) {
+	gc := tripletGC()
+	surfaces := powerSolveTripletSurfaces()
+	const designImageDistance = 21.36695183553
+	for i := range surfaces {
+		if surfaces[i].ID == 7 {
+			surfaces[i].Thickness += 3.0 // deliberately defocused
+		}
+	}
+	surface.Precompute(surfaces)
+
+	fields := []types.FieldItem{{ID: 0, AngleDeg: 0}}
+	wavelengths := []types.WavelengthItem{{Value: 0.0005876}}
+	cfg := &types.BackFocusSolveConfig{Enabled: true, Type: "spot", Surface: 7, NumRays: 96}
+
+	before := spotRMSOnImagePlane(t, surfaces, gc, 96)
+	if !ApplyBackFocusSolve(surfaces, cfg, "spot", 0, 0.0005876, fields, wavelengths, gc, "", nil) {
+		t.Fatal("ApplyBackFocusSolve reported failure although the system traces")
+	}
+	after := spotRMSOnImagePlane(t, surfaces, gc, 96)
+	if after >= before {
+		t.Errorf("spot radius after the solve (%v) must be below the defocused one (%v)", after, before)
+	}
+	var thk float64
+	for _, s := range surfaces {
+		if s.ID == 7 {
+			thk = s.Thickness
+		}
+	}
+	if math.Abs(thk-designImageDistance) > 1.0 {
+		t.Errorf("solved image distance %.4f mm is not near the design %.4f mm", thk, designImageDistance)
+	}
+}
+
+// TestSpotAndWavefrontBackFocusAgree cross-validates the new spot solve
+// against the wavefront solve it is meant to sit between: on the same
+// deliberately defocused system both must prescribe essentially the same plane
+// (they differ only by the spherical aberration that separates the geometric
+// spot minimum from the coherent-peak maximum).
+func TestSpotAndWavefrontBackFocusAgree(t *testing.T) {
+	gc := tripletGC()
+	build := func() []types.Surface {
+		s := powerSolveTripletSurfaces()
+		for i := range s {
+			if s[i].ID == 7 {
+				s[i].Thickness += 3.0
+			}
+		}
+		surface.Precompute(s)
+		return s
+	}
+	cfg := &types.BackFocusSolveConfig{
+		Enabled: true, Type: "spot", Surface: 7, NumRays: 96, WeightType: "uniform",
+	}
+	fieldDefs := []types.FieldDef{{Angle: 0, Direction: []float64{0, 1}}}
+
+	spotSurfaces := build()
+	spotShift, err := spotBackFocusShiftFor(spotSurfaces, cfg, 0, 0.0005876, fieldDefs, gc, "", nil)
+	if err != nil {
+		t.Fatalf("spot solve: %v", err)
+	}
+	waveSurfaces := build()
+	waveShift, err := wavefrontBackFocusShiftFor(waveSurfaces, cfg, 0, 0.0005876, fieldDefs, gc, "", nil)
+	if err != nil {
+		t.Fatalf("wavefront solve: %v", err)
+	}
+	if math.Abs(spotShift.ShiftMM-waveShift.ShiftMM) > 0.1 {
+		t.Errorf("spot shift %.4f mm and wavefront shift %.4f mm disagree by more than 0.1 mm",
+			spotShift.ShiftMM, waveShift.ShiftMM)
+	}
+	t.Logf("spot %.4f mm vs wavefront %.4f mm", spotShift.ShiftMM, waveShift.ShiftMM)
+	if spotShift.ShiftMM > -2.0 || spotShift.ShiftMM < -4.0 {
+		t.Errorf("spot shift %v mm should recover the ~-3 mm deliberate defocus", spotShift.ShiftMM)
+	}
+}
+
+// TestBackFocusSolveSpotType drives the optimizer path: the spot solve runs
+// from applyVariables and reports itself as "spot" (not as a paraxial
+// fallback) in opt_results.back_focus.
+func TestBackFocusSolveSpotType(t *testing.T) {
+	gc := tripletGC()
+	surfaces := powerSolveTripletSurfaces()
+	surface.Precompute(surfaces)
+	cfg := Config{
+		Surfaces:     surfaces,
+		Fields:       []types.FieldItem{{ID: 0, AngleDeg: 0}},
+		RefSurface:   8,
+		NumRays:      48,
+		GlassCatalog: gc,
+		Variables: []Variable{
+			{Name: "c", SurfaceID: 7, Param: "curvature", Min: -0.1, Max: 0.1, Config: "config1"},
+		},
+	}
+	opt := NewOptimizer(cfg)
+	opt.SetBackFocusSolve(&types.BackFocusSolveConfig{Enabled: true, Type: "spot", Surface: 7, NumRays: 48})
+
+	x := make([]float64, len(opt.Variables()))
+	x[0] = 0.0
+	surfMap, _, _ := opt.applyVariables(x)
+	for _, s := range surfMap["config1"] {
+		if s.ID == 7 && s.Thickness <= 0 {
+			t.Errorf("surface 7 thickness should be positive, got %f", s.Thickness)
+		}
+	}
+	diag := opt.BackFocusDiagnostics()
+	if diag == nil {
+		t.Fatal("BackFocusDiagnostics should report an enabled solve")
+	}
+	if diag.Method != "spot" {
+		t.Errorf("back-focus method: got %q, want \"spot\"", diag.Method)
+	}
+	if diag.Failures != 0 {
+		t.Errorf("the spot solve must not fall back here, failures = %d", diag.Failures)
+	}
+}
+
+// TestBackFocusSolveScheduleSwitchesToSpot verifies a merit-schedule mode may
+// name the spot solve as its back-focus type.
+func TestBackFocusSolveScheduleSwitchesToSpot(t *testing.T) {
+	gc := tripletGC()
+	surfaces := powerSolveTripletSurfaces()
+	surface.Precompute(surfaces)
+	cfg := Config{
+		Surfaces:     surfaces,
+		GlassCatalog: gc,
+		Variables: []Variable{
+			{Name: "c", SurfaceID: 7, Param: "curvature", Min: -0.1, Max: 0.1, Config: "config1"},
+		},
+	}
+	opt := NewOptimizer(cfg)
+	opt.SetBackFocusSolve(&types.BackFocusSolveConfig{
+		Enabled:  true,
+		Type:     "paraxial",
+		Schedule: &types.BackFocusScheduleConfig{DominantThreshold: 0.5},
+	})
+	opt.SetMeritSchedule(&types.MeritScheduleConfig{
+		Metric:     "iteration",
+		Curve:      "step",
+		AnchorFrom: 0,
+		AnchorTo:   100,
+		Modes: []types.MeritScheduleMode{
+			{Name: "early", WeightFrom: 1.0, WeightTo: 0.0, BackFocusType: "paraxial"},
+			{Name: "late", WeightFrom: 0.0, WeightTo: 1.0, BackFocusType: "spot"},
+		},
+	})
+	x := make([]float64, len(opt.Variables()))
+	opt.UpdateMeritWeights(x, 0)
+	if opt.currentBackFocusType != "paraxial" {
+		t.Errorf("iteration 0: want paraxial, got %s", opt.currentBackFocusType)
+	}
+	opt.UpdateMeritWeights(x, 100)
+	if opt.currentBackFocusType != "spot" {
+		t.Errorf("iteration 100: want spot, got %s", opt.currentBackFocusType)
+	}
+}
+
+// TestBackFocusSolveUnknownTypeWarns pins the typo handling: an unknown static
+// type or an unknown mode type is reported once and resolves to the paraxial
+// solve — silently claiming a method that is not running is exactly the class
+// of bug that ships a document out of focus.
+func TestBackFocusSolveUnknownTypeWarns(t *testing.T) {
+	var msgs []string
+	prev := Warnf
+	Warnf = func(format string, args ...interface{}) {
+		msgs = append(msgs, fmt.Sprintf(format, args...))
+	}
+	t.Cleanup(func() { Warnf = prev })
+
+	gc := tripletGC()
+	surfaces := powerSolveTripletSurfaces()
+	surface.Precompute(surfaces)
+	opt := NewOptimizer(Config{
+		Surfaces:     surfaces,
+		GlassCatalog: gc,
+		Variables: []Variable{
+			{Name: "c", SurfaceID: 7, Param: "curvature", Min: -0.1, Max: 0.1, Config: "config1"},
+		},
+	})
+	opt.SetBackFocusSolve(&types.BackFocusSolveConfig{Enabled: true, Type: "spott"})
+	if opt.currentBackFocusType != "paraxial" {
+		t.Errorf("unknown static type: want the paraxial fallback, got %q", opt.currentBackFocusType)
+	}
+	if !strings.Contains(strings.Join(msgs, "\n"), "spott") {
+		t.Errorf("want a warning naming the unknown type, got %v", msgs)
+	}
+
+	opt.SetMeritSchedule(&types.MeritScheduleConfig{
+		Metric: "iteration",
+		Curve:  "step",
+		Modes: []types.MeritScheduleMode{
+			{Name: "late", WeightFrom: 1.0, WeightTo: 0.0, BackFocusType: "spott"},
+		},
+	})
+	opt.UpdateMeritWeights(make([]float64, len(opt.Variables())), 0)
+	if opt.currentBackFocusType != "paraxial" {
+		t.Errorf("unknown mode type: want the static paraxial fallback, got %q", opt.currentBackFocusType)
+	}
+	if !strings.Contains(strings.Join(msgs, "\n"), "back_focus_type") {
+		t.Errorf("want a warning naming the mode's back_focus_type, got %v", msgs)
 	}
 }

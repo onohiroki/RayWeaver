@@ -505,7 +505,7 @@ the anchors empirically.
 
 The same dominant-mode machinery drives the
 [back-focus solve](../optimize.md#back-focus-solve-optimizationback_focus_solve)
-type: a mode may declare `back_focus_type: paraxial|wavefront`, and the
+type: a mode may declare `back_focus_type: paraxial|spot|wavefront`, and the
 optimizer switches the hard solve to that type when the mode is dominant (its
 weight reaches `optimization.back_focus_solve.schedule.dominant_threshold`,
 default 0.5). At the top of every DLS iteration `UpdateMeritWeights` recomputes
@@ -517,10 +517,11 @@ Unlike the merit blend, the back-focus switch is a **hard change** (no
 interpolation): a mode is chosen, not mixed. It is evaluated once per iteration
 and frozen together with the mode weights, so every residual and Jacobian
 evaluation in the iteration uses the same solve type. Because this only selects
-*how* the hard solve computes the focus (both `paraxial` and `wavefront` target
-the same image-plane position), it does not change the least-squares identity
-`Σ residual² == merit`. It lets e.g. a `spot_diffraction` schedule track the
-focus cheaply with `paraxial` while the geometric spot dominates, then use the
+*how* the hard solve computes the focus (`paraxial`, `spot` and `wavefront` all
+target the same image-plane position), it does not change the least-squares
+identity `Σ residual² == merit`. It lets e.g. a `spot_diffraction` schedule track
+the focus cheaply with `paraxial` while the geometric spot dominates, use the
+real-ray `spot` minimum once the spot itself is the meaningful focus, and the
 accurate `wavefront` best focus once the system approaches the diffraction
 limit.
 
