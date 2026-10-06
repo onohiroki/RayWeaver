@@ -128,6 +128,12 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 	if cfg.HullRescueIterFrac > 0 {
 		p.HullRescueIterFrac = cfg.HullRescueIterFrac
 	}
+	if cfg.EscapeBumps != nil {
+		p.EscapeBumps = *cfg.EscapeBumps
+	}
+	if cfg.CleanDLS != nil {
+		p.CleanDLS = *cfg.CleanDLS
+	}
 
 	p.Weights = make([]float64, len(variables))
 	p.Scales = make([]float64, len(variables))
@@ -180,6 +186,17 @@ func ParamsInfo(p Params, maxSeconds float64, workers, cycles int) types.EscapeP
 		v := true
 		stallEarlyStop = &v
 	}
+	// The two cycle phases are default-on, so they are reported only when off:
+	// a default run's params block keeps its exact key set.
+	var escapeBumps, cleanDLS *bool
+	if !p.EscapeBumps {
+		v := false
+		escapeBumps = &v
+	}
+	if !p.CleanDLS {
+		v := false
+		cleanDLS = &v
+	}
 	return types.EscapeParamsInfo{
 		HInitial:                     p.H,
 		WInitial:                     p.W,
@@ -196,6 +213,8 @@ func ParamsInfo(p Params, maxSeconds float64, workers, cycles int) types.EscapeP
 		StallRelTol:                  p.StallRelTol,
 		StallEarlyStop:               stallEarlyStop,
 		InitialPerturb:               p.InitialPerturb,
+		EscapeBumps:                  escapeBumps,
+		CleanDLS:                     cleanDLS,
 	}
 }
 
@@ -236,6 +255,13 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 	start := map[string]any{"workers": numWorkers, "max_cycles": maxCycles}
 	if !deadline.IsZero() {
 		start["max_seconds"] = cfg.MaxSeconds
+	}
+	// Both cycle phases are default-on, so they are reported only when off.
+	if !params.EscapeBumps {
+		start["escape_bumps"] = false
+	}
+	if !params.CleanDLS {
+		start["clean_dls"] = false
 	}
 	progress.Event("start", start)
 

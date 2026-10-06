@@ -77,6 +77,17 @@ type Params struct {
 	// HullRescueIterFrac is the rescue DLS MaxIter as a fraction of the full
 	// budget (0 = 0.25).
 	HullRescueIterFrac float64
+	// EscapeBumps places the Gaussian escape bumps on the recorded minima
+	// during the exploration phase. When false the exploration phase minimises
+	// the plain merit: the store, the new/repeat classification, the
+	// validation and the output are untouched, only the landscape stops being
+	// deformed. Default true.
+	EscapeBumps bool
+	// CleanDLS runs the clean re-optimisation that closes every cycle. When
+	// false the cycle records the exploration point as-is (or the glass-phase
+	// output when one ran) and skips the clean retry and the glass-hull
+	// rescue re-solve with it. Default true.
+	CleanDLS bool
 }
 
 // DefaultParams returns the literature-recommended starting values adapted to
@@ -98,6 +109,8 @@ func DefaultParams() Params {
 		InitialPerturb:     0.05,
 		HullRescue:         true,
 		HullRescueIterFrac: 0.25,
+		EscapeBumps:        true,
+		CleanDLS:           true,
 	}
 }
 

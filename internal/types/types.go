@@ -1146,6 +1146,18 @@ type EscapeConfig struct {
 	// HullRescueIterFrac is the rescue DLS MaxIter as a fraction of the full
 	// budget (default 0.25). 0 = default.
 	HullRescueIterFrac float64 `yaml:"hull_rescue_iter_frac,omitempty"`
+	// EscapeBumps turns off the escape-function bumps: the exploration phase
+	// minimises the plain merit instead of pushing away from the recorded
+	// minima, while the store, the new/repeat classification, the validation
+	// and the escape_result output all keep working as before. nil = default
+	// on; false disables the bumps.
+	EscapeBumps *bool `yaml:"escape_bumps,omitempty"`
+	// CleanDLS turns off the clean re-optimisation phase that closes each
+	// cycle: the point the cycle records is the exploration result as-is (or
+	// the glass-phase output when one ran), never gradient-refined. The clean
+	// retry and the glass-hull rescue re-solve belong to the same phase and
+	// are skipped with it. nil = default on; false disables the clean DLS.
+	CleanDLS *bool `yaml:"clean_dls,omitempty"`
 }
 
 // ResourceGuardConfig configures the escape resource self-monitor. Every field
@@ -1404,6 +1416,12 @@ type EscapeParamsInfo struct {
 	StallRelTol                  float64            `yaml:"stall_rel_tol,omitempty"`
 	StallEarlyStop               *bool              `yaml:"stall_early_stop,omitempty"`
 	InitialPerturb               float64            `yaml:"initial_perturb,omitempty"`
+	// EscapeBumps / CleanDLS report the two cycle phases as disabled. Both are
+	// default-on, so they are written only when off (a nil pointer omits the
+	// key) and a default run's params block stays unchanged; an explicitly
+	// disabled value is therefore distinguishable from the default.
+	EscapeBumps *bool `yaml:"escape_bumps,omitempty"`
+	CleanDLS    *bool `yaml:"clean_dls,omitempty"`
 }
 
 // EscapeMinimumStatus classifies a converged DLS point: feasible (all

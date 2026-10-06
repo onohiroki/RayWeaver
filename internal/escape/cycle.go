@@ -345,6 +345,18 @@ func enrich(base, extra map[string]any) {
 	}
 }
 
+// activeEscapes returns the escape points the exploration phase must see.
+// With EscapeBumps disabled the wrapper receives an empty list, so the
+// exploration phase minimises the plain merit; the store keeps growing and
+// drives the new/repeat classification, the restart widening and the output,
+// it simply no longer deforms the landscape.
+func (c *Cycle) activeEscapes() []Point {
+	if !c.params.EscapeBumps {
+		return nil
+	}
+	return c.store.All()
+}
+
 // Run performs the escape loop starting from x0. It returns the final point
 // (the last converged minimum) and its unescaped merit.
 func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
@@ -388,7 +400,7 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			break
 		}
 		// Step 1: escape exploration. Push away from every recorded minimum.
-		c.wrapper.SetEscapes(c.store.All())
+		c.wrapper.SetEscapes(c.activeEscapes())
 		c.wrapper.SetStartX(currentX)
 		c.wrapper.SetPhase(PhaseEscape)
 		c.wrapper.SetStop(c.stopCh())
@@ -543,107 +555,130 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		c.wrapper.SetStop(c.stopCh())
 		c.setPhase("clean_dls", cyc)
 		c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
-		cleanRes := dls.Solve(c.wrapper)
-		trueX := extractX(cleanRes)
-		if cleanRes.Status == dls.StatusInterrupted {
-			c.recordInterrupted(cleanRes, cyc, "clean_dls")
-			c.stopped = true
-			break
-		}
-		if !c.acceptable(cleanRes.Status, trueX) {
-			c.failures++
-			fields := map[string]any{
-				"cycle":      cyc,
-				"worker":     c.workerID,
-				"phase":      "clean_dls",
-				"status":     "rejected",
-				"dls_status": cleanRes.Status,
-			}
-			enrich(fields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
-			c.progress.Event("cycle", fields)
-			if c.failures >= c.maxFail {
-				break
-			}
-			currentX = c.perturb(cleanStart, cyc, restartAmp)
-			continue
-		}
-		fields = map[string]any{
-			"cycle":      cyc,
-			"worker":     c.workerID,
-			"phase":      "clean_dls",
-			"status":     "accepted",
-			"dls_status": cleanRes.Status,
-			"merit":      c.wrapper.InnerMerit(trueX),
-		}
-		enrich(fields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
-		c.progress.Event("cycle", fields)
 
-		// Post-glass retry: if clean DLS regressed vs the post-escape start,
-		// retry clean from escapedX (glass result discarded).  Both merits
-		// are evaluated under the current (PhaseClean / local) weights so
-		// the comparison is meaningful and consistent.
-		cleanMerit := c.wrapper.InnerMerit(trueX)
-		escapeMeritLocal := c.wrapper.InnerMerit(escapedX) // same local weights as cleanMerit
-		if cleanMerit > escapeMeritLocal {
-			retryFields := map[string]any{
-				"cycle":        cyc,
-				"worker":       c.workerID,
-				"phase":        "clean_dls",
-				"status":       "retry",
-				"escape_merit": escapeMeritLocal,
-				"clean_merit":  cleanMerit,
-			}
-			enrich(retryFields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
-			c.progress.Event("cycle", retryFields)
-			c.wrapper.SetEscapes(nil)
-			retryCopy := make([]float64, len(escapedX))
-			copy(retryCopy, escapedX)
-			c.wrapper.SetStartX(retryCopy)
-			c.wrapper.SetPhase(PhaseClean)
-			c.wrapper.SetStop(c.stopCh())
-			c.setPhase("clean_dls_retry", cyc)
-			c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
-			retryRes := dls.Solve(c.wrapper)
-			retryX := extractX(retryRes)
-			if retryRes.Status == dls.StatusInterrupted {
-				c.recordInterrupted(retryRes, cyc, "clean_dls_retry")
+		// With CleanDLS disabled the cycle records cleanStart unchanged (the
+		// exploration result, or the glass-phase output when one ran) and runs
+		// neither the clean solve nor the post-glass retry. The clean phase and
+		// its weights are still selected above, so the recorded merit and the
+		// validation below read the same weighted lens a real clean solve would
+		// have produced. A copy keeps the recorded point independent of the
+		// vectors the store already holds.
+		trueX := append([]float64(nil), cleanStart...)
+		// cleanRes is only assigned when a clean solve runs; its Status is the
+		// empty string when the phase was skipped, which is the signal for
+		// "the exploration point was recorded as-is" in the events below.
+		var cleanRes dls.Result
+		if c.params.CleanDLS {
+			cleanRes = dls.Solve(c.wrapper)
+			trueX = extractX(cleanRes)
+			if cleanRes.Status == dls.StatusInterrupted {
+				c.recordInterrupted(cleanRes, cyc, "clean_dls")
 				c.stopped = true
 				break
 			}
-			if c.acceptable(retryRes.Status, retryX) {
-				retryMerit := c.wrapper.InnerMerit(retryX)
-				if retryMerit < cleanMerit {
-					trueX = retryX
-					retryAcceptedFields := map[string]any{
+			if !c.acceptable(cleanRes.Status, trueX) {
+				c.failures++
+				fields := map[string]any{
+					"cycle":      cyc,
+					"worker":     c.workerID,
+					"phase":      "clean_dls",
+					"status":     "rejected",
+					"dls_status": cleanRes.Status,
+				}
+				enrich(fields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
+				c.progress.Event("cycle", fields)
+				if c.failures >= c.maxFail {
+					break
+				}
+				currentX = c.perturb(cleanStart, cyc, restartAmp)
+				continue
+			}
+			fields = map[string]any{
+				"cycle":      cyc,
+				"worker":     c.workerID,
+				"phase":      "clean_dls",
+				"status":     "accepted",
+				"dls_status": cleanRes.Status,
+				"merit":      c.wrapper.InnerMerit(trueX),
+			}
+			enrich(fields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
+			c.progress.Event("cycle", fields)
+
+			// Post-glass retry: if clean DLS regressed vs the post-escape start,
+			// retry clean from escapedX (glass result discarded).  Both merits
+			// are evaluated under the current (PhaseClean / local) weights so
+			// the comparison is meaningful and consistent.
+			cleanMerit := c.wrapper.InnerMerit(trueX)
+			escapeMeritLocal := c.wrapper.InnerMerit(escapedX) // same local weights as cleanMerit
+			if cleanMerit > escapeMeritLocal {
+				retryFields := map[string]any{
+					"cycle":        cyc,
+					"worker":       c.workerID,
+					"phase":        "clean_dls",
+					"status":       "retry",
+					"escape_merit": escapeMeritLocal,
+					"clean_merit":  cleanMerit,
+				}
+				enrich(retryFields, c.debugCycleFields(trueX, cleanRes, "clean_dls"))
+				c.progress.Event("cycle", retryFields)
+				c.wrapper.SetEscapes(nil)
+				retryCopy := make([]float64, len(escapedX))
+				copy(retryCopy, escapedX)
+				c.wrapper.SetStartX(retryCopy)
+				c.wrapper.SetPhase(PhaseClean)
+				c.wrapper.SetStop(c.stopCh())
+				c.setPhase("clean_dls_retry", cyc)
+				c.wrapper.ensurePhaseWeights() // install phase weights before beforeMerit
+				retryRes := dls.Solve(c.wrapper)
+				retryX := extractX(retryRes)
+				if retryRes.Status == dls.StatusInterrupted {
+					c.recordInterrupted(retryRes, cyc, "clean_dls_retry")
+					c.stopped = true
+					break
+				}
+				if c.acceptable(retryRes.Status, retryX) {
+					retryMerit := c.wrapper.InnerMerit(retryX)
+					if retryMerit < cleanMerit {
+						trueX = retryX
+						retryAcceptedFields := map[string]any{
+							"cycle":      cyc,
+							"worker":     c.workerID,
+							"phase":      "clean_dls_retry",
+							"status":     "accepted",
+							"dls_status": retryRes.Status,
+							"merit":      retryMerit,
+						}
+						enrich(retryAcceptedFields, c.debugCycleFields(retryX, retryRes, "clean_dls_retry"))
+						c.progress.Event("cycle", retryAcceptedFields)
+					} else {
+						c.progress.Event("cycle", map[string]any{
+							"cycle":  cyc,
+							"worker": c.workerID,
+							"phase":  "clean_dls_retry",
+							"status": "no_improvement",
+							"merit":  retryMerit,
+						})
+					}
+				} else {
+					retryRejectedFields := map[string]any{
 						"cycle":      cyc,
 						"worker":     c.workerID,
 						"phase":      "clean_dls_retry",
-						"status":     "accepted",
+						"status":     "rejected",
 						"dls_status": retryRes.Status,
-						"merit":      retryMerit,
 					}
-					enrich(retryAcceptedFields, c.debugCycleFields(retryX, retryRes, "clean_dls_retry"))
-					c.progress.Event("cycle", retryAcceptedFields)
-				} else {
-					c.progress.Event("cycle", map[string]any{
-						"cycle":  cyc,
-						"worker": c.workerID,
-						"phase":  "clean_dls_retry",
-						"status": "no_improvement",
-						"merit":  retryMerit,
-					})
+					enrich(retryRejectedFields, c.debugCycleFields(retryX, retryRes, "clean_dls_retry"))
+					c.progress.Event("cycle", retryRejectedFields)
 				}
-			} else {
-				retryRejectedFields := map[string]any{
-					"cycle":      cyc,
-					"worker":     c.workerID,
-					"phase":      "clean_dls_retry",
-					"status":     "rejected",
-					"dls_status": retryRes.Status,
-				}
-				enrich(retryRejectedFields, c.debugCycleFields(retryX, retryRes, "clean_dls_retry"))
-				c.progress.Event("cycle", retryRejectedFields)
 			}
+		} else {
+			c.progress.Event("cycle", map[string]any{
+				"cycle":  cyc,
+				"worker": c.workerID,
+				"phase":  "clean_dls",
+				"status": "skipped",
+				"merit":  c.wrapper.InnerMerit(trueX),
+			})
 		}
 
 		c.failures = 0
@@ -661,15 +696,27 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 
 		// Evaluation failures are not recorded (no escape bump placed).
 		if status == MinStatusEvaluationFailure {
-			c.progress.Event("cycle", map[string]any{
+			// The clean solve is what the phase label normally refers to; with
+			// it skipped the event must not claim an accepted clean solve.
+			cleanStatus := "accepted"
+			if cleanRes.Status == "" {
+				cleanStatus = "skipped"
+			}
+			ef := map[string]any{
 				"cycle":      cyc,
 				"worker":     c.workerID,
 				"phase":      "clean_dls",
-				"status":     "accepted",
-				"dls_status": cleanRes.Status,
+				"status":     cleanStatus,
 				"merit":      trueMerit,
 				"min_status": "evaluation_failure",
-			})
+			}
+			// Present only when a clean solve actually produced the point; with
+			// the phase skipped the exploration result is recorded as-is and
+			// carries no DLS status of its own.
+			if cleanRes.Status != "" {
+				ef["dls_status"] = cleanRes.Status
+			}
+			c.progress.Event("cycle", ef)
 			currentX = c.perturb(trueX, cyc, restartAmp)
 			continue
 		}
@@ -680,9 +727,10 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 		// validation replaces the point and is recorded as a feasible
 		// minimum, so the cycle produces a solution instead of an infeasible
 		// basin; otherwise the original classification (and its escape bump)
-		// is kept. Skipped when the run is stopping or out of time.
+		// is kept. Skipped when the run is stopping or out of time, and with
+		// the clean phase itself disabled — the rescue *is* a clean DLS.
 		if status == MinStatusInfeasibleBasin && invalidReason == ReasonGlassHullViolation &&
-			c.params.HullRescue && !c.timeUp() && !hardStopped(c.hardStop) {
+			c.params.CleanDLS && c.params.HullRescue && !c.timeUp() && !hardStopped(c.hardStop) {
 			if rs, isRescuer := c.wrapper.inner.(hullRescuer); isRescuer {
 				if projected, ok := rs.RescueGlassHull(trueX); ok {
 					c.wrapper.SetEscapes(nil)
