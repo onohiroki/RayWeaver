@@ -82,6 +82,10 @@ func runEscapeCore(input types.Input, gc *glass.Catalog, progress *escape.Progre
 		}
 	}
 
+	// Cycle-phase switches (--escape-bumps / --clean-dls), resolved under the
+	// same CLI-wins / write-back-only-what-was-given rule as --stream.
+	applyCyclePhaseFlags(&input, command)
+
 	// Build the per-config glass-phase merit from the config's own terms: the
 	// chromatic terms scaled by power_solve.color_scale plus a cheap geometric
 	// guardrail. The config's explicit merit is never replaced.

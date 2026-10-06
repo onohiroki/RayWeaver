@@ -157,8 +157,12 @@ func main() {
 			fs.StringVar(&optEscapeGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
 			fs.IntVar(&optEscapeGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
 			fs.StringVar(&optEscapeMemLimit, "mem-limit", "", "cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1 (unlimited); default optimization.mem_limit_mb")
+			fs.StringVar(&optEscapePhases.escapeBumps, phaseEscapeBumpsFlag, "", "place the escape-function bumps on recorded minima: true|false (default true)")
+			fs.StringVar(&optEscapePhases.cleanDLS, phaseCleanDLSFlag, "", "run the clean DLS that closes each cycle: true|false (default true)")
 			fs.Parse(args[1:])
 			optEscapeStreamSet = flagWasSet(fs, "stream")
+			optEscapePhases.escapeBumpsSet = flagWasSet(fs, phaseEscapeBumpsFlag)
+			optEscapePhases.cleanDLSSet = flagWasSet(fs, phaseCleanDLSFlag)
 		}
 	}
 
@@ -203,8 +207,12 @@ func main() {
 			fs.StringVar(&optPSOGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
 			fs.IntVar(&optPSOGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
 			fs.StringVar(&optPSOMemLimit, "mem-limit", "", "cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1 (unlimited); default optimization.mem_limit_mb")
+			fs.StringVar(&optPSOPhases.escapeBumps, phaseEscapeBumpsFlag, "", "place the escape-function bumps on recorded minima: true|false (default true)")
+			fs.StringVar(&optPSOPhases.cleanDLS, phaseCleanDLSFlag, "", "run the clean DLS that closes each cycle: true|false (default true)")
 			fs.Parse(args[1:])
 			optPSOStreamSet = flagWasSet(fs, "stream")
+			optPSOPhases.escapeBumpsSet = flagWasSet(fs, phaseEscapeBumpsFlag)
+			optPSOPhases.cleanDLSSet = flagWasSet(fs, phaseCleanDLSFlag)
 		}
 	}
 
@@ -837,7 +845,8 @@ immediately (exit 1).
 		fmt.Print(`Usage: rayweave escape [--verbose] [--log FILE] [--save FILE]
                      [--keep-infeasible] [--stream BOOL] [--power-solve]
                      [--power-solve-surfaces SURFACES]
-                     [--glass-variables] [--glass-dir DIR] < input.yaml
+                     [--glass-variables] [--glass-dir DIR]
+                     [--escape-bumps BOOL] [--clean-dls BOOL] < input.yaml
        rayweave escape extract --index N < escape-output.yaml
 
 Escape-function global optimisation (Ishiki-Ono style). DLS repeatedly
@@ -869,6 +878,18 @@ Options:
                    so a run killed mid-way still leaves a readable document.
                    --stream=false (or optimization.escape.stream: false)
                    restores the one-shot write performed after the run.
+  --escape-bumps BOOL
+                   place the escape-function bumps on the recorded minima
+                   (default true). --escape-bumps false keeps the store, the
+                   new/repeat classification, the validation and the
+                   escape_result output working exactly as before, but the
+                   exploration phase minimises the plain merit instead of
+                   being pushed away from known minima.
+  --clean-dls BOOL  run the clean DLS that closes each cycle (default true).
+                   --clean-dls false records the exploration result as-is (or
+                   the glass-phase output when power_solve ran) and skips the
+                   post-glass retry and the glass-hull rescue re-solve with it.
+                   The two switches are independent of each other.
   --power-solve    insert the power-preserving glass phase between each escape
                    and clean DLS (holds element powers fixed while the glasses
                    are rebalanced)
@@ -919,6 +940,10 @@ Input YAML — optimization.escape section:
        stall_rel_tol: 0.0001   # stalled-early-stop relative merit threshold
        stall_early_stop: true  # stalled-early-stop in the escape phase (clean phase never stalls)
        initial_perturb: 0.05   # normalised spread of parallel-worker start points
+       escape_bumps: true      # place the escape-function bumps (false = plain exploration)
+       clean_dls: true         # clean DLS closing each cycle (false = record the
+                               # exploration result as-is; also skips the clean
+                               # retry and the hull-rescue re-solve)
 
 The DLS solve inside each worker parallelises the Jacobian across jacobian_workers
 (optimization.jacobian_workers). Under the escape command, an unset
@@ -951,7 +976,8 @@ every discovered local minimum with its full surfaces.
                      [--power-solve-surfaces SURFACES]
                      [--glass-variables] [--glass-dir DIR]
                      [--swarm-size N] [--pso-iterations N]
-                     [--constraint-penalty W] < input.yaml
+                     [--constraint-penalty W]
+                     [--escape-bumps BOOL] [--clean-dls BOOL] < input.yaml
        rayweave pso extract --index N < pso-output.yaml
 
 PSO escape-function global optimisation. Identical three-phase cycle to
@@ -965,6 +991,18 @@ Options:
   --save FILE      save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...
   --keep-infeasible include infeasible basins in stdout YAML (default: discard)
   --stream BOOL     stream the pipeline document to stdout as the run progresses (default on); --stream=false restores the one-shot write after the run
+  --escape-bumps BOOL
+                   place the escape-function bumps on the recorded minima
+                   (default true). --escape-bumps false keeps the store, the
+                   new/repeat classification, the validation and the
+                   escape_result output working exactly as before, but the PSO
+                   swarm then minimises the plain merit instead of being
+                   pushed away from known minima.
+  --clean-dls BOOL  run the clean DLS that closes each cycle (default true).
+                   --clean-dls false records the PSO result as-is (or the
+                   glass-phase output when power_solve ran) and skips the
+                   post-glass retry and the glass-hull rescue re-solve with it.
+                   The two switches are independent of each other.
   --power-solve    insert the power-preserving glass phase between each PSO and clean DLS
   --power-solve-surfaces SURFACES
                    comma-separated surface IDs for the power-preserving solve
@@ -1008,6 +1046,10 @@ Input YAML — optimization.pso section:
        velocity_clamp: 0.2     # max velocity as fraction of range
        init_spread: 0.1        # initial swarm spread as fraction of range
        constraint_penalty: 1000
+       escape_bumps: true       # place the escape-function bumps (false = plain exploration)
+       clean_dls: true          # clean DLS closing each cycle (false = record the
+                                # PSO result as-is; also skips the clean retry and
+                                # the hull-rescue re-solve)
 
 Output: best solution in configs[].surfaces (pipeline-compatible with
 "rayweave trace"/"rayweave plot"), plus an escape_result section listing
