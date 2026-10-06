@@ -10,9 +10,10 @@ set -euo pipefail
 #
 # Two lenses are supported:
 #   escape-demo.bash                           : degraded US2645157 triplet (default)
-#   escape-demo.bash --lens 6elements          : v14 escape-optimised 6-element
+#   escape-demo.bash --lens 6elements          : v52 spot-merit 6-element
 # The 6-element run uses the escape section baked into
-# samples/escape-6elements-init.yaml (virtual pupil, 37 variables, 256 rays).
+# samples/escape-6elements-init.yaml (virtual pupil, 37 variables, 256 rays,
+# spot_flatness/spot_astigmatism merit, back_focus type spot, 4 cycles).
 #
 # Steps
 #   1. escape                  : global search with merit_schedule
@@ -91,7 +92,7 @@ case "$LENS" in
   6elements)
     YAML="$SCRIPT_DIR/escape-6elements-init.yaml"
     PREFIX="escape-demo-6elements-"
-    LENS_NAME="6-element v14 (escape-optimised, virtual pupil)"
+    LENS_NAME="6-element v52 (spot merit, virtual pupil, 4 cycles)"
     SAVE_BASE="$OUTDIR/${PREFIX}min"
     LOG_FILE="$OUTDIR/${PREFIX}progress.jsonl"
     ;;
