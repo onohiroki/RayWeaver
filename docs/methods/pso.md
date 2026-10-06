@@ -46,7 +46,13 @@ Each worker repeats, up to `max_cycles` times:
    store, and used as the start point for the next cycle.
 
 The cycle structure, validation, store management, and output are identical
-to the escape function — only step 1 differs.
+to the escape function — only step 1 differs. Steps 1 and 3 are therefore
+switchable exactly as they are for `escape`: `escape_bumps: false` makes the
+swarm minimise the plain merit (the store, the new/repeat classification and
+the output are untouched), and `clean_dls: false` records the swarm's best
+position (or the glass phase's output) as-is instead of DLS-refining it, and
+skips the post-glass retry and the hull-rescue re-solve with it. See
+[escape-function.md §2](escape-function.md#2-the-two-step-cycle).
 
 ### Post-cycle logic
 
@@ -171,7 +177,8 @@ the escape gradient is weak or the landscape is highly multimodal.
 
 All escape-function parameters (max_cycles, escape_workers, max_seconds,
 distance_threshold, h_initial, w_initial, h_mult, w_mult, variable_weights,
-initial_perturb, fingerprint_distance_threshold, min_throughput_ratio) are
+initial_perturb, fingerprint_distance_threshold, min_throughput_ratio,
+escape_bumps, clean_dls) are
 identical to the escape command.
 
 ## Relationship to DLS

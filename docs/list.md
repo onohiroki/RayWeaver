@@ -1004,7 +1004,8 @@ log, not a failure to read it:
   output) — same sources: the log records the merit of a minimum, not the
   point that produced it;
 - the escape tuning parameters outside the `params` event (`escape_iter_frac`,
-  `w_span`, `stall_*`, `initial_perturb`, `fingerprint_distance_threshold`, the
+  `w_span`, `stall_*`, `initial_perturb`, `escape_bumps`, `clean_dls`,
+  `fingerprint_distance_threshold`, the
   variable weights), which are shown for a pipeline document and skipped here;
 - the saved file names when the run used no `--save` (or came from a compact
   stream — see [Recovered file names](#recovered-file-names)).

@@ -72,6 +72,23 @@ Each worker repeats, up to `max_cycles` times:
 2. **Clean DLS** — run DLS with the bumps cleared, starting from the escaped
    point, to converge to the *true* local minimum of the unperturbed merit.
 
+Both steps are independently switchable (`escape_bumps` / `clean_dls`, default
+`true` each):
+
+- `escape_bumps: false` installs **no** bumps, so step 1 minimises the plain
+  merit. Nothing else changes: the store still grows, a repeat still
+  strengthens/widens the stored bump and still replaces `X`/`Merit` on a
+  better arrival, and validation and the output are untouched — only the
+  landscape stops being deformed. This is the ablation of the escape function.
+- `clean_dls: false` records the escaped point (or the glass phase's output,
+  when one ran) instead of running step 2. The clean phase is still *selected*
+  — `PhaseClean` and its phase weights are installed before the point is read —
+  so the recorded merit and the validation are computed under exactly the
+  weights a real clean solve would have been judged on, and the `clean_dls`
+  cycle event reports `status: skipped`. The post-glass retry and the
+  glass-hull rescue re-solve are clean DLS solves too and are skipped with the
+  phase.
+
 The true minimum is then classified:
 
 - **New** (normalized distance to every known minimum > `distance_threshold`):
@@ -186,6 +203,8 @@ cut off.
 | `stall_rel_tol` | `1e-4` | stalled-early-stop relative merit threshold |
 | `stall_early_stop` | true | stalled-early-stop in the escape phase (clean phase never stalls) |
 | `initial_perturb` | 0.05 | normalised spread of parallel-worker start points |
+| `escape_bumps` | true | place the escape-function bumps during the exploration phase (false = plain exploration) |
+| `clean_dls` | true | run the clean DLS that closes each cycle (false = record the exploration result as-is) |
 | `keep_infeasible` | false | include infeasible basins in stdout YAML (`--keep-infeasible`) |
 
 ## 4b. Termination

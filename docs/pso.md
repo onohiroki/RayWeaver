@@ -6,7 +6,8 @@ by a power-preserving glass phase and a clean DLS refinement — identical to
 `rayweave escape` except the first phase uses PSO instead of DLS.
 
 ```
-rayweave pso [--verbose] [--log FILE] [--save FILE] [--glass-dir DIR] < input.yaml
+rayweave pso [--verbose] [--log FILE] [--save FILE] [--glass-dir DIR]
+             [--escape-bumps BOOL] [--clean-dls BOOL] < input.yaml
 rayweave pso extract --index N < pso-output.yaml
 ```
 
@@ -24,6 +25,8 @@ rayweave pso extract --index N < pso-output.yaml
 | `--index N` | (with `pso extract`) local minimum index to extract |
 | `--keep-infeasible` | include infeasible basins in stdout YAML (default: discard) |
 | `--stream BOOL` | stream the pipeline document to stdout as the run progresses: `true` (default) or `false` for the one-shot write performed after the run |
+| `--escape-bumps BOOL` | place the escape-function bumps on the recorded minima: `true` (default) or `false` (see [escape.md §Switching the cycle phases off](escape.md#switching-the-cycle-phases-off)) |
+| `--clean-dls BOOL` | run the clean DLS that closes each cycle: `true` (default) or `false` (see [escape.md §Switching the cycle phases off](escape.md#switching-the-cycle-phases-off)) |
 | `--swarm-size N` | number of particles per worker (default 30; overrides `optimization.pso.swarm_size`) |
 | `--pso-iterations N` | PSO iterations per cycle (default 40; overrides `optimization.pso.pso_iterations`) |
 | `--constraint-penalty W` | constraint penalty weight (default 1e3; overrides `optimization.pso.constraint_penalty`) |
@@ -32,7 +35,14 @@ rayweave pso extract --index N < pso-output.yaml
 `--save` records the per-minimum files in `escape_result.minima[].file`.
 `--swarm-size` / `--pso-iterations` / `--constraint-penalty` are PSO-specific
 flags that override their YAML counterparts. `--stream` is echoed back as
-`optimization.pso.stream` only when the flag is actually given.
+`optimization.pso.stream` only when the flag is actually given; `--escape-bumps`
+and `--clean-dls` follow the same rule (see
+[escape.md §Switching the cycle phases off](escape.md#switching-the-cycle-phases-off))
+— each lands in `optimization.pso` only when that flag was given. `pso` points
+`optimization.escape` at that same embedded config so the shared cycle can read
+it, which is why an `escape:` block mirroring the `pso:` escape keys appears in
+every `pso` output (with or without any flag), carrying the write-back under
+both names.
 
 The JSONL progress stream is readable with `rayweave list escape`, which detects
 it automatically and adds the per-worker completion table:
@@ -72,6 +82,8 @@ optimization:
       vd: 1
     initial_perturb: 0.05
     min_throughput_ratio: 0.3
+    escape_bumps: true       # place the escape-function bumps (false = plain exploration)
+    clean_dls: true          # clean DLS closing each cycle (false = record the PSO result as-is)
 
     # PSO-specific parameters
     swarm_size: 30            # particles per worker
@@ -90,11 +102,17 @@ optimization:
 
 All escape-function parameters (max_cycles, distance_threshold, h_initial,
 w_initial, h_mult, w_mult, variable_weights, fingerprint_distance_threshold,
-initial_perturb, min_throughput_ratio) are shared with `optimization.escape`
+initial_perturb, min_throughput_ratio, escape_bumps, clean_dls) are shared with
+`optimization.escape`
 and embedded inline in `optimization.pso`. These parameters act in the
 **normalized variable space** (each variable scaled by its min..max range).
 See [escape.md](escape.md#input-yaml--optimizationescape) for their full
 description.
+
+The two cycle-phase switches behave exactly as they do for `escape` — with the
+PSO result taking the place of the escape DLS result when the clean phase is
+off — and are described in
+[escape.md §Switching the cycle phases off](escape.md#switching-the-cycle-phases-off).
 
 ### PSO-specific parameters
 

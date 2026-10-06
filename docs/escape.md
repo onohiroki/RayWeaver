@@ -7,7 +7,8 @@ minimum, pushing the next DLS run out of the valley to discover other local
 minima.
 
 ```
-rayweave escape [--verbose] [--log FILE] [--save FILE] [--stream BOOL] [--glass-dir DIR] < input.yaml
+rayweave escape [--verbose] [--log FILE] [--save FILE] [--stream BOOL] [--glass-dir DIR]
+                [--escape-bumps BOOL] [--clean-dls BOOL] < input.yaml
 rayweave escape extract --index N < escape-output.yaml
 ```
 
@@ -17,6 +18,8 @@ rayweave escape extract --index N < escape-output.yaml
 |---|---|
 | `--glass-dir DIR` | AGF glass catalog directory |
 | `--stream BOOL` | stream the pipeline document to stdout as the run progresses: `true` (default) or `false` for the one-shot write performed after the run (see [Streaming output](#streaming-output)) |
+| `--escape-bumps BOOL` | place the escape-function bumps on the recorded minima: `true` (default) or `false` (see [Switching the cycle phases off](#switching-the-cycle-phases-off)) |
+| `--clean-dls BOOL` | run the clean DLS that closes each cycle: `true` (default) or `false` (see [Switching the cycle phases off](#switching-the-cycle-phases-off)) |
 | `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `escaped`, `recorded`, `best_merit`, `cycles`, `escapes`, `minima`, `message`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves. While a stream is active the optimizer's and the glass package's non-fatal warnings are routed into it as `warn` events carrying `message`, instead of the tagged plain-text lines they would otherwise write to stderr next to the JSONL — so a captured `--verbose` stream stays pure JSON Lines and `list escape`, `jq` and `query --jsonl` can all read it) |
 | `--log FILE` | write the **full** JSONL progress stream to `FILE` (same fields as before — full-precision floats, RFC3339 `time`, `elapsed` seconds, `status`/`signal`/`timed_out`/`interrupted` included — with keys in the same fixed order followed by the remaining keys alphabetically) |
 | `--save FILE` | save every discovered local minimum to `FILE0.yaml`, `FILE1.yaml`, … (see [Saving minima](#saving-minima)) |
@@ -32,7 +35,11 @@ rayweave escape extract --index N < escape-output.yaml
 `--power-solve` / `--power-solve-surfaces` echo the effective
 `power_solve` config into the output; `--stream` is written back as
 `optimization.escape.stream` **only when the flag is given**, so an unset flag
-never overrides the input YAML.
+never overrides the input YAML. `--escape-bumps` / `--clean-dls` follow exactly
+the same rule: each is written back as `optimization.escape.escape_bumps` /
+`optimization.escape.clean_dls` only when that flag was given, so a run that
+never mentions either switch produces an output that does not mention them
+either.
 
 DLS-internal events are never emitted during escape: the per-iteration `iter`,
 per-solve `final`, `adaptive_damping` and `mode_change` records that
@@ -81,6 +88,8 @@ optimization:
     stream: true            # append the pipeline document to stdout as the run progresses
     hull_rescue: true       # project a hull-violating point onto the glass hull and re-solve
     hull_rescue_iter_frac: 0.25 # rescue re-solve MaxIter as a fraction of the full budget
+    escape_bumps: true      # place the escape-function bumps (false = plain exploration)
+    clean_dls: true         # clean DLS closing each cycle (false = record the exploration result as-is)
 ```
 
 ### Escape parameters
@@ -133,9 +142,11 @@ Escape-phase DLS solves have a capped iteration budget:
 iterations. Once the best merit has failed to improve by at least
 `stall_rel_tol` (default `1e-4`, relative) over a `stall_window_frac`
 (default 0.2) window of iterations, that escape-phase solve returns early with
-the best point found (`stall_early_stop: true`, the default). The clean
-re-optimisation phase — the source of slow, late-stage merit improvements —
-**always** runs the full budget and never stalls. Set `stall_early_stop: false`
+the best point found (`stall_early_stop: true`, the default). When it runs, the
+clean re-optimisation phase — the source of slow, late-stage merit improvements
+— **always** runs the full budget and never stalls (`clean_dls: false` skips it
+entirely, see [Switching the cycle phases off](#switching-the-cycle-phases-off)).
+Set `stall_early_stop: false`
 to disable stalled-early-stop in the escape phase entirely.
 
 `w_span` (default 2.0) widens worker diversity: worker `i` of `N` uses
@@ -148,6 +159,44 @@ same basin, so this is usually the first knob to raise.
 `stream` (default `true`) selects how the pipeline document reaches stdout:
 incrementally while the run progresses, or in one write after it (see
 [Streaming output](#streaming-output)). `--stream true|false` overrides it.
+
+### Switching the cycle phases off
+
+The cycle closes with two independently switchable phases, both default-on:
+
+| Phase | YAML | CLI | `false` means |
+|---|---|---|---|
+| escape bumps | `escape.escape_bumps` | `--escape-bumps BOOL` | the exploration phase minimises the **plain** merit instead of being pushed away from the recorded minima |
+| clean DLS | `escape.clean_dls` | `--clean-dls BOOL` | the cycle records the exploration point as-is instead of gradient-refining it |
+
+Turning the bumps off is an ablation of the escape function itself, not of the
+machinery around it: the store keeps growing, points keep being classified as
+new/repeat (a repeat still strengthens and widens the stored bump, and still
+replaces `X`/`Merit` when it arrives better), validated, and written to
+`escape_result`. Only the landscape stops being deformed, so every cycle
+converges to whatever basin the plain merit's restart point falls into — the
+result is a repeated local search with the same reporting, which is exactly
+what an ablation run wants to compare against.
+
+Turning the clean DLS off records `cleanStart` — the exploration result, or
+the power-preserving glass phase's output when one ran — without any gradient
+refinement. The clean phase is still *selected* before the point is read
+(`PhaseClean` plus its phase weights are installed exactly as for a real
+solve), so the recorded merit and the validation read the same weighted lens a
+clean solve would have been judged on; the `clean_dls` cycle event reports
+`status: skipped` instead of `accepted` / `rejected`.
+
+Because the post-glass retry and the glass-hull rescue are themselves clean
+DLS solves, they are skipped with the phase: with `clean_dls: false`,
+`hull_rescue` never fires, and a point that fails validation is recorded as an
+infeasible basin instead of being projected back onto the real-glass hull.
+
+The two switches are independent — either can be turned off without the other
+— and both take an explicit `true`/`false` value. Each is read from
+`optimization.escape` when its flag is not given, and — like `--stream` — is
+echoed into the output only when the flag was actually given;
+`escape_result.params` reports whichever of the two is **off** (both are
+default-on, so a default run's params block carries neither key).
 
 ### Power-preserving glass phase
 
@@ -256,7 +305,8 @@ In both cases `max_cycles` trades breadth against depth of a setting, and
 `escape_workers` scales the wall-clock cost (each worker is independent, so a
 higher count broadens the search cheaply). Nothing here changes the two-phase
 (escape-then-clean) structure — the clean phase always refines the final best
-point with the full budget.
+point with the full budget, unless `clean_dls` is switched off (see
+[Switching the cycle phases off](#switching-the-cycle-phases-off)).
 
 #### Parameter summary
 
@@ -436,8 +486,10 @@ real glass without turning the hull into a hard wall:
    **feasible** minimum instead of an infeasible basin. The cycle event
    stream carries it as `"phase": "hull_rescue"` with
    `status: accepted|rejected`. The rescue is skipped when the run is
-   stopping or out of time; a re-solve that fails validation keeps the
-   original classification and its escape bump.
+   stopping or out of time, and whenever `clean_dls` is off — it *is* a clean
+   DLS (see [Switching the cycle phases off](#switching-the-cycle-phases-off));
+   a re-solve that fails validation keeps the original classification and its
+   escape bump.
 
 ## Output
 
@@ -464,6 +516,8 @@ escape_result:
     stall_rel_tol: ...
     stall_early_stop: ...
     initial_perturb: ...
+    escape_bumps: false              # only present when the bumps are off
+    clean_dls: false                 # only present when the clean DLS is off
   timed_out: false              # true if the search was cut short by max_seconds
   interrupted: false            # true if a SIGINT/SIGTERM stopped the search
   minima:
@@ -588,8 +642,9 @@ merit tables) and the tracing commands (`trace`, `plot`, `psf`, …) do not, unt
 the completion writes it. A force-quit run also loses the completion block, so
 `best_index` / `best_merit` / `configs` may be absent from a killed document.
 
-`--stream` is echoed back as `optimization.escape.stream` only when the flag is
-actually given, so an unset flag never overrides the input YAML.
+`--stream`, `--escape-bumps` and `--clean-dls` are each echoed back as
+`optimization.escape.stream` / `.escape_bumps` / `.clean_dls` only when the
+flag is actually given, so an unset flag never overrides the input YAML.
 
 ## Examples
 
