@@ -1,13 +1,16 @@
-# `rayweave pso` — PSO escape-function global optimization
+# `rayweave pso` — particle-swarm global optimization
 
-Particle Swarm Optimization (PSO) combined with the escape-function method.
-Each cycle runs a PSO swarm that minimizes the escape-augmented merit, followed
-by a power-preserving glass phase and a clean DLS refinement — identical to
-`rayweave escape` except the first phase uses PSO instead of DLS.
+Particle Swarm Optimization as a plain multi-start global search: each cycle a
+swarm explores the merit landscape from a perturbed start point, then a
+power-preserving glass phase and a clean DLS refine the result — the same
+three-phase cycle as [`rayweave escape`](escape.md), with the exploration phase
+run by a swarm instead of DLS. **No escape-function bumps are ever placed**: the
+PSO merit is the plain merit plus the constraint penalty, so `pso` never
+deforms the landscape around minima it has already found.
 
 ```
 rayweave pso [--verbose] [--log FILE] [--save FILE] [--glass-dir DIR]
-             [--escape-bumps BOOL] [--clean-dls BOOL] < input.yaml
+             [--clean-dls BOOL] < input.yaml
 rayweave pso extract --index N < pso-output.yaml
 ```
 
@@ -25,35 +28,33 @@ rayweave pso extract --index N < pso-output.yaml
 | `--index N` | (with `pso extract`) local minimum index to extract |
 | `--keep-infeasible` | include infeasible basins in stdout YAML (default: discard) |
 | `--stream BOOL` | stream the pipeline document to stdout as the run progresses: `true` (default) or `false` for the one-shot write performed after the run |
-| `--escape-bumps BOOL` | place the escape-function bumps on the recorded minima: `true` (default) or `false` (see [escape.md §Switching the cycle phases off](escape.md#switching-the-cycle-phases-off)) |
-| `--clean-dls BOOL` | run the clean DLS that closes each cycle: `true` (default) or `false` (see [escape.md §Switching the cycle phases off](escape.md#switching-the-cycle-phases-off)) |
+| `--clean-dls BOOL` | run the clean DLS that closes each cycle: `true` (default) or `false` (see [escape.md §Switching the clean DLS off](escape.md#switching-the-clean-dls-off)) |
 | `--swarm-size N` | number of particles per worker (default 30; overrides `optimization.pso.swarm_size`) |
 | `--pso-iterations N` | PSO iterations per cycle (default 40; overrides `optimization.pso.pso_iterations`) |
 | `--constraint-penalty W` | constraint penalty weight (default 1e3; overrides `optimization.pso.constraint_penalty`) |
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`.
-`--save` records the per-minimum files in `escape_result.minima[].file`.
+`--save` records the per-minimum files in `global_result.minima[].file`.
 `--swarm-size` / `--pso-iterations` / `--constraint-penalty` are PSO-specific
 flags that override their YAML counterparts. `--stream` is echoed back as
-`optimization.pso.stream` only when the flag is actually given; `--escape-bumps`
-and `--clean-dls` follow the same rule (see
-[escape.md §Switching the cycle phases off](escape.md#switching-the-cycle-phases-off))
-— each lands in `optimization.pso` only when that flag was given. `pso` points
-`optimization.escape` at that same embedded config so the shared cycle can read
-it, which is why an `escape:` block mirroring the `pso:` escape keys appears in
-every `pso` output (with or without any flag), carrying the write-back under
-both names.
+`optimization.pso.stream` only when the flag is actually given, and
+`--clean-dls` follows the same rule (see
+[escape.md §Switching the clean DLS off](escape.md#switching-the-clean-dls-off))
+— each lands in `optimization.pso` only when that flag was given. A `pso` run
+keeps its settings in `optimization.pso` throughout; it never writes to
+`optimization.escape`, so a document that carries both sections echoes each one
+unchanged.
 
-The JSONL progress stream is readable with `rayweave list escape`, which detects
+The JSONL progress stream is readable with `rayweave list global`, which detects
 it automatically and adds the per-worker completion table:
 
 ```sh
 rayweave pso --log run.jsonl < lens.yaml > out.yaml
-rayweave list escape < run.jsonl
+rayweave list global < run.jsonl
 ```
 
 See [escape.md](escape.md#reading-a-run-log) for what a run log can and cannot
-show, and [list.md §11](list.md#11-escape-section--escapepso-global-search-results)
+show, and [list.md §11](list.md#11-global-section--escapepso-global-search-results)
 for the full output shape.
 
 ## Input YAML — `optimization.pso`
@@ -65,69 +66,65 @@ optimization:
   max_iter: 200
   variables: [...]          # same variable definitions as 'optimize'
   pso:
-    # Escape-function parameters (same as optimization.escape)
+    # Shared cycle parameters (same as optimization.escape)
     max_cycles: 10
-    escape_workers: 4       # top-level parallel goroutines (default 4)
+    global_workers: 4       # top-level parallel goroutines (default 4)
     max_seconds: 0          # soft wall-clock budget (seconds, shared; 0 = unlimited)
-    distance_threshold: 0.1
-    fingerprint_distance_threshold: 0
-    h_initial: 0.1
-    w_initial: 0.5
-    h_mult: 2.0
-    w_mult: 1.3
-    variable_weights:
+    distance_threshold: 0.1 # normalised distance to call a point "new"
+    fingerprint_distance_threshold: 0  # design-fingerprint distance for "new" (0 = off)
+    variable_weights:       # optional per-param weight (default 1.0)
       curvature: 1000
       thickness: 1
       nd: 10
       vd: 1
-    initial_perturb: 0.05
-    min_throughput_ratio: 0.3
-    escape_bumps: true       # place the escape-function bumps (false = plain exploration)
-    clean_dls: true          # clean DLS closing each cycle (false = record the PSO result as-is)
+    initial_perturb: 0.05   # normalised amplitude spreading parallel workers' start points
+    min_throughput_ratio: 0.3 # minimum valid-ray fraction for a feasible point
+    stall_window_frac: 0.2  # stall-early-stop window (fraction of the phase budget)
+    stall_rel_tol: 1e-4     # stalled-early-stop relative merit threshold
+    stream: true            # append the pipeline document to stdout as the run progresses
+    clean_dls: true         # clean DLS closing each cycle (false = record the PSO result as-is)
 
     # PSO-specific parameters
     swarm_size: 30            # particles per worker
     pso_iterations: 40        # PSO iterations per cycle
-    inertia: 0.9               # starting inertia weight (linear decay: inertia -> 0.4; 0 = 0.9)
-    cognitive: 1.494           # personal-best attraction coefficient (c1)
-    social: 1.494              # global-best attraction coefficient (c2)
-    velocity_clamp: 0.2        # max velocity as fraction of variable range
-    init_spread: 0.1           # initial swarm spread as fraction of range
-    constraint_penalty: 1000   # penalty weight for constraint violations
-    stall_window_frac: 0.2     # stall-early-stop window (fraction of max_iter)
-    stall_rel_tol: 1e-4        # relative improvement threshold for stall
+    inertia: 0.9              # starting inertia weight (linear decay: inertia -> 0.4; 0 = 0.9)
+    cognitive: 1.494          # personal-best attraction coefficient (c1)
+    social: 1.494             # global-best attraction coefficient (c2)
+    velocity_clamp: 0.2       # max velocity as fraction of variable range
+    init_spread: 0.1          # initial swarm spread as fraction of range
+    constraint_penalty: 1000  # penalty weight for constraint violations
 ```
 
-### Escape parameters
+### Shared cycle parameters
 
-All escape-function parameters (max_cycles, distance_threshold, h_initial,
-w_initial, h_mult, w_mult, variable_weights, fingerprint_distance_threshold,
-initial_perturb, min_throughput_ratio, escape_bumps, clean_dls) are shared with
-`optimization.escape`
-and embedded inline in `optimization.pso`. These parameters act in the
-**normalized variable space** (each variable scaled by its min..max range).
-See [escape.md](escape.md#input-yaml--optimizationescape) for their full
+Every parameter of `optimization.escape` that is *not* escape-specific is
+embedded inline in `optimization.pso`, so `max_cycles`, `global_workers`,
+`max_seconds`, `distance_threshold`, `fingerprint_distance_threshold`,
+`variable_weights`, `initial_perturb`, `min_throughput_ratio`,
+`stall_window_frac`, `stall_rel_tol`, `stall_early_stop`, `resource_guard`,
+`stream`, `hull_rescue`, `hull_rescue_iter_frac` and `clean_dls` behave
+identically under either section. They act in the **normalized variable space**
+(each variable scaled by its min..max range). See
+[escape.md](escape.md#input-yaml--optimizationescape) for their full
 description.
 
-The two cycle-phase switches behave exactly as they do for `escape` — with the
-PSO result taking the place of the escape DLS result when the clean phase is
-off — and are described in
-[escape.md §Switching the cycle phases off](escape.md#switching-the-cycle-phases-off).
+The escape bump geometry (`h_initial`, `w_initial`, `h_mult`, `w_mult`,
+`escape_iter_frac`, `w_span`) belongs to `optimization.escape` only: it is
+absent from `optimization.pso`, from `global_result.params` and from the JSONL
+`params` event of a PSO run.
 
 ### PSO-specific parameters
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `swarm_size` | 30 | number of particles per escape worker |
-| `pso_iterations` | 40 | PSO iterations per cycle (replaces DLS escape-phase budget) |
+| `swarm_size` | 30 | number of particles per worker |
+| `pso_iterations` | 40 | PSO iterations per cycle (the escape-phase `escape_iter_frac` budget does not apply) |
 | `inertia` | 0 (0.9) | starting velocity inertia weight; linearly decays from `inertia` (or 0.9 when unset) to 0.4 |
 | `cognitive` | 1.494 | personal-best attraction coefficient (c1) |
 | `social` | 1.494 | global-best attraction coefficient (c2) |
 | `velocity_clamp` | 0.2 | max velocity as fraction of variable range (0 = unclamped) |
 | `init_spread` | 0.1 | initial swarm spread as fraction of variable range |
 | `constraint_penalty` | 1000 | penalty weight for constraint violations in fitness |
-| `stall_window_frac` | 0.2 | fraction of pso_iterations for stall detection |
-| `stall_rel_tol` | 1e-4 | relative improvement threshold for stall detection |
 
 ### Swarm initialisation
 
@@ -153,6 +150,10 @@ feasible regions without the complexity of a death penalty or constraint
 preservation. The penalty weight is configurable via `constraint_penalty`
 (default 1000).
 
+`f` is the swarm's **only** fitness value: personal best and global best are
+selected on the same scale, so an infeasible particle can never become gbest
+merely because its raw merit is lower.
+
 ### PSO algorithm (global-best)
 
 Each cycle's PSO phase runs a standard global-best PSO in normalized space:
@@ -160,11 +161,11 @@ Each cycle's PSO phase runs a standard global-best PSO in normalized space:
 1. Initialize particles and velocities.
 2. For each iteration:
    a. Update the dynamic pupil at the current global best (`UpdatePupils`).
-   b. Evaluate each particle's fitness.
-   c. Update personal bests and global best.
+   b. Evaluate each particle's fitness `f`.
+   c. Update personal bests and global best on `f`.
    d. Update velocities: `v = w·v + c1·r1·(pbest−x) + c2·r2·(gbest−x)`
    e. Update positions: `x = x + v`, clamped to [0, 1].
-3. Return the global best as the escaped point.
+3. Return the global best as the exploration result of the cycle.
 
 The inertia weight `w` linearly decays from 0.9 to 0.4 over the iteration
 budget. The velocity is clamped to `|v_j| ≤ velocity_clamp × range_j`.
@@ -181,15 +182,15 @@ with the moving lens.
 
 ## Output
 
-The output reuses `escape_result` for full pipeline compatibility. The best
+The output reuses `global_result` for full pipeline compatibility. The best
 solution is written to `configs[].surfaces` and all discovered minima are
-listed in `escape_result.minima[]`. See [escape.md#output](escape.md#output)
+listed in `global_result.minima[]`. See [escape.md#output](escape.md#output)
 for the full schema.
 
 As with `escape`, the document is appended to stdout while the run progresses
 (`--stream false` restores the one-shot write), so a killed run still leaves
 every minimum discovered so far; the write sequence, the key order it implies
-and `escape_result.minima_improvements` are described in
+and `global_result.minima_improvements` are described in
 [escape.md#streaming-output](escape.md#streaming-output).
 
 `pso extract --index N` works identically to `escape extract --index N`.
@@ -213,7 +214,8 @@ rayweave pso --swarm-size 50 --pso-iterations 60 < input.yaml > output.yaml
 
 ## Method
 
-The escape-function mathematics and the PSO algorithm are described in
-[methods/pso.md](methods/pso.md). The three-phase cycle (PSO exploration,
-glass optimization, clean DLS) is the same structure used by
-[escape](escape.md), with the DLS escape phase replaced by PSO.
+The PSO algorithm is described in [methods/pso.md](methods/pso.md). The
+three-phase cycle (PSO exploration, glass optimization, clean DLS) is the same
+structure used by [escape](escape.md) and
+[methods/escape-function.md](methods/escape-function.md), with the DLS
+exploration phase replaced by PSO.

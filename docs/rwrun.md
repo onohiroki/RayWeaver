@@ -44,8 +44,8 @@ impossible from inside a harness-owned shell.
 The cost of being killed is not only the wasted time. `escape` assembles its
 report document and writes it to stdout **once, after every cycle has finished**.
 A process killed during the graceful-stop window leaves stdout empty, so the
-merit-ranked minimum list and the `escape_result` summary are gone. The `--save`
-minima survive (atomic writes), and `rayweave list escape < run.jsonl`
+merit-ranked minimum list and the `global_result` summary are gone. The `--save`
+minima survive (atomic writes), and `rayweave list global < run.jsonl`
 reconstructs the aggregate from the log, so no computation is lost — but the
 convenient artifact is.
 
@@ -145,13 +145,13 @@ file.
 
 ```
 go run ./cmd/rwrun -status -n v42      # pid, elapsed, command, artefact sizes
-rayweave list escape < v42-progress.jsonl   # minima (feasible only), workers, log events
-rayweave list escape < v42-result.yaml     # the same, from the assembled document
+rayweave list global < v42-progress.jsonl   # minima (feasible only), workers, log events
+rayweave list global < v42-result.yaml     # the same, from the assembled document
 ```
 
-`escape_result` in the final document lists the feasible minima with their `--save`
+`global_result` in the final document lists the feasible minima with their `--save`
 file names, and the infeasible basins separately (with `--keep-infeasible`).
-`list escape` also reads the JSONL run log directly, which is the way to inspect
+`list global` also reads the JSONL run log directly, which is the way to inspect
 a run that was interrupted before the document was written.
 
 Because the child is reparented to init, nothing reaps it: a crash leaves no

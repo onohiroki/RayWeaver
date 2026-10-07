@@ -13,11 +13,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The escape cycle exposes two independently switchable phases as value-taking
-// boolean CLI flags on both `escape` and `pso` (the same reason --stream takes
-// a value: a Go bool flag cannot consume a following "true"/"false"). These
-// tests pin the CLI/YAML/default precedence, the write-back rule, and one full
-// run of each subcommand proving the flags reach the cycle.
+// The global cycle exposes its closing phase as a value-taking boolean CLI
+// flag on both `escape` and `pso` (the same reason --stream takes a value: a Go
+// bool flag cannot consume a following "true"/"false"). These tests pin the
+// CLI/YAML/default precedence, the write-back rule, and one full run of each
+// subcommand proving the flag reaches the cycle.
 
 // phaseFlagInput is a minimal but complete document for both subcommands: one
 // lens, two curvature variables, a spot merit, and an escape and a pso section
@@ -51,16 +51,14 @@ optimization:
   max_iter: 30
   escape:
     max_cycles: 2
-    escape_workers: 1
+    global_workers: 1
     distance_threshold: 0.1
     h_initial: 0.5
     w_initial: 0.4
   pso:
     max_cycles: 2
-    escape_workers: 1
+    global_workers: 1
     distance_threshold: 0.1
-    h_initial: 0.5
-    w_initial: 0.4
     swarm_size: 6
     pso_iterations: 8
   variables:
@@ -118,9 +116,8 @@ type phaseLogEvent struct {
 	Event  string `json:"event"`
 	Phase  string `json:"phase"`
 	Status string `json:"status"`
-	// The two phase switches ride the start event only when disabled.
-	EscapeBumps *bool `json:"escape_bumps"`
-	CleanDLS    *bool `json:"clean_dls"`
+	// The phase switch rides the start event only when disabled.
+	CleanDLS *bool `json:"clean_dls"`
 }
 
 func parsePhaseLog(t *testing.T, raw string) []phaseLogEvent {
@@ -152,45 +149,39 @@ func TestEscapePhaseFlagsPrecedence(t *testing.T) {
 
 	off, on := false, true
 
-	// No flag, no YAML: both phases on, nothing to write back.
-	if v, wb := escapePhaseEnabled(nil, "escape", phaseEscapeBumpsFlag); !v || wb {
-		t.Errorf("default escape_bumps = (%v, %v), want (true, false)", v, wb)
+	// No flag, no YAML: the phase is on, nothing to write back.
+	if v, wb := cleanDLSEnabled(nil, "escape"); !v || wb {
+		t.Errorf("default clean_dls = (%v, %v), want (true, false)", v, wb)
 	}
-	if v, wb := escapePhaseEnabled(nil, "pso", phaseCleanDLSFlag); !v || wb {
+	if v, wb := cleanDLSEnabled(nil, "pso"); !v || wb {
 		t.Errorf("default clean_dls = (%v, %v), want (true, false)", v, wb)
 	}
 	// No flag, YAML off: honoured, and still nothing to write back.
-	if v, wb := escapePhaseEnabled(&types.EscapeConfig{CleanDLS: &off}, "escape", phaseCleanDLSFlag); v || wb {
+	if v, wb := cleanDLSEnabled(&types.GlobalConfig{CleanDLS: &off}, "escape"); v || wb {
 		t.Errorf("YAML clean_dls off = (%v, %v), want (false, false)", v, wb)
 	}
-	if v, wb := escapePhaseEnabled(&types.EscapeConfig{EscapeBumps: &off}, "escape", phaseEscapeBumpsFlag); v || wb {
-		t.Errorf("YAML escape_bumps off = (%v, %v), want (false, false)", v, wb)
-	}
-	// The two switches are independent: one YAML key never affects the other.
-	if v, _ := escapePhaseEnabled(&types.EscapeConfig{EscapeBumps: &off}, "escape", phaseCleanDLSFlag); !v {
-		t.Error("clean_dls must stay on when only escape_bumps is set in YAML")
-	}
-	if v, _ := escapePhaseEnabled(&types.EscapeConfig{CleanDLS: &off}, "escape", phaseEscapeBumpsFlag); !v {
-		t.Error("escape_bumps must stay on when only clean_dls is set in YAML")
+	// An unset YAML key stays the default even with a section present.
+	if v, wb := cleanDLSEnabled(&types.GlobalConfig{}, "escape"); !v || wb {
+		t.Errorf("YAML silent = (%v, %v), want (true, false)", v, wb)
 	}
 
 	// Flag off overrides a YAML on value and is written back.
-	optEscapePhases.escapeBumps, optEscapePhases.escapeBumpsSet = "false", true
-	if v, wb := escapePhaseEnabled(&types.EscapeConfig{EscapeBumps: &on}, "escape", phaseEscapeBumpsFlag); v || !wb {
+	optEscapePhases.cleanDLS, optEscapePhases.cleanDLSSet = "false", true
+	if v, wb := cleanDLSEnabled(&types.GlobalConfig{CleanDLS: &on}, "escape"); v || !wb {
 		t.Errorf("flag off = (%v, %v), want (false, true)", v, wb)
 	}
 	// Flag on overrides a YAML off value and is written back.
 	optEscapePhases.cleanDLS, optEscapePhases.cleanDLSSet = "true", true
-	if v, wb := escapePhaseEnabled(&types.EscapeConfig{CleanDLS: &off}, "escape", phaseCleanDLSFlag); !v || !wb {
+	if v, wb := cleanDLSEnabled(&types.GlobalConfig{CleanDLS: &off}, "escape"); !v || !wb {
 		t.Errorf("flag on = (%v, %v), want (true, true)", v, wb)
 	}
-	// PSO reads its own flag pair, not the escape one.
+	// pso reads its own flag pair, not the escape one.
 	optEscapePhases = phaseFlagValues{}
-	optPSOPhases.escapeBumps, optPSOPhases.escapeBumpsSet = "false", true
-	if v, wb := escapePhaseEnabled(nil, "pso", phaseEscapeBumpsFlag); v || !wb {
+	optPSOPhases.cleanDLS, optPSOPhases.cleanDLSSet = "false", true
+	if v, wb := cleanDLSEnabled(nil, "pso"); v || !wb {
 		t.Errorf("pso flag off = (%v, %v), want (false, true)", v, wb)
 	}
-	if v, wb := escapePhaseEnabled(nil, "escape", phaseEscapeBumpsFlag); !v || wb {
+	if v, wb := cleanDLSEnabled(nil, "escape"); !v || wb {
 		t.Errorf("escape = (%v, %v), want (true, false): an unset flag must not leak", v, wb)
 	}
 }
@@ -213,70 +204,62 @@ func TestApplyCyclePhaseFlagsWriteBack(t *testing.T) {
 		return &in
 	}
 
-	// Nothing given: neither key is injected.
+	// Nothing given: the phase key is not injected.
 	in := parse()
-	applyCyclePhaseFlags(in, "escape")
-	if in.Optimization.Escape.EscapeBumps != nil || in.Optimization.Escape.CleanDLS != nil {
-		t.Errorf("no flags: escape_bumps=%v clean_dls=%v, want both nil",
-			in.Optimization.Escape.EscapeBumps, in.Optimization.Escape.CleanDLS)
-	}
-
-	// One flag given: only that key is written back.
-	optEscapePhases.escapeBumps, optEscapePhases.escapeBumpsSet = "false", true
-	in = parse()
-	applyCyclePhaseFlags(in, "escape")
-	if in.Optimization.Escape.EscapeBumps == nil || *in.Optimization.Escape.EscapeBumps {
-		t.Errorf("escape_bumps = %v, want *false", in.Optimization.Escape.EscapeBumps)
-	}
+	applyCyclePhaseFlags(&in.Optimization.Escape.GlobalConfig, "escape")
 	if in.Optimization.Escape.CleanDLS != nil {
-		t.Errorf("clean_dls = %v, want nil (flag not given)", in.Optimization.Escape.CleanDLS)
+		t.Errorf("no flags: clean_dls=%v, want nil", in.Optimization.Escape.CleanDLS)
 	}
 
-	// Both flags given on a pso run: runPSO aliases the embedded config, so
-	// the write lands in optimization.pso.
+	// A flag given lands in the section the run writes back to.
+	optEscapePhases.cleanDLS, optEscapePhases.cleanDLSSet = "false", true
+	in = parse()
+	applyCyclePhaseFlags(&in.Optimization.Escape.GlobalConfig, "escape")
+	if in.Optimization.Escape.CleanDLS == nil || *in.Optimization.Escape.CleanDLS {
+		t.Errorf("clean_dls = %v, want *false", in.Optimization.Escape.CleanDLS)
+	}
+
+	// A pso run writes into optimization.pso and never touches the escape
+	// section, even though the document carries one.
 	unset()
-	optPSOPhases.escapeBumps, optPSOPhases.escapeBumpsSet = "true", true
 	optPSOPhases.cleanDLS, optPSOPhases.cleanDLSSet = "false", true
 	in = parse()
-	in.Optimization.Escape = &in.Optimization.PSO.EscapeConfig // runPSO's alias
-	applyCyclePhaseFlags(in, "pso")
-	if in.Optimization.PSO.EscapeBumps == nil || !*in.Optimization.PSO.EscapeBumps {
-		t.Errorf("pso escape_bumps = %v, want *true", in.Optimization.PSO.EscapeBumps)
-	}
+	applyCyclePhaseFlags(&in.Optimization.PSO.GlobalConfig, "pso")
 	if in.Optimization.PSO.CleanDLS == nil || *in.Optimization.PSO.CleanDLS {
 		t.Errorf("pso clean_dls = %v, want *false", in.Optimization.PSO.CleanDLS)
+	}
+	if in.Optimization.Escape.CleanDLS != nil {
+		t.Errorf("escape clean_dls = %v, want nil (a pso run must not write there)",
+			in.Optimization.Escape.CleanDLS)
 	}
 }
 
 // TestEscapePhaseFlagsCLI runs the real flag parser end to end for each
 // subcommand and checks the three observable effects: the write-back into the
-// document, the params block of escape_result, and the cycle behaviour the
+// document, the params block of global_result, and the cycle behaviour the
 // switches actually change (the clean phase reporting itself as skipped).
 func TestEscapePhaseFlagsCLI(t *testing.T) {
-	t.Run("escape bumps off", func(t *testing.T) {
-		stdout, logText := runEscapePhaseCLI(t, "escape", "--escape-bumps", "false")
+	t.Run("clean dls on for escape", func(t *testing.T) {
+		stdout, logText := runEscapePhaseCLI(t, "escape")
 		out := parseYAML[types.Output]([]byte(stdout))
 
 		if out.Optimization == nil || out.Optimization.Escape == nil {
 			t.Fatal("no optimization section in the output")
 		}
-		if got := out.Optimization.Escape.EscapeBumps; got == nil || *got {
-			t.Errorf("optimization.escape.escape_bumps = %v, want *false", got)
-		}
 		if got := out.Optimization.Escape.CleanDLS; got != nil {
 			t.Errorf("optimization.escape.clean_dls = %v, want nil (flag not given)", got)
 		}
-		if out.EscapeResult == nil {
-			t.Fatal("no escape_result section")
+		if out.GlobalResult == nil {
+			t.Fatal("no global_result section")
 		}
-		if got := out.EscapeResult.Params.EscapeBumps; got == nil || *got {
-			t.Errorf("params.escape_bumps = %v, want *false", got)
-		}
-		if got := out.EscapeResult.Params.CleanDLS; got != nil {
+		if got := out.GlobalResult.Params.CleanDLS; got != nil {
 			t.Errorf("params.clean_dls = %v, want nil (still on)", got)
 		}
+		// The escape run reports its bump geometry; a PSO run never does.
+		if out.GlobalResult.Params.HInitial == 0 {
+			t.Error("params.h_initial = 0, want the escape geometry reported")
+		}
 
-		// The clean phase still runs: only the bumps were switched off.
 		var accepted int
 		for _, ev := range parsePhaseLog(t, logText) {
 			if ev.Event == "cycle" && ev.Phase == "clean_dls" && ev.Status == "accepted" {
@@ -284,32 +267,37 @@ func TestEscapePhaseFlagsCLI(t *testing.T) {
 			}
 		}
 		if accepted == 0 {
-			t.Error("expected accepted clean_dls events with only --escape-bumps off")
+			t.Error("expected accepted clean_dls events on a default escape run")
 		}
 	})
 
-	t.Run("both phases off", func(t *testing.T) {
-		stdout, logText := runEscapePhaseCLI(t, "pso",
-			"--escape-bumps", "false", "--clean-dls", "false")
+	t.Run("clean dls off for pso", func(t *testing.T) {
+		stdout, logText := runEscapePhaseCLI(t, "pso", "--clean-dls", "false")
 		out := parseYAML[types.Output]([]byte(stdout))
 
 		if out.Optimization == nil || out.Optimization.PSO == nil {
 			t.Fatal("no optimization.pso section in the output")
 		}
-		if got := out.Optimization.PSO.EscapeBumps; got == nil || *got {
-			t.Errorf("optimization.pso.escape_bumps = %v, want *false", got)
-		}
 		if got := out.Optimization.PSO.CleanDLS; got == nil || *got {
 			t.Errorf("optimization.pso.clean_dls = %v, want *false", got)
 		}
-		if out.EscapeResult == nil {
-			t.Fatal("no escape_result section")
+		if out.GlobalResult == nil {
+			t.Fatal("no global_result section")
 		}
-		if got := out.EscapeResult.Params.EscapeBumps; got == nil || *got {
-			t.Errorf("params.escape_bumps = %v, want *false", got)
-		}
-		if got := out.EscapeResult.Params.CleanDLS; got == nil || *got {
+		if got := out.GlobalResult.Params.CleanDLS; got == nil || *got {
 			t.Errorf("params.clean_dls = %v, want *false", got)
+		}
+		// A pso run reports no escape geometry anywhere: not in its own
+		// section and not in the shared params block.
+		if got := out.GlobalResult.Params.HInitial; got != 0 {
+			t.Errorf("params.h_initial = %v, want 0 (pso has no bump geometry)", got)
+		}
+		psoRaw, err := yaml.Marshal(out.Optimization.PSO)
+		if err != nil {
+			t.Fatalf("marshal optimization.pso: %v", err)
+		}
+		if strings.Contains(string(psoRaw), "h_initial") || strings.Contains(string(psoRaw), "w_initial") {
+			t.Error("optimization.pso mentions escape bump geometry")
 		}
 
 		events := parsePhaseLog(t, logText)
@@ -329,9 +317,6 @@ func TestEscapePhaseFlagsCLI(t *testing.T) {
 		if start == nil {
 			t.Fatal("no start event in the progress log")
 		}
-		if start.EscapeBumps == nil || *start.EscapeBumps {
-			t.Errorf("start.escape_bumps = %v, want *false", start.EscapeBumps)
-		}
 		if start.CleanDLS == nil || *start.CleanDLS {
 			t.Errorf("start.clean_dls = %v, want *false", start.CleanDLS)
 		}
@@ -345,8 +330,8 @@ func TestEscapePhaseFlagsCLI(t *testing.T) {
 }
 
 // TestDefaultRunReportsNoPhaseKeys guards the "silent by default" rule at the
-// document level: a run that mentions neither switch must produce an output
-// without them, both in optimization.escape and in escape_result.params.
+// document level: a run that never mentions the switch must produce an output
+// without it, both in optimization.escape and in global_result.params.
 func TestDefaultRunReportsNoPhaseKeys(t *testing.T) {
 	stdout, _ := runEscapePhaseCLI(t, "escape")
 	out := parseYAML[types.Output]([]byte(stdout))
@@ -354,23 +339,27 @@ func TestDefaultRunReportsNoPhaseKeys(t *testing.T) {
 	if out.Optimization == nil || out.Optimization.Escape == nil {
 		t.Fatal("no optimization section in the output")
 	}
-	if out.Optimization.Escape.EscapeBumps != nil || out.Optimization.Escape.CleanDLS != nil {
-		t.Errorf("default run wrote escape_bumps=%v clean_dls=%v into optimization.escape, want both nil",
-			out.Optimization.Escape.EscapeBumps, out.Optimization.Escape.CleanDLS)
+	if out.Optimization.Escape.CleanDLS != nil {
+		t.Errorf("default run wrote clean_dls=%v into optimization.escape, want nil",
+			out.Optimization.Escape.CleanDLS)
 	}
-	if out.EscapeResult == nil {
-		t.Fatal("no escape_result section")
+	if out.GlobalResult == nil {
+		t.Fatal("no global_result section")
 	}
-	if out.EscapeResult.Params.EscapeBumps != nil || out.EscapeResult.Params.CleanDLS != nil {
-		t.Errorf("default params block = escape_bumps:%v clean_dls:%v, want both omitted",
-			out.EscapeResult.Params.EscapeBumps, out.EscapeResult.Params.CleanDLS)
+	if out.GlobalResult.Params.CleanDLS != nil {
+		t.Errorf("default params block = clean_dls:%v, want omitted",
+			out.GlobalResult.Params.CleanDLS)
 	}
 	// The document still round-trips through the same YAML the input did.
 	raw, err := yaml.Marshal(out)
 	if err != nil {
 		t.Fatalf("marshal output: %v", err)
 	}
-	if strings.Contains(string(raw), "escape_bumps") || strings.Contains(string(raw), "clean_dls") {
+	if strings.Contains(string(raw), "clean_dls") {
 		t.Error("default run's output mentions a phase switch it was never given")
+	}
+	// A stale escape_bumps key from an older document is never echoed back.
+	if strings.Contains(string(raw), "escape_bumps") {
+		t.Error("output echoes the removed escape_bumps key")
 	}
 }

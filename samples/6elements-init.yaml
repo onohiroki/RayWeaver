@@ -50,7 +50,7 @@ optimization:
     surfaces: [2, 4, 6, 9, 11, 13]
   escape:
     max_cycles: 10
-    escape_workers: 8
+    global_workers: 8
     distance_threshold: 0.05
     h_initial: 2.0
     w_initial: 0.8

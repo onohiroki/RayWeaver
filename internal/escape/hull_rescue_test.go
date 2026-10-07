@@ -40,13 +40,15 @@ func (m *hullWell) rescueCalls() int {
 
 func rescueTestConfig(maxCycles int) types.EscapeConfig {
 	return types.EscapeConfig{
-		MaxCycles:         maxCycles,
-		EscapeWorkers:     1,
-		DistanceThreshold: 0.1,
-		HInitial:          0.5,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         maxCycles,
+			GlobalWorkers:     1,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
 }
 
@@ -56,7 +58,7 @@ func rescueTestConfig(maxCycles int) types.EscapeConfig {
 // minimum instead of an infeasible basin.
 func TestCycleHullRescueRecordsFeasible(t *testing.T) {
 	cfg := rescueTestConfig(4)
-	params := BuildParams(cfg, twoWell{}.Variables())
+	params := buildParamsOf(cfg, twoWell{}.Variables())
 	if !params.HullRescue {
 		t.Fatal("HullRescue should default to on")
 	}
@@ -99,7 +101,7 @@ func TestCycleHullRescueDisabled(t *testing.T) {
 	off := false
 	cfg := rescueTestConfig(3)
 	cfg.HullRescue = &off
-	params := BuildParams(cfg, twoWell{}.Variables())
+	params := buildParamsOf(cfg, twoWell{}.Variables())
 	if params.HullRescue {
 		t.Fatal("HullRescue should be off when the config disables it")
 	}
@@ -131,7 +133,7 @@ func TestCycleHullRescueDisabled(t *testing.T) {
 
 // TestBuildParamsHullRescue: defaults (on, 0.25) and the config overrides.
 func TestBuildParamsHullRescue(t *testing.T) {
-	p := BuildParams(types.EscapeConfig{}, twoWell{}.Variables())
+	p := buildParamsOf(types.EscapeConfig{}, twoWell{}.Variables())
 	if !p.HullRescue {
 		t.Error("default HullRescue = false, want true")
 	}
@@ -140,7 +142,7 @@ func TestBuildParamsHullRescue(t *testing.T) {
 	}
 
 	off := false
-	p = BuildParams(types.EscapeConfig{HullRescue: &off, HullRescueIterFrac: 0.5}, twoWell{}.Variables())
+	p = buildParamsOf(types.EscapeConfig{GlobalConfig: types.GlobalConfig{HullRescue: &off, HullRescueIterFrac: 0.5}}, twoWell{}.Variables())
 	if p.HullRescue {
 		t.Error("config hull_rescue: false ignored")
 	}
@@ -166,7 +168,7 @@ func (m *phaseRecorder) SetEscapePhase(p float64) {
 
 // TestWrapperSetPhaseForwardsEscapePhase: SetPhase pushes the phase metric to
 // the inner model immediately, so phase-dependent merit shaping (the "phase"
-// schedule metric, the hull escape_weight_factor) is never stale even for
+// schedule metric, the hull exploration_weight_factor) is never stale even for
 // solve paths that skip ensurePhaseWeights (the PSO explorer).
 func TestWrapperSetPhaseForwardsEscapePhase(t *testing.T) {
 	params := testParams()

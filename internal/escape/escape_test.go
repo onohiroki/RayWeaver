@@ -41,15 +41,32 @@ func (twoWell) ComputeResiduals(x []float64) []float64 {
 
 func (twoWell) ComputeConstraints(x []float64) []float64 { return nil }
 
+// buildParamsOf mirrors the command layer for an `optimization.escape`
+// section: the shared cycle config plus the bump tuning that section asks for
+// (see resolveGlobalSettings). Tests go through it so they cannot drift from
+// how a real run derives its parameters.
+func buildParamsOf(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
+	return BuildParams(cfg.GlobalConfig, TuningFrom(cfg), variables)
+}
+
+// parallelEscapeOf mirrors runEscapeCore: the section's shared cycle config
+// plus the bump tuning that section asks for.
+func parallelEscapeOf(newModel func() dls.Model, cfg types.EscapeConfig, opts RunOptions) Result {
+	opts.Tuning = TuningFrom(cfg)
+	return ParallelEscape(newModel, cfg.GlobalConfig, opts)
+}
+
 func testParams() Params {
 	cfg := types.EscapeConfig{
-		HInitial:          0.05,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.3,
-		DistanceThreshold: 0.1,
+		GlobalConfig: types.GlobalConfig{
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.05,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.3,
 	}
-	return BuildParams(cfg, twoWell{}.Variables())
+	return buildParamsOf(cfg, twoWell{}.Variables())
 }
 
 func TestTwoWellDLSConverges(t *testing.T) {
@@ -166,18 +183,20 @@ func TestStoreBasic(t *testing.T) {
 
 func TestBuildParamsExcludesFixedVariables(t *testing.T) {
 	cfg := types.EscapeConfig{
-		HInitial:          0.2,
-		WInitial:          0.7,
-		HMult:             2.5,
-		WMult:             1.5,
-		DistanceThreshold: 0.3,
-		VariableWeights:   map[string]float64{"curvature": 100},
+		GlobalConfig: types.GlobalConfig{
+			DistanceThreshold: 0.3,
+			VariableWeights:   map[string]float64{"curvature": 100},
+		},
+		HInitial: 0.2,
+		WInitial: 0.7,
+		HMult:    2.5,
+		WMult:    1.5,
 	}
 	variables := []dls.VariableInfo{
 		{Name: "c1", Param: "curvature", Min: -1, Max: 1},
 		{Name: "t1", Param: "thickness", Min: 1, Max: 1}, // fixed
 	}
-	p := BuildParams(cfg, variables)
+	p := buildParamsOf(cfg, variables)
 	if p.H != 0.2 || p.W != 0.7 || p.HMult != 2.5 || p.WMult != 1.5 || p.Dt != 0.3 {
 		t.Fatalf("params not applied: %+v", p)
 	}
@@ -191,15 +210,17 @@ func TestBuildParamsExcludesFixedVariables(t *testing.T) {
 
 func TestCycleFindsTwoMinima(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:         10,
-		EscapeWorkers:     1,
-		DistanceThreshold: 0.1,
-		HInitial:          0.5,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         10,
+			GlobalWorkers:     1,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
-	params := BuildParams(cfg, twoWell{}.Variables())
+	params := buildParamsOf(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
 	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background(), nil, nil, nil, false)
@@ -225,15 +246,17 @@ func TestCycleFindsTwoMinima(t *testing.T) {
 
 func TestParallelEscapeFindsBothWells(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:         8,
-		EscapeWorkers:     2,
-		DistanceThreshold: 0.1,
-		HInitial:          0.5,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         8,
+			GlobalWorkers:     2,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
-	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{})
+	res := parallelEscapeOf(func() dls.Model { return twoWell{} }, cfg, RunOptions{})
 
 	if len(res.Minima) < 2 {
 		t.Fatalf("expected >=2 minima, got %d (%+v)", len(res.Minima), res.Minima)
@@ -251,7 +274,7 @@ func TestParallelEscapeFindsBothWells(t *testing.T) {
 
 func TestCycleTimeBudgetStopsEarly(t *testing.T) {
 	cfg := types.EscapeConfig{HInitial: 0.5, WInitial: 0.5, HMult: 2.0, WMult: 1.0}
-	params := BuildParams(cfg, twoWell{}.Variables())
+	params := buildParamsOf(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
 	// A deadline already in the past forces the cycle to stop before the
@@ -264,8 +287,8 @@ func TestCycleTimeBudgetStopsEarly(t *testing.T) {
 	if !cycle.StoppedByTime() {
 		t.Fatal("expected cycle stopped by time budget")
 	}
-	if cycle.Escaped() != 0 {
-		t.Fatalf("escaped = %d, want 0 (no DLS before expiry)", cycle.Escaped())
+	if cycle.Explored() != 0 {
+		t.Fatalf("escaped = %d, want 0 (no DLS before expiry)", cycle.Explored())
 	}
 	if store.Len() != 0 {
 		t.Fatalf("no minima should be recorded before expiry, got %d", store.Len())
@@ -274,14 +297,16 @@ func TestCycleTimeBudgetStopsEarly(t *testing.T) {
 
 func TestCycleNoDeadlineRunsToCompletion(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:         3,
-		DistanceThreshold: 0.1,
-		HInitial:          0.5,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         3,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
-	params := BuildParams(cfg, twoWell{}.Variables())
+	params := buildParamsOf(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
 	cycle := NewCycle(wrapper, store, params, cfg.MaxCycles, 0, nil, time.Time{}, context.Background(), nil, nil, nil, false)
@@ -329,14 +354,16 @@ func (slowShallow) ComputeConstraints(x []float64) []float64 { return nil }
 // preserves the interrupted solve's best-so-far in the store.
 func TestCycleHardStopInterruptsMidSolve(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:         50,
-		DistanceThreshold: 0.1,
-		HInitial:          0.5,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         50,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
-	params := BuildParams(cfg, slowShallow{}.Variables())
+	params := buildParamsOf(cfg, slowShallow{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(slowShallow{}, params)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -371,11 +398,13 @@ func TestCycleHardStopInterruptsMidSolve(t *testing.T) {
 
 func TestParallelEscapeTimeBudget(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:     8,
-		EscapeWorkers: 2,
-		MaxSeconds:    1e-9, // 1ns budget -> always expired before the first cycle
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:     8,
+			GlobalWorkers: 2,
+			MaxSeconds:    1e-9, // 1ns budget -> always expired before the first cycle
+		},
 	}
-	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{})
+	res := parallelEscapeOf(func() dls.Model { return twoWell{} }, cfg, RunOptions{})
 
 	if !res.TimedOut {
 		t.Fatal("expected TimedOut=true with a tiny budget")
@@ -386,11 +415,11 @@ func TestParallelEscapeTimeBudget(t *testing.T) {
 }
 
 func TestParallelEscapeInterrupt(t *testing.T) {
-	cfg := types.EscapeConfig{MaxCycles: 8, EscapeWorkers: 2}
+	cfg := types.EscapeConfig{GlobalConfig: types.GlobalConfig{MaxCycles: 8, GlobalWorkers: 2}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already cancelled: workers must stop before the first DLS run
 
-	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{Context: ctx})
+	res := parallelEscapeOf(func() dls.Model { return twoWell{} }, cfg, RunOptions{Context: ctx})
 
 	if !res.Interrupted {
 		t.Fatal("expected Interrupted=true with a cancelled context")
@@ -408,20 +437,22 @@ func TestParallelEscapeInterrupt(t *testing.T) {
 // reports Interrupted=true — the second-Ctrl-C path at the parallel level.
 func TestParallelEscapeHardStop(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:         50,
-		EscapeWorkers:     2,
-		DistanceThreshold: 0.1,
-		HInitial:          0.5,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         50,
+			GlobalWorkers:     2,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	hardStop := make(chan struct{})
 	resCh := make(chan Result, 1)
 	go func() {
-		resCh <- ParallelEscape(func() dls.Model { return slowShallow{} }, cfg, RunOptions{Context: ctx, HardStop: hardStop})
+		resCh <- parallelEscapeOf(func() dls.Model { return slowShallow{} }, cfg, RunOptions{Context: ctx, HardStop: hardStop})
 	}()
 
 	// Let the workers get into long-running solves, then interrupt mid-run.
@@ -446,13 +477,15 @@ func TestParallelEscapeHardStop(t *testing.T) {
 
 func TestParallelEscapeOnRecord(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:         6,
-		EscapeWorkers:     1,
-		DistanceThreshold: 0.1,
-		HInitial:          0.5,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         6,
+			GlobalWorkers:     1,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
 	var mu sync.Mutex
 	var records []int // idx of every record event (new and improved)
@@ -469,7 +502,7 @@ func TestParallelEscapeOnRecord(t *testing.T) {
 		}
 	}
 
-	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{OnRecord: onRecord})
+	res := parallelEscapeOf(func() dls.Model { return twoWell{} }, cfg, RunOptions{OnRecord: onRecord})
 
 	if len(res.Minima) == 0 {
 		t.Fatal("expected at least one minimum")
@@ -565,14 +598,16 @@ func TestStoreOnRecord(t *testing.T) {
 // threshold is 0.5.
 func fingerprintParams() Params {
 	cfg := types.EscapeConfig{
-		HInitial:                     0.05,
-		WInitial:                     0.5,
-		HMult:                        2.0,
-		WMult:                        1.3,
-		DistanceThreshold:            0.1,
-		FingerprintDistanceThreshold: 0.5,
+		GlobalConfig: types.GlobalConfig{
+			DistanceThreshold:            0.1,
+			FingerprintDistanceThreshold: 0.5,
+		},
+		HInitial: 0.05,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.3,
 	}
-	return BuildParams(cfg, twoWell{}.Variables())
+	return buildParamsOf(cfg, twoWell{}.Variables())
 }
 
 // TestStoreFingerprintCriterion verifies that IsNew treats a candidate as the
@@ -658,8 +693,8 @@ func TestStoreFingerprintElementCountMismatch(t *testing.T) {
 // TestBuildParamsFingerprintThreshold verifies that BuildParams applies the
 // fingerprint distance threshold from the config.
 func TestBuildParamsFingerprintThreshold(t *testing.T) {
-	cfg := types.EscapeConfig{FingerprintDistanceThreshold: 0.02}
-	p := BuildParams(cfg, twoWell{}.Variables())
+	cfg := types.EscapeConfig{GlobalConfig: types.GlobalConfig{FingerprintDistanceThreshold: 0.02}}
+	p := buildParamsOf(cfg, twoWell{}.Variables())
 	if p.DtFp != 0.02 {
 		t.Fatalf("DtFp = %v, want 0.02", p.DtFp)
 	}
@@ -669,17 +704,19 @@ func TestBuildParamsFingerprintThreshold(t *testing.T) {
 // passed through RunOptions is applied to every recorded minimum.
 func TestParallelEscapeRecordsFingerprints(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:                    8,
-		EscapeWorkers:                2,
-		DistanceThreshold:            0.1,
-		FingerprintDistanceThreshold: 0.5,
-		HInitial:                     0.5,
-		WInitial:                     0.5,
-		HMult:                        2.0,
-		WMult:                        1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:                    8,
+			GlobalWorkers:                2,
+			DistanceThreshold:            0.1,
+			FingerprintDistanceThreshold: 0.5,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
 	fp := func(x []float64) []float64 { return []float64{math.Floor(x[0] * 20)} }
-	res := ParallelEscape(func() dls.Model { return twoWell{} }, cfg, RunOptions{Fingerprint: fp})
+	res := parallelEscapeOf(func() dls.Model { return twoWell{} }, cfg, RunOptions{Fingerprint: fp})
 
 	if len(res.Minima) < 2 {
 		t.Fatalf("expected >=2 minima, got %d", len(res.Minima))
@@ -878,12 +915,12 @@ func TestProgressCompactAllEvents(t *testing.T) {
 		}
 	}
 
-	// worker_done: escaped/recorded shown, timed_out/interrupted hidden in the
+	// worker_done: explored/recorded shown, timed_out/interrupted hidden in the
 	// compact stream but retained in the full one.
-	emit("worker_done", map[string]any{"worker": 3, "escaped": 5, "recorded": 3, "timed_out": false, "interrupted": false})
+	emit("worker_done", map[string]any{"worker": 3, "explored": 5, "recorded": 3, "timed_out": false, "interrupted": false})
 	got = string(bytes.TrimSpace(compact.Bytes()))
-	if !strings.Contains(got, `"escaped":5`) || !strings.Contains(got, `"recorded":3`) {
-		t.Fatalf("worker_done compact missing escaped/recorded: %s", got)
+	if !strings.Contains(got, `"explored":5`) || !strings.Contains(got, `"recorded":3`) {
+		t.Fatalf("worker_done compact missing explored/recorded: %s", got)
 	}
 	if strings.Contains(got, "timed_out") || strings.Contains(got, `"interrupted"`) {
 		t.Fatalf("worker_done compact must hide timed_out/interrupted: %s", got)
@@ -893,9 +930,9 @@ func TestProgressCompactAllEvents(t *testing.T) {
 	}
 
 	// done: aggregates shown, timed_out/interrupted hidden.
-	emit("done", map[string]any{"workers": 4, "cycles": 8, "escapes": 18, "minima": 5, "best_merit": 0.3551473063945567, "timed_out": false, "interrupted": false})
+	emit("done", map[string]any{"workers": 4, "cycles": 8, "explorations": 18, "minima": 5, "best_merit": 0.3551473063945567, "timed_out": false, "interrupted": false})
 	got = string(bytes.TrimSpace(compact.Bytes()))
-	for _, want := range []string{`"event":"done"`, `"workers":4`, `"best_merit":3.55147e-01`, `"cycles":8`, `"escapes":18`, `"minima":5`} {
+	for _, want := range []string{`"event":"done"`, `"workers":4`, `"best_merit":3.55147e-01`, `"cycles":8`, `"explorations":18`, `"minima":5`} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("done compact missing %s: %s", want, got)
 		}
@@ -928,14 +965,16 @@ func TestProgressCompactAllEvents(t *testing.T) {
 func TestBuildParamsAppliesExecutionTuning(t *testing.T) {
 	early := false
 	cfg := types.EscapeConfig{
-		EscapeIterFrac:  0.25,
-		WSpan:           3.0,
-		StallWindowFrac: 0.5,
-		StallRelTol:     1e-3,
-		StallEarlyStop:  &early,
-		InitialPerturb:  0.1,
+		GlobalConfig: types.GlobalConfig{
+			StallWindowFrac: 0.5,
+			StallRelTol:     1e-3,
+			StallEarlyStop:  &early,
+			InitialPerturb:  0.1,
+		},
+		EscapeIterFrac: 0.25,
+		WSpan:          3.0,
 	}
-	p := BuildParams(cfg, twoWell{}.Variables())
+	p := buildParamsOf(cfg, twoWell{}.Variables())
 	if p.EscapeIterFrac != 0.25 || p.WSpan != 3.0 || p.StallWindowFrac != 0.5 ||
 		p.StallRelTol != 1e-3 || p.StallEarlyStop || p.InitialPerturb != 0.1 {
 		t.Fatalf("tuning not applied: %+v", p)
@@ -1120,14 +1159,16 @@ func (p *phaseModel) resolveDominant() string {
 // best never updated.
 func TestPhaseScheduleCleanDLSMoves(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:         3,
-		DistanceThreshold: 0.1,
-		HInitial:          0.5,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         3,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
-	params := BuildParams(cfg, phaseModel{}.Variables())
+	params := buildParamsOf(cfg, phaseModel{}.Variables())
 	inner := &phaseModel{}
 	wrapper := NewWrapper(inner, params)
 

@@ -49,7 +49,7 @@ func captureStderr(t *testing.T, fn func()) string {
 // registered stream, so `--log` records it too; the tagged line is kept only
 // when stderr is *not* itself a JSONL stream, otherwise a captured stream
 // mixes human-readable lines with JSON and no consumer can parse it
-// (`list escape`, jq and query --jsonl all reject the mixed input).
+// (`list global`, jq and query --jsonl all reject the mixed input).
 func TestRouteWarningsToProgress(t *testing.T) {
 	prevOptWarn, prevGlassWarn := optimize.Warnf, glass.Warnf
 	t.Cleanup(func() { optimize.Warnf, glass.Warnf = prevOptWarn, prevGlassWarn })

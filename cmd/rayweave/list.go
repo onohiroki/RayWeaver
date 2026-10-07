@@ -346,53 +346,53 @@ type optimizationListOutput struct {
 	OptResult       *OptimizationResultSummary `json:"opt_result,omitempty" yaml:"opt_result,omitempty"`
 }
 
-// EscapeMinimumRow is one local minimum for `list escape`. Reason carries the
+// GlobalMinimumRow is one local minimum for `list global`. Reason carries the
 // invalid reason of an infeasible basin (the feasible list never has one).
 // Variables is the minimum's variable values (name/param/after, the nd/vd
 // states a glass-changing run carries) and, like ElementPowers, exists only
 // for a pipeline document — a run log records no design data. Both are
 // structured (yaml/json) output only: the table and csv renderers build their
 // cells explicitly and ignore them.
-type EscapeMinimumRow struct {
+type GlobalMinimumRow struct {
 	Index         int                    `json:"index" yaml:"index"`
 	Merit         float64                `json:"merit" yaml:"merit"`
 	Status        string                 `json:"status,omitempty" yaml:"status,omitempty"`
 	Reason        string                 `json:"reason,omitempty" yaml:"reason,omitempty"`
 	File          string                 `json:"file,omitempty" yaml:"file,omitempty"`
 	ElementPowers [][]float64            `json:"element_powers,omitempty" yaml:"element_powers,omitempty"`
-	Variables     []types.EscapeVarState `json:"variables,omitempty" yaml:"variables,omitempty"`
+	Variables     []types.GlobalVarState `json:"variables,omitempty" yaml:"variables,omitempty"`
 }
 
-// escapeRunInfo is the run-level aggregate recovered from an escape/pso JSONL
-// run log (the `escape_complete` / `done` events). It is absent for a pipeline
+// globalRunInfo is the run-level aggregate recovered from an escape/pso JSONL
+// run log (the `global_complete` / `done` events). It is absent for a pipeline
 // document, which carries no record of how the run progressed.
-type escapeRunInfo struct {
-	Workers int     `json:"workers,omitempty" yaml:"workers,omitempty"`
-	Cycles  int     `json:"cycles,omitempty" yaml:"cycles,omitempty"`
-	Escapes int     `json:"escapes,omitempty" yaml:"escapes,omitempty"`
-	Minima  int     `json:"minima_count,omitempty" yaml:"minima_count,omitempty"`
-	Elapsed float64 `json:"elapsed_s,omitempty" yaml:"elapsed_s,omitempty"`
+type globalRunInfo struct {
+	Workers      int     `json:"workers,omitempty" yaml:"workers,omitempty"`
+	Cycles       int     `json:"cycles,omitempty" yaml:"cycles,omitempty"`
+	Explorations int     `json:"explorations,omitempty" yaml:"explorations,omitempty"`
+	Minima       int     `json:"minima_count,omitempty" yaml:"minima_count,omitempty"`
+	Elapsed      float64 `json:"elapsed_s,omitempty" yaml:"elapsed_s,omitempty"`
 }
 
-// EscapeWorkerRow is one worker's lifecycle summary for `list escape`. It is
+// GlobalWorkerRow is one worker's lifecycle summary for `list global`. It is
 // recovered only from an escape/pso JSONL run log: Status is the completion
 // state (completed / timeout / interrupted / retired), Cycles the number of
-// cycles the worker reached before finishing, Escaped/Recorded its escape and
+// cycles the worker reached before finishing, Explored/Recorded its exploration and
 // minimum-recording counts, BestMerit the best merit it reached, Elapsed the
 // seconds from run start to its completion event, and Reason the
 // resource-guard retirement reason.
-type EscapeWorkerRow struct {
+type GlobalWorkerRow struct {
 	Worker    int      `json:"worker" yaml:"worker"`
 	Status    string   `json:"status" yaml:"status"`
 	Cycles    int      `json:"cycles,omitempty" yaml:"cycles,omitempty"`
-	Escaped   int      `json:"escaped,omitempty" yaml:"escaped,omitempty"`
+	Explored  int      `json:"explored,omitempty" yaml:"explored,omitempty"`
 	Recorded  int      `json:"recorded,omitempty" yaml:"recorded,omitempty"`
 	BestMerit *float64 `json:"best_merit,omitempty" yaml:"best_merit,omitempty"`
 	Elapsed   float64  `json:"elapsed_s,omitempty" yaml:"elapsed_s,omitempty"`
 	Reason    string   `json:"reason,omitempty" yaml:"reason,omitempty"`
 }
 
-// EscapeEventRow is one run-level event of an escape/pso run log (only
+// GlobalEventRow is one run-level event of an escape/pso run log (only
 // recovered from a run log, since a pipeline document does not record how the
 // run progressed). Event is the JSONL event name; Detail summarises it — the
 // OS signal for the `interrupt` / `interrupt_dls` stages, the memory-limit
@@ -402,7 +402,7 @@ type EscapeWorkerRow struct {
 // rows were folded). Count is how many log rows this one row summarises: it is
 // set for the events that fold when they repeat (`warn`) and left 0, hence
 // omitted, for the rest, which are always single occurrences.
-type EscapeEventRow struct {
+type GlobalEventRow struct {
 	Event   string   `json:"event" yaml:"event"`
 	Detail  string   `json:"detail,omitempty" yaml:"detail,omitempty"`
 	Elapsed *float64 `json:"elapsed_s,omitempty" yaml:"elapsed_s,omitempty"`
@@ -412,50 +412,50 @@ type EscapeEventRow struct {
 // detailCell renders Detail for a human-readable table or CSV cell: a row that
 // summarises more than one occurrence appends the total as (×N). The
 // structured (json/yaml) formats carry Count as its own field instead.
-func (r EscapeEventRow) detailCell() string {
+func (r GlobalEventRow) detailCell() string {
 	if r.Count > 1 {
 		return fmt.Sprintf("%s (×%d)", r.Detail, r.Count)
 	}
 	return r.Detail
 }
 
-// escapeListData is the render input of `list escape`, shared by the pipeline
+// globalListData is the render input of `list global`, shared by the pipeline
 // (YAML) reader and the escape/pso JSONL run-log reader so both render through
 // one code path. Run, Workers, Events and the file names of InfeasibleBasins
 // are only populated from a run log; Found is false when the input carried no
 // escape result at all.
-type escapeListData struct {
+type globalListData struct {
 	Found bool
 	// FromLog marks data recovered from an escape/pso JSONL run log. Such a
 	// log may carry no --save file names, in which case the File column of the
 	// minima tables is dropped for it.
 	FromLog          bool
 	Params           []propRow
-	Minima           []EscapeMinimumRow
-	InfeasibleBasins []EscapeMinimumRow
+	Minima           []GlobalMinimumRow
+	InfeasibleBasins []GlobalMinimumRow
 	BestIndex        int
 	BestMerit        float64
 	FileDir          string
 	TimedOut         bool
 	Interrupted      bool
-	Run              *escapeRunInfo
-	Workers          []EscapeWorkerRow
-	Events           []EscapeEventRow
+	Run              *globalRunInfo
+	Workers          []GlobalWorkerRow
+	Events           []GlobalEventRow
 }
 
-// escapeListOutput is the structured (yaml/json) shape of `list escape`.
-type escapeListOutput struct {
+// globalListOutput is the structured (yaml/json) shape of `list global`.
+type globalListOutput struct {
 	Params           []propRow          `json:"params,omitempty" yaml:"params,omitempty"`
-	Minima           []EscapeMinimumRow `json:"minima,omitempty" yaml:"minima,omitempty"`
-	InfeasibleBasins []EscapeMinimumRow `json:"infeasible_basins,omitempty" yaml:"infeasible_basins,omitempty"`
+	Minima           []GlobalMinimumRow `json:"minima,omitempty" yaml:"minima,omitempty"`
+	InfeasibleBasins []GlobalMinimumRow `json:"infeasible_basins,omitempty" yaml:"infeasible_basins,omitempty"`
 	BestIndex        int                `json:"best_index" yaml:"best_index"`
 	BestMerit        float64            `json:"best_merit" yaml:"best_merit"`
 	FileDir          string             `json:"file_directory,omitempty" yaml:"file_directory,omitempty"`
 	TimedOut         bool               `json:"timed_out,omitempty" yaml:"timed_out,omitempty"`
 	Interrupted      bool               `json:"interrupted,omitempty" yaml:"interrupted,omitempty"`
-	Run              *escapeRunInfo     `json:"run,omitempty" yaml:"run,omitempty"`
-	Workers          []EscapeWorkerRow  `json:"workers,omitempty" yaml:"workers,omitempty"`
-	Events           []EscapeEventRow   `json:"events,omitempty" yaml:"events,omitempty"`
+	Run              *globalRunInfo     `json:"run,omitempty" yaml:"run,omitempty"`
+	Workers          []GlobalWorkerRow  `json:"workers,omitempty" yaml:"workers,omitempty"`
+	Events           []GlobalEventRow   `json:"events,omitempty" yaml:"events,omitempty"`
 }
 
 // runList implements the `list` subcommand: a read-only, human-readable
@@ -487,10 +487,10 @@ func runList(data []byte) {
 	}
 
 	// An escape/pso JSONL run log is detected before any YAML parsing: it
-	// carries no system definition, so only the escape target can be served
+	// carries no system definition, so only the global target can be served
 	// from it (a bare `list < run.jsonl` therefore lists the escape run).
-	if looksLikeEscapeJSONL(data) {
-		runListEscapeLog(data, args.positional, *format)
+	if looksLikeGlobalJSONL(data) {
+		runListGlobalLog(data, args.positional, *format)
 		return
 	}
 
@@ -499,7 +499,7 @@ func runList(data []byte) {
 	defaultListTargets := []string{"surfaces", "glasses", "paraxial", "fields"}
 	// allListTargets is the full target set; the "all" keyword expands to it
 	// and implies --auto-aperture, --all-glasses, and --roles.
-	allListTargets := []string{"surfaces", "glasses", "paraxial", "fields", "rays", "merit", "optimization", "escape", "focus"}
+	allListTargets := []string{"surfaces", "glasses", "paraxial", "fields", "rays", "merit", "optimization", "global", "focus"}
 
 	targets := args.positional
 	if len(targets) == 0 {
@@ -534,7 +534,7 @@ func runList(data []byte) {
 
 	needsOutput := false
 	for _, t := range targets {
-		if t == "rays" || t == "merit" || t == "optimization" || t == "escape" || t == "focus" {
+		if t == "rays" || t == "merit" || t == "optimization" || t == "global" || t == "focus" {
 			needsOutput = true
 		}
 	}
@@ -577,12 +577,12 @@ func runList(data []byte) {
 			listMerit(input, output, *format)
 		case "optimization":
 			listOptimization(input, output, *format)
-		case "escape":
-			listEscape(output, *format)
+		case "global":
+			listGlobal(output, *format)
 		case "focus":
 			listFocus(output, *format)
 		default:
-			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, escape, focus, \"default\", or \"all\")", target)
+			errOut("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, global, focus, \"default\", or \"all\")", target)
 			os.Exit(1)
 		}
 	}
@@ -2372,7 +2372,7 @@ func listMerit(input types.Input, output types.Output, format string) {
 		appendConstraints("single-config", optConstraints, true)
 	}
 
-	// Optimization result (only when piped from optimize/escape).
+	// Optimization result (only when piped from optimize or a global run).
 	var optResult *OptResultSummary
 	if output.OptResults != nil {
 		optResult = &OptResultSummary{
@@ -2381,16 +2381,16 @@ func listMerit(input types.Input, output types.Output, format string) {
 			Interrupted: output.OptResults.Interrupted,
 		}
 	}
-	if output.EscapeResult != nil {
+	if output.GlobalResult != nil {
 		if optResult == nil {
 			optResult = &OptResultSummary{}
 		}
-		optResult.Merit = output.EscapeResult.BestMerit
-		if output.EscapeResult.Interrupted {
+		optResult.Merit = output.GlobalResult.BestMerit
+		if output.GlobalResult.Interrupted {
 			optResult.Interrupted = true
 		}
 		if optResult.Status == "" {
-			optResult.Status = "escape"
+			optResult.Status = "global"
 		}
 	}
 
@@ -2746,7 +2746,7 @@ func sharedBindingsCompact(bindings []SharedBindingRow) string {
 func escapeSettings(e *types.EscapeConfig) []propRow {
 	var p []propRow
 	p = appendIntProp(p, "Max Cycles", e.MaxCycles)
-	p = appendIntProp(p, "Escape Workers", e.EscapeWorkers)
+	p = appendIntProp(p, "Global Workers", e.GlobalWorkers)
 	p = appendNumProp(p, "Max Seconds", e.MaxSeconds)
 	p = appendNumProp(p, "Distance Threshold", e.DistanceThreshold)
 	p = appendNumProp(p, "Fingerprint Distance Threshold", e.FingerprintDistanceThreshold)
@@ -2782,31 +2782,27 @@ func psoSettings(pso *types.PSOConfig) []propRow {
 	p = appendNumProp(p, "Velocity Clamp", pso.VelocityClamp)
 	p = appendNumProp(p, "Init Spread", pso.InitSpread)
 	p = appendNumProp(p, "Constraint Penalty", pso.ConstraintPenalty)
-	// Escape params are shown via the embedded EscapeConfig sub-section.
-	if esc := &pso.EscapeConfig; esc != nil {
-		// Show a collapsed "escape" row within the PSO section so the user
-		// can see the shared cycle parameters without a separate block.
-		p = append(p, propRow{Name: "escape (shared)", Value: "-"})
-		p = appendIntProp(p, "  Max Cycles", esc.MaxCycles)
-		p = appendIntProp(p, "  Escape Workers", esc.EscapeWorkers)
-		p = appendNumProp(p, "  Max Seconds", esc.MaxSeconds)
-		p = appendNumProp(p, "  Distance Threshold", esc.DistanceThreshold)
-		p = appendNumProp(p, "  H Initial", esc.HInitial)
-		p = appendNumProp(p, "  W Initial", esc.WInitial)
-		p = appendNumProp(p, "  H Mult", esc.HMult)
-		p = appendNumProp(p, "  W Mult", esc.WMult)
-		p = appendNumProp(p, "  Initial Perturb", esc.InitialPerturb)
-		p = appendBoolPtrProp(p, "  Stream", esc.Stream)
-	}
+	// The cycle machinery is shared with `escape` and lives in the embedded
+	// GlobalConfig, so it is shown as a collapsed sub-block under the method's
+	// own knobs. The escape bump geometry (h_initial / w_initial / ...) is not
+	// part of it and never appears here.
+	g := &pso.GlobalConfig
+	p = append(p, propRow{Name: "global (shared)", Value: "-"})
+	p = appendIntProp(p, "  Max Cycles", g.MaxCycles)
+	p = appendIntProp(p, "  Global Workers", g.GlobalWorkers)
+	p = appendNumProp(p, "  Max Seconds", g.MaxSeconds)
+	p = appendNumProp(p, "  Distance Threshold", g.DistanceThreshold)
+	p = appendNumProp(p, "  Initial Perturb", g.InitialPerturb)
+	p = appendBoolPtrProp(p, "  Stream", g.Stream)
 	return p
 }
 
-// escapeParamsSettings flattens the set fields of escape_result.params into
+// globalParamsSettings flattens the set fields of global_result.params into
 // key-value rows.
-func escapeParamsSettings(p *types.EscapeParamsInfo) []propRow {
+func globalParamsSettings(p *types.GlobalParamsInfo) []propRow {
 	var rows []propRow
 	rows = appendIntProp(rows, "Max Cycles", p.MaxCycles)
-	rows = appendIntProp(rows, "Escape Workers", p.EscapeWorkers)
+	rows = appendIntProp(rows, "Global Workers", p.GlobalWorkers)
 	rows = appendNumProp(rows, "Max Seconds", p.MaxSeconds)
 	rows = appendNumProp(rows, "Distance Threshold", p.DistanceThreshold)
 	rows = appendNumProp(rows, "Fingerprint Distance Threshold", p.FingerprintDistanceThreshold)
@@ -2826,31 +2822,31 @@ func escapeParamsSettings(p *types.EscapeParamsInfo) []propRow {
 	return rows
 }
 
-// listEscape renders the escape-function global optimisation results from
-// output.escape_result (the pipeline document produced by escape/pso).
-func listEscape(output types.Output, format string) {
-	renderEscapeList(escapeDataFromOutput(output), format)
+// listGlobal renders the escape-function global optimisation results from
+// output.global_result (the pipeline document produced by escape/pso).
+func listGlobal(output types.Output, format string) {
+	renderGlobalList(globalDataFromOutput(output), format)
 }
 
-// escapeDataFromOutput flattens output.escape_result into the shared
-// escapeListData render input: the effective escape parameters, the file
+// globalDataFromOutput flattens output.global_result into the shared
+// globalListData render input: the effective escape parameters, the file
 // directory shared by all minima, and one row per local minimum (merit-sorted
 // rank index, status, --save file basename, per-config element powers and the
 // minimum's variable values).
-func escapeDataFromOutput(output types.Output) escapeListData {
-	esc := output.EscapeResult
+func globalDataFromOutput(output types.Output) globalListData {
+	esc := output.GlobalResult
 	if esc == nil {
-		return escapeListData{}
+		return globalListData{}
 	}
 
-	// Build minima rows. escape_result.minima lists the feasible solutions;
+	// Build minima rows. global_result.minima lists the feasible solutions;
 	// infeasible basins are a separate list (only present with --keep-infeasible).
 	// A streamed document writes minima append-only, so it keeps the
 	// first-discovery values there and carries each improved point in
 	// minima_improvements (indexed by the position it supersedes); the improved
 	// entry replaces its row before the list is ranked.
-	entries := effectiveEscapeMinima(esc)
-	minima := make([]EscapeMinimumRow, 0, len(entries))
+	entries := effectiveGlobalMinima(esc)
+	minima := make([]GlobalMinimumRow, 0, len(entries))
 	files := make([]string, 0, len(entries))
 	for _, m := range entries {
 		var powers [][]float64
@@ -2859,7 +2855,7 @@ func escapeDataFromOutput(output types.Output) escapeListData {
 				powers = append(powers, f.ElementPowers)
 			}
 		}
-		minima = append(minima, EscapeMinimumRow{
+		minima = append(minima, GlobalMinimumRow{
 			Index:         m.Index,
 			Merit:         m.Merit,
 			Status:        string(m.Status),
@@ -2880,9 +2876,9 @@ func escapeDataFromOutput(output types.Output) escapeListData {
 		return minima[i].Merit < minima[j].Merit
 	})
 
-	var infeasible []EscapeMinimumRow
+	var infeasible []GlobalMinimumRow
 	for _, m := range esc.InfeasibleBasins {
-		infeasible = append(infeasible, EscapeMinimumRow{
+		infeasible = append(infeasible, GlobalMinimumRow{
 			Index:     m.Index,
 			Merit:     m.Merit,
 			Status:    string(m.Status),
@@ -2895,9 +2891,9 @@ func escapeDataFromOutput(output types.Output) escapeListData {
 		}
 	}
 
-	return escapeListData{
+	return globalListData{
 		Found:            true,
-		Params:           escapeParamsSettings(&esc.Params),
+		Params:           globalParamsSettings(&esc.Params),
 		Minima:           minima,
 		InfeasibleBasins: infeasible,
 		BestIndex:        esc.BestIndex,
@@ -2933,12 +2929,12 @@ func commonFileDir(paths []string) string {
 	return dir
 }
 
-// escapeRunSettings flattens a run-log aggregate into key-value rows.
-func escapeRunSettings(r *escapeRunInfo) []propRow {
+// globalRunSettings flattens a run-log aggregate into key-value rows.
+func globalRunSettings(r *globalRunInfo) []propRow {
 	var rows []propRow
 	rows = appendIntProp(rows, "Workers", r.Workers)
 	rows = appendIntProp(rows, "Cycles", r.Cycles)
-	rows = appendIntProp(rows, "Escapes", r.Escapes)
+	rows = appendIntProp(rows, "Explorations", r.Explorations)
 	rows = appendIntProp(rows, "Minima", r.Minima)
 	rows = appendNumProp(rows, "Run Elapsed", r.Elapsed)
 	return rows
@@ -2948,7 +2944,7 @@ func escapeRunSettings(r *escapeRunInfo) []propRow {
 // The precedence follows how the escape loop stops a worker: an explicit
 // resource-guard retirement outranks an interrupt, which outranks the wall
 // clock budget; anything else finished its cycles normally.
-func escapeWorkerStatus(w *escapeLogWorker) string {
+func escapeWorkerStatus(w *globalLogWorker) string {
 	switch {
 	case w.retired:
 		return "retired"
@@ -2961,12 +2957,12 @@ func escapeWorkerStatus(w *escapeLogWorker) string {
 }
 
 // workerRow converts the accumulated log record into a display row.
-func workerRow(w *escapeLogWorker) EscapeWorkerRow {
-	row := EscapeWorkerRow{
+func workerRow(w *globalLogWorker) GlobalWorkerRow {
+	row := GlobalWorkerRow{
 		Worker:   w.id,
 		Status:   escapeWorkerStatus(w),
 		Cycles:   w.maxCycle + 1,
-		Escaped:  w.escaped,
+		Explored: w.explored,
 		Recorded: w.recorded,
 		Elapsed:  w.elapsed,
 		Reason:   w.reason,
@@ -2981,10 +2977,10 @@ func workerRow(w *escapeLogWorker) EscapeWorkerRow {
 	return row
 }
 
-// renderEscapeList prints the escape listing in the requested format. The
-// input is source-agnostic: escapeDataFromOutput fills it from a pipeline
-// document, buildEscapeListDataFromLog from an escape/pso JSONL run log.
-func renderEscapeList(d escapeListData, format string) {
+// renderGlobalList prints the escape listing in the requested format. The
+// input is source-agnostic: globalDataFromOutput fills it from a pipeline
+// document, buildGlobalListDataFromLog from an escape/pso JSONL run log.
+func renderGlobalList(d globalListData, format string) {
 	if !d.Found {
 		switch format {
 		case "yaml":
@@ -2992,7 +2988,7 @@ func renderEscapeList(d escapeListData, format string) {
 		case "json":
 			fmt.Println(`{"params":[]}`)
 		default:
-			fmt.Println("Escape: (no escape result)")
+			fmt.Println("Global: (no global result)")
 		}
 		return
 	}
@@ -3002,7 +2998,7 @@ func renderEscapeList(d escapeListData, format string) {
 
 	switch format {
 	case "yaml":
-		outData, err := yaml.Marshal(escapeListOutput{
+		outData, err := yaml.Marshal(globalListOutput{
 			Params:           params,
 			Minima:           minima,
 			InfeasibleBasins: d.InfeasibleBasins,
@@ -3021,7 +3017,7 @@ func renderEscapeList(d escapeListData, format string) {
 		}
 		os.Stdout.Write(outData)
 	case "json":
-		outData, err := json.MarshalIndent(escapeListOutput{
+		outData, err := json.MarshalIndent(globalListOutput{
 			Params:           params,
 			Minima:           minima,
 			InfeasibleBasins: d.InfeasibleBasins,
@@ -3041,10 +3037,10 @@ func renderEscapeList(d escapeListData, format string) {
 		os.Stdout.Write(outData)
 		fmt.Println()
 	case "csv":
-		printPropsSection("Escape Parameters:", params)
+		printPropsSection("Global Parameters:", params)
 		if d.Run != nil {
 			fmt.Println()
-			printPropsSection("Escape Run:", escapeRunSettings(d.Run))
+			printPropsSection("Global Run:", globalRunSettings(d.Run))
 		}
 		if len(minima) > 0 {
 			fmt.Println("Local Minima:")
@@ -3116,13 +3112,13 @@ func renderEscapeList(d escapeListData, format string) {
 		if len(d.Workers) > 0 {
 			fmt.Println()
 			fmt.Println("Workers:")
-			fmt.Println("worker,status,cycles,escaped,recorded,best_merit,elapsed_s,reason")
+			fmt.Println("worker,status,cycles,explored,recorded,best_merit,elapsed_s,reason")
 			for _, w := range d.Workers {
 				cells := []string{
 					strconv.Itoa(w.Worker),
 					w.Status,
 					strconv.Itoa(w.Cycles),
-					strconv.Itoa(w.Escaped),
+					strconv.Itoa(w.Explored),
 					strconv.Itoa(w.Recorded),
 					optionalFloatCSV(w.BestMerit),
 					optionalFloatCSV(&w.Elapsed),
@@ -3155,12 +3151,12 @@ func renderEscapeList(d escapeListData, format string) {
 			resultProps = appendBoolTrueProp(resultProps, "Interrupted", d.Interrupted)
 		}
 
-		printPropsSection("Escape Parameters:", params)
+		printPropsSection("Global Parameters:", params)
 		if len(resultProps) > 0 {
-			printPropsSection("Escape Result:", resultProps)
+			printPropsSection("Global Result:", resultProps)
 		}
 		if d.Run != nil {
-			printPropsSection("Escape Run:", escapeRunSettings(d.Run))
+			printPropsSection("Global Run:", globalRunSettings(d.Run))
 		}
 
 		if len(minima) > 0 {
@@ -3250,7 +3246,7 @@ func renderEscapeList(d escapeListData, format string) {
 				{header: "Worker", right: true},
 				{header: "Status"},
 				{header: "Cycles", right: true},
-				{header: "Escaped", right: true},
+				{header: "Explored", right: true},
 				{header: "Recorded", right: true},
 				{header: "Best Merit", right: true},
 				{header: "Elapsed[s]", right: true},
@@ -3262,7 +3258,7 @@ func renderEscapeList(d escapeListData, format string) {
 				cols[0].cells = append(cols[0].cells, strconv.Itoa(w.Worker))
 				cols[1].cells = append(cols[1].cells, w.Status)
 				cols[2].cells = append(cols[2].cells, strconv.Itoa(w.Cycles))
-				cols[3].cells = append(cols[3].cells, strconv.Itoa(w.Escaped))
+				cols[3].cells = append(cols[3].cells, strconv.Itoa(w.Explored))
 				cols[4].cells = append(cols[4].cells, strconv.Itoa(w.Recorded))
 				cols[5].cells = append(cols[5].cells, formatOptionalFloat(w.BestMerit))
 				cols[6].cells = append(cols[6].cells, formatTableFloat(w.Elapsed))
@@ -3302,7 +3298,7 @@ func renderEscapeList(d escapeListData, format string) {
 
 // hasAnyWorkerReason reports whether any worker carries a retirement reason
 // (the Reason column is dropped when none do).
-func hasAnyWorkerReason(workers []EscapeWorkerRow) bool {
+func hasAnyWorkerReason(workers []GlobalWorkerRow) bool {
 	for _, w := range workers {
 		if w.Reason != "" {
 			return true
@@ -3312,7 +3308,7 @@ func hasAnyWorkerReason(workers []EscapeWorkerRow) bool {
 }
 
 // hasAnySavedFile reports whether any row recovered a --save file name.
-func hasAnySavedFile(rows []EscapeMinimumRow) bool {
+func hasAnySavedFile(rows []GlobalMinimumRow) bool {
 	for _, r := range rows {
 		if r.File != "" && r.File != "-" {
 			return true
@@ -3324,7 +3320,7 @@ func hasAnySavedFile(rows []EscapeMinimumRow) bool {
 // escapeShowFileColumn reports whether the minima table carries a File column.
 // A pipeline document always shows it (a run without --save renders as "-");
 // a run log shows it only when its minimum_saved events yielded file names.
-func escapeShowFileColumn(d escapeListData, rows []EscapeMinimumRow) bool {
+func escapeShowFileColumn(d globalListData, rows []GlobalMinimumRow) bool {
 	return !d.FromLog || hasAnySavedFile(rows)
 }
 
@@ -3337,7 +3333,7 @@ func fileBase(path string) string {
 }
 
 // hasAnyElementPowers reports whether any minimum has element powers.
-func hasAnyElementPowers(minima []EscapeMinimumRow) bool {
+func hasAnyElementPowers(minima []GlobalMinimumRow) bool {
 	for _, m := range minima {
 		if len(m.ElementPowers) > 0 {
 			return true
@@ -3348,7 +3344,7 @@ func hasAnyElementPowers(minima []EscapeMinimumRow) bool {
 
 // maxElementPowerCount returns the maximum number of element powers per config
 // across all minima.
-func maxElementPowerCount(minima []EscapeMinimumRow) int {
+func maxElementPowerCount(minima []GlobalMinimumRow) int {
 	n := 0
 	for _, m := range minima {
 		for _, ep := range m.ElementPowers {
@@ -4008,8 +4004,8 @@ func listOptimization(input types.Input, output types.Output, format string) {
 			if gh.GuardBand != nil {
 				p = appendNumProp(p, "Guard Band", *gh.GuardBand)
 			}
-			if gh.EscapeWeightFactor != nil {
-				p = appendNumProp(p, "Escape Weight Factor", *gh.EscapeWeightFactor)
+			if gh.ExplorationWeightFactor != nil {
+				p = appendNumProp(p, "Exploration Weight Factor", *gh.ExplorationWeightFactor)
 			}
 			if len(gh.Glasses) > 0 {
 				p = appendIntProp(p, "Glasses", len(gh.Glasses))

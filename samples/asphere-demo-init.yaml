@@ -413,7 +413,7 @@ optimization:
       active: true
   escape:
     max_cycles: 6
-    escape_workers: 8
+    global_workers: 8
     distance_threshold: 0.15
     h_initial: 0.5
     w_initial: 0.8

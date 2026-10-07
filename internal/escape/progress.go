@@ -90,7 +90,7 @@ func (p *Progress) Event(name string, fields map[string]any) {
 // what keeps a --verbose / --log stream pure JSONL: the optimizer's and the
 // glass package's Warnf sinks otherwise write tagged plain-text lines straight
 // to stderr, interleaving them with the compact JSONL and breaking
-// `rayweave list escape` (and jq, and query --jsonl) on a captured stream. A
+// `rayweave list global` (and jq, and query --jsonl) on a captured stream. A
 // nil receiver and an empty writer list are both no-ops, so the caller must
 // keep the plain-text sink whenever no writer is registered.
 func (p *Progress) Warnf(format string, args ...any) {
@@ -102,8 +102,8 @@ func (p *Progress) Warnf(format string, args ...any) {
 var eventKeyOrder = []string{
 	"cycle", "elapsed", "time", "event", "merit", "worker", "index", "kind",
 	"dls_status", "phase", "distance_threshold", "h", "h_mult", "w", "w_mult",
-	"max_cycles", "max_seconds", "workers", "escaped", "recorded", "best_merit",
-	"cycles", "escapes", "minima",
+	"max_cycles", "max_seconds", "workers", "explored", "recorded", "best_merit",
+	"cycles", "explorations", "minima",
 	// PSO-specific keys.
 	"iter", "improve", "restarts", "gbest_merit", "gbest_true",
 	"swarm_mean", "swarm_min", "swarm_max",

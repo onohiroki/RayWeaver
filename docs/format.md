@@ -84,5 +84,5 @@ Top-level sections (all except `metadata` may be `omitempty`):
 
 Output documents inline the full input (preserving every section and `metadata`)
 and append the computed result sections on top (e.g. `chief_rays`, `results`,
-`paraxial_result`, `escape_result`, etc.), so a pipeline such as
+`paraxial_result`, `global_result`, etc.), so a pipeline such as
 `chief → trace → plot` stays pipe-compatible at every stage.

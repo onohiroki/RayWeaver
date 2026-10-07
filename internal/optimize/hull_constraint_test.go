@@ -205,7 +205,7 @@ func TestRescueGlassHullNoop(t *testing.T) {
 // TestHullEscapePhaseFactor: the hull penalty keeps full weight outside an
 // escape run (phaseActive false — a plain optimize run never calls
 // SetEscapePhase) and during the glass (0.5) and clean (1) phases, and is
-// scaled by the hull's escape_weight_factor only during escape exploration
+// scaled by the hull's exploration_weight_factor only during escape exploration
 // (phase 0). Hulls without a configured factor are never scaled.
 func TestHullEscapePhaseFactor(t *testing.T) {
 	opt := buildHullTestOptimizer(t)
@@ -218,7 +218,7 @@ func TestHullEscapePhaseFactor(t *testing.T) {
 	if got := opt.hullPhaseFactor(); got != 1 {
 		t.Errorf("escape phase without configured factor = %v, want 1", got)
 	}
-	opt.hull.SetEscapeWeightFactor(0.1)
+	opt.hull.SetExplorationWeightFactor(0.1)
 	if got := opt.hullPhaseFactor(); got != 0.1 {
 		t.Errorf("escape phase factor = %v, want 0.1", got)
 	}
@@ -234,7 +234,7 @@ func TestHullEscapePhaseFactor(t *testing.T) {
 	// A plain optimize run (SetEscapePhase never called) stays at full
 	// strength even when the hull carries a factor.
 	plain := buildHullTestOptimizer(t)
-	plain.hull.SetEscapeWeightFactor(0.1)
+	plain.hull.SetExplorationWeightFactor(0.1)
 	if got := plain.hullPhaseFactor(); got != 1 {
 		t.Errorf("plain optimize factor = %v, want 1", got)
 	}
@@ -242,10 +242,10 @@ func TestHullEscapePhaseFactor(t *testing.T) {
 
 // TestEscapePhaseScalesHullMerit: behavioural check of the factor at the
 // merit/residual sites — during escape the hull term (and the squared hull
-// residual) is multiplied by escape_weight_factor, otherwise it is full.
+// residual) is multiplied by exploration_weight_factor, otherwise it is full.
 func TestEscapePhaseScalesHullMerit(t *testing.T) {
 	opt := buildHullTestOptimizer(t)
-	opt.hull.SetEscapeWeightFactor(0.1)
+	opt.hull.SetExplorationWeightFactor(0.1)
 	x := []float64{2.5, 80.0} // outside the hull: nonzero penalty
 
 	base := opt.MeritBreakdown(x)["hull"]

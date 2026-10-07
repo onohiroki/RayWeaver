@@ -766,12 +766,12 @@ type GlassHullConfig struct {
 	// true hull while feasibility is still judged against the true hull.
 	// nil (absent) = default 0.01 (on); an explicit 0 disables it.
 	GuardBand *float64 `yaml:"guard_band,omitempty"`
-	// EscapeWeightFactor scales the whole hull-penalty term during the
+	// ExplorationWeightFactor scales the whole hull-penalty term during the
 	// escape exploration phase (0 = escape, 0.5 = glass, 1 = clean), so the
 	// search may cross the hull barrier between basins while the glass/clean
 	// phases keep full wall strength. nil or 0 = default 0.1; 1 disables the
 	// phase scaling.
-	EscapeWeightFactor *float64 `yaml:"escape_weight_factor,omitempty"`
+	ExplorationWeightFactor *float64 `yaml:"exploration_weight_factor,omitempty"`
 }
 
 // GlassHullVertex is an explicit (nd, vd) point for the hull.
@@ -1090,11 +1090,16 @@ type DegenerateConfig struct {
 	WavefrontValue float64 `yaml:"wavefront_value,omitempty"`
 }
 
-// EscapeConfig configures the escape-function global optimisation loop
-// (Ishiki-Ono style local-minimum escape for DLS).
-type EscapeConfig struct {
+// GlobalConfig is the configuration shared by every global optimisation
+// method: the cycle budget, the worker pool, how a discovered point is
+// deduplicated against the store, the stall policy and the feasibility
+// validation. The `escape` and `pso` sections both embed it inline, so a knob
+// written under one of them behaves identically under the other; each method
+// adds its own section below (see EscapeConfig, PSOConfig). Nothing in it
+// refers to a particular search strategy.
+type GlobalConfig struct {
 	MaxCycles         int     `yaml:"max_cycles,omitempty"`
-	EscapeWorkers     int     `yaml:"escape_workers,omitempty"`
+	GlobalWorkers     int     `yaml:"global_workers,omitempty"`
 	MaxSeconds        float64 `yaml:"max_seconds,omitempty"`
 	DistanceThreshold float64 `yaml:"distance_threshold,omitempty"`
 	// FingerprintDistanceThreshold is the design-fingerprint (element-power)
@@ -1104,13 +1109,7 @@ type EscapeConfig struct {
 	// structurally-different solutions are recorded as distinct minima. 0
 	// disables the fingerprint criterion (variable distance only).
 	FingerprintDistanceThreshold float64            `yaml:"fingerprint_distance_threshold,omitempty"`
-	HInitial                     float64            `yaml:"h_initial,omitempty"`
-	WInitial                     float64            `yaml:"w_initial,omitempty"`
-	HMult                        float64            `yaml:"h_mult,omitempty"`
-	WMult                        float64            `yaml:"w_mult,omitempty"`
 	VariableWeights              map[string]float64 `yaml:"variable_weights,omitempty"`
-	EscapeIterFrac               float64            `yaml:"escape_iter_frac,omitempty"`
-	WSpan                        float64            `yaml:"w_span,omitempty"`
 	StallWindowFrac              float64            `yaml:"stall_window_frac,omitempty"`
 	StallRelTol                  float64            `yaml:"stall_rel_tol,omitempty"`
 	StallEarlyStop               *bool              `yaml:"stall_early_stop,omitempty"`
@@ -1125,14 +1124,14 @@ type EscapeConfig struct {
 	// A higher value (e.g. 64) checks throughput at finer sampling, preventing
 	// valid low-ray-count solutions from being rejected as infeasible.
 	ValidationNumRays int `yaml:"validation_num_rays,omitempty"`
-	// ResourceGuard enables the escape resource self-monitor: it samples the
-	// process and OS memory state and retires the least-productive worker, one
-	// at a time with a cooldown, when pressure builds up. Disabled unless the
-	// section is present with enabled: true.
+	// ResourceGuard enables the resource self-monitor of a global run: it
+	// samples the process and OS memory state and retires the least-productive
+	// worker, one at a time with a cooldown, when pressure builds up. Disabled
+	// unless the section is present with enabled: true.
 	ResourceGuard *ResourceGuardConfig `yaml:"resource_guard,omitempty"`
 	// Stream selects append-only streaming of the pipeline document to stdout
 	// (the default). The settled parts are written when the run starts and one
-	// escape_result.minima entry is appended per discovered solution, so a run
+	// global_result.minima entry is appended per discovered solution, so a run
 	// killed mid-way still leaves a readable document behind; false restores
 	// the legacy one-shot write performed after every cycle has finished. See
 	// docs/escape.md.
@@ -1146,18 +1145,31 @@ type EscapeConfig struct {
 	// HullRescueIterFrac is the rescue DLS MaxIter as a fraction of the full
 	// budget (default 0.25). 0 = default.
 	HullRescueIterFrac float64 `yaml:"hull_rescue_iter_frac,omitempty"`
-	// EscapeBumps turns off the escape-function bumps: the exploration phase
-	// minimises the plain merit instead of pushing away from the recorded
-	// minima, while the store, the new/repeat classification, the validation
-	// and the escape_result output all keep working as before. nil = default
-	// on; false disables the bumps.
-	EscapeBumps *bool `yaml:"escape_bumps,omitempty"`
 	// CleanDLS turns off the clean re-optimisation phase that closes each
 	// cycle: the point the cycle records is the exploration result as-is (or
 	// the glass-phase output when one ran), never gradient-refined. The clean
 	// retry and the glass-hull rescue re-solve belong to the same phase and
 	// are skipped with it. nil = default on; false disables the clean DLS.
 	CleanDLS *bool `yaml:"clean_dls,omitempty"`
+}
+
+// EscapeConfig configures the escape-function global optimisation loop
+// (Ishiki-Ono style local-minimum escape for DLS). The shared cycle machinery
+// lives in the embedded GlobalConfig; only the bump geometry and the
+// escape-phase budget are specific to this method.
+type EscapeConfig struct {
+	GlobalConfig `yaml:",inline"`
+
+	HInitial float64 `yaml:"h_initial,omitempty"`
+	WInitial float64 `yaml:"w_initial,omitempty"`
+	HMult    float64 `yaml:"h_mult,omitempty"`
+	WMult    float64 `yaml:"w_mult,omitempty"`
+	// EscapeIterFrac is the escape-phase DLS budget as a fraction of the full
+	// cycle MaxIter (default 1/3).
+	EscapeIterFrac float64 `yaml:"escape_iter_frac,omitempty"`
+	// WSpan spreads the per-worker bump width as a fraction of WInitial, so
+	// the workers escape on different length scales (default 2.0).
+	WSpan float64 `yaml:"w_span,omitempty"`
 }
 
 // ResourceGuardConfig configures the escape resource self-monitor. Every field
@@ -1190,7 +1202,7 @@ type ResourceGuardConfig struct {
 	// compaction backstops require (default 3).
 	Consecutive int `yaml:"consecutive,omitempty"`
 	// MinWorkers is the floor: the guard never retires below it. 0 = half the
-	// configured escape_workers.
+	// configured global_workers.
 	MinWorkers int `yaml:"min_workers,omitempty"`
 	// RetireCooldownSeconds is the observation window after a retirement
 	// (default 600): at most one worker is retired per window.
@@ -1200,16 +1212,16 @@ type ResourceGuardConfig struct {
 	MidDLSStop bool `yaml:"mid_dls_stop,omitempty"`
 }
 
-// PSOConfig configures the Particle Swarm Optimization escape-function
-// global optimiser. Escape-function parameters are embedded inline; PSO-specific
-// fields control the swarm behaviour.
+// PSOConfig configures the particle-swarm global optimiser, a plain
+// multi-start search with no escape-function bumps. The shared cycle
+// machinery lives in the embedded GlobalConfig; only the swarm behaviour is
+// specific to this method.
 type PSOConfig struct {
-	EscapeConfig `yaml:",inline"`
+	GlobalConfig `yaml:",inline"`
 
-	// SwarmSize is the number of particles per escape worker (default 30).
+	// SwarmSize is the number of particles per worker (default 30).
 	SwarmSize int `yaml:"swarm_size,omitempty"`
 	// PsoIterations is the number of PSO iterations per cycle (default 40).
-	// Replaces the DLS escape-phase budget (EscapeIterFrac is unused in PSO mode).
 	PsoIterations int `yaml:"pso_iterations,omitempty"`
 	// Inertia is the starting velocity inertia weight. Linearly decays from
 	// Inertia down to 0.4 over the iteration budget. 0 uses the built-in
@@ -1375,39 +1387,42 @@ type ConstraintMeasurement struct {
 	Residual float64 `yaml:"residual"`
 }
 
-// EscapeResult is the escape-function global optimisation report. The best
+// GlobalResult is the escape-function global optimisation report. The best
 // solution's surfaces live in the top-level system/configs (pipeline-compatible);
 // every discovered local minimum is listed here with its full surface data.
-type EscapeResult struct {
+type GlobalResult struct {
 	BestIndex        int              `yaml:"best_index"`
 	BestMerit        float64          `yaml:"best_merit"`
-	Params           EscapeParamsInfo `yaml:"params"`
+	Params           GlobalParamsInfo `yaml:"params"`
 	TimedOut         bool             `yaml:"timed_out,omitempty"`
 	Interrupted      bool             `yaml:"interrupted,omitempty"`
-	Minima           []EscapeMinimum  `yaml:"minima"`
-	InfeasibleBasins []EscapeMinimum  `yaml:"infeasible_basins,omitempty"`
+	Minima           []GlobalMinimum  `yaml:"minima"`
+	InfeasibleBasins []GlobalMinimum  `yaml:"infeasible_basins,omitempty"`
 	// MinimaImprovements carries the final version of every minimum whose point
 	// was replaced in the store during the run (Store.Replace). Each entry's
 	// Index is the position in Minima it supersedes, so a reader takes
 	// minima[i] unless an improvement names i. It is written at completion,
 	// before the top-level configs, because the streamed minima list is
-	// append-only and keeps its first-discovery values; `list escape` already
+	// append-only and keeps its first-discovery values; `list global` already
 	// merges it (see docs/escape.md).
-	MinimaImprovements []EscapeMinimum `yaml:"minima_improvements,omitempty"`
+	MinimaImprovements []GlobalMinimum `yaml:"minima_improvements,omitempty"`
 }
 
-// EscapeParamsInfo records the escape parameter values actually used.
-type EscapeParamsInfo struct {
-	HInitial          float64 `yaml:"h_initial"`
-	WInitial          float64 `yaml:"w_initial"`
-	HMult             float64 `yaml:"h_mult"`
-	WMult             float64 `yaml:"w_mult"`
+// GlobalParamsInfo records the parameter values a global run actually used.
+// The shared cycle knobs are always reported; the escape bump geometry
+// (h_initial .. w_span) is escape-only and is omitted entirely by a run that
+// carries no bumps (PSO), so its params block never mentions it.
+type GlobalParamsInfo struct {
+	HInitial          float64 `yaml:"h_initial,omitempty"`
+	WInitial          float64 `yaml:"w_initial,omitempty"`
+	HMult             float64 `yaml:"h_mult,omitempty"`
+	WMult             float64 `yaml:"w_mult,omitempty"`
 	DistanceThreshold float64 `yaml:"distance_threshold"`
 	// FingerprintDistanceThreshold is the design-fingerprint distance used for
 	// the distinct-minimum criterion (0 = fingerprint criterion disabled).
 	FingerprintDistanceThreshold float64            `yaml:"fingerprint_distance_threshold,omitempty"`
 	MaxCycles                    int                `yaml:"max_cycles"`
-	EscapeWorkers                int                `yaml:"escape_workers,omitempty"`
+	GlobalWorkers                int                `yaml:"global_workers,omitempty"`
 	MaxSeconds                   float64            `yaml:"max_seconds,omitempty"`
 	VariableWeights              map[string]float64 `yaml:"variable_weights,omitempty"`
 	EscapeIterFrac               float64            `yaml:"escape_iter_frac,omitempty"`
@@ -1416,33 +1431,32 @@ type EscapeParamsInfo struct {
 	StallRelTol                  float64            `yaml:"stall_rel_tol,omitempty"`
 	StallEarlyStop               *bool              `yaml:"stall_early_stop,omitempty"`
 	InitialPerturb               float64            `yaml:"initial_perturb,omitempty"`
-	// EscapeBumps / CleanDLS report the two cycle phases as disabled. Both are
-	// default-on, so they are written only when off (a nil pointer omits the
+	// CleanDLS reports the closing cycle phase as disabled. It is
+	// default-on, so it is written only when off (a nil pointer omits the
 	// key) and a default run's params block stays unchanged; an explicitly
 	// disabled value is therefore distinguishable from the default.
-	EscapeBumps *bool `yaml:"escape_bumps,omitempty"`
-	CleanDLS    *bool `yaml:"clean_dls,omitempty"`
+	CleanDLS *bool `yaml:"clean_dls,omitempty"`
 }
 
-// EscapeMinimumStatus classifies a converged DLS point: feasible (all
+// GlobalMinimumStatus classifies a converged DLS point: feasible (all
 // constraints satisfied), infeasible (constraints violated but a valid basin
 // for escape bumps), or evaluation failure (numerical / ray-trace error).
-type EscapeMinimumStatus string
+type GlobalMinimumStatus string
 
 const (
 	// StatusFeasibleLocalMinimum is a valid local minimum that satisfies all
-	// constraints. It is listed as a solution in escape_result.minima.
-	StatusFeasibleLocalMinimum EscapeMinimumStatus = "feasible_local_minimum"
+	// constraints. It is listed as a solution in global_result.minima.
+	StatusFeasibleLocalMinimum GlobalMinimumStatus = "feasible_local_minimum"
 	// StatusInfeasibleBasin is a point where DLS converged but one or more
 	// constraints are violated (e.g. insufficient field throughput). It is
 	// not listed as a solution, but an escape bump is placed there to prevent
 	// re-visiting the basin. When --keep-infeasible is set, it appears in
-	// escape_result.infeasible_basins.
-	StatusInfeasibleBasin EscapeMinimumStatus = "infeasible_basin"
+	// global_result.infeasible_basins.
+	StatusInfeasibleBasin GlobalMinimumStatus = "infeasible_basin"
 	// StatusEvaluationFailure is a point where merit/residual evaluation
 	// failed (NaN, Inf, ray-trace error, degenerate). It is not listed as a
 	// solution and does not receive an escape bump.
-	StatusEvaluationFailure EscapeMinimumStatus = "evaluation_failure"
+	StatusEvaluationFailure GlobalMinimumStatus = "evaluation_failure"
 )
 
 // InvalidReason describes why an infeasible basin was classified as such.
@@ -1485,25 +1499,25 @@ type ConfigFeatures struct {
 	ElementPowers []float64 `yaml:"element_powers,omitempty"`
 }
 
-// EscapeMinimum is one discovered local minimum. Single-config runs populate
+// GlobalMinimum is one discovered local minimum. Single-config runs populate
 // Surfaces; multi-config runs populate Configs. Features lists the fingerprint
 // of each config; Merit stays at the minimum level as the objective scalar.
-type EscapeMinimum struct {
+type GlobalMinimum struct {
 	Index         int                 `yaml:"index"`
 	Merit         float64             `yaml:"merit"`
-	Status        EscapeMinimumStatus `yaml:"status,omitempty"`
+	Status        GlobalMinimumStatus `yaml:"status,omitempty"`
 	InvalidReason InvalidReason       `yaml:"invalid_reason,omitempty"`
 	File          string              `yaml:"file,omitempty"`
 	Configs       []Config            `yaml:"configs,omitempty"`
 	Surfaces      []Surface           `yaml:"surfaces,omitempty"`
-	Variables     []EscapeVarState    `yaml:"variables"`
+	Variables     []GlobalVarState    `yaml:"variables"`
 	Features      []ConfigFeatures    `yaml:"features,omitempty"`
 }
 
-// EscapeVarState records the variable values at a local minimum. The json tags
-// mirror the yaml ones so `list escape --format json` renders the same keys as
+// GlobalVarState records the variable values at a local minimum. The json tags
+// mirror the yaml ones so `list global --format json` renders the same keys as
 // `--format yaml` (the pipeline document itself is YAML-only).
-type EscapeVarState struct {
+type GlobalVarState struct {
 	Name   string  `json:"name" yaml:"name"`
 	Config string  `json:"config,omitempty" yaml:"config,omitempty"`
 	Surf   int     `json:"surf,omitempty" yaml:"surf,omitempty"`
@@ -1511,12 +1525,12 @@ type EscapeVarState struct {
 	After  float64 `json:"after" yaml:"after"`
 }
 
-// EscapeMinimumInfo records escape-minimum metadata carried in a saved YAML
+// GlobalMinimumInfo records escape-minimum metadata carried in a saved YAML
 // file (--save) so each minimum declares its own feasibility status.
-type EscapeMinimumInfo struct {
+type GlobalMinimumInfo struct {
 	Index         int                 `yaml:"index"`
 	Merit         float64             `yaml:"merit"`
-	Status        EscapeMinimumStatus `yaml:"status"`
+	Status        GlobalMinimumStatus `yaml:"status"`
 	InvalidReason InvalidReason       `yaml:"invalid_reason,omitempty"`
 }
 
@@ -1864,7 +1878,7 @@ type Input struct {
 	Focus          *FocusConfig            `yaml:"focus,omitempty"`
 	Wavefront      *WavefrontConfig        `yaml:"wavefront,omitempty"`
 	Scale          *ScaleConfig            `yaml:"scale,omitempty"`
-	EscapeMinimum  *EscapeMinimumInfo      `yaml:"escape_minimum,omitempty"`
+	GlobalMinimum  *GlobalMinimumInfo      `yaml:"global_minimum,omitempty"`
 }
 
 type GridPoint struct {
@@ -2670,7 +2684,7 @@ type Output struct {
 	Results          []RayResult             `yaml:"results,omitempty"`
 	ParaxialResult   *ParaxialResult         `yaml:"paraxial_result,omitempty"`
 	OptResults       *OptimizationResult     `yaml:"opt_results,omitempty"`
-	EscapeResult     *EscapeResult           `yaml:"escape_result,omitempty"`
+	GlobalResult     *GlobalResult           `yaml:"global_result,omitempty"`
 	Vignetting       *VignettingResult       `yaml:"vignetting_result,omitempty"`
 	AsphereResult    *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
 	PsfResults       []PSFResult             `yaml:"psf_results,omitempty"`

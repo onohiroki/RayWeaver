@@ -8,10 +8,13 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-// runPSO runs the PSO escape-function global optimisation. It mirrors runEscape
-// but requires optimization.pso and uses a PSO explorer instead of DLS for the
-// escape phase. The three-phase cycle (PSO exploration, glass, clean DLS) is
-// identical to escape; only the exploration engine differs.
+// runPSO runs the PSO global optimisation: a plain multi-start swarm search
+// with no escape-function bumps. It mirrors runEscape but requires
+// optimization.pso and drives the exploration phase with a PSO explorer
+// instead of DLS. The three-phase cycle (PSO exploration, glass, clean DLS) is
+// identical to escape; only the exploration engine differs, and the run keeps
+// its settings in optimization.pso throughout — it never borrows
+// optimization.escape.
 func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassVariables bool, keepInfeasible bool, swarmSize int, psoIterations int, constraintPenalty float64) {
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
@@ -38,10 +41,6 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 	if constraintPenalty > 0 {
 		input.Optimization.PSO.ConstraintPenalty = constraintPenalty
 	}
-
-	// Copy the PSO's embedded escape config to the top-level escape field
-	// so the shared cycle infrastructure can use it.
-	input.Optimization.Escape = &input.Optimization.PSO.EscapeConfig
 
 	// Resolve the power-preserving glass phase.
 	psu := effectivePowerSolve(input, powerSolve, powerSolveSurfaces)

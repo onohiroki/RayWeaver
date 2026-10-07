@@ -279,16 +279,16 @@ func TestResolveGlassHullGuardAndFactor(t *testing.T) {
 	if got := dflt.GuardBand(); got != 0.01 {
 		t.Errorf("default guard band = %v, want 0.01", got)
 	}
-	if got := dflt.EscapeWeightFactor(); got != 0.1 {
+	if got := dflt.ExplorationWeightFactor(); got != 0.1 {
 		t.Errorf("default escape weight factor = %v, want 0.1", got)
 	}
 
 	// Explicit overrides (including guard_band: 0 to disable).
 	guardOff := 0.0
 	cfg := &types.GlassHullConfig{
-		Enabled:            true,
-		GuardBand:          &guardOff,
-		EscapeWeightFactor: float64Ptr(0.5),
+		Enabled:                 true,
+		GuardBand:               &guardOff,
+		ExplorationWeightFactor: float64Ptr(0.5),
 	}
 	var h *glass.ConvexHull
 	resolveGlassHull(cfg, &h, testCat)
@@ -298,8 +298,8 @@ func TestResolveGlassHullGuardAndFactor(t *testing.T) {
 	if got := h.GuardBand(); got != 0 {
 		t.Errorf("explicit guard_band 0 = %v, want 0 (disabled)", got)
 	}
-	if got := h.EscapeWeightFactor(); got != 0.5 {
-		t.Errorf("explicit escape_weight_factor = %v, want 0.5", got)
+	if got := h.ExplorationWeightFactor(); got != 0.5 {
+		t.Errorf("explicit exploration_weight_factor = %v, want 0.5", got)
 	}
 }
 

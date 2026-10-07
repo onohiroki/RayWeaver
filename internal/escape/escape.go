@@ -9,11 +9,12 @@ import (
 	"math"
 
 	"github.com/hiroki/rayweaver/internal/dls"
+	"github.com/hiroki/rayweaver/internal/types"
 )
 
 // MinStatus classifies a converged DLS point. The escape package uses these
 // local constants to keep the package decoupled from the types package; the
-// cmd layer maps them to types.EscapeMinimumStatus.
+// cmd layer maps them to types.GlobalMinimumStatus.
 type MinStatus int
 
 const (
@@ -77,12 +78,11 @@ type Params struct {
 	// HullRescueIterFrac is the rescue DLS MaxIter as a fraction of the full
 	// budget (0 = 0.25).
 	HullRescueIterFrac float64
-	// EscapeBumps places the Gaussian escape bumps on the recorded minima
-	// during the exploration phase. When false the exploration phase minimises
-	// the plain merit: the store, the new/repeat classification, the
-	// validation and the output are untouched, only the landscape stops being
-	// deformed. Default true.
-	EscapeBumps bool
+	// UsesBumps reports that the exploration phase places the Gaussian escape
+	// bumps on the recorded minima. It is derived from the run shape rather
+	// than read from YAML: a run driven by an Explorer has no bumps at all, so
+	// the h/w fields stay out of its params report. See Tuning.
+	UsesBumps bool
 	// CleanDLS runs the clean re-optimisation that closes every cycle. When
 	// false the cycle records the exploration point as-is (or the glass-phase
 	// output when one ran) and skips the clean retry and the glass-hull
@@ -109,8 +109,36 @@ func DefaultParams() Params {
 		InitialPerturb:     0.05,
 		HullRescue:         true,
 		HullRescueIterFrac: 0.25,
-		EscapeBumps:        true,
+		UsesBumps:          true,
 		CleanDLS:           true,
+	}
+}
+
+// Tuning carries the escape-function-specific parameters of a run: the bump
+// geometry and the escape-phase DLS budget, supplied by the `escape` section
+// of the input document. A nil Tuning marks a run without bumps (PSO): the
+// cycle installs no escape points on the wrapper, and the params report and
+// the JSONL params event omit the h/w fields.
+type Tuning struct {
+	H              float64
+	W              float64
+	HMult          float64
+	WMult          float64
+	EscapeIterFrac float64
+	WSpan          float64
+}
+
+// TuningFrom turns the escape section of an input document into the bump
+// tuning the cycle uses. The command layer and the tests both go through it,
+// so the section-to-Params mapping exists once.
+func TuningFrom(cfg types.EscapeConfig) *Tuning {
+	return &Tuning{
+		H:              cfg.HInitial,
+		W:              cfg.WInitial,
+		HMult:          cfg.HMult,
+		WMult:          cfg.WMult,
+		EscapeIterFrac: cfg.EscapeIterFrac,
+		WSpan:          cfg.WSpan,
 	}
 }
 
@@ -138,15 +166,16 @@ const (
 	PhaseGlassSolve
 )
 
-// Explorer is an optional pluggable exploration engine for Phase 1 (escape
-// exploration). When set on a Cycle, it replaces the default DLS-based escape
-// phase. The PSO package provides an implementation via pso.NewExplorer.
+// Explorer is the optional pluggable exploration engine that replaces the
+// default DLS escape phase. When set on a Cycle the run carries no escape
+// points (see Tuning), so the explorer searches the plain merit landscape. The
+// PSO package provides an implementation via pso.NewExplorer.
 type Explorer interface {
-	// Explore minimises the escape-augmented merit (the model already has
-	// escapes set) starting from x0 and returns the result. The returned
-	// dls.Result must have Variables populated (After field) in the same
-	// order as model.Variables(), a finite AfterMerit, and a Status of
-	// "converged", "max_iterations", or "interrupted".
+	// Explore searches the model's merit starting from x0 and returns the
+	// best point it found. The returned dls.Result must have Variables
+	// populated (After field) in the same order as model.Variables(), a finite
+	// AfterMerit, and a Status of "converged", "max_iterations", or
+	// "interrupted".
 	Explore(model dls.Model, x0 []float64) dls.Result
 }
 
@@ -331,7 +360,7 @@ func (w *Wrapper) SetPhase(p Phase) {
 	w.phase = p
 	// Forward the phase to the inner model immediately (in addition to
 	// ensurePhaseWeights), so phase-dependent merit shaping (the "phase"
-	// schedule metric and the hull escape_weight_factor) is never stale even
+	// schedule metric and the hull exploration_weight_factor) is never stale even
 	// for solve paths that skip ensurePhaseWeights (the PSO explorer).
 	if pe, ok := w.inner.(interface{ SetEscapePhase(float64) }); ok {
 		pe.SetEscapePhase(w.phaseMetric())
@@ -542,20 +571,8 @@ func (w *Wrapper) ensurePhaseWeights() {
 }
 
 // InnerMerit evaluates the real (unescaped) merit at x, bypassing the
-// escape-function bumps. Used by the PSO explorer to select gbest based
-// on true merit rather than escape-augmented merit.
+// escape-function bumps. The cycle reports every phase's before/after merit on
+// this scale so an escape bump never shows up as an improvement.
 func (w *Wrapper) InnerMerit(x []float64) float64 {
 	return w.inner.EvaluateMerit(x)
-}
-
-// EvaluateMeritBoth evaluates both the escaped merit (inner + escape bumps)
-// and the inner merit (without bumps) in a single call. The inner model's
-// EvaluateMerit is called once; the escape bumps are added separately.
-// Used by the PSO explorer to avoid the 2× ray-trace cost of calling
-// EvaluateMerit and InnerMerit independently.
-func (w *Wrapper) EvaluateMeritBoth(x []float64) (escapedMerit, innerMerit float64) {
-	inner := w.inner.EvaluateMerit(x)
-	escapedMerit = inner + w.EscapeMerit(x)
-	innerMerit = inner
-	return
 }

@@ -464,7 +464,7 @@ func (o *Optimizer) SetEscapePhase(p float64) {
 
 // hullPhaseFactor scales the hull-penalty term for the current escape-cycle
 // phase. During escape exploration (phase < 0.5) the term is multiplied by
-// the hull's escape_weight_factor (default 0.1), softening the real-glass
+// the hull's exploration_weight_factor (default 0.1), softening the real-glass
 // wall so the search can cross it between basins; the glass (0.5) and clean
 // (1) phases keep full strength, so a converged point is pushed back inside
 // the hull. Hulls without a configured factor (tests, non-escape paths) and
@@ -473,7 +473,7 @@ func (o *Optimizer) hullPhaseFactor() float64 {
 	if o.hull == nil || !o.phaseActive || o.phase >= 0.5 {
 		return 1
 	}
-	if f := o.hull.EscapeWeightFactor(); f > 0 {
+	if f := o.hull.ExplorationWeightFactor(); f > 0 {
 		return f
 	}
 	return 1
@@ -4498,10 +4498,10 @@ func (o *Optimizer) gridWorkers() int {
 }
 
 // gridTraceSem bounds the number of concurrently running pupil-grid traces
-// across every Optimizer in the process. An escape run keeps escape_workers
+// across every Optimizer in the process. An escape run keeps global_workers
 // independent Optimizers alive and each precomputeGrids fans out gridWorkers
 // traces, so without a global cap the in-flight allocation load scales as
-// escape_workers × gridWorkers (8 × 10 = 80 in the broad campaign, because
+// global_workers × gridWorkers (8 × 10 = 80 in the broad campaign, because
 // gridWorkers = GOMAXPROCS / jacobian_workers is maximal at
 // jacobian_workers = 1). That load made the Go heap target ratchet up into the
 // GBs (measured: heap goal 0.3 → 1.5 GB within minutes, RSS saturating around

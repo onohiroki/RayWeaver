@@ -1058,7 +1058,7 @@ optimization:
       active: true
   glass_hull:
     enabled: true
-    escape_weight_factor: 1
+    exploration_weight_factor: 1
   power_solve:
     enabled: true
     surfaces:
@@ -1096,7 +1096,7 @@ optimization:
         back_focus_type: spot
   escape:
     max_cycles: 4
-    escape_workers: 8
+    global_workers: 8
     distance_threshold: 0.05
     h_initial: 2
     w_initial: 1

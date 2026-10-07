@@ -15,7 +15,8 @@ RayWeaver is a CLI ray tracing engine for optical systems, written in Go.
 - Jones-matrix polarization tracking
 - Point-spread function via direct vector Huygens integration (no FFT, fisheye-safe, RCP/LCP/X/Y input)
 - DLS (damped least squares) local optimization of lens surfaces
-- Escape-function global optimization that finds multiple local minima
+- Two global optimizers that find multiple local minima: the escape-function
+  method (`escape`) and particle-swarm optimization (`pso`)
 - Parallel computation for pupil grids and optimization Jacobians
 - YAML-based input/output, pipeable between subcommands
 
@@ -60,7 +61,8 @@ Subcommands are grouped by their role in the data flow
 | Transform | `scale` | Uniformly scale a system so its EFL equals `--efl TARGET` (exact; preserves f/#). Useful for building a starting point before optimizing. | system → scaled system |
 | Synthesis | `vignette` | Iteratively settle per-field vignetting and `auto_aperture` surface diameters using the dynamic pupil; glass-path (edge-thickness) rejection and fixed (`auto_aperture: false`) surfaces narrow the beam. Flags: `--iterations`, `--min-glass-path`, `--margin-mm`, `--config`. See `docs/vignette.md`. | system → sized system + `vignetting_result` |
 | Synthesis | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. `--verbose` also emits a per-term merit breakdown. `--exclude-param` drops target params (e.g. asphere coefficients) from the variable set. | system + merit → optimized system |
-| Synthesis | `escape` | Escape-function global optimization (Ishiki-Ono style): repeatedly run DLS, adding a smooth merit-function bump at each discovered local minimum so the next run escapes the valley and finds other minima. Sub-command `escape extract --index N` pulls one minimum out as a clean lens. Flags: `--glass-dir`, `--verbose`, `--log FILE`, `--save FILE` (versioned per-minimum files), `--index N` (extract). See `docs/escape.md`. | system + merit → best solution + `escape_result` |
+| Synthesis | `escape` | Escape-function global optimization (Ishiki-Ono style): repeatedly run DLS, adding a smooth merit-function bump at each discovered local minimum so the next run escapes the valley and finds other minima. Sub-command `escape extract --index N` pulls one minimum out as a clean lens. Flags: `--glass-dir`, `--verbose`, `--log FILE`, `--save FILE` (versioned per-minimum files), `--index N` (extract). See `docs/escape.md`. | system + merit → best solution + `global_result` |
+| Synthesis | `pso` | Particle-swarm global optimization: a plain multi-start search over the same cycle as `escape` (exploration → glass → clean DLS) with no escape-function bumps — the swarm minimises the plain merit. Shares the budget, workers, deduplication and `global_result` with `escape`; sub-command `pso extract --index N`. Flags: `--swarm-size`, `--pso-iterations`, `--constraint-penalty`, `--glass-dir`, `--verbose`, `--log FILE`, `--save FILE`, `--index N` (extract). See `docs/pso.md`. | system + merit → best solution + `global_result` |
 | Synthesis | `asphere` | Rank candidate surfaces for aspheric introduction and fit safe initial even-order asphere coefficients (conic + A4..A12) from the per-field OPD residuals. `--validate` runs a short DLS against the spot RMS per fitted surface (`validation:` block with the DLS-solved coefficients); `--apply` inserts the top-ranked validated asphere (implies `--validate`) so `asphere --validate --apply \| chief \| trace \| plot` shows all-spherical vs aspherized. See `docs/asphere.md` and `docs/methods/asphere-candidates.md`. | system + `chief` fields → `asphere_candidate_result` (+ modified system with `--apply`) |
 | Analysis | `psf` | Point-spread function on the flat image plane via per-field polarized ray tracing, non-uniform wavefront sampling (Delaunay-triangulated reference surface) and a direct vector Huygens integral (no FFT; fisheye-safe). Flags: `--ref-surface`, `--psf-grid`, `--psf-width`, `--num-rays`, `--fields`, `--wavelengths`, `--polarization RCP\|LCP\|X\|Y\|RCP+LCP`, `--yaml FILE` (full structured data), `--csv FILE` (gnuplot map). See `docs/psf.md` and `docs/methods/psf.md`. | system + `chief` fields → `psf_results` summary (+ `--yaml`/`--csv` files) |
 | Analysis | `focus` | Image-plane comparison of the same system across focus conventions (`file`, single all-field `all`, per-field `best`). Sub-subcommands `focus mtf` (MTF at requested frequencies + Strehl), `focus psf` (Strehl/FWHM/EE50/centroid) and `focus spot` (geometric spot RMS + tangential/sagittal and x/y decompositions; no Huygens). Flags: `--wavelengths`, `--frequencies` (mtf), `--fields`, `--planes`, `--through-focus FROM,STEP,COUNT` (scan around base planes `file`/`all`/`on_axis`), `--num-rays`, `--psf-grid`, `--polarization`, `--ref-surface`, `--converge-check`, `--config`, `--glass-dir`. See `docs/focus.md`. | system + `chief` fields → `focus_comparison` |
@@ -85,6 +87,7 @@ Per-subcommand usage manuals live in [`docs/`](docs/):
 | [docs/scale.md](docs/scale.md) | EFL scaling |
 | [docs/optimize.md](docs/optimize.md) | DLS optimization |
 | [docs/escape.md](docs/escape.md) | escape-function global optimization |
+| [docs/pso.md](docs/pso.md) | particle-swarm global optimization |
 | [docs/asphere.md](docs/asphere.md) | asphere candidate ranking and initial coefficient estimation |
 | [docs/psf.md](docs/psf.md) | point-spread function via direct vector Huygens integration |
 | [docs/focus.md](docs/focus.md) | image-plane comparison of MTF/PSF across focus conventions |
@@ -95,7 +98,7 @@ Per-subcommand usage manuals live in [`docs/`](docs/):
 The numerical methods behind the analyses and optimizations are described
 separately in [`docs/methods/`](docs/methods/README.md) (ray tracing, chief-ray
 and spot computation, paraxial optics, merit functions, DLS, escape functions,
-glass dispersion, thin-film TMM, asphere candidate selection, point-spread
+particle-swarm optimization, glass dispersion, thin-film TMM, asphere candidate selection, point-spread
 function via vector Huygens integration, and EFL scaling).
 
 ### Long runs and AI agents
@@ -197,11 +200,11 @@ Notes:
   DLS finite-difference Jacobian (default `GOMAXPROCS`; the `escape` command
   defaults an unset value to 2 instead). The Jacobian is deterministic: the
   result is identical for any worker count.
-- `optimization.escape.escape_workers` sets the top-level parallel escape
+- `optimization.escape.global_workers` sets the top-level parallel escape
   goroutines (default 4). Each escape worker runs a DLS solve that itself
   parallelises its Jacobian across `jacobian_workers`, so the total goroutine
-  count is `escape_workers × jacobian_workers`; set `jacobian_workers: 1` when
-  running many escape workers to avoid oversubscription.
+  count is `global_workers × jacobian_workers`; set `jacobian_workers: 1` when
+  running many global workers to avoid oversubscription.
 - `optimization.escape` execution tuning extends the defaults: `escape_iter_frac`
   caps escape-phase DLS iterations (default 1/3), `stall_early_stop` (default
   true) ends an escape-phase solve whose best merit stalls over
@@ -217,18 +220,22 @@ Notes:
 - `edge_thickness` constraints take the back surface via `back_surface`
   (default: the next surface in system order).
 - `optimization.escape` enables the escape-function global optimizer (see
-  `docs/escape.md` and `docs/methods/escape-function.md`). It wraps the same
-  `variables`/`merit` definitions as `optimize`; the best solution is written
-  to the top-level configs (pipeline-compatible) and every discovered local
-  minimum is listed in the `escape_result` section, with `features` (per-config
-  thin-lens `element_powers` of each lens element) as a compact fingerprint for
-  comparing the minima. A repeat of a known minimum with a better merit replaces
-  the stored point ("keep the better data"). `escape --save FILE` writes each
-  minimum to `FILE0.yaml`, `FILE1.yaml`, … (improvements are kept as
-  `FILE N.<version>.yaml`), and a `SIGINT`/`SIGTERM` stops the search gracefully
-  (`interrupted: true`, exit 0): the first signal waits for the cycle boundary,
-  the second interrupts the running DLS within one iteration (preserving its
-  best point so far), and the third force-quits.
+  `docs/escape.md` and `docs/methods/escape-function.md`), and
+  `optimization.pso` enables particle-swarm global optimization (`docs/pso.md`,
+  `docs/methods/pso.md`). Both are *global* methods: they wrap the same
+  `variables`/`merit` definitions as `optimize`, share the cycle budget, the
+  worker pool and the deduplication of discovered points, and report into the
+  same `global_result` section (the best solution is written to the top-level
+  configs, pipeline-compatible), with `features` (per-config thin-lens
+  `element_powers` of each lens element) as a compact fingerprint for comparing
+  the minima. Under `escape` a repeat of a known minimum with a better merit
+  replaces the stored point ("keep the better data"). `escape --save FILE` /
+  `pso --save FILE` write each minimum to `FILE0.yaml`, `FILE1.yaml`, ...
+  (improvements are kept as `FILE N.<version>.yaml`), and a `SIGINT`/`SIGTERM`
+  stops the search gracefully (`interrupted: true`, exit 0): the first signal
+  waits for the cycle boundary, the second interrupts the running DLS within one
+  iteration (preserving its best point so far), and the third force-quits. The
+  results of either method are listed with `rayweave list global`.
 - `optimize` also stops gracefully on `SIGINT`/`SIGTERM` (`interrupted: true`,
   exit 0): the first signal interrupts the running DLS within one iteration and
   writes the best point found so far to stdout; the second force-quits.

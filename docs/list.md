@@ -71,9 +71,9 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `paraxial` | First-order optical properties (EFL, F/#, NA, EPD, BFL, …). With `--roles`, appends the per-element glass-role table. |
 | `fields` | Field-of-view definitions from `chief.fields[]` (or `configs[].fields[]` as fallback). Shows each field's type (`angle`, `image_height`, `height`) with input values from the YAML and computed values (actual angle, image height) from the real-ray chief trace. When input and computed values match, only one is shown; when they differ (e.g. `image_height` mode where the angle is solved iteratively), both are shown as `input (computed)`. |
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
-| `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, comparison_wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize`/`escape`, also shows the optimization result (status, iterations, merit). |
+| `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, comparison_wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize` or a global run, also shows the optimization result (status, iterations, merit). |
 | `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables/variable links, `merit_schedule`, and the sub-configs (`escape`, `pso`, `glass_hull`, `glass_attraction`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
-| `escape` | Escape-function global optimisation results. Reads either the `escape_result` section of an `escape`/`pso` pipeline document or, detected automatically, an escape/pso JSONL run log (`--log FILE` / a captured `--verbose` stream), showing escape parameters, the run aggregate, discovered local minima with their per-minimum element powers and variable values (both from a pipeline document; the variables only in structured output), and the per-worker completion list (run log only). See [§11](#11-escape-section--escapepso-global-search-results). |
+| `global` | Global-optimisation results for either global method (`escape` or `pso`). Reads either the `global_result` section of a pipeline document or, detected automatically, an escape/pso JSONL run log (`--log FILE` / a captured `--verbose` stream), showing the run parameters (escape-only ones listed for an `escape` run), the run aggregate, discovered local minima with their per-minimum element powers and variable values (both from a pipeline document; the variables only in structured output), and the per-worker completion list (run log only). See [§11](#11-global-section--escapepso-global-search-results). |
 | `focus` | Image-plane comparison results from the `focus_comparison` section (requires `focus mtf` / `focus psf` output). Auto-detects the MTF/PSF sub-section and renders the per-(field, wavelength) × plane table. |
 
 Default (no target arguments): `surfaces glasses paraxial fields`. The
@@ -82,7 +82,7 @@ order of the remaining targets — `rayweave list default merit` shows the
 default targets followed by merit, and `rayweave list merit default` shows
 merit first. The explicit keyword `all` expands to all nine targets
 (`surfaces`, `glasses`, `paraxial`, `fields`, `rays`, `merit`, `optimization`,
-`escape`, `focus`) and implies `--auto-aperture`, `--all-glasses`, and `--roles`
+`global`, `focus`) and implies `--auto-aperture`, `--all-glasses`, and `--roles`
 so every optional detail is shown without specifying each flag individually.
 Duplicate targets (e.g. `default surfaces`, `all merit`) are shown once.
 
@@ -95,7 +95,7 @@ rayweave list default < lens.yaml             # same as the bare invocation
 rayweave list default merit < lens.yaml       # default targets, then merit
 rayweave list all < lens.yaml                 # all targets, implies --auto-aperture --all-glasses --roles
 rayweave list optimization < lens.yaml        # optimizer configuration
-rayweave list escape < run.jsonl              # escape/pso run log (auto-detected)
+rayweave list global < run.jsonl              # escape/pso run log (auto-detected)
 rayweave chief | rayweave trace | rayweave list rays
 rayweave optimize < lens.yaml | rayweave list merit         # + optimization result
 rayweave optimize < lens.yaml | rayweave list optimization  # + optimization result
@@ -311,7 +311,7 @@ rayweave optimize < lens.yaml | rayweave list merit
 | Merit Terms | `configs[].merit.terms` | When a fixed merit is defined |
 | Merit Modes | `configs[].merit_modes` | When merit_modes is used instead of fixed merit |
 | Constraints | `configs[].constraints`, else `optimization.constraints` | When constraints are defined (per-config first, matching the optimizer's resolution) |
-| Optimization Result | `output.opt_results` / `output.escape_result` | Only when piped from optimize/escape |
+| Optimization Result | `output.opt_results` / `output.global_result` | Only when piped from optimize or a global run |
 
 Constraints follow the optimizer's per-config resolution: a config's own
 `constraints` win; a config without its own inherits `optimization.constraints`
@@ -700,67 +700,67 @@ under `focus_comparison`; the `json` output uses the same key names as the YAML
 
 ---
 
-## 11. Escape section — escape/pso global-search results
+## 11. Global section — escape/pso global-search results
 
-The `escape` target renders the results of a previous `escape` / `pso` run. It
+The `global` target renders the results of a previous `escape` / `pso` run. It
 accepts **two kinds of input, detected automatically**:
 
-- a **pipeline document** — the `escape_result` section written to stdout by
-  `escape` / `pso` (the usual `rayweave escape … | rayweave list escape` pipe);
+- a **pipeline document** — the `global_result` section written to stdout by
+  `escape` / `pso` (the usual `rayweave escape … | rayweave list global` pipe);
 - an **escape/pso JSONL run log** — the file written by `escape --log FILE` /
   `pso --log FILE`, or the `--verbose` stream captured from stderr.
 
 A run log is recognised when every non-empty line is a JSON object and at least
 one carries one of the event names the search emits (`params`, `start`, `cycle`,
 `minimum`, `worker_done`, `worker_retired`, `timeout`, `interrupt`,
-`interrupt_dls`, `done`, `escape_complete`, the `pso_*` events, …). A pipeline
+`interrupt_dls`, `done`, `global_complete`, the `pso_*` events, …). A pipeline
 document and an `optimize --log` stream never match.
 
 ```sh
 rayweave escape --log run.jsonl --save minima < lens.yaml > out.yaml
-rayweave list escape < out.yaml        # pipeline document
-rayweave list escape < run.jsonl       # run log
-rayweave list < run.jsonl              # a bare list defaults to the escape target
+rayweave list global < out.yaml        # pipeline document
+rayweave list global < run.jsonl       # run log
+rayweave list < run.jsonl              # a bare list defaults to the global target
 ```
 
-A run log carries no system definition, so `escape` is the only target it can
+A run log carries no system definition, so `global` is the only target it can
 serve; any other target is rejected with an error.
 
 ### Pipeline document
 
-Shows the effective escape parameters, the best solution, the local minima
+Shows the effective run parameters, the best solution, the local minima
 (status, `--save` file basename, file directory when all minima share one) and
 the per-minimum element powers. A document written with `--keep-infeasible` also
 lists its infeasible basins:
 
 The minima rows are **ranked by merit (ascending)** and each row's `Index` is
-the position in `escape_result.minima`, so the number shown is the one
+the position in `global_result.minima`, so the number shown is the one
 `escape extract --index` takes (ties keep their document order). A one-shot
 document already stores `minima` merit-sorted, which makes this a no-op; a
 **streamed** document stores it in discovery order, and before ranking every
 minimum that a repeat visit improved is replaced by its
-`escape_result.minima_improvements` entry (indexed by the position it
+`global_result.minima_improvements` entry (indexed by the position it
 supersedes), so the table reports each minimum's final merit — a raw `query` on
-`escape_result.minima[]` would show the first-discovery values instead.
+`global_result.minima[]` would show the first-discovery values instead.
 
 A script that renders the minima ranking (tables, charts, per-solution gates)
 should therefore read this target's structured output instead of reaching into
-`escape_result`: `--format yaml` carries `params`, the `minima` rows (`index`,
+`global_result`: `--format yaml` carries `params`, the `minima` rows (`index`,
 `merit`, `status`, `reason`, `file`, `element_powers` and — from a pipeline
 document — `variables`, the minimum's name/param/after variable values, e.g.
 the nd/vd a glass-changing run settled on), `infeasible_basins`, `best_index`
 and `best_merit`, which is everything the ranking display needs.
 
 ```
-Escape Parameters:
+Global Parameters:
 Property                 Value
 Max Cycles                   2
-Escape Workers              2
+Global Workers              2
 Distance Threshold  0.150000
 H Initial           0.500000
 ...
 
-Escape Result:
+Global Result:
 Property           Value
 Best Merit  2.6688e-04
 File Directory  /tmp/esc
@@ -788,21 +788,21 @@ infeasible basins (a document hides them unless `--keep-infeasible` was used,
 while the log always has them) and the run-level event log.
 
 ```
-Escape Parameters:
+Global Parameters:
 Property               Value
 Max Cycles                 2
-Escape Workers             2
+Global Workers             2
 Distance Threshold  0.150000
 H Initial           0.500000
 W Initial           0.400000
 H Mult              2.000000
 W Mult              1.300000
 
-Escape Result:
+Global Result:
 Property         Value
 Best Merit  2.6688e-04
 
-Escape Run:
+Global Run:
 Property        Value
 Workers             2
 Cycles             2
@@ -825,13 +825,13 @@ What is recovered from a run log:
 
 | Section | Source events |
 |---|---|
-| Escape Parameters: Max Cycles / Escape Workers / Max Seconds | `start` |
-| Escape Parameters: Distance Threshold / H, W Initial / H, W Mult | `params` |
-| Escape Result: Best Merit | best (lowest-merit) `minimum` event, or `escape_complete.best_merit` |
-| Escape Result: Timed Out / Interrupted | `escape_complete`/`done`, else the `timeout` / `interrupt` events |
-| Escape Run | `escape_complete` / `done` (absent when the log was truncated before them) |
-| Local Minima | `minimum` events, aggregated per discovery index and re-ranked by merit; the feasible points only, matching the document's `escape_result.minima` (with `minima_improvements` applied) |
-| Infeasible Basins | the `minimum` events classified `infeasible_basin` (re-ranked by merit, with their `invalid_reason`), or the `escape_complete.infeasible` array |
+| Global Parameters: Max Cycles / Global Workers / Max Seconds | `start` |
+| Global Parameters: Distance Threshold / H, W Initial / H, W Mult | `params` |
+| Global Result: Best Merit | best (lowest-merit) `minimum` event, or `global_complete.best_merit` |
+| Global Result: Timed Out / Interrupted | `global_complete`/`done`, else the `timeout` / `interrupt` events |
+| Global Run | `global_complete` / `done` (absent when the log was truncated before them) |
+| Local Minima | `minimum` events, aggregated per discovery index and re-ranked by merit; the feasible points only, matching the document's `global_result.minima` (with `minima_improvements` applied) |
+| Infeasible Basins | the `minimum` events classified `infeasible_basin` (re-ranked by merit, with their `invalid_reason`), or the `global_complete.infeasible` array |
 | File column / File Directory | `minimum_saved` events (`index` + `file`), present when the run used `--save` |
 | Workers | `worker_done`, `worker_retired`, `timeout`, `interrupted`, `cycle` |
 | Log Events | `interrupt`, `interrupt_dls`, `force_quit`, `memory_limit`, `worker_retire`, `resource`, `error`, `warn` |
@@ -840,7 +840,8 @@ What is recovered from a run log:
 
 A converged point that violates a constraint is an **infeasible basin**: a
 region of variable space where the design is broken, which the search still
-records (with an escape bump) but does not offer as a solution. It is a separate
+records (an `escape` run also places a bump on it) but does not offer as a
+solution. It is a separate
 list, exactly as in the pipeline document, so a run that found only basins still
 reports what it discovered — and never promotes one of them to `Best Merit`:
 
@@ -858,7 +859,7 @@ Index        Merit  File           Reason
 ```
 
 A pipeline document lists them too when it was written with `--keep-infeasible`
-(`escape_result.infeasible_basins[]`). Note that the document records the saved
+(`global_result.infeasible_basins[]`). Note that the document records the saved
 file name of its **feasible** minima only, so on the document path the basins
 have no file column.
 
@@ -874,12 +875,12 @@ not reported).
 Two conditions: the run must have used `--save` (otherwise no `minimum_saved`
 event exists), and the stream must be a full `--log` — the compact `--verbose`
 stream drops `file`. When no file is recovered the column is omitted entirely.
-`File Directory` appears in the `Escape Result` section when every saved file
+`File Directory` appears in the `Global Result` section when every saved file
 sits in one real directory (a working-directory-relative name reports nothing).
 
 Workers columns: the completion state (`completed`, `timeout`, `interrupted`,
 `retired` — a retirement outranks an interrupt, which outranks the time budget),
-the number of cycles the worker reached, its escape and minimum-recording
+the number of cycles the worker reached, its exploration and minimum-recording
 counts, the best merit it reached, the seconds from run start to its completion
 event, and the resource-guard retirement reason. The `Best Merit` and `Reason`
 columns are omitted when no worker has them.
@@ -967,14 +968,14 @@ best_merit: 0.00026687664351083754
 run:
     workers: 2
     cycles: 2
-    escapes: 4
+    explorations: 4
     minima_count: 2
     elapsed_s: 0.971095125
 workers:
     - worker: 0
       status: completed
       cycles: 2
-      escaped: 2
+      explored: 2
       recorded: 2
       elapsed_s: 0.797353125
 events:
@@ -986,8 +987,8 @@ events:
       elapsed_s: 60.412639
 ```
 
-`--format csv` adds an `Escape Run:` block, a `Workers:` block
-(`worker,status,cycles,escaped,recorded,best_merit,elapsed_s,reason`), an
+`--format csv` adds an `Global Run:` block, a `Workers:` block
+(`worker,status,cycles,explored,recorded,best_merit,elapsed_s,reason`), an
 `Infeasible Basins:` block (`index,merit[,file],reason`) and a `Log Events:`
 block (`event,detail,elapsed_s`); for a run log the `Local Minima` header drops
 its `file` column when no file name was recovered.
@@ -1003,10 +1004,10 @@ log, not a failure to read it:
 - the per-minimum **variable values** (`minima[].variables` in the structured
   output) — same sources: the log records the merit of a minimum, not the
   point that produced it;
-- the escape tuning parameters outside the `params` event (`escape_iter_frac`,
-  `w_span`, `stall_*`, `initial_perturb`, `escape_bumps`, `clean_dls`,
-  `fingerprint_distance_threshold`, the
-  variable weights), which are shown for a pipeline document and skipped here;
+- the cycle tuning parameters outside the `params` event (`escape_iter_frac`
+  and `w_span` for an `escape` run, plus `stall_*`, `initial_perturb`,
+  `clean_dls`, `fingerprint_distance_threshold` and the variable weights),
+  which are shown for a pipeline document and skipped here;
 - the saved file names when the run used no `--save` (or came from a compact
   stream — see [Recovered file names](#recovered-file-names)).
 
@@ -1150,12 +1151,12 @@ rayweave optimize < lens.yaml | rayweave list merit
 # Optimizer configuration (solver, variables, sub-configs)
 rayweave list optimization < lens.yaml
 
-# Escape/pso results from the pipeline document
-rayweave escape --save minima < lens.yaml | rayweave list escape
+# Global results from the pipeline document
+rayweave escape --save minima < lens.yaml | rayweave list global
 
-# Escape/pso results reconstructed from the JSONL run log (adds the worker list)
+# Global results reconstructed from the JSONL run log (adds the worker list)
 rayweave escape --log run.jsonl < lens.yaml > out.yaml
-rayweave list escape < run.jsonl
+rayweave list global < run.jsonl
 
 # Focus plane comparison results (MTF/PSF, from focus mtf/focus psf)
 rayweave focus psf --planes all,best < lens.yaml | rayweave list focus

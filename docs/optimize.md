@@ -666,10 +666,11 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   clearance so the guarded zone stays a shell around the boundary — so the
   penalty's ramp onset, and with it the DLS balance point, rests **inside**
   the true hull instead of just outside it (exact catalogue points stay at
-  zero penalty); `escape_weight_factor` (default `0.1`) scales the whole
-  hull-penalty term during an `escape` run's exploration phase only (the
-  glass/clean phases and a plain `optimize` run keep full strength), letting
-  escape bumps still cross the soft wall — see `docs/escape.md`.
+  zero penalty); `exploration_weight_factor` (default `0.1`) scales the whole
+  hull-penalty term during a global run's exploration phase only (`escape`
+  and `pso`; the glass/clean phases and a plain `optimize` run keep full
+  strength), letting the exploration still cross the soft wall — see
+  `docs/escape.md`.
 - A `SIGINT`/`SIGTERM` stops the solve gracefully (`interrupted: true`, exit 0):
   the first signal interrupts the running DLS within one iteration and writes
   the best point found so far to stdout; the second force-quits (exit 1).

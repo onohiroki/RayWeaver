@@ -132,16 +132,18 @@ func indexOfEvent(events []string, exact string) int {
 // The cycle under test is one pass of Cycle.Run with the glass phase enabled.
 func TestCycleGlassPhaseSettlesPowerIntoCleanStart(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles:         1,
-		EscapeWorkers:     1,
-		DistanceThreshold: 0.1,
-		HInitial:          0.5,
-		WInitial:          0.5,
-		HMult:             2.0,
-		WMult:             1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         1,
+			GlobalWorkers:     1,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
 	inner := &glassSettleMock{}
-	params := BuildParams(cfg, inner.Variables())
+	params := buildParamsOf(cfg, inner.Variables())
 	store := NewStore(params)
 	w := NewWrapper(inner, params)
 	w.SetGlassPhase(true)

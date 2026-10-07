@@ -94,8 +94,8 @@ func NewCycle(wrapper *Wrapper, store *Store, params Params, maxCycles int, seed
 	}
 }
 
-// Escaped reports how many successful escape steps this cycle performed.
-func (c *Cycle) Escaped() int { return int(c.escapedA.Load()) }
+// Explored reports how many successful exploration steps this cycle performed.
+func (c *Cycle) Explored() int { return int(c.escapedA.Load()) }
 
 // Recorded reports how many distinct minima this cycle recorded.
 func (c *Cycle) Recorded() int { return int(c.recordedA.Load()) }
@@ -345,13 +345,12 @@ func enrich(base, extra map[string]any) {
 	}
 }
 
-// activeEscapes returns the escape points the exploration phase must see.
-// With EscapeBumps disabled the wrapper receives an empty list, so the
-// exploration phase minimises the plain merit; the store keeps growing and
-// drives the new/repeat classification, the restart widening and the output,
-// it simply no longer deforms the landscape.
-func (c *Cycle) activeEscapes() []Point {
-	if !c.params.EscapeBumps {
+// escapesFor returns the escape points the exploration phase must see: the DLS
+// path pushes away from every point the store has recorded, while an
+// explorer-driven run (PSO) sees none at all — that is what makes it a plain
+// multi-start search rather than an escape-function one.
+func (c *Cycle) escapesFor() []Point {
+	if c.explorer != nil {
 		return nil
 	}
 	return c.store.All()
@@ -392,15 +391,19 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 				"worker":     c.workerID,
 				"reason":     c.retireReasonValue(),
 				"cycle":      cyc,
-				"escaped":    c.Escaped(),
+				"explored":   c.Explored(),
 				"recorded":   c.Recorded(),
 				"best_merit": c.BestMerit(),
 				"metrics":    resourceMetrics(),
 			})
 			break
 		}
-		// Step 1: escape exploration. Push away from every recorded minimum.
-		c.wrapper.SetEscapes(c.activeEscapes())
+		// Step 1: exploration. The DLS escape path pushes away from every
+		// recorded minimum; a run driven by a pluggable explorer (PSO) carries
+		// no escape points at all and searches the plain merit landscape, while
+		// the store keeps growing and drives the new/repeat classification, the
+		// restart widening and the output.
+		c.wrapper.SetEscapes(c.escapesFor())
 		c.wrapper.SetStartX(currentX)
 		c.wrapper.SetPhase(PhaseEscape)
 		c.wrapper.SetStop(c.stopCh())

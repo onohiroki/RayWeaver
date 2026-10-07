@@ -167,10 +167,17 @@ func TestHeapCeilingAuto(t *testing.T) {
 // nothing (its earlier results, if any, stay in the shared store).
 func TestCycleRetireAtBoundary(t *testing.T) {
 	cfg := types.EscapeConfig{
-		MaxCycles: 100, EscapeWorkers: 1, DistanceThreshold: 0.1,
-		HInitial: 0.5, WInitial: 0.5, HMult: 2.0, WMult: 1.0,
+		GlobalConfig: types.GlobalConfig{
+			MaxCycles:         100,
+			GlobalWorkers:     1,
+			DistanceThreshold: 0.1,
+		},
+		HInitial: 0.5,
+		WInitial: 0.5,
+		HMult:    2.0,
+		WMult:    1.0,
 	}
-	params := BuildParams(cfg, twoWell{}.Variables())
+	params := buildParamsOf(cfg, twoWell{}.Variables())
 	store := NewStore(params)
 	wrapper := NewWrapper(twoWell{}, params)
 	progress := NewProgress()

@@ -20,7 +20,7 @@ set -euo pipefail
 #                                (spot_phase -> wavefront_phase step switch
 #                                at merit_ratio=0.1) -> <prefix>result.yaml
 #                                the minima ranking below is rendered from
-#                                `rayweave list escape --format yaml` of that
+#                                `rayweave list global --format yaml` of that
 #                                document -> <prefix>escape-list.yaml
 #   2. PSF verification        : per-field Strehl at best focus (RCP+LCP, d
 #                                line) -> table; the demo gates on every field
@@ -46,13 +46,13 @@ set -euo pipefail
 #
 # How to read the result
 #   - Best merit is the lowest DLS merit among the discovered minima.
-#   - <prefix>escape-list.yaml is `list escape --format yaml`: every minimum's
+#   - <prefix>escape-list.yaml is `list global --format yaml`: every minimum's
 #     final merit, ranked ascending, with the improved entries substituted and
 #     the element powers / variable values (nd/vd) of each solution. The
 #     summary table, the element-powers chart and the glass gate read it, so
 #     the ranking stays correct for a streamed document too. The lines are in
 #     merit order; a row's `index` — printed as [i] — is the position in
-#     `escape_result.minima`, i.e. the number `escape extract --index` takes.
+#     `global_result.minima`, i.e. the number `escape extract --index` takes.
 #   - The result YAML holds every minimum's full surfaces; use
 #     `escape extract --index N` to re-optimise from a chosen one. With
 #     --save the per-minimum clean lens files are already on disk.
@@ -99,7 +99,7 @@ case "$LENS" in
 esac
 RESULT="$OUTDIR/${PREFIX}result.yaml"
 RESULT_FILE="$OUTDIR/${PREFIX}result.txt"
-# `list escape --format yaml` of RESULT: the merit-ranked minima index the
+# `list global --format yaml` of RESULT: the merit-ranked minima index the
 # summary table, the element-powers chart and the glass gate all read.
 LIST="$OUTDIR/${PREFIX}escape-list.yaml"
 
@@ -148,11 +148,11 @@ cat >> "$RESULT_FILE" <<EOF
   surfaces of every minimum; \`escape extract --index N\` pulls one out
   (e.g. ${PREFIX}min1.yaml) to re-optimise from.
 - The minima summary above is rendered from ${PREFIX}escape-list.yaml, the
-  \`list escape --format yaml\` listing of the result: its rows carry every
+  \`list global --format yaml\` listing of the result: its rows carry every
   minimum's final merit (an improved minimum's latest value, substituted for
   the first-discovery one) ranked ascending, plus the element powers and the
   variable values of that solution. The lines are in merit order, and each
-  line's [i] is that minimum's position in escape_result.minima — the number
+  line's [i] is that minimum's position in global_result.minima — the number
   \`escape extract --index\` takes (the two coincide for a one-shot document
   but not necessarily for a streamed one, which is written in discovery
   order).
@@ -185,7 +185,7 @@ fi
 trap append_interpretation EXIT
 
 # ── Element-powers chart: one offset line per local minimum ──
-# Reads the `list escape --format yaml` listing and draws a PNG whose vertical
+# Reads the `list global --format yaml` listing and draws a PNG whose vertical
 # axis is merit (log scale); each minimum's element_powers are a polyline
 # offset from its merit baseline. Requires gnuplot (fallback to
 # /opt/homebrew/bin) and the rayweave binary (RAYWEAVE). Silently returns when
@@ -203,7 +203,7 @@ plot_element_powers() {
   fi
 
   local nmin nel
-  # $LIST is `list escape --format yaml`: rows ranked by merit, so i is both
+  # $LIST is `list global --format yaml`: rows ranked by merit, so i is both
   # the chart's series index and the rank. query --len reports -1 when the key
   # is absent, hence the -le 0 guards.
   nmin=$("$RAYWEAVE" query --len minima < "$LIST" 2>/dev/null || echo 0)
@@ -263,9 +263,9 @@ if [[ -n "$SAVE_BASE" ]]; then
 fi
 $RAYWEAVE escape "${ESCAPE_ARGS[@]}" < "$YAML" > "$RESULT"
 # The minima ranking (final merits, improved entries substituted, ascending)
-# rendered by `list escape`; every read below goes through it.
-$RAYWEAVE list escape --format yaml < "$RESULT" > "$LIST"
-echo "Written: $LIST (minima ranking from \`list escape --format yaml\`)"
+# rendered by `list global`; every read below goes through it.
+$RAYWEAVE list global --format yaml < "$RESULT" > "$LIST"
+echo "Written: $LIST (minima ranking from \`list global --format yaml\`)"
 echo
 
 echo "--- Local minima summary ---"
@@ -285,7 +285,7 @@ echo "--- Local minima summary ---"
   fi
   # The rows of $LIST are ranked by merit, so the loop position (pos) walks
   # them in rank order while idx — the row's `index` field, printed as [idx] —
-  # is the position in escape_result.minima, i.e. the number
+  # is the position in global_result.minima, i.e. the number
   # `escape extract --index` takes. They differ as soon as the ranking is not
   # the document order (a streamed document is in discovery order).
   pos=0

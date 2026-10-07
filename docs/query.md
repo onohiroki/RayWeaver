@@ -151,7 +151,7 @@ floating-point verbs (`%.4f`, `%.6e`), and become their decimal string for
 `%s`/`%v`.
 
 ```sh
-rayweave query --each 'escape_result.minima[]:index,merit' \
+rayweave query --each 'global_result.minima[]:index,merit' \
                --printf '  [%d] merit=%.6e' < escape.yaml
 ```
 
@@ -222,7 +222,7 @@ resolved relative to each element; missing columns print `--default`.
 rayweave query --each 'chief_rays[]:field_angle' --printf 'field %s deg' < chief.yaml
 
 # escape local minima as structured YAML
-rayweave query --yaml --each 'escape_result.minima[]:index,merit' < escape.yaml
+rayweave query --yaml --each 'global_result.minima[]:index,merit' < escape.yaml
 
 # optimize-log breakdown terms (a mapping → key/value columns)
 rayweave query --jsonl --where 'event=="breakdown"' \

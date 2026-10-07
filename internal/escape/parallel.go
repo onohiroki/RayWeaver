@@ -19,7 +19,7 @@ type Result struct {
 	InfeasibleBasinIdx []int   // discovery-order store index of each basin
 	BestIdx            int
 	BestMerit          float64
-	Escapes            int
+	Explorations       int
 	Workers            int
 	Cycles             int
 	MaxSeconds         float64
@@ -79,25 +79,35 @@ type RunOptions struct {
 	// writers. Each call must return a fresh instance to avoid data races
 	// between workers. nil uses the default DLS escape phase.
 	NewExplorer func(progress *Progress, seed int64) Explorer
+	// Tuning carries the escape-function bump geometry and escape-phase DLS
+	// budget of the `escape` section. nil marks a run without bumps (PSO): the
+	// cycle installs no escape points and the params report omits the h/w
+	// fields.
+	Tuning *Tuning
 }
 
-// BuildParams derives the escape parameters from the YAML config and the
-// model's variable definitions. Variables with Min == Max are excluded from
-// the escape distance; per-variable weights come from VariableWeights keyed
-// by variable parameter name (curvature, thickness, nd, vd, ...).
-func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
+// BuildParams derives the cycle parameters from the shared YAML config, the
+// method's escape tuning and the model's variable definitions. Variables with
+// Min == Max are excluded from the escape distance; per-variable weights come
+// from VariableWeights keyed by variable parameter name (curvature, thickness,
+// nd, vd, ...). A nil tuning means the run places no bumps, so UsesBumps stays
+// false and the h/w values keep their (unused) defaults.
+func BuildParams(cfg types.GlobalConfig, tuning *Tuning, variables []dls.VariableInfo) Params {
 	p := DefaultParams()
-	if cfg.HInitial != 0 {
-		p.H = cfg.HInitial
-	}
-	if cfg.WInitial != 0 {
-		p.W = cfg.WInitial
-	}
-	if cfg.HMult != 0 {
-		p.HMult = cfg.HMult
-	}
-	if cfg.WMult != 0 {
-		p.WMult = cfg.WMult
+	p.UsesBumps = tuning != nil
+	if tuning != nil {
+		if tuning.H != 0 {
+			p.H = tuning.H
+		}
+		if tuning.W != 0 {
+			p.W = tuning.W
+		}
+		if tuning.HMult != 0 {
+			p.HMult = tuning.HMult
+		}
+		if tuning.WMult != 0 {
+			p.WMult = tuning.WMult
+		}
 	}
 	if cfg.DistanceThreshold != 0 {
 		p.Dt = cfg.DistanceThreshold
@@ -109,8 +119,6 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 		src float64
 		dst *float64
 	}{
-		{cfg.EscapeIterFrac, &p.EscapeIterFrac},
-		{cfg.WSpan, &p.WSpan},
 		{cfg.StallWindowFrac, &p.StallWindowFrac},
 		{cfg.StallRelTol, &p.StallRelTol},
 		{cfg.InitialPerturb, &p.InitialPerturb},
@@ -128,8 +136,18 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 	if cfg.HullRescueIterFrac > 0 {
 		p.HullRescueIterFrac = cfg.HullRescueIterFrac
 	}
-	if cfg.EscapeBumps != nil {
-		p.EscapeBumps = *cfg.EscapeBumps
+	if tuning != nil {
+		if tuning.EscapeIterFrac > 0 {
+			p.EscapeIterFrac = tuning.EscapeIterFrac
+		}
+		if tuning.WSpan > 0 {
+			p.WSpan = tuning.WSpan
+		}
+	} else {
+		// No bumps: the escape phase never runs, so its DLS budget and the
+		// per-worker W spread are irrelevant and must not be reported.
+		p.EscapeIterFrac = 0
+		p.WSpan = 0
 	}
 	if cfg.CleanDLS != nil {
 		p.CleanDLS = *cfg.CleanDLS
@@ -156,29 +174,29 @@ func BuildParams(cfg types.EscapeConfig, variables []dls.VariableInfo) Params {
 }
 
 // NumWorkers resolves the escape worker count from the YAML config (default 4).
-// ParallelEscape and ReportParams share it so the reported escape_workers is
+// ParallelEscape and ReportParams share it so the reported global_workers is
 // always the count the run actually uses.
-func NumWorkers(cfg types.EscapeConfig) int {
-	if cfg.EscapeWorkers <= 0 {
+func NumWorkers(cfg types.GlobalConfig) int {
+	if cfg.GlobalWorkers <= 0 {
 		return 4
 	}
-	return cfg.EscapeWorkers
+	return cfg.GlobalWorkers
 }
 
 // MaxCycles resolves the cycle budget from the YAML config (default 10).
-func MaxCycles(cfg types.EscapeConfig) int {
+func MaxCycles(cfg types.GlobalConfig) int {
 	if cfg.MaxCycles <= 0 {
 		return 10
 	}
 	return cfg.MaxCycles
 }
 
-// ParamsInfo renders the escape_result.params report for a run. Both the
+// ParamsInfo renders the global_result.params report for a run. Both the
 // pre-run streaming header (ReportParams) and the completion report
-// (assembleEscapeResult) go through it, so the two cannot drift: the values
+// (assembleGlobalResult) go through it, so the two cannot drift: the values
 // depend only on the resolved parameters, the worker count and the cycle
 // budget, all of which are known before the search starts.
-func ParamsInfo(p Params, maxSeconds float64, workers, cycles int) types.EscapeParamsInfo {
+func ParamsInfo(p Params, maxSeconds float64, workers, cycles int) types.GlobalParamsInfo {
 	// StallEarlyStop is reported only when on (a nil pointer omits the key), so
 	// an explicitly-off value stays distinguishable from the default.
 	var stallEarlyStop *bool
@@ -186,52 +204,52 @@ func ParamsInfo(p Params, maxSeconds float64, workers, cycles int) types.EscapeP
 		v := true
 		stallEarlyStop = &v
 	}
-	// The two cycle phases are default-on, so they are reported only when off:
-	// a default run's params block keeps its exact key set.
-	var escapeBumps, cleanDLS *bool
-	if !p.EscapeBumps {
-		v := false
-		escapeBumps = &v
-	}
+	// The clean DLS is default-on, so it is reported only when off: a default
+	// run's params block keeps its exact key set.
+	var cleanDLS *bool
 	if !p.CleanDLS {
 		v := false
 		cleanDLS = &v
 	}
-	return types.EscapeParamsInfo{
-		HInitial:                     p.H,
-		WInitial:                     p.W,
-		HMult:                        p.HMult,
-		WMult:                        p.WMult,
+	info := types.GlobalParamsInfo{
 		DistanceThreshold:            p.Dt,
 		FingerprintDistanceThreshold: p.DtFp,
 		MaxCycles:                    cycles,
-		EscapeWorkers:                workers,
+		GlobalWorkers:                workers,
 		MaxSeconds:                   maxSeconds,
-		EscapeIterFrac:               p.EscapeIterFrac,
-		WSpan:                        p.WSpan,
 		StallWindowFrac:              p.StallWindowFrac,
 		StallRelTol:                  p.StallRelTol,
 		StallEarlyStop:               stallEarlyStop,
 		InitialPerturb:               p.InitialPerturb,
-		EscapeBumps:                  escapeBumps,
 		CleanDLS:                     cleanDLS,
 	}
+	// The bump geometry belongs to the escape method alone, so a run without
+	// bumps (PSO) reports none of it.
+	if p.UsesBumps {
+		info.HInitial = p.H
+		info.WInitial = p.W
+		info.HMult = p.HMult
+		info.WMult = p.WMult
+		info.EscapeIterFrac = p.EscapeIterFrac
+		info.WSpan = p.WSpan
+	}
+	return info
 }
 
-// ReportParams builds escape_result.params before the run starts, from the
+// ReportParams builds global_result.params before the run starts, from the
 // YAML config and the model's variable definitions — the same inputs
 // ParallelEscape derives its parameters from, so the streamed header and the
 // completed document report identical values.
-func ReportParams(cfg types.EscapeConfig, variables []dls.VariableInfo) types.EscapeParamsInfo {
-	return ParamsInfo(BuildParams(cfg, variables), cfg.MaxSeconds, NumWorkers(cfg), MaxCycles(cfg))
+func ReportParams(cfg types.GlobalConfig, tuning *Tuning, variables []dls.VariableInfo) types.GlobalParamsInfo {
+	return ParamsInfo(BuildParams(cfg, tuning, variables), cfg.MaxSeconds, NumWorkers(cfg), MaxCycles(cfg))
 }
 
 // ParallelEscape runs the escape loop across escapeWorkers goroutines, each with
 // its own freshly-built model (via the factory) so the shared catalog and
 // surface state stay race-free. All workers share one Store. opts.Progress may
 // be nil to disable verbose reporting; opts.Context cancels the search.
-func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunOptions) Result {
-	params := BuildParams(cfg, newModel().Variables())
+func ParallelEscape(newModel func() dls.Model, cfg types.GlobalConfig, opts RunOptions) Result {
+	params := BuildParams(cfg, opts.Tuning, newModel().Variables())
 
 	numWorkers := NumWorkers(cfg)
 	maxCycles := MaxCycles(cfg)
@@ -245,21 +263,21 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 	}
 
 	progress := opts.Progress
-	progress.Event("params", map[string]any{
-		"h":                  params.H,
-		"w":                  params.W,
-		"h_mult":             params.HMult,
-		"w_mult":             params.WMult,
-		"distance_threshold": params.Dt,
-	})
+	// The bump geometry is escape-only: a run without bumps (PSO) says nothing
+	// about it in the log either.
+	paramsEvent := map[string]any{"distance_threshold": params.Dt}
+	if params.UsesBumps {
+		paramsEvent["h"] = params.H
+		paramsEvent["w"] = params.W
+		paramsEvent["h_mult"] = params.HMult
+		paramsEvent["w_mult"] = params.WMult
+	}
+	progress.Event("params", paramsEvent)
 	start := map[string]any{"workers": numWorkers, "max_cycles": maxCycles}
 	if !deadline.IsZero() {
 		start["max_seconds"] = cfg.MaxSeconds
 	}
-	// Both cycle phases are default-on, so they are reported only when off.
-	if !params.EscapeBumps {
-		start["escape_bumps"] = false
-	}
+	// The clean DLS is default-on, so it is reported only when off.
 	if !params.CleanDLS {
 		start["clean_dls"] = false
 	}
@@ -269,7 +287,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 	store.SetFingerprint(opts.Fingerprint)
 	store.SetOnRecord(opts.OnRecord)
 	var wg sync.WaitGroup
-	totalEscapes := 0
+	totalExplorations := 0
 	timedOut := false
 	var escMu sync.Mutex
 
@@ -317,7 +335,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 			cyc.Run(x0)
 			progress.Event("worker_done", map[string]any{
 				"worker":      int(seed),
-				"escaped":     cyc.Escaped(),
+				"explored":    cyc.Explored(),
 				"recorded":    cyc.Recorded(),
 				"retired":     cyc.Retired(),
 				"interrupted": cyc.Interrupted(),
@@ -325,7 +343,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 			})
 
 			escMu.Lock()
-			totalEscapes += cyc.Escaped()
+			totalExplorations += cyc.Explored()
 			if cyc.StoppedByTime() {
 				timedOut = true
 			}
@@ -364,7 +382,7 @@ func ParallelEscape(newModel func() dls.Model, cfg types.EscapeConfig, opts RunO
 		MinimaIdx:          feasibleIdxs,
 		InfeasibleBasins:   infeasiblePoints,
 		InfeasibleBasinIdx: infeasibleIdxs,
-		Escapes:            totalEscapes,
+		Explorations:       totalExplorations,
 		Workers:            numWorkers,
 		Cycles:             maxCycles,
 		MaxSeconds:         cfg.MaxSeconds,

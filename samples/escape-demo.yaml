@@ -18,7 +18,7 @@ metadata:
     wavefront_astigmatism merit (w16=14000, w24=6500, 24° spot terms w=0.11,
     512-ray grid) so every field reaches Strehl >= 0.5 (~0.97/~0.51/~0.63),
     and then verifies the profile with `rayweave psf --best-focus`.
-    Feed to `rayweave escape` to get escape_result.minima[]; the bash script
+    Feed to `rayweave escape` to get global_result.minima[]; the bash script
     wraps it with --verbose + JSONL progress.
 chief:
   fields:
@@ -39,12 +39,20 @@ optimization:
   max_iter: 200
   escape:
     max_cycles: 4
-    escape_workers: 3
+    global_workers: 3
     distance_threshold: 0.15
     h_initial: 0.5
     w_initial: 0.4
     h_mult: 2.0
     w_mult: 1.3
+  # Same budget for the other global method, so `escape` and `pso` are
+  # comparable on this file; the swarm needs no bump geometry.
+  pso:
+    max_cycles: 4
+    global_workers: 3
+    distance_threshold: 0.15
+    swarm_size: 30
+    pso_iterations: 40
   variables:
     - name: s1_curvature
       target:

@@ -26,13 +26,13 @@ type escapeStreamTails struct {
 	chief bool
 }
 
-// streamParamsBlock is the part of escape_result written together with the
+// streamParamsBlock is the part of global_result written together with the
 // header: the resolved parameters, known before the search starts.
 type streamParamsBlock struct {
-	Params types.EscapeParamsInfo `yaml:"params"`
+	Params types.GlobalParamsInfo `yaml:"params"`
 }
 
-// streamCompletion is the rest of escape_result, written once the search has
+// streamCompletion is the rest of global_result, written once the search has
 // finished. The field order is the emission order: best index and merit, then
 // the run outcome, then the lists. minima_improvements comes last so it lands
 // immediately before the deferred top-level keys (configs).
@@ -41,12 +41,12 @@ type streamCompletion struct {
 	BestMerit          float64               `yaml:"best_merit"`
 	TimedOut           bool                  `yaml:"timed_out,omitempty"`
 	Interrupted        bool                  `yaml:"interrupted,omitempty"`
-	InfeasibleBasins   []types.EscapeMinimum `yaml:"infeasible_basins,omitempty"`
-	MinimaImprovements []types.EscapeMinimum `yaml:"minima_improvements,omitempty"`
+	InfeasibleBasins   []types.GlobalMinimum `yaml:"infeasible_basins,omitempty"`
+	MinimaImprovements []types.GlobalMinimum `yaml:"minima_improvements,omitempty"`
 }
 
 // escapeStream writes one pipeline document as an append-only sequence of
-// writes: the settled top-level part first, one escape_result.minima entry per
+// writes: the settled top-level part first, one global_result.minima entry per
 // discovered solution, and the completion (run outcome, improved minima,
 // deferred top-level keys) when the search ends. No write rewrites or seeks, so
 // a document read while the run is going (or after it was killed) is a single
@@ -58,7 +58,7 @@ type escapeStream struct {
 	w        io.Writer
 	tails    escapeStreamTails
 	err      error
-	pos      map[int]int  // store index -> position in escape_result.minima
+	pos      map[int]int  // store index -> position in global_result.minima
 	improved map[int]bool // store index whose point was replaced in the run
 }
 
@@ -73,10 +73,10 @@ func newEscapeStream(w io.Writer, tails escapeStreamTails) *escapeStream {
 }
 
 // header writes the settled top-level part of the document — every Input key
-// the run will not touch again — followed by escape_result with its params and
+// the run will not touch again — followed by global_result with its params and
 // an (empty) minima list left open. It is the first write of the run, so
 // metadata.created_at records the run start rather than the run end.
-func (s *escapeStream) header(in types.Input, params types.EscapeParamsInfo) {
+func (s *escapeStream) header(in types.Input, params types.GlobalParamsInfo) {
 	head := in
 	head.Configs = nil // the best solution lands there only at completion
 	if s.tails.chief {
@@ -94,20 +94,20 @@ func (s *escapeStream) header(in types.Input, params types.EscapeParamsInfo) {
 	}
 	var buf bytes.Buffer
 	buf.Write(block)
-	buf.WriteString("escape_result:\n")
+	buf.WriteString("global_result:\n")
 	buf.Write(paramsBlock)
 	buf.WriteString("    minima:\n")
 	s.write(buf.Bytes())
 }
 
 // record implements escape.RecordHandler. A brand-new minimum is appended to
-// escape_result.minima in discovery order. A replacement (Store.Replace) is
+// global_result.minima in discovery order. A replacement (Store.Replace) is
 // only remembered: the list is append-only, so the improved point is written
-// once — as escape_result.minima_improvements, when the run completes — see
+// once — as global_result.minima_improvements, when the run completes — see
 // improvements. build is called only for points that are actually streamed.
 // Infeasible basins are never streamed: they are a separate list written at
 // completion (and only with --keep-infeasible).
-func (s *escapeStream) record(idx int, p escape.Point, isNew bool, build func(position, storeIdx int, p escape.Point) types.EscapeMinimum) {
+func (s *escapeStream) record(idx int, p escape.Point, isNew bool, build func(position, storeIdx int, p escape.Point) types.GlobalMinimum) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.err != nil {
@@ -125,7 +125,7 @@ func (s *escapeStream) record(idx int, p escape.Point, isNew bool, build func(po
 	position := len(s.pos)
 	m := build(position, idx, p)
 	s.pos[idx] = position
-	block, err := marshalIndent([]types.EscapeMinimum{m}, 8)
+	block, err := marshalIndent([]types.GlobalMinimum{m}, 8)
 	if err != nil {
 		s.setErr(err)
 		return
@@ -138,7 +138,7 @@ func (s *escapeStream) record(idx int, p escape.Point, isNew bool, build func(po
 // Points that never made it into minima (infeasible basins, or a point whose
 // store index was skipped) are ignored: the streamed entry they would have
 // superseded does not exist.
-func (s *escapeStream) improvements(res escape.Result, build func(position, storeIdx int, p escape.Point) types.EscapeMinimum) []types.EscapeMinimum {
+func (s *escapeStream) improvements(res escape.Result, build func(position, storeIdx int, p escape.Point) types.GlobalMinimum) []types.GlobalMinimum {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if len(s.improved) == 0 || s.err != nil {
@@ -156,7 +156,7 @@ func (s *escapeStream) improvements(res escape.Result, build func(position, stor
 	sort.Slice(idxs, func(i, j int) bool {
 		return s.pos[idxs[i]] < s.pos[idxs[j]]
 	})
-	var out []types.EscapeMinimum
+	var out []types.GlobalMinimum
 	for _, storeIdx := range idxs {
 		position, ok := s.pos[storeIdx]
 		if !ok {
@@ -171,7 +171,7 @@ func (s *escapeStream) improvements(res escape.Result, build func(position, stor
 	return out
 }
 
-// complete closes the document: the rest of escape_result, then the top-level
+// complete closes the document: the rest of global_result, then the top-level
 // Input keys the run deferred (configs, and chief when a pupil_model_*
 // variable rewrote it). It is one Write, so the final document is either
 // complete or ends where the previous write did.
@@ -280,11 +280,12 @@ func marshalIndent(v any, n int) ([]byte, error) {
 }
 
 // escapeStreamEnabled resolves the streaming switch under the three principles:
-// the --stream flag wins when it was given, else optimization.escape.stream
-// when the document sets it, else the built-in default (stream on). fromFlag
-// reports that the CLI supplied the value, so only then is it written back to
-// the output document.
-func escapeStreamEnabled(cfg *types.EscapeConfig, command string) (enabled, fromFlag bool) {
+// the --stream flag wins when it was given, else the run's own `stream` key
+// (optimization.escape.stream or optimization.pso.stream) when the document
+// sets it, else the built-in default (stream on). fromFlag reports that the
+// CLI supplied the value, so only then is it written back to the output
+// document.
+func escapeStreamEnabled(cfg *types.GlobalConfig, command string) (enabled, fromFlag bool) {
 	if v, set := escapeStreamFlag(command); set {
 		return v, true
 	}
@@ -298,9 +299,8 @@ func escapeStreamEnabled(cfg *types.EscapeConfig, command string) (enabled, from
 // whether it was given. The value is an explicit "true"/"false" string so that
 // both `--stream false` and `--stream=false` work (a Go bool flag only
 // understands the latter); a bare `--stream` is rejected like any other flag
-// missing its argument. escape and pso parse their own flag sets but share the
-// same EscapeConfig (runPSO aliases optimization.pso.escape into it), so the
-// two pairs are kept separate only to mirror the flag declarations.
+// missing its argument. escape and pso parse their own flag sets; the two
+// pairs are kept separate only to mirror the flag declarations.
 func escapeStreamFlag(command string) (value, set bool) {
 	raw, given := optEscapeStream, optEscapeStreamSet
 	if command == "pso" {

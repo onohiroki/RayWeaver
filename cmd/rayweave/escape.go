@@ -21,7 +21,7 @@ import (
 
 // runEscape runs the escape-function global optimisation and writes the best
 // solution (pipeline-compatible) plus all discovered local minima in the
-// escape_result section. When verbose is true, progress events (local minima,
+// global_result section. When verbose is true, progress events (local minima,
 // escape-parameter changes) are reported to stderr as compact abbreviated
 // JSONL; --log FILE writes the full JSONL stream to a file. When saveBase is
 // non-empty, each discovered minimum is written to saveBase0.yaml,
@@ -62,6 +62,43 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	runEscapeCore(input, gc, progress, saveBase, keepInfeasible, debug, "escape", newExplorer)
 }
 
+// globalSettings is the resolved configuration of one global-search run. It
+// carries the shared cycle config the pipeline executes — the embedded
+// GlobalConfig of whichever section the command selected, so a write-back
+// lands in that section without the caller having to know which — plus the
+// escape-function tuning the same section supplies. tuning is nil for a method
+// that has no bumps (PSO), which is what keeps h_initial / w_initial / h_mult /
+// w_mult / escape_iter_frac / w_span out of the params report, out of the
+// JSONL params event and out of the output document.
+type globalSettings struct {
+	config *types.GlobalConfig
+	tuning *escape.Tuning
+}
+
+// resolveGlobalSettings selects the output section for the running command and
+// resolves it into the shared cycle config. `escape` and `pso` both require
+// their own section, so the two never alias one another's settings.
+func resolveGlobalSettings(input *types.Input, command string) globalSettings {
+	if input.Optimization == nil {
+		errOut("Error: 'optimization' section is required")
+		os.Exit(1)
+	}
+	if command == "pso" {
+		if input.Optimization.PSO == nil {
+			errOut("Error: 'optimization.pso' section is required")
+			os.Exit(1)
+		}
+		p := input.Optimization.PSO
+		return globalSettings{config: &p.GlobalConfig}
+	}
+	if input.Optimization.Escape == nil {
+		errOut("Error: 'optimization.escape' section is required")
+		os.Exit(1)
+	}
+	e := input.Optimization.Escape
+	return globalSettings{config: &e.GlobalConfig, tuning: escape.TuningFrom(*e)}
+}
+
 // runEscapeCore is the shared escape/PSO execution path. It accepts an
 // already-parsed input (so callers like runPSO can modify it first) plus the
 // loaded glass catalog, and handles progress logging, signal handling, single/
@@ -71,20 +108,20 @@ func runEscapeCore(input types.Input, gc *glass.Catalog, progress *escape.Progre
 	// optimization.mem_limit_mb); the effective value is written back.
 	applyMemLimit(&input, optEscapeMemLimit)
 
-	// Streaming switch (CLI --stream wins over optimization.escape.stream,
+	settings := resolveGlobalSettings(&input, command)
+
+	// Streaming switch (CLI --stream wins over the run's own `stream` key,
 	// else the built-in default is on). Only a flag that was actually given is
 	// written back, so a document that never mentions `stream` stays silent
 	// about it in the output too.
-	if input.Optimization != nil {
-		if enabled, fromFlag := escapeStreamEnabled(input.Optimization.Escape, command); fromFlag && input.Optimization.Escape != nil {
-			v := enabled
-			input.Optimization.Escape.Stream = &v
-		}
+	if enabled, fromFlag := escapeStreamEnabled(settings.config, command); fromFlag {
+		v := enabled
+		settings.config.Stream = &v
 	}
 
-	// Cycle-phase switches (--escape-bumps / --clean-dls), resolved under the
-	// same CLI-wins / write-back-only-what-was-given rule as --stream.
-	applyCyclePhaseFlags(&input, command)
+	// Cycle-phase switch (--clean-dls), resolved under the same CLI-wins /
+	// write-back-only-what-was-given rule as --stream.
+	applyCyclePhaseFlags(settings.config, command)
 
 	// Build the per-config glass-phase merit from the config's own terms: the
 	// chromatic terms scaled by power_solve.color_scale plus a cheap geometric
@@ -139,10 +176,10 @@ func runEscapeCore(input types.Input, gc *glass.Catalog, progress *escape.Progre
 	}
 
 	if isMultiConfig && len(input.Configs) > 1 {
-		runEscapeMulti(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, command, newExplorer)
+		runEscapeMulti(input, gc, settings, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, command, newExplorer)
 		return
 	}
-	runEscapeSingle(input, gc, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, command, newExplorer)
+	runEscapeSingle(input, gc, settings, progress, dlsLogger, saveBase, ctx, hardStop, gctx, keepInfeasible, debug, command, newExplorer)
 }
 
 // glassPhaseCtx carries the power-preserving glass-phase configuration through
@@ -346,7 +383,7 @@ func singleEscapeConfig(input types.Input, surfaces []types.Surface, variables [
 	return cfg
 }
 
-func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
+func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettings, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
 		surfaces = input.Configs[0].Surfaces
@@ -427,7 +464,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	}
 	outCfg := &input.Configs[0]
 
-	// Build the escape_result minima against the pristine original surfaces.
+	// Build the global_result minima against the pristine original surfaces.
 	cfgID := "config1"
 	if input.Configs[0].ID != "" {
 		cfgID = input.Configs[0].ID
@@ -438,12 +475,12 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		saveStem, saveExt = splitSaveBase(saveBase)
 	}
 
-	// buildMinimum materialises one minimum into its escape_result entry.
-	// position is the index inside escape_result.minima (discovery order when
+	// buildMinimum materialises one minimum into its global_result entry.
+	// position is the index inside global_result.minima (discovery order when
 	// streamed, merit order in the one-shot output); storeIdx is the discovery
 	// index the --save file name carries. The whole entry is built here so the
 	// streamed records and the completed document agree by construction.
-	buildMinimum := func(position, storeIdx int, p escape.Point) types.EscapeMinimum {
+	buildMinimum := func(position, storeIdx int, p escape.Point) types.GlobalMinimum {
 		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
 		// Register the optimised nd/vd model glasses so the element powers use
 		// the values at this minimum, not the original catalogue entries.
@@ -459,7 +496,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		// `escape extract` agrees with the --save file for the same index.
 		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
 		applySavedBackFocusSolve(input, outCfg, surf, gc, pupilModelForX(&input, variables, p.X))
-		m := types.EscapeMinimum{
+		m := types.GlobalMinimum{
 			Index:     position,
 			Merit:     p.Merit,
 			Surfaces:  surf,
@@ -477,8 +514,8 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 
 	// buildInfeasible is the same materialisation for an infeasible basin,
 	// which carries its classification and no --save file name. position is the
-	// index inside escape_result.infeasible_basins.
-	buildInfeasible := func(position int, p escape.Point) types.EscapeMinimum {
+	// index inside global_result.infeasible_basins.
+	buildInfeasible := func(position int, p escape.Point) types.GlobalMinimum {
 		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
 		for _, g := range newGlasses {
 			gc.Add(g)
@@ -486,10 +523,10 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
 		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
 		applySavedBackFocusSolve(input, outCfg, surf, gc, pupilModelForX(&input, variables, p.X))
-		return types.EscapeMinimum{
+		return types.GlobalMinimum{
 			Index:         position,
 			Merit:         p.Merit,
-			Status:        types.EscapeMinimumStatus(statusString(p.Status)),
+			Status:        types.GlobalMinimumStatus(statusString(p.Status)),
 			InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
 			Surfaces:      surf,
 			Variables:     buildSingleVarStates(variables, p.X),
@@ -539,14 +576,14 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		// low-ray-count solutions from being rejected as infeasible due
 		// to statistical grid sampling at the DLS ray count.
 		validationNumRays := numRays
-		if input.Optimization.Escape != nil && input.Optimization.Escape.ValidationNumRays > 0 {
-			validationNumRays = input.Optimization.Escape.ValidationNumRays
+		if settings.config.ValidationNumRays > 0 {
+			validationNumRays = settings.config.ValidationNumRays
 		}
 		wl := effectiveReferenceWavelength(input.Chief)
 		pupilModel := input.Chief.PupilModel
 		throughputThreshold := 0.3
-		if input.Optimization.Escape != nil && input.Optimization.Escape.MinThroughputRatio > 0 {
-			throughputThreshold = input.Optimization.Escape.MinThroughputRatio
+		if settings.config.MinThroughputRatio > 0 {
+			throughputThreshold = settings.config.MinThroughputRatio
 		}
 
 		validateFn = func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
@@ -615,11 +652,11 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	}
 
 	// Streaming output (default): the settled top-level part of the document is
-	// written now and one escape_result.minima entry follows each discovered
+	// written now and one global_result.minima entry follows each discovered
 	// solution, so a run killed mid-way still leaves a readable document.
 	// metadata is stamped here, which makes created_at the run start.
 	var st *escapeStream
-	if enabled, _ := escapeStreamEnabled(input.Optimization.Escape, command); enabled {
+	if enabled, _ := escapeStreamEnabled(settings.config, command); enabled {
 		st = newEscapeStream(os.Stdout, escapeStreamTails{chief: hasPupilModelVariables(variables)})
 		inner := onRecord
 		onRecord = func(idx int, p escape.Point, isNew bool, version int) {
@@ -629,10 +666,11 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 			st.record(idx, p, isNew, buildMinimum)
 		}
 		withOutputMetadata(&input, command, subcmdArgs())
-		st.header(input, escape.ReportParams(*input.Optimization.Escape, factory().Variables()))
+		st.header(input, escape.ReportParams(*settings.config, settings.tuning, factory().Variables()))
 	}
 
-	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
+	res := escape.ParallelEscape(factory, *settings.config, escape.RunOptions{
+		Tuning:      settings.tuning,
 		Progress:    progress,
 		OnRecord:    onRecord,
 		Fingerprint: fingerprint,
@@ -645,13 +683,13 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		NewExplorer: newExplorer,
 	})
 	progress.Event("done", map[string]any{
-		"workers":     res.Workers,
-		"cycles":      res.Cycles,
-		"escapes":     res.Escapes,
-		"minima":      len(res.Minima),
-		"best_merit":  safeF(res.BestMerit),
-		"timed_out":   res.TimedOut,
-		"interrupted": res.Interrupted,
+		"workers":      res.Workers,
+		"cycles":       res.Cycles,
+		"explorations": res.Explorations,
+		"minima":       len(res.Minima),
+		"best_merit":   safeF(res.BestMerit),
+		"timed_out":    res.TimedOut,
+		"interrupted":  res.Interrupted,
 	})
 	if saver != nil && saver.err != nil {
 		progress.Event("error", map[string]any{"message": saver.err.Error()})
@@ -660,16 +698,16 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 	// The streamed records already carry the feasible minima; the one-shot
 	// output builds them here, in merit order (buildMinimum is shared, so both
 	// forms produce identical entries).
-	var minima []types.EscapeMinimum
+	var minima []types.GlobalMinimum
 	if st == nil {
-		minima = make([]types.EscapeMinimum, len(res.Minima))
+		minima = make([]types.GlobalMinimum, len(res.Minima))
 		for i, p := range res.Minima {
 			minima[i] = buildMinimum(i, res.MinimaIdx[i], p)
 		}
 	}
 
 	// Build infeasible basins list.
-	infeasibleMinima := make([]types.EscapeMinimum, len(res.InfeasibleBasins))
+	infeasibleMinima := make([]types.GlobalMinimum, len(res.InfeasibleBasins))
 	for i, p := range res.InfeasibleBasins {
 		infeasibleMinima[i] = buildInfeasible(i, p)
 	}
@@ -726,12 +764,12 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, progress *escape.Prog
 		return
 	}
 
-	escResult := assembleEscapeResult(res, minima, infeasibleMinima)
+	escResult := assembleGlobalResult(res, minima, infeasibleMinima)
 	reportEscape(res, progress)
-	writeEscapeOutput(input, escResult, command)
+	writeGlobalOutput(input, escResult, command)
 }
 
-func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
+func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSettings, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -885,7 +923,7 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	}
 
 	// projectMulti materialises one point's per-config surfaces for an
-	// escape_result entry: element powers from the variable-only projection
+	// global_result entry: element powers from the variable-only projection
 	// (the run-time fingerprint), then the prescription the optimizer
 	// evaluated — back-focus hard solve + sized auto apertures — so
 	// `escape extract` agrees with the --save file for the same index.
@@ -911,14 +949,14 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		return cfgs, features
 	}
 
-	// buildMinimum materialises one minimum into its escape_result entry.
-	// position is the index inside escape_result.minima (discovery order when
+	// buildMinimum materialises one minimum into its global_result entry.
+	// position is the index inside global_result.minima (discovery order when
 	// streamed, merit order in the one-shot output); storeIdx is the discovery
 	// index the --save file name carries. It is shared by the streamed records
 	// and the completed document, so both forms produce identical entries.
-	buildMinimum := func(position, storeIdx int, p escape.Point) types.EscapeMinimum {
+	buildMinimum := func(position, storeIdx int, p escape.Point) types.GlobalMinimum {
 		cfgs, features := projectMulti(p)
-		m := types.EscapeMinimum{
+		m := types.GlobalMinimum{
 			Index:     position,
 			Merit:     p.Merit,
 			Configs:   cfgs,
@@ -933,13 +971,13 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 
 	// buildInfeasible is the same materialisation for an infeasible basin,
 	// which carries its classification and no --save file name. position is the
-	// index inside escape_result.infeasible_basins.
-	buildInfeasible := func(position int, p escape.Point) types.EscapeMinimum {
+	// index inside global_result.infeasible_basins.
+	buildInfeasible := func(position int, p escape.Point) types.GlobalMinimum {
 		cfgs, features := projectMulti(p)
-		return types.EscapeMinimum{
+		return types.GlobalMinimum{
 			Index:         position,
 			Merit:         p.Merit,
-			Status:        types.EscapeMinimumStatus(statusString(p.Status)),
+			Status:        types.GlobalMinimumStatus(statusString(p.Status)),
 			InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
 			Configs:       cfgs,
 			Variables:     buildMultiVarStates(input.Optimization, p.X),
@@ -973,14 +1011,14 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			numRays = 64
 		}
 		validationNumRays := numRays
-		if input.Optimization.Escape != nil && input.Optimization.Escape.ValidationNumRays > 0 {
-			validationNumRays = input.Optimization.Escape.ValidationNumRays
+		if settings.config.ValidationNumRays > 0 {
+			validationNumRays = settings.config.ValidationNumRays
 		}
 		wl := effectiveReferenceWavelength(input.Chief)
 		pupilModel := input.Chief.PupilModel
 		throughputThreshold := 0.3
-		if input.Optimization.Escape != nil && input.Optimization.Escape.MinThroughputRatio > 0 {
-			throughputThreshold = input.Optimization.Escape.MinThroughputRatio
+		if settings.config.MinThroughputRatio > 0 {
+			throughputThreshold = settings.config.MinThroughputRatio
 		}
 		// Use the first config's surfaces as the primary validation target.
 		primarySurfaces := template[0].Surfaces
@@ -1043,11 +1081,11 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	}
 
 	// Streaming output (default): the settled top-level part of the document is
-	// written now and one escape_result.minima entry follows each discovered
+	// written now and one global_result.minima entry follows each discovered
 	// solution, so a run killed mid-way still leaves a readable document.
 	// metadata is stamped here, which makes created_at the run start.
 	var st *escapeStream
-	if enabled, _ := escapeStreamEnabled(input.Optimization.Escape, command); enabled {
+	if enabled, _ := escapeStreamEnabled(settings.config, command); enabled {
 		st = newEscapeStream(os.Stdout, escapeStreamTails{chief: hasPupilModelVariablesMulti(input.Optimization)})
 		inner := onRecord
 		onRecord = func(idx int, p escape.Point, isNew bool, version int) {
@@ -1057,10 +1095,11 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 			st.record(idx, p, isNew, buildMinimum)
 		}
 		withOutputMetadata(&input, command, subcmdArgs())
-		st.header(input, escape.ReportParams(*input.Optimization.Escape, factory().Variables()))
+		st.header(input, escape.ReportParams(*settings.config, settings.tuning, factory().Variables()))
 	}
 
-	res := escape.ParallelEscape(factory, *input.Optimization.Escape, escape.RunOptions{
+	res := escape.ParallelEscape(factory, *settings.config, escape.RunOptions{
+		Tuning:      settings.tuning,
 		Progress:    progress,
 		OnRecord:    onRecord,
 		Fingerprint: fingerprint,
@@ -1073,13 +1112,13 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		NewExplorer: newExplorer,
 	})
 	progress.Event("done", map[string]any{
-		"workers":     res.Workers,
-		"cycles":      res.Cycles,
-		"escapes":     res.Escapes,
-		"minima":      len(res.Minima),
-		"best_merit":  safeF(res.BestMerit),
-		"timed_out":   res.TimedOut,
-		"interrupted": res.Interrupted,
+		"workers":      res.Workers,
+		"cycles":       res.Cycles,
+		"explorations": res.Explorations,
+		"minima":       len(res.Minima),
+		"best_merit":   safeF(res.BestMerit),
+		"timed_out":    res.TimedOut,
+		"interrupted":  res.Interrupted,
 	})
 	if saver != nil && saver.err != nil {
 		progress.Event("error", map[string]any{"message": saver.err.Error()})
@@ -1088,16 +1127,16 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 	// The streamed records already carry the feasible minima; the one-shot
 	// output builds them here, in merit order (buildMinimum is shared, so both
 	// forms produce identical entries).
-	var minima []types.EscapeMinimum
+	var minima []types.GlobalMinimum
 	if st == nil {
-		minima = make([]types.EscapeMinimum, len(res.Minima))
+		minima = make([]types.GlobalMinimum, len(res.Minima))
 		for i, p := range res.Minima {
 			minima[i] = buildMinimum(i, res.MinimaIdx[i], p)
 		}
 	}
 
 	// Build infeasible basins list.
-	infeasibleMinima := make([]types.EscapeMinimum, len(res.InfeasibleBasins))
+	infeasibleMinima := make([]types.GlobalMinimum, len(res.InfeasibleBasins))
 	for i, p := range res.InfeasibleBasins {
 		infeasibleMinima[i] = buildInfeasible(i, p)
 	}
@@ -1148,14 +1187,14 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, progress *escape.Progr
 		return
 	}
 
-	escapeResult := assembleEscapeResult(res, minima, infeasibleMinima)
+	globalResult := assembleGlobalResult(res, minima, infeasibleMinima)
 	reportEscape(res, progress)
-	writeEscapeOutput(input, escapeResult, command)
+	writeGlobalOutput(input, globalResult, command)
 }
 
-// assembleEscapeResult wraps the minima list with the report metadata.
-func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum, infeasibleMinima []types.EscapeMinimum) *types.EscapeResult {
-	return &types.EscapeResult{
+// assembleGlobalResult wraps the minima list with the report metadata.
+func assembleGlobalResult(res escape.Result, minima []types.GlobalMinimum, infeasibleMinima []types.GlobalMinimum) *types.GlobalResult {
+	return &types.GlobalResult{
 		BestIndex: res.BestIdx,
 		BestMerit: res.BestMerit,
 		// Shared with the streaming header (escape.ReportParams): the params
@@ -1170,10 +1209,10 @@ func assembleEscapeResult(res escape.Result, minima []types.EscapeMinimum, infea
 
 // buildSingleVarStates lists the variable values at a point for single-config
 // mode.
-func buildSingleVarStates(variables []optimize.Variable, x []float64) []types.EscapeVarState {
-	states := make([]types.EscapeVarState, len(variables))
+func buildSingleVarStates(variables []optimize.Variable, x []float64) []types.GlobalVarState {
+	states := make([]types.GlobalVarState, len(variables))
 	for i, v := range variables {
-		states[i] = types.EscapeVarState{
+		states[i] = types.GlobalVarState{
 			Name:  v.Name,
 			Surf:  v.SurfaceID,
 			Param: v.Param,
@@ -1462,8 +1501,8 @@ func applyEscapeMulti(configs []types.Config, opt *types.OptimizationConfig, x [
 // buildMultiVarStates lists variable values at a point for multi-config mode,
 // in the same shared-then-local order as the variable vector, followed by
 // linked variable values (computed from independent variables).
-func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.EscapeVarState {
-	var states []types.EscapeVarState
+func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.GlobalVarState {
+	var states []types.GlobalVarState
 	varNameIndex := make(map[string]int)
 	var varIdx int
 	for _, sv := range opt.SharedVariables {
@@ -1474,7 +1513,7 @@ func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.Esc
 		if len(sv.Bindings) > 0 {
 			param = sv.Bindings[0].Param
 		}
-		states = append(states, types.EscapeVarState{
+		states = append(states, types.GlobalVarState{
 			Name:  sv.Name,
 			Param: param,
 			After: x[varIdx],
@@ -1486,7 +1525,7 @@ func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.Esc
 		if !lv.Active {
 			continue
 		}
-		states = append(states, types.EscapeVarState{
+		states = append(states, types.GlobalVarState{
 			Name:   lv.Name,
 			Config: lv.Config,
 			Surf:   lv.Target.ID,
@@ -1519,7 +1558,7 @@ func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.Esc
 		}
 		val := lk.Relation.Scale*sourceVal + lk.Relation.Offset
 		linkValues[lk.Name] = val
-		states = append(states, types.EscapeVarState{
+		states = append(states, types.GlobalVarState{
 			Name:   lk.Name,
 			Config: lk.Target.Config,
 			Surf:   lk.Target.ID,
@@ -1539,7 +1578,7 @@ func buildMultiVarStates(opt *types.OptimizationConfig, x []float64) []types.Esc
 // It must be created *before* the glass catalog is loaded: the sinks default to
 // a tagged plain-text line on stderr — the very stream the compact --verbose
 // JSONL uses — so any warning raised before the reporter exists would be the
-// one human-readable line in an otherwise JSONL capture, which `list escape`,
+// one human-readable line in an otherwise JSONL capture, which `list global`,
 // jq and query --jsonl all reject. Bridged, a warning becomes a structured
 // "warn" event on every registered stream, the --log file included. With
 // neither --verbose nor --log there is no stream, so the sinks are left alone
@@ -1603,7 +1642,7 @@ func routeWarningsToProgress(progress *escape.Progress, streamOnStderr bool) (re
 	}
 }
 
-// reportEscape emits a single JSONL "escape_complete" event with the full
+// reportEscape emits a single JSONL "global_complete" event with the full
 // summary to the progress reporter (stderr via compact writer when --verbose).
 func reportEscape(res escape.Result, progress *escape.Progress) {
 	minima := make([]map[string]any, len(res.Minima))
@@ -1625,7 +1664,7 @@ func reportEscape(res escape.Result, progress *escape.Progress) {
 	fields := map[string]any{
 		"workers":      res.Workers,
 		"cycles":       res.Cycles,
-		"escapes":      res.Escapes,
+		"explorations": res.Explorations,
 		"minima_count": len(res.Minima),
 		"best_merit":   safeF(res.BestMerit),
 		"timed_out":    res.TimedOut,
@@ -1641,37 +1680,37 @@ func reportEscape(res escape.Result, progress *escape.Progress) {
 		fields["infeasible_basins"] = len(infeasible)
 		fields["infeasible"] = infeasible
 	}
-	progress.Event("escape_complete", fields)
+	progress.Event("global_complete", fields)
 }
 
-// writeEscapeOutput writes the final YAML to stdout. The command name is
+// writeGlobalOutput writes the final YAML to stdout. The command name is
 // stamped into metadata.tool.command ("escape" or "pso").
-func writeEscapeOutput(input types.Input, escResult *types.EscapeResult, command string) {
+func writeGlobalOutput(input types.Input, escResult *types.GlobalResult, command string) {
 	withOutputMetadata(&input, command, subcmdArgs())
 	output := types.Output{
 		Input:        input,
-		EscapeResult: escResult,
+		GlobalResult: escResult,
 	}
 	writeYAML(&output)
 }
 
-// effectiveEscapeMinima returns escape_result.minima with the improved entries
+// effectiveGlobalMinima returns global_result.minima with the improved entries
 // applied: a streamed document keeps its first-discovery values in minima (the
 // list is written append-only) and carries each replacement in
 // minima_improvements, whose Index is the position it supersedes. Readers that
-// want the solutions as the run ended with them — `list escape` and
+// want the solutions as the run ended with them — `list global` and
 // `escape extract` — go through here. A document without improvements (every
 // one-shot output, and every streamed run in which no point was replaced) is
 // returned unchanged.
-func effectiveEscapeMinima(esc *types.EscapeResult) []types.EscapeMinimum {
+func effectiveGlobalMinima(esc *types.GlobalResult) []types.GlobalMinimum {
 	if esc == nil || len(esc.MinimaImprovements) == 0 {
-		var minima []types.EscapeMinimum
+		var minima []types.GlobalMinimum
 		if esc != nil {
 			minima = esc.Minima
 		}
 		return minima
 	}
-	out := make([]types.EscapeMinimum, len(esc.Minima))
+	out := make([]types.GlobalMinimum, len(esc.Minima))
 	copy(out, esc.Minima)
 	for _, imp := range esc.MinimaImprovements {
 		if imp.Index >= 0 && imp.Index < len(out) {
@@ -1686,18 +1725,18 @@ func effectiveEscapeMinima(esc *types.EscapeResult) []types.EscapeMinimum {
 // command name is stamped into metadata.tool.command.
 func runEscapeExtract(data []byte, index int, command string) {
 	output := parseYAML[types.Output](data)
-	if output.EscapeResult == nil {
-		errOut("Error: input has no 'escape_result' section (was it produced by 'rayweave escape' or 'rayweave pso'?)")
+	if output.GlobalResult == nil {
+		errOut("Error: input has no 'global_result' section (was it produced by 'rayweave escape' or 'rayweave pso'?)")
 		os.Exit(1)
 	}
-	if index < 0 || index >= len(output.EscapeResult.Minima) {
-		errOut("Error: index %d out of range (minima count: %d)", index, len(output.EscapeResult.Minima))
+	if index < 0 || index >= len(output.GlobalResult.Minima) {
+		errOut("Error: index %d out of range (minima count: %d)", index, len(output.GlobalResult.Minima))
 		os.Exit(1)
 	}
 	// A streamed document keeps its first-discovery values in minima (the list
 	// is append-only) and carries the replacements in minima_improvements, so
 	// extract must take the improved entry to agree with best_merit.
-	min := effectiveEscapeMinima(output.EscapeResult)[index]
+	min := effectiveGlobalMinima(output.GlobalResult)[index]
 
 	if len(min.Configs) > 0 {
 		for i := range output.Configs {
@@ -1748,7 +1787,7 @@ func (n *noIterLogger) LogIter(int, float64, float64, float64, []float64, []dls.
 
 func (n *noIterLogger) LogFinal(int, string, float64, float64, []float64, []dls.ConstraintState) {}
 
-// statusString converts an escape.MinStatus to a types.EscapeMinimumStatus string.
+// statusString converts an escape.MinStatus to a types.GlobalMinimumStatus string.
 func statusString(s escape.MinStatus) string {
 	switch s {
 	case escape.MinStatusFeasibleLocalMinimum:

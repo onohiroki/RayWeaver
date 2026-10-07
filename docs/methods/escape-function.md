@@ -72,14 +72,11 @@ Each worker repeats, up to `max_cycles` times:
 2. **Clean DLS** — run DLS with the bumps cleared, starting from the escaped
    point, to converge to the *true* local minimum of the unperturbed merit.
 
-Both steps are independently switchable (`escape_bumps` / `clean_dls`, default
-`true` each):
+Step 1 is what separates the two global methods: `escape` always installs the
+bumps, while [`pso`](pso.md) never applies the escape function at all — its
+swarm minimises the plain merit. Step 2 is switchable with `clean_dls`
+(default `true`):
 
-- `escape_bumps: false` installs **no** bumps, so step 1 minimises the plain
-  merit. Nothing else changes: the store still grows, a repeat still
-  strengthens/widens the stored bump and still replaces `X`/`Merit` on a
-  better arrival, and validation and the output are untouched — only the
-  landscape stops being deformed. This is the ablation of the escape function.
 - `clean_dls: false` records the escaped point (or the glass phase's output,
   when one ran) instead of running step 2. The clean phase is still *selected*
   — `PhaseClean` and its phase weights are installed before the point is read —
@@ -157,7 +154,7 @@ the search rather than only rejected at the end.
 
 ## 3. Parallel workers
 
-`escape_workers` (default 4) goroutines each run their own cycle, sharing a
+`global_workers` (default 4) goroutines each run their own cycle, sharing a
 single store of recorded minima. Each worker's initial state is perturbed by a
 deterministic, seed-derived offset (`initialPerturb = 0.05` default) so the
 workers explore distinct neighbourhoods. Each worker builds an **isolated model**
@@ -167,7 +164,7 @@ The escape-bump width is additionally a per-worker function of the index
 so workers drift toward different basins.
 
 Because each DLS run inside a cycle parallelizes its own Jacobian across
-`jacobian_workers`, the total goroutine count is `escape_workers ×
+`jacobian_workers`, the total goroutine count is `global_workers ×
 jacobian_workers`; set `jacobian_workers: 1` when running many escape workers.
 
 The escape cycle disables the DLS internal stall perturbation
@@ -188,7 +185,7 @@ cut off.
 
 | Parameter | Default | Meaning |
 |---|---|---|
-| `escape_workers` | 4 | parallel top-level goroutines |
+| `global_workers` | 4 | parallel top-level goroutines |
 | `max_cycles` | 10 | DLS cycles per worker |
 | `max_seconds` | 0 | soft wall-clock budget in seconds, shared by all workers (0 = unlimited) |
 | `distance_threshold` | 0.1 | normalized distance to call a point "new" |
@@ -203,13 +200,12 @@ cut off.
 | `stall_rel_tol` | `1e-4` | stalled-early-stop relative merit threshold |
 | `stall_early_stop` | true | stalled-early-stop in the escape phase (clean phase never stalls) |
 | `initial_perturb` | 0.05 | normalised spread of parallel-worker start points |
-| `escape_bumps` | true | place the escape-function bumps during the exploration phase (false = plain exploration) |
 | `clean_dls` | true | run the clean DLS that closes each cycle (false = record the exploration result as-is) |
 | `keep_infeasible` | false | include infeasible basins in stdout YAML (`--keep-infeasible`) |
 
 ## 4b. Termination
 
-The search normally runs `escape_workers` workers for `max_cycles` cycles each.
+The search normally runs `global_workers` workers for `max_cycles` cycles each.
 A worker also stops early after `maxFail = 3` consecutive unacceptable DLS runs
 (a solve that neither converges nor produces a finite, sane merit).
 
@@ -254,7 +250,7 @@ hard kill never loses already-found minima.
 
 The best minimum (lowest true merit) is written to the top-level configs,
 pipeline-compatible with `rayweave trace`/`plot`. Every discovered minimum is
-listed in `escape_result.minima[]` with its full surfaces and variable values,
+listed in `global_result.minima[]` with its full surfaces and variable values,
 so `escape extract --index N` can recover any of them as a clean lens YAML.
 Each minimum also carries `features` — a compact fingerprint for comparing
 minima against each other — with one entry per config (`id`) holding
@@ -265,7 +261,7 @@ elements with power `-2n/R`). `merit` stays at the minimum level as the
 objective scalar. Every minimum in `minima[]` has `status: feasible_local_minimum`.
 
 Infeasible basins (when `--keep-infeasible` is used) are listed separately in
-`escape_result.infeasible_basins[]` with the same structure, plus
+`global_result.infeasible_basins[]` with the same structure, plus
 `status: infeasible_basin` and `invalid_reason`. The `--save` flag never
 includes infeasible basins.
 

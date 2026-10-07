@@ -13,24 +13,20 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 )
 
-// particleResult holds the per-particle evaluation output.
+// particleResult holds the per-particle evaluation output. The swarm has one
+// fitness value, so pbest and gbest are selected on exactly the same scale.
 type particleResult struct {
-	f  float64 // escaped merit (fitness)
-	tf float64 // true merit (for gbest selection)
+	f float64 // penalised fitness
 }
 
 // evalSwarm evaluates all particles in parallel using GOMAXPROCS goroutines.
 // The model's EvaluateMerit is goroutine-safe (applyVariables deep-copies surfaces
 // and creates a local cache each call).
 //
-// When bothFn is non-nil, it is used instead of fitness+innerMeritFn: the
-// combined function returns (escapedMerit, innerMerit) in a single ray-trace
-// pass, avoiding the 2× EvaluateMerit cost.
-//
 // When skipConstraints is true, ComputeConstraints is skipped entirely (the
 // inner model has no active constraints, so the call would be a no-op that
 // still pays for applyVariables + sizeAutoApertures with a nil cache).
-func (e *Explorer) evalSwarm(model dls.Model, pos [][]float64, variables []dls.VariableInfo, scales []float64, innerMeritFn func([]float64) float64, bothFn func([]float64) (float64, float64), skipConstraints bool) []particleResult {
+func (e *Explorer) evalSwarm(model dls.Model, pos [][]float64, variables []dls.VariableInfo, scales []float64, skipConstraints bool) []particleResult {
 	swarmSize := len(pos)
 	results := make([]particleResult, swarmSize)
 
@@ -49,22 +45,7 @@ func (e *Explorer) evalSwarm(model dls.Model, pos [][]float64, variables []dls.V
 			defer wg.Done()
 			defer func() { <-sem }()
 			xPhys := denormalize(pos[i], variables, scales)
-			if bothFn != nil {
-				// ① Single ray-trace pass for both escaped and inner merit.
-				escaped, inner := bothFn(xPhys)
-				// Add constraint penalty if applicable.
-				if !skipConstraints && e.cfg.ConstraintPenalty > 0 {
-					constraints := model.ComputeConstraints(xPhys)
-					for _, c := range constraints {
-						escaped += e.cfg.ConstraintPenalty * c * c
-					}
-				}
-				results[i].f = escaped
-				results[i].tf = inner
-			} else {
-				results[i].f = e.fitness(model, xPhys)
-				results[i].tf = innerMeritFn(xPhys)
-			}
+			results[i].f = e.fitness(model, xPhys, skipConstraints)
 		}(i)
 	}
 	wg.Wait()
@@ -155,8 +136,9 @@ func NewExplorer(cfg Config, seed int64, progress func(event string, fields map[
 	return &Explorer{cfg: cfg, seed: seed, progress: progress}
 }
 
-// Explore runs a global-best PSO swarm in normalized variable space and returns
-// the best point found. The model must have escapes set before calling.
+// Explore runs a global-best PSO swarm in normalized variable space and
+// returns the best point it found. The search is plain: the model carries no
+// escape bumps, so the fitness it minimises is the merit the pipeline reports.
 func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 	variables := model.Variables()
 	nVars := len(variables)
@@ -221,23 +203,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		copy(pbestPos[i], pos[i])
 	}
 
-	// Detect InnerMerit: when the model (escape Wrapper) exposes the true
-	// (unescaped) merit, gbest is selected by true merit so known minima
-	// with escape bumps are excluded from the global-best pool.
-	innerMeritFn := model.EvaluateMerit // fallback: use escaped merit
-	if ime, ok := model.(interface{ InnerMerit([]float64) float64 }); ok {
-		innerMeritFn = ime.InnerMerit
-	}
-
-	// ① Detect EvaluateMeritBoth: single ray-trace pass for escaped + inner merit.
-	var bothFn func([]float64) (float64, float64)
-	if bfn, ok := model.(interface {
-		EvaluateMeritBoth([]float64) (float64, float64)
-	}); ok {
-		bothFn = bfn.EvaluateMeritBoth
-	}
-
-	// ② Detect HasConstraints: skip redundant ComputeConstraints when the
+	// Detect HasConstraints: skip redundant ComputeConstraints when the
 	// inner model has no active constraints.
 	skipConstraints := false
 	if hc, ok := model.(interface{ HasConstraints() bool }); ok {
@@ -251,15 +217,13 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 	}
 
 	gbestFit := math.MaxFloat64
-	gbestTrueFit := math.MaxFloat64
 	gbestPos := make([]float64, nVars)
 	copy(gbestPos, x0Norm)
 
-	results := e.evalSwarm(model, pos, variables, scales, innerMeritFn, bothFn, skipConstraints)
+	results := e.evalSwarm(model, pos, variables, scales, skipConstraints)
 	for i := 0; i < swarmSize; i++ {
 		pbestFit[i] = results[i].f
-		if results[i].tf < gbestTrueFit {
-			gbestTrueFit = results[i].tf
+		if results[i].f < gbestFit {
 			gbestFit = results[i].f
 			copy(gbestPos, pos[i])
 		}
@@ -272,7 +236,6 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 			"n_vars":           nVars,
 			"pso_iterations":   maxIter,
 			"inertia":          e.cfg.Inertia,
-			"has_both_fn":      bothFn != nil,
 			"skip_constraints": skipConstraints,
 			"light_aperture":   true,
 		})
@@ -293,7 +256,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		// Check stop channel (via model.Options().Stop).
 		opts := model.Options()
 		if stopped(opts.Stop) {
-			return e.buildResult(model, variables, scales, gbestPos, gbestFit, gbestTrueFit, iter, "interrupted")
+			return e.buildResult(model, variables, scales, gbestPos, gbestFit, iter, "interrupted")
 		}
 
 		// Update pupil at global best.
@@ -342,7 +305,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		}
 
 		// Phase 2: evaluate all particles in parallel (dominant cost).
-		results := e.evalSwarm(model, pos, variables, scales, innerMeritFn, bothFn, skipConstraints)
+		results := e.evalSwarm(model, pos, variables, scales, skipConstraints)
 
 		// Phase 3: update personal and global bests (sequential, lightweight).
 		swarmSum := 0.0
@@ -353,8 +316,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 				pbestFit[i] = results[i].f
 				copy(pbestPos[i], pos[i])
 			}
-			if results[i].tf < gbestTrueFit {
-				gbestTrueFit = results[i].tf
+			if results[i].f < gbestFit {
 				gbestFit = results[i].f
 				copy(gbestPos, pos[i])
 			}
@@ -372,7 +334,6 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 			e.progress("pso_iter", map[string]any{
 				"iter":        iter + 1,
 				"gbest_merit": gbestFit,
-				"gbest_true":  gbestTrueFit,
 				"swarm_mean":  swarmSum / float64(swarmSize),
 				"swarm_min":   swarmMin,
 				"swarm_max":   swarmMax,
@@ -431,13 +392,12 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 						}
 					}
 					// Re-evaluate reinitialized particles.
-					reResults := e.evalSwarm(model, pos, variables, scales, innerMeritFn, bothFn, skipConstraints)
+					reResults := e.evalSwarm(model, pos, variables, scales, skipConstraints)
 					for k := 0; k < half; k++ {
 						i := idx[k]
 						results[i] = reResults[i]
 						pbestFit[i] = reResults[i].f
-						if reResults[i].tf < gbestTrueFit {
-							gbestTrueFit = reResults[i].tf
+						if reResults[i].f < gbestFit {
 							gbestFit = reResults[i].f
 							copy(gbestPos, pos[i])
 						}
@@ -463,13 +423,16 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		}
 	}
 
-	return e.buildResult(model, variables, scales, gbestPos, gbestFit, gbestTrueFit, maxIter, "max_iterations")
+	return e.buildResult(model, variables, scales, gbestPos, gbestFit, maxIter, "max_iterations")
 }
 
-// fitness computes the penalized fitness: merit + penalty * sum(c_j^2).
-func (e *Explorer) fitness(model dls.Model, xPhys []float64) float64 {
+// fitness computes the penalised fitness: merit + penalty * sum(c_j^2). It is
+// the swarm's only fitness value, so pbest and gbest always agree on the scale
+// they are ranked by. skipConstraints short-circuits the penalty when the model
+// declares no active constraints.
+func (e *Explorer) fitness(model dls.Model, xPhys []float64, skipConstraints bool) float64 {
 	f := model.EvaluateMerit(xPhys)
-	if e.cfg.ConstraintPenalty > 0 {
+	if !skipConstraints && e.cfg.ConstraintPenalty > 0 {
 		constraints := model.ComputeConstraints(xPhys)
 		for _, c := range constraints {
 			f += e.cfg.ConstraintPenalty * c * c
@@ -479,7 +442,7 @@ func (e *Explorer) fitness(model dls.Model, xPhys []float64) float64 {
 }
 
 // buildResult constructs a dls.Result from the global best.
-func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, scales, gbestNorm []float64, gbestFit, gbestTrueFit float64, iterations int, status string) dls.Result {
+func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, scales, gbestNorm []float64, gbestFit float64, iterations int, status string) dls.Result {
 	gbestPhys := denormalize(gbestNorm, variables, scales)
 
 	vars := make([]dls.VariableState, len(variables))
@@ -495,7 +458,7 @@ func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, sc
 
 	return dls.Result{
 		BeforeMerit: gbestFit,
-		AfterMerit:  gbestTrueFit,
+		AfterMerit:  gbestFit,
 		Iterations:  iterations,
 		Status:      status,
 		Variables:   vars,

@@ -6,9 +6,15 @@ convergence a smooth "escape bump" is added to the merit function around that
 minimum, pushing the next DLS run out of the valley to discover other local
 minima.
 
+`escape` and [`pso`](pso.md) are the two global-optimisation methods: they
+share the cycle budget, the worker pool, the deduplication of discovered points
+and their validation, and the `global_result` output, and each one only adds
+its own `optimization.*` section. Everything in this manual that is not marked
+as escape-specific applies to both.
+
 ```
 rayweave escape [--verbose] [--log FILE] [--save FILE] [--stream BOOL] [--glass-dir DIR]
-                [--escape-bumps BOOL] [--clean-dls BOOL] < input.yaml
+                [--clean-dls BOOL] < input.yaml
 rayweave escape extract --index N < escape-output.yaml
 ```
 
@@ -18,28 +24,26 @@ rayweave escape extract --index N < escape-output.yaml
 |---|---|
 | `--glass-dir DIR` | AGF glass catalog directory |
 | `--stream BOOL` | stream the pipeline document to stdout as the run progresses: `true` (default) or `false` for the one-shot write performed after the run (see [Streaming output](#streaming-output)) |
-| `--escape-bumps BOOL` | place the escape-function bumps on the recorded minima: `true` (default) or `false` (see [Switching the cycle phases off](#switching-the-cycle-phases-off)) |
-| `--clean-dls BOOL` | run the clean DLS that closes each cycle: `true` (default) or `false` (see [Switching the cycle phases off](#switching-the-cycle-phases-off)) |
-| `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `escaped`, `recorded`, `best_merit`, `cycles`, `escapes`, `minima`, `message`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves. While a stream is active the optimizer's and the glass package's non-fatal warnings are routed into it as `warn` events carrying `message`, instead of the tagged plain-text lines they would otherwise write to stderr next to the JSONL — so a captured `--verbose` stream stays pure JSON Lines and `list escape`, `jq` and `query --jsonl` can all read it) |
+| `--clean-dls BOOL` | run the clean DLS that closes each cycle: `true` (default) or `false` (see [Switching the clean DLS off](#switching-the-clean-dls-off)) |
+| `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `explored`, `recorded`, `best_merit`, `cycles`, `explorations`, `minima`, `message`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves. While a stream is active the optimizer's and the glass package's non-fatal warnings are routed into it as `warn` events carrying `message`, instead of the tagged plain-text lines they would otherwise write to stderr next to the JSONL — so a captured `--verbose` stream stays pure JSON Lines and `list global`, `jq` and `query --jsonl` can all read it) |
 | `--log FILE` | write the **full** JSONL progress stream to `FILE` (same fields as before — full-precision floats, RFC3339 `time`, `elapsed` seconds, `status`/`signal`/`timed_out`/`interrupted` included — with keys in the same fixed order followed by the remaining keys alphabetically) |
 | `--save FILE` | save every discovered local minimum to `FILE0.yaml`, `FILE1.yaml`, … (see [Saving minima](#saving-minima)) |
 | `--power-solve` | insert the power-preserving glass phase between each escape and clean DLS: locks every variable except the glass dispersions, emphasises the config's chromatic merit terms (scaled by `power_solve.color_scale`), keeps a cheap geometric guardrail, and holds the element powers fixed |
 | `--power-solve-surfaces A,B,…` | surface IDs whose curvature is recomputed to hold the containing element's thin-lens power (with `--power-solve`) |
 | `--glass-variables` | auto-generate nd/vd variables for every refractive element (the merit is left unchanged) |
 | `--index N` | (with `escape extract`) local minimum index to extract |
-| `--keep-infeasible` | include `escape_result.infeasible_basins[]` in stdout YAML (default: discard; `--save` never includes infeasible basins) |
+| `--keep-infeasible` | include `global_result.infeasible_basins[]` in stdout YAML (default: discard; `--save` never includes infeasible basins) |
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`
 (CLI/YAML rule); `--save` records the per-minimum files in
-`escape_result.minima[].file`; `--verbose` / `--log` are run-stream flags;
+`global_result.minima[].file`; `--verbose` / `--log` are run-stream flags;
 `--power-solve` / `--power-solve-surfaces` echo the effective
 `power_solve` config into the output; `--stream` is written back as
 `optimization.escape.stream` **only when the flag is given**, so an unset flag
-never overrides the input YAML. `--escape-bumps` / `--clean-dls` follow exactly
-the same rule: each is written back as `optimization.escape.escape_bumps` /
-`optimization.escape.clean_dls` only when that flag was given, so a run that
-never mentions either switch produces an output that does not mention them
-either.
+never overrides the input YAML. `--clean-dls` follows exactly the same rule:
+it is written back as `optimization.escape.clean_dls` only when the flag was
+given, so a run that never mentions the switch produces an output that does not
+mention it either.
 
 DLS-internal events are never emitted during escape: the per-iteration `iter`,
 per-solve `final`, `adaptive_damping` and `mode_change` records that
@@ -65,7 +69,7 @@ optimization:
   variables: [...]          # same variable definitions as 'optimize'
   escape:
     max_cycles: 10          # DLS cycles per worker
-    escape_workers: 4       # top-level parallel goroutines (default 4)
+    global_workers: 4       # top-level parallel goroutines (default 4)
     max_seconds: 0          # soft wall-clock budget (seconds, shared; 0 = unlimited)
     distance_threshold: 0.1 # normalised distance to call a point "new"
     fingerprint_distance_threshold: 0  # design-fingerprint distance for "new" (0 = off)
@@ -88,7 +92,6 @@ optimization:
     stream: true            # append the pipeline document to stdout as the run progresses
     hull_rescue: true       # project a hull-violating point onto the glass hull and re-solve
     hull_rescue_iter_frac: 0.25 # rescue re-solve MaxIter as a fraction of the full budget
-    escape_bumps: true      # place the escape-function bumps (false = plain exploration)
     clean_dls: true         # clean DLS closing each cycle (false = record the exploration result as-is)
 ```
 
@@ -131,8 +134,8 @@ default) keeps the original variable-distance-only behaviour.
 
 The DLS solve inside each worker parallelises its Jacobian across
 `jacobian_workers`. Under the `escape` command an unset `jacobian_workers`
-defaults to **2** instead of `GOMAXPROCS`. With `escape_workers > 1` the total
-goroutines are `escape_workers × jacobian_workers`; set `jacobian_workers: 1`
+defaults to **2** instead of `GOMAXPROCS`. With `global_workers > 1` the total
+goroutines are `global_workers × jacobian_workers`; set `jacobian_workers: 1`
 with many escape workers to avoid oversubscription.
 
 ### Execution tuning
@@ -145,7 +148,7 @@ iterations. Once the best merit has failed to improve by at least
 the best point found (`stall_early_stop: true`, the default). When it runs, the
 clean re-optimisation phase — the source of slow, late-stage merit improvements
 — **always** runs the full budget and never stalls (`clean_dls: false` skips it
-entirely, see [Switching the cycle phases off](#switching-the-cycle-phases-off)).
+entirely, see [Switching the clean DLS off](#switching-the-clean-dls-off)).
 Set `stall_early_stop: false`
 to disable stalled-early-stop in the escape phase entirely.
 
@@ -160,23 +163,13 @@ same basin, so this is usually the first knob to raise.
 incrementally while the run progresses, or in one write after it (see
 [Streaming output](#streaming-output)). `--stream true|false` overrides it.
 
-### Switching the cycle phases off
+### Switching the clean DLS off
 
-The cycle closes with two independently switchable phases, both default-on:
+The cycle closes with a clean DLS, default-on:
 
 | Phase | YAML | CLI | `false` means |
 |---|---|---|---|
-| escape bumps | `escape.escape_bumps` | `--escape-bumps BOOL` | the exploration phase minimises the **plain** merit instead of being pushed away from the recorded minima |
-| clean DLS | `escape.clean_dls` | `--clean-dls BOOL` | the cycle records the exploration point as-is instead of gradient-refining it |
-
-Turning the bumps off is an ablation of the escape function itself, not of the
-machinery around it: the store keeps growing, points keep being classified as
-new/repeat (a repeat still strengthens and widens the stored bump, and still
-replaces `X`/`Merit` when it arrives better), validated, and written to
-`escape_result`. Only the landscape stops being deformed, so every cycle
-converges to whatever basin the plain merit's restart point falls into — the
-result is a repeated local search with the same reporting, which is exactly
-what an ablation run wants to compare against.
+| clean DLS | `escape.clean_dls` (or `pso.clean_dls`) | `--clean-dls BOOL` | the cycle records the exploration point as-is instead of gradient-refining it |
 
 Turning the clean DLS off records `cleanStart` — the exploration result, or
 the power-preserving glass phase's output when one ran — without any gradient
@@ -191,12 +184,11 @@ DLS solves, they are skipped with the phase: with `clean_dls: false`,
 `hull_rescue` never fires, and a point that fails validation is recorded as an
 infeasible basin instead of being projected back onto the real-glass hull.
 
-The two switches are independent — either can be turned off without the other
-— and both take an explicit `true`/`false` value. Each is read from
-`optimization.escape` when its flag is not given, and — like `--stream` — is
-echoed into the output only when the flag was actually given;
-`escape_result.params` reports whichever of the two is **off** (both are
-default-on, so a default run's params block carries neither key).
+The switch takes an explicit `true`/`false` value, is read from
+`optimization.escape` (or `optimization.pso`) when `--clean-dls` is not given,
+and — like `--stream` — is echoed into the output only when the flag was
+actually given. `global_result.params` reports it only when it is **off**
+(it is default-on, so a default run's params block carries no such key).
 
 ### Power-preserving glass phase
 
@@ -302,11 +294,11 @@ promising dome.
 - the trade-off is fewer basins visited per unit time
 
 In both cases `max_cycles` trades breadth against depth of a setting, and
-`escape_workers` scales the wall-clock cost (each worker is independent, so a
+`global_workers` scales the wall-clock cost (each worker is independent, so a
 higher count broadens the search cheaply). Nothing here changes the two-phase
 (escape-then-clean) structure — the clean phase always refines the final best
 point with the full budget, unless `clean_dls` is switched off (see
-[Switching the cycle phases off](#switching-the-cycle-phases-off)).
+[Switching the clean DLS off](#switching-the-clean-dls-off)).
 
 #### Parameter summary
 
@@ -317,7 +309,7 @@ point with the full budget, unless `clean_dls` is switched off (see
 | `w_initial` | 0.5 | 0.8 | 0.3 |
 | `escape_iter_frac` | 1/3 | 0.25 | 0.5 |
 | `max_cycles` | 10 | lower | higher |
-| `escape_workers` | 4 | higher for cheap breadth | lower |
+| `global_workers` | 4 | higher for cheap breadth | lower |
 
 `w_initial` and `max_cycles` are set alongside the four tuning knobs above. The
 remaining performance fields (`h_initial`, `w_mult`, `max_seconds`, …) are
@@ -329,7 +321,7 @@ independent of the breadth/depth trade-off.
 optimization:
   method: dls
   escape:
-    escape_workers: 8
+    global_workers: 8
     max_cycles: 6
     initial_perturb: 0.10
     w_span: 3.0
@@ -343,7 +335,7 @@ optimization:
 optimization:
   method: dls
   escape:
-    escape_workers: 2
+    global_workers: 2
     max_cycles: 15
     initial_perturb: 0.02
     w_span: 1.5
@@ -399,7 +391,7 @@ applied, ready for `chief`/`trace`/`plot` or a re-optimisation):
   is written to `FILE N.yaml`.
 - Writes are atomic (temp file + fsync + rename), so a killed process never
   leaves a partial file. The per-minimum file name is also recorded in
-  `escape_result.minima[].file`.
+  `global_result.minima[].file`.
 
 ### Infeasible basins
 
@@ -445,11 +437,11 @@ The invalid reason is reported per basin:
 | `glass_hull_violation` | a converged nd/vd pair lies outside the real-glass convex hull (see below) |
 
 By default infeasible basins are discarded from the stdout YAML. Pass
-`--keep-infeasible` to include them as `escape_result.infeasible_basins[]`
+`--keep-infeasible` to include them as `global_result.infeasible_basins[]`
 (useful for diagnosing broken regions of variable space). The `--save` flag
 **never** includes infeasible basins.
 
-### Real-glass hull: guard band, escape weight, rescue
+### Real-glass hull: guard band, exploration weight, rescue
 
 Glass variables are constrained to the real-glass convex hull by a smooth
 penalty (`optimization.glass_hull`, on by default; see `docs/optimize.md`).
@@ -457,7 +449,7 @@ The penalty's smooth band is centred on the hull boundary, so an outward
 optical gradient can park the DLS balance point slightly **outside** the hull,
 where the point then fails validation with `invalid_reason:
 glass_hull_violation` — real runs recorded several such minima (e.g. the
-v40 campaign's `list escape` output was dominated by
+v40 campaign's `list global` output was dominated by
 `glass_hull_violation` entries). Three mechanisms keep escape solutions on
 real glass without turning the hull into a hard wall:
 
@@ -470,10 +462,10 @@ real glass without turning the hull into a hard wall:
    true hull. The feasibility check (`Contains`, used by the escape
    validator) stays on the true hull, and exact catalogue points/vertices
    remain at zero penalty.
-2. **Escape-phase weight** (`optimization.glass_hull.escape_weight_factor`,
-   default `0.1`): during the escape exploration phase the whole hull-penalty
+2. **Exploration-phase weight** (`optimization.glass_hull.exploration_weight_factor`,
+   default `0.1`): during the exploration phase the whole hull-penalty
    term is scaled by this factor (the `glass_dls` and clean phases, and a
-   plain `optimize` run, keep full strength), so an escape bump can still
+   plain `optimize` run, keep full strength), so the exploration can still
    carry the search across the soft hull wall into a different basin while
    the full-weight phases keep the settle-down on real glass. Residuals scale
    by `sqrt(factor)` so `Σ residual² == merit` still holds.
@@ -487,18 +479,18 @@ real glass without turning the hull into a hard wall:
    stream carries it as `"phase": "hull_rescue"` with
    `status: accepted|rejected`. The rescue is skipped when the run is
    stopping or out of time, and whenever `clean_dls` is off — it *is* a clean
-   DLS (see [Switching the cycle phases off](#switching-the-cycle-phases-off));
+   DLS (see [Switching the clean DLS off](#switching-the-clean-dls-off));
    a re-solve that fails validation keeps the original classification and its
    escape bump.
 
 ## Output
 
 The best solution is written to `configs[].surfaces` (pipeline-compatible with
-`rayweave trace` / `rayweave plot`), and an `escape_result` section lists every
+`rayweave trace` / `rayweave plot`), and an `global_result` section lists every
 discovered local minimum with its full surfaces and variable values:
 
 ```yaml
-escape_result:
+global_result:
   best_index: 0
   best_merit: ...
   params:
@@ -508,7 +500,7 @@ escape_result:
     w_mult: ...
     distance_threshold: ...
     max_cycles: ...
-    escape_workers: ...
+    global_workers: ...
     max_seconds: ...
     escape_iter_frac: ...
     w_span: ...
@@ -516,7 +508,6 @@ escape_result:
     stall_rel_tol: ...
     stall_early_stop: ...
     initial_perturb: ...
-    escape_bumps: false              # only present when the bumps are off
     clean_dls: false                 # only present when the clean DLS is off
   timed_out: false              # true if the search was cut short by max_seconds
   interrupted: false            # true if a SIGINT/SIGTERM stopped the search
@@ -561,17 +552,17 @@ sorted **by merit** (see [Streaming output](#streaming-output)) — and
 `best_index` is always a position in the document's own list, so
 `minima[best_index]` — after applying the improvement for that index, if any —
 carries `best_merit`. That is exactly what
-`escape extract --index $(query -r escape_result.best_index)` relies on.
+`escape extract --index $(query -r global_result.best_index)` relies on.
 
 `minima_improvements` carries the final version of every minimum whose point was
 replaced during the run (a repeat visit that reached a better merit,
 `Store.Replace`): each entry's `index` is the position in `minima` it supersedes,
 and the whole entry (`merit`, `surfaces`, `variables`, `features`, `file`) is the
 replacement, not a delta — take `minima[i]` unless an improvement names `i`.
-`list escape` applies these substitutions for you (and then ranks the rows by
-effective merit); a raw `query` on `escape_result.minima[]` does not, so it shows
+`list global` applies these substitutions for you (and then ranks the rows by
+effective merit); a raw `query` on `global_result.minima[]` does not, so it shows
 the first-discovery values of a streamed document. Its structured output
-(`list escape --format yaml`) is the ranking a script should read instead of
+(`list global --format yaml`) is the ranking a script should read instead of
 the raw section: `minima[]` rows with `index`, `merit`, `status`, `file`,
 `element_powers` and `variables`, plus `best_index` / `best_merit` — the way
 `samples/escape-demo.bash` renders its minima summary, chart and glass gate.
@@ -599,9 +590,9 @@ rayweave escape --stream false < lens.yaml > out.yaml   # one-shot, as before
 
 | # | When | Content |
 |---|---|---|
-| 1 | run start | header: every input key **except** those the run still computes — `configs` always (the best solution lands there), `chief` when a `pupil_model_*` variable rewrites `chief.pupil_model` — plus the literal `escape_result:` with its `params` block (resolved before the search starts) and the `minima:` list opener |
+| 1 | run start | header: every input key **except** those the run still computes — `configs` always (the best solution lands there), `chief` when a `pupil_model_*` variable rewrites `chief.pupil_model` — plus the literal `global_result:` with its `params` block (resolved before the search starts) and the `minima:` list opener |
 | 2 | each discovered minimum | one `minima` entry, appended under the store lock (infeasible points are never streamed, so they appear only with the completion) |
-| 3 | run end | the `escape_result` completion: `best_index`, `best_merit`, `timed_out` / `interrupted` when true, `infeasible_basins` with `--keep-infeasible`, and `minima_improvements` |
+| 3 | run end | the `global_result` completion: `best_index`, `best_merit`, `timed_out` / `interrupted` when true, `infeasible_basins` with `--keep-infeasible`, and `minima_improvements` |
 | 4 | run end | the deferred top-level keys: `configs` (best solution applied, back-focus solved, apertures sized) and `chief`, when it was deferred |
 
 ### Key order
@@ -610,9 +601,9 @@ The values are the same as the one-shot document's; only two orders change,
 because a YAML key may be defined once and a stream can only be appended to:
 
 - **top level** — the deferred keys come last: `metadata, glass_catalog,
-  optimization, chief, escape_result, configs` instead of `metadata,
-  glass_catalog, configs, optimization, chief, escape_result`.
-- **`escape_result`** — written in write order: `params`, `minima`, then
+  optimization, chief, global_result, configs` instead of `metadata,
+  glass_catalog, configs, optimization, chief, global_result`.
+- **`global_result`** — written in write order: `params`, `minima`, then
   `best_index`, `best_merit`, the outcome flags, `infeasible_basins` and
   `minima_improvements`.
 
@@ -630,21 +621,21 @@ list. The one-shot document writes `minima` **sorted by merit**, which makes its
 
 Because the append-only list keeps the first-discovery values, a minimum that a
 repeat visit improved appears there with its old merit; the final value lives in
-`minima_improvements` at the position it supersedes. `list escape` merges the
-two before ranking; a raw `query` on `escape_result.minima[]` does not.
+`minima_improvements` at the position it supersedes. `list global` merges the
+two before ranking; a raw `query` on `global_result.minima[]` does not.
 
 ### Reading a document mid-run
 
-`list escape`, `query` and `escape extract` work on a half-finished document —
-it already carries `metadata`, `optimization`, `chief`, `escape_result` and
+`list global`, `query` and `escape extract` work on a half-finished document —
+it already carries `metadata`, `optimization`, `chief`, `global_result` and
 `minima`. Targets that need `configs` (`list surfaces`, `list paraxial`, the
 merit tables) and the tracing commands (`trace`, `plot`, `psf`, …) do not, until
 the completion writes it. A force-quit run also loses the completion block, so
 `best_index` / `best_merit` / `configs` may be absent from a killed document.
 
-`--stream`, `--escape-bumps` and `--clean-dls` are each echoed back as
-`optimization.escape.stream` / `.escape_bumps` / `.clean_dls` only when the
-flag is actually given, so an unset flag never overrides the input YAML.
+`--stream` and `--clean-dls` are each echoed back as
+`optimization.escape.stream` / `.clean_dls` only when the flag is actually
+given, so an unset flag never overrides the input YAML.
 
 ## Examples
 
@@ -662,18 +653,18 @@ rayweave escape extract --index 1 < escape-result.yaml \
   | rayweave trace | rayweave plot -o min1.svg
 
 # List the discovered minima
-rayweave query --each 'escape_result.minima[]:index,merit' \
+rayweave query --each 'global_result.minima[]:index,merit' \
   --printf '  [%d] merit=%.6e' < escape-result.yaml
 
 # List the same results from the JSONL run log (auto-detected), which also
 # reports when each worker finished and why
 rayweave escape --log run.jsonl < samples/escape-demo.yaml > escape-result.yaml
-rayweave list escape < run.jsonl
+rayweave list global < run.jsonl
 ```
 
 ## Reading a run log
 
-`--log FILE` and the `--verbose` stream are JSON Lines, and `rayweave list escape`
+`--log FILE` and the `--verbose` stream are JSON Lines, and `rayweave list global`
 reads them directly: piping the log back in reproduces the same listing as the
 pipeline document (escape parameters, run aggregate, local minima) and adds a
 per-worker completion table (state, cycles, escapes, recordings, best merit,
@@ -682,8 +673,8 @@ is needed:
 
 ```sh
 rayweave escape --verbose --log run.jsonl < lens.yaml > out.yaml
-rayweave list escape < run.jsonl            # table
-rayweave list escape --format csv < run.jsonl
+rayweave list global < run.jsonl            # table
+rayweave list global --format csv < run.jsonl
 rayweave query --jsonl --where 'event=="minimum"' -r merit < run.jsonl   # raw events
 ```
 
@@ -699,15 +690,15 @@ order (`min_status`, `invalid_reason`, `retired`, `timed_out`, `interrupted`,
 message), so a full `--log` file is needed to classify the minima, the basins and
 those events — a `warn` row keeps its text either way, since `message` is part of
 the fixed key order. See
-[list.md §11](list.md#11-escape-section--escapepso-global-search-results).
+[list.md §11](list.md#11-global-section--escapepso-global-search-results).
 
-The `Log Events` section of `list escape` is the quickest way to see why a run
+The `Log Events` section of `list global` is the quickest way to see why a run
 ended — every signal the process received and which stage it stopped at:
 
 ```sh
 rayweave escape --log run.jsonl < lens.yaml > out.yaml &
 sleep 300; kill -TERM %1
-rayweave list escape < run.jsonl        # Log Events: interrupt | terminated
+rayweave list global < run.jsonl        # Log Events: interrupt | terminated
 ```
 
 The sample script `samples/escape-demo.bash` runs the same pipeline end to end:

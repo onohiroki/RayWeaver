@@ -31,8 +31,8 @@ nothing for the CLI/YAML three-principles rule to apply to.
 | `results` | `trace` / `trace single` |
 | `paraxial_result` | `paraxial` |
 | `opt_results` | `optimize` (including `spot_flatness[]`, `back_focus[]`, `glass_attraction`, `snap`, `constraints`) |
-| `escape_result` | `escape` / `pso` |
-| `escape_minimum` | `escape --save` (the index/merit/status provenance block written into each saved minimum file) |
+| `global_result` | `escape` / `pso` |
+| `global_minimum` | `escape --save` / `pso --save` (the index/merit/status provenance block written into each saved minimum file) |
 | `vignetting_result` | `vignette` |
 | `asphere_candidate_result` | `asphere` |
 | `psf_results` | `psf` |

@@ -157,11 +157,9 @@ func main() {
 			fs.StringVar(&optEscapeGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
 			fs.IntVar(&optEscapeGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
 			fs.StringVar(&optEscapeMemLimit, "mem-limit", "", "cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1 (unlimited); default optimization.mem_limit_mb")
-			fs.StringVar(&optEscapePhases.escapeBumps, phaseEscapeBumpsFlag, "", "place the escape-function bumps on recorded minima: true|false (default true)")
 			fs.StringVar(&optEscapePhases.cleanDLS, phaseCleanDLSFlag, "", "run the clean DLS that closes each cycle: true|false (default true)")
 			fs.Parse(args[1:])
 			optEscapeStreamSet = flagWasSet(fs, "stream")
-			optEscapePhases.escapeBumpsSet = flagWasSet(fs, phaseEscapeBumpsFlag)
 			optEscapePhases.cleanDLSSet = flagWasSet(fs, phaseCleanDLSFlag)
 		}
 	}
@@ -207,11 +205,9 @@ func main() {
 			fs.StringVar(&optPSOGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
 			fs.IntVar(&optPSOGOGC, "gogc", 0, "GC target percentage (0 = default for compute commands, 400; overrides $GOGC)")
 			fs.StringVar(&optPSOMemLimit, "mem-limit", "", "cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1 (unlimited); default optimization.mem_limit_mb")
-			fs.StringVar(&optPSOPhases.escapeBumps, phaseEscapeBumpsFlag, "", "place the escape-function bumps on recorded minima: true|false (default true)")
 			fs.StringVar(&optPSOPhases.cleanDLS, phaseCleanDLSFlag, "", "run the clean DLS that closes each cycle: true|false (default true)")
 			fs.Parse(args[1:])
 			optPSOStreamSet = flagWasSet(fs, "stream")
-			optPSOPhases.escapeBumpsSet = flagWasSet(fs, phaseEscapeBumpsFlag)
 			optPSOPhases.cleanDLSSet = flagWasSet(fs, phaseCleanDLSFlag)
 		}
 	}
@@ -846,7 +842,7 @@ immediately (exit 1).
                      [--keep-infeasible] [--stream BOOL] [--power-solve]
                      [--power-solve-surfaces SURFACES]
                      [--glass-variables] [--glass-dir DIR]
-                     [--escape-bumps BOOL] [--clean-dls BOOL] < input.yaml
+                     [--clean-dls BOOL] < input.yaml
        rayweave escape extract --index N < escape-output.yaml
 
 Escape-function global optimisation (Ishiki-Ono style). DLS repeatedly
@@ -874,22 +870,14 @@ Options:
                    (default: feasible minima only)
   --stream BOOL     stream the pipeline document to stdout as the run progresses
                    (default on): the settled top-level part is written first,
-                   then one escape_result.minima entry per discovered solution,
+                   then one global_result.minima entry per discovered solution,
                    so a run killed mid-way still leaves a readable document.
                    --stream=false (or optimization.escape.stream: false)
                    restores the one-shot write performed after the run.
-  --escape-bumps BOOL
-                   place the escape-function bumps on the recorded minima
-                   (default true). --escape-bumps false keeps the store, the
-                   new/repeat classification, the validation and the
-                   escape_result output working exactly as before, but the
-                   exploration phase minimises the plain merit instead of
-                   being pushed away from known minima.
   --clean-dls BOOL  run the clean DLS that closes each cycle (default true).
                    --clean-dls false records the exploration result as-is (or
                    the glass-phase output when power_solve ran) and skips the
                    post-glass retry and the glass-hull rescue re-solve with it.
-                   The two switches are independent of each other.
   --power-solve    insert the power-preserving glass phase between each escape
                    and clean DLS (holds element powers fixed while the glasses
                    are rebalanced)
@@ -921,13 +909,9 @@ Input YAML — optimization.escape section:
      variables: [...]          # same variable definitions as 'optimize'
      escape:
        max_cycles: 10          # DLS cycles per worker
-       escape_workers: 4       # top-level parallel goroutines (default 4)
+       global_workers: 4       # top-level parallel goroutines (default 4)
        max_seconds: 0          # soft shared wall-clock budget in seconds (0 = unlimited)
        distance_threshold: 0.1 # normalised distance to call a point "new"
-       h_initial: 0.1          # escape bump height
-       w_initial: 0.5          # escape bump width
-       h_mult: 2.0             # strengthen factor when a minimum repeats
-       w_mult: 1.3             # widen factor when a minimum repeats
        variable_weights:       # optional per-param weight (default 1.0)
          curvature: 1000
          thickness: 1
@@ -940,16 +924,15 @@ Input YAML — optimization.escape section:
        stall_rel_tol: 0.0001   # stalled-early-stop relative merit threshold
        stall_early_stop: true  # stalled-early-stop in the escape phase (clean phase never stalls)
        initial_perturb: 0.05   # normalised spread of parallel-worker start points
-       escape_bumps: true      # place the escape-function bumps (false = plain exploration)
        clean_dls: true         # clean DLS closing each cycle (false = record the
                                # exploration result as-is; also skips the clean
                                # retry and the hull-rescue re-solve)
 
 The DLS solve inside each worker parallelises the Jacobian across jacobian_workers
 (optimization.jacobian_workers). Under the escape command, an unset
-jacobian_workers defaults to 2 instead of GOMAXPROCS; with escape_workers > 1 the
-total goroutines are escape_workers * jacobian_workers, so set jacobian_workers: 1
-with many escape workers to avoid oversubscription.
+jacobian_workers defaults to 2 instead of GOMAXPROCS; with global_workers > 1 the
+total goroutines are global_workers * jacobian_workers, so set jacobian_workers: 1
+with many global workers to avoid oversubscription.
 
 Escape parameters act in the normalised variable space: each variable is
 scaled by its min..max range. Variables with min == max are excluded from the
@@ -964,7 +947,7 @@ late-stage improvement is not cut off. Set stall_early_stop: false to disable
 this entirely.
 
 Output: best solution in configs[].surfaces (pipeline-compatible with
-"rayweave trace"/"rayweave plot"), plus an escape_result section listing
+"rayweave trace"/"rayweave plot"), plus an global_result section listing
 every discovered local minimum with its full surfaces.
 
   rayweave escape < input.yaml | rayweave trace | rayweave plot
@@ -977,13 +960,17 @@ every discovered local minimum with its full surfaces.
                      [--glass-variables] [--glass-dir DIR]
                      [--swarm-size N] [--pso-iterations N]
                      [--constraint-penalty W]
-                     [--escape-bumps BOOL] [--clean-dls BOOL] < input.yaml
+                     [--clean-dls BOOL] < input.yaml
        rayweave pso extract --index N < pso-output.yaml
 
-PSO escape-function global optimisation. Identical three-phase cycle to
-"escape" (exploration -> glass -> clean DLS), but the first phase uses a
-Particle Swarm Optimizer instead of DLS. The PSO swarm operates in normalized
-variable space with a static penalty for constraint violations.
+Particle-swarm global optimisation: a plain multi-start search with no
+escape-function bumps. Identical three-phase cycle to "escape"
+(exploration -> glass -> clean DLS), but the first phase runs a swarm
+instead of DLS, in normalized variable space with a static penalty for
+constraint violations. escape and pso are the two global-optimisation
+methods: they share the cycle budget, the worker pool, the deduplication
+and the validation (global_workers, max_cycles, distance_threshold, ...)
+and each keeps its own YAML section.
 
 Options:
   --verbose        print PSO progress to stderr as compact JSONL
@@ -991,18 +978,10 @@ Options:
   --save FILE      save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...
   --keep-infeasible include infeasible basins in stdout YAML (default: discard)
   --stream BOOL     stream the pipeline document to stdout as the run progresses (default on); --stream=false restores the one-shot write after the run
-  --escape-bumps BOOL
-                   place the escape-function bumps on the recorded minima
-                   (default true). --escape-bumps false keeps the store, the
-                   new/repeat classification, the validation and the
-                   escape_result output working exactly as before, but the PSO
-                   swarm then minimises the plain merit instead of being
-                   pushed away from known minima.
   --clean-dls BOOL  run the clean DLS that closes each cycle (default true).
                    --clean-dls false records the PSO result as-is (or the
                    glass-phase output when power_solve ran) and skips the
                    post-glass retry and the glass-hull rescue re-solve with it.
-                   The two switches are independent of each other.
   --power-solve    insert the power-preserving glass phase between each PSO and clean DLS
   --power-solve-surfaces SURFACES
                    comma-separated surface IDs for the power-preserving solve
@@ -1027,13 +1006,9 @@ Input YAML — optimization.pso section:
      variables: [...]          # same variable definitions as 'optimize'
      pso:
        max_cycles: 10          # cycles per worker
-       escape_workers: 4       # top-level parallel goroutines (default 4)
+       global_workers: 4       # top-level parallel goroutines (default 4)
        max_seconds: 0          # soft shared wall-clock budget in seconds (0 = unlimited)
        distance_threshold: 0.1
-       h_initial: 0.1
-       w_initial: 0.5
-       h_mult: 2.0
-       w_mult: 1.3
        variable_weights:
          curvature: 1000
          thickness: 1
@@ -1046,13 +1021,12 @@ Input YAML — optimization.pso section:
        velocity_clamp: 0.2     # max velocity as fraction of range
        init_spread: 0.1        # initial swarm spread as fraction of range
        constraint_penalty: 1000
-       escape_bumps: true       # place the escape-function bumps (false = plain exploration)
        clean_dls: true          # clean DLS closing each cycle (false = record the
                                 # PSO result as-is; also skips the clean retry and
                                 # the hull-rescue re-solve)
 
 Output: best solution in configs[].surfaces (pipeline-compatible with
-"rayweave trace"/"rayweave plot"), plus an escape_result section listing
+"rayweave trace"/"rayweave plot"), plus an global_result section listing
 every discovered local minimum with its full surfaces.
 
   rayweave pso < input.yaml | rayweave trace | rayweave plot
@@ -1598,7 +1572,7 @@ Subcommands:
   plot       Generate SVG cross-section drawing
   optimize   DLS optimization of lens surfaces
   escape     Escape-function global optimization (multiple local minima)
-  pso        PSO escape-function global optimization (particle swarm)
+  pso        PSO global optimization (particle swarm, no escape bumps)
   scale      Scale a system so its EFL equals --efl TARGET
   asphere    Rank surfaces for asphere introduction, estimate initial coefficients
   psf        Point-spread function via direct vector Huygens integration
@@ -1659,21 +1633,23 @@ and implies --auto-aperture, --all-glasses, and --roles):
   optimization optimization configuration from optimization[]: solver settings
              (method, max_iter, tol, mu, ...), variables (per-config,
              shared with bindings, local), the merit_schedule section, and the
-             sub-configs (escape, glass_hull, degenerate, power_solve,
+             sub-configs (escape, pso, glass_hull, degenerate, power_solve,
              region_active, adaptive_damping). Constraints are not shown here —
              the effective constraint display lives in the merit target (per-
              config constraints, else inherited from optimization.constraints).
               When piped from optimize, also shows the optimization result
               (status, iterations, active mode, metric value).
-  escape     escape-function global optimisation results. Reads either the
-             escape_result section of an escape/pso pipeline document or, when
-             the input is detected to be an escape/pso JSONL run log (a --log
-             file or a captured --verbose stream), the equivalent information
-             reconstructed from the log: escape parameters, the run aggregate
-             (workers, cycles, escapes, minima, run elapsed), the local minima
-             (merit-sorted rank and classification), and a worker table with
-             each worker's completion state (completed / timeout / interrupted /
-             retired), cycles reached, escape and recording counts, best merit,
+  global     global optimisation results for either global method (escape or
+             pso). Reads either the global_result section of a pipeline
+             document or, when the input is detected to be an escape/pso JSONL
+             run log (a --log file or a captured --verbose stream), the
+             equivalent information reconstructed from the log: the run
+             parameters (escape-only ones listed for an escape run), the run
+             aggregate (workers, cycles, explorations, minima, run elapsed),
+             the local minima (merit-sorted rank and classification), and a
+             worker table with each worker's completion state (completed /
+             timeout / interrupted / retired), cycles reached, exploration and
+             recording counts, best merit,
              elapsed time and retirement reason. It also lists the run-level
              log events (Log Events): the signals the process received with the
              stage they stopped at (interrupt / interrupt_dls / force_quit), the
@@ -1752,7 +1728,7 @@ Examples:
   rayweave list paraxial < lens.yaml
   rayweave list paraxial --roles < lens.yaml
   rayweave escape --log run.jsonl < lens.yaml > out.yaml
-  rayweave list escape < run.jsonl
+  rayweave list global < run.jsonl
   rayweave trace single --origin 0,5,-100 --angle-yz 5 < lens.yaml | rayweave list rays
   rayweave chief | rayweave trace | rayweave list rays --summary
   rayweave focus psf --planes all,best < lens.yaml | rayweave list focus
@@ -1766,7 +1742,7 @@ configuration settings. The metadata.tool section is overwritten with
 this tool's own identity.
 
 Removed fields: chief_rays, results, paraxial_result, opt_results,
-escape_result, escape_minimum, vignetting_result,
+global_result, global_minimum, vignetting_result,
 asphere_candidate_result, psf_results, focus_comparison,
 wavefront_result.
 

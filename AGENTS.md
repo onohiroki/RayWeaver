@@ -113,7 +113,7 @@ always loses the document. With streaming on (the default) the stdout document i
 appended to as the run progresses, so a kill leaves every minimum found so far
 and only drops the completion block; with `--stream false` a kill leaves stdout
 empty, because the document is written once at the end. The `--save` minima
-survive either way (atomic writes), and `rayweave list escape < run.jsonl`
+survive either way (atomic writes), and `rayweave list global < run.jsonl`
 rebuilds the aggregate from the log. Full manual:
 [docs/rwrun.md](docs/rwrun.md); the signal stages are also documented in
 [docs/escape.md](docs/escape.md).
@@ -181,7 +181,7 @@ Exemptions (deliberate, documented in the owning manual):
 - Action/stream flags record their **effect**, not a setting: chief
   `--clear-aperture*` / `--marginal-rays` / `--preserve-rays` / `--ray-fan` /
   `--fan-plane` / `--fan-rotation` (effect: diameters, `rays[]`, `ray_fan`),
-  `--verbose` / `--log`, `escape --save` (effect: `escape_result.minima[].file`),
+  `--verbose` / `--log`, `escape --save` (effect: `global_result.minima[].file`),
   `psf --yaml` / `--csv` (effect: `psf_results[].output_file`).
 - `psf --focus-plane all` is action-style: the shift is reported on stderr and
   nothing is written back; `focus` is the pipeline form of the same comparison.

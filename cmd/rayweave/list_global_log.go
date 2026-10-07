@@ -13,7 +13,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
-// This file implements the `list escape` reader for an escape/pso JSONL run log
+// This file implements the `list global` reader for an escape/pso JSONL run log
 // (`escape --log FILE` / `pso --log FILE`, or the `--verbose` stream captured
 // from stderr). The log is detected automatically: a run log is recognised when
 // every non-empty line is a JSON object and at least one carries one of the
@@ -32,10 +32,10 @@ import (
 // key order (min_status, retired, timed_out, interrupted, reason), so those are
 // reconstructed only from a full `--log` file.
 
-// escapeLogEventNames are the event names emitted by internal/escape
+// globalLogEventNames are the event names emitted by internal/escape
 // (including the resource guard and the cmd-level summary) and internal/pso.
 // At least one line must carry one of them for an input to be read as a run log.
-var escapeLogEventNames = map[string]bool{
+var globalLogEventNames = map[string]bool{
 	"params":          true,
 	"start":           true,
 	"cycle":           true,
@@ -50,7 +50,7 @@ var escapeLogEventNames = map[string]bool{
 	"interrupt_dls":   true,
 	"force_quit":      true,
 	"done":            true,
-	"escape_complete": true,
+	"global_complete": true,
 	"error":           true,
 	"resource":        true,
 	"memory_limit":    true,
@@ -60,8 +60,8 @@ var escapeLogEventNames = map[string]bool{
 	"pso_restart":     true,
 }
 
-// looksLikeEscapeJSONL reports whether data is an escape/pso JSONL run log.
-func looksLikeEscapeJSONL(data []byte) bool {
+// looksLikeGlobalJSONL reports whether data is an escape/pso JSONL run log.
+func looksLikeGlobalJSONL(data []byte) bool {
 	lines, recognized := 0, 0
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -78,19 +78,19 @@ func looksLikeEscapeJSONL(data []byte) bool {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			return false
 		}
-		if ev, ok := rec["event"].(string); ok && escapeLogEventNames[ev] {
+		if ev, ok := rec["event"].(string); ok && globalLogEventNames[ev] {
 			recognized++
 		}
 	}
 	return lines > 0 && recognized > 0
 }
 
-// escapeLogMinimum is the aggregated record of one store entry, keyed in the
+// globalLogMinimum is the aggregated record of one store entry, keyed in the
 // log by its discovery index (the `--save` FILE<n> number), not by the
-// merit-sorted rank used by escape_result.minima[]. order is the first-seen
+// merit-sorted rank used by global_result.minima[]. order is the first-seen
 // order, the tiebreaker when two entries share a merit. reason and file come
 // from the invalid_reason and (for a --save run) minimum_saved events.
-type escapeLogMinimum struct {
+type globalLogMinimum struct {
 	merit    float64
 	hasMerit bool
 	status   string
@@ -99,11 +99,11 @@ type escapeLogMinimum struct {
 	order    int
 }
 
-// escapeLogWorker is the aggregated lifecycle record of one escape worker.
-type escapeLogWorker struct {
+// globalLogWorker is the aggregated lifecycle record of one escape worker.
+type globalLogWorker struct {
 	id          int
 	maxCycle    int // highest cycle index seen (-1 when none)
-	escaped     int
+	explored    int
 	recorded    int
 	best        float64
 	hasBest     bool
@@ -119,13 +119,13 @@ type escapeLogWorker struct {
 // of these while a progress stream is active (see runEscapeCore).
 const runEventWarn = "warn"
 
-// escapeLogRunEvents are the run-level events `list escape` lists verbatim
+// globalLogRunEvents are the run-level events `list global` lists verbatim
 // (with a one-line Detail) in its Log Events section, in the order the log
 // recorded them: the three signal-handling stages, the resource guard's actions
 // and samples, the run's error report and the structured warnings. The compact
 // --verbose stream drops every field outside the fixed key order, so only the
 // event name survives there (and `resource` samples carry nothing at all).
-var escapeLogRunEvents = map[string]bool{
+var globalLogRunEvents = map[string]bool{
 	"interrupt":     true,
 	"interrupt_dls": true,
 	"force_quit":    true,
@@ -234,7 +234,7 @@ var escapeLogFoldEvents = map[string]bool{runEventWarn: true}
 // the first occurrence's message and elapsed time, and Count carries how many
 // log rows it summarises (always >= 1 for a foldable event, so a lone warning
 // reports 1 and a folded run reports its total).
-func foldRunEvent(events []EscapeEventRow, row EscapeEventRow) []EscapeEventRow {
+func foldRunEvent(events []GlobalEventRow, row GlobalEventRow) []GlobalEventRow {
 	if !escapeLogFoldEvents[row.Event] {
 		return append(events, row)
 	}
@@ -270,68 +270,68 @@ func runEventKey(detail string) string {
 	return detail[:i]
 }
 
-// runListEscapeLog renders `list escape` for an escape/pso JSONL run log. The
-// log holds no system definition, so only the `escape` target can be served; a
-// bare `list < run.jsonl` therefore lists the escape run.
-func runListEscapeLog(data []byte, positional []string, format string) {
-	if err := escapeLogTargetError(positional); err != nil {
+// runListGlobalLog renders `list global` for an escape/pso JSONL run log. The
+// log holds no system definition, so only the `global` target can be served; a
+// bare `list < run.jsonl` therefore lists the global run.
+func runListGlobalLog(data []byte, positional []string, format string) {
+	if err := globalLogTargetError(positional); err != nil {
 		errOut("Error: %v", err)
 		os.Exit(1)
 	}
-	renderEscapeList(buildEscapeListDataFromLog(data), format)
+	renderGlobalList(buildGlobalListDataFromLog(data), format)
 }
 
-// escapeLogTargetError validates the requested targets against a run log. An
-// empty list defaults to the escape target.
-func escapeLogTargetError(positional []string) error {
+// globalLogTargetError validates the requested targets against a run log. An
+// empty list defaults to the global target.
+func globalLogTargetError(positional []string) error {
 	if len(positional) == 0 {
 		return nil
 	}
 	for _, t := range positional {
-		if t != "escape" {
-			return fmt.Errorf("an escape/pso JSONL run log carries no system definition; only the \"escape\" target can be listed from it (got %q)", t)
+		if t != "global" {
+			return fmt.Errorf("an escape/pso JSONL run log carries no system definition; only the \"global\" target can be listed from it (got %q)", t)
 		}
 	}
 	return nil
 }
 
-// buildEscapeListDataFromLog reconstructs the `list escape` view from a run
+// buildGlobalListDataFromLog reconstructs the `list global` view from a run
 // log. Events are folded in file order, so the last value of a repeated key
 // wins: a minimum's merit is the best one recorded for its discovery index, and
 // a worker's counts are the ones from its completion event.
-func buildEscapeListDataFromLog(data []byte) escapeListData {
+func buildGlobalListDataFromLog(data []byte) globalListData {
 	events := parseJSONL(data)
-	d := escapeListData{Found: len(events) > 0, FromLog: true}
+	d := globalListData{Found: len(events) > 0, FromLog: true}
 	if !d.Found {
 		return d
 	}
 
-	var params types.EscapeParamsInfo
-	var run escapeRunInfo
+	var params types.GlobalParamsInfo
+	var run globalRunInfo
 	var haveRun bool
 	var completeBest float64
 	var haveCompleteBest bool
-	var completeMinima []EscapeMinimumRow
-	var completeInfeasible []EscapeMinimumRow
+	var completeMinima []GlobalMinimumRow
+	var completeInfeasible []GlobalMinimumRow
 
-	minima := map[int]*escapeLogMinimum{}
+	minima := map[int]*globalLogMinimum{}
 	// savedFiles maps a store (discovery) index to the --save file last written
 	// for it. The saver reports it per record, so an improved minimum replaces
 	// its earlier name; the mapping is applied after the scan because the
 	// minimum_saved event precedes the matching minimum event.
 	savedFiles := map[int]string{}
-	workers := map[int]*escapeLogWorker{}
+	workers := map[int]*globalLogWorker{}
 	var minOrder int
 
-	workerFor := func(id int) *escapeLogWorker {
+	workerFor := func(id int) *globalLogWorker {
 		w, ok := workers[id]
 		if !ok {
-			w = &escapeLogWorker{id: id, maxCycle: -1}
+			w = &globalLogWorker{id: id, maxCycle: -1}
 			workers[id] = w
 		}
 		return w
 	}
-	noteCycle := func(w *escapeLogWorker, v any) {
+	noteCycle := func(w *globalLogWorker, v any) {
 		c, ok := asNum(v)
 		if !ok {
 			return
@@ -350,8 +350,8 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 		name, _ := rec["event"].(string)
 		// Every run-level event is listed in log order, including the ones
 		// whose payload also drives the summary below.
-		if escapeLogRunEvents[name] {
-			d.Events = foldRunEvent(d.Events, EscapeEventRow{
+		if globalLogRunEvents[name] {
+			d.Events = foldRunEvent(d.Events, GlobalEventRow{
 				Event:   name,
 				Detail:  escapeEventDetail(name, rec),
 				Elapsed: elapsedSeconds(rec),
@@ -367,7 +367,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 
 		case "start":
 			if v, ok := asNum(rec["workers"]); ok {
-				params.EscapeWorkers = int(v)
+				params.GlobalWorkers = int(v)
 			}
 			if v, ok := asNum(rec["max_cycles"]); ok {
 				params.MaxCycles = int(v)
@@ -376,7 +376,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 				params.MaxSeconds = v
 			}
 
-		case "done", "escape_complete":
+		case "done", "global_complete":
 			haveRun = true
 			if v, ok := asNum(rec["workers"]); ok && int(v) > 0 {
 				run.Workers = int(v)
@@ -384,8 +384,8 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 			if v, ok := asNum(rec["cycles"]); ok && int(v) > 0 {
 				run.Cycles = int(v)
 			}
-			if v, ok := asNum(rec["escapes"]); ok && int(v) > 0 {
-				run.Escapes = int(v)
+			if v, ok := asNum(rec["explorations"]); ok && int(v) > 0 {
+				run.Explorations = int(v)
 			}
 			if v, ok := asNum(rec["minima_count"]); ok && int(v) > 0 {
 				run.Minima = int(v)
@@ -403,7 +403,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 				d.Interrupted = true
 			}
 			run.Elapsed = elapsed
-			// escape_complete repeats the merit-sorted minima; they are the
+			// global_complete repeats the merit-sorted minima; they are the
 			// fallback when the `minimum` events are absent (a log captured
 			// without them carries no classification).
 			if arr, ok := rec["minima"].([]any); ok {
@@ -413,7 +413,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 						continue
 					}
 					merit, _ := asNum(m["merit"])
-					completeMinima = append(completeMinima, EscapeMinimumRow{Index: i, Merit: merit})
+					completeMinima = append(completeMinima, GlobalMinimumRow{Index: i, Merit: merit})
 				}
 			}
 			if arr, ok := rec["infeasible"].([]any); ok {
@@ -424,7 +424,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 					}
 					merit, _ := asNum(m["merit"])
 					reason, _ := m["reason"].(string)
-					completeInfeasible = append(completeInfeasible, EscapeMinimumRow{
+					completeInfeasible = append(completeInfeasible, GlobalMinimumRow{
 						Index:  i,
 						Merit:  merit,
 						Status: string(types.StatusInfeasibleBasin),
@@ -450,7 +450,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 			key := int(idx)
 			m, ok := minima[key]
 			if !ok {
-				m = &escapeLogMinimum{order: minOrder}
+				m = &globalLogMinimum{order: minOrder}
 				minOrder++
 				minima[key] = m
 			}
@@ -469,8 +469,8 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 		case "worker_done":
 			id, _ := asNum(rec["worker"])
 			w := workerFor(int(id))
-			if v, ok := asNum(rec["escaped"]); ok {
-				w.escaped = int(v)
+			if v, ok := asNum(rec["explored"]); ok {
+				w.explored = int(v)
 			}
 			if v, ok := asNum(rec["recorded"]); ok {
 				w.recorded = int(v)
@@ -490,8 +490,8 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 			id, _ := asNum(rec["worker"])
 			w := workerFor(int(id))
 			w.retired = true
-			if v, ok := asNum(rec["escaped"]); ok {
-				w.escaped = int(v)
+			if v, ok := asNum(rec["explored"]); ok {
+				w.explored = int(v)
 			}
 			if v, ok := asNum(rec["recorded"]); ok {
 				w.recorded = int(v)
@@ -527,23 +527,23 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 	}
 
 	// Split the discovered points the way the pipeline document does:
-	// escape_result.minima lists the feasible solutions, the infeasible basins
+	// global_result.minima lists the feasible solutions, the infeasible basins
 	// are a separate list. Both are re-ranked by merit; the --save file a
 	// minimum_saved event reported travels with its point.
-	var feasible, infeasible []*escapeLogMinimum
+	var feasible, infeasible []*globalLogMinimum
 	var files []string
 	for key, m := range minima {
 		if file := savedFiles[key]; file != "" {
 			m.file = file
 			files = append(files, file)
 		}
-		if types.EscapeMinimumStatus(m.status) == types.StatusInfeasibleBasin {
+		if types.GlobalMinimumStatus(m.status) == types.StatusInfeasibleBasin {
 			infeasible = append(infeasible, m)
 			continue
 		}
 		feasible = append(feasible, m)
 	}
-	byMerit := func(recs []*escapeLogMinimum) {
+	byMerit := func(recs []*globalLogMinimum) {
 		sort.Slice(recs, func(i, j int) bool {
 			if recs[i].merit != recs[j].merit {
 				return recs[i].merit < recs[j].merit
@@ -554,9 +554,9 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 	byMerit(feasible)
 	byMerit(infeasible)
 
-	minimaRows := make([]EscapeMinimumRow, 0, len(feasible))
+	minimaRows := make([]GlobalMinimumRow, 0, len(feasible))
 	for i, m := range feasible {
-		rows := EscapeMinimumRow{Index: i, Merit: m.merit, Status: m.status}
+		rows := GlobalMinimumRow{Index: i, Merit: m.merit, Status: m.status}
 		if m.file != "" {
 			rows.File = fileBase(m.file)
 		}
@@ -566,9 +566,9 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 		minimaRows = completeMinima
 	}
 
-	infeasibleRows := make([]EscapeMinimumRow, 0, len(infeasible))
+	infeasibleRows := make([]GlobalMinimumRow, 0, len(infeasible))
 	for i, m := range infeasible {
-		row := EscapeMinimumRow{Index: i, Merit: m.merit, Status: m.status, Reason: m.reason}
+		row := GlobalMinimumRow{Index: i, Merit: m.merit, Status: m.status, Reason: m.reason}
 		if m.file != "" {
 			row.File = fileBase(m.file)
 		}
@@ -584,7 +584,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 		ids = append(ids, id)
 	}
 	sort.Ints(ids)
-	workerRows := make([]EscapeWorkerRow, 0, len(ids))
+	workerRows := make([]GlobalWorkerRow, 0, len(ids))
 	for _, id := range ids {
 		workerRows = append(workerRows, workerRow(workers[id]))
 	}
@@ -604,7 +604,7 @@ func buildEscapeListDataFromLog(data []byte) escapeListData {
 	if haveRun {
 		d.Run = &run
 	}
-	d.Params = escapeParamsSettings(&params)
+	d.Params = globalParamsSettings(&params)
 	d.Minima = minimaRows
 	d.InfeasibleBasins = infeasibleRows
 	d.FileDir = commonFileDir(files)

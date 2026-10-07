@@ -64,10 +64,10 @@ func (s *escapeFileSaver) record(idx int, p escape.Point, isNew bool, version in
 		return
 	}
 	input := s.build(p)
-	input.EscapeMinimum = &types.EscapeMinimumInfo{
+	input.GlobalMinimum = &types.GlobalMinimumInfo{
 		Index:         idx,
 		Merit:         p.Merit,
-		Status:        types.EscapeMinimumStatus(statusString(p.Status)),
+		Status:        types.GlobalMinimumStatus(statusString(p.Status)),
 		InvalidReason: types.InvalidReason(reasonString(p.InvalidReason)),
 	}
 	data, err := yaml.Marshal(input)

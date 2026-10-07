@@ -618,18 +618,18 @@ func (h *ConvexHull) SetGuardBand(f float64) {
 // GuardBand returns the guard-band fraction of the hull radius.
 func (h *ConvexHull) GuardBand() float64 { return h.guardBand }
 
-// SetEscapeWeightFactor sets the escape-phase penalty scale (see the
+// SetExplorationWeightFactor sets the escape-phase penalty scale (see the
 // escapeFactor field). Values below 0 are clamped to 0.
-func (h *ConvexHull) SetEscapeWeightFactor(f float64) {
+func (h *ConvexHull) SetExplorationWeightFactor(f float64) {
 	if f < 0 {
 		f = 0
 	}
 	h.escapeFactor = f
 }
 
-// EscapeWeightFactor returns the escape-phase penalty scale (0 = no phase
+// ExplorationWeightFactor returns the escape-phase penalty scale (0 = no phase
 // scaling).
-func (h *ConvexHull) EscapeWeightFactor() float64 { return h.escapeFactor }
+func (h *ConvexHull) ExplorationWeightFactor() float64 { return h.escapeFactor }
 
 // References returns the catalogue metadata for the reference points.
 func (h *ConvexHull) References() []HullReference {

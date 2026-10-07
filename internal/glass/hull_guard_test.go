@@ -112,22 +112,22 @@ func TestConvexHullGuardBandDisabled(t *testing.T) {
 	}
 }
 
-// TestConvexHullEscapeWeightFactor: setter/getter plumbing with clamping
+// TestConvexHullExplorationWeightFactor: setter/getter plumbing with clamping
 // (0 = no phase scaling; the optimizer reads it in hullPhaseFactor).
-func TestConvexHullEscapeWeightFactor(t *testing.T) {
+func TestConvexHullExplorationWeightFactor(t *testing.T) {
 	h := NewBuiltinConvexHull()
 	if h == nil {
 		t.Fatal("expected hull")
 	}
-	if h.EscapeWeightFactor() != 0 {
-		t.Errorf("default escape factor = %v, want 0 (no phase scaling)", h.EscapeWeightFactor())
+	if h.ExplorationWeightFactor() != 0 {
+		t.Errorf("default escape factor = %v, want 0 (no phase scaling)", h.ExplorationWeightFactor())
 	}
-	h.SetEscapeWeightFactor(0.1)
-	if h.EscapeWeightFactor() != 0.1 {
-		t.Errorf("escape factor = %v, want 0.1", h.EscapeWeightFactor())
+	h.SetExplorationWeightFactor(0.1)
+	if h.ExplorationWeightFactor() != 0.1 {
+		t.Errorf("escape factor = %v, want 0.1", h.ExplorationWeightFactor())
 	}
-	h.SetEscapeWeightFactor(-2) // clamped to 0
-	if h.EscapeWeightFactor() != 0 {
-		t.Errorf("negative escape factor should clamp to 0, got %v", h.EscapeWeightFactor())
+	h.SetExplorationWeightFactor(-2) // clamped to 0
+	if h.ExplorationWeightFactor() != 0 {
+		t.Errorf("negative escape factor should clamp to 0, got %v", h.ExplorationWeightFactor())
 	}
 }

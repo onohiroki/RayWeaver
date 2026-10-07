@@ -16,7 +16,7 @@ instead.
 | [dls-optimization.md](dls-optimization.md) | damped least squares: normalised variables, finite-difference Jacobian, augmented-Lagrangian constraints, damping control |
 | [region-active.md](region-active.md) | Okudaira Region Active Method: Lagrange-multiplier-based dynamic active-set with hysteresis for inequality constraints |
 | [escape-function.md](escape-function.md) | escape-function global optimization |
-| [pso.md](pso.md) | particle-swarm phase of the `pso` escape cycle: swarm in normalised variable space, constraint penalty |
+| [pso.md](pso.md) | particle-swarm exploration phase of the `pso` global cycle: swarm in normalised variable space, constraint penalty |
 | [glass-dispersion.md](glass-dispersion.md) | Sellmeier / Schott / Cauchy / nd-vd dispersion models, glass hull |
 | [thin-film-tmm.md](thin-film-tmm.md) | transfer-matrix method for thin-film coatings |
 | [asphere-candidates.md](asphere-candidates.md) | asphere candidate ranking, initial sag estimation, measured sensitivity, DLS validation |

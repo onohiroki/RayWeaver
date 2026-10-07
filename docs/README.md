@@ -27,7 +27,7 @@ system → ray bundle → quantities
 | [merit-and-constraints.md](merit-and-constraints.md) | _optimization reference_ | consolidated catalog of configurable merit terms and constraints (setting, effect, computation) |
 | [contrast.md](contrast.md) | _optimization reference_ | contrast optimization: geometric MTF, wavefront-shift and diffraction (Huygens) MTF merit kinds |
 | [escape.md](escape.md) | `rayweave escape` | escape-function global optimization |
-| [pso.md](pso.md) | `rayweave pso` | particle-swarm escape-function global optimization (same cycle and output as `escape`) |
+| [pso.md](pso.md) | `rayweave pso` | particle-swarm global optimization (same cycle and output as `escape`, no bumps) |
 | [asphere.md](asphere.md) | `rayweave asphere` | rank candidate surfaces for asphere introduction and estimate initial coefficients |
 | [psf.md](psf.md) | `rayweave psf` | point-spread function on the flat image plane via direct vector Huygens integration |
 | [focus.md](focus.md) | `rayweave focus` | image-plane comparison of MTF/PSF across focus conventions |
@@ -51,7 +51,7 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
 - [methods/dls-optimization.md](methods/dls-optimization.md) — damped least squares, Jacobian, augmented-Lagrangian constraints, damping control
 - [methods/region-active.md](methods/region-active.md) — Okudaira Region Active Method: dynamic active-set with hysteresis for inequality constraints
 - [methods/escape-function.md](methods/escape-function.md) — escape-function global optimization
-- [methods/pso.md](methods/pso.md) — particle-swarm phase of the `pso` escape cycle
+- [methods/pso.md](methods/pso.md) — particle-swarm exploration phase of the `pso` global cycle
 - [methods/glass-dispersion.md](methods/glass-dispersion.md) — Sellmeier / Schott / Cauchy / nd-vd models, glass hull
 - [methods/thin-film-tmm.md](methods/thin-film-tmm.md) — transfer-matrix method for coatings
 - [methods/asphere-candidates.md](methods/asphere-candidates.md) — asphere candidate ranking, initial sag estimation, measured sensitivity, DLS validation

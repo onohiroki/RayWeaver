@@ -8,11 +8,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// runListEscapeLogCLI runs `list escape` (or `list`) over an escape/pso JSONL
+// runListGlobalLogCLI runs `list global` (or `list`) over an escape/pso JSONL
 // run log and returns the captured stdout.
-func runListEscapeLogCLI(t *testing.T, log string, extra ...string) []byte {
+func runListGlobalLogCLI(t *testing.T, log string, extra ...string) []byte {
 	t.Helper()
-	args := append([]string{"rayweave", "list", "escape"}, extra...)
+	args := append([]string{"rayweave", "list", "global"}, extra...)
 	return runCommand(t, args, func() { runList([]byte(log)) })
 }
 
@@ -30,42 +30,42 @@ const escapeLogFixture = `{"cycle":0,"elapsed":0.1,"time":"2026-09-28T10:00:00Z"
 {"cycle":1,"elapsed":4.0,"time":"2026-09-28T10:00:04Z","event":"cycle","merit":0.3,"worker":0,"phase":"clean_dls","status":"accepted","dls_status":"converged"}
 {"cycle":2,"elapsed":5.0,"time":"2026-09-28T10:00:05Z","event":"cycle","merit":0.2,"worker":0,"phase":"escape_dls","status":"accepted","dls_status":"converged"}
 {"cycle":2,"elapsed":5.4,"time":"2026-09-28T10:00:05Z","event":"minimum","cycle":2,"worker":0,"kind":"improved","index":2,"merit":0.001,"min_status":"feasible_local_minimum","invalid_reason":""}
-{"cycle":3,"elapsed":6.0,"time":"2026-09-28T10:00:06Z","event":"worker_retired","worker":1,"reason":"memory_pressure","cycle":1,"escaped":1,"recorded":1,"best_merit":0.009,"metrics":{"heap_alloc_mb":1024}}
-{"cycle":3,"elapsed":6.1,"time":"2026-09-28T10:00:06Z","event":"worker_done","worker":1,"escaped":1,"recorded":1,"retired":true,"interrupted":false,"timed_out":false}
+{"cycle":3,"elapsed":6.0,"time":"2026-09-28T10:00:06Z","event":"worker_retired","worker":1,"reason":"memory_pressure","cycle":1,"explored":1,"recorded":1,"best_merit":0.009,"metrics":{"heap_alloc_mb":1024}}
+{"cycle":3,"elapsed":6.1,"time":"2026-09-28T10:00:06Z","event":"worker_done","worker":1,"explored":1,"recorded":1,"retired":true,"interrupted":false,"timed_out":false}
 {"cycle":3,"elapsed":7.0,"time":"2026-09-28T10:00:07Z","event":"timeout","worker":0,"cycle":3,"max_cycles":3}
-{"cycle":3,"elapsed":7.1,"time":"2026-09-28T10:00:07Z","event":"worker_done","worker":0,"escaped":3,"recorded":2,"retired":false,"interrupted":false,"timed_out":true}
-{"cycle":3,"elapsed":7.5,"time":"2026-09-28T10:00:07Z","event":"done","workers":2,"cycles":3,"escapes":4,"minima":2,"best_merit":0.001,"timed_out":true,"interrupted":false}
-{"cycle":3,"elapsed":7.6,"time":"2026-09-28T10:00:07Z","event":"escape_complete","workers":2,"cycles":3,"escapes":4,"minima_count":2,"best_merit":0.001,"timed_out":true,"interrupted":false,"minima":[{"index":0,"merit":0.001,"best":true},{"index":1,"merit":0.004,"best":false}]}
+{"cycle":3,"elapsed":7.1,"time":"2026-09-28T10:00:07Z","event":"worker_done","worker":0,"explored":3,"recorded":2,"retired":false,"interrupted":false,"timed_out":true}
+{"cycle":3,"elapsed":7.5,"time":"2026-09-28T10:00:07Z","event":"done","workers":2,"cycles":3,"explorations":4,"minima":2,"best_merit":0.001,"timed_out":true,"interrupted":false}
+{"cycle":3,"elapsed":7.6,"time":"2026-09-28T10:00:07Z","event":"global_complete","workers":2,"cycles":3,"explorations":4,"minima_count":2,"best_merit":0.001,"timed_out":true,"interrupted":false,"minima":[{"index":0,"merit":0.001,"best":true},{"index":1,"merit":0.004,"best":false}]}
 `
 
 func TestLooksLikeEscapeJSONL(t *testing.T) {
-	if !looksLikeEscapeJSONL([]byte(escapeLogFixture)) {
+	if !looksLikeGlobalJSONL([]byte(escapeLogFixture)) {
 		t.Fatal("escape log fixture was not recognised as JSONL")
 	}
 	// A pipeline document is not a run log.
-	if looksLikeEscapeJSONL([]byte(singletYAML)) {
+	if looksLikeGlobalJSONL([]byte(singletYAML)) {
 		t.Error("singlet pipeline YAML was recognised as a run log")
 	}
 	// An optimize --log stream has no "event" key.
 	optLog := "{\"iter\":0,\"merit\":0.5,\"status\":\"running\"}\n{\"iter\":1,\"merit\":0.2,\"status\":\"converged\"}\n"
-	if looksLikeEscapeJSONL([]byte(optLog)) {
+	if looksLikeGlobalJSONL([]byte(optLog)) {
 		t.Error("optimize --log stream was recognised as an escape run log")
 	}
 	// A single JSON object without a known event is not a run log either.
-	if looksLikeEscapeJSONL([]byte("{\"a\":1}\n{\"b\":2}\n")) {
+	if looksLikeGlobalJSONL([]byte("{\"a\":1}\n{\"b\":2}\n")) {
 		t.Error("arbitrary JSONL was recognised as an escape run log")
 	}
 	// Compact (--verbose) lines, where only the fixed key order survives.
 	compact := "{\"cycle\":0,\"e\":\"00:00\",\"t\":\"10:00:00\",\"event\":\"params\",\"h\":1.00000e-01,\"w\":5.00000e-01}\n" +
 		"{\"e\":\"00:01\",\"t\":\"10:00:01\",\"event\":\"worker_done\",\"worker\":0,\"escaped\":1,\"recorded\":1}\n"
-	if !looksLikeEscapeJSONL([]byte(compact)) {
+	if !looksLikeGlobalJSONL([]byte(compact)) {
 		t.Error("compact run log was not recognised as JSONL")
 	}
 	// A pso run log differs from an escape one only in the extra pso_* events.
 	psoLog := "{\"e\":\"00:00\",\"t\":\"10:00:00\",\"event\":\"params\",\"h\":1.00000e-01}\n" +
 		"{\"swarm_size\":2.00000e+01,\"n_vars\":7.00000e+00,\"pso_iterations\":5.00000e+01,\"inertia\":9.00000e-01,\"event\":\"pso_init\"}\n" +
 		"{\"iter\":1.00000e+01,\"gbest_merit\":1.00000e-01,\"phase\":\"pso\",\"event\":\"pso_iter\"}\n"
-	if !looksLikeEscapeJSONL([]byte(psoLog)) {
+	if !looksLikeGlobalJSONL([]byte(psoLog)) {
 		t.Error("pso run log was not recognised as JSONL")
 	}
 }
@@ -79,12 +79,12 @@ const escapeSignalLogFixture = `{"elapsed":0.2,"time":"2026-09-28T10:00:00Z","ev
 {"elapsed":6.0,"time":"2026-09-28T10:00:06Z","event":"memory_limit","kind":"tighten","reason":"heap_pressure","before_mb":2048,"after_mb":1536,"metrics":{}}
 {"elapsed":6.5,"time":"2026-09-28T10:00:06Z","event":"worker_retire","worker":2,"reason":"compaction_rate","cycle":3,"workers_before":4,"workers_after":3,"min_workers":1}
 {"elapsed":7.0,"time":"2026-09-28T10:00:07Z","event":"resource","cycle":3,"workers":3,"heap_alloc_mb":410.0,"pressure_level":2,"note":"trend_change"}
-{"elapsed":8.0,"time":"2026-09-28T10:00:08Z","event":"worker_retired","worker":2,"reason":"compaction_rate","cycle":3,"escaped":3,"recorded":2,"best_merit":0.004}
+{"elapsed":8.0,"time":"2026-09-28T10:00:08Z","event":"worker_retired","worker":2,"reason":"compaction_rate","cycle":3,"explored":3,"recorded":2,"best_merit":0.004}
 {"elapsed":9.0,"time":"2026-09-28T10:00:09Z","event":"interrupt","signal":"terminated"}
-{"elapsed":9.5,"time":"2026-09-28T10:00:09Z","event":"worker_done","worker":0,"escaped":5,"recorded":3,"retired":false,"interrupted":true,"timed_out":false}
+{"elapsed":9.5,"time":"2026-09-28T10:00:09Z","event":"worker_done","worker":0,"explored":5,"recorded":3,"retired":false,"interrupted":true,"timed_out":false}
 {"elapsed":12.0,"time":"2026-09-28T10:00:12Z","event":"interrupt_dls","signal":"terminated"}
 {"elapsed":12.5,"time":"2026-09-28T10:00:12Z","event":"error","message":"save minima0.yaml: write failed, no space left on device"}
-{"elapsed":13.0,"time":"2026-09-28T10:00:13Z","event":"worker_done","worker":0,"escaped":5,"recorded":3,"retired":false,"interrupted":true,"timed_out":false}
+{"elapsed":13.0,"time":"2026-09-28T10:00:13Z","event":"worker_done","worker":0,"explored":5,"recorded":3,"retired":false,"interrupted":true,"timed_out":false}
 {"elapsed":14.0,"time":"2026-09-28T10:00:14Z","event":"force_quit"}
 `
 
@@ -103,7 +103,7 @@ const escapeInfeasibleLogFixture = `{"elapsed":0.2,"time":"2026-09-28T10:00:00Z"
 `
 
 func TestListEscapeFromLogInfeasibleOnly(t *testing.T) {
-	out := runListEscapeLogCLI(t, escapeInfeasibleLogFixture, "--format", "json")
+	out := runListGlobalLogCLI(t, escapeInfeasibleLogFixture, "--format", "json")
 	var doc struct {
 		BestMerit        float64 `json:"best_merit"`
 		FileDir          string  `json:"file_directory"`
@@ -166,7 +166,7 @@ func TestListEscapeFromLogInfeasibleOnly(t *testing.T) {
 }
 
 func TestListEscapeFromLogInfeasibleTable(t *testing.T) {
-	out := runListEscapeLogCLI(t, escapeInfeasibleLogFixture)
+	out := runListGlobalLogCLI(t, escapeInfeasibleLogFixture)
 	text := string(out)
 	if strings.Contains(text, "Local Minima:") {
 		t.Errorf("no feasible minimum was found, so Local Minima must be absent:\n%s", text)
@@ -188,7 +188,7 @@ func TestListEscapeFromLogInfeasibleTable(t *testing.T) {
 		t.Errorf("best merit must not be reported for an infeasible-only run:\n%s", text)
 	}
 
-	csvOut := runListEscapeLogCLI(t, escapeInfeasibleLogFixture, "--format", "csv")
+	csvOut := runListGlobalLogCLI(t, escapeInfeasibleLogFixture, "--format", "csv")
 	csvText := string(csvOut)
 	if !strings.Contains(csvText, "Infeasible Basins:\nindex,merit,file,reason\n") {
 		t.Errorf("csv basins header wrong:\n%s", csvText)
@@ -207,11 +207,11 @@ const escapeMixedLogFixture = `{"elapsed":0.2,"event":"start","max_cycles":10,"w
 {"elapsed":2.0,"event":"minimum","cycle":0,"worker":1,"index":1,"kind":"new","merit":0.05,"min_status":"infeasible_basin","invalid_reason":"aperture_clipping"}
 {"elapsed":3.0,"event":"minimum_saved","index":0,"file":"/tmp/esc/minima0.yaml","merit":0.001,"new":false,"version":1}
 {"elapsed":3.0,"event":"minimum","cycle":1,"worker":0,"index":0,"kind":"improved","merit":0.001,"min_status":"feasible_local_minimum"}
-{"elapsed":4.0,"event":"escape_complete","workers":2,"cycles":10,"escapes":2,"minima_count":1,"best_merit":0.001,"minima":[{"index":0,"merit":0.001,"best":true}]}
+{"elapsed":4.0,"event":"global_complete","workers":2,"cycles":10,"explorations":2,"minima_count":1,"best_merit":0.001,"minima":[{"index":0,"merit":0.001,"best":true}]}
 `
 
 func TestListEscapeFromLogMixedFeasibleAndInfeasible(t *testing.T) {
-	out := runListEscapeLogCLI(t, escapeMixedLogFixture, "--format", "json")
+	out := runListGlobalLogCLI(t, escapeMixedLogFixture, "--format", "json")
 	var doc struct {
 		FileDir   string  `json:"file_directory"`
 		BestMerit float64 `json:"best_merit"`
@@ -252,7 +252,7 @@ func TestListEscapeFromLogMixedFeasibleAndInfeasible(t *testing.T) {
 		t.Errorf("file_directory = %q, want /tmp/esc", doc.FileDir)
 	}
 
-	text := string(runListEscapeLogCLI(t, escapeMixedLogFixture))
+	text := string(runListGlobalLogCLI(t, escapeMixedLogFixture))
 	// The minima table gains a File column (recovered), the basins table does
 	// not (nothing saved for them).
 	if !strings.Contains(text, "Infeasible Basins:\nIndex     Merit  Reason") {
@@ -264,12 +264,12 @@ func TestListEscapeFromLogMixedFeasibleAndInfeasible(t *testing.T) {
 }
 
 func TestListEscapeFromLogInfeasibleFallback(t *testing.T) {
-	// Without `minimum` events the escape_complete summary supplies both
+	// Without `minimum` events the global_complete summary supplies both
 	// lists (the basins array carries index, merit and reason).
 	log := `{"elapsed":0.2,"event":"start","max_cycles":10,"workers":2}
-{"elapsed":9.0,"event":"escape_complete","workers":2,"cycles":10,"escapes":12,"minima_count":1,"best_merit":0.002,"minima":[{"index":0,"merit":0.002,"best":true}],"infeasible_basins":2,"infeasible":[{"index":0,"merit":9.5,"reason":"geometry_violation"},{"index":1,"merit":3.25,"reason":"ray_trace_failure"}]}
+{"elapsed":9.0,"event":"global_complete","workers":2,"cycles":10,"explorations":12,"minima_count":1,"best_merit":0.002,"minima":[{"index":0,"merit":0.002,"best":true}],"infeasible_basins":2,"infeasible":[{"index":0,"merit":9.5,"reason":"geometry_violation"},{"index":1,"merit":3.25,"reason":"ray_trace_failure"}]}
 `
-	out := runListEscapeLogCLI(t, log, "--format", "json")
+	out := runListGlobalLogCLI(t, log, "--format", "json")
 	var doc struct {
 		Minima           []struct{ Merit float64 } `json:"minima"`
 		InfeasibleBasins []struct {
@@ -284,7 +284,7 @@ func TestListEscapeFromLogInfeasibleFallback(t *testing.T) {
 		t.Fatalf("minima = %+v", doc.Minima)
 	}
 	if len(doc.InfeasibleBasins) != 2 {
-		t.Fatalf("infeasible_basins = %+v, want the escape_complete fallback", doc.InfeasibleBasins)
+		t.Fatalf("infeasible_basins = %+v, want the global_complete fallback", doc.InfeasibleBasins)
 	}
 	if doc.InfeasibleBasins[0].Merit != 9.5 || doc.InfeasibleBasins[0].Reason != "geometry_violation" {
 		t.Errorf("basins[0] = %+v", doc.InfeasibleBasins[0])
@@ -293,8 +293,8 @@ func TestListEscapeFromLogInfeasibleFallback(t *testing.T) {
 
 func TestListEscapeFromPipelineInfeasibleBasins(t *testing.T) {
 	// A pipeline document written with --keep-infeasible carries the basins in
-	// escape_result.infeasible_basins; they are listed the same way.
-	pipeline := `escape_result:
+	// global_result.infeasible_basins; they are listed the same way.
+	pipeline := `global_result:
   best_index: 0
   best_merit: 0.002
   minima:
@@ -312,7 +312,7 @@ func TestListEscapeFromPipelineInfeasibleBasins(t *testing.T) {
       status: infeasible_basin
       invalid_reason: ray_trace_failure
 `
-	text := string(runListEscapeLogCLI(t, pipeline))
+	text := string(runListGlobalLogCLI(t, pipeline))
 	if !strings.Contains(text, "Infeasible Basins:") {
 		t.Fatalf("pipeline basins section missing:\n%s", text)
 	}
@@ -326,7 +326,7 @@ func TestListEscapeFromPipelineInfeasibleBasins(t *testing.T) {
 }
 
 func TestListEscapeFromLogEvents(t *testing.T) {
-	out := runListEscapeLogCLI(t, escapeSignalLogFixture, "--format", "json")
+	out := runListGlobalLogCLI(t, escapeSignalLogFixture, "--format", "json")
 	var doc struct {
 		Interrupted bool `json:"interrupted"`
 		Events      []struct {
@@ -339,7 +339,7 @@ func TestListEscapeFromLogEvents(t *testing.T) {
 		t.Fatalf("unmarshal: %v\n%s", err, out)
 	}
 	if !doc.Interrupted {
-		t.Error("interrupted should still be reported in Escape Result")
+		t.Error("interrupted should still be reported in Global Result")
 	}
 
 	// Every run-level event is listed once, in log order.
@@ -375,7 +375,7 @@ func TestListEscapeFromLogEvents(t *testing.T) {
 }
 
 func TestListEscapeFromLogEventsTableAndCSV(t *testing.T) {
-	out := runListEscapeLogCLI(t, escapeSignalLogFixture)
+	out := runListGlobalLogCLI(t, escapeSignalLogFixture)
 	text := string(out)
 	if !strings.Contains(text, "Log Events:") {
 		t.Fatalf("table output missing the Log Events section:\n%s", text)
@@ -399,7 +399,7 @@ func TestListEscapeFromLogEventsTableAndCSV(t *testing.T) {
 		}
 	}
 
-	csvOut := runListEscapeLogCLI(t, escapeSignalLogFixture, "--format", "csv")
+	csvOut := runListGlobalLogCLI(t, escapeSignalLogFixture, "--format", "csv")
 	csvText := string(csvOut)
 	if !strings.Contains(csvText, "Log Events:\nevent,detail,elapsed_s\n") {
 		t.Errorf("csv output missing the Log Events header:\n%s", csvText)
@@ -419,7 +419,7 @@ func TestListEscapeFromLogEventsCompact(t *testing.T) {
 {"e":"02:05","t":"10:02:05","event":"interrupt"}
 {"e":"02:06","t":"10:02:06","event":"interrupt_dls"}
 `
-	out := runListEscapeLogCLI(t, log, "--format", "json")
+	out := runListGlobalLogCLI(t, log, "--format", "json")
 	var doc struct {
 		Events []struct {
 			Event   string   `json:"event"`
@@ -453,15 +453,15 @@ const escapeWarnLogFixture = `{"e":"00:00","t":"10:00:00","event":"start","max_c
 {"e":"00:02","t":"10:00:02","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 3 valid grid rays; wavefront best focus of the surviving fields applied (event 2)"}
 {"e":"00:03","t":"10:00:03","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 0 valid grid rays; wavefront best focus of the surviving fields applied (event 3)"}
 {"e":"00:04","t":"10:00:04","event":"interrupt"}
-{"e":"00:05","t":"10:00:05","event":"escape_complete","workers":1,"cycles":1,"escapes":1,"minima_count":0,"best_merit":1.0,"timed_out":false,"interrupted":true}
+{"e":"00:05","t":"10:00:05","event":"global_complete","workers":1,"cycles":1,"explorations":1,"minima_count":0,"best_merit":1.0,"timed_out":false,"interrupted":true}
 `
 
 func TestListEscapeWarnEventsFolded(t *testing.T) {
-	if !looksLikeEscapeJSONL([]byte(escapeWarnLogFixture)) {
+	if !looksLikeGlobalJSONL([]byte(escapeWarnLogFixture)) {
 		t.Fatal("a stream carrying warn events was not recognised as a run log")
 	}
 
-	out := runListEscapeLogCLI(t, escapeWarnLogFixture, "--format", "json")
+	out := runListGlobalLogCLI(t, escapeWarnLogFixture, "--format", "json")
 	var doc struct {
 		Events []struct {
 			Event   string   `json:"event"`
@@ -504,11 +504,11 @@ func TestListEscapeWarnEventsFolded(t *testing.T) {
 	}
 
 	// The human-readable formats show the fold as (×N) in the Detail cell.
-	table := string(runListEscapeLogCLI(t, escapeWarnLogFixture))
+	table := string(runListGlobalLogCLI(t, escapeWarnLogFixture))
 	if !strings.Contains(table, "(×2)") {
 		t.Errorf("table output missing the fold count (×2):\n%s", table)
 	}
-	csv := string(runListEscapeLogCLI(t, escapeWarnLogFixture, "--format", "csv"))
+	csv := string(runListGlobalLogCLI(t, escapeWarnLogFixture, "--format", "csv"))
 	if !strings.Contains(csv, "warn,") || !strings.Contains(csv, "(×2)") {
 		t.Errorf("csv output missing the folded warn row:\n%s", csv)
 	}
@@ -536,18 +536,18 @@ func TestRunEventKey(t *testing.T) {
 
 func TestListEscapeNoEventsForCleanLog(t *testing.T) {
 	// A log without any run-level event must not gain an empty section.
-	out := runListEscapeLogCLI(t, escapeLogFixture, "--format", "json")
+	out := runListGlobalLogCLI(t, escapeLogFixture, "--format", "json")
 	if strings.Contains(string(out), "\"events\"") {
 		t.Errorf("events key must be absent for a log with no run-level events:\n%s", out)
 	}
 	// The pipeline path never has it either.
-	if strings.Contains(string(runListEscapeLogCLI(t, "escape_result:\n  best_index: 0\n", "--format", "json")), "events") {
+	if strings.Contains(string(runListGlobalLogCLI(t, "global_result:\n  best_index: 0\n", "--format", "json")), "events") {
 		t.Error("events key must be absent for a pipeline document")
 	}
 }
 
 func TestListEscapeFromLogYAML(t *testing.T) {
-	out := runListEscapeLogCLI(t, escapeLogFixture, "--format", "yaml")
+	out := runListGlobalLogCLI(t, escapeLogFixture, "--format", "yaml")
 	var doc struct {
 		Params []struct {
 			Name  string `json:"name"`
@@ -563,17 +563,17 @@ func TestListEscapeFromLogYAML(t *testing.T) {
 		TimedOut    bool    `json:"timed_out"`
 		Interrupted bool    `json:"interrupted"`
 		Run         *struct {
-			Workers int     `json:"workers"`
-			Cycles  int     `json:"cycles"`
-			Escapes int     `json:"escapes"`
-			Minima  int     `json:"minima_count"`
-			Elapsed float64 `json:"elapsed_s"`
+			Workers      int     `json:"workers"`
+			Cycles       int     `json:"cycles"`
+			Explorations int     `json:"explorations"`
+			Minima       int     `json:"minima_count"`
+			Elapsed      float64 `json:"elapsed_s"`
 		} `json:"run"`
 		Workers []struct {
 			Worker    int      `json:"worker"`
 			Status    string   `json:"status"`
 			Cycles    int      `json:"cycles"`
-			Escaped   int      `json:"escaped"`
+			Explored  int      `json:"explored"`
 			Recorded  int      `json:"recorded"`
 			BestMerit *float64 `json:"best_merit"`
 			Elapsed   float64  `json:"elapsed_s"`
@@ -587,7 +587,7 @@ func TestListEscapeFromLogYAML(t *testing.T) {
 	// Params come from the params/start events only.
 	want := map[string]string{
 		"Max Cycles":         "3",
-		"Escape Workers":     "2",
+		"Global Workers":     "2",
 		"Max Seconds":        "600.000000",
 		"Distance Threshold": "0.100000",
 		"H Initial":          "0.100000",
@@ -633,8 +633,8 @@ func TestListEscapeFromLogYAML(t *testing.T) {
 	if doc.Run == nil {
 		t.Fatal("run section missing")
 	}
-	if doc.Run.Workers != 2 || doc.Run.Cycles != 3 || doc.Run.Escapes != 4 || doc.Run.Minima != 2 {
-		t.Errorf("run = %+v, want workers 2 cycles 3 escapes 4 minima 2", *doc.Run)
+	if doc.Run.Workers != 2 || doc.Run.Cycles != 3 || doc.Run.Explorations != 4 || doc.Run.Minima != 2 {
+		t.Errorf("run = %+v, want workers 2 cycles 3 explorations 4 minima 2", *doc.Run)
 	}
 	if doc.Run.Elapsed != 7.6 {
 		t.Errorf("run.elapsed_s = %v, want 7.6", doc.Run.Elapsed)
@@ -645,7 +645,7 @@ func TestListEscapeFromLogYAML(t *testing.T) {
 		t.Fatalf("workers = %d, want 2", len(doc.Workers))
 	}
 	w0, w1 := doc.Workers[0], doc.Workers[1]
-	if w0.Worker != 0 || w0.Status != "timeout" || w0.Cycles != 4 || w0.Escaped != 3 || w0.Recorded != 2 {
+	if w0.Worker != 0 || w0.Status != "timeout" || w0.Cycles != 4 || w0.Explored != 3 || w0.Recorded != 2 {
 		t.Errorf("workers[0] = %+v", w0)
 	}
 	if w0.Elapsed != 7.1 {
@@ -663,12 +663,12 @@ func TestListEscapeFromLogYAML(t *testing.T) {
 }
 
 func TestListEscapeFromLogTable(t *testing.T) {
-	out := runListEscapeLogCLI(t, escapeLogFixture)
+	out := runListGlobalLogCLI(t, escapeLogFixture)
 	text := string(out)
 	for _, want := range []string{
-		"Escape Parameters:",
-		"Escape Result:",
-		"Escape Run:",
+		"Global Parameters:",
+		"Global Result:",
+		"Global Run:",
 		"Local Minima:",
 		"Workers:",
 		"Run Elapsed",
@@ -692,15 +692,15 @@ func TestListEscapeFromLogTable(t *testing.T) {
 }
 
 func TestListEscapeFromLogCSV(t *testing.T) {
-	out := runListEscapeLogCLI(t, escapeLogFixture, "--format", "csv")
+	out := runListGlobalLogCLI(t, escapeLogFixture, "--format", "csv")
 	text := string(out)
 	if !strings.Contains(text, "Local Minima:\nindex,merit,status\n") {
 		t.Errorf("csv minima header should drop the file column:\n%s", text)
 	}
-	if !strings.Contains(text, "Escape Run:") {
-		t.Errorf("csv output missing the Escape Run section:\n%s", text)
+	if !strings.Contains(text, "Global Run:") {
+		t.Errorf("csv output missing the Global Run section:\n%s", text)
 	}
-	if !strings.Contains(text, "worker,status,cycles,escaped,recorded,best_merit,elapsed_s,reason\n") {
+	if !strings.Contains(text, "worker,status,cycles,explored,recorded,best_merit,elapsed_s,reason\n") {
 		t.Errorf("csv output missing the workers header:\n%s", text)
 	}
 	if !strings.Contains(text, "1,retired,2,1,1,0.009,6.1,memory_pressure") {
@@ -709,14 +709,14 @@ func TestListEscapeFromLogCSV(t *testing.T) {
 }
 
 func TestListEscapeFromLogMinimal(t *testing.T) {
-	// A log truncated before escape_complete: the minima still come from the
+	// A log truncated before global_complete: the minima still come from the
 	// `minimum` events, and the best merit from them rather than the summary.
 	log := `{"elapsed":0.1,"event":"params","h":0.1,"w":0.5,"h_mult":2.0,"w_mult":1.3,"distance_threshold":0.1}
 {"elapsed":0.2,"event":"start","max_cycles":10,"workers":4}
 {"elapsed":1.0,"event":"minimum","cycle":0,"worker":0,"kind":"new","index":3,"merit":0.5,"min_status":"feasible_local_minimum"}
 {"elapsed":2.0,"event":"minimum","cycle":1,"worker":1,"kind":"new","index":7,"merit":0.25,"min_status":"feasible_local_minimum"}
 `
-	out := runListEscapeLogCLI(t, log, "--format", "json")
+	out := runListGlobalLogCLI(t, log, "--format", "json")
 	var doc struct {
 		BestMerit float64 `json:"best_merit"`
 		Minima    []struct {
@@ -740,17 +740,17 @@ func TestListEscapeFromLogMinimal(t *testing.T) {
 		t.Errorf("best_merit = %v, want 0.25", doc.BestMerit)
 	}
 	if doc.Run != nil {
-		t.Error("run section must be absent without a done/escape_complete event")
+		t.Error("run section must be absent without a done/global_complete event")
 	}
 }
 
 func TestListEscapeFromLogCompleteOnlyFallback(t *testing.T) {
 	// A log with only the final summary (no `minimum` events): the
-	// merit-sorted minima array of escape_complete is the fallback source.
+	// merit-sorted minima array of global_complete is the fallback source.
 	log := `{"elapsed":0.2,"event":"start","max_cycles":10,"workers":2}
-{"elapsed":9.0,"event":"escape_complete","workers":2,"cycles":10,"escapes":12,"minima_count":2,"best_merit":0.002,"minima":[{"index":0,"merit":0.002,"best":true},{"index":1,"merit":0.03,"best":false}]}
+{"elapsed":9.0,"event":"global_complete","workers":2,"cycles":10,"explorations":12,"minima_count":2,"best_merit":0.002,"minima":[{"index":0,"merit":0.002,"best":true},{"index":1,"merit":0.03,"best":false}]}
 `
-	out := runListEscapeLogCLI(t, log, "--format", "json")
+	out := runListGlobalLogCLI(t, log, "--format", "json")
 	var doc struct {
 		BestMerit float64 `json:"best_merit"`
 		Minima    []struct {
@@ -762,7 +762,7 @@ func TestListEscapeFromLogCompleteOnlyFallback(t *testing.T) {
 		t.Fatalf("unmarshal: %v\n%s", err, out)
 	}
 	if len(doc.Minima) != 2 || doc.Minima[0].Merit != 0.002 || doc.Minima[1].Merit != 0.03 {
-		t.Fatalf("minima = %+v, want the escape_complete fallback list", doc.Minima)
+		t.Fatalf("minima = %+v, want the global_complete fallback list", doc.Minima)
 	}
 	if doc.BestMerit != 0.002 {
 		t.Errorf("best_merit = %v, want 0.002", doc.BestMerit)
@@ -776,9 +776,9 @@ func TestListEscapeFromLogCompactDropsFields(t *testing.T) {
 	log := `{"cycle":0,"e":"00:00","t":"10:00:00","event":"params","h":1.00000e-01,"w":5.00000e-01,"h_mult":2.00000e+00,"w_mult":1.30000e+00,"distance_threshold":1.00000e-01}
 {"e":"00:00","t":"10:00:00","event":"start","max_cycles":1.00000e+01,"workers":4.00000e+00}
 {"cycle":0,"e":"00:01","t":"10:00:01","event":"minimum","cycle":0,"worker":0,"index":0,"merit":1.23400e-03}
-{"e":"00:02","t":"10:00:02","event":"worker_done","worker":0,"escaped":2.00000e+00,"recorded":1.00000e+00}
+{"e":"00:02","t":"10:00:02","event":"worker_done","worker":0,"explored":2.00000e+00,"recorded":1.00000e+00}
 `
-	out := runListEscapeLogCLI(t, log, "--format", "json")
+	out := runListGlobalLogCLI(t, log, "--format", "json")
 	var doc struct {
 		Minima []struct {
 			Index  int     `json:"index"`
@@ -786,9 +786,9 @@ func TestListEscapeFromLogCompactDropsFields(t *testing.T) {
 			Status string  `json:"status"`
 		} `json:"minima"`
 		Workers []struct {
-			Worker  int    `json:"worker"`
-			Status  string `json:"status"`
-			Escaped int    `json:"escaped"`
+			Worker   int    `json:"worker"`
+			Status   string `json:"status"`
+			Explored int    `json:"explored"`
 		} `json:"workers"`
 	}
 	if err := json.Unmarshal(out, &doc); err != nil {
@@ -800,8 +800,8 @@ func TestListEscapeFromLogCompactDropsFields(t *testing.T) {
 	if doc.Minima[0].Status != "" {
 		t.Errorf("status = %q, want empty (dropped by the compact stream)", doc.Minima[0].Status)
 	}
-	if len(doc.Workers) != 1 || doc.Workers[0].Escaped != 2 {
-		t.Fatalf("workers = %+v, want one worker with 2 escapes", doc.Workers)
+	if len(doc.Workers) != 1 || doc.Workers[0].Explored != 2 {
+		t.Fatalf("workers = %+v, want one worker with 2 explorations", doc.Workers)
 	}
 	if doc.Workers[0].Status != "completed" {
 		t.Errorf("status = %q, want completed (no flags in the compact stream)", doc.Workers[0].Status)
@@ -809,16 +809,16 @@ func TestListEscapeFromLogCompactDropsFields(t *testing.T) {
 }
 
 func TestEscapeLogTargetError(t *testing.T) {
-	// A run log has no system definition, so a non-escape target is rejected
+	// A run log has no system definition, so a non-global target is rejected
 	// rather than silently listing nothing.
-	if err := escapeLogTargetError(nil); err != nil {
-		t.Errorf("bare invocation should default to escape: %v", err)
+	if err := globalLogTargetError(nil); err != nil {
+		t.Errorf("bare invocation should default to global: %v", err)
 	}
-	if err := escapeLogTargetError([]string{"escape"}); err != nil {
-		t.Errorf("escape target should be accepted: %v", err)
+	if err := globalLogTargetError([]string{"global"}); err != nil {
+		t.Errorf("global target should be accepted: %v", err)
 	}
 	for _, target := range []string{"surfaces", "all", "default", "focus"} {
-		if err := escapeLogTargetError([]string{target}); err == nil {
+		if err := globalLogTargetError([]string{target}); err == nil {
 			t.Errorf("target %q should be rejected for a run log", target)
 		}
 	}
@@ -827,14 +827,14 @@ func TestEscapeLogTargetError(t *testing.T) {
 func TestListEscapeFromPipelineUnchanged(t *testing.T) {
 	// The pipeline path keeps its shape: workers/run are absent, and the File
 	// column is always shown.
-	pipeline := `escape_result:
+	pipeline := `global_result:
   best_index: 0
   best_merit: 0.001234
   params:
     h_initial: 0.1
     w_initial: 0.5
     max_cycles: 10
-    escape_workers: 4
+    global_workers: 4
   minima:
     - index: 0
       merit: 0.001234
@@ -851,18 +851,18 @@ func TestListEscapeFromPipelineUnchanged(t *testing.T) {
         - id: config1
           element_powers: [0.0179, -0.0088]
 `
-	out := runListEscapeLogCLI(t, pipeline)
+	out := runListGlobalLogCLI(t, pipeline)
 	text := string(out)
-	for _, want := range []string{"Escape Parameters:", "Escape Result:", "Local Minima:", "Element Powers:", "minima0.yaml", "minima3.yaml"} {
+	for _, want := range []string{"Global Parameters:", "Global Result:", "Local Minima:", "Element Powers:", "minima0.yaml", "minima3.yaml"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("pipeline listing missing %q:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "Workers:") || strings.Contains(text, "Escape Run:") {
+	if strings.Contains(text, "Workers:") || strings.Contains(text, "Global Run:") {
 		t.Errorf("pipeline listing must not show run-log-only sections:\n%s", text)
 	}
 
-	outY := runListEscapeLogCLI(t, pipeline, "--format", "json")
+	outY := runListGlobalLogCLI(t, pipeline, "--format", "json")
 	var doc map[string]any
 	if err := json.Unmarshal(outY, &doc); err != nil {
 		t.Fatalf("unmarshal: %v\n%s", err, outY)
