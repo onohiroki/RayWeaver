@@ -297,9 +297,14 @@ func (w *Wrapper) Options() dls.Options {
 			opts.Logger = l
 		}
 	}
-	// The escape cycle provides its own escape mechanism; the DLS internal
-	// stall perturbation would fight it.
-	opts.DisableStallEscape = true
+	// The escape phase carries the bumps, which are its own escape mechanism;
+	// the DLS internal stall perturbation would fight them. The bump-free
+	// sub-solves (the clean re-optimisation, the glass phase and the glass-hull
+	// rescue) keep the perturbation: a saturated merit guardrail, a vignetting
+	// discontinuity or a degenerate spot evaluation leaves those solves with no
+	// gradient, and without the perturbation the DLS converges on the resulting
+	// plateau — which the cycle then records as a (broken) basin.
+	opts.DisableStallEscape = w.phase == PhaseEscape
 	// The mid-solve stop channel is set per-solve by the cycle from the shared
 	// interrupt signal. Each worker owns its Wrapper and runs sequentially, so
 	// per-wrapper state is race-free.
@@ -333,8 +338,9 @@ func (w *Wrapper) Options() dls.Options {
 			opts.MaxIter = max(50, int(float64(opts.MaxIter)*frac))
 		}
 	}
-	// The power-preserving glass phase is a plain DLS (no escape bumps).
-	opts.DisableStallEscape = true
+	// The power-preserving glass phase is a plain DLS (no escape bumps), so the
+	// phase-aware DisableStallEscape set above already leaves the perturbation
+	// enabled for it.
 	return opts
 }
 

@@ -127,11 +127,23 @@ func TestWrapperResidualCount(t *testing.T) {
 	}
 }
 
-func TestWrapperDisablesStallEscape(t *testing.T) {
+// TestWrapperStallEscapeIsPhaseAware pins the rule that only the bump-carrying
+// escape phase suppresses the DLS internal stall perturbation: the bump-free
+// solves (clean, glass phase, hull rescue) must keep it, or they converge on a
+// gradient-free merit plateau and the cycle records a broken basin there.
+func TestWrapperStallEscapeIsPhaseAware(t *testing.T) {
 	params := testParams()
 	w := NewWrapper(twoWell{}, params)
+
+	w.SetPhase(PhaseEscape)
 	if !w.Options().DisableStallEscape {
-		t.Fatal("escape wrapper must disable DLS stall escape")
+		t.Fatal("escape phase must disable the DLS stall escape (it has the bumps)")
+	}
+	for _, phase := range []Phase{PhaseClean, PhaseGlassSolve} {
+		w.SetPhase(phase)
+		if w.Options().DisableStallEscape {
+			t.Fatalf("phase %d has no escape bumps and must keep the DLS stall escape", phase)
+		}
 	}
 }
 

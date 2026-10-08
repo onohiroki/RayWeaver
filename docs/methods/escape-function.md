@@ -167,8 +167,13 @@ Because each DLS run inside a cycle parallelizes its own Jacobian across
 `jacobian_workers`, the total goroutine count is `global_workers ×
 jacobian_workers`; set `jacobian_workers: 1` when running many escape workers.
 
-The escape cycle disables the DLS internal stall perturbation
-(`DisableStallEscape`), which would otherwise fight the escape mechanism.
+The escape phase — which carries the bumps — disables the DLS internal stall
+perturbation (`DisableStallEscape`), which would otherwise fight the escape
+mechanism. The bump-free solves (the clean re-optimisation, the glass phase and
+the glass-hull rescue) keep it: a merit plateau — a saturated `field_alive`
+bound, a vignetting discontinuity, a degenerate spot evaluation — has no
+gradient, and the perturbation is what lets those solves leave it instead of
+converging on it and recording a broken basin.
 
 ### Stalled-early-stop (phase-aware)
 
@@ -177,9 +182,10 @@ Escape-phase DLS solves have a capped iteration budget: `escape_iter_frac`
 `stall_early_stop` (default true), a solve whose best merit has not improved by
 at least `stall_rel_tol` (default `1e-4`, relative) over a `stall_window_frac`
 (default 0.2) window returns the best point found and the cycle moves on. The
-clean re-optimisation phase always runs the full budget and never stalls, so a
-slow, late-stage merit improvement (a real source of the global best) is never
-cut off.
+clean re-optimisation phase always runs the full budget and never early-stops
+(`EnableStallDone` is escape-phase only), so a slow, late-stage merit
+improvement (a real source of the global best) is never cut off; it may still
+need a DLS stall perturbation to move off a plateau.
 
 ## 4. Parameters
 
