@@ -13,10 +13,13 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 )
 
-// particleResult holds the per-particle evaluation output. The swarm has one
-// fitness value, so pbest and gbest are selected on exactly the same scale.
+// particleResult holds the per-particle evaluation output. Every particle
+// carries both scales: merit is the unpenalised merit the pipeline reports,
+// f is the penalised fitness. Personal best is ranked on f; global best is
+// ranked on f or on merit according to Config.Gbest.
 type particleResult struct {
-	f float64 // penalised fitness
+	merit float64 // unpenalised merit
+	f     float64 // penalised fitness (merit + constraint penalty)
 }
 
 // evalSwarm evaluates all particles in parallel using GOMAXPROCS goroutines.
@@ -45,7 +48,7 @@ func (e *Explorer) evalSwarm(model dls.Model, pos [][]float64, variables []dls.V
 			defer wg.Done()
 			defer func() { <-sem }()
 			xPhys := denormalize(pos[i], variables, scales)
-			results[i].f = e.fitness(model, xPhys, skipConstraints)
+			results[i].merit, results[i].f = e.fitness(model, xPhys, skipConstraints)
 		}(i)
 	}
 	wg.Wait()
@@ -65,7 +68,24 @@ type Config struct {
 	ConstraintPenalty float64
 	StallWindowFrac   float64
 	StallRelTol       float64
+	// Gbest selects the scale the global best is ranked on; personal best is
+	// always ranked on the penalised fitness. See GbestMerit/GbestPenalised.
+	Gbest string
 }
+
+// The two scales Config.Gbest accepts.
+const (
+	// GbestMerit ranks the global best on the unpenalised merit. The swarm
+	// then explores the merit landscape the pipeline reports and the cycle's
+	// DLS repairs the constraints, so a particle is not pushed out of gbest
+	// merely because its constraint residual is large.
+	GbestMerit = "merit"
+	// GbestPenalised ranks the global best on merit + constraint penalty, so
+	// an infeasible particle can never become gbest on a lower raw merit.
+	// With a large penalty this can converge the swarm onto a point whose
+	// merit is poor but whose residuals vanish.
+	GbestPenalised = "penalised"
+)
 
 // Inertia decay bounds. The inertia weight decays linearly from the configured
 // (or default) high value down to InertiaLow over the iteration budget.
@@ -90,6 +110,7 @@ func DefaultConfig() Config {
 		ConstraintPenalty: 1000,
 		StallWindowFrac:   0.2,
 		StallRelTol:       1e-4,
+		Gbest:             GbestMerit,
 	}
 }
 
@@ -132,6 +153,14 @@ func NewExplorer(cfg Config, seed int64, progress func(event string, fields map[
 	}
 	if cfg.StallRelTol <= 0 {
 		cfg.StallRelTol = 1e-4
+	}
+	// Normalise the selection scale to one of the two documented values. The
+	// command validates `optimization.pso.gbest` before it gets here, so a
+	// value that is neither is an unset or unknown one: use the default.
+	switch cfg.Gbest {
+	case GbestPenalised:
+	default:
+		cfg.Gbest = GbestMerit
 	}
 	return &Explorer{cfg: cfg, seed: seed, progress: progress}
 }
@@ -216,15 +245,24 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		pu.UpdatePupils(denormalize(x0Norm, variables, scales))
 	}
 
-	gbestFit := math.MaxFloat64
+	// The plain merit of the start point: the result's BeforeMerit, so the
+	// phase reports before/after on the merit scale the rest of the pipeline
+	// uses rather than on the swarm's internal fitness.
+	startMerit := model.EvaluateMerit(denormalize(x0Norm, variables, scales))
+
+	gbestKey := math.MaxFloat64 // value on the configured selection scale
+	gbestFit := math.MaxFloat64 // penalised fitness of gbest (stall window, logs)
+	gbestMerit := math.MaxFloat64
 	gbestPos := make([]float64, nVars)
 	copy(gbestPos, x0Norm)
 
 	results := e.evalSwarm(model, pos, variables, scales, skipConstraints)
 	for i := 0; i < swarmSize; i++ {
 		pbestFit[i] = results[i].f
-		if results[i].f < gbestFit {
+		if k := e.gbestKey(results[i]); k < gbestKey {
+			gbestKey = k
 			gbestFit = results[i].f
+			gbestMerit = results[i].merit
 			copy(gbestPos, pos[i])
 		}
 	}
@@ -236,6 +274,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 			"n_vars":           nVars,
 			"pso_iterations":   maxIter,
 			"inertia":          e.cfg.Inertia,
+			"gbest_criterion":  e.cfg.Gbest,
 			"skip_constraints": skipConstraints,
 			"light_aperture":   true,
 		})
@@ -256,7 +295,7 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		// Check stop channel (via model.Options().Stop).
 		opts := model.Options()
 		if stopped(opts.Stop) {
-			return e.buildResult(model, variables, scales, gbestPos, gbestFit, iter, "interrupted")
+			return e.buildResult(model, variables, scales, gbestPos, startMerit, gbestMerit, iter, "interrupted")
 		}
 
 		// Update pupil at global best.
@@ -316,8 +355,10 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 				pbestFit[i] = results[i].f
 				copy(pbestPos[i], pos[i])
 			}
-			if results[i].f < gbestFit {
+			if k := e.gbestKey(results[i]); k < gbestKey {
+				gbestKey = k
 				gbestFit = results[i].f
+				gbestMerit = results[i].merit
 				copy(gbestPos, pos[i])
 			}
 			swarmSum += results[i].f
@@ -330,10 +371,14 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		}
 
 		// Emit pso_iter every 10 iterations for progress tracking.
+		// gbest_merit is the penalised fitness the swarm ranks by; gbest_true
+		// is the unpenalised merit of the same point (the value the cycle
+		// reports as the phase result). They coincide when the penalty is 0.
 		if e.progress != nil && (iter+1)%10 == 0 {
 			e.progress("pso_iter", map[string]any{
 				"iter":        iter + 1,
 				"gbest_merit": gbestFit,
+				"gbest_true":  gbestMerit,
 				"swarm_mean":  swarmSum / float64(swarmSize),
 				"swarm_min":   swarmMin,
 				"swarm_max":   swarmMax,
@@ -397,8 +442,10 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 						i := idx[k]
 						results[i] = reResults[i]
 						pbestFit[i] = reResults[i].f
-						if reResults[i].f < gbestFit {
+						if key := e.gbestKey(reResults[i]); key < gbestKey {
+							gbestKey = key
 							gbestFit = reResults[i].f
+							gbestMerit = reResults[i].merit
 							copy(gbestPos, pos[i])
 						}
 					}
@@ -423,26 +470,41 @@ func (e *Explorer) Explore(model dls.Model, x0 []float64) dls.Result {
 		}
 	}
 
-	return e.buildResult(model, variables, scales, gbestPos, gbestFit, maxIter, "max_iterations")
+	return e.buildResult(model, variables, scales, gbestPos, startMerit, gbestMerit, maxIter, "max_iterations")
 }
 
-// fitness computes the penalised fitness: merit + penalty * sum(c_j^2). It is
-// the swarm's only fitness value, so pbest and gbest always agree on the scale
-// they are ranked by. skipConstraints short-circuits the penalty when the model
-// declares no active constraints.
-func (e *Explorer) fitness(model dls.Model, xPhys []float64, skipConstraints bool) float64 {
-	f := model.EvaluateMerit(xPhys)
-	if !skipConstraints && e.cfg.ConstraintPenalty > 0 {
-		constraints := model.ComputeConstraints(xPhys)
-		for _, c := range constraints {
-			f += e.cfg.ConstraintPenalty * c * c
-		}
+// gbestKey is the value a particle's global-best candidacy is judged on: the
+// penalised fitness, or the unpenalised merit under GbestMerit. Personal best
+// is always judged on the penalised fitness.
+func (e *Explorer) gbestKey(r particleResult) float64 {
+	if e.cfg.Gbest == GbestPenalised {
+		return r.f
 	}
-	return f
+	return r.merit
 }
 
-// buildResult constructs a dls.Result from the global best.
-func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, scales, gbestNorm []float64, gbestFit float64, iterations int, status string) dls.Result {
+// fitness returns both scales of a particle: the unpenalised merit and the
+// penalised merit merit + penalty * sum(c_j^2). skipConstraints short-circuits
+// the penalty when the model declares no active constraints.
+func (e *Explorer) fitness(model dls.Model, xPhys []float64, skipConstraints bool) (float64, float64) {
+	merit := model.EvaluateMerit(xPhys)
+	if skipConstraints || e.cfg.ConstraintPenalty <= 0 {
+		return merit, merit
+	}
+	f := merit
+	constraints := model.ComputeConstraints(xPhys)
+	for _, c := range constraints {
+		f += e.cfg.ConstraintPenalty * c * c
+	}
+	return merit, f
+}
+
+// buildResult constructs a dls.Result from the global best. Both merit fields
+// are the plain merit — before is the start point, after is the returned
+// particle — so the phase result is on the same scale as a DLS phase result
+// and as the cycle's own "merit" event field. The penalised fitness the swarm
+// ranked by is reported separately in the pso_iter events.
+func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, scales, gbestNorm []float64, startMerit, gbestMerit float64, iterations int, status string) dls.Result {
 	gbestPhys := denormalize(gbestNorm, variables, scales)
 
 	vars := make([]dls.VariableState, len(variables))
@@ -457,8 +519,8 @@ func (e *Explorer) buildResult(model dls.Model, variables []dls.VariableInfo, sc
 	}
 
 	return dls.Result{
-		BeforeMerit: gbestFit,
-		AfterMerit:  gbestFit,
+		BeforeMerit: startMerit,
+		AfterMerit:  gbestMerit,
 		Iterations:  iterations,
 		Status:      status,
 		Variables:   vars,

@@ -5,8 +5,11 @@ swarm explores the merit landscape from a perturbed start point, then a
 power-preserving glass phase and a clean DLS refine the result — the same
 three-phase cycle as [`rayweave escape`](escape.md), with the exploration phase
 run by a swarm instead of DLS. **No escape-function bumps are ever placed**: the
-PSO merit is the plain merit plus the constraint penalty, so `pso` never
-deforms the landscape around minima it has already found.
+swarm's merit is the pipeline's own merit, so `pso` never deforms the
+landscape around minima it has already found. Constraint violations are
+handled by the fitness penalty described in
+[§Constraint handling](#constraint-handling), and the scale the swarm's global
+best is ranked on is selected by `gbest`.
 
 ```
 rayweave pso [--verbose] [--log FILE] [--save FILE] [--glass-dir DIR]
@@ -32,11 +35,12 @@ rayweave pso extract --index N < pso-output.yaml
 | `--swarm-size N` | number of particles per worker (default 30; overrides `optimization.pso.swarm_size`) |
 | `--pso-iterations N` | PSO iterations per cycle (default 40; overrides `optimization.pso.pso_iterations`) |
 | `--constraint-penalty W` | constraint penalty weight (default 1e3; overrides `optimization.pso.constraint_penalty`) |
+| `--gbest SCALE` | scale the global best is ranked on: `merit` (default) or `penalised` (overrides `optimization.pso.gbest`) |
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`.
 `--save` records the per-minimum files in `global_result.minima[].file`.
-`--swarm-size` / `--pso-iterations` / `--constraint-penalty` are PSO-specific
-flags that override their YAML counterparts. `--stream` is echoed back as
+`--swarm-size` / `--pso-iterations` / `--constraint-penalty` / `--gbest` are
+PSO-specific flags that override their YAML counterparts. `--stream` is echoed back as
 `optimization.pso.stream` only when the flag is actually given, and
 `--clean-dls` follows the same rule (see
 [escape.md §Switching the clean DLS off](escape.md#switching-the-clean-dls-off))
@@ -93,6 +97,7 @@ optimization:
     velocity_clamp: 0.2       # max velocity as fraction of variable range
     init_spread: 0.1          # initial swarm spread as fraction of range
     constraint_penalty: 1000  # penalty weight for constraint violations
+    gbest: merit              # scale for the global best: merit | penalised
 ```
 
 ### Shared cycle parameters
@@ -125,6 +130,7 @@ absent from `optimization.pso`, from `global_result.params` and from the JSONL
 | `velocity_clamp` | 0.2 | max velocity as fraction of variable range (0 = unclamped) |
 | `init_spread` | 0.1 | initial swarm spread as fraction of variable range |
 | `constraint_penalty` | 1000 | penalty weight for constraint violations in fitness |
+| `gbest` | `merit` | scale the swarm's global best is ranked on: `merit` (plain merit) or `penalised` (`merit + constraint_penalty × Σc²`) |
 
 ### Swarm initialisation
 
@@ -150,9 +156,24 @@ feasible regions without the complexity of a death penalty or constraint
 preservation. The penalty weight is configurable via `constraint_penalty`
 (default 1000).
 
-`f` is the swarm's **only** fitness value: personal best and global best are
-selected on the same scale, so an infeasible particle can never become gbest
-merely because its raw merit is lower.
+Two scales are therefore available for every particle: the plain `merit` and
+the penalised `f`. Personal best is always ranked on `f`, global best on the
+scale `gbest` selects:
+
+- `gbest: merit` (**default**) — gbest is ranked on the plain merit, so the
+  swarm explores the merit landscape the pipeline reports and the cycle's DLS
+  repairs the constraints. A particle is never pushed out of gbest merely
+  because its constraint residual is large.
+- `gbest: penalised` — gbest is ranked on `f`, so an infeasible particle can
+  never become gbest on a lower raw merit. Because `f` squares the residuals
+  and scales them by `constraint_penalty` and the constraint weights, a
+  strongly infeasible-but-low-merit point and a feasible-but-high-merit point
+  can be far apart on this scale; whichever the swarm converges on decides the
+  basin the cycle's clean DLS starts from.
+
+The two runs are **not numerically comparable**: record which `gbest` a run
+used (`optimization.pso.gbest` is echoed in the output document, and the
+`pso_init` JSONL event reports it as `gbest_criterion`).
 
 ### PSO algorithm (global-best)
 
@@ -161,11 +182,16 @@ Each cycle's PSO phase runs a standard global-best PSO in normalized space:
 1. Initialize particles and velocities.
 2. For each iteration:
    a. Update the dynamic pupil at the current global best (`UpdatePupils`).
-   b. Evaluate each particle's fitness `f`.
-   c. Update personal bests and global best on `f`.
+   b. Evaluate each particle's merit and fitness `f`.
+   c. Update personal bests on `f`, and the global best on the `gbest` scale.
    d. Update velocities: `v = w·v + c1·r1·(pbest−x) + c2·r2·(gbest−x)`
    e. Update positions: `x = x + v`, clamped to [0, 1].
-3. Return the global best as the exploration result of the cycle.
+3. Return the global best as the exploration result of the cycle. The phase
+   result carries the **plain** merit of the start point (`before_merit`) and
+   of the returned particle (`after_merit`), so a cycle event, a recorded
+   minimum and a DLS phase result are all on one scale; the penalised fitness
+   the swarm ranked by is reported in the `pso_iter` events as `gbest_merit`
+   next to the plain `gbest_true`.
 
 The inertia weight `w` linearly decays from 0.9 to 0.4 over the iteration
 budget. The velocity is clamped to `|v_j| ≤ velocity_clamp × range_j`.

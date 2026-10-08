@@ -15,6 +15,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
+	psoopt "github.com/hiroki/rayweaver/internal/pso"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
@@ -2782,6 +2783,14 @@ func psoSettings(pso *types.PSOConfig) []propRow {
 	p = appendNumProp(p, "Velocity Clamp", pso.VelocityClamp)
 	p = appendNumProp(p, "Init Spread", pso.InitSpread)
 	p = appendNumProp(p, "Constraint Penalty", pso.ConstraintPenalty)
+	// The criterion has a non-empty default, so it is reported even when the
+	// document never set it — the scale the run ranked gbest on is what makes
+	// two runs comparable.
+	gbestRank := pso.Gbest
+	if gbestRank == "" {
+		gbestRank = psoopt.GbestMerit + " (default)"
+	}
+	p = append(p, propRow{Name: "GBest Rank", Value: gbestRank})
 	// The cycle machinery is shared with `escape` and lives in the embedded
 	// GlobalConfig, so it is shown as a collapsed sub-block under the method's
 	// own knobs. The escape bump geometry (h_initial / w_initial / ...) is not

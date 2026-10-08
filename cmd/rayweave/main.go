@@ -178,6 +178,7 @@ func main() {
 	optPSOSwarmSize := 0
 	optPSOIterations := 0
 	optPSOConstraintPenalty := 0.0
+	optPSOGbest := ""
 	optPSOCPUProfile := ""
 	optPSOMemProfile := ""
 	optPSOGorProfile := ""
@@ -200,6 +201,7 @@ func main() {
 			fs.IntVar(&optPSOSwarmSize, "swarm-size", 0, "number of particles per worker (overrides optimization.pso.swarm_size)")
 			fs.IntVar(&optPSOIterations, "pso-iterations", 0, "PSO iterations per cycle (overrides optimization.pso.pso_iterations)")
 			fs.Float64Var(&optPSOConstraintPenalty, "constraint-penalty", 0, "constraint penalty weight (overrides optimization.pso.constraint_penalty)")
+			fs.StringVar(&optPSOGbest, "gbest", "", "scale the global best is ranked on: merit|penalised (overrides optimization.pso.gbest)")
 			fs.StringVar(&optPSOCPUProfile, "cpuprofile", "", "write a CPU profile (pprof) to FILE")
 			fs.StringVar(&optPSOMemProfile, "memprofile", "", "write a heap profile (pprof) to FILE at exit")
 			fs.StringVar(&optPSOGorProfile, "gorprofile", "", "write a goroutine profile to FILE at exit")
@@ -271,7 +273,7 @@ func main() {
 		} else {
 			applyGCPercent(optPSOGOGC)
 			stop := startCPUProfile(optPSOCPUProfile)
-			runPSO(data, optPSOGlassDir, optPSOVerbose, optPSOLogFile, optPSOSaveFile, optPSOPowerSolve, optPSOPowerSolveSurfaces, optPSOGlassVariables, optPSOKeepInfeasible, optPSOSwarmSize, optPSOIterations, optPSOConstraintPenalty)
+			runPSO(data, optPSOGlassDir, optPSOVerbose, optPSOLogFile, optPSOSaveFile, optPSOPowerSolve, optPSOPowerSolveSurfaces, optPSOGlassVariables, optPSOKeepInfeasible, optPSOSwarmSize, optPSOIterations, optPSOConstraintPenalty, optPSOGbest)
 			stop()
 			writeMemGorProfiles(optPSOMemProfile, optPSOGorProfile)
 		}
@@ -959,7 +961,7 @@ every discovered local minimum with its full surfaces.
                      [--power-solve-surfaces SURFACES]
                      [--glass-variables] [--glass-dir DIR]
                      [--swarm-size N] [--pso-iterations N]
-                     [--constraint-penalty W]
+                     [--constraint-penalty W] [--gbest SCALE]
                      [--clean-dls BOOL] < input.yaml
        rayweave pso extract --index N < pso-output.yaml
 
@@ -971,6 +973,13 @@ constraint violations. escape and pso are the two global-optimisation
 methods: they share the cycle budget, the worker pool, the deduplication
 and the validation (global_workers, max_cycles, distance_threshold, ...)
 and each keeps its own YAML section.
+
+The swarm ranks its personal best on the penalised fitness
+(merit + constraint_penalty * sum(c^2)); its global best is ranked on the
+plain merit (--gbest merit, the default) or on the same penalised fitness
+(--gbest penalised). With "merit" the swarm explores the merit landscape
+and the cycle's DLS repairs the constraints; with "penalised" an infeasible
+particle can never become gbest on a lower raw merit.
 
 Options:
   --verbose        print PSO progress to stderr as compact JSONL
@@ -991,6 +1000,10 @@ Options:
   --swarm-size N     number of particles per worker (overrides optimization.pso.swarm_size)
   --pso-iterations N PSO iterations per cycle (overrides optimization.pso.pso_iterations)
   --constraint-penalty W constraint penalty weight (overrides optimization.pso.constraint_penalty)
+  --gbest SCALE     scale the global best is ranked on: merit (default, plain
+                   merit; constraints are repaired by the cycle's DLS) or
+                   penalised (merit + constraint penalty)
+                   (overrides optimization.pso.gbest)
   --cpuprofile FILE  write a CPU profile (pprof) to FILE
   --memprofile FILE  write a heap profile (pprof) to FILE at exit
   --gorprofile FILE  write a goroutine profile to FILE at exit

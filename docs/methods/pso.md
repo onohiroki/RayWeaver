@@ -7,7 +7,8 @@ other is the [escape-function](escape-function.md) search. Each cycle runs
 three phases:
 
 1. **PSO exploration** — a swarm minimizes the **plain** merit (plus the
-   constraint penalty) by a gradient-free population-based search.
+   constraint penalty, see [§Constraint handling](#constraint-handling)) by a
+   gradient-free population-based search.
 2. **Glass optimization** (optional) — locks non-glass variables and rebalances
    dispersions while holding element powers fixed (identical to the escape
    command's glass phase).
@@ -54,13 +55,12 @@ Each worker repeats, up to `max_cycles` times:
 
 The cycle structure, validation, store management, and output are identical
 to the escape function — only step 1 differs, and there the escape function is
-simply never applied: the swarm minimises the plain merit, so no bump is ever
-placed on a minimum a PSO run has found. Step 3 stays switchable exactly as it
-is for `escape`: `clean_dls: false` records the swarm's best position (or the
-glass phase's output) as-is instead of DLS-refining it, and skips the
-post-glass retry and the hull-rescue re-solve with it. See
+simply never applied: no bump is ever placed on a minimum a PSO run has found,
+so the swarm ranks itself on the undeformed merit. Step 3 stays switchable
+exactly as it does for `escape`: `clean_dls: false` records the swarm's best
+position (or the glass phase's output) as-is instead of DLS-refining it, and
+skips the post-glass retry and the hull-rescue re-solve with it. See
 [escape-function.md §2](escape-function.md#2-the-two-step-cycle).
-
 ### Post-cycle logic
 
 After the clean DLS converges, the cycle applies the same logic as escape:
@@ -94,6 +94,10 @@ where:
 - `r1, r2` are independent uniform random numbers in [0, 1]
 - `g` is the global best position across the entire swarm
 
+`p_i` is the personal best ranked on the penalised fitness `f`; `g` is the
+global best ranked on the scale `gbest` selects (plain merit by default, see
+[§Constraint handling](#constraint-handling)).
+
 ### Velocity clamping
 
 Each velocity component is clamped:
@@ -125,15 +129,23 @@ f(x) = merit + μ · Σ c_j²
 
 where `c_j` are the constraint residuals from `ComputeConstraints(x)` (the same
 residuals DLS uses in its augmented system) and `μ` is the penalty weight
-(default 1000). This is symmetric: constraints penalized equally in both
+(default 1000). This is symmetric: constraints penalised equally in both
 violation directions (matching DLS's `sumConstraintTerms`).
 
-`f` is the swarm's **single** fitness value: personal best and global best are
-both selected on it, so an infeasible particle never becomes gbest merely
-because its raw merit is lower. (Earlier releases selected gbest on the raw
-merit while pbest used the penalized one; a PSO run is therefore not
-numerically comparable with one of those older runs whenever constraints are
-active.)
+Both scales are carried for every particle: the plain `merit` and the
+penalised `f`. Personal best is always ranked on `f`. Global best is ranked on
+one of them, chosen by `optimization.pso.gbest`:
+
+| `gbest` | gbest is ranked on | Consequence |
+|---|---|---|
+| `merit` (default) | the plain merit | The swarm follows the merit landscape the pipeline reports; constraint repair is left to the cycle's clean DLS, exactly as it is for an `escape` run. |
+| `penalised` | `f` | An infeasible particle can never become gbest on a lower raw merit, but a point whose merit is poor while its residuals vanish competes on the penalty alone — with `μ = 1000` and a weight of `1e5` a residual of `0.02` costs `4·10⁴`, which a feasible basin of that size cannot beat. |
+
+The two criteria are **not interchangeable**: which scale the swarm converges
+on decides which basin the cycle starts its DLS from. A run is only comparable
+with another run that used the same `gbest` value (and the same
+`constraint_penalty`), which the `pso_init` event records as
+`gbest_criterion`.
 
 ### Dynamic pupil
 
@@ -187,6 +199,7 @@ ever deforming the merit it reports against.
 | `velocity_clamp` | 0.2 | max velocity as fraction of range |
 | `init_spread` | 0.1 | initial swarm spread as fraction of range |
 | `constraint_penalty` | 1000 | constraint penalty weight |
+| `gbest` | `merit` | scale the global best is ranked on: `merit` (plain merit) or `penalised` (`merit + constraint_penalty·Σc²`) |
 | `stall_window_frac` | 0.2 | stall detection window fraction |
 | `stall_rel_tol` | 1e-4 | stall relative improvement threshold |
 

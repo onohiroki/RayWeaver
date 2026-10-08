@@ -1237,6 +1237,13 @@ type PSOConfig struct {
 	InitSpread float64 `yaml:"init_spread,omitempty"`
 	// ConstraintPenalty is the penalty weight for constraint violations (default 1000).
 	ConstraintPenalty float64 `yaml:"constraint_penalty,omitempty"`
+	// Gbest selects the scale the swarm's global best is ranked on:
+	// "merit" (default) ranks gbest on the plain merit and leaves the
+	// constraint repair to the cycle's DLS, "penalised" ranks it on
+	// merit + constraint_penalty * sum(c^2) so an infeasible particle can
+	// never become gbest on a lower raw merit. Personal best is always
+	// ranked on the penalised fitness.
+	Gbest string `yaml:"gbest,omitempty"`
 }
 
 // GlassAttractionPairResult reports the final glass-attraction state for one

@@ -180,70 +180,87 @@ func TestStallSlidingWindow(t *testing.T) {
 	t.Logf("stallIter=%d status=%s iterations=%d", stallIter, result.Status, result.Iterations)
 }
 
-// --- True merit gbest selection test ---
+// --- gbest selection criterion test ---
 
-// escapedSphere wraps a sphere merit and adds a Gaussian bump at a known
-// minimum. InnerMerit returns only the true sphere merit (no bump).
-type escapedSphere struct {
-	cx      float64  // true minimum
-	bumpAt  float64  // bump center (known minimum to avoid)
-	bumpH   float64  // bump height
-	bumpW   float64  // bump width
-}
+// constrainedSphere has its merit minimum at 0 while the single constraint
+// residual c(x)=x-1 vanishes only at x=1. The penalised fitness
+// merit + mu*c^2 therefore has its minimum between the two, so the two
+// criteria disagree about where the swarm should converge.
+type constrainedSphere struct{}
 
-func (m escapedSphere) Variables() []dls.VariableInfo {
+func (m constrainedSphere) Variables() []dls.VariableInfo {
 	return []dls.VariableInfo{{Name: "x", Param: "x", Min: -2, Max: 2}}
 }
-func (m escapedSphere) InitialState() []float64 { return []float64{0} }
-func (m escapedSphere) Options() dls.Options {
+func (m constrainedSphere) InitialState() []float64 { return []float64{1.5} }
+func (m constrainedSphere) Options() dls.Options {
 	return dls.Options{MaxIter: 200, Mu: 0.1, Tol: 1e-8, Epsilon: 1e-7}
 }
-func (m escapedSphere) EvaluateMerit(x []float64) float64 {
-	d := x[0] - m.cx
-	trueMerit := d * d
-	dBump := x[0] - m.bumpAt
-	bump := m.bumpH * math.Exp(-dBump*dBump/(m.bumpW*m.bumpW))
-	return trueMerit + bump
+func (m constrainedSphere) EvaluateMerit(x []float64) float64 { return x[0] * x[0] }
+func (m constrainedSphere) ComputeResiduals(x []float64) []float64 {
+	return []float64{x[0] - 1}
 }
-func (m escapedSphere) InnerMerit(x []float64) float64 {
-	d := x[0] - m.cx
-	return d * d
+func (m constrainedSphere) ComputeConstraints(x []float64) []float64 {
+	return []float64{x[0] - 1}
 }
-func (m escapedSphere) ComputeResiduals(x []float64) []float64 {
-	return []float64{x[0] - m.cx}
-}
-func (m escapedSphere) ComputeConstraints(x []float64) []float64 { return nil }
 
-func TestGBestUsesTrueMerit(t *testing.T) {
-	// True minimum at x=0.0. Bump at x=0.5 (height 100, width 0.1).
-	// If gbest were selected by escaped merit, the bump would dominate
-	// and the swarm would avoid x=0.0. With true merit, gbest tracks the
-	// true minimum.
-	model := escapedSphere{
-		cx:     0.0,
-		bumpAt: 0.5,
-		bumpH:  100.0,
-		bumpW:  0.1,
-	}
-
+// runCriterion runs one PSO phase on constrainedSphere with the given
+// selection criterion and returns the returned particle's position.
+func runCriterion(t *testing.T, criterion string) float64 {
+	t.Helper()
 	cfg := DefaultConfig()
 	cfg.SwarmSize = 30
 	cfg.PsoIterations = 60
-	cfg.InitSpread = 0.8 // wide spread to reach both sides of bump
+	cfg.InitSpread = 0.4
+	cfg.ConstraintPenalty = 1000
 	cfg.StallWindowFrac = 0.5
 	cfg.StallRelTol = 1e-3
-
-	x0 := []float64{0.8} // start on the far side of the bump
+	cfg.Gbest = criterion
 
 	ex := NewExplorer(cfg, 42, nil)
-	result := ex.Explore(model, x0)
-
-	finalX := result.Variables[0].After
-	// The swarm should converge near x=0.0 (true minimum), not be repelled
-	// by the bump at x=0.5.
-	if math.Abs(finalX-0.0) > 0.3 {
-		t.Errorf("expected x≈0.0 (true minimum), got %f — bump may be repelling gbest", finalX)
+	r := ex.Explore(constrainedSphere{}, []float64{1.5})
+	if r.Status == "interrupted" {
+		t.Fatal("phase was interrupted")
 	}
-	t.Logf("escapedSphere: x=%.6f merit=%.6e iterations=%d status=%s",
-		finalX, result.AfterMerit, result.Iterations, result.Status)
+	return r.Variables[0].After
+}
+
+func TestGBestRankMerit(t *testing.T) {
+	// With gbest ranked on the plain merit the swarm must follow the merit
+	// minimum (x=0) and leave the constraint residual to the cycle's DLS:
+	// mu*c^2 = 1000 would otherwise drag it to x = 1000/1001.
+	x := runCriterion(t, GbestMerit)
+	if math.Abs(x) > 0.2 {
+		t.Errorf("gbest=merit: expected x≈0 (merit minimum), got %f", x)
+	}
+}
+
+func TestGBestRankPenalised(t *testing.T) {
+	// The same run ranked on the penalised fitness must follow the fitness
+	// minimum (x = mu/(1+mu) ≈ 0.999) instead.
+	x := runCriterion(t, GbestPenalised)
+	if math.Abs(x-1) > 0.2 {
+		t.Errorf("gbest=penalised: expected x≈1 (constraint minimum), got %f", x)
+	}
+}
+
+func TestResultMeritsArePlain(t *testing.T) {
+	// Whatever scale the swarm ranked on, the phase result reports the plain
+	// merit of the start point and of the returned particle, so a cycle event,
+	// a recorded minimum and a DLS phase result all stay on one scale.
+	cfg := DefaultConfig()
+	cfg.SwarmSize = 30
+	cfg.PsoIterations = 60
+	cfg.InitSpread = 0.4
+	cfg.ConstraintPenalty = 1000
+	cfg.Gbest = GbestPenalised
+
+	ex := NewExplorer(cfg, 42, nil)
+	r := ex.Explore(constrainedSphere{}, []float64{1.5})
+	x := r.Variables[0].After
+	if want := x * x; math.Abs(r.AfterMerit-want) > 1e-9 {
+		t.Errorf("AfterMerit = %v, want the plain merit %v", r.AfterMerit, want)
+	}
+	if want := 1.5 * 1.5; math.Abs(r.BeforeMerit-want) > 1e-9 {
+		t.Errorf("BeforeMerit = %v, want the plain merit at x0 = %v", r.BeforeMerit, want)
+	}
 }

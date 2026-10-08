@@ -15,7 +15,7 @@ import (
 // identical to escape; only the exploration engine differs, and the run keeps
 // its settings in optimization.pso throughout — it never borrows
 // optimization.escape.
-func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassVariables bool, keepInfeasible bool, swarmSize int, psoIterations int, constraintPenalty float64) {
+func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassVariables bool, keepInfeasible bool, swarmSize int, psoIterations int, constraintPenalty float64, gbest string) {
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
 	if input.Optimization == nil {
@@ -40,6 +40,17 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 	}
 	if constraintPenalty > 0 {
 		input.Optimization.PSO.ConstraintPenalty = constraintPenalty
+	}
+	if gbest != "" {
+		input.Optimization.PSO.Gbest = gbest
+	}
+	// The selection scale is a closed vocabulary: reject anything else here
+	// so a typo cannot silently fall back to the default criterion.
+	switch input.Optimization.PSO.Gbest {
+	case "", pso.GbestMerit, pso.GbestPenalised:
+	default:
+		errOut("Error: gbest must be %q or %q, got %q", pso.GbestMerit, pso.GbestPenalised, input.Optimization.PSO.Gbest)
+		os.Exit(1)
 	}
 
 	// Resolve the power-preserving glass phase.
@@ -105,6 +116,11 @@ func buildPSOConfig(cfg *types.PSOConfig) pso.Config {
 	}
 	if cfg.ConstraintPenalty > 0 {
 		c.ConstraintPenalty = cfg.ConstraintPenalty
+	}
+	// The selection scale is a named value, so the unset value (empty) keeps
+	// the pso.Config default rather than being replaced by it numerically.
+	if cfg.Gbest != "" {
+		c.Gbest = cfg.Gbest
 	}
 	// Stall params come from the embedded EscapeConfig (YAML-specifiable); the
 	// pso.Config defaults apply when unset.
