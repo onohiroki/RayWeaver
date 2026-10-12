@@ -385,6 +385,21 @@ configs:
             wavelength: 0.0005876
             weight: 720
             target: 0
+          - kind: pupil_fill
+            field: 0
+            weight: 1000
+          - kind: pupil_fill
+            field: 1
+            weight: 1000
+          - kind: pupil_fill
+            field: 2
+            weight: 1000
+          - kind: pupil_fill
+            field: 3
+            weight: 1000
+          - kind: pupil_fill
+            field: 4
+            weight: 1000
       - name: wavefront
         terms:
           - kind: spot_rms_t
@@ -590,6 +605,21 @@ configs:
             field: 4
             weight: 10000
             target: 1
+          - kind: pupil_fill
+            field: 0
+            weight: 1000
+          - kind: pupil_fill
+            field: 1
+            weight: 1000
+          - kind: pupil_fill
+            field: 2
+            weight: 1000
+          - kind: pupil_fill
+            field: 3
+            weight: 1000
+          - kind: pupil_fill
+            field: 4
+            weight: 1000
 optimization:
   method: dls
   max_iter: 1000
@@ -1106,7 +1136,7 @@ optimization:
     w_span: 4
     initial_perturb: 0.1
     max_seconds: 28800
-    min_throughput_ratio: 0.1
+    min_throughput_ratio: 0.9
 chief:
   fields:
     - angle: 0

@@ -150,7 +150,12 @@ surviving the trace (the `field_alive` threshold, overridable with
 classified as infeasible. This is consistent with the `field_alive` merit
 term, so the two classifications agree; the merit side also carries the
 unbounded `pupil_fill` kind so a partially clipped pupil is penalised during
-the search rather than only rejected at the end.
+the search rather than only rejected at the end. The ratio is measured on the
+field's **prescribed** (vignetting-masked) grid, so `ratio ~ 1` is a design that
+delivers the vignetting it prescribes and the 30 % default is lax: the
+delivered-design checks allow only `+-0.03`, i.e. `ratio >= ~0.94` — use a value
+near 0.9 for a design that is not deliberately over-vignetted (see
+[escape.md](../escape.md#infeasible-basins)).
 
 ## 3. Parallel workers
 

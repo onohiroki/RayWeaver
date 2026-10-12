@@ -23,8 +23,9 @@ set -euo pipefail
 #                                `rayweave list global --format yaml` of that
 #                                document -> <prefix>escape-list.yaml
 #   2. PSF verification        : per-field Strehl at best focus (RCP+LCP, d
-#                                line) -> table; the demo gates on every field
-#                                reaching >= 0.5
+#                                line) -> table, flagged OK/BELOW 0.5. Reported,
+#                                not refined: a 4-cycle spot-merit run is
+#                                typically below 0.5 at every field.
 #   3. 6elements --save/--log: every discovered minimum written to a clean
 #                                <prefix>min1.yaml, <prefix>min2.yaml, ... as
 #                                it is found (interrupt/kill safe), progress

@@ -419,6 +419,16 @@ unbounded `pupil_fill` kind: a partially clipped pupil shrinks the survivor-only
 spot/OPD residuals, so `pupil_fill` (a non-zero weight) keeps the solver from
 buying a smaller residual by killing a field's periphery.
 
+The ratio is measured on the field's **prescribed** grid — the vignetting-masked
+per-field grid the merit's `field_alive` / `pupil_fill` terms trace — so a design
+that delivers the vignetting it prescribes has `ratio ~ 1` and the value reads as
+"fraction of the prescribed pupil this design actually delivers". The 0.3 default
+(and the 0.1 some inputs set) therefore labels a design that loses most of its
+prescribed pupil feasible: the delivered-design checks allow only `+-0.03` around
+the prescribed fill, i.e. `ratio >= ~0.94`. Use a value near **0.9** unless the
+lens is deliberately over-vignetted. Measured on the v53 6-element runs, raising
+0.8 -> 0.9 reclassified only over-clipped points and lost no gate-passing design.
+
 Validation happens **post-DLS only** — after the clean DLS converges, the
 converged point is traced through `chief.DetermineChiefRaysGrid` with the same
 pupil model (dynamic or virtual) the DLS used. If validation fails, the DLS
@@ -429,7 +439,7 @@ The invalid reason is reported per basin:
 
 | Reason | Meaning |
 |---|---|
-| `insufficient_field_throughput` | fewer than `min_throughput_ratio` (default 30 %) of pupil rays reach the image for at least one field |
+| `insufficient_field_throughput` | fewer than `min_throughput_ratio` (default 30 %) of the **prescribed** pupil rays reach the image for at least one field |
 | `field_unreachable` | zero rays reach the image for at least one field |
 | `severe_vignetting` | intermediate vignetting caused catastrophic beam loss |
 | `geometry_violation` | negative thickness or other surface-geometry error |

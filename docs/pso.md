@@ -82,7 +82,7 @@ optimization:
       nd: 10
       vd: 1
     initial_perturb: 0.05   # normalised amplitude spreading parallel workers' start points
-    min_throughput_ratio: 0.3 # minimum valid-ray fraction for a feasible point
+    min_throughput_ratio: 0.3 # minimum fraction of the prescribed per-field pupil the design must deliver (0.3 default; ~0.9 matches the +-0.03 vignetting checks)
     stall_window_frac: 0.2  # stall-early-stop window (fraction of the phase budget)
     stall_rel_tol: 1e-4     # stalled-early-stop relative merit threshold
     stream: true            # append the pipeline document to stdout as the run progresses
