@@ -10,10 +10,16 @@ set -euo pipefail
 #
 # Two lenses are supported:
 #   escape-demo.bash                           : degraded US2645157 triplet (default)
-#   escape-demo.bash --lens 6elements          : v52 spot-merit 6-element
+#   escape-demo.bash --lens 6elements          : 6-element double-Gauss
 # The 6-element run uses the escape section baked into
 # samples/escape-6elements-init.yaml (virtual pupil, 37 variables, 256 rays,
-# spot_flatness/spot_astigmatism merit, back_focus type spot, 4 cycles).
+# spot merit plus one pupil_fill term per field (weight 1000) in BOTH merit
+# modes, min_throughput_ratio 0.9, back_focus type spot, 4 cycles). Those are
+# the measured optimum for this system, which reached best recorded merit 4.9
+# with 10 gate-passing minima; only the budget stays this demo's 4 cycles (a
+# full optimisation run uses 30). The pupil_fill weight is algorithm-dependent:
+# 1000 is the escape optimum, 300 is the PSO optimum
+# (docs/merit-and-constraints.md 3.2).
 #
 # Steps
 #   1. escape                  : global search with merit_schedule
@@ -93,7 +99,7 @@ case "$LENS" in
   6elements)
     YAML="$SCRIPT_DIR/escape-6elements-init.yaml"
     PREFIX="escape-demo-6elements-"
-    LENS_NAME="6-element v52 (spot merit, virtual pupil, 4 cycles)"
+    LENS_NAME="6-element double-Gauss (spot merit + pupil_fill, virtual pupil, 4 cycles)"
     SAVE_BASE="$OUTDIR/${PREFIX}min"
     LOG_FILE="$OUTDIR/${PREFIX}progress.jsonl"
     ;;

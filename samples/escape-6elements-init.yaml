@@ -1,3 +1,21 @@
+# Escape-function demo input for the 6-element double-Gauss
+# (samples/escape-demo.bash --lens 6elements).
+#
+# Merit, validation and escape settings are the measured optimum for this
+# 6-element system:
+#   merit         : the spot merit plus one `pupil_fill` term per field in BOTH
+#                   merit modes. The measured weight optima are algorithm-
+#                   dependent: 1000 for escape (best recorded merit 4.9 with 10
+#                   gate-passing minima), 300 for PSO (best merit 4.1 with 8).
+#   threshold     : `min_throughput_ratio` 0.9. The validation grid is the
+#                   PRESCRIBED (vignetting-masked) per-field grid, so ratio ~ 1
+#                   is a design that delivers its prescription; the
+#                   delivered-design checks allow +-0.03, i.e. ratio >= ~0.94.
+#   escape params : global_workers 8, distance_threshold 0.05, h_initial 2,
+#                   w_initial 1, h_mult 2, w_mult 1.3, escape_iter_frac 0.45,
+#                   w_span 4, initial_perturb 0.1, max_seconds 28800.
+#   budget        : max_cycles 4 -- this demo's own short budget (a full
+#                   optimisation run uses 30 cycles).
 metadata:
   tool:
     name: RayWeaver
@@ -12,6 +30,11 @@ metadata:
     (2) BACK FOCUS: back_focus_solve.type wavefront -> spot, num_rays 400 -> 256; both merit_modes back_focus_type -> spot.
     (3) vp_z variable range -20..50 -> 0..30 mm.
     Demo variant: max_cycles 4 (the v52 prod run found its best gate-passing minimum at cycle 3). Merit numbers are not comparable with v51 (different term set).
+    This file: the merit gains one pupil_fill term per field (weight 1000) in both modes and
+    min_throughput_ratio becomes 0.9 -- the measured optimum for this 6-element system, which
+    reached best recorded merit 4.87 with 10 gate-passing minima (only the budget stays this
+    demo's max_cycles 4). The pupil_fill weight is algorithm-dependent: 1000 is the escape
+    optimum (best merit 4.87, 10 gate passes) and 300 is the PSO optimum (best merit 4.12, 8).
 glass_catalog:
   entries:
     - type: model
@@ -385,6 +408,11 @@ configs:
             wavelength: 0.0005876
             weight: 720
             target: 0
+          # pupil_fill: unbounded pupil-coverage penalty, the companion of the
+          # bounded field_alive above (docs/merit-and-constraints.md 3.2). Weight
+          # 1000 is the escape optimum measured on this 6-element system; the PSO
+          # optimum is 300 (a strong weight distorts PSO's clean-phase
+          # refinement, while escape's perturbed restarts need it).
           - kind: pupil_fill
             field: 0
             weight: 1000
@@ -605,6 +633,8 @@ configs:
             field: 4
             weight: 10000
             target: 1
+          # Same pupil_fill set as the geometric mode (weight 1000 = the escape
+          # optimum; the PSO optimum is 300).
           - kind: pupil_fill
             field: 0
             weight: 1000
@@ -1136,6 +1166,12 @@ optimization:
     w_span: 4
     initial_perturb: 0.1
     max_seconds: 28800
+    # The validation grid is the prescribed (vignetting-masked) per-field grid,
+    # so ratio ~ 1 is a design that delivers its prescription and the
+    # delivered-design checks allow only +-0.03, i.e. ratio >= ~0.94. 0.9 (not
+    # the 0.3 default, nor the 0.1 some inputs set) keeps over-clipped points out
+    # of the reported solutions; it labels basins only, it does not change the
+    # search. See docs/escape.md Infeasible basins.
     min_throughput_ratio: 0.9
 chief:
   fields:

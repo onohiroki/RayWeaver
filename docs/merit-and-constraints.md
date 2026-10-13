@@ -274,16 +274,16 @@ clipping dominant. Use both together (a bounded-plus-unbounded pair).
 
 The **weight matters as much as the kind, and it is algorithm-dependent**. The
 term is unbounded, so a weight that is large next to the imaging terms lets a
-clipped intermediate iterate dominate the DLS line search. Measured on the v53
-6-element runs: for the **escape** optimiser a strong weight wins (weight 1000
-reached best recorded merit 4.9 and 10 gate passes; 300 reached only 10.2,
-because the escape's perturbed restarts land in clipped regions and need the
-strong penalty to push back), while for **PSO** a moderate weight wins (300
-reached 4.1 with 8 gate passes versus 27.5 at 1000 and 14.2 with the term
-absent — the swarm never selects a clipped design, so there the strong penalty
-only distorts the clean refinement). Start near 1000 for escape and near 300 for
-PSO when the imaging terms are of order 1-10, and tune from the run's own gate
-table.
+clipped intermediate iterate dominate the DLS line search. Measured on the
+repository's 6-element double-Gauss benchmark: for the **escape** optimiser a
+strong weight wins (weight 1000 reached best recorded merit 4.9 and 10 gate
+passes; 300 reached only 10.2, because the escape's perturbed restarts land in
+clipped regions and need the strong penalty to push back), while for **PSO** a
+moderate weight wins (300 reached 4.1 with 8 gate passes versus 27.5 at 1000 and
+14.2 with the term absent — the swarm never selects a clipped design, so there
+the strong penalty only distorts the clean refinement). Start near 1000 for
+escape and near 300 for PSO when the imaging terms are of order 1-10, and tune
+from the run's own gate table.
 
 ### 3.3 OPD kind
 

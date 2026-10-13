@@ -426,8 +426,9 @@ that delivers the vignetting it prescribes has `ratio ~ 1` and the value reads a
 (and the 0.1 some inputs set) therefore labels a design that loses most of its
 prescribed pupil feasible: the delivered-design checks allow only `+-0.03` around
 the prescribed fill, i.e. `ratio >= ~0.94`. Use a value near **0.9** unless the
-lens is deliberately over-vignetted. Measured on the v53 6-element runs, raising
-0.8 -> 0.9 reclassified only over-clipped points and lost no gate-passing design.
+lens is deliberately over-vignetted. Measured on the repository's 6-element
+double-Gauss benchmark, raising 0.8 -> 0.9 reclassified only over-clipped points
+and lost no gate-passing design.
 
 Validation happens **post-DLS only** — after the clean DLS converges, the
 converged point is traced through `chief.DetermineChiefRaysGrid` with the same

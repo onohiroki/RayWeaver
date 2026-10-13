@@ -4,8 +4,8 @@
 # spot terms at w24=0.05 yields 0°/16°/24° Strehl ~0.99/~0.62/~0.59 — the 0°>
 # 16°>24° profile used by the demo table, meeting 0.9/0.6/0.5).
 # Cleaned copy: only the sections the `psf` subcommand consumes (glass_catalog,
-# configs, chief); the optimization/global_result history lives in the original
-# escape-demo-result.yaml (untracked). Three fields (0/16/24 deg), reference
+# configs, chief); the optimization/global_result history stays in the run
+# result document this file was cleaned from. Three fields (0/16/24 deg), reference
 # surface 8. MTF is reported up to psf.mtf_config.max_frequency (200 c/mm) —
 # the demo script's --max-freq CLI flag overrides this, so the cap stays
 # effective even when the run uses a different lens YAML.
