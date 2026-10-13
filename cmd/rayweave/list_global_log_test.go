@@ -587,15 +587,19 @@ func TestListEscapeFromLogEventsCompact(t *testing.T) {
 	}
 }
 
-// escapeWarnLogFixture is a captured --verbose stream whose optimizer warnings
-// have become structured "warn" events: consecutive copies of one message
-// differ only in the throttle sequence the warning appends as " (event N)".
+// escapeWarnLogFixture is a captured --verbose stream whose optimiser warnings
+// have become structured "warn" events. Consecutive copies of one message
+// differ only in the throttle sequence the warning appends as " (event N)"; a
+// second message and an `interrupt` are interleaved between two copies of the
+// first to prove the fold is by message across the whole log, not only
+// consecutive rows.
 const escapeWarnLogFixture = `{"e":"00:00","t":"10:00:00","event":"start","max_cycles":1.00000e+01,"workers":1.00000e+00}
-{"e":"00:01","t":"10:00:01","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 3 valid grid rays; wavefront best focus of the surviving fields applied (event 1)"}
-{"e":"00:02","t":"10:00:02","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 3 valid grid rays; wavefront best focus of the surviving fields applied (event 2)"}
-{"e":"00:03","t":"10:00:03","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 0 valid grid rays; wavefront best focus of the surviving fields applied (event 3)"}
-{"e":"00:04","t":"10:00:04","event":"interrupt"}
-{"e":"00:05","t":"10:00:05","event":"global_complete","workers":1,"cycles":1,"explorations":1,"minima_count":0,"best_merit":1.0,"timed_out":false,"interrupted":true}
+{"e":"00:01","t":"10:00:01","event":"warn","message":"power_solve: surface 4 has no free curvature variable (event 1)"}
+{"e":"00:02","t":"10:00:02","event":"warn","message":"power_solve: surface 4 has no free curvature variable (event 2)"}
+{"e":"00:03","t":"10:00:03","event":"warn","message":"cannot read AGF file SK18.agf (event 3)"}
+{"e":"00:04","t":"10:00:04","event":"warn","message":"power_solve: surface 4 has no free curvature variable (event 4)"}
+{"e":"00:05","t":"10:00:05","event":"interrupt"}
+{"e":"00:06","t":"10:00:06","event":"global_complete","workers":1,"cycles":1,"explorations":1,"minima_count":0,"best_merit":1.0,"timed_out":false,"interrupted":true}
 `
 
 func TestListEscapeWarnEventsFolded(t *testing.T) {
@@ -616,8 +620,9 @@ func TestListEscapeWarnEventsFolded(t *testing.T) {
 		t.Fatalf("unmarshal: %v\n%s", err, out)
 	}
 
-	// Two identical messages fold into one row; the message that differs keeps
-	// its own row, then the interrupt follows.
+	// Every copy of one message folds into its first row even when copies are
+	// separated by another message; the distinct message keeps its own row,
+	// then the interrupt follows.
 	if len(doc.Events) != 3 {
 		t.Fatalf("events = %d, want 3: %+v", len(doc.Events), doc.Events)
 	}
@@ -625,10 +630,10 @@ func TestListEscapeWarnEventsFolded(t *testing.T) {
 	if warn0.Event != runEventWarn || warn1.Event != runEventWarn {
 		t.Fatalf("events[0..1] = %q / %q, want warn / warn", warn0.Event, warn1.Event)
 	}
-	if warn0.Count != 2 {
-		t.Errorf("events[0].count = %d, want 2 log rows summarised", warn0.Count)
+	if warn0.Count != 3 {
+		t.Errorf("events[0].count = %d, want 3 log rows summarised across the whole log", warn0.Count)
 	}
-	if !strings.Contains(warn0.Detail, "only 3 valid grid rays") {
+	if !strings.Contains(warn0.Detail, "power_solve") {
 		t.Errorf("events[0].detail = %q, want the first occurrence's message", warn0.Detail)
 	}
 	if warn0.Elapsed == nil || *warn0.Elapsed != 60 {
@@ -638,7 +643,7 @@ func TestListEscapeWarnEventsFolded(t *testing.T) {
 	if warn1.Count != 1 {
 		t.Errorf("events[1].count = %d, want 1 (an unfolded warn reports its lone occurrence)", warn1.Count)
 	}
-	if !strings.Contains(warn1.Detail, "only 0 valid grid rays") {
+	if !strings.Contains(warn1.Detail, "cannot read AGF") {
 		t.Errorf("events[1].detail = %q, want the differing message", warn1.Detail)
 	}
 	if interrupt.Event != "interrupt" {
@@ -647,12 +652,40 @@ func TestListEscapeWarnEventsFolded(t *testing.T) {
 
 	// The human-readable formats show the fold as (×N) in the Detail cell.
 	table := string(runListGlobalLogCLI(t, escapeWarnLogFixture))
-	if !strings.Contains(table, "(×2)") {
-		t.Errorf("table output missing the fold count (×2):\n%s", table)
+	if !strings.Contains(table, "(×3)") {
+		t.Errorf("table output missing the fold count (×3):\n%s", table)
 	}
 	csv := string(runListGlobalLogCLI(t, escapeWarnLogFixture, "--format", "csv"))
-	if !strings.Contains(csv, "warn,") || !strings.Contains(csv, "(×2)") {
+	if !strings.Contains(csv, "warn,") || !strings.Contains(csv, "(×3)") {
 		t.Errorf("csv output missing the folded warn row:\n%s", csv)
+	}
+}
+
+// The per-evaluation back_focus diagnostics are omitted from Log Events: they
+// are not run-level events and on a long run their few dozen distinct messages
+// span tens of thousands of rows. A log whose only warnings are those gains no
+// section at all, while every other warning still appears.
+func TestListEscapeBackFocusWarnsOmitted(t *testing.T) {
+	log := `{"e":"00:00","t":"10:00:00","event":"start","max_cycles":1.00000e+01,"workers":1.00000e+00}
+{"e":"00:01","t":"10:00:01","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 0 valid grid rays; spot best focus of the surviving fields applied (event 1)"}
+{"e":"00:02","t":"10:00:02","event":"warn","message":"back_focus: 2 of 5 field(s) dropped: field 3 @ 587.600000 nm: only 0 valid grid rays; field 4 @ 587.600000 nm: only 0 valid grid rays; spot best focus of the surviving fields applied (event 1)"}
+{"e":"00:03","t":"10:00:03","event":"warn","message":"cannot parse AGF file SK18.agf: bad header"}
+{"e":"00:04","t":"10:00:04","event":"interrupt"}
+`
+	table := string(runListGlobalLogCLI(t, log))
+	if strings.Contains(table, "back_focus:") {
+		t.Errorf("back_focus warn must be omitted from Log Events:\n%s", table)
+	}
+	if !strings.Contains(table, "cannot parse AGF file") {
+		t.Errorf("a non-back_focus warn must stay in Log Events:\n%s", table)
+	}
+
+	// A log whose only run-level event was a back_focus warn has no section.
+	onlyBackFocus := `{"e":"00:00","t":"10:00:00","event":"start","max_cycles":1.00000e+01,"workers":1.00000e+00}
+{"e":"00:01","t":"10:00:01","event":"warn","message":"back_focus: 1 of 5 field(s) dropped: field 4 @ 587.600000 nm: only 0 valid grid rays; spot best focus of the surviving fields applied (event 1)"}
+`
+	if strings.Contains(string(runListGlobalLogCLI(t, onlyBackFocus, "--format", "json")), "\"events\"") {
+		t.Error("a log whose only warning was a back_focus diagnostic must not gain a Log Events section")
 	}
 }
 

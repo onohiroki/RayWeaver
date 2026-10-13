@@ -401,8 +401,10 @@ type GlobalWorkerRow struct {
 // measured resource state for `resource`, the message for `error` and for a
 // `warn`; Elapsed is the seconds from run start (of the first occurrence when
 // rows were folded). Count is how many log rows this one row summarises: it is
-// set for the events that fold when they repeat (`warn`) and left 0, hence
-// omitted, for the rest, which are always single occurrences.
+// set for a `warn`, which folds by message across the whole log (the recurring
+// per-evaluation `back_focus:` diagnostics are dropped entirely, see
+// backFocusWarnEvent), and left 0, hence omitted, for the rest, which are
+// always single occurrences.
 type GlobalEventRow struct {
 	Event   string   `json:"event" yaml:"event"`
 	Detail  string   `json:"detail,omitempty" yaml:"detail,omitempty"`

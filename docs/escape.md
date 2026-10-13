@@ -695,12 +695,14 @@ the saved `FILE<n>.yaml` for those. Everything else is: the minima's `--save`
 file names come from the `minimum_saved` events (no filesystem lookup), the
 infeasible basins are always present in the log even when the document hides
 them, and the run log also lists the signals, guard actions, errors and
-warnings. Both streams carry the minimum classification, the file names and the
+warnings (the per-evaluation `back_focus:` diagnostics excepted — see
+[list.md §11](list.md#11-global-section--escapepso-global-search-results)).
+Both streams carry the minimum classification, the file names and the
 infeasible basins; the compact `--verbose` stream still drops the fields outside
 its fixed key order (`status`, `retired`, `timed_out`, `interrupted`, the
 retirement `reason`, and the `Log Events` details such as `signal` and the
 `error` message), so the worker completion state and those event details need a
-full `--log` file — a `warn` row keeps its text either way, since `message` is
+full `--log` file — a listed `warn` row keeps its text either way, since `message` is
 part of the fixed key order. A capture that interleaves tagged plain-text
 warning lines with the JSONL (a run whose warnings did not take the routed
 `warn` path) is still read: the non-JSON lines are skipped and reported as a

@@ -838,7 +838,7 @@ What is recovered from a run log:
 | Infeasible Basins | the `minimum` events classified `infeasible_basin` (re-ranked by merit, with their `invalid_reason`), or the `global_complete.infeasible` array |
 | File column / File Directory | `minimum_saved` events (`index` + `file`), present when the run used `--save` |
 | Workers | `worker_done`, `worker_retired`, `timeout`, `interrupted`, `cycle` |
-| Log Events | `interrupt`, `interrupt_dls`, `force_quit`, `memory_limit`, `worker_retire`, `resource`, `error`, `warn` |
+| Log Events | `interrupt`, `interrupt_dls`, `force_quit`, `memory_limit`, `worker_retire`, `resource`, `error`, `warn` (folded by message; the per-evaluation `back_focus:` diagnostics omitted) |
 
 ### Infeasible basins
 
@@ -914,26 +914,36 @@ force_quit     -                                               135.000000
 | `worker_retire` | the resource guard's decision: `worker N reason=… cycle=M` |
 | `resource` | a periodic resource sample: `heap=… MB pressure=… compaction=…/s` |
 | `error` | the error message |
-| `warn` | the warning text, e.g. `back_focus: 1 of 5 field(s) dropped: …` |
+| `warn` | the warning text, except the per-evaluation `back_focus:` diagnostics (see below), e.g. `power_solve: surface 4 … has no free curvature variable` |
 
-**Repeated warnings are folded into one row.** A warning that recurs with the
-same text — the back-focus solve reports the fields it dropped on every throttled
-evaluation, which on a long run is tens of thousands of times — would otherwise
-dominate the section, so consecutive copies of one message become a single row
-carrying how many they were:
+**Repeated warnings are folded into one row, keyed by message across the whole
+log.** Every copy of one message becomes a single row carrying how many there
+were, at the position and elapsed time of its first occurrence:
 
 ```
 Log Events:
-Event   Detail                                                                   Elapsed[s]
-warn    back_focus: 1 of 5 field(s) dropped: field 4 @ 587.6 nm: only 3 … (×8710)  60.412639
+Event   Detail                                                            Elapsed[s]
+warn    power_solve: surface 4 (cfg1) has no free curvature variable (×3)   12.500000
 ```
 
-The comparison ignores the trailing `(event N)` throttle counter the warning
-appends, which is the only thing that differs between copies of one message; the
-row keeps the first occurrence's message and elapsed time. The `count` field of
-the structured (`--format json`/`yaml`) output carries the total, and only `warn`
-is folded — every other run-level event is rare and reports its own state, so
-each stays a row of its own.
+Only `warn` folds; every other run-level event is rare and reports its own
+state, so each stays a row of its own. The comparison ignores the trailing
+`(event N)` throttle counter a warning appends, which is the only thing that
+differs between copies of one message, and the `count` field of the structured
+(`--format json`/`yaml`) output carries the total.
+
+**The per-evaluation `back_focus:` warnings are omitted.** A `spot`/`wavefront`
+back-focus solve reports every field set it had to drop on *each* merit
+evaluation, so even folded to one row per message its handful of distinct texts
+would still fill the section (measured on one v53 run: 36 distinct messages
+spanning ~88 000 log rows), while describing a merit-evaluation artifact rather
+than a run-level event. The run-level totals are in `opt_results.back_focus`
+(`fields_used` / `fields_dropped` / `failures`), and the raw `--log` /
+`--verbose` stream keeps every message, so nothing is lost — but `list global`
+shows the back-focus drop diagnostic in no format. A log whose only warnings are
+those gains no `Log Events` section at all. Every other warning (a glass-file
+load failure, an unknown solve type, an unsettled `power_solve`) is rare and
+stays.
 
 The section is omitted when the log recorded none of these events, so a
 completed run without a resource guard and a pipeline document both leave it
@@ -1023,9 +1033,9 @@ and the `error` message), the guard reasons and the resource metrics, leaving
 only the event names. The minimum classification (`min_status`, `invalid_reason`),
 the `--save` file name and the infeasible-basin list are part of the fixed key
 order, so a compact capture separates the basins from the feasible minima and
-recovers the files just like a full `--log` does. A `warn` row keeps its text in
-both streams: `message` is part of the fixed key order precisely so the compact
-stream still carries what the warning said. Without the dropped fields the
+recovers the files just like a full `--log` does. A listed `warn` row keeps its
+text in both streams: `message` is part of the fixed key order precisely so the
+compact stream still carries what the warning said. Without the dropped fields the
 listing degrades gracefully: every worker is shown as `completed`. The compact
 clock `e` (`HH:MM`) is still used for the elapsed column, at minute resolution.
 

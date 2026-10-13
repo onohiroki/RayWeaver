@@ -288,28 +288,46 @@ func escapeEventDetail(name string, rec map[string]any) string {
 // signal events are rare and each carries its own state.
 var escapeLogFoldEvents = map[string]bool{runEventWarn: true}
 
-// foldRunEvent appends one run-level event row, folding it into the row just
-// recorded when it repeats the same event with the same message. The row keeps
-// the first occurrence's message and elapsed time, and Count carries how many
-// log rows it summarises (always >= 1 for a foldable event, so a lone warning
-// reports 1 and a folded run reports its total).
-func foldRunEvent(events []GlobalEventRow, row GlobalEventRow) []GlobalEventRow {
+// foldRunEvent appends one run-level event row, folding a repeated warning into
+// the row already recorded for the same message anywhere in the log, not only
+// into the row just before it. An 8-worker run emits the same diagnostic in
+// interleaved bursts (and on every merit evaluation), so consecutive-only
+// folding left tens of thousands of rows; keying by the normalised message
+// bounds the section to one row per distinct warning. folded maps a normalised
+// warn message to its row's index in events, so the row keeps the position and
+// elapsed time of the first occurrence while Count accumulates every copy.
+// Lifecycle events (interrupt, resource, error, ...) never fold: each carries
+// its own state.
+func foldRunEvent(events []GlobalEventRow, row GlobalEventRow, folded map[string]int) []GlobalEventRow {
 	if !escapeLogFoldEvents[row.Event] {
 		return append(events, row)
 	}
-	row.Count = 1
-	if n := len(events); n > 0 && events[n-1].Event == row.Event &&
-		runEventKey(events[n-1].Detail) == runEventKey(row.Detail) {
-		events[n-1].Count++
+	key := row.Event + "\x00" + runEventKey(row.Detail)
+	if i, ok := folded[key]; ok {
+		events[i].Count++
 		return events
 	}
+	row.Count = 1
+	folded[key] = len(events)
 	return append(events, row)
 }
 
-// runEventKey normalises a run-level event detail for the fold comparison. The
-// back-focus warning appends its throttle sequence as a trailing " (event N)",
-// which is what differs between consecutive copies of one otherwise identical
-// message; dropping that suffix lets them compare equal. Any other detail — or
+// backFocusWarnEvent reports whether a structured warning is the per-evaluation
+// back-focus diagnostic (`back_focus: …`) the spot/wavefront hard solve emits
+// for every dropped field set, on every merit evaluation. On a long run its few
+// dozen distinct messages still span tens of thousands of rows — it describes a
+// merit-evaluation artifact, not a run-level event — so `list global` omits it.
+// The run-level totals live in opt_results.back_focus, and the raw --log /
+// --verbose stream keeps every message. Other warnings (a glass-file load
+// failure, an unknown solve type, an unsettled power_solve) are rare and stay.
+func backFocusWarnEvent(detail string) bool {
+	return strings.HasPrefix(detail, "back_focus:")
+}
+
+// runEventKey normalises a run-level event detail for the fold comparison. A
+// throttled warning appends its sequence as a trailing " (event N)", which is
+// what differs between copies of one otherwise identical message; dropping that
+// suffix lets them compare equal. Any other detail — or
 // one without a numeric sequence in the expected shape — is returned unchanged.
 func runEventKey(detail string) string {
 	const prefix = " (event "
@@ -383,6 +401,7 @@ func buildGlobalListDataFromLog(data []byte) globalListData {
 	// minimum_saved event precedes the matching minimum event.
 	savedFiles := map[int]string{}
 	workers := map[int]*globalLogWorker{}
+	foldedWarns := map[string]int{}
 	var minOrder int
 
 	workerFor := func(id int) *globalLogWorker {
@@ -411,13 +430,17 @@ func buildGlobalListDataFromLog(data []byte) globalListData {
 		elapsed, _ := asNum(rec["elapsed"])
 		name, _ := rec["event"].(string)
 		// Every run-level event is listed in log order, including the ones
-		// whose payload also drives the summary below.
+		// whose payload also drives the summary below. The recurring
+		// back-focus diagnostics are dropped (see backFocusWarnEvent).
 		if globalLogRunEvents[name] {
-			d.Events = foldRunEvent(d.Events, GlobalEventRow{
-				Event:   name,
-				Detail:  escapeEventDetail(name, rec),
-				Elapsed: elapsedSeconds(rec),
-			})
+			detail := escapeEventDetail(name, rec)
+			if name != runEventWarn || !backFocusWarnEvent(detail) {
+				d.Events = foldRunEvent(d.Events, GlobalEventRow{
+					Event:   name,
+					Detail:  detail,
+					Elapsed: elapsedSeconds(rec),
+				}, foldedWarns)
+			}
 		}
 		switch rec["event"] {
 		case "params":
