@@ -1,5 +1,7 @@
 # RayWeaver
 
+You describe the lens. RayWeaver traces the rays.
+
 RayWeaver is a CLI ray tracing engine for optical systems, written in Go.
 
 ## Features
