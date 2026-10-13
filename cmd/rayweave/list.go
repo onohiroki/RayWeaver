@@ -494,6 +494,14 @@ func runList(data []byte) {
 		runListGlobalLog(data, args.positional, *format)
 		return
 	}
+	// JSON Lines that carries no escape/pso event (an `optimize --log` stream,
+	// say) must not fall through to the YAML parser: it would either error with
+	// a confusing message or, when the lines happen to parse as YAML scalars,
+	// report "no global result" with exit 0.
+	if looksLikeJSONLObjects(data) {
+		errOut("Error: input is JSON Lines but carries no escape/pso event; `list` cannot read it (use `query --jsonl` for a generic JSONL stream)")
+		os.Exit(1)
+	}
 
 	// defaultListTargets is the target set of the bare `list` invocation; the
 	// explicit "default" keyword expands to it in place.

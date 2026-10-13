@@ -25,7 +25,7 @@ rayweave escape extract --index N < escape-output.yaml
 | `--glass-dir DIR` | AGF glass catalog directory |
 | `--stream BOOL` | stream the pipeline document to stdout as the run progresses: `true` (default) or `false` for the one-shot write performed after the run (see [Streaming output](#streaming-output)) |
 | `--clean-dls BOOL` | run the clean DLS that closes each cycle: `true` (default) or `false` (see [Switching the clean DLS off](#switching-the-clean-dls-off)) |
-| `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `explored`, `recorded`, `best_merit`, `cycles`, `explorations`, `minima`, `message`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out` and `interrupted` are omitted — they are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves. While a stream is active the optimizer's and the glass package's non-fatal warnings are routed into it as `warn` events carrying `message`, instead of the tagged plain-text lines they would otherwise write to stderr next to the JSONL — so a captured `--verbose` stream stays pure JSON Lines and `list global`, `jq` and `query --jsonl` can all read it) |
+| `--verbose` | print escape progress to stderr as **compact** JSONL (keys follow the fixed order `cycle`, `e`, `t`, `event`, `merit`, `worker`, `index`, `kind`, `dls_status`, `phase`, `distance_threshold`, `h`, `h_mult`, `w`, `w_mult`, `max_cycles`, `max_seconds`, `workers`, `explored`, `recorded`, `best_merit`, `cycles`, `explorations`, `minima`, `min_status`, `invalid_reason`, `file`, `infeasible_basins`, `infeasible`, `message`; floats are 6-significant-figure exponent notation, `e` is elapsed since run start as `HH:MM`, `t` is wall-clock `HH:MM:SS`; `status`, `signal`, `timed_out`, `interrupted` and the retirement `reason` are omitted — `status`/`timed_out`/`interrupted` are conveyed by the `cycle`/`timeout`/`interrupt`/`interrupted` events themselves. The minimum classification (`min_status`, `invalid_reason`), the `--save` file name (`file`) and the infeasible-basin list are kept, so `list global` recovers the basins and the file names from a `--verbose` capture too. While a stream is active the optimizer's and the glass package's non-fatal warnings are routed into it as `warn` events carrying `message`, instead of the tagged plain-text lines they would otherwise write to stderr next to the JSONL — so a captured `--verbose` stream stays pure JSON Lines and `list global`, `jq` and `query --jsonl` can all read it) |
 | `--log FILE` | write the **full** JSONL progress stream to `FILE` (same fields as before — full-precision floats, RFC3339 `time`, `elapsed` seconds, `status`/`signal`/`timed_out`/`interrupted` included — with keys in the same fixed order followed by the remaining keys alphabetically) |
 | `--save FILE` | save every discovered local minimum to `FILE0.yaml`, `FILE1.yaml`, … (see [Saving minima](#saving-minima)) |
 | `--power-solve` | insert the power-preserving glass phase between each escape and clean DLS: locks every variable except the glass dispersions, emphasises the config's chromatic merit terms (scaled by `power_solve.color_scale`), keeps a cheap geometric guardrail, and holds the element powers fixed |
@@ -695,12 +695,16 @@ the saved `FILE<n>.yaml` for those. Everything else is: the minima's `--save`
 file names come from the `minimum_saved` events (no filesystem lookup), the
 infeasible basins are always present in the log even when the document hides
 them, and the run log also lists the signals, guard actions, errors and
-warnings. The compact `--verbose` stream drops every field outside the fixed key
-order (`min_status`, `invalid_reason`, `retired`, `timed_out`, `interrupted`,
-`reason`, `file`, and the `Log Events` details such as `signal` and the `error`
-message), so a full `--log` file is needed to classify the minima, the basins and
-those events — a `warn` row keeps its text either way, since `message` is part of
-the fixed key order. See
+warnings. Both streams carry the minimum classification, the file names and the
+infeasible basins; the compact `--verbose` stream still drops the fields outside
+its fixed key order (`status`, `retired`, `timed_out`, `interrupted`, the
+retirement `reason`, and the `Log Events` details such as `signal` and the
+`error` message), so the worker completion state and those event details need a
+full `--log` file — a `warn` row keeps its text either way, since `message` is
+part of the fixed key order. A capture that interleaves tagged plain-text
+warning lines with the JSONL (a run whose warnings did not take the routed
+`warn` path) is still read: the non-JSON lines are skipped and reported as a
+count. See
 [list.md §11](list.md#11-global-section--escapepso-global-search-results).
 
 The `Log Events` section of `list global` is the quickest way to see why a run

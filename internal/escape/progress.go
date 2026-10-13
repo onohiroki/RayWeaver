@@ -104,6 +104,12 @@ var eventKeyOrder = []string{
 	"dls_status", "phase", "distance_threshold", "h", "h_mult", "w", "w_mult",
 	"max_cycles", "max_seconds", "workers", "explored", "recorded", "best_merit",
 	"cycles", "explorations", "minima",
+	// Minimum classification, the --save file name and the infeasible-basin
+	// list: kept in the compact stream too, so `list global` can separate the
+	// basins from the feasible minima and recover the saved file names from a
+	// captured --verbose run — without them a --verbose capture reports every
+	// discovered point as a feasible minimum and drops the File column.
+	"min_status", "invalid_reason", "file", "infeasible_basins", "infeasible",
 	// PSO-specific keys.
 	"iter", "improve", "restarts", "gbest_merit", "gbest_true",
 	"swarm_mean", "swarm_min", "swarm_max",

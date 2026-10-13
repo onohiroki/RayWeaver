@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/escape"
 	"gopkg.in/yaml.v3"
 )
 
@@ -67,6 +69,146 @@ func TestLooksLikeEscapeJSONL(t *testing.T) {
 		"{\"iter\":1.00000e+01,\"gbest_merit\":1.00000e-01,\"phase\":\"pso\",\"event\":\"pso_iter\"}\n"
 	if !looksLikeGlobalJSONL([]byte(psoLog)) {
 		t.Error("pso run log was not recognised as JSONL")
+	}
+}
+
+// A legacy capture interleaves tagged plain-text warning lines with the compact
+// stream. Those lines must not disqualify the whole input: the run log is still
+// recognised and read, with the stray lines skipped. JSON Lines that carries no
+// escape/pso event is a different case and must be reported, not read as YAML.
+func TestLooksLikeMixedGlobalJSONL(t *testing.T) {
+	mixed := `{"e":"00:00","t":"10:00:00","event":"params","h":0.1}
+rayweave[escape]: back_focus: 1 of 5 field(s) dropped (event 1)
+{"e":"00:01","t":"10:00:01","event":"minimum","index":0,"merit":0.004,"min_status":"feasible_local_minimum"}
+`
+	if !looksLikeGlobalJSONL([]byte(mixed)) {
+		t.Fatal("a mixed plain-text/JSON capture was not recognised as a run log")
+	}
+	if looksLikeJSONLObjects([]byte(mixed)) {
+		t.Error("a mixed capture must not count as plain JSON Lines")
+	}
+
+	optLog := `{"iter":0,"merit":0.5}
+{"iter":1,"merit":0.2}
+`
+	if looksLikeGlobalJSONL([]byte(optLog)) {
+		t.Error("an optimize --log stream was recognised as a run log")
+	}
+	if !looksLikeJSONLObjects([]byte(optLog)) {
+		t.Error("a pure JSON Lines stream was not identified as such")
+	}
+	if looksLikeJSONLObjects([]byte(singletYAML)) {
+		t.Error("a pipeline YAML document was identified as JSON Lines")
+	}
+	if looksLikeJSONLObjects([]byte(`{"global_result": {"minima": []}}`)) {
+		t.Error("a single-line JSON document must not be taken for a JSON Lines stream")
+	}
+}
+
+// The mixed capture used to fall through to the YAML parser and be reported as
+// having no global result at all (exit 0). It must now read the run log.
+func TestListGlobalReadsMixedCapture(t *testing.T) {
+	mixed := `{"e":"00:00","t":"10:00:00","event":"params","h":0.10000e+00,"distance_threshold":5.00000e-02}
+rayweave[escape]: back_focus: 1 of 5 field(s) dropped (event 1)
+{"e":"00:05","t":"10:00:05","event":"minimum","index":0,"merit":4.00000e-03,"min_status":"feasible_local_minimum","invalid_reason":""}
+{"e":"00:05","t":"10:00:05","event":"minimum_saved","index":0,"merit":4.00000e-03,"file":"min0.yaml"}
+`
+	out := runListGlobalLogCLI(t, mixed, "--format", "json")
+	var doc struct {
+		Minima []struct {
+			Index int     `json:"index"`
+			Merit float64 `json:"merit"`
+			File  string  `json:"file"`
+		} `json:"minima"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(doc.Minima) != 1 || doc.Minima[0].File != "min0.yaml" {
+		t.Fatalf("minima = %+v, want the one saved feasible minimum", doc.Minima)
+	}
+}
+
+// A compact (--verbose) run log now carries min_status/invalid_reason/file and
+// the infeasible array, so `list global` classifies the basins and recovers the
+// --save file names from it instead of reporting every point as feasible.
+func TestListGlobalCompactClassification(t *testing.T) {
+	log := `{"e":"00:00","t":"10:00:00","event":"start","max_cycles":1.00000e+01,"workers":1.00000e+00}
+{"e":"00:01","t":"10:00:01","event":"minimum","index":0,"merit":4.00000e-03,"min_status":"feasible_local_minimum","invalid_reason":""}
+{"e":"00:01","t":"10:00:01","event":"minimum_saved","index":0,"merit":4.00000e-03,"file":"min0.yaml"}
+{"e":"00:02","t":"10:00:02","event":"minimum","index":1,"merit":9.00000e-01,"min_status":"infeasible_basin","invalid_reason":"glass_hull_violation"}
+{"e":"00:02","t":"10:00:02","event":"minimum_saved","index":1,"merit":9.00000e-01,"file":"min1.yaml"}
+{"e":"00:03","t":"10:00:03","event":"global_complete","workers":1,"cycles":1,"explorations":2,"minima_count":1,"best_merit":4.00000e-03,"timed_out":false,"interrupted":false,"minima":[{"index":0,"merit":4.00000e-03,"best":true}],"infeasible_basins":1,"infeasible":[{"index":0,"merit":9.00000e-01,"reason":"glass_hull_violation"}]}
+`
+	out := runListGlobalLogCLI(t, log, "--format", "json")
+	var doc struct {
+		BestMerit float64 `json:"best_merit"`
+		Minima    []struct {
+			Merit  float64 `json:"merit"`
+			Status string  `json:"status"`
+			File   string  `json:"file"`
+		} `json:"minima"`
+		Infeasible []struct {
+			Merit  float64 `json:"merit"`
+			Reason string  `json:"reason"`
+			File   string  `json:"file"`
+		} `json:"infeasible_basins"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(doc.Minima) != 1 || doc.Minima[0].Status != "feasible_local_minimum" || doc.Minima[0].File != "min0.yaml" {
+		t.Fatalf("minima = %+v, want one classified feasible minimum with its file", doc.Minima)
+	}
+	if len(doc.Infeasible) != 1 || doc.Infeasible[0].Reason != "glass_hull_violation" || doc.Infeasible[0].File != "min1.yaml" {
+		t.Fatalf("infeasible = %+v, want the basin with its reason and file", doc.Infeasible)
+	}
+	if doc.BestMerit != 0.004 {
+		t.Errorf("best_merit = %v, want 0.004 (the feasible minimum, not the basin)", doc.BestMerit)
+	}
+}
+
+// Round trip through the reporter's own compact writer: the fixed key order and
+// the reader's field names must not drift apart, or a captured --verbose stream
+// would silently lose the classification, files and basins again.
+func TestListGlobalCompactRoundTrip(t *testing.T) {
+	var buf bytes.Buffer
+	p := escape.NewProgress()
+	p.AddCompactWriter(&buf)
+	p.Event("params", map[string]any{"h": 2.0, "w": 1.0, "h_mult": 2.0, "w_mult": 1.3, "distance_threshold": 0.05})
+	p.Event("start", map[string]any{"workers": 1, "max_cycles": 3, "max_seconds": 60.0})
+	p.Event("minimum", map[string]any{"index": 0, "merit": 0.004, "kind": "new", "min_status": "feasible_local_minimum", "invalid_reason": ""})
+	p.Event("minimum_saved", map[string]any{"index": 0, "merit": 0.004, "file": "min0.yaml", "new": true, "version": 0})
+	p.Event("minimum", map[string]any{"index": 1, "merit": 0.9, "kind": "new", "min_status": "infeasible_basin", "invalid_reason": "glass_hull_violation"})
+	p.Event("minimum_saved", map[string]any{"index": 1, "merit": 0.9, "file": "min1.yaml", "new": true, "version": 0})
+	p.Event("global_complete", map[string]any{
+		"workers": 1, "cycles": 1, "explorations": 2, "minima_count": 1,
+		"best_merit": 0.004, "timed_out": false, "interrupted": false,
+		"minima":            []any{map[string]any{"index": 0, "merit": 0.004, "best": true}},
+		"infeasible_basins": 1,
+		"infeasible":        []any{map[string]any{"index": 0, "merit": 0.9, "reason": "glass_hull_violation"}},
+	})
+
+	out := runListGlobalLogCLI(t, buf.String(), "--format", "json")
+	var doc struct {
+		Minima []struct {
+			Merit  float64 `json:"merit"`
+			Status string  `json:"status"`
+			File   string  `json:"file"`
+		} `json:"minima"`
+		Infeasible []struct {
+			Reason string `json:"reason"`
+			File   string `json:"file"`
+		} `json:"infeasible_basins"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, out)
+	}
+	if len(doc.Minima) != 1 || doc.Minima[0].Status != "feasible_local_minimum" || doc.Minima[0].File != "min0.yaml" {
+		t.Fatalf("minima = %+v, want the classified feasible minimum with its file", doc.Minima)
+	}
+	if len(doc.Infeasible) != 1 || doc.Infeasible[0].Reason != "glass_hull_violation" {
+		t.Fatalf("infeasible = %+v, want the basin with its reason", doc.Infeasible)
 	}
 }
 
@@ -770,9 +912,10 @@ func TestListEscapeFromLogCompleteOnlyFallback(t *testing.T) {
 }
 
 func TestListEscapeFromLogCompactDropsFields(t *testing.T) {
-	// A compact --verbose stream loses min_status and the worker_done flags
-	// (they are outside the fixed key order), so the listing degrades
-	// gracefully instead of failing.
+	// A legacy compact capture from before the classification fields entered
+	// the fixed key order (or one whose warnings took the plain-text path)
+	// carries no min_status, and the worker_done flags are outside the fixed
+	// key order, so the listing degrades gracefully instead of failing.
 	log := `{"cycle":0,"e":"00:00","t":"10:00:00","event":"params","h":1.00000e-01,"w":5.00000e-01,"h_mult":2.00000e+00,"w_mult":1.30000e+00,"distance_threshold":1.00000e-01}
 {"e":"00:00","t":"10:00:00","event":"start","max_cycles":1.00000e+01,"workers":4.00000e+00}
 {"cycle":0,"e":"00:01","t":"10:00:01","event":"minimum","cycle":0,"worker":0,"index":0,"merit":1.23400e-03}

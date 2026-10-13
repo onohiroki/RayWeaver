@@ -856,7 +856,9 @@ Options:
   --verbose        print escape progress to stderr as compact JSONL (abbreviated
                    values: fixed key order, floats as 6-digit exponent, wall
                    clock as HH:MM:SS, elapsed as HH:MM,
-                   status/signal/timed_out/interrupted omitted)
+                   status/signal/timed_out/interrupted/reason omitted; the
+                   minimum classification, file names and infeasible basins are
+                   kept, so "list global" reads a --verbose capture)
   --log FILE       write the full JSONL progress stream to FILE (same fields,
                    keys ordered as the compact form)
   --debug          emit all DLS-internal JSONL events (iter, final,
@@ -1672,8 +1674,8 @@ and implies --auto-aperture, --all-glasses, and --roles):
              the best solution. From a pipeline document the per-minimum file
              names and element powers are shown as well (file directory when all
              minima share the same path); a run log recovers the file names
-             from its minimum_saved events, and a compact --verbose log omits
-             the classification fields.
+             from the log itself — both the --log file and a captured --verbose
+             stream — and the minimum classification with it.
   focus      image-plane comparison results from focus_comparison (requires
              focus mtf / focus psf / focus spot output). Auto-detects the mtf,
              psf, spot or through_focus sub-section and renders the per-(field,

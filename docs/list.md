@@ -710,11 +710,15 @@ accepts **two kinds of input, detected automatically**:
 - an **escape/pso JSONL run log** — the file written by `escape --log FILE` /
   `pso --log FILE`, or the `--verbose` stream captured from stderr.
 
-A run log is recognised when every non-empty line is a JSON object and at least
-one carries one of the event names the search emits (`params`, `start`, `cycle`,
+A run log is recognised when at least one non-empty line is a JSON object
+carrying one of the event names the search emits (`params`, `start`, `cycle`,
 `minimum`, `worker_done`, `worker_retired`, `timeout`, `interrupt`,
-`interrupt_dls`, `done`, `global_complete`, the `pso_*` events, …). A pipeline
-document and an `optimize --log` stream never match.
+`interrupt_dls`, `done`, `global_complete`, the `pso_*` events, …). Non-JSON
+lines are skipped and their total is reported on stderr, so a legacy capture
+that interleaves tagged plain-text warning lines with the compact stream is
+still read. A pipeline document never matches, and a stream that is JSON Lines
+but carries no such event (an `optimize --log`, say) is rejected with an error
+instead of being parsed as YAML.
 
 ```sh
 rayweave escape --log run.jsonl --save minima < lens.yaml > out.yaml
@@ -872,9 +876,9 @@ use) and the `file` it wrote. The latest event for an index wins, so an improved
 minimum keeps its live `FILE N.yaml` (the archived `FILE N.<version>.yaml` is
 not reported).
 
-Two conditions: the run must have used `--save` (otherwise no `minimum_saved`
-event exists), and the stream must be a full `--log` — the compact `--verbose`
-stream drops `file`. When no file is recovered the column is omitted entirely.
+The only condition is that the run used `--save` (otherwise no `minimum_saved`
+event exists); both the full `--log` file and the compact `--verbose` stream
+carry `file`. When no file is recovered the column is omitted entirely.
 `File Directory` appears in the `Global Result` section when every saved file
 sits in one real directory (a working-directory-relative name reports nothing).
 
@@ -1008,20 +1012,22 @@ log, not a failure to read it:
   and `w_span` for an `escape` run, plus `stall_*`, `initial_perturb`,
   `clean_dls`, `fingerprint_distance_threshold` and the variable weights),
   which are shown for a pipeline document and skipped here;
-- the saved file names when the run used no `--save` (or came from a compact
-  stream — see [Recovered file names](#recovered-file-names)).
+- the saved file names when the run used no `--save` (see
+  [Recovered file names](#recovered-file-names)).
 
 The compact `--verbose` stream additionally drops every field outside the fixed
-key order, so `min_status`, `invalid_reason`, `retired`, `timed_out`,
-`interrupted` and `reason` are only recoverable from a full `--log` file — and
+key order, so the worker completion flags (`retired`, `timed_out`, `interrupted`)
+and the retirement `reason` are only recoverable from a full `--log` file — and
 the same applies to the `Log Events` details of `interrupt`/`error` (the `signal`
 and the `error` message), the guard reasons and the resource metrics, leaving
-only the event names. A `warn` row keeps its text in both streams: `message` is
-part of the fixed key order precisely so the compact stream still carries what
-the warning said. Without the dropped fields the listing degrades gracefully:
-minima are shown as classified feasible (so basins land in `Local Minima` rather
-than `Infeasible Basins`), and every worker as `completed`. The compact clock `e`
-(`HH:MM`) is still used for the elapsed column, at minute resolution.
+only the event names. The minimum classification (`min_status`, `invalid_reason`),
+the `--save` file name and the infeasible-basin list are part of the fixed key
+order, so a compact capture separates the basins from the feasible minima and
+recovers the files just like a full `--log` does. A `warn` row keeps its text in
+both streams: `message` is part of the fixed key order precisely so the compact
+stream still carries what the warning said. Without the dropped fields the
+listing degrades gracefully: every worker is shown as `completed`. The compact
+clock `e` (`HH:MM`) is still used for the elapsed column, at minute resolution.
 
 ---
 

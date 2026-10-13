@@ -16,21 +16,22 @@ import (
 // This file implements the `list global` reader for an escape/pso JSONL run log
 // (`escape --log FILE` / `pso --log FILE`, or the `--verbose` stream captured
 // from stderr). The log is detected automatically: a run log is recognised when
-// every non-empty line is a JSON object and at least one carries one of the
-// event names the escape search emits. A pipeline YAML document (and an
-// `optimize --log` stream, which has no `event` key) never matches.
+// at least one non-empty line is a JSON object carrying one of the event names
+// the escape search emits. Non-JSON lines are ignored, so a legacy capture that
+// interleaved tagged plain-text warning lines with the compact stream still
+// reads; a pipeline YAML document (and an `optimize --log` stream, which has no
+// `event` key) never matches.
 //
 // The reconstruction is best-effort by construction: the pipeline document
 // carries data the progress stream does not. Recoverable: the escape bump
 // parameters, the run budget, the run aggregate, every discovered minimum's
-// merit and classification, and each worker's completion state and timing. Not
-// recoverable: the per-minimum `--save` file names and the element powers
-// (both need the surface data, which the log never contains), and the tuning
-// parameters that are not part of the `params` event (escape_iter_frac, w_span,
-// stall_*, initial_perturb, the fingerprint threshold, the variable weights).
-// The compact `--verbose` stream additionally drops the fields outside the fixed
-// key order (min_status, retired, timed_out, interrupted, reason), so those are
-// reconstructed only from a full `--log` file.
+// merit and classification, the `--save` file names and each worker's timing.
+// Not recoverable: the per-minimum element powers (which need the surface data
+// the log never contains), the tuning parameters that are not part of the
+// `params` event (escape_iter_frac, w_span, stall_*, initial_perturb, the
+// fingerprint threshold, the variable weights), and the worker completion flags
+// (retired, timed_out, interrupted) and reason, which the compact `--verbose`
+// stream drops as fields outside the fixed key order.
 
 // globalLogEventNames are the event names emitted by internal/escape
 // (including the resource guard and the cmd-level summary) and internal/pso.
@@ -61,8 +62,44 @@ var globalLogEventNames = map[string]bool{
 }
 
 // looksLikeGlobalJSONL reports whether data is an escape/pso JSONL run log.
+// Non-JSON lines are ignored rather than disqualifying the whole input: a
+// captured --verbose stream from a run whose warnings took the tagged
+// plain-text path (or any other stray stderr line) is still a run log, and the
+// reader skips those lines. A pipeline YAML document, an `optimize --log`
+// stream and arbitrary JSONL carry no recognised event and never match.
 func looksLikeGlobalJSONL(data []byte) bool {
 	lines, recognized := 0, 0
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		lines++
+		if !strings.HasPrefix(line, "{") || !strings.HasSuffix(line, "}") {
+			continue
+		}
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		if ev, ok := rec["event"].(string); ok && globalLogEventNames[ev] {
+			recognized++
+		}
+	}
+	return lines > 0 && recognized > 0
+}
+
+// looksLikeJSONLObjects reports whether data is a JSON Lines stream — several
+// non-empty lines, every one a JSON object — that carries no escape/pso event.
+// `list` rejects such an input explicitly instead of silently falling through
+// to YAML parsing (where a JSONL stream either errors or, worse, parses to an
+// empty document and reports "no global result" with exit 0). A single-line
+// JSON object is left alone: it is a valid YAML/JSON pipeline document, not a
+// stream.
+func looksLikeJSONLObjects(data []byte) bool {
+	lines, objs := 0, 0
 	sc := bufio.NewScanner(bytes.NewReader(data))
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -78,11 +115,33 @@ func looksLikeGlobalJSONL(data []byte) bool {
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			return false
 		}
-		if ev, ok := rec["event"].(string); ok && globalLogEventNames[ev] {
-			recognized++
-		}
+		objs++
 	}
-	return lines > 0 && recognized > 0
+	return lines > 1 && objs == lines
+}
+
+// parseJSONLForLog decodes a run log that may interleave non-JSON lines with
+// the records (see looksLikeGlobalJSONL). Unlike parseJSONL it does not report
+// each bad line — a legacy capture can hold tens of thousands of tagged
+// plain-text warnings — and returns how many non-empty lines it skipped so the
+// caller can warn once. The scanner buffer matches looksLikeGlobalJSONL's, so a
+// very long event line is never silently dropped as a parse failure.
+func parseJSONLForLog(data []byte) (records []any, skipped int) {
+	sc := bufio.NewScanner(bytes.NewReader(data))
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		var v any
+		if err := json.Unmarshal([]byte(line), &v); err != nil {
+			skipped++
+			continue
+		}
+		records = append(records, v)
+	}
+	return records, skipped
 }
 
 // globalLogMinimum is the aggregated record of one store entry, keyed in the
@@ -300,7 +359,10 @@ func globalLogTargetError(positional []string) error {
 // wins: a minimum's merit is the best one recorded for its discovery index, and
 // a worker's counts are the ones from its completion event.
 func buildGlobalListDataFromLog(data []byte) globalListData {
-	events := parseJSONL(data)
+	events, skipped := parseJSONLForLog(data)
+	if skipped > 0 {
+		errOut("Warning: skipped %d non-JSON line(s) while reading the run log", skipped)
+	}
 	d := globalListData{Found: len(events) > 0, FromLog: true}
 	if !d.Found {
 		return d

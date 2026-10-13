@@ -974,6 +974,49 @@ func TestProgressCompactAllEvents(t *testing.T) {
 	}
 }
 
+// The compact stream must keep the minimum classification, the --save file name
+// and the infeasible-basin list: `list global` reads a captured --verbose stream
+// as a run log, and without these it cannot separate an infeasible basin from a
+// feasible minimum or recover the saved file names.
+func TestProgressCompactKeepsGlobalClassification(t *testing.T) {
+	var compact bytes.Buffer
+	p := NewProgress()
+	p.AddCompactWriter(&compact)
+
+	p.Event("minimum", map[string]any{
+		"index": 0, "merit": 0.004, "kind": "new",
+		"min_status": "infeasible_basin", "invalid_reason": "insufficient_field_throughput",
+	})
+	got := string(bytes.TrimSpace(compact.Bytes()))
+	for _, want := range []string{
+		`"min_status":"infeasible_basin"`, `"invalid_reason":"insufficient_field_throughput"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("minimum compact missing %s: %s", want, got)
+		}
+	}
+
+	compact.Reset()
+	p.Event("minimum_saved", map[string]any{"index": 1, "merit": 0.002, "file": "min1.yaml"})
+	got = string(bytes.TrimSpace(compact.Bytes()))
+	if !strings.Contains(got, `"file":"min1.yaml"`) {
+		t.Fatalf("minimum_saved compact missing the file name: %s", got)
+	}
+
+	compact.Reset()
+	p.Event("global_complete", map[string]any{
+		"workers": 2, "cycles": 3, "minima_count": 1,
+		"infeasible_basins": 1,
+		"infeasible":        []any{map[string]any{"index": 0, "merit": 0.9, "reason": "glass_hull_violation"}},
+	})
+	got = string(bytes.TrimSpace(compact.Bytes()))
+	for _, want := range []string{`"infeasible_basins":1`, `"reason":"glass_hull_violation"`} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("global_complete compact missing %s: %s", want, got)
+		}
+	}
+}
+
 func TestBuildParamsAppliesExecutionTuning(t *testing.T) {
 	early := false
 	cfg := types.EscapeConfig{
