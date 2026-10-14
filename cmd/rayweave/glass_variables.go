@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"os"
 	"strconv"
 	"strings"
 
@@ -88,33 +90,179 @@ func hasGlassVariable(input *types.Input) bool {
 func applyGlassVariables(input *types.Input, gc *glass.Catalog) {
 	if len(input.Configs) == 0 {
 		errOut("Error: --glass-variables requires at least one config (or chief.fields + surfaces)")
+		os.Exit(1)
 	}
+
+	// A multi-config (zoom) run keeps one shared nd/vd pair per physical element,
+	// bound to that element's surface in every active config, so the glass is a
+	// single degree of freedom shared across zoom positions rather than one per
+	// position. A single-config run keeps the optimization.variables form.
+	if activeConfigCount(input) > 1 {
+		shared := buildSharedGlassVariables(input, gc)
+		if len(shared) == 0 {
+			errOut("Error: --glass-variables found no refractive lens elements to optimize")
+			os.Exit(1)
+		}
+		input.Optimization.SharedVariables = append(input.Optimization.SharedVariables, shared...)
+		return
+	}
+
 	vars := buildGlassVariables(input, gc)
 	if len(vars) == 0 {
 		errOut("Error: --glass-variables found no refractive lens elements to optimize")
+		os.Exit(1)
+	}
+	input.Optimization.Variables = append(input.Optimization.Variables, vars...)
+}
+
+// activeConfigCount returns the number of active configs.
+func activeConfigCount(input *types.Input) int {
+	n := 0
+	for i := range input.Configs {
+		if input.Configs[i].Active {
+			n++
+		}
+	}
+	return n
+}
+
+// buildSharedGlassVariables returns one shared nd/vd variable pair per physical
+// lens element (a representative surface ID), bound to that surface in every
+// active config. All active configs of a zoom share the surface layout, so the
+// element IDs are taken from the first active config.
+func buildSharedGlassVariables(input *types.Input, gc *glass.Catalog) []types.SharedVariable {
+	var active []int
+	for i := range input.Configs {
+		if input.Configs[i].Active {
+			active = append(active, i)
+		}
+	}
+	if len(active) == 0 {
+		return nil
 	}
 
-	// Single-config YAML expresses variables as optimization.variables; a
-	// multi-config run uses local_variables. Choose by the number of active
-	// configs, matching the normal config-building rule.
-	cfgID := ""
-	multi := false
-	for _, cc := range input.Configs {
-		if !cc.Active {
+	var ids []int
+	for _, role := range paraxial.GlassRoles(input.Configs[active[0]].Surfaces, gc) {
+		if len(role.SurfaceIDs) > 0 {
+			ids = append(ids, role.SurfaceIDs[0])
+		}
+	}
+
+	var out []types.SharedVariable
+	for _, id := range ids {
+		var bindings []types.SharedVariableBinding
+		bound := make(map[string][]string) // param -> binding configs
+		for _, ci := range active {
+			cfg := &input.Configs[ci]
+			if !surfaceHasGlassID(cfg.Surfaces, id) {
+				continue
+			}
+			for _, param := range []string{"nd", "vd"} {
+				bindings = append(bindings, types.SharedVariableBinding{Config: cfg.ID, ID: id, Param: param})
+				bound[param] = append(bound[param], cfg.ID)
+			}
+		}
+		if len(bound["nd"]) == 0 {
 			continue
 		}
-		if cfgID != "" {
-			multi = true
-			break
-		}
-		cfgID = cc.ID
+		out = append(out,
+			types.SharedVariable{Name: fmt.Sprintf("s%d_nd", id), Min: 1.4, Max: 2.0, Active: true, Bindings: keepParam(bindings, "nd")},
+			types.SharedVariable{Name: fmt.Sprintf("s%d_vd", id), Min: 20.0, Max: 90.0, Active: true, Bindings: keepParam(bindings, "vd")},
+		)
 	}
+	return out
+}
 
-	if multi {
-		input.Optimization.LocalVariables = append(input.Optimization.LocalVariables, varsToLocal(vars)...)
-	} else {
-		input.Optimization.Variables = append(input.Optimization.Variables, vars...)
+// keepParam returns the bindings whose param matches p.
+func keepParam(in []types.SharedVariableBinding, p string) []types.SharedVariableBinding {
+	var out []types.SharedVariableBinding
+	for _, b := range in {
+		if b.Param == p {
+			out = append(out, b)
+		}
 	}
+	return out
+}
+
+// surfaceHasGlassID reports whether the surface list contains a refractive
+// surface with the given ID.
+func surfaceHasGlassID(surfaces []types.Surface, id int) bool {
+	for i := range surfaces {
+		if surfaces[i].ID == id {
+			return !surfaces[i].Material.IsAir()
+		}
+	}
+	return false
+}
+
+// validateSharedGlassVariables rejects a shared nd/vd variable whose bindings
+// mix glass and non-glass params, mix nd with vd, or start from different
+// glasses — cases where "one value for every binding" is ill-defined.
+func validateSharedGlassVariables(input *types.Input, gc *glass.Catalog) error {
+	if input.Optimization == nil {
+		return nil
+	}
+	for _, sv := range input.Optimization.SharedVariables {
+		if !sv.Active || len(sv.Bindings) == 0 {
+			continue
+		}
+		glassParam := ""
+		var sig, sigWhere string
+		for _, b := range sv.Bindings {
+			isGlass := b.Param == "nd" || b.Param == "vd"
+			if !isGlass {
+				if glassParam != "" {
+					return fmt.Errorf("shared variable %q mixes glass (nd/vd) and non-glass bindings", sv.Name)
+				}
+				continue
+			}
+			if glassParam == "" {
+				glassParam = b.Param
+			} else if b.Param != glassParam {
+				return fmt.Errorf("shared variable %q mixes nd and vd bindings", sv.Name)
+			}
+			cfg := findInputConfig(input, b.Config)
+			if cfg == nil {
+				continue
+			}
+			s := initialGlassSignature(cfg, b.ID, gc)
+			where := fmt.Sprintf("%s/s%d=%s", b.Config, b.ID, s)
+			if sig == "" {
+				sig, sigWhere = s, where
+			} else if s != sig {
+				return fmt.Errorf("shared variable %q binds surfaces with different glasses: %s, %s", sv.Name, sigWhere, where)
+			}
+		}
+	}
+	return nil
+}
+
+func findInputConfig(input *types.Input, id string) *types.Config {
+	for i := range input.Configs {
+		if input.Configs[i].ID == id {
+			return &input.Configs[i]
+		}
+	}
+	return nil
+}
+
+// initialGlassSignature identifies a surface's starting glass so two bindings
+// can be compared: the catalogue key, or the inline nd/vd, or the raw nd/vd.
+func initialGlassSignature(cfg *types.Config, id int, gc *glass.Catalog) string {
+	for i := range cfg.Surfaces {
+		if cfg.Surfaces[i].ID != id {
+			continue
+		}
+		m := cfg.Surfaces[i].Material
+		if m.HasKey() {
+			return "key:" + m.Key
+		}
+		if m.HasModel() {
+			return fmt.Sprintf("nd:%.5f/vd:%.4f", m.ND, m.VD)
+		}
+		return "AIR"
+	}
+	return "missing"
 }
 
 // buildGlassVariables returns an nd/vd variable pair per refractive lens
@@ -149,17 +297,6 @@ func buildGlassVariables(input *types.Input, gc *glass.Catalog) []types.Optimiza
 				},
 			)
 		}
-	}
-	return out
-}
-
-func varsToLocal(vars []types.OptimizationVariable) []types.LocalVariableDef {
-	out := make([]types.LocalVariableDef, 0, len(vars))
-	for _, v := range vars {
-		out = append(out, types.LocalVariableDef{
-			Name: v.Name, Config: v.Target.Config, Target: v.Target,
-			Min: v.Min, Max: v.Max, Active: v.Active,
-		})
 	}
 	return out
 }

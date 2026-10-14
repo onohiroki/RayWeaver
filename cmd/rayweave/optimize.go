@@ -95,6 +95,10 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 	if glassVariables {
 		applyGlassVariables(&input, gc)
 	}
+	if err := validateSharedGlassVariables(&input, gc); err != nil {
+		errOut("Error: %v", err)
+		os.Exit(1)
+	}
 
 	// Build the per-config optimisation inputs (shared/local variables are
 	// read below; the unified Optimizer drives all configs together).

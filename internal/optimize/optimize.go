@@ -1418,7 +1418,6 @@ type Optimizer struct {
 	configs          []config
 	variables        []Variable
 	gc               *glass.Catalog
-	glassOverrides   map[string]*types.Glass
 	initialDiameters map[string]float64
 	maxIter          int
 	mu               float64
@@ -2337,10 +2336,19 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 		if name == "" {
 			name = fmt.Sprintf("shared_%d", si)
 		}
+		// A shared variable that binds a glass parameter (nd/vd) carries that
+		// param so the glass paths (startup conversion, apply, materialize)
+		// recognise it. All bindings must use the same param and the same
+		// initial glass; the command layer validates both before building.
+		sharedParam := ""
+		if len(sv.Bindings) > 0 {
+			sharedParam = sv.Bindings[0].Param
+		}
 		variables = append(variables, Variable{
 			Name:     name,
 			IsShared: true,
 			Bindings: sv.Bindings,
+			Param:    sharedParam,
 			Min:      sv.Min,
 			Max:      sv.Max,
 		})
@@ -2667,57 +2675,78 @@ func newOptimizer(configs []config, variables []Variable, linkedVars []LinkedVar
 	variablesCopy := make([]Variable, len(variables))
 	copy(variablesCopy, variables)
 
-	glassOverrides := make(map[string]*types.Glass)
-	// First pass: resolve glass names for all variables before converting
-	// any surfaces, so the nd variable's conversion doesn't prevent the vd
-	// variable on the same surface from finding the catalog key.
-	type glassResolve struct {
-		varIdx     int
-		surfIdx    int
-		key        string
-		glassLabel string
+	// Every nd/vd variable — shared or local — targets only the surfaces it
+	// actually binds (bindings only): those keyed target surfaces are converted
+	// to a self-contained inline model glass seeded from their catalogue entry,
+	// while other surfaces sharing the same catalogue key keep it. No catalogue
+	// override is registered, so a sibling surface is never silently rewritten.
+	//
+	// First pass: resolve the initial catalogue key of every target before any
+	// surface is converted, so the nd variable's conversion does not hide the key
+	// from the vd variable on the same surface.
+	type glassTarget struct {
+		cfg string
+		id  int
+		key string
 	}
-	var resolves []glassResolve
+	targetsByVar := make([][]glassTarget, len(variablesCopy))
 	for i := range variablesCopy {
 		v := &variablesCopy[i]
-		if v.IsShared {
+		if v.Param != "nd" && v.Param != "vd" {
 			continue
 		}
-		if v.Param == "nd" || v.Param == "vd" {
-			cfg := findConfigByID(configs, v.Config)
+		var ts []glassTarget
+		if v.IsShared {
+			for _, b := range v.Bindings {
+				if b.Param == "nd" || b.Param == "vd" {
+					ts = append(ts, glassTarget{cfg: b.Config, id: b.ID})
+				}
+			}
+		} else {
+			ts = append(ts, glassTarget{cfg: v.Config, id: v.SurfaceID})
+		}
+		for k := range ts {
+			cfg := findConfigByID(configs, ts[k].cfg)
 			if cfg == nil {
 				continue
 			}
-			key := resolveGlassKeyFromSurface(cfg.surfaces, v.SurfaceID)
-			v.GlassName = key
-			if key != "" {
-				if g, ok := gc.Lookup(key); ok {
-					for si := range cfg.surfaces {
-						if cfg.surfaces[si].ID == v.SurfaceID && cfg.surfaces[si].Material.HasKey() {
-							resolves = append(resolves, glassResolve{varIdx: i, surfIdx: si, key: key, glassLabel: key})
-							_ = g // lookup again in second pass
-							break
-						}
-					}
+			si := surfaceIndex(cfg.surfaces, ts[k].id)
+			if si < 0 {
+				continue
+			}
+			if m := cfg.surfaces[si].Material; m.HasKey() {
+				ts[k].key = m.Key
+			}
+		}
+		targetsByVar[i] = ts
+		if v.GlassName == "" {
+			for _, t := range ts {
+				if t.key != "" {
+					v.GlassName = t.key
+					break
 				}
 			}
 		}
 	}
-	// Second pass: convert keyed surfaces to inline model glasses.
-	for _, r := range resolves {
-		cfg := findConfigByID(configs, variablesCopy[r.varIdx].Config)
-		if cfg == nil {
-			continue
-		}
-		if g, ok := gc.Lookup(r.key); ok {
-			cfg.surfaces[r.surfIdx].Material = types.Material{ND: g.ND, VD: g.VD}
-			cp := *g
-			cp.Label = r.key
-			if cp.Type == types.GlassTypeCatalog {
-				cp.Type = types.GlassTypeModel
-				cp.DispersionFormula = ""
+	// Second pass: convert the keyed target surfaces to inline model glasses.
+	for i := range variablesCopy {
+		for _, t := range targetsByVar[i] {
+			if t.key == "" {
+				continue
 			}
-			glassOverrides[r.key] = &cp
+			cfg := findConfigByID(configs, t.cfg)
+			if cfg == nil {
+				continue
+			}
+			si := surfaceIndex(cfg.surfaces, t.id)
+			if si < 0 {
+				continue
+			}
+			if cfg.surfaces[si].Material.HasKey() {
+				if g, ok := gc.Lookup(t.key); ok {
+					cfg.surfaces[si].Material = types.Material{ND: g.ND, VD: g.VD}
+				}
+			}
 		}
 	}
 
@@ -2737,7 +2766,6 @@ func newOptimizer(configs []config, variables []Variable, linkedVars []LinkedVar
 		configs:             configs,
 		variables:           variablesCopy,
 		gc:                  gc,
-		glassOverrides:      glassOverrides,
 		initialDiameters:    initialDiameters,
 		maxIter:             maxIter,
 		mu:                  mu,
@@ -3025,11 +3053,11 @@ func (o *Optimizer) gridCentring(cfg *config, p appliedPupil, angle float64) flo
 }
 
 // applyVariables maps the variable vector x onto the surfaces of every config
-// and returns the updated surfaces, the glass catalog reflecting any in-flight
-// nd/vd overrides (nil when no override is active), and the per-config
-// virtual-entrance-pupil values with the pupil-model variables applied. It is
-// pure: no Optimizer state is mutated, so the DLS Jacobian loop can be
-// parallelised.
+// and returns the updated surfaces, a nil glass catalog (the nd/vd targets are
+// written as inline model glass on the surfaces themselves, so no override
+// catalog is needed), and the per-config virtual-entrance-pupil values with the
+// pupil-model variables applied. It is pure: no Optimizer state is mutated, so
+// the DLS Jacobian loop can be parallelised.
 func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *glass.Catalog, map[string]appliedPupil) {
 	configSurfaces := make(map[string][]types.Surface, len(o.configs))
 	for ci := range o.configs {
@@ -3053,12 +3081,6 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 		pupils[o.configs[ci].id] = pupilFromModel(o.configs[ci].pupilModel)
 	}
 
-	needTempGC := false
-	localOverrides := make(map[string]*types.Glass, len(o.glassOverrides))
-	for k, g := range o.glassOverrides {
-		cp := *g
-		localOverrides[k] = &cp
-	}
 	for vi, v := range o.variables {
 		val := x[vi]
 
@@ -3076,7 +3098,23 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 				if scale == 0 {
 					scale = 1.0
 				}
-				SetSurfaceParam(&surfaces[idx], b.Param, scale*val+b.Offset)
+				bound := scale*val + b.Offset
+				switch b.Param {
+				case "nd", "vd":
+					// Inline model glass: the startup pass converted the target
+					// keyed surface, so set the material directly. Only the bound
+					// surface changes — a sibling sharing the catalogue key keeps
+					// its own glass.
+					m := &surfaces[idx].Material
+					m.Key = ""
+					if b.Param == "nd" {
+						m.ND = bound
+					} else {
+						m.VD = bound
+					}
+				default:
+					SetSurfaceParam(&surfaces[idx], b.Param, bound)
+				}
 			}
 			continue
 		}
@@ -3139,28 +3177,15 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 				surfaces[idx].Curvature = 1.0 / val
 			}
 		case "nd", "vd":
-			// Inline model glass (nd/vd carried on the surface, no catalogue
-			// key): apply the variable directly to the surface material. A
-			// keyed material goes through the in-flight catalogue override.
+			// Set the targeted surface as an inline model glass (bindings only):
+			// the catalogue key is dropped so the model values win, and a sibling
+			// surface sharing the key is left untouched.
 			m := &surfaces[idx].Material
-			if m.HasModel() && !m.HasKey() {
-				switch v.Param {
-				case "nd":
-					m.ND = val
-				case "vd":
-					m.VD = val
-				}
-				continue
-			}
-			key := resolveGlassKeyFromSurface(surfaces, v.SurfaceID)
-			if g, ok := localOverrides[key]; ok {
-				switch v.Param {
-				case "nd":
-					g.ND = val
-				case "vd":
-					g.VD = val
-				}
-				needTempGC = true
+			m.Key = ""
+			if v.Param == "nd" {
+				m.ND = val
+			} else {
+				m.VD = val
 			}
 		}
 	}
@@ -3244,41 +3269,12 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 			}
 		case "nd":
 			m := &surfaces[idx].Material
-			if m.HasModel() && !m.HasKey() {
-				m.ND = val
-				continue
-			}
-			key := resolveGlassKeyFromSurface(surfaces, lk.SurfaceID)
-			if g, ok := localOverrides[key]; ok {
-				g.ND = val
-				needTempGC = true
-			}
+			m.Key = ""
+			m.ND = val
 		case "vd":
 			m := &surfaces[idx].Material
-			if m.HasModel() && !m.HasKey() {
-				m.VD = val
-				continue
-			}
-			key := resolveGlassKeyFromSurface(surfaces, lk.SurfaceID)
-			if g, ok := localOverrides[key]; ok {
-				g.VD = val
-				needTempGC = true
-			}
-		}
-	}
-
-	var tempGC *glass.Catalog
-	if needTempGC {
-		tempGC = glass.NewCatalog()
-		if o.gc != nil {
-			for _, g := range o.gc.ByName {
-				cp := *g
-				tempGC.Add(cp)
-			}
-		}
-		for _, ov := range localOverrides {
-			cp := *ov
-			tempGC.Add(cp)
+			m.Key = ""
+			m.VD = val
 		}
 	}
 
@@ -3290,7 +3286,7 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 	// can build element power from a zero-power start), and the escape glass
 	// phase preserves it by locking the variable (Min==Max), which keeps
 	// SolveElementPower reproducing the same curvature every evaluation.
-	gc := effectiveGC(o.gc, tempGC)
+	gc := o.gc
 	o.applyPowerVariables(x, configSurfaces, gc)
 
 	// Apply the power-preserving solve after the variables and in-flight glass
@@ -3322,7 +3318,7 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 		surface.Precompute(configSurfaces[cfg.id])
 	}
 
-	return configSurfaces, tempGC, pupils
+	return configSurfaces, nil, pupils
 }
 
 // applyPowerVariables applies every "power" variable: the element containing
@@ -5213,27 +5209,54 @@ func (o *Optimizer) FinalPupilModels(x []float64) map[string]types.PupilModelCon
 	return out
 }
 
-// materializeGlasses collects the optimised nd/vd pairs and rewrites the
-// affected surface materials (catalogue-keyed ones become inline model glass;
-// inline models already carry the values from applyVariables).
+// materializeGlasses rewrites only the surfaces an nd/vd variable actually
+// targets (bindings only) as inline model glasses carrying the optimised
+// values. A surface sharing the catalogue key but not targeted keeps its key.
+// applyVariables already sets the targeted inline material, so this exists for
+// the chained callers (FinalConfigs) that materialise from a raw vector.
 func (o *Optimizer) materializeGlasses(configSurfaces map[string][]types.Surface, x []float64) []types.Glass {
-	MaterializeGlassEntries(o.variables, x, o.gc,
-		func(v Variable) (string, bool) {
-			if v.IsShared {
-				return "", false
-			}
-			return v.GlassName, v.GlassName != ""
-		},
-		func(origKey string, nd, vd float64) {
-			for ci := range o.configs {
-				cfgID := o.configs[ci].id
-				for i := range configSurfaces[cfgID] {
-					if configSurfaces[cfgID][i].Material.HasKey() && configSurfaces[cfgID][i].Material.Key == origKey {
-						configSurfaces[cfgID][i].Material = types.Material{ND: nd, VD: vd}
-					}
+	type ndvd struct {
+		nd, vd *float64
+	}
+	acc := map[string]*ndvd{}
+	set := func(cfg string, sid int, param string, val float64) {
+		k := cfgSurfKey(cfg, sid)
+		p := acc[k]
+		if p == nil {
+			p = &ndvd{}
+			acc[k] = p
+		}
+		v := val
+		if param == "nd" {
+			p.nd = &v
+		} else {
+			p.vd = &v
+		}
+	}
+	for i, v := range o.variables {
+		if v.Param != "nd" && v.Param != "vd" {
+			continue
+		}
+		if v.IsShared {
+			for _, b := range v.Bindings {
+				if b.Param == "nd" || b.Param == "vd" {
+					set(b.Config, b.ID, b.Param, x[i])
 				}
 			}
-		})
+		} else {
+			set(v.Config, v.SurfaceID, v.Param, x[i])
+		}
+	}
+	for ci := range o.configs {
+		cfgID := o.configs[ci].id
+		for i := range configSurfaces[cfgID] {
+			p := acc[cfgSurfKey(cfgID, configSurfaces[cfgID][i].ID)]
+			if p == nil || p.nd == nil || p.vd == nil {
+				continue
+			}
+			configSurfaces[cfgID][i].Material = types.Material{ND: *p.nd, VD: *p.vd}
+		}
+	}
 	return nil
 }
 
@@ -5305,6 +5328,20 @@ func getSurfaceParam(s types.Surface, param string) float64 {
 	return 0
 }
 
+// glassNDVD returns a material's nd/vd — the inline model's own values, or the
+// catalogue entry a key resolves to. ok is false when neither is available.
+func glassNDVD(m types.Material, gc *glass.Catalog) (nd, vd float64, ok bool) {
+	if m.HasModel() && !m.HasKey() {
+		return m.ND, m.VD, true
+	}
+	if m.HasKey() && gc != nil {
+		if g, found := gc.Lookup(m.Key); found {
+			return g.ND, g.VD, true
+		}
+	}
+	return 0, 0, false
+}
+
 func (o *Optimizer) getInitialState() []float64 {
 	x := make([]float64, len(o.variables))
 	for i, v := range o.variables {
@@ -5317,8 +5354,19 @@ func (o *Optimizer) getInitialState() []float64 {
 				b := v.Bindings[0]
 				if cfg := findConfigByID(o.configs, b.Config); cfg != nil {
 					if idx := surfaceIndex(cfg.surfaces, b.ID); idx >= 0 {
-						if v0 := getSurfaceParam(cfg.surfaces[idx], b.Param); v0 != 0 {
-							x[i] = v0
+						switch b.Param {
+						case "nd", "vd":
+							if nd, vd, ok := glassNDVD(cfg.surfaces[idx].Material, o.gc); ok {
+								if b.Param == "nd" {
+									x[i] = nd
+								} else {
+									x[i] = vd
+								}
+							}
+						default:
+							if v0 := getSurfaceParam(cfg.surfaces[idx], b.Param); v0 != 0 {
+								x[i] = v0
+							}
 						}
 					}
 				}
@@ -5348,20 +5396,11 @@ func (o *Optimizer) getInitialState() []float64 {
 		case "nd", "vd":
 			if cfg != nil {
 				if idx := surfaceIndex(cfg.surfaces, v.SurfaceID); idx >= 0 {
-					m := cfg.surfaces[idx].Material
-					if m.HasModel() && !m.HasKey() {
+					if nd, vd, ok := glassNDVD(cfg.surfaces[idx].Material, o.gc); ok {
 						if v.Param == "nd" {
-							x[i] = m.ND
+							x[i] = nd
 						} else {
-							x[i] = m.VD
-						}
-					} else if m.HasKey() && o.gc != nil {
-						if g, ok := o.gc.Lookup(m.Key); ok {
-							if v.Param == "nd" {
-								x[i] = g.ND
-							} else {
-								x[i] = g.VD
-							}
+							x[i] = vd
 						}
 					}
 				}
@@ -5484,14 +5523,21 @@ func buildHullPairs(variables []Variable) []glassPair {
 		if v.GlassName != "" {
 			return "glass:" + v.GlassName
 		}
+		if v.IsShared {
+			var parts []string
+			for _, b := range v.Bindings {
+				if b.Param == "nd" || b.Param == "vd" {
+					parts = append(parts, fmt.Sprintf("%s:%d", b.Config, b.ID))
+				}
+			}
+			sort.Strings(parts)
+			return "shared:" + strings.Join(parts, ",")
+		}
 		return fmt.Sprintf("surf:%s:%d", v.Config, v.SurfaceID)
 	}
 	ndMap := make(map[string]int)
 	vdMap := make(map[string]int)
 	for i, v := range variables {
-		if v.IsShared {
-			continue
-		}
 		switch v.Param {
 		case "nd":
 			ndMap[pairKey(v)] = i
@@ -5554,18 +5600,6 @@ func elementGlassSurfaces(surfaces []types.Surface, targetID int) []int {
 		}
 	}
 	return ids
-}
-
-func resolveGlassKeyFromSurface(surfaces []types.Surface, id int) string {
-	for _, s := range surfaces {
-		if s.ID == id {
-			if s.Material.HasKey() {
-				return s.Material.Key
-			}
-			return ""
-		}
-	}
-	return ""
 }
 
 func surfaceIndex(surfaces []types.Surface, id int) int {

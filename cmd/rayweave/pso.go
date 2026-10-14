@@ -68,6 +68,10 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 	if glassVariables {
 		applyGlassVariables(&input, gc)
 	}
+	if err := validateSharedGlassVariables(&input, gc); err != nil {
+		errOut("Error: %v", err)
+		os.Exit(1)
+	}
 
 	// Build the PSO explorer factory. Each worker gets its own Explorer
 	// instance with a unique seed derived from the worker ID. The factory

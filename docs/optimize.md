@@ -133,23 +133,37 @@ multiplier 1.50).
 #### Glass (`nd` / `vd`) variables and catalogue write-back
 
 An `nd` or `vd` variable targets the surface's `material`
-(see [glass-catalog.md](glass-catalog.md) for the two material forms), and the
-optimised value is materialised differently for the two:
+(see [glass-catalog.md](glass-catalog.md) for the two material forms). It may be
+declared in any of the three variable containers — single-config
+`optimization.variables`, multi-config `local_variables`, or multi-config
+`shared_variables` (via a `bindings` entry with `param: nd`/`vd`). A **shared**
+glass variable keeps one element's glass a single degree of freedom across zoom
+positions: the value is written to every bound surface, so all configs share the
+same dispersion.
 
-- **Inline model glass** (`material: {nd: …, vd: …}`) — updated in place; the
-  material keeps no `key`.
-- **Catalogue reference** (`material: {key: …}`) — optimised through an
-  **in-flight catalogue override** on the optimizer (`glassOverrides`): the base
-  catalogue is never mutated, so a shared key cannot leak its optimised
-  dispersion into an unrelated document or into a later run. At output,
-  `MaterializeGlassEntries` / `FinalConfigs` rewrite **every surface sharing
-  that key** as the optimised **inline** model glass (`{nd, vd}`, `key`
-  removed). No new entry is appended to `glass_catalog`, and other surfaces
-  using the same key are updated with it.
+Whichever form is used, only the **surfaces the variable actually targets** are
+rewritten (bindings only). A targeted **catalogue reference**
+(`material: {key: …}`) is converted to a self-contained **inline** model glass
+(`{nd, vd}`, `key` removed) seeded from the catalogue entry's `nd`/`vd`; the base
+catalogue is never mutated. A surface that merely shares the same key but is not
+targeted is **left untouched** — it keeps its key and its own dispersion. So an
+optimised glass leaves the run as an inline model, and re-running the output
+document reproduces the same dispersion without consulting the AGF files.
 
-So an optimised keyed glass leaves the run as a self-contained inline model,
-and re-running the output document reproduces the same dispersion without
-consulting the AGF files.
+A **shared** `nd`/`vd` variable must be well defined:
+
+- every binding must use the same param (`nd` or `vd`), and
+- every bound surface must start from the **same glass** (the same catalogue key,
+  or the same inline `nd`/`vd`).
+
+A binding set that mixes glass and non-glass params, mixes `nd` with `vd`, or
+binds surfaces with different initial glasses is rejected at startup with an
+error. Use `--glass-variables` to declare one shared `nd`/`vd` pair per physical
+element automatically (a single-config run keeps the `optimization.variables`
+form).
+
+`glass_hull` and `glass_attraction` apply to shared glass variables as well.
+
 
 ## Input — multi-config mode
 
