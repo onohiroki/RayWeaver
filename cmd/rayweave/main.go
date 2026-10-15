@@ -608,12 +608,16 @@ Examples:
   rayweave chief < lens.yaml | rayweave trace --details | rayweave list rays
 `)
 	case "paraxial":
-		fmt.Print(`Usage: rayweave paraxial [--config ID] < system.yaml
+		fmt.Print(`Usage: rayweave paraxial [--wl MM] [--config ID] [--glass-dir DIR] < system.yaml
 
 Performs paraxial (first-order) ray trace and cardinal analysis.
 
 Options:
+  --wl MM              reference wavelength in mm (default: the document's
+                       chief.reference_wavelength, else 0.00058756); written
+                       back into chief.reference_wavelength
   --config ID          select config by id (multi-config mode)
+  --glass-dir DIR      AGF glass catalog directory
 
 Input: standard system YAML (glass_catalog + surfaces)
 Optional input:

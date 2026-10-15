@@ -5,15 +5,27 @@ focal length, principal points, focal points, entrance/exit pupils, f/numbers
 and (for finite conjugates) magnification.
 
 ```
-rayweave paraxial [--config ID] [--glass-dir DIR] < system.yaml
+rayweave paraxial [--wl MM] [--config ID] [--glass-dir DIR] < system.yaml
 ```
 
 ## Options
 
 | Flag | Description |
 |---|---|
+| `--wl MM` | reference wavelength in mm for the trace (default: the document's `chief.reference_wavelength`, else `0.00058756`); written back into `chief.reference_wavelength` |
 | `--config ID` | select a config by id (multi-config mode); defaults to `configs[0]` |
 | `--glass-dir DIR` | AGF glass catalog directory |
+
+The reference wavelength sets the glass index (nd at that wavelength) for every
+paraxial quantity, so it shifts the focal length with dispersion — useful for a
+quick Abbe check of a design, and for reading a config's first order at F/d/C:
+
+```sh
+for wl in 0.00048613 0.00058756 0.00065627; do
+  rayweave paraxial --wl $wl < lens.yaml \
+    | rayweave query -r paraxial_result.focal_length
+done
+```
 
 ## Input
 
