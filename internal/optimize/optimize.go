@@ -16,6 +16,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/psf"
+	"github.com/hiroki/rayweaver/internal/pupil"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -4541,6 +4542,15 @@ func (o *Optimizer) EndJacobian() {
 
 // imageHeightToFieldAngle finds the field angle that lands the chief ray at
 // the target image height, via bisection on the image-plane intersection.
+//
+// The probe is launched through the entrance-pupil centre (the frozen
+// per-iteration pupil from UpdatePupils), not from the optical axis: an axis
+// launch at a non-zero field angle leaves z = -100 at (0,0) and therefore
+// arrives at the lens 100*tan(theta) off the axis, far outside every aperture.
+// With a stop on the first surface (the wide-angle zoom layouts) that clipped
+// every off-axis probe, so the bisection collapsed and the optimizer silently
+// worked the fields on-axis. When no pupil has been resolved the probe keeps
+// the historical axis launch.
 func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surface, targetHeight, wavelength float64, gc *glass.Catalog) float64 {
 	path := dls.BuildPath(surfaces)
 	engine := ray.NewEngine(gc, nil)
@@ -4551,41 +4561,105 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 	}
 
 	pol := types.NewCircularJones(true)
+	pupilZ := resolvedPupilZ(cfg)
 
-	lo, hi := 0.0, 45.0
-	for iter := 0; iter < 30; iter++ {
-		mid := (lo + hi) / 2
-		dir := raymath.DirectionFromAngle(mid)
-
+	heightAt := func(angle float64) (float64, bool) {
+		dir := raymath.DirectionFromAngle(angle)
 		origin := types.Vec3{X: 0, Y: 0, Z: -100.0}
+		if pupilZ != nil {
+			origin.X, origin.Y = pupil.GridCentre(dir, *pupilZ, -100.0)
+		}
 		r := types.Ray{
 			Wavelength:         wavelength,
 			Initial:            types.RayState{Origin: origin, Direction: dir},
 			Path:               path,
 			Jones:              pol,
-			SkipGlassPathCheck: mid == 0,
+			SkipGlassPathCheck: angle == 0,
 		}
 		result := engine.TraceRay(r, surfaces, false)
-		if result.Error != "" {
+		if result.Error != "" || len(result.Surfaces) == 0 {
+			return 0, false
+		}
+		return result.Surfaces[len(result.Surfaces)-1].Position.Y, true
+	}
+
+	// Signed target: the traced image height carries the field sign (angle
+	// theta lands at +height for the +Y direction), so the search compares
+	// magnitudes and the recovered angle takes the sign of the target —
+	// matching chief.searchAngleForImageHeight.
+	sgn := 1.0
+	targetMag := targetHeight
+	if targetHeight < 0 {
+		sgn = -1.0
+		targetMag = -targetHeight
+	}
+
+	// Ascending scan: advance in steps until the traced height magnitude
+	// reaches the target (a bracket is found) or the probe stops tracing — the
+	// field's clip angle, where the stop or a surface aperture cuts the chief
+	// ray. Overshooting the clip is what a fixed/expanding bracket does, and
+	// with the stop on the first surface it made the whole off-axis range fail
+	// and silently folded the field onto the axis — the failure this function
+	// must avoid. The scan starts at 0 (the on-axis probe always traces) and
+	// covers well past the widest zoom field.
+	const step = 3.0
+	lastA := 0.0
+	lo, hi := math.NaN(), math.NaN()
+	for a := step; a <= 80.0; a += step {
+		y, ok := heightAt(a)
+		if !ok {
+			break
+		}
+		if math.Abs(y) >= targetMag {
+			lo, hi = lastA, a
+			break
+		}
+		lastA = a
+	}
+
+	if math.IsNaN(lo) {
+		// The target is beyond this field's traceable range (or the scan only
+		// met the clip). Return the largest angle that still traces — the
+		// closest approach to the requested image height — not 0, so the field
+		// is never folded onto the axis. Refine that clip boundary between the
+		// last traced step and the failing one.
+		if lastA == 0 {
+			return 0
+		}
+		failA := lastA + step
+		for i := 0; i < 20 && failA-lastA > 1e-6; i++ {
+			mid := (lastA + failA) / 2
+			if _, ok := heightAt(mid); ok {
+				lastA = mid
+			} else {
+				failA = mid
+			}
+		}
+		return sgn * lastA
+	}
+
+	for iter := 0; iter < 40; iter++ {
+		mid := (lo + hi) / 2
+		y, ok := heightAt(mid)
+		if !ok {
+			// A clip inside the bracket: keep the side that still traces.
 			hi = mid
 			continue
 		}
-		if len(result.Surfaces) == 0 {
-			return 0
+		a := math.Abs(y)
+		if math.Abs(a-targetMag) < 1e-9 {
+			break
 		}
-		last := result.Surfaces[len(result.Surfaces)-1]
-		y := last.Position.Y
-
-		if math.Abs(y-targetHeight) < 1e-6 {
-			return mid
-		}
-		if y < targetHeight {
+		if a < targetMag {
 			lo = mid
 		} else {
 			hi = mid
 		}
+		if hi-lo < 1e-9 {
+			break
+		}
 	}
-	return (lo + hi) / 2
+	return sgn * (lo + hi) / 2
 }
 
 // sizeAutoApertures measures the true geometric beam extent of every field

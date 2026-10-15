@@ -626,6 +626,18 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   is set **and** it declares fields (`chief.fields` / `configs[].fields`); in
   `virtual_entrance_pupil` mode the model's `axial_position` / `diameter` are
   used directly and the chief-ray iteration is skipped.
+- **Image-height fields are resolved through the entrance pupil.** A field
+  declared by `image_height` (rather than `angle`) is converted to a field angle
+  by tracing its image-plane intersection: `optimize` launches a single probe
+  ray **through the entrance-pupil centre** and inverts the height/angle
+  relationship. The launch must not come from the optical axis — with a stop on
+  the first surface (the wide-angle zoom layouts) an axis launch reaches the
+  stop ~`100·tan θ` off-axis and is clipped, which used to collapse every
+  off-axis image-height field onto ~0° so the optimizer silently worked them
+  on-axis. The solved angle feeds the merit grid, the auto-aperture sizing and
+  the `image_height` constraint alike. When the requested image height lies
+  beyond the field's traceable range the search returns the largest angle that
+  still traces, never 0.
 - `optimization.aperture_margin` is clamped to ≥ 1.0; smaller values make the
   pupil grid smaller than the aperture and stall DLS.
 - `optimization.aperture_margin_mm` is the physical clearance (mm) added to
