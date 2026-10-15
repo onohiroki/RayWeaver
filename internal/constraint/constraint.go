@@ -35,6 +35,8 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 		return math.Abs(evaluateEFL(surfaces, gc))
 	case types.MeasureSystemLength:
 		return evaluateSystemLength(surfaces)
+	case types.MeasureSurfaceRange:
+		return evaluateSurfaceRange(surfaces, op.Surface, op.BackSurface)
 	case types.MeasureEntrancePupilDiameter:
 		return evaluateEntrancePupilDiameter(surfaces, gc, stopSurface)
 	case types.MeasureDiameter:
@@ -365,6 +367,25 @@ func evaluateSystemLength(surfaces []types.Surface) float64 {
 	total := 0.0
 	for _, s := range surfaces {
 		total += s.Thickness
+	}
+	return total
+}
+
+// evaluateSurfaceRange returns the axial distance between the vertices of two
+// surfaces: the sum of the thicknesses of the surfaces from frontID up to (but
+// not including) backID. It is the "group span" a zoom uses to pin a group's
+// position — a partial sum system_length cannot express — and with frontID at
+// the first surface and backID at the image plane it equals system_length.
+// Returns 0 when either surface is unknown or backID precedes frontID.
+func evaluateSurfaceRange(surfaces []types.Surface, frontID, backID int) float64 {
+	i := dls.SurfaceIndex(surfaces, frontID)
+	j := dls.SurfaceIndex(surfaces, backID)
+	if i < 0 || j < 0 || j < i {
+		return 0
+	}
+	total := 0.0
+	for k := i; k < j; k++ {
+		total += surfaces[k].Thickness
 	}
 	return total
 }

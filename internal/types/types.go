@@ -722,6 +722,7 @@ const (
 	MeasureEFL                   ConstraintMeasure = "efl"
 	MeasureFocalLength           ConstraintMeasure = "focal_length"
 	MeasureSystemLength          ConstraintMeasure = "system_length"
+	MeasureSurfaceRange          ConstraintMeasure = "surface_range"
 	MeasureEntrancePupilDiameter ConstraintMeasure = "entrance_pupil_diameter"
 	MeasureEdgeThickness         ConstraintMeasure = "edge_thickness"
 	MeasureDiameter              ConstraintMeasure = "diameter"

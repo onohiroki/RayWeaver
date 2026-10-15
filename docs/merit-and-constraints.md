@@ -793,6 +793,7 @@ reported with a warning rather than freezing the solve.
 | `efl` | Signed paraxial EFL | – |
 | `focal_length` | `\|EFL\|` (unsigned) | – |
 | `system_length` | Sum of every surface thickness | – |
+| `surface_range` | Axial vertex-to-vertex distance from `surface` to `back_surface`: the partial thickness sum over the range | `surface`, `back_surface` |
 | `entrance_pupil_diameter` | Paraxial EPD, or `2×` the smallest fixed aperture radius when there is no stop | – |
 | `edge_thickness` | Center thickness + back sagitta − front sagitta at `min(diameter)/2` | `surface`, `back_surface` |
 | `diameter` | The surface's diameter | `surface` |
@@ -804,6 +805,16 @@ reported with a warning rather than freezing the solve.
 For `edge_thickness`, `back_surface` may be omitted; the rear surface then
 defaults to the next surface in system order (the surface the front's thickness
 is measured to).
+
+`system_length` sums every thickness, so it pins the whole track — the image
+plane measured from surface 1 — but cannot express a single group's position.
+`surface_range` is that partial sum: the sum of the surfaces from `surface` up
+to (but not including) `back_surface`, i.e. the axial distance between their
+vertices. It is the measure a cam or a zoom position uses to hold a group
+(`surface: 6, back_surface: 9` holds the gap from surface 6 to surface 9). With
+`surface` at the first surface and `back_surface` at the image plane it equals
+`system_length`. Both endpoints are required; an unknown surface, or a
+`back_surface` that precedes `surface`, measures 0.
 
 ```yaml
 optimization:
@@ -911,8 +922,9 @@ per-config constraints when present, else `optimization.constraints` (marked
 ### 9.3 Constraint measures
 
 `image_height`, `incident_angle`, `thickness`, `efl`, `focal_length`,
-`system_length`, `entrance_pupil_diameter`, `edge_thickness`, `diameter`,
-`f_number`, `beam_clearance`, `vignetting_factor`, `beam_diameter`.
+`system_length`, `surface_range`, `entrance_pupil_diameter`, `edge_thickness`,
+`diameter`, `f_number`, `beam_clearance`, `vignetting_factor`,
+`beam_diameter`.
 
 ---
 

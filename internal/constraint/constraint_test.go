@@ -217,3 +217,41 @@ func TestEdgeThicknessAutoDerivesBackSurface(t *testing.T) {
 		t.Errorf("Evaluate(edge_thickness, surface 2) = %v, want %v (auto back surface 4)", got, want)
 	}
 }
+
+// TestSurfaceRange pins the group-span measure: the vertex-to-vertex axial
+// distance is the sum of the intervening thicknesses, non-contiguous IDs
+// follow array order, and a range that reaches the image plane equals
+// system_length.
+func TestSurfaceRange(t *testing.T) {
+	surfaces := []types.Surface{
+		{ID: 1, Thickness: 5.0},
+		{ID: 2, Thickness: 6.0},
+		{ID: 4, Thickness: 7.0},
+		{ID: 5, Thickness: 8.0},
+		{ID: 6, Thickness: 0.0},
+	}
+
+	op := types.ConstraintOperand{
+		Kind:        types.ConstraintEquality,
+		Measure:     types.MeasureSurfaceRange,
+		Surface:     1,
+		BackSurface: 4,
+		Weight:      1.0,
+		Active:      true,
+	}
+	if got := Evaluate(op, surfaces, 0, nil, 0, 0, 0, 0, 0); math.Abs(got-11.0) > 1e-12 {
+		t.Errorf("surface_range(1,4) = %v, want 11", got)
+	}
+	if got := evaluateSurfaceRange(surfaces, 1, 6); math.Abs(got-evaluateSystemLength(surfaces)) > 1e-12 {
+		t.Errorf("surface_range(first,image) = %v, want system_length %v", got, evaluateSystemLength(surfaces))
+	}
+	if got := evaluateSurfaceRange(surfaces, 4, 4); got != 0 {
+		t.Errorf("surface_range(x,x) = %v, want 0", got)
+	}
+	if got := evaluateSurfaceRange(surfaces, 4, 1); got != 0 {
+		t.Errorf("surface_range(reversed) = %v, want 0", got)
+	}
+	if got := evaluateSurfaceRange(surfaces, 1, 99); got != 0 {
+		t.Errorf("surface_range(unknown) = %v, want 0", got)
+	}
+}
