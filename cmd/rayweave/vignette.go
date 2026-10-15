@@ -85,15 +85,9 @@ func runVignette(data []byte) {
 		beforeByID[s.ID] = s.Diameter
 	}
 
-	// Resolve field definitions like `chief`.
-	var fields []types.FieldDef
-	if len(input.Chief.Fields) > 0 {
-		fields = input.Chief.Fields
-	} else {
-		for _, a := range input.Chief.FieldAngles {
-			fields = append(fields, types.FieldDef{Angle: a, Direction: []float64{0, 1}})
-		}
-	}
+	// Resolve field definitions like `chief`: the selected config's own fields
+	// win (see resolveConfigFieldDefs).
+	fields := resolveConfigFieldDefs(input, configFlag)
 	if len(fields) == 0 {
 		errOut("Error: 'fields' or 'field_angles' is required")
 		os.Exit(1)

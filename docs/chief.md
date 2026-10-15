@@ -64,6 +64,15 @@ chief:
 a unit vector in the pupil plane; the chief ray of each field lies in the plane
 spanned by the field vector and the optical axis.
 
+**Where the fields come from.** `--config ID` selects a config *and that
+config's fields* — a zoom position carries its own field angles, or the constant
+image heights of that position. The resolution order is: the selected config's
+`fields`, then `configs[0].fields`, then the top-level `chief.fields` /
+`chief.field_angles`. The surfaces come from the same config, so the analysis
+always uses the field list that belongs to the system it traced. Fields given as
+`image_height` are resolved to a field angle by inversion, per config.
+`vignette` resolves its fields the same way.
+
 ### Chief ray definitions
 
 `chief.chief_ray_definition` (or `--chief-ray`) selects how each field's

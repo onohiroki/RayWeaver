@@ -433,6 +433,38 @@ func chiefFieldDefs(input types.Input) []types.FieldDef {
 	return fields
 }
 
+// resolveConfigFieldDefs returns the field definitions a single-system command
+// should analyse, in the same order `psf`/`focus`/`asphere` use:
+//
+//  1. the config named by --config, when it declares fields;
+//  2. configs[0], when it declares fields;
+//  3. the top-level chief fields (explicit `fields`, else `field_angles`).
+//
+// In a zoom every config carries its own fields (its own field angles, or the
+// constant image heights of that zoom position), and the surfaces come from the
+// same config (configSurfaces). Analysing one config with another's field list
+// silently answers a different question, so the config's own fields win;
+// a document that declares its fields once, in `chief`, keeps working through
+// the fallback.
+func resolveConfigFieldDefs(input types.Input, configFlag *string) []types.FieldDef {
+	if configFlag != nil && *configFlag != "" {
+		idx, err := resolveConfig(input.Configs, *configFlag)
+		if idx < 0 {
+			errOut("Error: %s", err)
+			os.Exit(1)
+		}
+		if defs := fieldDefsFromItems(input.Configs[idx].Fields); len(defs) > 0 {
+			return defs
+		}
+	}
+	if len(input.Configs) > 0 {
+		if defs := fieldDefsFromItems(input.Configs[0].Fields); len(defs) > 0 {
+			return defs
+		}
+	}
+	return chiefFieldDefs(input)
+}
+
 // fieldItemsFromDefs converts chief field definitions back into the per-config
 // field-item shape (the inverse of fieldDefsFromItems), so a document whose
 // fields live only in chief.fields can still drive per-config machinery such as

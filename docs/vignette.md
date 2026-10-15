@@ -48,7 +48,9 @@ vignette:
 
 The system must carry a `chief` section providing the fields (`fields` or
 `field_angles`) plus the grid parameters (`num_rays`, `grid_type`,
-`reference_surface`). `chief.stop_surface` may be present, but **there is no
+`reference_surface`). `--config ID` (or, without it, `configs[0]`) supplies its
+own `fields` first, exactly as `chief` does, so a zoom position is analysed with
+its own field list. `chief.stop_surface` may be present, but **there is no
 implicit aperture stop**: even with a stop id set, the per-field pupils come
 from the chief-ray crossings.
 

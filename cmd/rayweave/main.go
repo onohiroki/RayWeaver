@@ -2049,15 +2049,11 @@ func runChief(data []byte) {
 		input.Chief.StopSurface = *passThrough
 	}
 
-	// Resolve field definitions
-	var fields []types.FieldDef
-	if len(input.Chief.Fields) > 0 {
-		fields = input.Chief.Fields
-	} else {
-		for _, a := range input.Chief.FieldAngles {
-			fields = append(fields, types.FieldDef{Angle: a, Direction: []float64{0, 1}})
-		}
-	}
+	// Resolve field definitions: the config selected by --config supplies its
+	// own fields (a zoom position carries its own field angles / target image
+	// heights), falling back to configs[0] and then the top-level chief section
+	// — the same order as trace / psf / focus / asphere.
+	fields := resolveConfigFieldDefs(input, configFlag)
 	if len(fields) == 0 {
 		errOut("Error: 'fields' or 'field_angles' is required")
 		os.Exit(1)
