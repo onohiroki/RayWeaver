@@ -1011,9 +1011,11 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSetting
 	}
 
 	// ValidateFn for multi-config: checks numerical failure and geometry
-	// violations across all configs. Full per-config field throughput
-	// validation would require tracing each config's pupil grid separately;
-	// for now we validate the first config's fields as a proxy.
+	// violations across all configs. Field throughput is decided by the
+	// optimizer's own grids when it can report them (checkThroughput); the
+	// first config's fields are only the fallback for a model without the
+	// hook, since that chief grid is shared by every config's validation
+	// closure.
 	var validateFn func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason)
 	if input.Chief != nil && len(input.Chief.Fields) > 0 && len(template) > 0 {
 		fieldDefs := input.Chief.Fields
