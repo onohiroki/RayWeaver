@@ -128,8 +128,13 @@ func activeConfigCount(input *types.Input) int {
 
 // buildSharedGlassVariables returns one shared nd/vd variable pair per physical
 // lens element (a representative surface ID), bound to that surface in every
-// active config. All active configs of a zoom share the surface layout, so the
-// element IDs are taken from the first active config.
+// active config that carries glass there. Every active config contributes its
+// elements, not just the first: a zoom whose positions number their surfaces
+// differently, or give a position an extra element, otherwise left that element
+// out of the optimisation without a word. An element that is missing (or air)
+// in some active config binds only the configs where it exists — the glass
+// cannot be shared with a surface that is not there — and that partial binding
+// is reported on stderr.
 func buildSharedGlassVariables(input *types.Input, gc *glass.Catalog) []types.SharedVariable {
 	var active []int
 	for i := range input.Configs {
@@ -141,10 +146,19 @@ func buildSharedGlassVariables(input *types.Input, gc *glass.Catalog) []types.Sh
 		return nil
 	}
 
+	// Union of the element representative IDs over every active config, in
+	// first-seen order, so a shared layout keeps the natural element order.
 	var ids []int
-	for _, role := range paraxial.GlassRoles(input.Configs[active[0]].Surfaces, gc) {
-		if len(role.SurfaceIDs) > 0 {
-			ids = append(ids, role.SurfaceIDs[0])
+	seen := make(map[int]bool)
+	for _, ci := range active {
+		for _, role := range paraxial.GlassRoles(input.Configs[ci].Surfaces, gc) {
+			if len(role.SurfaceIDs) == 0 {
+				continue
+			}
+			if id := role.SurfaceIDs[0]; !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
 		}
 	}
 
@@ -152,9 +166,11 @@ func buildSharedGlassVariables(input *types.Input, gc *glass.Catalog) []types.Sh
 	for _, id := range ids {
 		var bindings []types.SharedVariableBinding
 		bound := make(map[string][]string) // param -> binding configs
+		var missing []string
 		for _, ci := range active {
 			cfg := &input.Configs[ci]
 			if !surfaceHasGlassID(cfg.Surfaces, id) {
+				missing = append(missing, cfg.ID)
 				continue
 			}
 			for _, param := range []string{"nd", "vd"} {
@@ -164,6 +180,10 @@ func buildSharedGlassVariables(input *types.Input, gc *glass.Catalog) []types.Sh
 		}
 		if len(bound["nd"]) == 0 {
 			continue
+		}
+		if len(missing) > 0 {
+			errOut("Warning: glass element on surface %d is not glass in %s, so its shared nd/vd variable binds only %s",
+				id, strings.Join(missing, ", "), strings.Join(bound["nd"], ", "))
 		}
 		out = append(out,
 			types.SharedVariable{Name: fmt.Sprintf("s%d_nd", id), Min: 1.4, Max: 2.0, Active: true, Bindings: keepParam(bindings, "nd")},

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -130,5 +131,81 @@ func TestValidateSharedGlassVariables(t *testing.T) {
 	in.Optimization.SharedVariables = sharedVar("nd", "vd")
 	if err := validateSharedGlassVariables(in, gc); err == nil {
 		t.Errorf("shared glass mixing nd and vd was accepted")
+	}
+}
+
+// glassUnionMultiYAML gives config1 an extra F2 element on surface 3 where
+// config0 has only its image plane: the configurations do not share a surface
+// layout, so an element list taken from the first config alone would silently
+// leave surface 3 out of the optimisation.
+const glassUnionMultiYAML = `
+glass_catalog:
+  entries:
+  - {type: model, label: BK7, nd: 1.51680, vd: 64.1673}
+  - {type: model, label: F2, nd: 1.62004, vd: 36.37}
+optimization:
+  method: dls
+  max_iter: 1
+  num_rays: 8
+configs:
+- id: config0
+  active: true
+  surfaces:
+  - {id: 1, type: sphere, radius: 60.0, thickness: 4.0, material: {key: BK7}, diameter: 20.0}
+  - {id: 2, type: sphere, radius: -60.0, thickness: 50.0, material: AIR, diameter: 20.0}
+  - {id: 3, type: sphere, radius: 0.0, thickness: 0.0, material: AIR, diameter: 20.0}
+- id: config1
+  active: true
+  surfaces:
+  - {id: 1, type: sphere, radius: 70.0, thickness: 4.0, material: {key: BK7}, diameter: 20.0}
+  - {id: 2, type: sphere, radius: -70.0, thickness: 20.0, material: AIR, diameter: 20.0}
+  - {id: 3, type: sphere, radius: -40.0, thickness: 3.0, material: {key: F2}, diameter: 20.0}
+  - {id: 4, type: sphere, radius: 0.0, thickness: 0.0, material: AIR, diameter: 20.0}
+`
+
+// TestGlassVariablesUnionAcrossConfigs verifies --glass-variables collects the
+// element list from every active config, not just the first: a config that
+// numbers its surfaces differently (or carries an extra element) used to have
+// that element left out of the optimisation without a word. An element that is
+// not glass in some config binds only the configs where it exists, and the
+// partial binding is reported.
+func TestGlassVariablesUnionAcrossConfigs(t *testing.T) {
+	var in types.Input
+	if err := yaml.Unmarshal([]byte(glassUnionMultiYAML), &in); err != nil {
+		t.Fatalf("yaml.Unmarshal: %v", err)
+	}
+
+	var stderr string
+	stderr = captureStderr(t, func() { applyGlassVariables(&in, sharedGlassCatalog()) })
+
+	byName := map[string]types.SharedVariable{}
+	for _, sv := range in.Optimization.SharedVariables {
+		byName[sv.Name] = sv
+	}
+
+	// Surface 3 is an F2 element in config1 only: the union must find it.
+	s3, ok := byName["s3_nd"]
+	if !ok {
+		t.Fatalf("config1's extra element (surface 3) got no shared variable; got %v", byName)
+	}
+	if len(s3.Bindings) != 1 || s3.Bindings[0].Config != "config1" || s3.Bindings[0].ID != 3 {
+		t.Errorf("s3_nd bindings = %+v, want config1/surface 3 only", s3.Bindings)
+	}
+	if _, ok := byName["s3_vd"]; !ok {
+		t.Errorf("no shared s3_vd variable")
+	}
+	if !strings.Contains(stderr, "surface 3 is not glass in config0") {
+		t.Errorf("partial binding not reported; stderr = %q", stderr)
+	}
+
+	// Surface 1 exists in both configs and stays fully shared.
+	if got := len(byName["s1_nd"].Bindings); got != 2 {
+		t.Errorf("s1_nd bindings = %d, want 2", got)
+	}
+
+	// A shared layout (the common case) reports nothing.
+	full := parseSharedGlassInput(t)
+	if out := captureStderr(t, func() { applyGlassVariables(full, sharedGlassCatalog()) }); out != "" {
+		t.Errorf("shared layout warned: %q", out)
 	}
 }

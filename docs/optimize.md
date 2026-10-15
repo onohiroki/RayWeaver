@@ -162,7 +162,13 @@ A binding set that mixes glass and non-glass params, mixes `nd` with `vd`, or
 binds surfaces with different initial glasses is rejected at startup with an
 error. Use `--glass-variables` to declare one shared `nd`/`vd` pair per physical
 element automatically (a single-config run keeps the `optimization.variables`
-form).
+form). The generated set takes its elements from **every** active config, not
+just the first: a zoom whose positions number their surfaces differently, or
+give one position an extra element, otherwise left that element out of the
+optimisation without a word. An element that is missing (or air) in some active
+config binds only the configs where it exists — the glass cannot be shared with
+a surface that is not there — and that partial binding is reported on stderr,
+naming the surface and the configs it is absent from.
 
 `glass_hull` and `glass_attraction` apply to shared glass variables as well.
 
