@@ -178,6 +178,28 @@ Convergence is declared when the gradient norm is below `optimization.tol`
 improved for a window of iterations while every non-relaxed constraint is
 satisfied (`converged`).
 
+### 3b. A stalled solve is diagnosed
+
+`Result.AcceptedSteps` counts the iterations that actually reduced the merit, and
+`optimize` prints it as `Accepted:` in the run summary. When the solve reaches
+`max_iterations` with no accepted step, or with no improvement over a long tail
+(`optimization.max_iter`-scaled window), `Result.Diagnostic` carries a
+**stall diagnostic** instead of leaving the user with a merit that never moved:
+
+- how many of the iterations since the merit last improved;
+- the worst conditioning of the undamped normal equations over the run — the
+  smallest column norm relative to the largest (a **near-zero Jacobian column**,
+  a variable the merit barely responds to) and the largest `|cos|` between two
+  columns (a **near-duplicate pair**, which is what identical seed curvatures
+  inside a cemented group produce). Both statistics are read off the `H = JᵀJ`
+  product the solver already forms, so they cost nothing;
+- how many iterations the damped normal equations were singular (that path used
+  to double `μ` and `continue` without a trace);
+- what to try: `optimization.central_diff`, `optimization.bfgs`, a larger
+  `optimization.mu`, or breaking the symmetric seed.
+
+The diagnostic is advisory only: it changes no merit value and no step.
+
 ## 4. Stall escape
 
 If the merit stalls for many iterations (30), the solver resets to the best

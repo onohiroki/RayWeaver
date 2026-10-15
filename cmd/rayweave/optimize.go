@@ -444,11 +444,15 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		fmt.Fprintf(os.Stderr, "  Interrupted: true (best result found so far written to stdout)\n")
 	}
 	fmt.Fprintf(os.Stderr, "  Iterations:  %d\n", result.Iterations)
+	fmt.Fprintf(os.Stderr, "  Accepted:    %d (iterations that improved the merit)\n", result.AcceptedSteps)
 	fmt.Fprintf(os.Stderr, "  Before:      %.6e\n", result.BeforeMerit)
 	fmt.Fprintf(os.Stderr, "  After:       %.6e\n", result.AfterMerit)
 	if result.BeforeMerit > 0 {
 		improvement := (result.BeforeMerit - result.AfterMerit) / result.BeforeMerit * 100
 		fmt.Fprintf(os.Stderr, "  Improvement: %.2f%%\n", improvement)
+	}
+	if result.Diagnostic != "" {
+		fmt.Fprintf(os.Stderr, "  WARNING: DLS stalled — %s\n", result.Diagnostic)
 	}
 
 	finalX := finalXFromStates(result.Variables)

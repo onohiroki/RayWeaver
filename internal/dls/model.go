@@ -47,6 +47,14 @@ type Result struct {
 	Iterations  int
 	Status      string
 	Variables   []VariableState
+	// AcceptedSteps counts the DLS iterations that actually reduced the merit.
+	// Zero after a full run means the solver never moved.
+	AcceptedSteps int
+	// Diagnostic explains a stalled solve ("" when it made progress or
+	// converged): how long the merit has been flat plus the worst Jacobian
+	// conditioning seen, so the caller can report the cause instead of leaving
+	// the user with a merit that never moved.
+	Diagnostic string
 }
 
 type VariableState struct {

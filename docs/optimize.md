@@ -21,15 +21,17 @@ that does not run DLS.
 | `--log FILE` | write per-iteration progress to FILE (JSONL) |
 | `--glass-dir DIR` | AGF glass catalog directory |
 | `--exclude-param LIST` | comma-separated target param names to drop from the optimization variables (e.g. `conic,a4,a6`) |
-| `--central-diff` | use central-difference Jacobian (2nd-order accurate, 2× residual evaluations) |
-| `--bfgs` | enable BFGS-augmented damping (replaces μD with μ·B⁻¹) |
-| `--auto-scale` | enable Jacobian-based variable scaling (equalises sensitivity across variables) |
+
+The Jacobian and damping knobs are **input-YAML settings, not flags**:
+`optimization.central_diff` (central-difference Jacobian, 2nd-order accurate,
+2× residual evaluations), `optimization.bfgs` (BFGS-augmented damping, μ·B⁻¹
+instead of μD; pair it with `central_diff`) and `optimization.mu` (initial
+damping) have no command-line counterpart.
 
 `--glass-dir` is written back into the output's `glass_catalog.directory`
 (CLI/YAML rule); `--exclude-param` removes the named targets from the echoed
 `optimization.variables`; `--verbose` / `--log` are run-stream flags.
-`--central-diff`, `--bfgs`, `--auto-scale` are written back into the
-output's `optimization` section. `optimize snap` accepts only `--glass-dir`
+`optimize snap` accepts only `--glass-dir`
 (the snap settings are read from the input's `optimization`/`glass_catalog`).
 
 ## Input — single-config mode
@@ -638,6 +640,15 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   the `image_height` constraint alike. When the requested image height lies
   beyond the field's traceable range the search returns the largest angle that
   still traces, never 0.
+- **A stalled solve says so.** The summary always reports
+  `Accepted: N` — how many iterations actually reduced the merit — so a run that
+  burned its whole budget without moving is visible at a glance. When the solve
+  reaches `max_iterations` with no accepted step (or with no improvement over a
+  long tail), `optimize` also prints a `WARNING: DLS stalled — …` line naming the
+  worst Jacobian conditioning it saw: a near-zero column (a variable the merit
+  barely responds to) or a near-parallel column pair (equal seed curvatures in a
+  cemented group). See
+  [methods/dls-optimization.md §3](methods/dls-optimization.md).
 - **A dying field is reported.** The merit is evaluated over the rays that
   survive, so a merit without a liveliness guard (a bare `spot_rms`) can be
   lowered by clipping a field's pupil away. At the end of a solve `optimize`

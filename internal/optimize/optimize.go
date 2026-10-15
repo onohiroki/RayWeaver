@@ -199,6 +199,12 @@ type Result struct {
 	Iterations  int
 	Status      string
 	Variables   []VariableState
+	// AcceptedSteps counts the DLS iterations that reduced the merit; 0 after a
+	// full run means the solver never moved.
+	AcceptedSteps int
+	// Diagnostic explains a stalled solve ("" when it made progress or
+	// converged) — flat merit plus the worst Jacobian conditioning seen.
+	Diagnostic string
 }
 
 type VariableState struct {
@@ -5211,11 +5217,13 @@ func (o *Optimizer) Optimize() Result {
 	}
 
 	return Result{
-		BeforeMerit: dlsResult.BeforeMerit,
-		AfterMerit:  dlsResult.AfterMerit,
-		Iterations:  dlsResult.Iterations,
-		Status:      dlsResult.Status,
-		Variables:   o.buildVariableStates(x),
+		BeforeMerit:   dlsResult.BeforeMerit,
+		AfterMerit:    dlsResult.AfterMerit,
+		Iterations:    dlsResult.Iterations,
+		Status:        dlsResult.Status,
+		Variables:     o.buildVariableStates(x),
+		AcceptedSteps: dlsResult.AcceptedSteps,
+		Diagnostic:    dlsResult.Diagnostic,
 	}
 }
 

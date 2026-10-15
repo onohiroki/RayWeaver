@@ -1,8 +1,10 @@
 package dls
 
 import (
+	"fmt"
 	"math"
 	"runtime"
+	"strings"
 	"sync"
 
 	"github.com/hiroki/rayweaver/internal/types"
@@ -110,6 +112,11 @@ func Solve(m Model) Result {
 
 	bestMeritWindowAgo := bestMerit
 	lastCheckIter := 0
+	// Stall bookkeeping for the end-of-run diagnostic.
+	acceptedSteps := 0
+	lastImproveIter := 0
+	singularCount := 0
+	cond := jacobianConditioning{minNormRatio: 1.0, minNormIdx: -1, dupA: -1, dupB: -1}
 	stallWindowFrac := opts.StallWindowFrac
 	if stallWindowFrac <= 0 {
 		stallWindowFrac = 0.2
@@ -247,6 +254,9 @@ func Solve(m Model) Result {
 			}
 			hDiag[j] = H[j][j]
 		}
+		// Record the conditioning of the undamped normal equations now: the
+		// damping added below would mask it.
+		cond.record(H, nVars)
 		if opts.BFGS && bfgsB != nil {
 			// BFGS-augmented LM: replace μI with μ·B⁻¹.
 			// B⁻¹ is the Hessian approximation from the BFGS update.
@@ -303,6 +313,10 @@ func Solve(m Model) Result {
 
 		delta := solveLinearSystem(H, negG)
 		if delta == nil {
+			// Singular normal equations: double the damping and retry. Counted
+			// for the stall diagnostic — a solve that can only ever hit this
+			// path never moves and used to leave no trace at all.
+			singularCount++
 			mu *= 2.0
 			continue
 		}
@@ -462,6 +476,8 @@ func Solve(m Model) Result {
 				copy(bestXNorm, xNorm)
 				copy(bestKnownNorm, xNorm)
 			}
+			acceptedSteps++
+			lastImproveIter = totalIter
 			adaptiveState.OnAccepted(delta, variables, *adDampingCfg)
 		} else {
 			adaptiveState.OnRejected(g, delta, variables, *adDampingCfg)
@@ -599,6 +615,17 @@ func Solve(m Model) Result {
 		iterations = totalIter + 1
 	}
 
+	diagnostic := ""
+	if status == "max_iterations" {
+		stalledIters := totalIter - lastImproveIter
+		switch {
+		case acceptedSteps == 0 && totalIter >= 5:
+			diagnostic = stallDiagnostic(totalIter, iterations, bestMerit, variables, cond, singularCount)
+		case stalledIters >= stallWindow:
+			diagnostic = stallDiagnostic(stalledIters, iterations, bestMerit, variables, cond, singularCount)
+		}
+	}
+
 	if opts.Logger != nil {
 		finalVars := make([]float64, nVars)
 		for i := range nVars {
@@ -631,12 +658,94 @@ func Solve(m Model) Result {
 	}
 
 	return Result{
-		BeforeMerit: beforeMerit,
-		AfterMerit:  bestMerit,
-		Iterations:  iterations,
-		Status:      status,
-		Variables:   vars,
+		BeforeMerit:   beforeMerit,
+		AfterMerit:    bestMerit,
+		Iterations:    iterations,
+		Status:        status,
+		Variables:     vars,
+		AcceptedSteps: acceptedSteps,
+		Diagnostic:    diagnostic,
 	}
+}
+
+// jacobianConditioning is the worst conditioning seen over a solve, read off
+// the undamped normal-equation matrix H = JᵀJ.
+type jacobianConditioning struct {
+	// minNormRatio is the smallest column norm relative to the largest; values
+	// near 0 mark a variable the merit barely responds to.
+	minNormRatio float64
+	minNormIdx   int
+	// maxAbsCos is the largest |cos| between two columns; values near 1 mark
+	// near-duplicate variables (equal seed curvatures in a cemented group).
+	maxAbsCos float64
+	dupA      int
+	dupB      int
+}
+
+// record folds one iteration's normal equations into the worst-so-far
+// conditioning. H's diagonal is the squared column norm of J and its
+// off-diagonals the column inner products, so both statistics fall out of the
+// H = JᵀJ product the solver has already computed — no second pass over J.
+func (c *jacobianConditioning) record(H [][]float64, n int) {
+	if n == 0 {
+		return
+	}
+	norms := make([]float64, n)
+	maxNorm := 0.0
+	for j := 0; j < n; j++ {
+		if d := H[j][j]; d > 0 {
+			norms[j] = math.Sqrt(d)
+		}
+		if norms[j] > maxNorm {
+			maxNorm = norms[j]
+		}
+	}
+	if maxNorm <= 0 {
+		return
+	}
+	for j := 0; j < n; j++ {
+		r := 0.0
+		if norms[j] > 0 {
+			r = norms[j] / maxNorm
+		}
+		if r < c.minNormRatio {
+			c.minNormRatio, c.minNormIdx = r, j
+		}
+	}
+	for j := 0; j < n; j++ {
+		if norms[j] <= 0 {
+			continue
+		}
+		for k := j + 1; k < n; k++ {
+			if norms[k] <= 0 {
+				continue
+			}
+			cos := math.Abs(H[j][k] / (norms[j] * norms[k]))
+			if cos > c.maxAbsCos {
+				c.maxAbsCos, c.dupA, c.dupB = cos, j, k
+			}
+		}
+	}
+}
+
+// stallDiagnostic explains a stalled solve: how long the merit has been flat
+// plus whatever conditioning defect was observed, and what to try. It is the
+// "no improving step" message the solver never used to produce — the merit just
+// stayed put and the run reported max_iterations with no cause.
+func stallDiagnostic(stalledIters, iterations int, bestMerit float64, variables []VariableInfo, cond jacobianConditioning, singularCount int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "no step improved the merit in the last %d of %d iterations (merit %.6g)", stalledIters, iterations, bestMerit)
+	if cond.minNormIdx >= 0 && cond.minNormIdx < len(variables) && cond.minNormRatio < 1e-6 {
+		fmt.Fprintf(&b, "; variable %q has a near-zero Jacobian column (%.1e of the largest)", variables[cond.minNormIdx].Name, cond.minNormRatio)
+	}
+	if cond.dupA >= 0 && cond.dupB >= 0 && cond.dupA < len(variables) && cond.dupB < len(variables) && cond.maxAbsCos > 0.999 {
+		fmt.Fprintf(&b, "; variables %q and %q are nearly parallel (|cos| = %.4f)", variables[cond.dupA].Name, variables[cond.dupB].Name, cond.maxAbsCos)
+	}
+	if singularCount > 0 {
+		fmt.Fprintf(&b, "; the damped normal equations were singular on %d iteration(s)", singularCount)
+	}
+	b.WriteString("; try optimization.central_diff or optimization.bfgs, raise optimization.mu, or break a symmetric seed")
+	return b.String()
 }
 
 // computeJacobians evaluates the finite-difference Jacobian of the residuals
