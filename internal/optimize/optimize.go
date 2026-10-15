@@ -4794,6 +4794,16 @@ func (o *Optimizer) fieldSizingAngle(cfg *config, f *types.FieldItem, surfaces [
 // term, centred on the per-field entrance pupil when one is resolved. When a
 // virtual entrance pupil is active (p.dia > 0), the override is forwarded so
 // the beam envelope matches the merit grid.
+//
+// Eight rays on the pupil edge (cardinal + diagonal) are enough for the sizing,
+// and measurably conservative: the merit's polar grid puts its outermost ring
+// inside the launched radius, and its spokes land on the same azimuths, while
+// the extent is symmetric under x -> -x and y -> -y for any system the
+// cardinal/diagonal rays bound. Measured on axisymmetric and tilted systems the
+// 8-ray envelope is >= the dense hex envelope the final sizing uses for 8, 16
+// and 64 azimuths alike, so the sized diameter covers the bundle the merit
+// traces. WarnBeamClipping reports the residual case: a fixed aperture that
+// does clip.
 func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glass.Catalog, term *meritTerm, angle float64, p appliedPupil) map[int]float64 {
 	pupilZ := o.gridCentring(cfg, p, angle)
 	return dls.TraceFieldExtents8Rays(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, o.apertureMargin, o.gridWorkers(), p.dia)
@@ -5270,6 +5280,116 @@ func (o *Optimizer) configByID(id string) (*config, bool) {
 		}
 	}
 	return nil, false
+}
+
+// beamClipTolerance is the clear-aperture deficit (mm) at which
+// WarnBeamClipping reports a surface. The envelope is a sampled measurement —
+// the beam is traced at discrete azimuths and no interpolation is done — so a
+// tolerance keeps a ray that falls between two samples from being reported as
+// clipping.
+const beamClipTolerance = 0.01
+
+// WarnBeamClipping reports the clear apertures the prescribed beam leaves at x,
+// as a deficit in mm per surface.
+//
+// A fixed (non-auto_aperture) diameter is the user's prescription, so nothing
+// sizes it to the beam: the merit grid simply loses the rays it clips, which
+// lowers a spot-only residual (the same incentive the G4 field warning
+// describes) without anyone seeing the cause. The envelope is measured with
+// aperture and glass-path checks disabled at margin 1.0 — the physical marginal
+// beam, not the merit grid's deliberately inflated launch — on a dense grid of
+// the field's prescribed (vignetted) pupil, the measurement the beam_clearance
+// constraint and chief --clear-aperture use, for every config field and every
+// sizing wavelength. Auto-aperture surfaces are checked too (the sizing should
+// have covered them; a miss is worth knowing) and the stop is skipped: it
+// defines the beam. A config that already constrains beam_clearance /
+// beam_diameter is left alone — the user is managing the clearance there, and
+// the constraint reporting already names a violation.
+func (o *Optimizer) WarnBeamClipping(x []float64) {
+	type finding struct {
+		config   string
+		field    int
+		angle    float64
+		surface  int
+		diameter float64
+		needs    float64
+	}
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+	// The envelope grid must reach at least the merit grid's outermost ring,
+	// which lies at rings/(rings+1) of the launched radius, while a hex grid
+	// reaches 1-1/n: n >= rings+1 keeps the envelope inside that ring. 128 rays
+	// (n = 12) does so for every merit grid up to 121 rays.
+	rays := o.extentRays(128)
+	var findings []finding
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		if len(cfg.fields) == 0 || configGuardsBeamClearance(cfg) {
+			continue
+		}
+		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
+		wls := apertureSizingWavelengths(cfg)
+		for fi := range cfg.fields {
+			f := &cfg.fields[fi]
+			angle := o.fieldSizingAngle(cfg, f, surfaces, gc, wls[0])
+			pupilZ := o.gridCentring(cfg, p, angle)
+			worst := make(map[int]float64)
+			for _, wl := range wls {
+				env := dls.TraceFieldGridExtentsVignetted(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, wl, 1.0, rays, o.gridRotation, o.gridWorkers(), p.dia, f.Vignetting)
+				for id, e := range env {
+					if e > worst[id] {
+						worst[id] = e
+					}
+				}
+			}
+			for i := range surfaces {
+				s := &surfaces[i]
+				if s.ID == cfg.stopSurface || s.Diameter <= 0 {
+					continue
+				}
+				if deficit := worst[s.ID] - s.Diameter/2; deficit > beamClipTolerance {
+					findings = append(findings, finding{
+						config: cfg.id, field: fi, angle: angle,
+						surface: s.ID, diameter: s.Diameter, needs: worst[s.ID],
+					})
+				}
+			}
+		}
+	}
+	if len(findings) == 0 {
+		return
+	}
+	sort.SliceStable(findings, func(i, j int) bool {
+		return findings[i].needs-findings[i].diameter/2 > findings[j].needs-findings[j].diameter/2
+	})
+	Warnf("warning: the prescribed beam leaves the clear aperture of a surface, so the merit grid loses those rays and a spot-only residual is lowered by the clipping (the stop is exempt):")
+	shown := 0
+	for _, f := range findings {
+		if shown == beamClipWarnMax {
+			Warnf("  (+%d more surface/field pairs)", len(findings)-shown)
+			break
+		}
+		Warnf("  config %q field %d (%.2f deg): surface %d has diameter %.4f mm, the beam needs %.4f mm (over by %.4f mm) — raise the diameter, enable auto_aperture on it, or add a beam_clearance constraint",
+			f.config, f.field, f.angle, f.surface, f.diameter, 2*f.needs, f.needs-f.diameter/2)
+		shown++
+	}
+}
+
+// beamClipWarnMax caps the number of surfaces WarnBeamClipping prints; a badly
+// undersized lens can clip at every surface and the first (worst) few are
+// enough to act on.
+const beamClipWarnMax = 8
+
+// configGuardsBeamClearance reports whether cfg already constrains the beam
+// clearance at a surface, in which case WarnBeamClipping stays quiet.
+func configGuardsBeamClearance(cfg *config) bool {
+	for _, c := range cfg.constraints {
+		if c.Measure == types.MeasureBeamClearance || c.Measure == types.MeasureBeamDiameter {
+			return true
+		}
+	}
+	return false
 }
 
 func (o *Optimizer) Optimize() Result {

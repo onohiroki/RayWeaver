@@ -29,7 +29,17 @@ func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopSurface int
 // resolved; the returned extents therefore match the chief --clear-aperture
 // beam envelope.
 func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64) map[int]float64 {
-	_, perSurfMax := traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers, types.GridHex, epdOverride, nil)
+	return TraceFieldGridExtentsVignetted(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, workers, epdOverride, nil)
+}
+
+// TraceFieldGridExtentsVignetted is TraceFieldGridExtents with the field's
+// prescribed (vignetted) pupil: when vig is set the launch is clipped to the
+// vignetting ellipse, so the returned extents describe the beam the merit grid
+// actually traces. Measuring a deliberately vignetted field against the full
+// aperture would report the prescription itself as clipping. Aperture and
+// glass-path checks stay disabled.
+func TraceFieldGridExtentsVignetted(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64, vig *types.VignettingDef) map[int]float64 {
+	_, perSurfMax := traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers, types.GridHex, epdOverride, vig)
 	return perSurfMax
 }
 

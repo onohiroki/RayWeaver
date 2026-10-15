@@ -500,6 +500,11 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	// silently. Warning only — the merit values are untouched.
 	opt.WarnFieldThroughput(finalX)
 
+	// Warn about fixed clear apertures the beam leaves: the same incentive,
+	// but the cause is a diameter nothing sizes (auto_aperture off), and
+	// naming it saves the "raise every diameter and trim afterwards" detour.
+	opt.WarnBeamClipping(finalX)
+
 	// Apply final auto_aperture diameters.
 	finalAps := opt.FinalApertures(finalX)
 	for cfgID, apMap := range finalAps {

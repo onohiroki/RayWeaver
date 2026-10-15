@@ -657,6 +657,23 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   the message is suppressed when the config already carries a `field_alive` /
   `pupil_fill` term or a `vignetting_factor` constraint. See
   [merit-and-constraints.md §3.2](merit-and-constraints.md).
+- **A clipping clear aperture is reported.** The same incentive has a second
+  cause: a **fixed** (`auto_aperture: false`) diameter nothing sizes to the
+  beam clips the merit grid, and the optimizer would otherwise exploit that
+  silently. At the end of a solve `optimize` measures, per config field and per
+  sizing wavelength, the prescribed (vignetting-masked) beam envelope on a
+  dense grid with aperture checks disabled — the measurement the
+  `beam_clearance` constraint and `chief --clear-aperture` use, at
+  `optimization.aperture_margin` 1.0 so the grid's deliberate overfill is not
+  reported — and warns (stderr) for every surface that is left in deficit,
+  worst first, up to eight entries with a `(+N more)` tail. The stop is exempt
+  (it defines the beam) and a config that already constrains
+  `beam_clearance` / `beam_diameter` is left alone (the constraint reporting
+  names the violation there). Warning only; the merit and the diameters are
+  untouched. This is what makes the "raise every diameter during optimization
+  and trim afterwards" workaround unnecessary: the run says which surface is
+  clipping instead of leaving it to be inferred from a field that lost its
+  rays.
 - `optimization.aperture_margin` is clamped to ≥ 1.0; smaller values make the
   pupil grid smaller than the aperture and stall DLS.
 - `optimization.aperture_margin_mm` is the physical clearance (mm) added to
@@ -669,7 +686,13 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   clearance covers what remains of that difference, which is why the default is
   0.4 rather than 0.2. The sizing also carries each field's `vignetting` ellipse
   (`fieldDefsFromItems`), so it measures the same (vignetted) pupil the merit
-  grid traces.
+  grid traces. The per-evaluation sizing measures with aperture and glass-path
+  checks disabled, so it envelopes the *unclipped* bundle — the 8 pupil-edge
+  rays it traces bound the merit's polar grid, whose spokes land on the same
+  azimuths and whose outermost ring sits inside the launched radius (verified
+  against the dense hex envelope at 8, 16 and 64 azimuths) — and the
+  end-of-solve pass replaces the diameters with the `chief --clear-aperture`
+  hex envelope.
 - `optimization.jacobian_workers` sets the goroutines used for the finite
   difference Jacobian (default `GOMAXPROCS`). The Jacobian is deterministic:
   the result is identical for any worker count.

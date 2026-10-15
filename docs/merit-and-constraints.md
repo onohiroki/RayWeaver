@@ -816,6 +816,12 @@ For `edge_thickness`, `back_surface` may be omitted; the rear surface then
 defaults to the next surface in system order (the surface the front's thickness
 is measured to).
 
+`beam_clearance` and `beam_diameter` measure the same envelope the optimizer's
+beam-clipping warning does (a dense grid of the field's prescribed pupil with
+aperture checks disabled), and declaring either one suppresses that warning:
+the config is already managing the clearance, and the constraint reporting names
+the violation.
+
 `system_length` sums every thickness, so it pins the whole track — the image
 plane measured from surface 1 — but cannot express a single group's position.
 `surface_range` is that partial sum: the sum of the surfaces from `surface` up
