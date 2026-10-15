@@ -142,6 +142,15 @@ Each worker initializes its swarm around the cycle's start point (x0):
 Velocities are initialized to zero. The swarm is confined to the normalized
 variable space [0, 1]^n (each variable scaled by its min..max range).
 
+**Seeding the swarm from a solution.** x0 is the state the input document
+carries, so piping a result back in seeds the swarm with it: particle 0 *is*
+that point, and because the start is ranked like any other particle it is
+returned unless the swarm finds something better. To refine a DLS solution
+rather than restart from scratch, pipe `optimize` (or an `escape`/`pso` saved
+minimum) into `pso` / `escape`; combined with `initial_perturb` (which spreads
+the *parallel workers'* start points, not the particles within a swarm) each
+worker explores its own neighbourhood of the seed.
+
 ### Constraint handling
 
 PSO uses a **static penalty** method: the fitness at particle x is

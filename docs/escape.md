@@ -430,11 +430,26 @@ lens is deliberately over-vignetted. Measured on the repository's 6-element
 double-Gauss benchmark, raising 0.8 -> 0.9 reclassified only over-clipped points
 and lost no gate-passing design.
 
-Validation happens **post-DLS only** — after the clean DLS converges, the
-converged point is traced through `chief.DetermineChiefRaysGrid` with the same
-pupil model (dynamic or virtual) the DLS used. If validation fails, the DLS
-result is still used for the escape bump, so the search is pushed away from the
-broken basin.
+Validation happens **post-DLS only** — after the clean DLS converges, the point's
+throughput is measured on the **optimizer's own grids**: the same launch
+(entrance-pupil centring), aperture margin, per-field vignetting and sized
+auto-aperture diameters the merit terms traced, at the validation ray count
+(`optimization.escape.validation_num_rays`, default `optimization.num_rays`;
+a higher value guards against statistical grid sampling at the DLS ray count).
+So "feasible" means exactly what the objective saw: a field the merit cannot
+see is a field validation rejects, and every config of a multi-config document
+is validated (a chief-grid trace covers only the primary config, and its own
+sampling, which let a point be called feasible with a dead off-axis field while
+`list global` disagreed with a direct trace). Models without that capability —
+hand-built stubs in tests — fall back to a
+`chief.DetermineChiefRaysGrid` trace with the same pupil model (dynamic or
+virtual) the DLS used. If validation fails, the DLS result is still used for
+the escape bump, so the search is pushed away from the broken basin.
+
+A run that ends with no feasible minimum writes `global_result.best_index: -1`
+(and a `best_merit` that is not a solution), so it also reports the outcome on
+stderr — a `no feasible minimum found` warning with a tally of the rejection
+reasons. Without it the document looks like any other.
 
 The invalid reason is reported per basin:
 

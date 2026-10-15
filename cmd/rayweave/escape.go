@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/hiroki/rayweaver/internal/chief"
@@ -613,33 +614,40 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 					}
 				}
 			}
-			// Trace pupil grids for each field and count valid rays. The
-			// virtual entrance pupil must use the optimised axial_position/
-			// diameter (not the static input model), otherwise the grid is
-			// centred on the initial pupil and most rays miss the aperture.
-			sys := types.System{Surfaces: surf, StopSurface: stopSurface}
-			pm := effectivePupilModel(inner, x, "config1", pupilModel)
-			results := chief.DetermineChiefRaysGridMode(
-				sys, fieldDefs, refSurf, validationNumRays, gc,
-				types.NewCircularJones(true), wl,
-				false, types.GridPolar, nil, nil, nil, pm, 0, 0,
-				chiefRayDefinition(input),
-			)
-			for _, r := range results {
-				total := len(r.GridPoints)
-				if total == 0 {
-					return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
-				}
-				nValid := 0
-				for _, gp := range r.GridPoints {
-					if gp.ImageX != nil && gp.ImageY != nil && gp.ErrorCode == "" {
-						nValid++
+			// Feasibility must mean what the merit means: the optimizer's own
+			// grids decide when it can report them (see checkThroughput).
+			if st, reason := checkThroughput(inner, x, validationNumRays, throughputThreshold, func() (escape.MinStatus, escape.InvalidReason) {
+				// Fallback for a model without the hook: trace pupil grids for
+				// each field and count valid rays. The virtual entrance pupil
+				// must use the optimised axial_position/diameter (not the
+				// static input model), otherwise the grid is centred on the
+				// initial pupil and most rays miss the aperture.
+				sys := types.System{Surfaces: surf, StopSurface: stopSurface}
+				pm := effectivePupilModel(inner, x, "config1", pupilModel)
+				results := chief.DetermineChiefRaysGridMode(
+					sys, fieldDefs, refSurf, validationNumRays, gc,
+					types.NewCircularJones(true), wl,
+					false, types.GridPolar, nil, nil, nil, pm, 0, 0,
+					chiefRayDefinition(input),
+				)
+				for _, r := range results {
+					total := len(r.GridPoints)
+					if total == 0 {
+						return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
+					}
+					nValid := 0
+					for _, gp := range r.GridPoints {
+						if gp.ImageX != nil && gp.ImageY != nil && gp.ErrorCode == "" {
+							nValid++
+						}
+					}
+					if ratio := float64(nValid) / float64(total); ratio < throughputThreshold {
+						return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
 					}
 				}
-				ratio := float64(nValid) / float64(total)
-				if ratio < throughputThreshold {
-					return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
-				}
+				return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
+			}); st != escape.MinStatusFeasibleLocalMinimum {
+				return st, reason
 			}
 			// Glass convex-hull constraint: a converged point whose nd/vd lies
 			// outside the real-glass hull is infeasible (core constraint, not
@@ -1048,29 +1056,37 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSetting
 					return escape.MinStatusInfeasibleBasin, escape.ReasonGeometryViolation
 				}
 			}
-			sys := types.System{Surfaces: surf, StopSurface: primaryStop}
-			pm := effectivePupilModel(inner, x, template[0].ID, pupilModel)
-			results := chief.DetermineChiefRaysGridMode(
-				sys, fieldDefs, refSurf, validationNumRays, gc,
-				types.NewCircularJones(true), wl,
-				false, types.GridPolar, nil, nil, nil, pm, 0, 0,
-				chiefRayDefinition(input),
-			)
-			for _, r := range results {
-				total := len(r.GridPoints)
-				if total == 0 {
-					return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
-				}
-				nValid := 0
-				for _, gp := range r.GridPoints {
-					if gp.ImageX != nil && gp.ImageY != nil && gp.ErrorCode == "" {
-						nValid++
+			// Same reconciliation as the single-config path: the optimizer's
+			// own grids decide, so feasibility covers every config's fields
+			// (the fallback below traces one config's surfaces with the
+			// top-level chief fields).
+			if st, reason := checkThroughput(inner, x, validationNumRays, throughputThreshold, func() (escape.MinStatus, escape.InvalidReason) {
+				sys := types.System{Surfaces: surf, StopSurface: primaryStop}
+				pm := effectivePupilModel(inner, x, template[0].ID, pupilModel)
+				results := chief.DetermineChiefRaysGridMode(
+					sys, fieldDefs, refSurf, validationNumRays, gc,
+					types.NewCircularJones(true), wl,
+					false, types.GridPolar, nil, nil, nil, pm, 0, 0,
+					chiefRayDefinition(input),
+				)
+				for _, r := range results {
+					total := len(r.GridPoints)
+					if total == 0 {
+						return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
+					}
+					nValid := 0
+					for _, gp := range r.GridPoints {
+						if gp.ImageX != nil && gp.ImageY != nil && gp.ErrorCode == "" {
+							nValid++
+						}
+					}
+					if ratio := float64(nValid) / float64(total); ratio < throughputThreshold {
+						return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
 					}
 				}
-				ratio := float64(nValid) / float64(total)
-				if ratio < throughputThreshold {
-					return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
-				}
+				return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
+			}); st != escape.MinStatusFeasibleLocalMinimum {
+				return st, reason
 			}
 			// Glass convex-hull core constraint (see runEscapeSingle).
 			if hv, ok := inner.(interface {
@@ -1224,6 +1240,47 @@ func buildSingleVarStates(variables []optimize.Variable, x []float64) []types.Gl
 		}
 	}
 	return states
+}
+
+// fieldThroughputReporter is the optimizer capability the escape feasibility
+// check prefers: the surviving fraction of every field's pupil grid, measured
+// on the same grids (launch, aperture margin, vignetting, sized apertures) the
+// merit terms traced. Stub models in tests do not implement it, so the check
+// falls back to a chief-grid trace.
+//
+// The assertion keeps the reconciliation from silently rotting back into the
+// fallback: a real run always hands validateFn an *optimize.Optimizer.
+type fieldThroughputReporter interface {
+	FieldThroughputs(x []float64, rayCount int) []optimize.FieldThroughput
+}
+
+var _ fieldThroughputReporter = (*optimize.Optimizer)(nil)
+
+// checkThroughput decides the throughput verdict for one converged point. When
+// the model can report its own grids, they decide: the grids are the ones the
+// merit terms traced — the same launch, aperture margin, per-field vignetting
+// and sized apertures — so a field the objective cannot see is a field the
+// feasibility check rejects. Measuring on a separate chief grid instead can
+// call a point feasible whose merit grid is empty (or certify a config the
+// check never looked at), which is how `list global` came to disagree with a
+// direct trace.
+//
+// The fallback is used only for a model without the hook (stub models in
+// tests): it traces the chief grid and counts the valid points.
+func checkThroughput(inner any, x []float64, validationNumRays int, threshold float64, fallback func() (escape.MinStatus, escape.InvalidReason)) (escape.MinStatus, escape.InvalidReason) {
+	reporter, ok := inner.(fieldThroughputReporter)
+	if !ok {
+		return fallback()
+	}
+	for _, ft := range reporter.FieldThroughputs(x, validationNumRays) {
+		if ft.Points == 0 {
+			return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
+		}
+		if ft.Ratio < threshold {
+			return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
+		}
+	}
+	return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
 }
 
 // effectivePupilModel returns the virtual entrance pupil model that the
@@ -1640,7 +1697,47 @@ func routeWarningsToProgress(progress *escape.Progress, streamOnStderr bool) (re
 
 // reportEscape emits a single JSONL "global_complete" event with the full
 // summary to the progress reporter (stderr via compact writer when --verbose).
+// warnNoFeasibleMinimum reports a search that ended with no feasible minimum.
+// Its best_merit is not a solution and global_result.best_index is -1, so the
+// reasons the basins were rejected are the useful part of the outcome.
+func warnNoFeasibleMinimum(res escape.Result) {
+	reasons := map[string]int{}
+	var order []string
+	for _, p := range res.InfeasibleBasins {
+		r := reasonString(p.InvalidReason)
+		if r == "" {
+			r = "unknown"
+		}
+		if reasons[r] == 0 {
+			order = append(order, r)
+		}
+		reasons[r]++
+	}
+	why := "no converged point was recorded"
+	if len(order) > 0 {
+		parts := make([]string, 0, len(order))
+		for _, r := range order {
+			parts = append(parts, fmt.Sprintf("%s x%d", r, reasons[r]))
+		}
+		why = "converged points were rejected as " + strings.Join(parts, ", ")
+	}
+	switch {
+	case res.Interrupted:
+		why += " (the run was interrupted)"
+	case res.TimedOut:
+		why += " (the run reached max_seconds)"
+	}
+	optimize.Warnf("warning: no feasible minimum found: %s; global_result.best_index is -1 and best_merit is not a solution. Raise optimization.escape.max_cycles / max_seconds, or relax optimization.escape.min_throughput_ratio.", why)
+}
+
 func reportEscape(res escape.Result, progress *escape.Progress) {
+	// A run that found no feasible minimum carries best_index -1 and a
+	// best_merit that is not a solution. Say so, with the reasons the basins
+	// were rejected, rather than leaving the reader to infer it from a
+	// document that looks like every other one.
+	if len(res.Minima) == 0 {
+		warnNoFeasibleMinimum(res)
+	}
 	minima := make([]map[string]any, len(res.Minima))
 	for i, p := range res.Minima {
 		minima[i] = map[string]any{

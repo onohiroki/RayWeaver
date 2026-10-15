@@ -849,6 +849,12 @@ solution. It is a separate
 list, exactly as in the pipeline document, so a run that found only basins still
 reports what it discovered — and never promotes one of them to `Best Merit`:
 
+The classification is the verdict of the run that recorded the point — the
+escape/pso feasibility check, which measures each field's surviving pupil
+fraction on the same grids the merit traced (see
+[escape.md §Infeasible basins](escape.md#infeasible-basins)). `list` reports the
+recorded `status`, so the two never disagree by construction.
+
 ```
 Infeasible Basins:
 Index        Merit  File           Reason

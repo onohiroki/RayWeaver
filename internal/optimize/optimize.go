@@ -5168,15 +5168,48 @@ func (o *Optimizer) configGuardsFieldLiveliness(cfg *config) bool {
 // solve are untouched. A config that already carries a field_alive / pupil_fill
 // term or a vignetting_factor constraint is skipped, so the message appears
 // exactly for the merit the gap is about.
-func (o *Optimizer) WarnFieldThroughput(x []float64) {
+// FieldThroughput is how much of one field's pupil grid still traces at a
+// given variable state.
+type FieldThroughput struct {
+	Config string
+	Field  int
+	// Angle is the effective field angle (an image-height field is resolved
+	// by inversion first).
+	Angle float64
+	// Ratio is the fraction of grid points that traced through the field.
+	Ratio float64
+	// Points is the number of grid points sampled; 0 means the field's grid
+	// could not be built at all (an unreachable field).
+	Points int
+}
+
+// FieldThroughputs measures, at x, the surviving fraction of every field's
+// pupil grid.
+//
+// The measurement uses the same launch the merit terms use — the entrance-pupil
+// centring, the aperture margin, the field's vignetting and the auto-aperture
+// diameters the merit sized — so a caller can judge a point by exactly the rays
+// the objective saw. That is what the escape feasibility check wants: measuring
+// it on a separate chief grid can call a point feasible whose merit grid has no
+// rays left (or the reverse), and then `list global` disagrees with a direct
+// trace.
+//
+// rayCount <= 0 keeps the optimizer's own merit ray count; a larger value
+// validates on a denser grid than the DLS objective sampled, without changing
+// the launch geometry.
+func (o *Optimizer) FieldThroughputs(x []float64, rayCount int) []FieldThroughput {
+	if rayCount <= 0 {
+		rayCount = o.numRays
+	}
 	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 	o.updateGlassRoles(configSurfaces, gc)
 	cache := newEvalGridCache()
 
+	var out []FieldThroughput
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
-		if len(cfg.fields) == 0 || o.configGuardsFieldLiveliness(cfg) {
+		if len(cfg.fields) == 0 {
 			continue
 		}
 		surfaces := configSurfaces[cfg.id]
@@ -5197,15 +5230,46 @@ func (o *Optimizer) WarnFieldThroughput(x []float64) {
 				angle = o.imageHeightToFieldAngle(cfg, surfaces, f.ImageHeight, wl, gc)
 			}
 			pupilZ := o.gridCentring(cfg, p, angle)
-			points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), p.dia, f.Vignetting)
-			ratio := survivingFraction(points)
-			if ratio >= fieldThroughputWarn {
-				continue
-			}
-			Warnf("warning: config %q field %d (%.2f deg) keeps only %.0f%% of its pupil grid; the merit is computed over the surviving rays, so a spot-only merit can be lowered by clipping the field away. Add a field_alive / pupil_fill merit term (or a vignetting_factor constraint) to guard it.",
-				cfg.id, fi, angle, ratio*100)
+			points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, wl, o.apertureMargin, rayCount, o.gridRotation, o.gridWorkers(), p.dia, f.Vignetting)
+			out = append(out, FieldThroughput{
+				Config: cfg.id,
+				Field:  fi,
+				Angle:  angle,
+				Ratio:  survivingFraction(points),
+				Points: len(points),
+			})
 		}
 	}
+	return out
+}
+
+// WarnFieldThroughput reports every field whose pupil grid has collapsed at x,
+// unless the config's merit already guards field liveliness (a field_alive /
+// pupil_fill term, or a vignetting_factor constraint) — in that case the merit
+// cannot be lowered by clipping the field away, so there is nothing to warn
+// about.
+func (o *Optimizer) WarnFieldThroughput(x []float64) {
+	for _, ft := range o.FieldThroughputs(x, 0) {
+		if ft.Ratio >= fieldThroughputWarn {
+			continue
+		}
+		cfg, ok := o.configByID(ft.Config)
+		if !ok || o.configGuardsFieldLiveliness(cfg) {
+			continue
+		}
+		Warnf("warning: config %q field %d (%.2f deg) keeps only %.0f%% of its pupil grid; the merit is computed over the surviving rays, so a spot-only merit can be lowered by clipping the field away. Add a field_alive / pupil_fill merit term (or a vignetting_factor constraint) to guard it.",
+			ft.Config, ft.Field, ft.Angle, ft.Ratio*100)
+	}
+}
+
+// configByID returns the parsed config with the given id.
+func (o *Optimizer) configByID(id string) (*config, bool) {
+	for ci := range o.configs {
+		if o.configs[ci].id == id {
+			return &o.configs[ci], true
+		}
+	}
+	return nil, false
 }
 
 func (o *Optimizer) Optimize() Result {

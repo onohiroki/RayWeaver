@@ -8,10 +8,77 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/dls"
+	"github.com/hiroki/rayweaver/internal/escape"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
+
+// fakeThroughputReporter stands in for an optimizer in the checkThroughput
+// tests: it reports whatever grids the test hands it.
+type fakeThroughputReporter struct {
+	fts   []optimize.FieldThroughput
+	calls int
+	rays  int
+}
+
+func (f *fakeThroughputReporter) FieldThroughputs(x []float64, rayCount int) []optimize.FieldThroughput {
+	f.calls++
+	f.rays = rayCount
+	return f.fts
+}
+
+// TestCheckThroughputPrefersModelGrids pins the escape feasibility
+// reconciliation (G6): when the model reports its own grids they decide, so a
+// field the merit cannot see is rejected instead of being certified by a
+// separate chief-grid trace; a model without the hook still falls back.
+func TestCheckThroughputPrefersModelGrids(t *testing.T) {
+	fallbackCalled := false
+	fallback := func() (escape.MinStatus, escape.InvalidReason) {
+		fallbackCalled = true
+		return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
+	}
+
+	// A dead off-axis field in the second config: infeasible, and the
+	// chief-grid fallback must not run at all.
+	rep := &fakeThroughputReporter{fts: []optimize.FieldThroughput{
+		{Config: "config0", Field: 0, Ratio: 1, Points: 64},
+		{Config: "config1", Field: 1, Ratio: 0, Points: 64},
+	}}
+	st, reason := checkThroughput(rep, nil, 24, 0.3, fallback)
+	if st != escape.MinStatusInfeasibleBasin || reason != escape.ReasonInsufficientFieldThroughput {
+		t.Errorf("verdict = (%v, %v), want infeasible / insufficient_field_throughput", st, reason)
+	}
+	if fallbackCalled {
+		t.Error("chief-grid fallback ran although the model reports its own grids")
+	}
+	if rep.rays != 24 {
+		t.Errorf("validation ray count = %d, want the caller's 24", rep.rays)
+	}
+
+	// An unbuildable grid keeps its distinct reason.
+	empty := &fakeThroughputReporter{fts: []optimize.FieldThroughput{{Config: "config0", Field: 2, Points: 0}}}
+	if _, reason := checkThroughput(empty, nil, 0, 0.3, fallback); reason != escape.ReasonFieldUnreachable {
+		t.Errorf("empty-grid reason = %v, want field_unreachable", reason)
+	}
+
+	// Every field above the threshold is feasible.
+	healthy := &fakeThroughputReporter{fts: []optimize.FieldThroughput{{Ratio: 0.9, Points: 64}}}
+	if st, _ := checkThroughput(healthy, nil, 0, 0.3, fallback); st != escape.MinStatusFeasibleLocalMinimum {
+		t.Errorf("healthy grids verdict = %v, want feasible", st)
+	}
+
+	// A model without the hook (a stub model in a test) uses the fallback.
+	fallbackCalled = false
+	stub := struct{}{}
+	st, _ = checkThroughput(stub, nil, 0, 0.3, fallback)
+	if !fallbackCalled {
+		t.Error("stub model did not fall back to the chief-grid trace")
+	}
+	if st != escape.MinStatusFeasibleLocalMinimum {
+		t.Errorf("stub model verdict = %v, want the fallback's verdict", st)
+	}
+}
 
 // validationNopLogger satisfies dls.Logger; the test never runs a DLS solve,
 // the logger only rides along in the config.
