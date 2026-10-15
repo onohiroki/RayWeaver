@@ -2092,6 +2092,51 @@ type VignettingResult struct {
 	Fields       []VignettingField `yaml:"fields"`
 }
 
+// ZoomFieldSummary is one field's row in a ZoomConfigSummary: where the chief
+// ray lands and how the prescribed pupil grid fares there.
+type ZoomFieldSummary struct {
+	FieldIndex  int     `yaml:"field_index"`
+	AngleDeg    float64 `yaml:"angle_deg"`
+	ImageHeight float64 `yaml:"image_height"`
+	// SpotRMS is the RMS spot radius at the reference surface (mm), over the
+	// grid rays that reached it — the same statistic chief_rays[].spot_stats.rms_r
+	// reports for the same field.
+	SpotRMS float64 `yaml:"spot_rms,omitempty"`
+	// Vignetting is the surviving fraction of the prescribed pupil grid
+	// (GridSurviving / GridTotal): rays lost to an aperture clip or the
+	// glass-path (edge-thickness) check.
+	Vignetting    float64 `yaml:"vignetting"`
+	GridTotal     int     `yaml:"grid_total"`
+	GridSurviving int     `yaml:"grid_surviving"`
+}
+
+// ZoomConfigSummary is one configuration's row in a ZoomSummary: the first-order
+// data of that zoom position (paraxial) plus its per-field behaviour (chief
+// grid). The field names match paraxial_result / chief_rays so a value read here
+// means the same thing as in those sections.
+type ZoomConfigSummary struct {
+	ID                       string  `yaml:"id"`
+	Active                   bool    `yaml:"active"`
+	FocalLength              float64 `yaml:"focal_length,omitempty"`
+	EntrancePupilDiameter    float64 `yaml:"entrance_pupil_diameter,omitempty"`
+	ImageSpaceFNumber        float64 `yaml:"image_space_f_number,omitempty"`
+	InfConjImageSpaceFNumber float64 `yaml:"inf_conj_image_space_f_number,omitempty"`
+	TotalTrack               float64 `yaml:"total_track,omitempty"`
+	// ImagePlaneZ is the reference surface's vertex Z in the document frame
+	// (the same PhysicalZ the psf/focus commands use as the image plane).
+	ImagePlaneZ float64            `yaml:"image_plane_z,omitempty"`
+	Fields      []ZoomFieldSummary `yaml:"fields,omitempty"`
+}
+
+// ZoomSummary is the report emitted by the `zoom` subcommand: one row per
+// configuration, so a zoom's per-position first order, spot size and vignetting
+// can be read without looping `paraxial` and `chief` by hand.
+type ZoomSummary struct {
+	ReferenceWavelength float64             `yaml:"reference_wavelength"`
+	NumRays             int                 `yaml:"num_rays"`
+	Configs             []ZoomConfigSummary `yaml:"configs"`
+}
+
 // SpectralEntry is one point of a custom spectral power distribution
 // (wavelength in nm, relative power). Used by psf.spectral_entries.
 type SpectralEntry struct {
@@ -2694,6 +2739,7 @@ type Output struct {
 	OptResults       *OptimizationResult     `yaml:"opt_results,omitempty"`
 	GlobalResult     *GlobalResult           `yaml:"global_result,omitempty"`
 	Vignetting       *VignettingResult       `yaml:"vignetting_result,omitempty"`
+	ZoomSummary      *ZoomSummary            `yaml:"zoom_summary,omitempty"`
 	AsphereResult    *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
 	PsfResults       []PSFResult             `yaml:"psf_results,omitempty"`
 	FocusComparison  *FocusComparison        `yaml:"focus_comparison,omitempty"`

@@ -19,6 +19,7 @@ system → ray bundle → quantities
 | [trace.md](trace.md) | `rayweave trace` | trace individual rays and report per-surface data; `trace single` for a single ray from CLI flags |
 | [chief.md](chief.md) | `rayweave chief` | chief rays, pupil grids, spot statistics, ray fans, clear aperture |
 | [paraxial.md](paraxial.md) | `rayweave paraxial` | first-order (paraxial) analysis: EFL, pupils, cardinal points |
+| [zoom.md](zoom.md) | `rayweave zoom` | per-config summary of a multi-config (zoom) system: first order, spot RMS, vignetting |
 | [tmm.md](tmm.md) | `rayweave tmm` | thin-film coating analysis (transfer-matrix method) |
 | [vignette.md](vignette.md) | `rayweave vignette` | settle per-field vignetting and `auto_aperture` diameters with the dynamic pupil |
 | [plot.md](plot.md) | `rayweave plot` | SVG / PNG cross-section diagrams |

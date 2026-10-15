@@ -241,6 +241,8 @@ func main() {
 		runTrace(data, traceSingleMode)
 	case "paraxial":
 		runParaxial(data)
+	case "zoom":
+		runZoom(data)
 	case "tmm":
 		runTMM(data)
 	case "plot":
@@ -1577,6 +1579,52 @@ Examples:
 
 See docs/query.md for the full manual.
 `)
+	case "zoom":
+		printHelpText(`Usage: rayweave zoom [--wl MM] [--num-rays N] [--config ID] < system.yaml
+
+Summarises every active configuration of a multi-config (zoom) system in one
+zoom_summary section: the first order of that position, each field's image
+height, its spot RMS and the surviving fraction of its prescribed pupil grid.
+Read-only — nothing is sized and no merit is evaluated — so it answers "where
+are the zoom positions?" without looping paraxial and chief by hand.
+
+Options:
+  --wl MM              reference wavelength in mm for the first-order trace and
+                       the grids (default: chief.reference_wavelength, else
+                       0.00058756); written back into chief.reference_wavelength
+  --num-rays N         pupil-grid rays per field (default: chief.num_rays, else
+                       64); written back into chief.num_rays when given
+  --config ID          summarise only this config (a selector, not a setting)
+  --glass-dir DIR      AGF glass catalog directory
+
+Output: augmented YAML with a zoom_summary: section:
+
+  zoom_summary:
+    reference_wavelength: 0.00058756
+    num_rays: 64
+    configs:
+      - id: config0            # one row per config (zoom position)
+        active: true
+        focal_length: ...      # paraxial, same value paraxial_result reports
+        entrance_pupil_diameter: ...
+        image_space_f_number: ...       # working f-number
+        inf_conj_image_space_f_number: ...  # design f-number
+        total_track: ...       # first surface to image plane (mm)
+        image_plane_z: ...     # reference surface vertex Z (document frame)
+        fields:
+          - field_index: 0
+            angle_deg: 0
+            image_height: 0
+            spot_rms: ...      # mm, chief_rays[].spot_stats.rms_r
+            vignetting: 1      # surviving / launched grid rays
+            grid_total: 64
+            grid_surviving: 64
+
+Examples:
+  rayweave zoom < zoom.yaml
+  rayweave zoom --config config2 --num-rays 128 < zoom.yaml
+  rayweave zoom < zoom.yaml | rayweave query --each 'zoom_summary.configs[]:id,focal_length,image_plane_z'
+`)
 	default:
 		fmt.Print(`Usage: rayweave <subcommand> [< input.yaml]
 
@@ -1586,6 +1634,8 @@ Subcommands:
   chief      Determine chief rays (spot centroid) for each field
   trace      Trace ray(s) through the system
   paraxial   Paraxial (first-order) ray trace
+  zoom       Per-config summary of a multi-config system (first order, spot,
+             vignetting)
   tmm        Thin-film coating analysis (transfer-matrix method)
   vignette   Iteratively settle vignetting and auto_aperture diameters
   plot       Generate SVG cross-section drawing
