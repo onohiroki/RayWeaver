@@ -272,6 +272,16 @@ so a design could otherwise trade a dead periphery for a smaller aberration.
 (`0.5 → 1`, `0.1 → 9`, `0.03 → ~32`), so a suitable weight keeps partial
 clipping dominant. Use both together (a bounded-plus-unbounded pair).
 
+Because the spot/OPD kinds are blind to a dead field, `optimize` **warns about
+it by default**: at the end of a solve it measures every field's surviving-grid
+fraction (the same launch, vignetting and grid the terms use) and reports each
+field below **0.5** on stderr, naming the config, the field index and its angle.
+This is a warning only — the merit values and the solve are untouched. The
+message is suppressed for a config that already carries a `field_alive` /
+`pupil_fill` term or a `vignetting_factor` constraint, so it appears exactly for
+a merit that cannot see the dead field (a bare `spot_rms`). A field declared by
+`image_height` is measured at its resolved angle.
+
 The **weight matters as much as the kind, and it is algorithm-dependent**. The
 term is unbounded, so a weight that is large next to the imaging terms lets a
 clipped intermediate iterate dominate the DLS line search. Measured on the

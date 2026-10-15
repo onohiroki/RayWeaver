@@ -5116,6 +5116,92 @@ func (o *Optimizer) FinalConstraintMeasurements(x []float64) []types.ConstraintM
 	return out
 }
 
+// fieldThroughputWarn is the surviving-grid fraction at which
+// WarnFieldThroughput reports a dying field. field_alive starts penalising only
+// at 0.3, so the warning fires well before then: the point is to make the
+// collapse visible while there is still a lens to look at, not to duplicate the
+// merit penalty.
+const fieldThroughputWarn = 0.5
+
+// configGuardsFieldLiveliness reports whether cfg already penalises a dying
+// field: an active field_alive / pupil_fill merit term, or a
+// vignetting_factor constraint. When it does, the field-killing warning stays
+// quiet — the user has asked for the guard, so the optimizer is not silently
+// exploiting a merit that cannot see the dead field.
+func (o *Optimizer) configGuardsFieldLiveliness(cfg *config) bool {
+	guards := func(terms []meritTerm) bool {
+		for i := range terms {
+			if terms[i].kind == MeritFieldAlive || terms[i].kind == MeritPupilFill {
+				return true
+			}
+		}
+		return false
+	}
+	if guards(cfg.meritTerms) {
+		return true
+	}
+	for _, terms := range cfg.meritModes {
+		if guards(terms) {
+			return true
+		}
+	}
+	for _, c := range cfg.constraints {
+		if c.Measure == types.MeasureVignettingFactor {
+			return true
+		}
+	}
+	return false
+}
+
+// WarnFieldThroughput warns about fields whose pupil grid collapsed at x.
+//
+// The DLS objective is evaluated over the rays that survive, so a merit that
+// does not itself guard field liveliness (a bare spot_rms, say) can lower its
+// residual by clipping a field's pupil away — the "field killing" basin the
+// gap analysis hit repeatedly. This is a warning only: the merit values and the
+// solve are untouched. A config that already carries a field_alive / pupil_fill
+// term or a vignetting_factor constraint is skipped, so the message appears
+// exactly for the merit the gap is about.
+func (o *Optimizer) WarnFieldThroughput(x []float64) {
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+	o.updateGlassRoles(configSurfaces, gc)
+	cache := newEvalGridCache()
+
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		if len(cfg.fields) == 0 || o.configGuardsFieldLiveliness(cfg) {
+			continue
+		}
+		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
+
+		// Match the merit grid: the auto-aperture diameters and the pupil
+		// centring the terms themselves use.
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc, cache, p)
+
+		wl := cfg.referenceWavelength
+		if wl <= 0 {
+			wl = types.DefaultWavelength
+		}
+		for fi, f := range cfg.fields {
+			angle := f.AngleDeg
+			if f.ImageHeight != 0 {
+				angle = o.imageHeightToFieldAngle(cfg, surfaces, f.ImageHeight, wl, gc)
+			}
+			pupilZ := o.gridCentring(cfg, p, angle)
+			points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), p.dia, f.Vignetting)
+			ratio := survivingFraction(points)
+			if ratio >= fieldThroughputWarn {
+				continue
+			}
+			Warnf("warning: config %q field %d (%.2f deg) keeps only %.0f%% of its pupil grid; the merit is computed over the surviving rays, so a spot-only merit can be lowered by clipping the field away. Add a field_alive / pupil_fill merit term (or a vignetting_factor constraint) to guard it.",
+				cfg.id, fi, angle, ratio*100)
+		}
+	}
+}
+
 func (o *Optimizer) Optimize() Result {
 	dlsResult := dls.Solve(o)
 

@@ -638,6 +638,14 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   the `image_height` constraint alike. When the requested image height lies
   beyond the field's traceable range the search returns the largest angle that
   still traces, never 0.
+- **A dying field is reported.** The merit is evaluated over the rays that
+  survive, so a merit without a liveliness guard (a bare `spot_rms`) can be
+  lowered by clipping a field's pupil away. At the end of a solve `optimize`
+  measures each config field's surviving-grid fraction and warns (stderr) about
+  every field below 0.5. Warning only — the merit and the solve are untouched;
+  the message is suppressed when the config already carries a `field_alive` /
+  `pupil_fill` term or a `vignetting_factor` constraint. See
+  [merit-and-constraints.md §3.2](merit-and-constraints.md).
 - `optimization.aperture_margin` is clamped to ≥ 1.0; smaller values make the
   pupil grid smaller than the aperture and stall DLS.
 - `optimization.aperture_margin_mm` is the physical clearance (mm) added to

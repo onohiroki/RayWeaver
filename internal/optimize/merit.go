@@ -623,6 +623,23 @@ func (t *meritTerm) residualTarget() float64 {
 	return t.target
 }
 
+// survivingFraction returns the fraction of a traced pupil grid whose rays
+// reached the image plane (OK). An empty grid — the trace could not be built at
+// all — counts as fully dead (0), so every caller treats "no grid" and "no
+// survivors" alike.
+func survivingFraction(points []dls.IPoint) float64 {
+	if len(points) == 0 {
+		return 0
+	}
+	n := 0
+	for _, q := range points {
+		if q.OK {
+			n++
+		}
+	}
+	return float64(n) / float64(len(points))
+}
+
 // evaluateFieldAliveTerm traces the pupil grid for the term's field and returns
 // the "aliveness deficit": max(0, threshold − nValid/totalRays). A fully dead
 // field (nValid=0) returns threshold; a fully alive field returns 0. The
@@ -630,19 +647,10 @@ func (t *meritTerm) residualTarget() float64 {
 func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
 	points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
 	threshold := fieldAliveThreshold(term.target)
-	totalRays := len(points)
-	if totalRays == 0 {
-		// Grid could not be traced at all — treat as fully dead.
-		return threshold
-	}
-	nValid := 0
-	for _, p := range points {
-		if p.OK {
-			nValid++
-		}
-	}
-	ratio := float64(nValid) / float64(totalRays)
-	deficit := threshold - ratio
+	// A grid that could not be traced at all (no points) is fully dead, which
+	// survivingFraction reports as 0 — the same deficit as a traced-but-empty
+	// grid, and the previous explicit totalRays==0 branch.
+	deficit := threshold - survivingFraction(points)
 	if deficit <= 0 {
 		return 0
 	}
@@ -669,19 +677,10 @@ func (o *Optimizer) evaluatePupilFillTerm(cfg *config, term *meritTerm, surfaces
 
 // pupilFillFromPoints returns the pupil_fill value of a traced pupil grid: the
 // fraction of OK points mapped through pupilFillValue. An empty grid (the trace
-// could not be built at all) is treated as fully dead.
+// could not be built at all) is treated as fully dead, i.e. survivingFraction 0
+// maps to the cap.
 func pupilFillFromPoints(points []dls.IPoint) float64 {
-	total := len(points)
-	if total == 0 {
-		return pupilFillCap
-	}
-	nValid := 0
-	for _, q := range points {
-		if q.OK {
-			nValid++
-		}
-	}
-	return pupilFillValue(float64(nValid) / float64(total))
+	return pupilFillValue(survivingFraction(points))
 }
 
 // pupilFillValue maps a surviving-ray fraction to the unbounded pupil_fill

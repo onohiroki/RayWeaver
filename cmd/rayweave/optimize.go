@@ -490,6 +490,12 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		}
 	}
 
+	// Warn about fields whose pupil grid collapsed. A spot-only merit is
+	// computed over the surviving rays, so clipping a field away lowers its
+	// residual; the warning surfaces the dead corner instead of shipping it
+	// silently. Warning only — the merit values are untouched.
+	opt.WarnFieldThroughput(finalX)
+
 	// Apply final auto_aperture diameters.
 	finalAps := opt.FinalApertures(finalX)
 	for cfgID, apMap := range finalAps {
