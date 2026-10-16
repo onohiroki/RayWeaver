@@ -20,6 +20,7 @@ system → ray bundle → quantities
 | [chief.md](chief.md) | `rayweave chief` | chief rays, pupil grids, spot statistics, ray fans, clear aperture |
 | [paraxial.md](paraxial.md) | `rayweave paraxial` | first-order (paraxial) analysis: EFL, pupils, cardinal points |
 | [zoom.md](zoom.md) | `rayweave zoom` | per-config summary of a multi-config (zoom) system: first order, spot RMS, vignetting |
+| [cam.md](cam.md) | `rayweave cam` | first-order cam solve: the group airspaces per zoom position so every position hits its EFL with the focus on one fixed image plane |
 | [tmm.md](tmm.md) | `rayweave tmm` | thin-film coating analysis (transfer-matrix method) |
 | [vignette.md](vignette.md) | `rayweave vignette` | settle per-field vignetting and `auto_aperture` diameters with the dynamic pupil |
 | [plot.md](plot.md) | `rayweave plot` | SVG / PNG cross-section diagrams |
@@ -48,6 +49,7 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
 - [methods/pupil-grids.md](methods/pupil-grids.md) — entrance-pupil grid generation and grid-ray tracing: Launch/Trace, wavefront-plane launch, OPL normalisation, determinism
 - [methods/chief-rays-and-spot.md](methods/chief-rays-and-spot.md) — pupil grids, centroid chief ray, spot statistics, ray fans, clear aperture
 - [methods/paraxial.md](methods/paraxial.md) — first-order ray trace, cardinal points, entrance/exit pupils, f/#
+- [methods/cam.md](methods/cam.md) — first-order cam solve: per-position residuals, regularised Gauss-Newton with a trust region and a thickness-floor active set
 - [methods/merit-functions.md](methods/merit-functions.md) — merit terms (spot RMS, distortion, colour, Seidel, OPD RMS) and weighting
 - [methods/dls-optimization.md](methods/dls-optimization.md) — damped least squares, Jacobian, augmented-Lagrangian constraints, damping control
 - [methods/region-active.md](methods/region-active.md) — Okudaira Region Active Method: dynamic active-set with hysteresis for inequality constraints

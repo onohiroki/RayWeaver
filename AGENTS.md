@@ -69,8 +69,8 @@ no lint/CI configuration.
 Subcommands (each has a manual in [`docs/`](docs/README.md)): `chief`, `trace`,
 `paraxial`, `tmm`, `plot`, `vignette`, `optimize`, `escape`, `pso`, `import`,
 `export`, `scale`, `asphere`, `psf`, `focus`, `wavefront`, `query`, `clean`,
-`list`. `--config ID` selects a configuration on the commands that support
-multi-config documents.
+`list`, `zoom`, `cam`. `--config ID` selects a configuration on the commands
+that support multi-config documents.
 
 ### Long runs: `cmd/rwrun`
 
@@ -133,6 +133,8 @@ everywhere, add it to the document that owns the topic, not to this file.
 | Chief rays, pupil grids, spot statistics, clear aperture | [docs/chief.md](docs/chief.md), [methods/chief-rays-and-spot.md](docs/methods/chief-rays-and-spot.md) |
 | Ray tracing and results | [docs/trace.md](docs/trace.md), [methods/ray-tracing.md](docs/methods/ray-tracing.md) |
 | First-order analysis, cardinal points, element glass roles | [docs/paraxial.md](docs/paraxial.md), [methods/paraxial.md](docs/methods/paraxial.md) |
+| Multi-config (zoom) per-position summary | [docs/zoom.md](docs/zoom.md) |
+| First-order cam solve (zoom group airspaces, fixed image plane) | [docs/cam.md](docs/cam.md), [methods/cam.md](docs/methods/cam.md) |
 | Vignetting and `auto_aperture` sizing | [docs/vignette.md](docs/vignette.md) |
 | Diagrams | [docs/plot.md](docs/plot.md) |
 | EFL scaling | [docs/scale.md](docs/scale.md), [methods/efl-scaling.md](docs/methods/efl-scaling.md) |

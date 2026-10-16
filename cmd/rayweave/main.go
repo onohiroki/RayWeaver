@@ -285,6 +285,8 @@ func main() {
 		runExport(data)
 	case "scale":
 		runScale(data)
+	case "cam":
+		runCam(data)
 	case "asphere":
 		runAsphere(data)
 	case "psf":
@@ -1160,6 +1162,59 @@ written back into the output):
 Example:
   rayweave scale --efl 50 < ref25.yaml | rayweave optimize > optimized.yaml
 `)
+	case "cam":
+		printHelpText(`Usage: rayweave cam [--config ID] [--wl MM] [--max-iter N] [--tolerance T] < system.yaml
+
+First-order cam solve of a multi-config (zoom) system. For every position the
+airspaces declared in cam.surfaces are solved on the paraxial trace alone so
+that
+  1. the position reaches its target EFL,
+  2. the paraxial focus lands on the image plane, and
+  3. the image plane stays at one fixed Z (unless hold_image_plane: false).
+No ray tracing and no merit: the solve is deterministic and takes milliseconds,
+so it lays the zoom out before optimize gives it its aberrations. The extra
+freedom left when there are more airspaces than conditions is spent on the
+smallest layout change from the input (minimum-motion cam).
+
+Solved thicknesses are written back into configs[].surfaces[].thickness, the
+same way 'rayweave scale' writes back its scaled surfaces, and reported in a
+cam_result section.
+
+Options:
+  --config ID          solve only this config (a selector, not a setting)
+  --wl MM              reference wavelength in mm for the paraxial solve
+                       (default: chief.reference_wavelength, else 0.00058756);
+                       written back into chief.reference_wavelength
+  --max-iter N         maximum solver iterations (default: cam.max_iterations,
+                       else 50); written back into cam.max_iterations
+  --tolerance T        convergence tolerance on the residuals in mm (default:
+                       cam.tolerance, else 1e-9); written back into cam.tolerance
+  --verbose            print one line per accepted iteration to stderr
+  --glass-dir DIR      AGF glass catalog directory
+
+Input YAML — cam section:
+  cam:
+    surfaces: [3, 5, 8, 12]      # the *following* airspace of each ID is solved
+    image_plane: 17              # default: chief.reference_surface, else last surface
+    image_plane_z: 110.0         # default: the first solved config's image-plane Z
+    hold_image_plane: true       # default true
+    targets:
+      - {config: config0, efl: 28.0}
+      - {config: config1, efl: 44.0}
+      - {config: config2, efl: 70.0}
+    max_iterations: 50           # optional
+    tolerance: 1.0e-9            # optional
+    motion_weight: 0             # optional; >0 trades residual for less motion
+
+The image plane must be the last surface of every solved config. A position
+that cannot be solved (too few cam airspaces for the conditions, or a geometry
+that would need a negative airspace) is reported as not converged with its
+residuals instead of being silently accepted.
+
+Example:
+  rayweave cam < zoom.yaml | rayweave zoom | rayweave query --each
+      'zoom_summary.configs[]:id,focal_length,image_plane_z'
+`)
 	case "asphere":
 		fmt.Print(`Usage: rayweave asphere [--t-bins 8] [--pupil-samples 21] [--top-k 3] [--sag-scale 0.2] < system.yaml
 
@@ -1643,6 +1698,7 @@ Subcommands:
   escape     Escape-function global optimization (multiple local minima)
   pso        PSO global optimization (particle swarm, no escape bumps)
   scale      Scale a system so its EFL equals --efl TARGET
+  cam        First-order cam solve of a zoom (airspaces, fixed image plane)
   asphere    Rank surfaces for asphere introduction, estimate initial coefficients
   psf        Point-spread function via direct vector Huygens integration
   focus      Image-plane comparison of MTF/PSF across focus conventions

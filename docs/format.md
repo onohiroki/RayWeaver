@@ -81,8 +81,9 @@ Top-level sections (all except `metadata` may be `omitempty`):
 | `psf`               | `psf,omitempty`              | Point-spread-function settings. |
 | `vignette`          | `vignette,omitempty`         | Vignetting solver settings. |
 | `scale`             | `scale,omitempty`            | EFL-scaling settings. |
+| `cam`               | `cam,omitempty`              | First-order cam-solve settings (cam surfaces, per-position EFL targets, fixed image plane). |
 
 Output documents inline the full input (preserving every section and `metadata`)
 and append the computed result sections on top (e.g. `chief_rays`, `results`,
-`paraxial_result`, `zoom_summary`, `global_result`, etc.), so a pipeline such as
+`paraxial_result`, `zoom_summary`, `cam_result`, `global_result`, etc.), so a pipeline such as
 `chief → trace → plot` stays pipe-compatible at every stage.

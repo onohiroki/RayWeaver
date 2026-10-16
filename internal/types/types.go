@@ -1886,6 +1886,7 @@ type Input struct {
 	Focus          *FocusConfig            `yaml:"focus,omitempty"`
 	Wavefront      *WavefrontConfig        `yaml:"wavefront,omitempty"`
 	Scale          *ScaleConfig            `yaml:"scale,omitempty"`
+	Cam            *CamConfig              `yaml:"cam,omitempty"`
 	GlobalMinimum  *GlobalMinimumInfo      `yaml:"global_minimum,omitempty"`
 }
 
@@ -2029,6 +2030,79 @@ type ParaxialInput struct {
 // (flag wins; the effective value is written back on output).
 type ScaleConfig struct {
 	EFL float64 `yaml:"efl,omitempty"`
+}
+
+// CamTarget is one zoom position's EFL target for the `cam` subcommand.
+type CamTarget struct {
+	Config string  `yaml:"config"`
+	EFL    float64 `yaml:"efl"`
+}
+
+// CamConfig configures the `cam` subcommand (the `cam:` YAML section): which
+// airspaces are cam variables, the EFL each position must reach, and the fixed
+// image plane. Surfaces lists the IDs whose *following* airspace (the surface's
+// thickness) is solved. ImagePlane / ImagePlaneZ / HoldImagePlane are resolved
+// by the command and written back; max_iterations, tolerance and motion_weight
+// are the solver's controls (flags win and are written back only when set).
+type CamConfig struct {
+	Surfaces       []int       `yaml:"surfaces"`
+	ImagePlane     int         `yaml:"image_plane,omitempty"`
+	ImagePlaneZ    float64     `yaml:"image_plane_z,omitempty"`
+	HoldImagePlane *bool       `yaml:"hold_image_plane,omitempty"`
+	Targets        []CamTarget `yaml:"targets"`
+	MaxIterations  int         `yaml:"max_iterations,omitempty"`
+	Tolerance      float64     `yaml:"tolerance,omitempty"`
+	MotionWeight   float64     `yaml:"motion_weight,omitempty"`
+}
+
+// CamAirspace is one solved cam variable: the airspace following Surface, from
+// the input thickness (`from`) to the solved one (`to`).
+type CamAirspace struct {
+	Surface int     `yaml:"surface"`
+	From    float64 `yaml:"from"`
+	To      float64 `yaml:"to"`
+	Delta   float64 `yaml:"delta"`
+}
+
+// CamConfigResult is one position's solved state and its residuals (mm). The
+// residuals are what the solve drove to zero: the EFL error, the defocus
+// (positive = the paraxial focus falls beyond the image plane) and the
+// image-plane position error.
+type CamConfigResult struct {
+	Config             string        `yaml:"config"`
+	EFLTarget          float64       `yaml:"efl_target"`
+	EFL                float64       `yaml:"efl"`
+	ImagePlaneZ        float64       `yaml:"image_plane_z"`
+	FocusZ             float64       `yaml:"focus_z"`
+	ResidualEFL        float64       `yaml:"residual_efl_mm"`
+	ResidualFocus      float64       `yaml:"residual_focus_mm"`
+	ResidualImagePlane float64       `yaml:"residual_image_plane_mm"`
+	Iterations         int           `yaml:"iterations"`
+	Converged          bool          `yaml:"converged"`
+	Airspaces          []CamAirspace `yaml:"airspaces"`
+}
+
+// CamStrokeValue is one cam variable's solved thickness at one position.
+type CamStrokeValue struct {
+	Config    string  `yaml:"config"`
+	Thickness float64 `yaml:"thickness"`
+}
+
+// CamStroke is one cam variable's values across the solved positions, in
+// config order: the cam curve as a table (no fit).
+type CamStroke struct {
+	Surface int              `yaml:"surface"`
+	Values  []CamStrokeValue `yaml:"values"`
+}
+
+// CamResult is the report emitted by the `cam` subcommand. The solved
+// thicknesses are also written back into configs[].surfaces[].thickness.
+type CamResult struct {
+	ImagePlaneZ float64           `yaml:"image_plane_z"`
+	Wavelength  float64           `yaml:"wavelength"`
+	Converged   bool              `yaml:"converged"`
+	Configs     []CamConfigResult `yaml:"configs"`
+	Strokes     []CamStroke       `yaml:"strokes,omitempty"`
 }
 
 type StopInfo struct {
@@ -2740,6 +2814,7 @@ type Output struct {
 	GlobalResult     *GlobalResult           `yaml:"global_result,omitempty"`
 	Vignetting       *VignettingResult       `yaml:"vignetting_result,omitempty"`
 	ZoomSummary      *ZoomSummary            `yaml:"zoom_summary,omitempty"`
+	CamResult        *CamResult              `yaml:"cam_result,omitempty"`
 	AsphereResult    *AsphereCandidateResult `yaml:"asphere_candidate_result,omitempty"`
 	PsfResults       []PSFResult             `yaml:"psf_results,omitempty"`
 	FocusComparison  *FocusComparison        `yaml:"focus_comparison,omitempty"`

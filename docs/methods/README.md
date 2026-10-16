@@ -11,6 +11,7 @@ instead.
 | [pupil-grids.md](pupil-grids.md) | entrance-pupil grid generation and grid-ray tracing: Launch/Trace, wavefront-plane launch, OPL normalization, vignetting clip |
 | [chief-rays-and-spot.md](chief-rays-and-spot.md) | pupil grids, centroid chief ray, spot statistics, ray fans, clear aperture |
 | [paraxial.md](paraxial.md) | first-order ray trace, cardinal points, entrance/exit pupils, f/# |
+| [cam.md](cam.md) | first-order cam solve: per-position EFL/defocus/image-plane residuals, regularised Gauss-Newton, trust region, thickness-floor active set |
 | [merit-functions.md](merit-functions.md) | merit terms (spot RMS, distortion, colour, Seidel, OPD RMS), weights |
 | [../merit-and-constraints.md](../merit-and-constraints.md) | consolidated catalog of every merit term and constraint (setting, effect, computation) |
 | [dls-optimization.md](dls-optimization.md) | damped least squares: normalised variables, finite-difference Jacobian, augmented-Lagrangian constraints, damping control |
