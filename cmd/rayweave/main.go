@@ -2273,6 +2273,7 @@ func runChief(data []byte) {
 		input.Chief.NumRings, input.Chief.NumSpokes,
 		input.Chief.ChiefRayDefinition,
 	)
+	requireFieldResolution("", results)
 
 	// --- default clear-aperture: size unset-diameter surfaces ---
 	{
@@ -2743,7 +2744,14 @@ func runParaxial(data []byte) {
 	// chief pass (selected config's fields under --config) so EPD is reported
 	// even when the document carries no chief_rays.
 	if selectedSys.StopSurface <= 0 && len(chiefRays) == 0 {
-		if pupil := dynamicPupilForInput(input, configFlag, surfaces, gc); pupil != nil {
+		pupil, err := dynamicPupilForInput(input, configFlag, surfaces, gc)
+		if err != nil {
+			// The pupil is derived from the first field only, and paraxial
+			// reports no field of its own, so an unreachable image_height is a
+			// warning here (chief/zoom/list fields are where it must stop).
+			errOut("Warning: %v", err)
+		}
+		if pupil != nil {
 			chiefRays = append(chiefRays, types.ChiefRayResult{EntrancePupil: pupil})
 		}
 	}

@@ -73,6 +73,31 @@ always uses the field list that belongs to the system it traced. Fields given as
 `image_height` are resolved to a field angle by inversion, per config.
 `vignette` resolves its fields the same way.
 
+**An unreachable `image_height` is an error, never a substitution.** The
+inversion can fail: the requested height may lie beyond the field's traceable
+range (the beam clips at the stop or a surface aperture as the angle grows), and
+the traced height is not necessarily monotone or continuous — the chief ray can
+switch branch, leaving a step that no angle lands on. A command that measures
+the field then exits 1, naming the field, the height asked for and the closest
+reachable one:
+
+```text
+rayweave[zoom]: Error: config "config0": field 1 declares image_height 4.868 mm,
+which this system cannot form (the closest reachable field delivers 2.741 mm at
+7.5 deg) — the traced field is not the one the document declares
+```
+
+This covers `chief`, `zoom`, `psf`, `focus` and `wavefront`. Commands that
+*report* the field set instead of measuring it keep going and warn: `list
+fields` still shows the input/computed mismatch (see
+[docs/list.md](list.md)), and the paraxial pupil derivation — which only uses
+the first field — warns for `paraxial` / `list paraxial`. The search paths
+(`optimize`, `escape`, `pso`) cannot stop mid-run either: they warn once on
+stderr, keep the closest reachable angle and record every resolution in
+`optimization.field_resolution` (see [docs/optimize.md](optimize.md)). Either
+way an `image_height` field never silently becomes the on-axis field, which is
+exactly what a spot-only merit would otherwise reward.
+
 ### Chief ray definitions
 
 `chief.chief_ray_definition` (or `--chief-ray`) selects how each field's

@@ -267,6 +267,20 @@ When input and computed values match (within 1e-9), only one value is shown.
 When they differ (e.g. `image_height` mode where the angle is solved
 iteratively), both are shown as `input (computed)`.
 
+An `image_height` the system cannot form — the beam clips below the requested
+height, or the traced height steps over it — is exactly the discrepancy this
+target exists to show, so `list fields` still lists the field and adds a warning
+on stderr naming the closest reachable height:
+
+```text
+rayweave[list]: Warning: field 2 declares image_height 10 mm, which this system
+cannot form (the closest reachable field delivers 12.341 mm at 7.874 deg) — the
+traced field is not the one the document declares
+```
+
+Commands that *measure* the field (`chief`, `zoom`, `psf`, `focus`,
+`wavefront`) exit 1 instead; see [docs/chief.md](chief.md).
+
 For `height` mode, the Angle column shows `-` (the field angle is not stored
 in `ChiefRayResult` for height-mode fields).
 

@@ -64,6 +64,9 @@ func ComputeFieldGrid(system types.System, gc *glass.Catalog, fd types.FieldDef,
 	if len(results) == 0 {
 		return nil, fmt.Errorf("chief returned no grid for field")
 	}
+	if err := chief.CheckFieldResolution("", results); err != nil {
+		return nil, err
+	}
 	r := results[0]
 	pts := make([]types.GridPoint, 0, len(r.GridPoints))
 	for _, gp := range r.GridPoints {

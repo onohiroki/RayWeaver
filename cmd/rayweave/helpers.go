@@ -392,7 +392,7 @@ func computePupilZ(input types.Input, surfaces []types.Surface, gc *glass.Catalo
 			}
 		}
 	}
-	pupil := dynamicEntrancePupil(surfaces, chiefFieldDefs(input), input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), input.Chief.GridType, input.Chief.PassThrough, input.Chief.PupilModel, chiefRayDefinition(input))
+	pupil, _ := dynamicEntrancePupil(surfaces, chiefFieldDefs(input), input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), input.Chief.GridType, input.Chief.PassThrough, input.Chief.PupilModel, chiefRayDefinition(input))
 	if pupil != nil {
 		return pupil.Center.Z
 	}
@@ -521,9 +521,13 @@ func fieldDefsFromItems(items []types.FieldItem) []types.FieldDef {
 // which have no aperture stop to trace from. A non-nil pupilModel activates the
 // virtual-entrance-pupil path (fixed pupil Z and diameter). rayDefinition is
 // the document's chief-ray definition ("" = the per-system default).
-func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, refSurface, numRays int, gc *glass.Catalog, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget, pupilModel *types.PupilModelConfig, rayDefinition string) *types.Pupil {
+//
+// The error reports a field declared by image_height that the pass could not
+// resolve; the caller decides whether to warn about it (the reporting commands)
+// or ignore it (the optimiser's own pupil seeding, an asphere validation).
+func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, refSurface, numRays int, gc *glass.Catalog, pol types.JonesVector, gridType types.GridType, passThrough *types.PassThroughTarget, pupilModel *types.PupilModelConfig, rayDefinition string) (*types.Pupil, error) {
 	if len(fields) == 0 || len(surfaces) == 0 || refSurface <= 0 {
-		return nil
+		return nil, nil
 	}
 	surface.Precompute(surfaces)
 	results := chief.DetermineChiefRaysGridMode(
@@ -532,21 +536,24 @@ func dynamicEntrancePupil(surfaces []types.Surface, fields []types.FieldDef, ref
 		types.DefaultWavelength, false, gridType, passThrough, nil, nil, pupilModel, 0, 0,
 		rayDefinition,
 	)
+	if err := chief.CheckFieldResolution("", results); err != nil {
+		return nil, err
+	}
 	for _, r := range results {
 		if r.EntrancePupil != nil {
-			return r.EntrancePupil
+			return r.EntrancePupil, nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // dynamicPupilForInput returns the dynamic entrance pupil for the selected
 // system: the per-config fields when --config is set, else the top-level chief
 // fields. Nil when the chief section or a reference surface is absent. A
 // virtual_entrance_pupil model is honored (fixed pupil Z and diameter).
-func dynamicPupilForInput(input types.Input, configFlag *string, surfaces []types.Surface, gc *glass.Catalog) *types.Pupil {
+func dynamicPupilForInput(input types.Input, configFlag *string, surfaces []types.Surface, gc *glass.Catalog) (*types.Pupil, error) {
 	if input.Chief == nil || input.Chief.ReferenceSurface <= 0 {
-		return nil
+		return nil, nil
 	}
 	fields := chiefFieldDefs(input)
 	if configFlag != nil && *configFlag != "" {
@@ -557,6 +564,33 @@ func dynamicPupilForInput(input types.Input, configFlag *string, surfaces []type
 		}
 	}
 	return dynamicEntrancePupil(surfaces, fields, input.Chief.ReferenceSurface, input.Chief.NumRays, gc, polarization(input), types.GridPolar, nil, input.Chief.PupilModel, chiefRayDefinition(input))
+}
+
+// requireFieldResolution aborts a command that measures fields when a chief pass
+// could not resolve a field declared by image_height to the height the document
+// asks for. name labels the field set (a config id, or the command's own name).
+//
+// The chief pass itself keeps the closest reachable angle rather than folding
+// the field onto the axis, because a caller that must keep going mid-search (the
+// optimiser) cannot abort there. A command that measures the field must abort
+// instead: the field it would otherwise report is not the one the document
+// declares.
+func requireFieldResolution(name string, results []chief.Result) {
+	if err := chief.CheckFieldResolution(name, results); err != nil {
+		errOut("Error: %v", err)
+		os.Exit(1)
+	}
+}
+
+// warnFieldResolution reports every field a chief pass could not resolve to the
+// image height the document declares, without stopping. `list fields` uses it:
+// that command's contract is to display the input/computed mismatch, so it must
+// keep listing the field rather than refuse to report the document (see
+// requireFieldResolution for the commands that measure the field and must stop).
+func warnFieldResolution(name string, results []chief.Result) {
+	for _, w := range chief.FieldResolutionWarnings(name, results) {
+		errOut("Warning: %s", w)
+	}
 }
 
 // writeYAML marshals a value to stdout, exiting on error.

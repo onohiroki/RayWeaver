@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"math"
 	"os"
 
@@ -150,6 +151,7 @@ func runZoom(data []byte) {
 			input.Chief.NumRings, input.Chief.NumSpokes,
 			input.Chief.ChiefRayDefinition,
 		)
+		requireFieldResolution(fmt.Sprintf("config %q", t.id), results)
 
 		// The chief pass already found the entrance pupil of every field
 		// (dynamic pupil for a stop-free system), so hand those to paraxial: a

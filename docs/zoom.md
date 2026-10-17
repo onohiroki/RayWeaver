@@ -78,6 +78,18 @@ nothing is sized. Compare it with `vignette`, which also settles
 report the two ways this fraction is lost (a collapsed field, a clipped clear
 aperture).
 
+A field declared by `image_height` is solved to a field angle per config before
+the row is built. When the config's surfaces cannot form that image height the
+summary would otherwise describe a different field than the document declares,
+so `zoom` exits 1 and names the field, the height asked for and the closest
+reachable one (see [docs/chief.md](chief.md), *Where the fields come from*):
+
+```text
+rayweave[zoom]: Error: config "config0": field 1 declares image_height 4.868 mm,
+which this system cannot form (the closest reachable field delivers 2.741 mm at
+7.5 deg) — the traced field is not the one the document declares
+```
+
 ## Examples
 
 ```sh

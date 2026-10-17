@@ -2,6 +2,7 @@ package chief
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/dls"
@@ -1161,5 +1162,107 @@ func TestValidateRayDefinition(t *testing.T) {
 	}
 	if got := resolveRayDefinition(2, nil, RayDefinitionCentroid); got != RayDefinitionCentroid {
 		t.Errorf("explicit centroid = %q, want %q", got, RayDefinitionCentroid)
+	}
+}
+
+// frontStopSinglet is a system whose aperture stop sits on its first surface
+// with a small clear aperture, so the off-axis beam clips as the field angle
+// grows and the reachable image height is bounded — the geometry of a wide-angle
+// zoom whose stop is in front.
+func frontStopSinglet() (types.System, *glass.Catalog) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 6.0, Material: types.Material{Key: "N-BK7"}, Diameter: 8.0, Role: "stop"},
+		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 60.0, Material: types.Material{}, Diameter: 40.0},
+	}
+	surface.Precompute(surfaces)
+	return types.System{Surfaces: surfaces, StopSurface: 1}, gc
+}
+
+// resolveImageHeightField solves one image_height field and returns its solution.
+func resolveImageHeightField(t *testing.T, sys types.System, gc *glass.Catalog, pol types.JonesVector, imageHeight float64) FieldSolution {
+	t.Helper()
+	res := DetermineChiefRaysGridMode(sys,
+		[]types.FieldDef{{ImageHeight: imageHeight, Direction: []float64{0, 1}}},
+		2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil, 0, 0, "")
+	if len(res) != 1 {
+		t.Fatalf("got %d results, want 1", len(res))
+	}
+	return res[0].FieldSolution
+}
+
+// imageHeightAtAngle returns the traced image height of an angle field, so a
+// reported clip angle can be checked against what it actually delivers.
+func imageHeightAtAngle(t *testing.T, sys types.System, gc *glass.Catalog, pol types.JonesVector, angleDeg float64) float64 {
+	t.Helper()
+	res := DetermineChiefRaysGridMode(sys,
+		[]types.FieldDef{{Angle: angleDeg, Direction: []float64{0, 1}}},
+		2, 16, gc, pol, 0.00058756, false, types.GridPolar, nil, nil, nil, nil, 0, 0, "")
+	if len(res) != 1 {
+		t.Fatalf("got %d results, want 1", len(res))
+	}
+	return res[0].ImageHeight.Y
+}
+
+// TestImageHeightSolutionReportsReachability pins the resolution contract the
+// reporting commands and the optimiser both read: a reachable target is solved
+// exactly, and an unreachable one reports Resolved=false together with the clip
+// angle and the height it delivers — never a silent 0, which would hand the
+// caller the on-axis field instead of the declared one.
+func TestImageHeightSolutionReportsReachability(t *testing.T) {
+	sys, gc := frontStopSinglet()
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+
+	solved := resolveImageHeightField(t, sys, gc, pol, 2.0)
+	if !solved.Resolved {
+		t.Fatalf("a 2 mm image height reported unreachable: %+v", solved)
+	}
+	if solved.Requested != 2.0 || math.Abs(solved.Reached-2.0) > 1e-4 {
+		t.Errorf("solution = %+v, want Requested = Reached = 2", solved)
+	}
+	if got := imageHeightAtAngle(t, sys, gc, pol, solved.AngleDeg); math.Abs(got-2.0) > 1e-3 {
+		t.Errorf("the solved angle %v delivers %v mm, want 2", solved.AngleDeg, got)
+	}
+
+	// Far beyond any image height this system can deliver.
+	unreached := resolveImageHeightField(t, sys, gc, pol, 1e6)
+	if unreached.Resolved {
+		t.Fatalf("a 1e6 mm image height reported reachable: %+v", unreached)
+	}
+	if unreached.Requested != 1e6 {
+		t.Errorf("Requested = %v, want 1e6", unreached.Requested)
+	}
+	if unreached.AngleDeg <= 0 {
+		t.Fatalf("clip angle = %v, want > 0 (an unreachable field must not fold onto the axis)", unreached.AngleDeg)
+	}
+	if unreached.Reached <= 0 || unreached.Reached >= unreached.Requested {
+		t.Errorf("Reached = %v, want the positive height below the target that the clip angle delivers", unreached.Reached)
+	}
+	if got := imageHeightAtAngle(t, sys, gc, pol, unreached.AngleDeg); got <= 0 {
+		t.Errorf("the reported clip angle %v does not trace (image height %v)", unreached.AngleDeg, got)
+	}
+}
+
+// TestCheckFieldResolutionReportsUnreachableField checks the reporting side: the
+// error names the field and both heights, and a resolved field set is accepted.
+func TestCheckFieldResolutionReportsUnreachableField(t *testing.T) {
+	ok := []Result{{FieldSolution: FieldSolution{AngleDeg: 12, Resolved: true}}}
+	if err := CheckFieldResolution("chief", ok); err != nil {
+		t.Errorf("a resolved field set returned %v, want nil", err)
+	}
+	bad := []Result{
+		{FieldSolution: FieldSolution{AngleDeg: 11.5, Resolved: true}},
+		{FieldSolution: FieldSolution{AngleDeg: 9.87, Requested: 4.868, Reached: 2.395}},
+	}
+	err := CheckFieldResolution("config \"wide\"", bad)
+	if err == nil {
+		t.Fatal("an unresolved field set returned nil, want an error")
+	}
+	msg := err.Error()
+	for _, want := range []string{`config "wide"`, "field 1", "4.868", "9.87", "2.395"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not name %q", msg, want)
+		}
 	}
 }

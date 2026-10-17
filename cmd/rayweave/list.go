@@ -1537,7 +1537,13 @@ func computeParaxial(data []byte, input types.Input, gc *glass.Catalog, configFl
 	}
 
 	if selectedSys.StopSurface <= 0 && len(chiefRays) == 0 {
-		if pupil := dynamicPupilForInput(input, &configFlag, surfaces, gc); pupil != nil {
+		pupil, err := dynamicPupilForInput(input, &configFlag, surfaces, gc)
+		if err != nil {
+			// The pupil is derived from the first field only, so an unreachable
+			// image_height is a warning here rather than a command failure.
+			errOut("Warning: %v", err)
+		}
+		if pupil != nil {
 			chiefRays = append(chiefRays, types.ChiefRayResult{EntrancePupil: pupil})
 		}
 	}
@@ -2158,6 +2164,7 @@ func listFields(input types.Input, format string) {
 		input.Chief.NumRings, input.Chief.NumSpokes,
 		chiefRayDefinition(input),
 	)
+	warnFieldResolution("", results)
 
 	// Build rows.
 	rows := make([]FieldListRow, len(fields))

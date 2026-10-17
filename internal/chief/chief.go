@@ -1,6 +1,7 @@
 package chief
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"runtime"
@@ -15,6 +16,31 @@ import (
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
+
+// FieldSolution is the outcome of resolving a field to a field angle. A field
+// declared by `angle`, or by a finite-conjugate `height`, is resolved by
+// definition (Resolved true); a field declared by `image_height` is resolved by
+// inverting the traced height, and that inversion can fail — the requested
+// height may lie beyond the field's traceable range, or fall in a step of the
+// traced height that no angle lands on.
+type FieldSolution struct {
+	// AngleDeg is the field angle in degrees: the solved angle when Resolved,
+	// else the closest reachable field. It is never a silent 0, which would
+	// fold the field onto the axis and hand what comes after a different field
+	// than the document declares.
+	AngleDeg float64
+	// Requested is the declared image height (mm, magnitude) of an image_height
+	// field; 0 for a field declared by angle or finite-conjugate height.
+	Requested float64
+	// Reached is the image height (mm, magnitude) the returned angle actually
+	// delivers under the field's own pupil, vignetting and chief-ray
+	// definition. For a resolved field it equals Requested to the search
+	// tolerance.
+	Reached float64
+	// Resolved reports whether the solved field is the one the document
+	// declares. Always true for a field declared by angle or height.
+	Resolved bool
+}
 
 type Result struct {
 	FieldAngle     float64
@@ -42,6 +68,57 @@ type Result struct {
 	// applied to the spot-statistics/centroid grid. Nil when the field was not
 	// clipped that heavily or the estimate could not be trusted.
 	EffectiveVignetting *types.VignettingDef
+	// FieldSolution is how this field's angle was determined. For a field
+	// declared by image_height its Resolved flag reports whether the requested
+	// height was reached; a command that measures the field must turn
+	// Resolved==false into an error rather than measure the closest reachable
+	// one (see CheckFieldResolution, FieldResolutionWarnings).
+	FieldSolution FieldSolution
+}
+
+// fieldResolutionMessage formats one field the pass could not resolve. name
+// labels the field set and may be empty.
+func fieldResolutionMessage(name string, index int, sol FieldSolution) string {
+	label := ""
+	if name != "" {
+		label = name + ": "
+	}
+	return fmt.Sprintf("%sfield %d declares image_height %g mm, which this system cannot form (the closest reachable field delivers %g mm at %g deg) — the traced field is not the one the document declares",
+		label, index, sol.Requested, sol.Reached, sol.AngleDeg)
+}
+
+// CheckFieldResolution returns a user-facing error naming the first field a
+// chief pass could not resolve, or nil. name labels the field set being
+// reported on (a config id, or the command's own name) and may be empty.
+//
+// The chief pass itself never aborts on an unreachable field: it solves the
+// closest reachable angle and reports it, so a caller that must keep going
+// mid-search — the optimiser, which freezes the angles at the start geometry —
+// can continue. A command that measures the field must fail here instead,
+// because the field it would otherwise report is not the one the document
+// declares.
+func CheckFieldResolution(name string, results []Result) error {
+	for i := range results {
+		if sol := results[i].FieldSolution; !sol.Resolved {
+			return errors.New(fieldResolutionMessage(name, i, sol))
+		}
+	}
+	return nil
+}
+
+// FieldResolutionWarnings returns one message per field a chief pass could not
+// resolve, for callers that report the field set and must keep going: `list
+// fields` displays the input/computed mismatch, and the paraxial pupil
+// derivation only needs the first field. An empty slice means every field
+// resolved.
+func FieldResolutionWarnings(name string, results []Result) []string {
+	var out []string
+	for i := range results {
+		if sol := results[i].FieldSolution; !sol.Resolved {
+			out = append(out, fieldResolutionMessage(name, i, sol))
+		}
+	}
+	return out
 }
 
 // Chief-ray definition modes (`chief.chief_ray_definition`, `--chief-ray`):
@@ -541,9 +618,10 @@ func traceFields(
 		var result Result
 		switch {
 		case math.Abs(fd.ImageHeight) > 1e-12:
-			angle := searchAngleForImageHeight(system, engine, fd.ImageHeight,
+			solution := searchAngleForImageHeight(system, engine, fd.ImageHeight,
 				dx, dy, refSurfaceID, numRays, apertureRadius, pol, wavelength, gridType, passThrough,
 				fd.Vignetting, pupilZ, rayDefinition, numRings, numSpokes)
+			angle := solution.AngleDeg
 			thetaRad := raymath.DegToRad(angle)
 			if passThrough != nil && passThrough.Surface > 0 {
 				result = computeChiefRayAngleGridWithPassThrough(system, engine, path, thetaRad, dx, dy,
@@ -553,6 +631,7 @@ func traceFields(
 					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting, rayDefinition, numRings, numSpokes)
 			}
 			result.FieldAngle = angle
+			result.FieldSolution = solution
 
 		case math.Abs(fd.Height) > 1e-12:
 			objectZ := fd.ObjectZ
@@ -567,6 +646,9 @@ func traceFields(
 					objectZ, refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting, rayDefinition, numRings, numSpokes)
 			}
 			result.FieldHeight = fd.Height
+			// A finite-conjugate height needs no angle inversion, so the field
+			// is resolved by definition.
+			result.FieldSolution.Resolved = true
 
 		default:
 			thetaRad := raymath.DegToRad(fd.Angle)
@@ -578,6 +660,7 @@ func traceFields(
 					refSurfaceID, numRays, apertureRadius, pol, wavelength, dumpMap, gridType, pupilZ, fd.Vignetting, rayDefinition, numRings, numSpokes)
 			}
 			result.FieldAngle = fd.Angle
+			result.FieldSolution = FieldSolution{AngleDeg: fd.Angle, Resolved: true}
 		}
 		result.FieldDir = types.Vec3{X: dx, Y: dy}
 
@@ -2447,9 +2530,19 @@ func imageHeightForAngle(
 	}
 }
 
-// searchAngleForImageHeight finds the field angle (degrees) whose chief ray's
-// image height (dx*cx + dy*cy of the centroid, or of the prescribed-pupil
-// chief ray) at the reference surface equals targetY.
+// searchAngleForImageHeight resolves an image_height field: it finds the field
+// angle (degrees) whose chief ray's image height (dx*cx + dy*cy of the centroid,
+// or of the prescribed-pupil chief ray) at the reference surface equals targetY.
+//
+// The inversion can fail. The requested height may lie beyond the field's
+// traceable range (the beam clips at the stop or a surface aperture as the angle
+// grows), and the height function is not necessarily monotone or even
+// continuous: the traced chief ray can switch branch, leaving a step where no
+// angle delivers the request. The returned FieldSolution reports that, and the
+// angle it then carries is the closest reachable field — the probed angle whose
+// delivered height comes nearest the request — never 0, which would silently
+// substitute the on-axis field for the declared one (see CheckFieldResolution
+// for the reporting side and the optimiser's freeze for the search side).
 func searchAngleForImageHeight(
 	system types.System,
 	engine *ray.Engine,
@@ -2465,7 +2558,7 @@ func searchAngleForImageHeight(
 	pupilZ float64,
 	rayDefinition string,
 	numRings, numSpokes int,
-) float64 {
+) FieldSolution {
 	heightFn := func(angleDeg float64) (float64, bool) {
 		if passThrough != nil && passThrough.Surface > 0 {
 			y, ok := imageHeightForAnglePT(system, engine, angleDeg, dx, dy, refSurfaceID, pol, wavelength, passThrough, pupilZ)
@@ -2485,9 +2578,36 @@ func searchAngleForImageHeight(
 		sgn = -1.0
 	}
 	targetMag := mag(targetY)
+
+	// bestDeg/bestHeight track the probed angle whose delivered height comes
+	// closest to the request: the closest reachable field, reported when the
+	// request cannot be met. A probe whose beam no longer reaches the reference
+	// surface is not a candidate.
+	bestDeg, bestHeight := 0.0, 0.0
+	bestErr, bestSet := math.Inf(1), false
+	probe := func(angleDeg float64) (float64, bool) {
+		y, ok := heightFn(angleDeg)
+		if !ok {
+			return y, false
+		}
+		if e := mag(mag(y) - targetMag); !bestSet || e < bestErr {
+			bestDeg, bestHeight, bestErr, bestSet = angleDeg, y, e, true
+		}
+		return y, true
+	}
+	// closest reports the request as unresolved, carrying the closest reachable
+	// field rather than folding onto the axis.
+	closest := func() FieldSolution {
+		return FieldSolution{
+			AngleDeg:  sgn * mag(bestDeg),
+			Requested: targetMag,
+			Reached:   mag(bestHeight),
+		}
+	}
+
 	loDeg, hiDeg := 0.0, 15.0
-	yLo, okLo := heightFn(loDeg)
-	yHi, okHi := heightFn(hiDeg)
+	yLo, okLo := probe(loDeg)
+	yHi, okHi := probe(hiDeg)
 	aLo, aHi := mag(yLo), mag(yHi)
 
 	for iter := 0; iter < 25; iter++ {
@@ -2496,29 +2616,29 @@ func searchAngleForImageHeight(
 		}
 		if hiDeg > 70 {
 			hiDeg = 70
-			yHi, okHi = heightFn(hiDeg)
+			yHi, okHi = probe(hiDeg)
 			aHi = mag(yHi)
 		}
 		if !okLo || aLo > targetMag {
 			loDeg -= 3.0
 			if loDeg < -80 {
-				return 0
+				return closest()
 			}
-			yLo, okLo = heightFn(loDeg)
+			yLo, okLo = probe(loDeg)
 			aLo = mag(yLo)
 		} else if !okHi {
 			hiDeg = (loDeg + hiDeg) / 2
 			if math.Abs(hiDeg-loDeg) < 1e-12 {
-				return 0
+				return closest()
 			}
-			yHi, okHi = heightFn(hiDeg)
+			yHi, okHi = probe(hiDeg)
 			aHi = mag(yHi)
 		} else if aHi < targetMag {
 			hiDeg += 3.0
 			if hiDeg > 80 {
-				return 0
+				return closest()
 			}
-			yHi, okHi = heightFn(hiDeg)
+			yHi, okHi = probe(hiDeg)
 			aHi = mag(yHi)
 		} else {
 			break
@@ -2526,12 +2646,13 @@ func searchAngleForImageHeight(
 	}
 
 	if !okLo || !okHi || aLo > targetMag || aHi < targetMag {
-		return 0
+		return closest()
 	}
 
+	solved := FieldSolution{Requested: targetMag, Resolved: true}
 	for iter := 0; iter < 40; iter++ {
 		midDeg := (loDeg + hiDeg) / 2
-		yMid, ok := heightFn(midDeg)
+		yMid, ok := probe(midDeg)
 		if !ok {
 			if math.Abs(midDeg-loDeg) > math.Abs(hiDeg-midDeg) {
 				loDeg = midDeg
@@ -2542,7 +2663,9 @@ func searchAngleForImageHeight(
 		}
 		aMid := mag(yMid)
 		if math.Abs(aMid-targetMag) < 1e-12 {
-			return sgn * midDeg
+			solved.AngleDeg = sgn * midDeg
+			solved.Reached = aMid
+			return solved
 		}
 		if aMid < targetMag {
 			loDeg = midDeg
@@ -2553,7 +2676,38 @@ func searchAngleForImageHeight(
 			break
 		}
 	}
-	return sgn * (loDeg + hiDeg) / 2
+
+	// Verify the bracket's result against the height it actually delivers. A
+	// bracket can also stop on a step of the height function, where the
+	// bisection converges but the request is only delivered on the far side of
+	// the step; a probe that does deliver it is a solution, and reporting the
+	// step itself would hand back a field the document did not declare.
+	solved.AngleDeg = sgn * (loDeg + hiDeg) / 2
+	y, ok := heightFn(solved.AngleDeg)
+	if ok && math.Abs(mag(y)-targetMag) <= imageHeightTol(targetMag) {
+		solved.Reached = mag(y)
+		return solved
+	}
+	if bestSet && bestErr <= imageHeightTol(targetMag) {
+		return FieldSolution{
+			AngleDeg:  sgn * mag(bestDeg),
+			Requested: targetMag,
+			Reached:   mag(bestHeight),
+			Resolved:  true,
+		}
+	}
+	return closest()
+}
+
+// imageHeightTol is the image-height resolution tolerance: a solved angle is
+// accepted when the height it delivers comes within this fraction of the
+// request. The bisection converges to 1e-12 deg, so a smooth crossing passes
+// with orders of magnitude to spare, and the fraction is loose enough to absorb
+// the resolution-limited plateaus the traced height shows near a branch switch
+// (0.013% measured on samples/multi-config-zoom.yaml) while still rejecting the
+// switch itself, where the delivered height is off by tens of percent.
+func imageHeightTol(targetMag float64) float64 {
+	return math.Max(1e-6, 0.01*targetMag)
 }
 
 // imageHeightForAnglePT returns the Y position at the reference surface for a
