@@ -461,7 +461,7 @@ The invalid reason is reported per basin:
 | `geometry_violation` | negative thickness or other surface-geometry error |
 | `numerical_failure` | merit is NaN or Inf |
 | `glass_hull_violation` | a converged nd/vd pair lies outside the real-glass convex hull (see below) |
-| `constraint_violation` | an active hard constraint (EFL, image height, ...) is violated beyond tolerance — the merit already penalises it, but the design is not feasible |
+| `constraint_violation` | an active hard constraint (EFL, image height, ...) is violated by more than 1% of its natural scale. The recorded merit does not include constraints (only the DLS augmented Lagrangian does during a solve), so feasibility is the only place they are enforced. |
 
 By default infeasible basins are discarded from the stdout YAML. Pass
 `--keep-infeasible` to include them as `global_result.infeasible_basins[]`

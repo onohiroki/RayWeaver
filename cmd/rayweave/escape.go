@@ -665,12 +665,13 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 					return escape.MinStatusInfeasibleBasin, escape.ReasonGlassHullViolation
 				}
 			}
-			// Hard-constraint core check: an active constraint (EFL, image
-			// height, ...) violated beyond tolerance is not a feasible design,
-			// even though the merit already penalises it. Without this, a point
-			// with a 445 mm EFL could be recorded as feasible_local_minimum.
-			for _, c := range inner.ComputeConstraints(x) {
-				if math.Abs(c) > 0.1 {
+			// Hard-constraint feasibility: the recorded merit does not include
+			// constraints (only the DLS augmented Lagrangian does), so a
+			// violated constraint would otherwise ship as a low-merit feasible
+			// minimum. The rule is scale-free: a constraint is violated when
+			// its error exceeds 1% of its natural scale (target / bound).
+			if reporter, ok := inner.(constraintFeasibilityReporter); ok {
+				if vs := reporter.FeasibilityConstraintViolations(x); len(vs) > 0 {
 					return escape.MinStatusInfeasibleBasin, escape.ReasonConstraintViolation
 				}
 			}
@@ -1119,12 +1120,13 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSetting
 					return escape.MinStatusInfeasibleBasin, escape.ReasonGlassHullViolation
 				}
 			}
-			// Hard-constraint core check: an active constraint (EFL, image
-			// height, ...) violated beyond tolerance is not a feasible design,
-			// even though the merit already penalises it. Without this, a point
-			// with a 445 mm EFL could be recorded as feasible_local_minimum.
-			for _, c := range inner.ComputeConstraints(x) {
-				if math.Abs(c) > 0.1 {
+			// Hard-constraint feasibility: the recorded merit does not include
+			// constraints (only the DLS augmented Lagrangian does), so a
+			// violated constraint would otherwise ship as a low-merit feasible
+			// minimum. The rule is scale-free: a constraint is violated when
+			// its error exceeds 1% of its natural scale (target / bound).
+			if reporter, ok := inner.(constraintFeasibilityReporter); ok {
+				if vs := reporter.FeasibilityConstraintViolations(x); len(vs) > 0 {
 					return escape.MinStatusInfeasibleBasin, escape.ReasonConstraintViolation
 				}
 			}
@@ -1287,6 +1289,16 @@ type fieldThroughputReporter interface {
 }
 
 var _ fieldThroughputReporter = (*optimize.Optimizer)(nil)
+
+// constraintFeasibilityReporter is the optimizer capability escape uses to
+// enforce the hard constraints (EFL, image height, ...) at feasibility time.
+// The recorded merit does not include constraints, so this is the only place
+// they can reject a minimum. A model without the hook (stubs) skips the check.
+type constraintFeasibilityReporter interface {
+	FeasibilityConstraintViolations([]float64) []optimize.ConstraintViolation
+}
+
+var _ constraintFeasibilityReporter = (*optimize.Optimizer)(nil)
 
 // checkThroughput decides the throughput verdict for one converged point. When
 // the model can report its own grids, they decide: the grids are the ones the

@@ -5283,8 +5283,53 @@ func (o *Optimizer) FinalConstraintViolations(x []float64, tol float64) []Constr
 	return out
 }
 
-// FinalConstraintMeasurements evaluates every active constraint at x and
-// returns its measured value and weighted residual. Unlike
+// FeasibilityConstraintViolations reports the active constraints violated
+// beyond the escape feasibility tolerance at x. Unlike FinalConstraintViolations
+// (absolute weighted residual, used by the optimize command's final report),
+// feasibility uses a scale-free rule: a constraint is violated when its
+// unweighted error exceeds 1% of its natural scale (target for equality,
+// bound for inequality/band). This is what escape feasibility applies — the
+// recorded merit does not include constraints, so feasibility is the only
+// place they are enforced. The weight is deliberately not involved: it is a
+// DLS priority knob, not a requirement knob.
+func (o *Optimizer) FeasibilityConstraintViolations(x []float64) []ConstraintViolation {
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+
+	var out []ConstraintViolation
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
+
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil, p)
+
+		for _, c := range cfg.constraints {
+			if !c.Active {
+				continue
+			}
+			angle := o.constraintFieldAngle(cfg, c, surfaces, gc)
+			value := constraint.Evaluate(c, surfaces, angle, gc, o.numRays, o.apertureMargin, cfg.stopSurface, o.gridCentring(cfg, p, angle), p.dia)
+			err := constraint.ComputeError(c.Kind, value, c)
+			scale := constraint.Scale(c)
+			if scale <= 0 {
+				scale = 1
+			}
+			if math.Abs(err)/scale > 0.01 {
+				out = append(out, ConstraintViolation{
+					ID:       c.ID,
+					Config:   cfg.id,
+					Kind:     string(c.Kind),
+					Measure:  string(c.Measure),
+					Residual: err,
+				})
+			}
+		}
+	}
+	return out
+}
+
 // FinalConstraintViolations it reports all constraints, not just the violated
 // ones, so callers (e.g. the optimize command) can record the actual value the
 // constraint reached (for example the final vignetting factor).

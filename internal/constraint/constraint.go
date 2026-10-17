@@ -62,6 +62,38 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 	}
 }
 
+// Scale returns the natural magnitude of a constraint's measure, used by the
+// escape feasibility rule as the denominator of a scale-free (relative)
+// violation test. Equality and fuzzy constraints scale with their target;
+// inequality/band constraints scale with their bound. A scale-less constraint
+// returns 1 so the test reduces to an absolute one.
+func Scale(op types.ConstraintOperand) float64 {
+	switch op.Kind {
+	case types.ConstraintEquality, types.ConstraintFuzzy:
+		if op.Target != 0 {
+			return math.Abs(op.Target)
+		}
+	case types.ConstraintInequalityUpper:
+		if op.Upper != 0 {
+			return math.Abs(op.Upper)
+		}
+	case types.ConstraintInequalityLower:
+		if op.Lower != 0 {
+			return math.Abs(op.Lower)
+		}
+	case types.ConstraintBand:
+		m := math.Max(math.Abs(op.Lower), math.Abs(op.Upper))
+		if m > 0 {
+			return m
+		}
+	}
+	m := math.Max(math.Abs(op.Target), math.Max(math.Abs(op.Lower), math.Abs(op.Upper)))
+	if m > 0 {
+		return m
+	}
+	return 1
+}
+
 func ComputeError(kind types.ConstraintKind, value float64, op types.ConstraintOperand) float64 {
 	switch kind {
 	case types.ConstraintEquality:
