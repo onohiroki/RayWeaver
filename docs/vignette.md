@@ -102,6 +102,12 @@ The loop runs until the diameters stop changing or `--iterations` passes are
 used up (default 3). The final pass re-derives the per-field marginal rays
 (`Yplus` / `Yminus`) against the settled diameters.
 
+A field declared by `image_height` that the system cannot form at any angle is
+**left out of the solve** (it would be measured at the closest reachable angle,
+i.e. a different field) and reported on stderr; the remaining fields still get
+sized. `chief` and `zoom` treat the same situation as a hard error instead,
+because they measure the field.
+
 ## Output
 
 ```yaml

@@ -76,9 +76,12 @@ type Result struct {
 	FieldSolution FieldSolution
 }
 
-// fieldResolutionMessage formats one field the pass could not resolve. name
-// labels the field set and may be empty.
-func fieldResolutionMessage(name string, index int, sol FieldSolution) string {
+// FieldResolutionMessage formats one field the pass could not resolve, in the
+// form CheckFieldResolution and FieldResolutionWarnings use. name labels the
+// field set and may be empty; index is the field's position in the list being
+// reported, which a caller holding a *filtered* slice must supply itself rather
+// than let the slice position stand in for it.
+func FieldResolutionMessage(name string, index int, sol FieldSolution) string {
 	label := ""
 	if name != "" {
 		label = name + ": "
@@ -100,7 +103,7 @@ func fieldResolutionMessage(name string, index int, sol FieldSolution) string {
 func CheckFieldResolution(name string, results []Result) error {
 	for i := range results {
 		if sol := results[i].FieldSolution; !sol.Resolved {
-			return errors.New(fieldResolutionMessage(name, i, sol))
+			return errors.New(FieldResolutionMessage(name, i, sol))
 		}
 	}
 	return nil
@@ -115,8 +118,20 @@ func FieldResolutionWarnings(name string, results []Result) []string {
 	var out []string
 	for i := range results {
 		if sol := results[i].FieldSolution; !sol.Resolved {
-			out = append(out, fieldResolutionMessage(name, i, sol))
+			out = append(out, FieldResolutionMessage(name, i, sol))
 		}
+	}
+	return out
+}
+
+// FieldSolutions extracts each result's field resolution, one entry per result
+// and in the same order — preserving the position a caller needs to report a
+// field by (see FieldResolutionMessage) even when it holds a filtered field
+// list of its own.
+func FieldSolutions(results []Result) []FieldSolution {
+	out := make([]FieldSolution, len(results))
+	for i := range results {
+		out[i] = results[i].FieldSolution
 	}
 	return out
 }

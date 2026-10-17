@@ -594,6 +594,21 @@ func warnFieldResolution(name string, results []chief.Result) {
 	}
 }
 
+// warnFieldSkips is warnFieldResolution for the commands that leave such a
+// field out of their result rather than measuring or optimising it (import,
+// importsweep, vignette): those neither report the field nor need it to keep
+// going, so the closest reachable field would only misrepresent the document —
+// the warning says the field was dropped. The solutions must be passed in field
+// order (chief.FieldSolutions), or the message numbers the wrong field.
+func warnFieldSkips(name string, sols []chief.FieldSolution) {
+	for i, sol := range sols {
+		if sol.Resolved {
+			continue
+		}
+		errOut("Warning: %s; the field is skipped", chief.FieldResolutionMessage(name, i, sol))
+	}
+}
+
 // freezeFieldReport records the field angles the run's model froze at its start
 // geometry in the output document (optimization.field_resolution) and warns
 // about the image_height fields that geometry cannot form.

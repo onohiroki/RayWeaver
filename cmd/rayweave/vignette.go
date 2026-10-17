@@ -123,6 +123,11 @@ func runVignette(data []byte) {
 		}
 	}
 
+	// A field the solve dropped (its declared image_height is not the one the
+	// system forms) is reported, not silently missing from chief_rays and
+	// vignetting_result.fields.
+	warnFieldSkips("", res.FieldSolutions)
+
 	chiefRays := make([]types.ChiefRayResult, len(res.ChiefRays))
 	rayList := make([]types.Ray, 0, 2*len(res.Fields))
 	for i, r := range res.ChiefRays {

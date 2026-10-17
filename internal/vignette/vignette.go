@@ -49,12 +49,20 @@ type FieldResult struct {
 
 // Result is the settled system state after the vignette iteration.
 type Result struct {
-	Surfaces     []types.Surface
-	ChiefRays    []chief.Result
-	Fields       []FieldResult
-	Iterations   int
-	StopSurface  int
-	MinGlassPath float64
+	Surfaces  []types.Surface
+	ChiefRays []chief.Result
+	Fields    []FieldResult
+	// FieldSolutions holds one entry per *caller* field, in field order,
+	// including the fields the solve left out: a field whose declared
+	// image_height this system cannot form would be measured at the closest
+	// reachable angle instead, so its vignetting and marginal rays would
+	// describe a field the document does not declare. Those fields have
+	// Resolved == false and appear in neither ChiefRays nor Fields; the caller
+	// reports them by their position here (see chief.FieldResolutionMessage).
+	FieldSolutions []chief.FieldSolution
+	Iterations     int
+	StopSurface    int
+	MinGlassPath   float64
 }
 
 // tracedRay is a surviving grid ray with its full per-surface positions.
@@ -88,6 +96,27 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 		opts.Fields, opts.RefSurface, opts.NumRays, gc, pol, opts.Wavelength,
 		true, opts.GridType, nil, nil, nil, nil, 0, 0, opts.RayDefinition,
 	)
+
+	// A field whose declared image_height this system cannot form is not the
+	// field the document asks for: sizing diameters for, and reporting the
+	// vignetting of, the closest reachable one would describe a different
+	// field. The first pass decides that, so the solve drops those fields here
+	// and keeps their resolution (by position) in FieldSolutions for the caller
+	// to report.
+	solutions := chief.FieldSolutions(last)
+	keptFields := make([]types.FieldDef, 0, len(opts.Fields))
+	keptResults := make([]chief.Result, 0, len(last))
+	for i := range last {
+		if !last[i].FieldSolution.Resolved {
+			continue
+		}
+		keptResults = append(keptResults, last[i])
+		if i < len(opts.Fields) {
+			keptFields = append(keptFields, opts.Fields[i])
+		}
+	}
+	last = keptResults
+	opts.Fields = keptFields
 
 	used := 1
 	for it := 1; it < opts.Iterations; it++ {
@@ -123,12 +152,13 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 	fields, _ := analyze(work, last, opts, gc, pol)
 
 	return &Result{
-		Surfaces:     work,
-		ChiefRays:    last,
-		Fields:       fields,
-		Iterations:   used,
-		StopSurface:  opts.StopSurface,
-		MinGlassPath: opts.MinGlassPath,
+		Surfaces:       work,
+		ChiefRays:      last,
+		Fields:         fields,
+		FieldSolutions: solutions,
+		Iterations:     used,
+		StopSurface:    opts.StopSurface,
+		MinGlassPath:   opts.MinGlassPath,
 	}
 }
 

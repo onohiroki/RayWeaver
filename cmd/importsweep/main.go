@@ -324,7 +324,7 @@ func processFile(abs, format string, agfGlasses []types.Glass) record {
 	}
 
 	// --- Primary (config 0 / base) pipeline ---
-	prim := sweepConfig(surfaces, result, gc, wavelength, stopSurface, lastID)
+	prim := sweepConfig(surfaces, result, gc, wavelength, stopSurface, lastID, abs, true)
 	rec.ChiefOK = prim.ChiefOK
 	rec.ChiefRays = prim.ChiefRays
 	rec.MarginalRays = prim.MarginalRays
@@ -368,7 +368,7 @@ func processFile(abs, format string, agfGlasses []types.Glass) record {
 				fmt.Printf("    surf id=%d curv=%g thick=%g mat=%q diam=%g\n", s.ID, s.Curvature, s.Thickness, s.Material, s.Diameter)
 			}
 		}
-		r := sweepConfig(cfgSurfaces, result, gc, wavelength, stopSurface, lastID)
+		r := sweepConfig(cfgSurfaces, result, gc, wavelength, stopSurface, lastID, abs, false)
 		if r.ChiefRays > 0 && r.TraceTotal > 0 && r.TraceOK == r.TraceTotal {
 			rec.ConfigsOK++
 		}
@@ -412,7 +412,7 @@ type sweepMetrics struct {
 
 // sweepConfig runs the chief-grid + marginal-ray + trace + paraxial pipeline
 // on the given surface set, mirroring import.go + runTrace + runParaxial.
-func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *glass.Catalog, wavelength float64, stopSurface, lastID int) sweepMetrics {
+func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *glass.Catalog, wavelength float64, stopSurface, lastID int, label string, warn bool) sweepMetrics {
 	var m sweepMetrics
 
 	// --- Chief rays (replicates import.go chief pass) ---
@@ -435,6 +435,15 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 		true, types.GridPolar, pt, nil, nil, nil, 0, 0,
 	)
 
+	if warn {
+		for i, sol := range chief.FieldSolutions(chiefResults) {
+			if sol.Resolved {
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "warning: %s: %s; the field is skipped\n", label, chief.FieldResolutionMessage("", i, sol))
+		}
+	}
+
 	path := dls.BuildPath(surfaces)
 	rays := make([]types.Ray, 0, len(chiefResults)*4)
 	chiefCRs := make([]types.ChiefRayResult, 0, len(chiefResults))
@@ -442,6 +451,9 @@ func sweepConfig(surfaces []types.Surface, result *importer.ParseResult, gc *gla
 
 	m.ChiefOK = len(chiefResults) > 0
 	for fi, r := range chiefResults {
+		if !r.FieldSolution.Resolved {
+			continue
+		}
 		cr := types.ChiefRayResult{
 			FieldAngle:    r.FieldAngle,
 			ChiefRay:      r.ChiefRay,

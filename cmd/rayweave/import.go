@@ -273,12 +273,21 @@ func runImport(data []byte) {
 			0, 0,
 		)
 
-		outputOut.ChiefRays = make([]types.ChiefRayResult, len(chiefResults))
+		outputOut.ChiefRays = make([]types.ChiefRayResult, 0, len(chiefResults))
 		rayList := make([]types.Ray, 0, len(chiefResults)*2)
 		path := dls.BuildPath(chiefSurfaces)
 		marginalEngine := ray.NewEngine(gc, nil)
 
+		// A field whose declared image_height the imported system cannot form
+		// would be imported at the closest reachable angle, i.e. as a chief ray
+		// for a field the document does not ask for, so it is skipped (and
+		// reported) rather than handed to the pipeline.
+		warnFieldSkips("", chief.FieldSolutions(chiefResults))
+
 		for fi, r := range chiefResults {
+			if !r.FieldSolution.Resolved {
+				continue
+			}
 			cr := types.ChiefRayResult{
 				FieldAngle:    r.FieldAngle,
 				ChiefRay:      r.ChiefRay,
@@ -291,7 +300,7 @@ func runImport(data []byte) {
 			if len(r.GridPoints) > 0 {
 				cr.GridPoints = r.GridPoints
 			}
-			outputOut.ChiefRays[fi] = cr
+			outputOut.ChiefRays = append(outputOut.ChiefRays, cr)
 
 			rayList = append(rayList, chief.MarginalRays(fi, r, stopSurface, surfaces, marginalEngine, wavelength, path, pol)...)
 		}

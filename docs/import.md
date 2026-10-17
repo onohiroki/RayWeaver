@@ -55,6 +55,14 @@ Only the first `FTYP` value is used: the trailing values are internal
 compatibility flags, not per-field field types. Field weights (`FWGN`/`FWGT`)
 map to `fields[].weight`.
 
+A field imported as `image_height` (FTYP 2 or 3) is resolved to its field angle
+through the entrance pupil of the imported system. If the imported system cannot
+form that height at any angle, the field is **skipped** rather than imported at
+the closest reachable one (which would hand the pipeline a chief ray for a field
+the imported document does not ask for), and the skip is reported on stderr —
+the same rule as `vignette` and the optimisers. `chief` and `zoom` treat the
+same situation as a hard error instead, because they measure the field.
+
 ZEMAX vignetting factors (`VDXN`/`VDYN`/`VCXN`/`VCYN`/`VANN`) are imported per
 field as `fields[].vignetting` (`decenter_x`, `decenter_y`, `compression_x`,
 `compression_y`, `tangent`) — an entrance-pupil ellipse clip in the ZEMAX
