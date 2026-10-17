@@ -47,6 +47,12 @@ const (
 	// ReasonGlassHullViolation marks a converged point whose nd/vd glass lies
 	// outside the real-glass convex hull (the hull is a core constraint).
 	ReasonGlassHullViolation
+	// ReasonConstraintViolation marks a converged point whose active hard
+	// constraints (EFL, image height, ...) are violated beyond tolerance. Such
+	// a point's merit is inflated by the constraint penalty but it is not a
+	// feasible design; recording it as a minimum is what let a 445 mm EFL
+	// point ship as `feasible_local_minimum`.
+	ReasonConstraintViolation
 )
 
 // Params holds the escape-function parameters. H controls the bump height

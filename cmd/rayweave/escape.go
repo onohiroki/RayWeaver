@@ -665,6 +665,15 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 					return escape.MinStatusInfeasibleBasin, escape.ReasonGlassHullViolation
 				}
 			}
+			// Hard-constraint core check: an active constraint (EFL, image
+			// height, ...) violated beyond tolerance is not a feasible design,
+			// even though the merit already penalises it. Without this, a point
+			// with a 445 mm EFL could be recorded as feasible_local_minimum.
+			for _, c := range inner.ComputeConstraints(x) {
+				if math.Abs(c) > 0.1 {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonConstraintViolation
+				}
+			}
 			return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
 		}
 	}
@@ -1108,6 +1117,15 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSetting
 			}); ok {
 				if ids := hv.GlassHullViolations(x); len(ids) > 0 {
 					return escape.MinStatusInfeasibleBasin, escape.ReasonGlassHullViolation
+				}
+			}
+			// Hard-constraint core check: an active constraint (EFL, image
+			// height, ...) violated beyond tolerance is not a feasible design,
+			// even though the merit already penalises it. Without this, a point
+			// with a 445 mm EFL could be recorded as feasible_local_minimum.
+			for _, c := range inner.ComputeConstraints(x) {
+				if math.Abs(c) > 0.1 {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonConstraintViolation
 				}
 			}
 			return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
@@ -1931,6 +1949,8 @@ func reasonString(r escape.InvalidReason) string {
 		return string(types.ReasonNumericalFailure)
 	case escape.ReasonGlassHullViolation:
 		return string(types.ReasonGlassHullViolation)
+	case escape.ReasonConstraintViolation:
+		return string(types.ReasonConstraintViolation)
 	default:
 		return "unknown"
 	}

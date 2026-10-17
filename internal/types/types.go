@@ -1527,6 +1527,11 @@ const (
 	// ReasonGlassHullViolation: an nd/vd glass variable lies outside the
 	// real-glass convex hull (the hull is a core constraint).
 	ReasonGlassHullViolation InvalidReason = "glass_hull_violation"
+	// ReasonConstraintViolation: an active hard constraint (EFL, image height,
+	// ...) is violated beyond tolerance. The merit already penalises it, but
+	// the design is not feasible; recording it as a minimum is what let a
+	// 445 mm EFL point ship as `feasible_local_minimum`.
+	ReasonConstraintViolation InvalidReason = "constraint_violation"
 )
 
 // ConfigFeatures is one config's feature set for a local minimum — a compact
