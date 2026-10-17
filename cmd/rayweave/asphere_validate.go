@@ -70,11 +70,12 @@ func validateOneAsphere(surfaces []types.Surface, rs types.AsphereSurfaceScore, 
 	// spot stats report, so the validation improvement stays coherent with the
 	// spot before/after comparison the demo shows.
 	var meritTerms []optimize.MeritTerm
-	for _, f := range fields {
+	for i, f := range fields {
 		for _, wl := range wavelengths {
 			meritTerms = append(meritTerms, optimize.MeritTerm{
 				Kind:        optimize.MeritSpotRMS,
 				FieldAngle:  f.AngleDeg,
+				FieldIndex:  i,
 				FieldWeight: f.Weight,
 				Wavelength:  wl,
 				WavWeight:   1.0,

@@ -87,3 +87,9 @@ Output documents inline the full input (preserving every section and `metadata`)
 and append the computed result sections on top (e.g. `chief_rays`, `results`,
 `paraxial_result`, `zoom_summary`, `cam_result`, `global_result`, etc.), so a pipeline such as
 `chief → trace → plot` stays pipe-compatible at every stage.
+
+The one result written *into* an input section rather than appended beside it is
+`optimization.field_resolution`: a solve records there the field angles it froze
+for the fields the input declares by image height. It is what the run actually
+measured, so it belongs with the settings rather than in a result block (and
+`clean` removes it — see [clean.md](clean.md), [optimize.md](optimize.md)).

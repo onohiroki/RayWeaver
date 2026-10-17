@@ -389,6 +389,11 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	}
 	opt.SetMeritSchedule(input.Optimization.MeritSchedule)
 
+	// Report (and warn about) the field angles the model froze at this start
+	// geometry: from here the merit, the constraints and the aperture sizing all
+	// measure those fields, whatever the variables do to the geometry.
+	freezeFieldReport(&input, opt)
+
 	// Two-stage stop on SIGINT/SIGTERM.
 	//
 	//  1st signal: graceful stop. Closes the mid-solve stop channel so the
@@ -593,6 +598,10 @@ func runOptimizeSnap(data []byte, glassDir string) {
 		hull, hullMargin, hullWeight, input.Optimization.CentralDiff, input.Optimization.BFGS,
 		input.Optimization.AdaptiveDamping, input.Optimization.RegionActive)
 	opt.SetApertureMarginMM(run.apertureMarginMM)
+
+	// Record the field angles the model froze at this start geometry (see
+	// freezeFieldReport); snap evaluates the same fields the solve would.
+	freezeFieldReport(&input, opt)
 
 	if !opt.HasGlassPairs() {
 		errOut("Error: optimize snap found no declared nd/vd glass variables to snap")

@@ -200,6 +200,19 @@ type RegionActiveUpdater interface {
 	UpdateRegionActiveSet(x []float64)
 }
 
+// FieldResolutionReporter is an optional Model capability: report every config
+// field declared by image_height together with the field angle the model
+// resolved at its start geometry and froze for the whole run, the height that
+// angle delivers, and whether it delivers the declared one. A model freezes
+// those angles when it is constructed, so the report is available before the
+// search starts — the caller can warn about an unreachable field and record the
+// resolution in the output document, instead of shipping a run whose merit
+// measured a different field than the document declares. Models without
+// image-height fields return an empty slice.
+type FieldResolutionReporter interface {
+	FieldResolutionDiagnostics() []types.FieldResolution
+}
+
 // ActiveConstraintIndices is an optional Model capability: return the indices
 // of constraints that should be included in the augmented system. The solver
 // calls this after UpdateRegionActiveSet to determine which constraints to

@@ -898,6 +898,36 @@ type OptimizationConfig struct {
 	//	             wavefront_defocus term reports it as the equivalent
 	//	             longitudinal focus shift in mm
 	WavefrontReference string `yaml:"wavefront_reference,omitempty"`
+	// FieldResolution is written back by optimize/escape/pso: for every config
+	// field declared by image_height, the field angle the run resolved at its
+	// start geometry (and froze for the whole run), the height that angle
+	// delivers, and whether it delivers the declared one. It answers "which
+	// fields did this run actually measure?" — a field it could not resolve was
+	// optimised at the closest reachable angle instead, and this is the record
+	// that says so. Fields declared by angle need no resolution and are omitted.
+	FieldResolution []FieldResolution `yaml:"field_resolution,omitempty"`
+}
+
+// FieldResolution records how one config field declared by image_height was
+// resolved at an optimisation's start geometry (see OptimizationConfig
+// .FieldResolution).
+type FieldResolution struct {
+	// Config is the config the field belongs to ("" for a single-config run
+	// whose config carries no id).
+	Config string `yaml:"config,omitempty"`
+	// FieldIndex is the position in configs[].fields, FieldID its declared id.
+	FieldIndex int `yaml:"field_index"`
+	FieldID    int `yaml:"field_id,omitempty"`
+	// Requested is the declared image height (mm).
+	Requested float64 `yaml:"requested_image_height"`
+	// Reached is the image height (mm) the frozen angle delivers.
+	Reached float64 `yaml:"delivered_image_height"`
+	// AngleDeg is the frozen field angle (degrees).
+	AngleDeg float64 `yaml:"angle_deg"`
+	// Resolved reports whether the frozen angle delivers the requested height
+	// (within the same tolerance `chief` accepts). A false entry means the run
+	// optimised the closest reachable field, not the declared one.
+	Resolved bool `yaml:"resolved"`
 }
 
 // AdaptiveDampingConfig configures per-variable adaptive damping for the DLS

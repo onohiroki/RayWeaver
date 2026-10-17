@@ -38,6 +38,7 @@ nothing for the CLI/YAML three-principles rule to apply to.
 | `psf_results` | `psf` |
 | `focus_comparison` | `focus mtf` / `focus psf` / `focus spot` |
 | `wavefront_result` | `wavefront` |
+| `optimization.field_resolution` | `optimize` / `optimize snap` / `escape` / `pso` (the per-field image-height resolution the run froze at its start geometry) |
 
 Only the fields above are touched; a field that is absent is simply not
 reported (and not listed by `--verbose`).
@@ -45,7 +46,8 @@ reported (and not listed by `--verbose`).
 ## What is preserved
 
 - **Configuration**: `metadata`, `notes`, `chief` (fields, pupil model,
-  reference surface, …), `configs`, `optimization`, and the analysis *settings*
+  reference surface, …), `configs`, `optimization` (except
+  `optimization.field_resolution`, above), and the analysis *settings*
   sections (`psf`, `wavefront`, `focus`, `vignette`, `asphere_candidate`, …) —
   so a cleaned document can be re-run exactly as before.
 - **The top-level `stop` section** (`surface_id` / `physical_z` / `diameter`),

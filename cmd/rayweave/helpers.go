@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hiroki/rayweaver/internal/chief"
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -593,6 +594,40 @@ func warnFieldResolution(name string, results []chief.Result) {
 	}
 }
 
+// freezeFieldReport records the field angles the run's model froze at its start
+// geometry in the output document (optimization.field_resolution) and warns
+// about the image_height fields that geometry cannot form.
+//
+// A solve cannot stop on such a field, so it optimises the closest reachable
+// angle instead — and that has to be said out loud and in the document, or a
+// merit looking fine on the wrong field ships as if it were the declared one.
+// The model is the run's freshly built one: the freeze happened in its
+// constructor, so the report is available before the search starts.
+func freezeFieldReport(input *types.Input, model any) {
+	fr, ok := model.(dls.FieldResolutionReporter)
+	if !ok {
+		return
+	}
+	rows := fr.FieldResolutionDiagnostics()
+	if len(rows) == 0 {
+		return
+	}
+	if input.Optimization != nil {
+		input.Optimization.FieldResolution = rows
+	}
+	for _, r := range rows {
+		if r.Resolved {
+			continue
+		}
+		label := ""
+		if r.Config != "" {
+			label = fmt.Sprintf("config %q: ", r.Config)
+		}
+		errOut("Warning: %sfield %d declares image_height %g mm, which this system cannot form — the closest reachable field is %g mm at %g deg, and that angle is what this run evaluates for it",
+			label, r.FieldIndex, r.Requested, r.Reached, r.AngleDeg)
+	}
+}
+
 // writeYAML marshals a value to stdout, exiting on error.
 func writeYAML(v any) {
 	outData, err := yaml.Marshal(v)
@@ -681,10 +716,12 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 					kind = "spot_rms"
 				}
 
+				fieldIndex := mt.Field
 				var fieldAngle, fieldWeight float64
 				var fieldDir = []float64{0, 1}
-				for _, f := range cfg.Fields {
+				for i, f := range cfg.Fields {
 					if f.ID == mt.Field {
+						fieldIndex = i
 						fieldAngle = f.AngleDeg
 						fieldWeight = f.Weight
 						if len(f.Direction) >= 2 {
@@ -712,7 +749,7 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 					Kind:                 kind,
 					FieldAngle:           fieldAngle,
 					FieldDir:             fieldDir,
-					FieldIndex:           mt.Field,
+					FieldIndex:           fieldIndex,
 					FieldWeight:          fieldWeight,
 					Wavelength:           mt.Wavelength,
 					ComparisonWavelength: mt.ComparisonWavelength,

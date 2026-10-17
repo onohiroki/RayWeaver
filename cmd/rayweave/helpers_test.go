@@ -40,6 +40,36 @@ func TestBuildMeritTermsKeepsSurfaceSet(t *testing.T) {
 	}
 }
 
+// TestBuildMeritTermsReportsFieldPosition pins that the optimizer term carries
+// the field's position in the config's field list, not the declared id it names.
+// The optimizer uses the position to resolve a field declared by image_height to
+// its angle (and to read that field's vignetting), so an id that is not also its
+// own position would otherwise resolve the wrong field.
+func TestBuildMeritTermsReportsFieldPosition(t *testing.T) {
+	input := types.Input{
+		Configs: []types.Config{{
+			ID: "c0",
+			Fields: []types.FieldItem{
+				{ID: 5, AngleDeg: 0, Weight: 1},
+				{ID: 9, ImageHeight: 2.5, Weight: 1},
+			},
+			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.0005876, Weight: 1}},
+			Merit: &types.MeritFunction{
+				Type:  "weighted_sum",
+				Terms: []types.MeritTerm{{Kind: "spot_rms", Field: 9, Wavelength: 0.0005876, Weight: 1}},
+			},
+		}},
+	}
+
+	terms := buildMeritTerms(input)
+	if len(terms) != 1 {
+		t.Fatalf("expected 1 term, got %d", len(terms))
+	}
+	if terms[0].FieldIndex != 1 {
+		t.Errorf("FieldIndex = %d, want 1 (position of the field with id 9)", terms[0].FieldIndex)
+	}
+}
+
 // TestResolveConfigFieldDefs pins the field-resolution order (G2). A zoom
 // config carries its own fields (constant image height at that zoom position);
 // analysing it with the top-level chief field list answers a different

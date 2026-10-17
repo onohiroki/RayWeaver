@@ -634,18 +634,47 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   is set **and** it declares fields (`chief.fields` / `configs[].fields`); in
   `virtual_entrance_pupil` mode the model's `axial_position` / `diameter` are
   used directly and the chief-ray iteration is skipped.
-- **Image-height fields are resolved through the entrance pupil.** A field
-  declared by `image_height` (rather than `angle`) is converted to a field angle
-  by tracing its image-plane intersection: `optimize` launches a single probe
-  ray **through the entrance-pupil centre** and inverts the height/angle
-  relationship. The launch must not come from the optical axis — with a stop on
-  the first surface (the wide-angle zoom layouts) an axis launch reaches the
-  stop ~`100·tan θ` off-axis and is clipped, which used to collapse every
-  off-axis image-height field onto ~0° so the optimizer silently worked them
-  on-axis. The solved angle feeds the merit grid, the auto-aperture sizing and
-  the `image_height` constraint alike. When the requested image height lies
-  beyond the field's traceable range the search returns the largest angle that
-  still traces, never 0.
+- **Image-height fields are frozen at the start geometry.** A field declared by
+  `image_height` (rather than `angle`) is converted to a field angle once, when
+  the model is built: `optimize` launches a single probe ray **through the
+  entrance-pupil centre** and inverts the height/angle relationship. The launch
+  must not come from the optical axis — with a stop on the first surface (the
+  wide-angle zoom layouts) an axis launch reaches the stop ~`100·tan θ` off-axis
+  and is clipped, which used to collapse every off-axis image-height field onto
+  ~0° so the optimizer silently worked them on-axis. The solved angle is then
+  **frozen for the whole run** and feeds the merit grid, the `image_height`
+  constraint and the auto-aperture sizing alike. Resolving per evaluation made
+  the field a function of the variables: the same field could be the declared
+  4.868 mm at one evaluation and a 1.533 mm near-axis field at the next, and a
+  spot-only merit is lowered by exactly that substitution — a run could then
+  report a merit for a field the document does not declare.
+- **An image-height field the system cannot form is reported, not folded onto
+  the axis.** The resolved angle is accepted only when the height it delivers
+  comes within 1 % of the request (the same acceptance `chief`,
+  `zoom`, `psf` and `wavefront` apply, which abort on such a field instead of
+  optimising it). When it does not — the height function steps over the request
+  as the traced chief ray switches branch — the closest reachable angle is
+  frozen instead, the run continues (a solve must never abort mid-search) and
+  the summary carries a `Warning:` naming the config for each such field. Every
+  run that declares an image-height field writes what it froze into the output
+  document, one entry per field:
+
+  ```yaml
+  optimization:
+    field_resolution:
+      - config: config0
+        field_index: 1
+        field_id: 1
+        requested_image_height: 4.868022426727439
+        delivered_image_height: 2.741025836583559
+        angle_deg: 7.5
+        resolved: false
+  ```
+
+  `resolved: false` means the run optimised the closest reachable field, not the
+  declared one, so a merit read off the document has to be read with that in
+  mind. `rayweave zoom < doc` is the honest cross-check: it measures the
+  declared fields and exits 1 on the same one.
 - **A stalled solve says so.** The summary always reports
   `Accepted: N` — how many iterations actually reduced the merit — so a run that
   burned its whole budget without moving is visible at a glance. When the solve

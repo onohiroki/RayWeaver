@@ -176,9 +176,10 @@ type MeritTerm struct {
 	FieldAngle  float64
 	FieldDir    []float64
 	FieldWeight float64
-	// FieldIndex is the term's field index in the config's field list
-	// (-1 = unset). The wavefront kinds use it to carry the field's declared
-	// vignetting into the pupil-grid clip.
+	// FieldIndex is the 0-based position of the term's field in the config's
+	// Fields list (-1 = the field was not found). The wavefront kinds use it to
+	// carry the field's declared vignetting into the pupil-grid clip, and a
+	// field declared by image_height is resolved to its angle through it.
 	FieldIndex           int
 	Wavelength           float64
 	ComparisonWavelength float64
@@ -258,6 +259,11 @@ type config struct {
 	fields        []types.FieldItem
 	wavelengths   []types.WavelengthItem
 	meritTerms    []meritTerm
+	// fieldResolutions holds one entry per position in fields — the angle the
+	// run froze for it at the start geometry — and is produced by
+	// freezeFieldAngles. Nil until the freeze has run; consumers then resolve
+	// an image-height field on the fly (see frozenFieldAngle).
+	fieldResolutions []fieldResolution
 	// meritModes holds the config's named merit-mode term lists (from
 	// configs[].merit_modes). Nil when the config uses its fixed merit.
 	meritModes map[string][]meritTerm
@@ -875,7 +881,7 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 		var fields []fieldEntry
 		for fi := range cfg.fields {
 			fields = append(fields, fieldEntry{
-				angle:  o.fieldSizingAngle(cfg, &cfg.fields[fi], surfaces, gc, wl),
+				angle:  o.fieldSizingAngle(cfg, fi, surfaces, gc, wl),
 				weight: cfg.fields[fi].Weight,
 				vig:    cfg.fields[fi].Vignetting,
 			})
@@ -2195,7 +2201,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 		if len(t.FieldDir) >= 2 {
 			dx, dy = normalizeDir(t.FieldDir)
 		}
-		c.meritTerms = append(c.meritTerms, meritTerm{
+		mt := meritTerm{
 			kind:                 t.Kind,
 			fieldAngle:           t.FieldAngle,
 			fieldDirX:            dx,
@@ -2211,18 +2217,34 @@ func NewOptimizer(cfg Config) *Optimizer {
 			frequency:            t.Frequency,
 			surfaceSet:           append([]int(nil), t.SurfaceSet...),
 			normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, airyFor(t.Wavelength), cfg.Normalization),
-		})
+		}
+		// A field declared by image_height is resolved to its angle at the start
+		// geometry (see freezeFieldAngles), never read as the declared angle —
+		// which is 0 for such a field, i.e. the on-axis field the document did
+		// not ask for.
+		if i := t.FieldIndex; i >= 0 && i < len(c.fields) && c.fields[i].ImageHeight != 0 {
+			mt.useImageHeight = true
+			mt.imageHeight = c.fields[i].ImageHeight
+			mt.fieldAngle = 0
+		}
+		c.meritTerms = append(c.meritTerms, mt)
 	}
 	if len(cfg.MeritModes) > 0 {
 		c.meritModes = make(map[string][]meritTerm, len(cfg.MeritModes))
 		for _, m := range cfg.MeritModes {
 			var terms []meritTerm
 			for _, t := range m.Terms {
-				// Resolve field angle/direction from the config fields.
+				// Resolve field index/angle/direction from the config fields, by
+				// id like buildMeritTermFromTypes: the term carries the position
+				// (for the vignetting ellipse and the frozen field angle), not
+				// the declared id.
+				fieldIndex := -1
 				var fieldAngle, fieldWeight float64
 				var fieldDirX, fieldDirY float64 = 0.0, 1.0
-				for _, f := range cfg.Fields {
+				for i := range c.fields {
+					f := &c.fields[i]
 					if f.ID == t.Field {
+						fieldIndex = i
 						fieldAngle = f.AngleDeg
 						fieldWeight = f.Weight
 						if len(f.Direction) >= 2 {
@@ -2234,12 +2256,12 @@ func NewOptimizer(cfg Config) *Optimizer {
 				if fieldWeight == 0 {
 					fieldWeight = 1.0
 				}
-				terms = append(terms, meritTerm{
+				mt := meritTerm{
 					kind:                 t.Kind,
 					fieldAngle:           fieldAngle,
 					fieldDirX:            fieldDirX,
 					fieldDirY:            fieldDirY,
-					fieldIndex:           t.Field,
+					fieldIndex:           fieldIndex,
 					fieldWeight:          fieldWeight,
 					wavelength:           t.Wavelength,
 					comparisonWavelength: t.ComparisonWavelength,
@@ -2250,7 +2272,13 @@ func NewOptimizer(cfg Config) *Optimizer {
 					frequency:            t.Frequency,
 					surfaceSet:           append([]int(nil), t.SurfaceSet...),
 					normScale:            normScaleFor(t.Kind, t.Scale, t.Wavelength, airyFor(t.Wavelength), cfg.Normalization),
-				})
+				}
+				if fieldIndex >= 0 && c.fields[fieldIndex].ImageHeight != 0 {
+					mt.useImageHeight = true
+					mt.imageHeight = c.fields[fieldIndex].ImageHeight
+					mt.fieldAngle = 0
+				}
+				terms = append(terms, mt)
 			}
 			c.meritModes[m.Name] = terms
 		}
@@ -2804,6 +2832,11 @@ func newOptimizer(configs []config, variables []Variable, linkedVars []LinkedVar
 	if raCfg != nil {
 		opt.buildRegionActiveStates(raCfg)
 	}
+
+	// Freeze the image-height field angles at the start geometry before any
+	// evaluation runs, so every consumer — merit, constraints, aperture sizing,
+	// warnings — measures one field per declared field for the whole run.
+	opt.freezeFieldAngles()
 
 	return opt
 }
@@ -3938,24 +3971,35 @@ func (o *Optimizer) restoreDiameters(cfg *config, surfaces []types.Surface) {
 	}
 }
 
-// termFieldAngle returns the field angle for a merit term, converting
-// image-height fields via ray tracing (surfaces-dependent).
+// termFieldAngle returns the field angle for a merit term. A term on a field
+// declared by image_height reads the angle frozen at the start geometry (see
+// freezeFieldAngles); only a term the freeze did not cover — one naming a field
+// the config does not carry — resolves it now.
 func (o *Optimizer) termFieldAngle(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog) float64 {
 	if !term.useImageHeight {
 		return term.fieldAngle
 	}
+	if a, ok := frozenFieldAngle(cfg, term.fieldIndex); ok {
+		return a
+	}
 	return o.imageHeightToFieldAngle(cfg, surfaces, term.imageHeight, term.wavelength, gc)
 }
 
-// constraintFieldAngle resolves the field angle of a constraint operand.
+// constraintFieldAngle resolves the field angle of a constraint operand, from
+// the same frozen field set the merit terms read.
 func (o *Optimizer) constraintFieldAngle(cfg *config, c types.ConstraintOperand, surfaces []types.Surface, gc *glass.Catalog) float64 {
-	for _, f := range cfg.fields {
-		if f.ID == c.Field {
-			if f.AngleDeg != 0 || f.ImageHeight == 0 {
-				return f.AngleDeg
-			}
-			return o.imageHeightToFieldAngle(cfg, surfaces, f.ImageHeight, 0, gc)
+	for i := range cfg.fields {
+		f := &cfg.fields[i]
+		if f.ID != c.Field {
+			continue
 		}
+		if a, ok := frozenFieldAngle(cfg, i); ok {
+			return a
+		}
+		if f.AngleDeg != 0 || f.ImageHeight == 0 {
+			return f.AngleDeg
+		}
+		return o.imageHeightToFieldAngle(cfg, surfaces, f.ImageHeight, 0, gc)
 	}
 	return 0
 }
@@ -4546,8 +4590,10 @@ func (o *Optimizer) EndJacobian() {
 	o.reuseDiameters = nil
 }
 
-// imageHeightToFieldAngle finds the field angle that lands the chief ray at
-// the target image height, via bisection on the image-plane intersection.
+// resolveImageHeightField finds the field angle that lands the chief ray at the
+// target image height, via bisection on the image-plane intersection, and
+// reports the height the angle actually delivers and whether the request was
+// met.
 //
 // The probe is launched through the entrance-pupil centre (the frozen
 // per-iteration pupil from UpdatePupils), not from the optical axis: an axis
@@ -4557,13 +4603,24 @@ func (o *Optimizer) EndJacobian() {
 // every off-axis probe, so the bisection collapsed and the optimizer silently
 // worked the fields on-axis. When no pupil has been resolved the probe keeps
 // the historical axis launch.
-func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surface, targetHeight, wavelength float64, gc *glass.Catalog) float64 {
+//
+// Meeting the request is verified, not assumed: the height function is not
+// necessarily monotone or continuous — as the angle grows the traced chief ray
+// can switch branch, leaving a step that no angle lands on — so a collapsed
+// bracket can sit on such a step and deliver a height nowhere near the request
+// (the seed's wide position reported 1.533 mm for a declared 4.868 mm). A
+// solved angle is therefore accepted only when it delivers the requested height
+// within chief.ImageHeightTol, the same acceptance the `chief` command applies;
+// otherwise the probed angle whose delivered height comes closest is returned
+// with resolved=false, so the caller can never mistake it for the declared
+// field.
+func (o *Optimizer) resolveImageHeightField(cfg *config, surfaces []types.Surface, targetHeight, wavelength float64, gc *glass.Catalog) (angle, reached float64, resolved bool) {
 	path := dls.BuildPath(surfaces)
 	engine := ray.NewEngine(gc, nil)
 
 	apertureRadius := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, wavelength, gc, o.apertureMargin, 0)
 	if apertureRadius <= 0 {
-		return 0
+		return 0, 0, false
 	}
 
 	pol := types.NewCircularJones(true)
@@ -4600,6 +4657,29 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 		targetMag = -targetHeight
 	}
 
+	// bestDeg/bestHeight track the probed angle whose delivered height comes
+	// closest to the request — the closest reachable field, reported when the
+	// request cannot be met. So an unreachable field is never folded onto the
+	// axis (angle 0), which a spot-only merit would reward.
+	bestDeg, bestHeight := 0.0, 0.0
+	bestErr, bestSet := math.Inf(1), false
+	height := func(angle float64) (float64, bool) {
+		y, ok := heightAt(angle)
+		if !ok {
+			return y, false
+		}
+		if e := math.Abs(math.Abs(y) - targetMag); !bestSet || e < bestErr {
+			bestDeg, bestHeight, bestErr, bestSet = angle, y, e, true
+		}
+		return y, true
+	}
+	closest := func() (float64, float64, bool) {
+		if !bestSet {
+			return 0, 0, false
+		}
+		return sgn * math.Abs(bestDeg), math.Abs(bestHeight), false
+	}
+
 	// Ascending scan: advance in steps until the traced height magnitude
 	// reaches the target (a bracket is found) or the probe stops tracing — the
 	// field's clip angle, where the stop or a surface aperture cuts the chief
@@ -4612,7 +4692,7 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 	lastA := 0.0
 	lo, hi := math.NaN(), math.NaN()
 	for a := step; a <= 80.0; a += step {
-		y, ok := heightAt(a)
+		y, ok := height(a)
 		if !ok {
 			break
 		}
@@ -4625,47 +4705,154 @@ func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surfac
 
 	if math.IsNaN(lo) {
 		// The target is beyond this field's traceable range (or the scan only
-		// met the clip). Return the largest angle that still traces — the
-		// closest approach to the requested image height — not 0, so the field
-		// is never folded onto the axis. Refine that clip boundary between the
-		// last traced step and the failing one.
-		if lastA == 0 {
-			return 0
-		}
-		failA := lastA + step
-		for i := 0; i < 20 && failA-lastA > 1e-6; i++ {
-			mid := (lastA + failA) / 2
-			if _, ok := heightAt(mid); ok {
-				lastA = mid
-			} else {
-				failA = mid
-			}
-		}
-		return sgn * lastA
+		// met the clip): report the closest reachable field, never 0.
+		return closest()
 	}
 
 	for iter := 0; iter < 40; iter++ {
 		mid := (lo + hi) / 2
-		y, ok := heightAt(mid)
+		y, ok := height(mid)
 		if !ok {
 			// A clip inside the bracket: keep the side that still traces.
 			hi = mid
 			continue
 		}
 		a := math.Abs(y)
-		if math.Abs(a-targetMag) < 1e-9 {
-			break
+		if math.Abs(a-targetMag) < 1e-12 {
+			return sgn * mid, a, true
 		}
 		if a < targetMag {
 			lo = mid
 		} else {
 			hi = mid
 		}
-		if hi-lo < 1e-9 {
+		if hi-lo < 1e-12 {
 			break
 		}
 	}
-	return sgn * (lo + hi) / 2
+
+	// Verify the bracket's result against the height it delivers: a bracket can
+	// also stop on a step of the height function, and reporting that angle would
+	// hand the merit a field the document did not declare.
+	mid := (lo + hi) / 2
+	if y, ok := heightAt(mid); ok && math.Abs(math.Abs(y)-targetMag) <= chief.ImageHeightTol(targetMag) {
+		return sgn * mid, math.Abs(y), true
+	}
+	if bestSet && bestErr <= chief.ImageHeightTol(targetMag) {
+		return sgn * math.Abs(bestDeg), math.Abs(bestHeight), true
+	}
+	return closest()
+}
+
+// imageHeightToFieldAngle resolves an image-height field to its angle for a
+// caller that has no frozen value to read (see frozenFieldAngle); the resolved
+// flag and the delivered height are dropped, so use resolveImageHeightField
+// wherever the field's reachability matters.
+func (o *Optimizer) imageHeightToFieldAngle(cfg *config, surfaces []types.Surface, targetHeight, wavelength float64, gc *glass.Catalog) float64 {
+	angle, _, _ := o.resolveImageHeightField(cfg, surfaces, targetHeight, wavelength, gc)
+	return angle
+}
+
+// fieldResolution is one config field's resolved angle, fixed at the
+// optimisation's start geometry by freezeFieldAngles.
+type fieldResolution struct {
+	index   int     // position in config.fields
+	fieldID int     // declared field id
+	angle   float64 // the angle the run uses; the closest reachable when unresolved
+	// requested is the declared image height (mm, magnitude), 0 for a field
+	// declared by angle; reached is the height the frozen angle delivers.
+	requested float64
+	reached   float64
+	resolved  bool
+}
+
+// freezeFieldAngles resolves every config field declared by image_height once,
+// at the optimisation's start geometry, and stores the angle the whole run then
+// uses — merit terms, constraints, aperture sizing and the throughput warnings
+// alike. Re-resolving per evaluation made the field a function of the variables:
+// the same field could be the declared 4.868 mm at one evaluation and a 1.533 mm
+// near-axis field at the next, and a spot-only merit is lowered by exactly that
+// substitution. A frozen angle cannot be gamed, and freezeFieldAngles records how
+// each field resolved, so an unreachable one is reported instead of hidden.
+//
+// The pupils are resolved first (one UpdatePupils at the start state) so the
+// probe launches through the start geometry's entrance pupil, exactly as the
+// first DLS iteration would. A model whose configs declare no image-height
+// field needs neither the probe nor the pupil pass.
+func (o *Optimizer) freezeFieldAngles() {
+	probe := false
+	for ci := range o.configs {
+		for i := range o.configs[ci].fields {
+			if o.configs[ci].fields[i].ImageHeight != 0 {
+				probe = true
+			}
+		}
+	}
+	var surfaces map[string][]types.Surface
+	var gc *glass.Catalog
+	if probe {
+		x := o.InitialState()
+		o.UpdatePupils(x)
+		var tempGC *glass.Catalog
+		surfaces, tempGC, _ = o.applyVariables(x)
+		gc = effectiveGC(o.gc, tempGC)
+	}
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		wl := cfg.referenceWavelength
+		if wl <= 0 {
+			wl = types.DefaultWavelength
+		}
+		res := make([]fieldResolution, len(cfg.fields))
+		for i := range cfg.fields {
+			f := &cfg.fields[i]
+			r := fieldResolution{index: i, fieldID: f.ID, angle: f.AngleDeg, resolved: true}
+			if probe && f.ImageHeight != 0 {
+				r.requested = math.Abs(f.ImageHeight)
+				r.angle, r.reached, r.resolved = o.resolveImageHeightField(cfg, surfaces[cfg.id], f.ImageHeight, wl, gc)
+			}
+			res[i] = r
+		}
+		cfg.fieldResolutions = res
+	}
+}
+
+// frozenFieldAngle returns the angle the run uses for position i in cfg.fields,
+// fixed by freezeFieldAngles. ok is false when the freeze does not cover the
+// position — a caller naming a field the config does not carry — and the caller
+// resolves the field on the fly instead.
+func frozenFieldAngle(cfg *config, i int) (float64, bool) {
+	if cfg == nil || i < 0 || i >= len(cfg.fieldResolutions) {
+		return 0, false
+	}
+	return cfg.fieldResolutions[i].angle, true
+}
+
+// FieldResolutionDiagnostics reports every config field declared by image
+// height together with the angle the run froze for it and whether that angle
+// delivers the declared height. It is the run-level answer to "which fields did
+// this optimisation actually measure?" — the document's own fields record the
+// declaration, not what was solved, and a saved minimum carries no other trace.
+func (o *Optimizer) FieldResolutionDiagnostics() []types.FieldResolution {
+	var out []types.FieldResolution
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		for _, r := range cfg.fieldResolutions {
+			if r.requested == 0 {
+				continue
+			}
+			out = append(out, types.FieldResolution{
+				Config:     cfg.id,
+				FieldIndex: r.index,
+				FieldID:    r.fieldID,
+				Requested:  r.requested,
+				Reached:    r.reached,
+				AngleDeg:   r.angle,
+				Resolved:   r.resolved,
+			})
+		}
+	}
+	return out
 }
 
 // sizeAutoApertures measures the true geometric beam extent of every field
@@ -4713,7 +4900,7 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 	// the config has no explicit field list.
 	angles := make(map[float64]bool)
 	for fi := range cfg.fields {
-		angles[o.fieldSizingAngle(cfg, &cfg.fields[fi], surfaces, gc, wls[0])] = true
+		angles[o.fieldSizingAngle(cfg, fi, surfaces, gc, wls[0])] = true
 	}
 	if len(angles) == 0 {
 		for ti := range cfg.meritTerms {
@@ -4783,7 +4970,14 @@ func (o *Optimizer) sizeAperturesForBackFocus(configSurfaces map[string][]types.
 // fieldSizingAngle returns the beam angle used by sizeAutoApertures for a field
 // item: angle fields directly, image-height fields converted through the current
 // surfaces.
-func (o *Optimizer) fieldSizingAngle(cfg *config, f *types.FieldItem, surfaces []types.Surface, gc *glass.Catalog, wl float64) float64 {
+// fieldSizingAngle returns the beam angle sizeAutoApertures uses for the config
+// field at position i — the frozen angle for an image-height field, so the
+// sized apertures cover the field the merit actually traces.
+func (o *Optimizer) fieldSizingAngle(cfg *config, i int, surfaces []types.Surface, gc *glass.Catalog, wl float64) float64 {
+	if a, ok := frozenFieldAngle(cfg, i); ok {
+		return a
+	}
+	f := &cfg.fields[i]
 	if f.AngleDeg != 0 || f.ImageHeight == 0 {
 		return f.AngleDeg
 	}
@@ -5236,7 +5430,9 @@ func (o *Optimizer) FieldThroughputs(x []float64, rayCount int) []FieldThroughpu
 		}
 		for fi, f := range cfg.fields {
 			angle := f.AngleDeg
-			if f.ImageHeight != 0 {
+			if a, ok := frozenFieldAngle(cfg, fi); ok {
+				angle = a
+			} else if f.ImageHeight != 0 {
 				angle = o.imageHeightToFieldAngle(cfg, surfaces, f.ImageHeight, wl, gc)
 			}
 			pupilZ := o.gridCentring(cfg, p, angle)
@@ -5332,7 +5528,7 @@ func (o *Optimizer) WarnBeamClipping(x []float64) {
 		wls := apertureSizingWavelengths(cfg)
 		for fi := range cfg.fields {
 			f := &cfg.fields[fi]
-			angle := o.fieldSizingAngle(cfg, f, surfaces, gc, wls[0])
+			angle := o.fieldSizingAngle(cfg, fi, surfaces, gc, wls[0])
 			pupilZ := o.gridCentring(cfg, p, angle)
 			worst := make(map[int]float64)
 			for _, wl := range wls {

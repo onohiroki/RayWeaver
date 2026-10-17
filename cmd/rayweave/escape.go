@@ -469,6 +469,12 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 	}
 	outCfg := &input.Configs[0]
 
+	// The model built here froze each image-height field to an angle at this
+	// start geometry, so record those angles in the document (the streamed
+	// header below emits input, and the one-shot output reuses it) and warn
+	// about a field this geometry cannot form.
+	freezeFieldReport(&input, factory())
+
 	// Build the global_result minima against the pristine original surfaces.
 	cfgID := "config1"
 	if input.Configs[0].ID != "" {
@@ -914,6 +920,12 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSetting
 		}
 		return opt
 	}
+
+	// The model built here froze each image-height field to an angle at this
+	// start geometry, so record those angles in the document (the streamed
+	// header below emits input, and the one-shot output reuses it) and warn
+	// about a field this geometry cannot form.
+	freezeFieldReport(&input, factory())
 
 	var onRecord escape.RecordHandler
 	var saver *escapeFileSaver

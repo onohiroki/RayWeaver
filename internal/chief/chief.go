@@ -2684,11 +2684,11 @@ func searchAngleForImageHeight(
 	// step itself would hand back a field the document did not declare.
 	solved.AngleDeg = sgn * (loDeg + hiDeg) / 2
 	y, ok := heightFn(solved.AngleDeg)
-	if ok && math.Abs(mag(y)-targetMag) <= imageHeightTol(targetMag) {
+	if ok && math.Abs(mag(y)-targetMag) <= ImageHeightTol(targetMag) {
 		solved.Reached = mag(y)
 		return solved
 	}
-	if bestSet && bestErr <= imageHeightTol(targetMag) {
+	if bestSet && bestErr <= ImageHeightTol(targetMag) {
 		return FieldSolution{
 			AngleDeg:  sgn * mag(bestDeg),
 			Requested: targetMag,
@@ -2699,14 +2699,20 @@ func searchAngleForImageHeight(
 	return closest()
 }
 
-// imageHeightTol is the image-height resolution tolerance: a solved angle is
+// ImageHeightTol is the image-height resolution tolerance: a solved angle is
 // accepted when the height it delivers comes within this fraction of the
 // request. The bisection converges to 1e-12 deg, so a smooth crossing passes
 // with orders of magnitude to spare, and the fraction is loose enough to absorb
 // the resolution-limited plateaus the traced height shows near a branch switch
 // (0.013% measured on samples/multi-config-zoom.yaml) while still rejecting the
 // switch itself, where the delivered height is off by tens of percent.
-func imageHeightTol(targetMag float64) float64 {
+//
+// It is exported because the optimiser resolves image-height fields with its
+// own probe (through the entrance pupil, internal/optimize) and must accept
+// exactly the fields this package accepts: `chief` telling a document its field
+// is unreachable while a solve quietly works it anyway is the disagreement the
+// resolution report exists to prevent.
+func ImageHeightTol(targetMag float64) float64 {
 	return math.Max(1e-6, 0.01*targetMag)
 }
 

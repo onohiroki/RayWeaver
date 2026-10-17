@@ -65,6 +65,12 @@ func runClean(data []byte) {
 		removed = append(removed, removedEntry{Field: "wavefront_result", Count: 1})
 		output.WavefrontResults = nil
 	}
+	// optimization.field_resolution is a run result (the field angles a solve
+	// froze at its start geometry), not a setting: a re-run resolves it again.
+	if output.Input.Optimization != nil && len(output.Input.Optimization.FieldResolution) > 0 {
+		removed = append(removed, removedEntry{Field: "optimization.field_resolution", Count: len(output.Input.Optimization.FieldResolution)})
+		output.Input.Optimization.FieldResolution = nil
+	}
 
 	withOutputMetadata(&output.Input, "clean", subcmdArgs())
 
