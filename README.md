@@ -138,28 +138,24 @@ YAML semantics and the CLI-wins/write-back rules.
 go build -o rayweave-mcp ./cmd/rayweave-mcp/
 ```
 
-```json
-{
-  "mcp": {
-    "rayweave": {
-      "type": "local",
-      "command": ["/path/to/rayweave-mcp"],
-      "environment": {"RAYWEAVE": "/path/to/rayweave"},
-      "timeout": 120000
-    }
-  }
-}
+```sh
+opencode mcp add rayweave \
+  --env RAYWEAVE=/path/to/rayweave \
+  -- /path/to/rayweave-mcp
 ```
+
+(or the same under `mcp.servers` in `opencode.json`).
 
 Tools take a pipeline document inline or by `document_id`, and every result
 returns a compact summary plus a `rayweave://documents/<id>` resource for the
 full YAML. `escape` and `pso` start detached jobs (`job_status`, `job_result`,
 `job_stop`) that survive a server restart and are stopped in two graceful
 stages (SIGTERM twice on Unix, a control file on Windows).
-Manual: [docs/mcp.md](docs/mcp.md). Both companion binaries also build on
-Windows (`go build -o rayweave-mcp.exe ./cmd/rayweave-mcp/`); a detached run
-there uses a stop file instead of SIGTERM — see
-[docs/windows.md](docs/windows.md).
+Manual: [docs/mcp.md](docs/mcp.md), with copy-paste setups for
+[OpenCode, Claude Code, VS Code/Copilot, Claude Desktop and Cursor](docs/mcp.md#client-configuration).
+Both companion binaries also build on Windows
+(`go build -o rayweave-mcp.exe ./cmd/rayweave-mcp/`); a detached run there uses
+a stop file instead of SIGTERM — see [docs/windows.md](docs/windows.md).
 
 ## Pipeline examples
 

@@ -1,0 +1,14 @@
+{
+  "servers": {
+    "rayweave": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/rayweave-mcp",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RAYWEAVE": "${workspaceFolder}/rayweave",
+        "RAYWEAVE_WORKSPACE": "${workspaceFolder}/.rw-mcp",
+        "RAYWEAVE_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}

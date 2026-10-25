@@ -86,18 +86,31 @@ go build -o rwrun.exe ./cmd/rwrun/
 Point the client at the `.exe` (the server finds the engine as
 `rayweave.exe` next to itself, or through `RAYWEAVE`):
 
-```json
+```jsonc
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "rayweave": {
-      "type": "local",
-      "command": ["C:\\tools\\rayweave-mcp.exe"],
-      "environment": {"RAYWEAVE": "C:\\tools\\rayweave.exe"},
-      "timeout": 120000
+    "servers": {
+      "rayweave": {
+        "type": "local",
+        "command": ["C:\\tools\\rayweave-mcp.exe"],
+        "cwd": "C:\\work\\rayweaver",
+        "environment": {
+          "RAYWEAVE": "C:\\tools\\rayweave.exe",
+          "RAYWEAVE_WORKSPACE": "C:\\work\\rayweaver\\.rw-mcp",
+          "RAYWEAVE_ROOT": "C:\\work\\rayweaver"
+        }
+      }
     }
   }
 }
 ```
+
+(or `opencode mcp add rayweave --env RAYWEAVE=... -- C:\tools\rayweave-mcp.exe`).
+The Claude Code, VS Code/Copilot, Claude Desktop and Cursor examples in
+[mcp.md](mcp.md#client-configuration) apply unchanged: use absolute Windows
+paths ending in `.exe` and, where the client supports `cwd`, the checkout
+directory.
 
 The pipeline tools, summaries, documents and resources are the same as on Unix.
 The differences are in process control and long runs:

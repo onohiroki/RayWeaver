@@ -59,28 +59,246 @@ binary. Set `RAYWEAVE_ROOT` when the binary is installed away from a checkout.
 
 ## Client configuration
 
-OpenCode (`opencode.json`), with a generous timeout because `optimize` and
-`psf` are synchronous:
+Every client launches the same local stdio server; only the configuration file
+and its syntax differ. Build both binaries first:
 
-```json
+```sh
+go build -o rayweave ./cmd/rayweave/
+go build -o rayweave-mcp ./cmd/rayweave-mcp/
+```
+
+The examples use `/path/to/rayweaver` for the checkout. **Use absolute paths**:
+a client may start the server from a different working directory, and the
+engine, the workspace and the manuals must be unambiguous.
+
+| Setting | Value | Why |
+|---|---|---|
+| `RAYWEAVE` | `/path/to/rayweaver/rayweave` | the engine, not `rayweave-mcp`; optional when it sits next to the server |
+| `RAYWEAVE_WORKSPACE` | `/path/to/rayweaver/.rw-mcp` | documents, jobs and plots; must be writable |
+| `RAYWEAVE_ROOT` | `/path/to/rayweaver` | makes `rayweave://docs/...` and `rayweave://samples/...` resolve from any cwd |
+| `RAYWEAVE_MCP_TOOLS` | `core` (default) or `all` | 15 tools, or all 27 |
+| `RAYWEAVE_GLASS_DIR` | AGF directory | optional default glass catalogue |
+
+The workspace defaults to `./.rw-mcp` when the variable is unset, which is only
+safe when the client starts the server in the checkout. `.rw-mcp/` is ignored by
+this repository's `.gitignore`. On Windows the binaries are `rayweave-mcp.exe`
+and `rayweave.exe`; the rest of every entry is unchanged (see
+[windows.md](windows.md)).
+
+This repository ignores root-level `*.json`, so a local `opencode.json` or
+`.mcp.json` stays untracked. The shared VS Code entry lives at
+[`.vscode/mcp.json`](../.vscode/mcp.json) and uses `${workspaceFolder}`; add
+`!/.mcp.json` to `.gitignore` only if you want to commit a portable
+Claude Code/Copilot entry, whose absolute paths are machine-specific.
+
+### OpenCode V2
+
+The CLI writes a project-local entry (add `--global` to make it available in
+every project):
+
+```sh
+opencode mcp add rayweave \
+  --env RAYWEAVE=/path/to/rayweaver/rayweave \
+  --env RAYWEAVE_WORKSPACE=/path/to/rayweaver/.rw-mcp \
+  --env RAYWEAVE_ROOT=/path/to/rayweaver \
+  -- /path/to/rayweaver/rayweave-mcp
+opencode mcp list          # ✓ rayweave  connected
+```
+
+The equivalent `opencode.json(c)` entry:
+
+```jsonc
 {
+  "$schema": "https://opencode.ai/config.json",
   "mcp": {
-    "rayweave": {
-      "type": "local",
-      "command": ["/path/to/rayweave-mcp"],
-      "environment": {
-        "RAYWEAVE": "/path/to/rayweave",
-        "RAYWEAVE_WORKSPACE": "./.rw-mcp"
-      },
-      "timeout": 120000
+    "servers": {
+      "rayweave": {
+        "type": "local",
+        "command": ["/path/to/rayweaver/rayweave-mcp"],
+        "cwd": "/path/to/rayweaver",
+        "environment": {
+          "RAYWEAVE": "/path/to/rayweaver/rayweave",
+          "RAYWEAVE_WORKSPACE": "/path/to/rayweaver/.rw-mcp",
+          "RAYWEAVE_ROOT": "/path/to/rayweaver"
+        }
+      }
     }
   }
 }
 ```
 
-`RAYWEAVE` and `RAYWEAVE_WORKSPACE` are the environment forms of `-rayweave`
-and `-workspace`. A local stdio server inherits the client's working directory,
-which is why the default workspace is relative.
+`cwd` is optional (it defaults to the workspace, i.e. the project directory).
+Code Mode is on by default, so the tools are grouped as
+`tools.rayweave.<tool>`; `codemode: false` exposes them under their native
+`rayweave_<tool>` names, and `disabled: true` keeps the entry without
+connecting. OpenCode V2's default tool-execution timeout is 12 hours, so a
+synchronous `optimize` or `psf` needs no special `timeout`; set
+`mcp.timeout.execution` (milliseconds) only for a shorter bound.
+
+### Claude Code
+
+Project scope uses `.mcp.json` at the repository root (Claude Code asks for
+approval the first time it loads it):
+
+```json
+{
+  "mcpServers": {
+    "rayweave": {
+      "type": "stdio",
+      "command": "/path/to/rayweaver/rayweave-mcp",
+      "args": [],
+      "env": {
+        "RAYWEAVE": "/path/to/rayweaver/rayweave",
+        "RAYWEAVE_WORKSPACE": "/path/to/rayweaver/.rw-mcp",
+        "RAYWEAVE_ROOT": "/path/to/rayweaver"
+      }
+    }
+  }
+}
+```
+
+The CLI writes the same entry:
+
+```sh
+claude mcp add --scope project \
+  --env RAYWEAVE=/path/to/rayweaver/rayweave \
+  --env RAYWEAVE_WORKSPACE=/path/to/rayweaver/.rw-mcp \
+  --env RAYWEAVE_ROOT=/path/to/rayweaver \
+  --transport stdio rayweave -- /path/to/rayweaver/rayweave-mcp
+```
+
+`--scope project` shares the entry through `.mcp.json`; `--scope user` makes it
+available in every project. The variadic `--env` list must be terminated by
+another option (`--transport stdio` above) before the server name, otherwise
+Claude Code reads the name as one more `KEY=value` pair. Check it with
+`claude mcp list` or `/mcp`. Claude Code names the tools
+`mcp__rayweave__<tool>`, for example
+`mcp__rayweave__paraxial`; a per-server `timeout` field (milliseconds) is only
+needed if you want a bound shorter than the default.
+
+### GitHub Copilot
+
+**VS Code** uses `.vscode/mcp.json` (the VS Code format, top-level `servers`),
+which supports `cwd` and the `${workspaceFolder}` variable. This repository
+ships one at [`.vscode/mcp.json`](../.vscode/mcp.json):
+
+```json
+{
+  "servers": {
+    "rayweave": {
+      "type": "stdio",
+      "command": "${workspaceFolder}/rayweave-mcp",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "RAYWEAVE": "${workspaceFolder}/rayweave",
+        "RAYWEAVE_WORKSPACE": "${workspaceFolder}/.rw-mcp",
+        "RAYWEAVE_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}
+```
+
+**GitHub Copilot CLI** and Copilot harness sessions use the *portable* format
+(top-level `mcpServers`) from the workspace-root `.mcp.json`,
+`.github/mcp.json`, or `$COPILOT_HOME/mcp-config.json`
+(`~/.copilot/mcp-config.json` by default). A portable entry has no `cwd`, so
+keep the absolute paths:
+
+```json
+{
+  "mcpServers": {
+    "rayweave": {
+      "command": "/path/to/rayweaver/rayweave-mcp",
+      "env": {
+        "RAYWEAVE": "/path/to/rayweaver/rayweave",
+        "RAYWEAVE_WORKSPACE": "/path/to/rayweaver/.rw-mcp",
+        "RAYWEAVE_ROOT": "/path/to/rayweaver"
+      }
+    }
+  }
+}
+```
+
+The Copilot CLI can write its user entry:
+
+```sh
+copilot mcp add rayweave \
+  --env RAYWEAVE=/path/to/rayweaver/rayweave \
+  --env RAYWEAVE_WORKSPACE=/path/to/rayweaver/.rw-mcp \
+  --env RAYWEAVE_ROOT=/path/to/rayweaver \
+  -- /path/to/rayweaver/rayweave-mcp
+```
+
+VS Code does not hand `.vscode/mcp.json` to the Copilot harness directly; it
+forwards eligible stdio servers, and this server needs no interactive input, so
+it is forwarded. Verify with **MCP: List Servers** in VS Code or
+`copilot mcp list` in the CLI.
+
+### Claude Desktop
+
+`claude_desktop_config.json` (macOS
+`~/Library/Application Support/Claude/`, Windows `%APPDATA%\Claude\`, Linux
+`~/.config/Claude/`) also uses the portable `mcpServers` object:
+
+```json
+{
+  "mcpServers": {
+    "rayweave": {
+      "command": "/path/to/rayweaver/rayweave-mcp",
+      "env": {
+        "RAYWEAVE": "/path/to/rayweaver/rayweave",
+        "RAYWEAVE_WORKSPACE": "/path/to/rayweaver/.rw-mcp",
+        "RAYWEAVE_ROOT": "/path/to/rayweaver"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Desktop after editing the file.
+
+### Cursor
+
+Cursor reads `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project),
+with the same `mcpServers` shape:
+
+```json
+{
+  "mcpServers": {
+    "rayweave": {
+      "command": "/path/to/rayweaver/rayweave-mcp",
+      "env": {
+        "RAYWEAVE": "/path/to/rayweaver/rayweave",
+        "RAYWEAVE_WORKSPACE": "/path/to/rayweaver/.rw-mcp",
+        "RAYWEAVE_ROOT": "/path/to/rayweaver"
+      }
+    }
+  }
+}
+```
+
+Reload the window (or restart Cursor) after editing.
+
+### Verifying the connection
+
+| Client | Check |
+|---|---|
+| OpenCode | `opencode mcp list`; `/mcps`; `opencode service restart` if a config change is not picked up |
+| Claude Code | `claude mcp list`; `claude mcp get rayweave`; `/mcp` |
+| VS Code / Copilot | **MCP: List Servers**; **MCP: Reset Cached Tools**; `copilot mcp list` |
+| Claude Desktop / Cursor | the client's MCP status panel; restart or reload after editing |
+
+Then ask the agent to use the server, for example "run `paraxial` on
+`samples/us2645157.yaml`". A connected server answers with a compact summary
+and a `rayweave://documents/<id>` resource. If no rayweave tools appear:
+
+- check that `RAYWEAVE` points at the engine and not at `rayweave-mcp`;
+- make the workspace path absolute and writable;
+- set `RAYWEAVE_ROOT` if the docs/samples resources are missing;
+- restart the server from the client (OpenCode `/mcps`, VS Code **MCP: List
+  Servers**, Claude Code `/mcp`);
+- `RAYWEAVE_MCP_TOOLS=all` exposes the extended tools (27 instead of 15).
 
 The server never prints a pipeline document on its own stdout, and the client
 must not merge stderr into stdout: stderr carries the startup line and, during a
