@@ -74,6 +74,66 @@ looked up as `rayweaver` (no extension) — either build without the extension
 (`go build -o rayweaver ./cmd/rayweaver/`; Windows runs an extensionless PE
 fine) or point `RAYWEAVER` at the `.exe` explicitly.
 
+## MCP server and `rwrun`
+
+Both companion binaries build on Windows:
+
+```sh
+go build -o rayweave-mcp.exe ./cmd/rayweave-mcp/
+go build -o rwrun.exe ./cmd/rwrun/
+```
+
+Point the client at the `.exe` (the server finds the engine as
+`rayweave.exe` next to itself, or through `RAYWEAVE`):
+
+```json
+{
+  "mcp": {
+    "rayweave": {
+      "type": "local",
+      "command": ["C:\\tools\\rayweave-mcp.exe"],
+      "environment": {"RAYWEAVE": "C:\\tools\\rayweave.exe"},
+      "timeout": 120000
+    }
+  }
+}
+```
+
+The pipeline tools, summaries, documents and resources are the same as on Unix.
+The differences are in process control and long runs:
+
+- **No `setsid`.** A detached run is created with `DETACHED_PROCESS` and its own
+  process group, so it survives the MCP server restarting and is out of reach of
+  a Ctrl+C sent to the launcher's console. It is **not** fully equivalent to a
+  Unix session: if an agent harness puts the server in a Job Object whose
+  close kills its members, the run dies with it, and a tree killer that walks
+  parent pids can still find it (Windows does not reparent to init).
+- **No SIGTERM.** `job_stop` and `rwrun -stop` write the stages to a control
+  file (`RAYWEAVE_STOP_FILE`) instead of sending a signal: `1` lets the running
+  DLS finish, `2` aborts it within one iteration. Both stages still write the
+  document in `escape`/`pso`; the rule "never force-kill a long run" is
+  unchanged. The file is `<pidfile>.stop` for `rwrun` and `jobs/<id>/stop` for
+  an MCP job (see [mcp.md](mcp.md) and [rwrun.md](rwrun.md)).
+- **Only the commands that watch the file can be stopped gracefully.**
+  `escape`, `pso` and `optimize` do; a synchronous `psf`/`focus` cancellation has
+  no document to save and is terminated.
+- **No `ps`.** `rwrun -status` reports the elapsed time from the process creation
+  time (`GetProcessTimes`) rather than `ps`'s `etime` format; the command name
+  comes from `QueryFullProcessImageName`.
+- **A stale pid is guarded by the image name**, case-insensitively. A process
+  the current user cannot open is treated as alive (the Unix `EPERM` case).
+
+The CI-less validation for the Windows side is a cross-build:
+
+```sh
+GOOS=windows go build ./...
+GOOS=windows go vet ./...
+```
+
+The end-to-end tests run on the host OS; the stop-file path itself is
+platform-neutral and is exercised on Unix by
+`internal/mcpsrv/TestStopFileStopsEscapeGracefully`.
+
 ## Running a pipeline
 
 From a **PowerShell 7.2+** prompt, the standard redirect and pipe work:
@@ -149,6 +209,10 @@ Flags that take a file path (`--glass-dir`, `--log`, `--yaml`, `--csv`,
   `interrupted: true`; a final Ctrl+C force-quits. `SIGTERM` is not a console
   concept on Windows, so the staged behavior is driven entirely by repeated
   Ctrl+C.
+- A **detached** run has no console to receive Ctrl+C. `rwrun` and the MCP
+  server therefore use the stop file described above
+  (`RAYWEAVE_STOP_FILE`); it drives the same stages. The file can also be driven
+  by hand, e.g. `Add-Content -Value 1 C:\runs\v42.pid.stop`.
 - Parallel computation (pupil grids, DLS Jacobians, escape workers via
   `GOMAXPROCS`) works unchanged.
 

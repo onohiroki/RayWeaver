@@ -77,6 +77,12 @@ need exactly the same isolation. Because the MCP server stays alive (unlike
 finished run would linger as a zombie and `kill(pid, 0)` would report it alive
 forever.
 
+On Windows there is neither `setsid(2)` nor SIGTERM. `runctl` starts the child
+with `DETACHED_PROCESS` and its own process group, and the stop travels through
+a small control file (`RAYWEAVE_STOP_FILE`) instead of signals. The two stages
+are the same; see [windows.md](windows.md) for the weaker isolation guarantee
+(a Job Object teardown can still reach the child).
+
 ## Options
 
 ```
@@ -89,12 +95,12 @@ rwrun [options] -- [rayweave] SUBCOMMAND [ARGS...]
   -d, -dir DIR       working directory (default: the input's directory)
       -rayweave PATH rayweave binary (default: $RAYWEAVE, ./rayweave, $PATH, …)
       -pidfile FILE  detached pid record (default: <name>.pid)
-      -stop-grace N  seconds between the two SIGTERMs (default 5)
+      -stop-grace N  seconds between the two stop stages (default 5)
       -stop-wait N   seconds to wait for the exit (default 60)
       -fg           run in the foreground (no detach)
       -status       report whether the run is alive
-      -stop         graceful stop: SIGTERM twice, never SIGKILL
-      -purge        remove the pidfile
+      -stop         graceful stop: two stages, never a force-kill
+      -purge        remove the pidfile (and the Windows stop file)
 ```
 
 Everything after `--` is handed to rayweave unchanged. When the first argument
@@ -130,23 +136,29 @@ go run ./cmd/rwrun -stop -n v42
 
 `escape` stops in three escalating stages (see
 [escape.md § Interrupting the search](escape.md#interrupting-the-search)), and
-the first stage is
-slow: it cancels the context and the workers finish the running DLS solve, which
-can take minutes on a large system. The stdout document is written only after
+the first stage is slow: it cancels the context and the workers finish the
+running DLS solve, which can take minutes on a large system. The stdout document is written only after
 `ParallelEscape` returns. So:
 
-- **signal #1** — graceful. Let it take its time; the document will be written.
-- **signal #2** — the running DLS aborts within one iteration, its best point so
+- **stage #1** — graceful. Let it take its time; the document will be written.
+- **stage #2** — the running DLS aborts within one iteration, its best point so
   far is recorded, and the run **still writes the document and exits 0**.
-- **signal #3** — force quit (`exit 1`). Never send it.
+- **stage #3** — force quit (`exit 1`). Never send it.
 
 `rwrun -stop` sends #1, waits `-stop-grace` (5 s), then #2 only if the process is
-still alive, and reports whether it exited. A `kill -9` (SIGKILL) cannot be
-caught and therefore always loses the assembled document.
+still alive, and reports whether it exited.
 
-`rwrun -stop` refuses to signal a pid whose command is not a rayweave run, so a
-recycled pid left behind in a stale pidfile can never be hit; `-purge` clears the
-file.
+The transport differs by platform:
+
+- **Unix** sends SIGTERM twice. A `kill -9` (SIGKILL) cannot be caught and
+  therefore always loses the assembled document.
+- **Windows** has no SIGTERM: it appends `1` and (if needed) `2` to
+  `<pidfile>.stop`, which the run watches. `-purge` removes that file with the
+  pidfile.
+
+`rwrun -stop` refuses to touch a pid whose image is not a rayweave run, so a
+recycled pid left behind in a stale pidfile can never be hit (Windows compares
+the image name case-insensitively).
 
 ## Reporting on a run
 
@@ -164,7 +176,9 @@ a run that was interrupted before the document was written.
 Because the child is reparented to init, nothing reaps it: a crash leaves no
 `launchd` exit code, so liveness is `kill -0` on the pidfile plus the logs. That
 is the one capability given up relative to running under `launchd`; in exchange
-there are no plists, no job registry and nothing to purge.
+there are no plists, no job registry and nothing to purge. On Windows liveness
+is `OpenProcess` + `WaitForSingleObject` on the recorded pid, and the process is
+not reparented (the PPID field keeps pointing at the launcher).
 
 ## What it is not
 

@@ -23,8 +23,9 @@ that uses these tools therefore produces exactly the documents the CLI produces.
   server — or another tool call — down with it.
 - **The long-run rules already exist.** `cmd/rwrun` and the MCP server share
   [`internal/runctl`](../internal/runctl) for binary resolution, a
-  session-detached launch (`setsid`) and the two-stage SIGTERM stop. See
-  [rwrun.md](rwrun.md) and [escape.md](escape.md).
+  session-detached launch (`setsid` on Unix, a detached process group on
+  Windows) and the two-stage stop (SIGTERM on Unix, a control file on Windows).
+  See [rwrun.md](rwrun.md) and [escape.md](escape.md).
 
 A future in-process implementation can implement the same `Runner` surface
 without changing any tool schema.
@@ -192,9 +193,11 @@ document stays one resource read away.
 ## Jobs: `escape` and `pso`
 
 Global searches are never synchronous. The tool writes the input, starts the
-engine with `setsid` (its own session, reparented to init) and returns a job id
-at once. The same isolation as `rwrun` means an MCP server restart, a client
-timeout or an agent harness releasing the workspace does not kill the run.
+engine detached (its own session on Unix; a detached process group on Windows)
+and returns a job id at once. The same isolation as `rwrun` means an MCP server restart, a client
+timeout or an agent harness releasing the workspace does not kill the run (on
+Windows the isolation is weaker — see the platform note under intentional
+limits).
 
 ```
 jobs/<job-id>/
@@ -205,6 +208,7 @@ jobs/<job-id>/
   minima0.yaml …   --save minima
   meta.json        command, argv, pid, started_at, paths
   job.pid          pidfile used by job_stop
+  stop             Windows control file for the staged stop
 ```
 
 `job_status` is cheap and does not disturb the run. It reads the last progress
@@ -220,16 +224,19 @@ document is written at the very end.
 `job_stop` implements the policy documented in
 [escape.md § Interrupting the search](escape.md) and [rwrun.md](rwrun.md):
 
-1. **SIGTERM #1** — the workers finish the running DLS (this can take minutes),
+1. **Stage 1** — the workers finish the running DLS (this can take minutes),
    then the run appends its completion block and exits 0.
-2. **SIGTERM #2** (after `grace_seconds`, default 5) — that DLS aborts within one
+2. **Stage 2** (after `grace_seconds`, default 5) — that DLS aborts within one
    iteration; the best point so far is still recorded and saved, and the run
    still writes its document and exits 0.
 
-A third signal would force-quit, and `kill -9` always loses the assembled
-document, so neither is ever sent. `job_stop` waits up to `wait_seconds`
-(default 60) and returns the status it reached; if the run is still finishing,
-the save files and the streamed document survive either way.
+On Unix the stages are SIGTERM twice; Windows has no SIGTERM, so the server
+writes the numbers to `jobs/<id>/stop` and the child watches that file (the same
+`RAYWEAVE_STOP_FILE` a detached `rwrun` uses). A third stage would force-quit,
+and a force-kill always loses the assembled document, so neither is ever sent.
+`job_stop` waits up to `wait_seconds` (default 60) and returns the status it
+reached; if the run is still finishing, the save files and the streamed
+document survive either way.
 
 Jobs are capped by `-max-jobs` across the workspace; the limiter counts live
 pids, so a stale job never blocks a new one. Job tool results are served from
@@ -261,11 +268,15 @@ stderr lines so the model can correct the call. Output that is empty, or a
 `document_id` from another workspace, is an error with the same shape.
 
 When a client cancels a synchronous call (or its timeout fires), the child is
-stopped with SIGTERM, then SIGTERM again after 5 s, and waited for up to 60 s.
-Nothing is ever SIGKILLed. If the child is still finishing after that, the tool
-returns an explanatory error and the child keeps going: `optimize` writes its
-document when the DLS returns, and the `escape`/`pso` job path is unaffected
-because jobs are not tied to the request.
+stopped with the platform's two-stage request: SIGTERM twice on Unix, the
+control file on Windows (`optimize` watches it; it is passed in the child's
+environment for that call). Nothing is ever force-killed on Unix. If the child
+is still finishing after `CancelWait`, the tool returns an explanatory error
+and the child keeps going: `optimize` writes its document when the DLS returns,
+and the `escape`/`pso` job path is unaffected because jobs are not tied to the
+request. On Windows a command that does not watch the control file (for
+example `psf`) cannot be signalled, so a cancelled call is terminated instead;
+there is no assembled document to lose in that case.
 
 ## Intentional limits
 
@@ -280,18 +291,25 @@ because jobs are not tied to the request.
 - One child process per call: a pipeline saves round trips, not CPU. Parallel
   tool calls run in parallel children, and `applyVariables` purity keeps each
   result deterministic.
-- Platform: like `rwrun`, the server uses `setsid(2)` and therefore builds on
-  macOS and Linux. The engine itself builds on Windows; a Windows MCP transport
-  would need a job-control shim and is not implemented.
+- Platform: the server runs on Windows as well as macOS/Linux. Unix detaches
+  with `setsid(2)` and stops with SIGTERM; Windows detaches with
+  `DETACHED_PROCESS` and stops through `RAYWEAVE_STOP_FILE`. Windows isolation
+  is weaker (a closing Job Object or a parent-pid tree kill can still reach the
+  child) and only `escape`, `pso` and `optimize` watch the stop file. See
+  [windows.md](windows.md).
 
 ## Tests
 
 ```sh
 go test ./internal/mcpsrv ./internal/runctl ./cmd/rwrun
+GOOS=windows go build ./...     # the Windows compile gate; there is no CI
+GOOS=windows go vet ./...
 ```
 
 The MCP tests build the real CLI once, connect an in-memory client to the server
 and cover the tool schemas (embedded inputs flattened), `paraxial`, a
 `chief → trace` pipeline, query/list, plot image content, `optimize` summaries,
-PSF/wavefront compaction, the escape job lifecycle and the graceful stop. The
-`rwrun` tests cover the shared `runctl` stop sequence.
+PSF/wavefront compaction, the escape job lifecycle and the graceful stop. One
+test drives `escape` with `RAYWEAVE_STOP_FILE` directly, so the stop-file stage
+that Windows uses is exercised on every platform. The `rwrun` tests cover the
+shared `runctl` stop sequence (the Unix process-group property is Unix-only).

@@ -50,6 +50,8 @@ go build -o rayweave ./cmd/rayweave/
 go build -o rayweave-mcp ./cmd/rayweave-mcp/     # optional MCP server (stdio)
 ./rayweave <subcommand> < input.yaml > out.yaml   # stdout = pipeline YAML
 go test ./...                                    # full suite; there is no CI
+GOOS=windows go build ./...                      # Windows build gate (rwrun, MCP)
+GOOS=windows go vet ./...
 ```
 
 - `cmd/rayweave` — the CLI. One file per command family; every subcommand's
@@ -97,7 +99,7 @@ go run ./cmd/rwrun -n v42 -i v42-escape-input.yaml -o v42-result.yaml \
     -e v42-stderr.jsonl -- escape --verbose --keep-infeasible \
     --log v42-progress.jsonl --save v42-min
 go run ./cmd/rwrun -status -n v42     # pid, elapsed, artefact sizes
-go run ./cmd/rwrun -stop   -n v42     # SIGTERM twice (see below)
+go run ./cmd/rwrun -stop   -n v42     # two stages (see below)
 go run ./cmd/rwrun -purge  -n v42     # drop a stale pidfile
 ```
 
@@ -109,14 +111,16 @@ summary — **check it**, since an older copy elsewhere on `$PATH` is otherwise 
 to pick up silently. `-stop` refuses to signal a pid whose command is not a
 rayweave run, so a recycled pid can never be hit.
 
-**Stopping a run on purpose: send SIGTERM twice, never SIGKILL.** The first
-signal is the slow stage — the workers finish the running DLS solve, which can
-take minutes, and the completion block (`best_index` / `best_merit` / `configs`)
-is appended to the document only after they return, so killing the process during
-that wait loses it. The second signal aborts the running DLS within one iteration
+**Stopping a run on purpose: two stages, never a force-kill.** The first stage
+is the slow one — the workers finish the running DLS solve, which can take
+minutes, and the completion block (`best_index` / `best_merit` / `configs`) is
+appended to the document only after they return, so killing the process during
+that wait loses it. The second stage aborts the running DLS within one iteration
 (the best point so far is still recorded and saved) and the run still writes its
-document and exits 0. A third signal is a force quit and is never sent; `kill -9`
-always loses the document. With streaming on (the default) the stdout document is
+document and exits 0. On Unix the stages are SIGTERM twice; Windows has no
+SIGTERM, so `runctl` writes them to the run's stop file (`RAYWEAVE_STOP_FILE`).
+A third stage is a force quit and is never sent; a force-kill always loses the
+document. With streaming on (the default) the stdout document is
 appended to as the run progresses, so a kill leaves every minimum found so far
 and only drops the completion block; with `--stream false` a kill leaves stdout
 empty, because the document is written once at the end. The `--save` minima

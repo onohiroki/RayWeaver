@@ -15,7 +15,12 @@
 //	    -e v42-stderr.jsonl -- escape --verbose --keep-infeasible \
 //	    --log v42-progress.jsonl --save v42-min
 //	go run ./cmd/rwrun -status -n v42
-//	go run ./cmd/rwrun -stop -n v42        # SIGTERM twice; never kill -9
+//	go run ./cmd/rwrun -stop -n v42        # two stages; never a force-kill
+//
+// On Windows there is no setsid and no SIGTERM: the child is created with
+// DETACHED_PROCESS and its own process group, and -stop writes the stages to
+// <pidfile>.stop, which the run watches. A Job Object teardown or a parent-pid
+// tree kill can still reach the child; see docs/windows.md.
 //
 // Everything after `--` is handed to rayweave unchanged. When the first argument
 // is an existing executable file it is taken as the command as-is
@@ -64,7 +69,7 @@ func run(argv []string) error {
 		wait    = fs.Int("stop-wait", 60, "seconds to wait for the process to exit after the second SIGTERM")
 		fg      = fs.Bool("fg", false, "run in the foreground (no detach)")
 		status  = fs.Bool("status", false, "report whether the run is alive")
-		stop    = fs.Bool("stop", false, "graceful stop: SIGTERM twice, never SIGKILL")
+		stop    = fs.Bool("stop", false, "graceful stop: two stages, never a force-kill")
 		purge   = fs.Bool("purge", false, "remove the pidfile")
 	)
 	if err := fs.Parse(expandAliases(argv)); err != nil {
@@ -103,6 +108,8 @@ func run(argv []string) error {
 		if err := os.Remove(*pidfile); err != nil && !os.IsNotExist(err) {
 			return err
 		}
+		// Windows leaves the stop file next to the pidfile; Unix never creates it.
+		_ = os.Remove(runctl.StopFilePath(*pidfile))
 		fmt.Printf("removed %s\n", absPid)
 		return nil
 	}
@@ -144,12 +151,13 @@ func run(argv []string) error {
 // can signal it as a side effect.
 func runDetached(bin string, argv []string, work, input, output, errPath, pidfile, name string) error {
 	pid, err := runctl.Launch(runctl.LaunchOptions{
-		Binary: bin,
-		Args:   argv,
-		Dir:    work,
-		Stdin:  input,
-		Stdout: output,
-		Stderr: errPath,
+		Binary:   bin,
+		Args:     argv,
+		Dir:      work,
+		Stdin:    input,
+		Stdout:   output,
+		Stderr:   errPath,
+		StopFile: runctl.StopFilePath(pidfile),
 	})
 	if err != nil {
 		return err
@@ -173,7 +181,7 @@ func runDetached(bin string, argv []string, work, input, output, errPath, pidfil
 	fmt.Printf("  stderr  : %s   (diagnostics; never merged with stdout)\n", runctl.AbsPath(errPath))
 	fmt.Printf("  command : %s %s\n", bin, strings.Join(argv, " "))
 	fmt.Printf("  status  : go run ./cmd/rwrun -status -name %s -pidfile %s\n", name, runctl.AbsPath(pidfile))
-	fmt.Printf("  stop    : go run ./cmd/rwrun -stop   -name %s -pidfile %s   (SIGTERM twice)\n", name, runctl.AbsPath(pidfile))
+	fmt.Printf("  stop    : go run ./cmd/rwrun -stop   -name %s -pidfile %s   (%s)\n", name, runctl.AbsPath(pidfile), runctl.StopHint())
 	return nil
 }
 
@@ -250,10 +258,11 @@ func reportStatus(pidfile, output, errPath string) error {
 // the caller can re-run -stop, and the document is not lost.
 func doStop(pidfile string, grace, wait int) error {
 	res, err := runctl.Stop(runctl.StopOptions{
-		PidFile: pidfile,
-		Grace:   time.Duration(grace) * time.Second,
-		Wait:    time.Duration(wait) * time.Second,
-		Report:  func(format string, args ...any) { fmt.Printf(format+"\n", args...) },
+		PidFile:  pidfile,
+		StopFile: runctl.StopFilePath(pidfile),
+		Grace:    time.Duration(grace) * time.Second,
+		Wait:     time.Duration(wait) * time.Second,
+		Report:   func(format string, args ...any) { fmt.Printf(format+"\n", args...) },
 	})
 	if err != nil {
 		if res.Signalled {
@@ -367,11 +376,12 @@ Usage:
   -d, -dir DIR       working directory (default: the input's directory)
       -rayweave PATH rayweave binary (default: $RAYWEAVE, ./rayweave, beside rwrun, $PATH)
       -pidfile FILE   detached pid record (default: <name>.pid)
-      -stop-grace N   seconds between the two SIGTERMs (default 5)
+      -stop-grace N   seconds between the two stop stages (default 5)
       -stop-wait N    seconds to wait for the exit (default 60)
       -fg            run in the foreground (no detach)
       -status        report whether the run is alive
-      -stop          graceful stop: SIGTERM twice, never SIGKILL
+      -stop          graceful stop: two stages (SIGTERM on Unix, control file on
+                     Windows), never a force-kill
       -purge         remove the pidfile
 
 Examples:

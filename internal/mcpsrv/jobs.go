@@ -31,6 +31,7 @@ type JobMeta struct {
 	Stderr     string    `json:"stderr"`
 	Progress   string    `json:"progress"`
 	Minima     string    `json:"minima"`
+	StopFile   string    `json:"stop_file,omitempty" jsonschema:"Windows control file for the staged stop"`
 	WorkingDir string    `json:"working_dir"`
 }
 
@@ -81,6 +82,7 @@ func (j *Jobs) Start(command string, baseArgs []string, doc []byte) (JobMeta, er
 		Stderr:     filepath.Join(dir, "stderr.log"),
 		Progress:   filepath.Join(dir, "progress.jsonl"),
 		Minima:     filepath.Join(dir, "minima"),
+		StopFile:   filepath.Join(dir, "stop"),
 		WorkingDir: j.workdir,
 	}
 	if err := os.WriteFile(meta.Input, doc, 0o644); err != nil {
@@ -91,12 +93,13 @@ func (j *Jobs) Start(command string, baseArgs []string, doc []byte) (JobMeta, er
 	meta.Args = args
 
 	pid, err := runctl.Launch(runctl.LaunchOptions{
-		Binary: j.binary,
-		Args:   append([]string{command}, args...),
-		Dir:    meta.WorkingDir,
-		Stdin:  meta.Input,
-		Stdout: meta.Output,
-		Stderr: meta.Stderr,
+		Binary:   j.binary,
+		Args:     append([]string{command}, args...),
+		Dir:      meta.WorkingDir,
+		Stdin:    meta.Input,
+		Stdout:   meta.Output,
+		Stderr:   meta.Stderr,
+		StopFile: meta.StopFile,
 	})
 	if err != nil {
 		return JobMeta{}, err
@@ -170,18 +173,24 @@ func (j *Jobs) Status(id string) (JobStatus, error) {
 	return st, nil
 }
 
-// Stop sends the two-stage SIGTERM to a job. It never SIGKILLs: the run still
-// writes its document, and the --save minima survive regardless.
+// Stop sends the two-stage stop to a job: SIGTERM twice on Unix, stage numbers
+// in the job's control file on Windows. It never force-kills, so the run still
+// writes its document; the --save minima survive regardless.
 func (j *Jobs) Stop(id string, grace, wait time.Duration) (JobStatus, error) {
 	meta, err := j.read(id)
 	if err != nil {
 		return JobStatus{}, err
 	}
+	stopFile := meta.StopFile
+	if stopFile == "" {
+		stopFile = runctl.StopFilePath(filepath.Join(meta.Dir, "job.pid"))
+	}
 	if _, err := runctl.Stop(runctl.StopOptions{
-		PidFile: filepath.Join(meta.Dir, "job.pid"),
-		Grace:   grace,
-		Wait:    wait,
-		Guard:   filepath.Base(j.binary),
+		PidFile:  filepath.Join(meta.Dir, "job.pid"),
+		StopFile: stopFile,
+		Grace:    grace,
+		Wait:     wait,
+		Guard:    filepath.Base(j.binary),
 	}); err != nil {
 		// Still running after the wait (or a stale pid): report the status, but
 		// keep the error so the caller knows the stop did not complete.

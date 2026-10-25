@@ -3,6 +3,7 @@ package mcpsrv
 import (
 	"context"
 	"os"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,9 @@ func TestStoreResolveRejects(t *testing.T) {
 }
 
 func TestRunnerSeparatesStreams(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the test drives /bin/sh")
+	}
 	r := &Runner{binary: "/bin/sh", dir: t.TempDir(), grace: time.Second, wait: 5 * time.Second}
 	res, err := r.Run(context.Background(), Call{
 		Command: "-c",
@@ -86,6 +90,9 @@ func TestRunnerSeparatesStreams(t *testing.T) {
 }
 
 func TestRunnerCancellationUsesSIGTERM(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the test drives /bin/sh; Windows cancellation is covered by the build")
+	}
 	r := &Runner{binary: "/bin/sh", dir: t.TempDir(), grace: 200 * time.Millisecond, wait: 5 * time.Second}
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {

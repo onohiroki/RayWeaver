@@ -51,7 +51,7 @@ func (s *server) addEscape() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "escape",
 		Title:       "Escape-function global search (job)",
-		Description: "Start an escape-function global optimisation as a detached job and return immediately with a job id. Poll job_status, fetch job_result when finished, stop with job_stop (SIGTERM twice - never kill -9, which loses the assembled document). The search runs for hours; the run survives an MCP server restart because it is started in its own session.",
+		Description: "Start an escape-function global optimisation as a detached job and return immediately with a job id. Poll job_status, fetch job_result when finished, stop with job_stop (two graceful stages - never a force-kill, which loses the assembled document). The search runs for hours; the run survives an MCP server restart because it is started in its own session.",
 		Annotations: toolAnnotations(false),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in escapeIn) (*mcp.CallToolResult, JobStatus, error) {
 		doc, _, err := s.store.Resolve(in.DocInput)
@@ -101,7 +101,7 @@ type jobIDIn struct {
 
 type jobStopIn struct {
 	ID           string `json:"id" jsonschema:"job id returned by escape/pso"`
-	GraceSeconds int    `json:"grace_seconds,omitempty" jsonschema:"seconds between the two SIGTERMs (default 5)"`
+	GraceSeconds int    `json:"grace_seconds,omitempty" jsonschema:"seconds between the two stop stages (default 5)"`
 	WaitSeconds  int    `json:"wait_seconds,omitempty" jsonschema:"seconds to wait for the exit (default 60)"`
 }
 
@@ -126,7 +126,7 @@ func (s *server) addJobTools() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "job_stop",
 		Title:       "Stop a global-search job gracefully",
-		Description: "Stop a running escape/pso job with the two-stage SIGTERM the optimisers expect: the first lets the current DLS finish (it can take minutes), the second aborts it within one iteration. The run still writes its document and exits 0. Never uses SIGKILL.",
+		Description: "Stop a running escape/pso job with the two-stage stop the optimisers expect: the first lets the current DLS finish (it can take minutes), the second aborts it within one iteration. The run still writes its document and exits 0. Unix sends SIGTERM twice; Windows writes the stages to the job's control file. Never force-kills.",
 		Annotations: toolAnnotations(false),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in jobStopIn) (*mcp.CallToolResult, JobStatus, error) {
 		grace := time.Duration(in.GraceSeconds) * time.Second

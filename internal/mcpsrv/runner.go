@@ -8,12 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
+
+	"github.com/hiroki/rayweaver/internal/runctl"
 )
 
 // Call is one synchronous rayweave invocation: the subcommand, its flags, and
@@ -46,15 +49,21 @@ type RunResult struct {
 	Cancelled bool
 }
 
-// Runner invokes the rayweave binary. It never SIGKILLs: a cancelled run is
-// asked to stop with the two-stage SIGTERM sequence the optimisers expect, so
-// the document it was assembling still reaches stdout.
+// Runner invokes the rayweave binary. A cancelled run is asked to stop with the
+// two-stage sequence the optimisers expect, so the document it was assembling
+// still reaches stdout: SIGTERM twice on Unix, the control file on Windows. A
+// Windows command that does not watch the control file cannot be signalled, so
+// it is terminated instead.
 type Runner struct {
 	binary string
 	dir    string
 	grace  time.Duration
 	wait   time.Duration
 }
+
+// stopFileCommands are the synchronous subcommands that watch
+// RAYWEAVE_STOP_FILE. escape/pso are jobs and never come through the Runner.
+var stopFileCommands = map[string]bool{"optimize": true}
 
 var taggedLine = regexp.MustCompile(`^rayweave(?:\[[a-zA-Z]+\])?: (.*)$`)
 
@@ -65,6 +74,20 @@ func (r *Runner) Run(ctx context.Context, c Call) (RunResult, error) {
 	cmd := exec.Command(r.binary, args...)
 	cmd.Dir = r.dir
 	cmd.Stdin = bytes.NewReader(c.Stdin)
+	// Windows has no SIGTERM. Give the commands that watch the stop file one
+	// before they start; the file is truncated by os.CreateTemp, so a stop
+	// requested during startup is not lost.
+	stopFile := ""
+	if runtime.GOOS == "windows" && stopFileCommands[c.Command] {
+		f, err := os.CreateTemp(r.dir, ".stop-*")
+		if err != nil {
+			return res, err
+		}
+		stopFile = f.Name()
+		f.Close()
+		defer os.Remove(stopFile)
+		cmd.Env = runctl.EnvWithStopFile(stopFile)
+	}
 	stdout := &lockedBuffer{}
 	cmd.Stdout = stdout
 	errPipe, err := cmd.StderrPipe()
@@ -109,13 +132,21 @@ func (r *Runner) Run(ctx context.Context, c Call) (RunResult, error) {
 	case waitErr = <-waitCh:
 	case <-ctx.Done():
 		res.Cancelled = true
-		// First SIGTERM: let the running DLS finish. Second: abort it within one
-		// iteration, which still leaves the document on stdout.
-		_ = cmd.Process.Signal(syscall.SIGTERM)
+		if runtime.GOOS == "windows" && stopFile == "" {
+			// The command does not watch the control file and Windows cannot
+			// deliver a signal: terminate it. There is no staged stop to lose.
+			_ = cmd.Process.Kill()
+			waitErr = <-waitCh
+			break
+		}
+		// First stage: let the running DLS finish. Second: abort it within one
+		// iteration, which still leaves the document on stdout. On Unix the
+		// stage argument is unused (each call is one SIGTERM).
+		_ = runctl.RequestStop(pid, 1, stopFile)
 		select {
 		case waitErr = <-waitCh:
 		case <-time.After(r.grace):
-			_ = cmd.Process.Signal(syscall.SIGTERM)
+			_ = runctl.RequestStop(pid, 2, stopFile)
 			select {
 			case waitErr = <-waitCh:
 			case <-time.After(r.wait):
@@ -124,7 +155,7 @@ func (r *Runner) Run(ctx context.Context, c Call) (RunResult, error) {
 				res.Stderr = sink.stderr()
 				res.Warnings = sink.warnings()
 				res.Logs = sink.logs()
-				return res, fmt.Errorf("cancelled: rayweave %s (pid %d) is still finishing its DLS and was not killed; it writes its document when it exits", c.Command, pid)
+				return res, fmt.Errorf("cancelled: rayweave %s (pid %d) is still finishing its DLS and was not force-killed; it writes its document when it exits", c.Command, pid)
 			}
 		}
 	}

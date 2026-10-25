@@ -404,16 +404,33 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	//  2nd signal: force quit immediately (exit 1).
 	stop := make(chan struct{})
 	opt.SetStop(stop)
+	stages := newStageRunner(
+		func() { close(stop) },
+		func() {
+			fmt.Fprintln(os.Stderr, "optimize: force quit")
+			os.Exit(1)
+		},
+	)
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		sig := <-sigCh
-		fmt.Fprintf(os.Stderr, "optimize: %v received — stopping at the current DLS iteration and writing the best result found so far (press Ctrl-C again to force quit)\n", sig)
-		close(stop)
-		<-sigCh
-		fmt.Fprintln(os.Stderr, "optimize: force quit")
-		os.Exit(1)
+		for n := 1; ; n++ {
+			sig := <-sigCh
+			from, to := stages.request(n)
+			if from < 1 && to >= 1 {
+				fmt.Fprintf(os.Stderr, "optimize: %v received — stopping at the current DLS iteration and writing the best result found so far (press Ctrl-C again to force quit)\n", sig)
+			}
+		}
 	}()
+	// Windows has no SIGTERM, so a detached launcher writes the same stages to
+	// a file. On Unix the variable is unset and this starts nothing.
+	stopWatch := watchStopFile(os.Getenv(stopFileEnv), func(n int) {
+		from, to := stages.request(n)
+		if from < 1 && to >= 1 {
+			fmt.Fprintln(os.Stderr, "optimize: stop requested — stopping at the current DLS iteration and writing the best result found so far")
+		}
+	})
+	defer stopWatch()
 
 	result := opt.Optimize()
 

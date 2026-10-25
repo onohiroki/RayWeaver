@@ -845,7 +845,9 @@ Output: optimized YAML with updated surface parameters in each config.
 A SIGINT/SIGTERM stops the solve in two stages: the first signal interrupts
 the running DLS within one iteration, preserving its best point found so far
 (written to stdout with interrupted: true, exit 0); the second force-quits
-immediately (exit 1).
+immediately (exit 1). A detached launcher may request the same stages through
+the file named by $RAYWEAVE_STOP_FILE (one stage number per line); rwrun and
+the MCP server use that on Windows, where SIGTERM does not exist.
  `)
 	case "escape":
 		fmt.Print(`Usage: rayweave escape [--verbose] [--log FILE] [--save FILE]
@@ -909,7 +911,9 @@ A SIGINT/SIGTERM stops the search in three stages: the first signal waits for
 the current DLS run to finish (everything saved, interrupted: true, exit 0); the
 second interrupts the running DLS within one iteration, preserving its best
 point so far (interrupted: true, exit 0); the third force-quits immediately
-(exit 1).
+(exit 1). A detached launcher may request the same stages through the file
+named by $RAYWEAVE_STOP_FILE (one stage number per line); rwrun and the MCP
+server use that on Windows, where SIGTERM does not exist.
 
 Sub-commands:
   escape (default)       run the global optimisation loop

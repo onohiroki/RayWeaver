@@ -156,19 +156,44 @@ func runEscapeCore(input types.Input, gc *glass.Catalog, progress *escape.Progre
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	hardStop := make(chan struct{})
+	stages := newStageRunner(
+		func() { cancel() },
+		func() { close(hardStop) },
+		func() {
+			progress.Event("force_quit", nil)
+			os.Exit(1)
+		},
+	)
 	sigCh := make(chan os.Signal, 3)
 	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		sig := <-sigCh
-		progress.Event("interrupt", map[string]any{"signal": sig.String()})
-		cancel()
-		sig = <-sigCh
-		progress.Event("interrupt_dls", map[string]any{"signal": sig.String()})
-		close(hardStop)
-		<-sigCh
-		progress.Event("force_quit", nil)
-		os.Exit(1)
+		for n := 1; ; n++ {
+			sig := <-sigCh
+			from, to := stages.request(n)
+			for stage := from + 1; stage <= to; stage++ {
+				switch stage {
+				case 1:
+					progress.Event("interrupt", map[string]any{"signal": sig.String()})
+				case 2:
+					progress.Event("interrupt_dls", map[string]any{"signal": sig.String()})
+				}
+			}
+		}
 	}()
+	// Windows has no SIGTERM, so a detached launcher writes the same stages to
+	// a file. On Unix the variable is unset and this starts nothing.
+	stopWatch := watchStopFile(os.Getenv(stopFileEnv), func(n int) {
+		from, to := stages.request(n)
+		for stage := from + 1; stage <= to; stage++ {
+			switch stage {
+			case 1:
+				progress.Event("interrupt", map[string]any{"signal": "stop_file"})
+			case 2:
+				progress.Event("interrupt_dls", map[string]any{"signal": "stop_file"})
+			}
+		}
+	})
+	defer stopWatch()
 
 	isMultiConfig := len(input.Optimization.SharedVariables) > 0 || len(input.Optimization.LocalVariables) > 0
 	if !isMultiConfig {

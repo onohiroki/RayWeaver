@@ -370,6 +370,14 @@ three escalating stages, and the first two still complete normally
    and saved to the `--save` files. The run still exits 0 with `interrupted: true`.
 3. **Third signal** — force quit with exit 1.
 
+A detached launcher cannot always deliver a signal — on Windows there is no
+SIGTERM at all. Such a launcher instead writes the stage number (`1`, then `2`)
+to the file named by `RAYWEAVE_STOP_FILE`; the run watches it and advances the
+same stages, and `rwrun`/the MCP server create and write the file for you (see
+[rwrun.md](rwrun.md) and [mcp.md](mcp.md)). The file is only read when the
+variable is set, so a normal foreground run is unchanged. The launcher never
+writes `3`.
+
 Because every minimum is written atomically as it is found, even a hard kill
 never loses already-discovered minima. With streaming on (the default) the
 stdout document itself is also written as the run progresses, so a hard kill

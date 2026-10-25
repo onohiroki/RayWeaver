@@ -1,13 +1,11 @@
 // Package runctl launches long rayweave runs detached from the caller's process
-// group and stops them with the two-stage SIGTERM sequence the optimisers
-// expect.
+// group and stops them with the staged stop the optimisers expect.
 //
-// It exists so the two front-ends that need this behaviour — the `rwrun`
-// companion binary and the MCP server — share one implementation of the rules
-// that are easy to get wrong: a run must be started in its own session (so a
-// shell or agent harness releasing its workspace cannot signal it), a stop is
-// always SIGTERM twice (never SIGKILL, which always loses the assembled
-// document), and a recycled pid is never signalled.
+// The mechanism is platform-specific: Unix uses setsid(2) and SIGTERM twice,
+// Windows has neither, so it starts the child in its own detached process group
+// and the child watches a small stop file. The two stages (graceful, then abort
+// the running DLS) are the same on both. See docs/rwrun.md, docs/mcp.md and
+// docs/escape.md.
 package runctl
 
 import (
@@ -17,9 +15,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
+
+// StopFileEnv is the environment variable a detached launch sets to the path of
+// the stop file. Only the Windows launcher creates the file; on Unix the
+// optimisers keep using signals. A caller may set it explicitly on Unix to use
+// the same cooperative path (tests, or a launcher that cannot signal).
+const StopFileEnv = "RAYWEAVE_STOP_FILE"
 
 // Resolve locates the rayweave binary. Order: the explicit path, $RAYWEAVE,
 // ./rayweave, $PATH, and only then the directory holding the calling executable
@@ -41,6 +44,7 @@ func Resolve(explicit string) (string, error) {
 		// "./rayweave" explicitly: LookPath on a bare name searches $PATH, which
 		// does not normally include the working directory, so a freshly built
 		// ./rayweave would be shadowed by an older copy elsewhere on $PATH.
+		// On Windows LookPath appends PATHEXT, so this also finds rayweave.exe.
 		cands = append(cands, "./rayweave")
 		if p, err := exec.LookPath("rayweave"); err == nil {
 			cands = append(cands, p)
@@ -73,21 +77,21 @@ type LaunchOptions struct {
 	Stdin  string
 	Stdout string
 	Stderr string
+	// StopFile is the control file the Windows child watches. It is created
+	// (truncated) before the process starts, so an immediate stop cannot race
+	// the watcher. Unix launchers ignore it and keep using signals.
+	StopFile string
 }
 
-// Launch starts the command in its own session and returns its pid without
-// waiting. The child is reparented to init, so nothing in the caller's process
-// group or process tree can signal it as a side effect.
+// Launch starts the command detached and returns its pid without waiting. On
+// Unix the child is reparented to init, so nothing in the caller's process
+// group or process tree can signal it as a side effect. On Windows the child
+// runs in its own detached process group; see the limitations in
+// docs/windows.md (a Job Object teardown can still reach it).
 func Launch(o LaunchOptions) (int, error) {
 	cmd := exec.Command(o.Binary, o.Args...)
 	cmd.Dir = o.Dir
-	// Setsid alone: setsid(2) creates a new session with no controlling
-	// terminal, which is exactly the isolation needed. Do NOT add
-	// SysProcAttr.Noctty here - on darwin it issues ioctl(0, TIOCNOTTY), which
-	// fails with ENOTTY whenever fd 0 is not a terminal (a pipe, /dev/null, a
-	// script), i.e. exactly how a long job is normally launched. It is also
-	// redundant: a session leader has no controlling tty to begin with.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = sysProcAttr()
 
 	if o.Stdin != "" {
 		f, err := os.Open(o.Stdin)
@@ -112,6 +116,13 @@ func Launch(o LaunchOptions) (int, error) {
 	defer f.Close()
 	cmd.Stderr = f
 
+	if useStopFile && o.StopFile != "" {
+		if err := createStopFile(o.StopFile); err != nil {
+			return 0, fmt.Errorf("stop file: %w", err)
+		}
+		cmd.Env = EnvWithStopFile(AbsPath(o.StopFile))
+	}
+
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
@@ -125,11 +136,14 @@ func Launch(o LaunchOptions) (int, error) {
 }
 
 // StopOptions configures Stop. Zero durations fall back to 5s between the
-// signals and a 60s wait for the exit, the rwrun defaults.
+// stages and a 60s wait for the exit, the rwrun defaults.
 type StopOptions struct {
 	PidFile string
-	Grace   time.Duration
-	Wait    time.Duration
+	// StopFile is where Windows writes the stage numbers. Empty means
+	// <PidFile>.stop. Unix ignores it.
+	StopFile string
+	Grace    time.Duration
+	Wait     time.Duration
 	// Guard is the executable name a signalled pid must look like, protecting
 	// against a recycled pid in a stale pidfile. Empty means "rayweave", the
 	// rwrun default; the MCP server passes the basename of its own binary,
@@ -143,19 +157,20 @@ type StopOptions struct {
 type StopResult struct {
 	Pid        int
 	Exited     bool
-	AfterFirst bool // the run was gone after the first SIGTERM
-	Signalled  bool // at least one SIGTERM was delivered
+	AfterFirst bool // the run was gone after the first stage
+	Signalled  bool // at least one stop request was delivered
 }
 
 // Stop implements the two-stage graceful stop documented in docs/escape.md
-// ("Interrupting the search") and docs/rwrun.md: the first signal cancels the
+// ("Interrupting the search") and docs/rwrun.md: the first request cancels the
 // context and lets the running DLS finish (minutes on a large system, and the
 // stdout document is only written after ParallelEscape returns); the second
 // aborts that DLS within one iteration so the run still writes the document and
 // exits 0.
 //
 // A third signal force-quits, so it is never sent, and SIGKILL is never used:
-// it always loses the assembled document (the --save minima survive).
+// it always loses the assembled document (the --save minima survive). On
+// Windows the stages travel through the stop file instead of signals.
 func Stop(o StopOptions) (StopResult, error) {
 	grace, wait := o.Grace, o.Wait
 	if grace <= 0 {
@@ -188,25 +203,37 @@ func Stop(o StopOptions) (StopResult, error) {
 	if guard == "" {
 		guard = "rayweave"
 	}
-	if _, comm, perr := ProcInfo(pid); perr == nil && comm != "" && !strings.Contains(comm, guard) {
+	if _, comm, perr := ProcInfo(pid); perr == nil && comm != "" && !guardMatches(comm, guard) {
 		return res, fmt.Errorf("pid %d is now %q, not a rayweave run - the pidfile is stale; remove %s if you are sure",
 			pid, comm, AbsPath(o.PidFile))
 	}
 
-	report("SIGTERM #1 -> graceful: the workers finish the running DLS (this can take minutes)")
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	stopFile := o.StopFile
+	if useStopFile {
+		if stopFile == "" {
+			stopFile = StopFilePath(o.PidFile)
+		}
+		stopFile = AbsPath(stopFile)
+		if _, err := os.Stat(stopFile); err != nil {
+			return res, fmt.Errorf("no stop file %s: the run was launched without %s (an older launcher?), so it cannot be asked to stop gracefully",
+				AbsPath(stopFile), StopFileEnv)
+		}
+	}
+
+	report("%s #1 -> graceful: the workers finish the running DLS (this can take minutes)", stopName)
+	if err := requestStop(pid, 1, stopFile); err != nil {
 		return res, err
 	}
 	res.Signalled = true
 	time.Sleep(grace)
 	if PidAlive(pid) {
-		report("SIGTERM #2 -> that DLS aborts within one iteration; the run then writes its document and exits 0")
-		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+		report("%s #2 -> that DLS aborts within one iteration; the run then writes its document and exits 0", stopName)
+		if err := requestStop(pid, 2, stopFile); err != nil {
 			return res, err
 		}
 	} else {
 		res.AfterFirst = true
-		report("already exited after the first signal")
+		report("already exited after the first stop request")
 	}
 
 	deadline := time.Now().Add(wait)
@@ -214,12 +241,31 @@ func Stop(o StopOptions) (StopResult, error) {
 		if !PidAlive(pid) {
 			res.Exited = true
 			report("exited.")
-			report("never use kill -9: it always loses the assembled document (the --save minima survive).")
+			report("%s", doneAdvice)
 			return res, nil
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
-	return res, fmt.Errorf("pid %d is still alive after %s; do NOT send kill -9 (it always loses the assembled document) - re-run the stop, or accept the --save minima", pid, wait)
+	return res, fmt.Errorf("pid %d is still alive after %s; %s", pid, wait, killAdvice)
+}
+
+// RequestStop delivers one stop stage. On Unix it sends SIGTERM (the optimisers
+// count signals); on Windows it appends the stage to stopFile, which the child
+// polls.
+func RequestStop(pid, stage int, stopFile string) error {
+	return requestStop(pid, stage, stopFile)
+}
+
+// StopFilePath returns the default stop-file path for a pidfile. The launcher
+// and the stopper derive the same path, so neither has to parse the other's
+// files.
+func StopFilePath(pidFile string) string {
+	return pidFile + ".stop"
+}
+
+// StopHint describes the platform's stop mechanism for help text and summaries.
+func StopHint() string {
+	return stopHint
 }
 
 // WritePid records pid in path.
@@ -236,26 +282,18 @@ func ReadPid(path string) (int, error) {
 	return strconv.Atoi(strings.TrimSpace(string(b)))
 }
 
-// PidAlive reports whether a signal can be delivered to pid. EPERM means it
-// exists but belongs to someone else, which still counts as alive.
+// PidAlive reports whether pid names a live process. A process that exists but
+// cannot be inspected (EPERM on Unix, ACCESS_DENIED on Windows) still counts as
+// alive.
 func PidAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
+	return pidAlive(pid)
 }
 
-// ProcInfo returns the elapsed time and the command name of pid, via ps.
+// ProcInfo returns the elapsed time and the command name of pid when the
+// platform can provide them (ps on Unix, GetProcessTimes +
+// QueryFullProcessImageName on Windows).
 func ProcInfo(pid int) (string, string, error) {
-	out, err := exec.Command("ps", "-o", "etime=,comm=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return "", "", err
-	}
-	f := strings.Fields(string(out))
-	if len(f) == 0 {
-		return "", "", fmt.Errorf("no ps output for pid %d", pid)
-	}
-	comm := f[len(f)-1]
-	elapsed := strings.Join(f[:len(f)-1], " ")
-	return elapsed, comm, nil
+	return procInfo(pid)
 }
 
 // AbsPath makes p absolute, returning p unchanged when that fails.
@@ -265,4 +303,33 @@ func AbsPath(p string) string {
 		return p
 	}
 	return a
+}
+
+// EnvWithStopFile returns the current environment with RAYWEAVE_STOP_FILE set
+// to path, replacing any inherited value so the launcher's path always wins.
+func EnvWithStopFile(path string) []string {
+	env := os.Environ()
+	out := env[:0]
+	for _, e := range env {
+		if strings.HasPrefix(e, StopFileEnv+"=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, StopFileEnv+"="+path)
+}
+
+// createStopFile creates (or truncates) the control file before the child
+// starts, removing the race between a fast stop request and the watcher.
+func createStopFile(path string) error {
+	if dir := filepath.Dir(path); dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	return f.Close()
 }
