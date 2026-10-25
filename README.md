@@ -26,11 +26,14 @@ RayWeaver is a CLI ray tracing engine for optical systems, written in Go.
 
 ```sh
 go build -o rayweave ./cmd/rayweave/
+go build -o rwrun ./cmd/rwrun/            # optional: detached long runs
+go build -o rayweave-mcp ./cmd/rayweave-mcp/   # optional: MCP server for agents
 ```
 
-Two external modules, both vendored through the module cache: `gopkg.in/yaml.v3`
-(the YAML pipeline format) and `golang.org/x/image` (PNG output). See
-[Dependencies](#dependencies).
+The engine needs two external modules, both vendored through the module cache:
+`gopkg.in/yaml.v3` (the YAML pipeline format) and `golang.org/x/image` (PNG
+output). The optional MCP companion adds the official
+`github.com/modelcontextprotocol/go-sdk`. See [Dependencies](#dependencies).
 
 Windows usage is covered in [docs/windows.md](docs/windows.md): installing Go
 and PowerShell 7.2+ (the recommended shell), the `rayweaver.exe` build, and
@@ -95,6 +98,7 @@ Per-subcommand usage manuals live in [`docs/`](docs/):
 | [docs/focus.md](docs/focus.md) | image-plane comparison of MTF/PSF across focus conventions |
 | [docs/query.md](docs/query.md) | YAML/JSONL selector |
 | [docs/rwrun.md](docs/rwrun.md) | `rwrun` companion binary: start a long run detached so an AI agent's shell teardown cannot kill it |
+| [docs/mcp.md](docs/mcp.md) | `rayweave-mcp` companion binary: serve the subcommands to AI agents over the Model Context Protocol |
 | [docs/windows.md](docs/windows.md) | Windows usage: Go/PowerShell 7.2+ install, `rayweaver.exe` build, bash demos |
 
 The numerical methods behind the analyses and optimizations are described
@@ -121,6 +125,37 @@ go run ./cmd/rwrun -stop   -n v42     # SIGTERM twice — keeps the report docum
 ```
 
 See [docs/rwrun.md](docs/rwrun.md).
+
+### AI agents over MCP
+
+`cmd/rayweave-mcp` serves the same subcommands over the Model Context Protocol
+(stdio), so an agent can run analyses and optimisations as typed tool calls
+instead of composing shell pipelines. It is a protocol adapter: each call runs
+`rayweave <subcommand>`, so the CLI remains the single source of truth for the
+YAML semantics and the CLI-wins/write-back rules.
+
+```sh
+go build -o rayweave-mcp ./cmd/rayweave-mcp/
+```
+
+```json
+{
+  "mcp": {
+    "rayweave": {
+      "type": "local",
+      "command": ["/path/to/rayweave-mcp"],
+      "environment": {"RAYWEAVE": "/path/to/rayweave"},
+      "timeout": 120000
+    }
+  }
+}
+```
+
+Tools take a pipeline document inline or by `document_id`, and every result
+returns a compact summary plus a `rayweave://documents/<id>` resource for the
+full YAML. `escape` and `pso` start detached jobs (`job_status`, `job_result`,
+`job_stop`) that survive a server restart and are stopped with SIGTERM twice.
+Manual: [docs/mcp.md](docs/mcp.md).
 
 ## Pipeline examples
 
@@ -269,6 +304,7 @@ All units are millimetres (wavelengths, thicknesses, radii, coordinates). Coatin
 |:---:|:---:|
 | [gopkg.in/yaml.v3](https://github.com/go-yaml/yaml) | MIT |
 | [golang.org/x/image](https://pkg.go.dev/golang.org/x/image) | BSD |
+| [modelcontextprotocol/go-sdk](https://github.com/modelcontextprotocol/go-sdk) | Apache-2.0 / MIT (see its LICENSE) |
 
 ## Credits
 

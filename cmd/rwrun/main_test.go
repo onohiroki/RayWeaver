@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/hiroki/rayweaver/internal/runctl"
 )
 
 func TestExpandAliasesRewritesShortFlagsBeforeSeparator(t *testing.T) {
@@ -66,30 +68,30 @@ func TestPidFileRoundTripAndLiveness(t *testing.T) {
 	dir := t.TempDir()
 	pf := filepath.Join(dir, "x.pid")
 
-	if err := writePid(pf, 4242); err != nil {
+	if err := runctl.WritePid(pf, 4242); err != nil {
 		t.Fatal(err)
 	}
-	pid, err := readPid(pf)
+	pid, err := runctl.ReadPid(pf)
 	if err != nil || pid != 4242 {
 		t.Fatalf("readPid = %d, %v; want 4242", pid, err)
 	}
-	if pidAlive(4242) {
+	if runctl.PidAlive(4242) {
 		// A pid in the thousands is almost certainly free; if the machine happens
 		// to have it, the liveness check is not what this test is about.
 		t.Log("pid 4242 happens to be alive on this machine; skipping the negative check")
 	}
-	if _, err := readPid(filepath.Join(dir, "missing.pid")); !os.IsNotExist(err) {
-		t.Errorf("readPid(missing) err = %v, want a not-exist error", err)
+	if _, err := runctl.ReadPid(filepath.Join(dir, "missing.pid")); !os.IsNotExist(err) {
+		t.Errorf("ReadPid(missing) err = %v, want a not-exist error", err)
 	}
 }
 
 func TestResolveRayweavePrefersExplicitPath(t *testing.T) {
-	got, err := resolveRayweave("/bin/sh")
+	got, err := runctl.Resolve("/bin/sh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got != "/bin/sh" {
-		t.Errorf("resolveRayweave(/bin/sh) = %q", got)
+		t.Errorf("Resolve(/bin/sh) = %q", got)
 	}
 }
 
@@ -110,7 +112,7 @@ func TestDetachedChildIsInItsOwnSession(t *testing.T) {
 	if err := runDetached("/bin/sleep", []string{"300"}, dir, "", out, logf, pidfile, "t"); err != nil {
 		t.Fatal(err)
 	}
-	pid, err := readPid(pidfile)
+	pid, err := runctl.ReadPid(pidfile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +122,7 @@ func TestDetachedChildIsInItsOwnSession(t *testing.T) {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
 	}()
 
-	if !pidAlive(pid) {
+	if !runctl.PidAlive(pid) {
 		t.Fatalf("pid %d is not alive right after the launch", pid)
 	}
 	pgid := procField(t, pid, "pgid")
@@ -150,7 +152,7 @@ func TestStopRefusesARecycledPid(t *testing.T) {
 	}
 	defer func() { _ = sleeper.Process.Kill(); _, _ = sleeper.Process.Wait() }()
 
-	if err := writePid(pidfile, sleeper.Process.Pid); err != nil {
+	if err := runctl.WritePid(pidfile, sleeper.Process.Pid); err != nil {
 		t.Fatal(err)
 	}
 	err := doStop(pidfile, 0, 1)
@@ -168,7 +170,7 @@ func TestStopRefusesARecycledPid(t *testing.T) {
 func TestStopOnAStalePidfileIsNotAnError(t *testing.T) {
 	dir := t.TempDir()
 	pidfile := filepath.Join(dir, "d.pid")
-	if err := writePid(pidfile, 999999); err != nil {
+	if err := runctl.WritePid(pidfile, 999999); err != nil {
 		t.Fatal(err)
 	}
 	if err := doStop(pidfile, 0, 1); err != nil {

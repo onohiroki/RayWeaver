@@ -47,6 +47,7 @@ reference — product behaviour lives in [`docs/`](docs/README.md) and
 
 ```sh
 go build -o rayweave ./cmd/rayweave/
+go build -o rayweave-mcp ./cmd/rayweave-mcp/     # optional MCP server (stdio)
 ./rayweave <subcommand> < input.yaml > out.yaml   # stdout = pipeline YAML
 go test ./...                                    # full suite; there is no CI
 ```
@@ -54,17 +55,23 @@ go test ./...                                    # full suite; there is no CI
 - `cmd/rayweave` — the CLI. One file per command family; every subcommand's
   usage text lives in `main.go` (`--help` prints it).
 - `cmd/rwrun` — companion binary that launches a long run detached.
+- `cmd/rayweave-mcp` — companion binary that serves the subcommands to AI agents
+  over the Model Context Protocol on stdio (manual: [docs/mcp.md](docs/mcp.md)).
 - `cmd/importsweep` — batch sweep of a lens directory through
   `import | trace | paraxial`, CSV status report.
 - `internal/<domain>` — `asphere`, `chief`, `coating`, `constraint`, `dls`,
-  `escape`, `exporter`, `fft`, `glass`, `importer`, `mesh`, `optimize`,
+  `escape`, `exporter`, `fft`, `glass`, `importer`, `mcpsrv`, `mesh`, `optimize`,
   `paraxial`, `polarization`, `psf`, `pso`, `pupil`, `ray`, `raymath`, `render`,
-  `resource`, `spectral`, `surface`, `types`, `vignette`, `wavefront`.
+  `resource`, `runctl`, `spectral`, `surface`, `types`, `vignette`, `wavefront`.
+  `runctl` is the detached-launch/SIGTERM-twice policy shared by `rwrun` and the
+  MCP server; `mcpsrv` is only the protocol adapter (it must not reimplement
+  YAML semantics).
 - `docs/`, `samples/`, `GLASS/` — documentation, demo scripts and inputs, glass
   data.
 
-Dependencies are `gopkg.in/yaml.v3` and `golang.org/x/image` (PNG). No Makefile,
-no lint/CI configuration.
+Dependencies are `gopkg.in/yaml.v3`, `golang.org/x/image` (PNG), and the
+official `github.com/modelcontextprotocol/go-sdk` for the MCP companion (its
+transitive modules come with it). No Makefile, no lint/CI configuration.
 
 Subcommands (each has a manual in [`docs/`](docs/README.md)): `chief`, `trace`,
 `paraxial`, `tmm`, `plot`, `vignette`, `optimize`, `escape`, `pso`, `import`,
@@ -151,6 +158,7 @@ everywhere, add it to the document that owns the topic, not to this file.
 | Read-only listing, YAML/JSONL selection | [docs/list.md](docs/list.md), [docs/query.md](docs/query.md) |
 | Stripping results from a document | [docs/clean.md](docs/clean.md) |
 | Detached long runs | [docs/rwrun.md](docs/rwrun.md) |
+| MCP server, tools, jobs, resources, client setup | [docs/mcp.md](docs/mcp.md) |
 | Windows / PowerShell notes | [docs/windows.md](docs/windows.md) |
 | Demo scripts and their inputs, generated outputs | [samples/README.md](samples/README.md) |
 

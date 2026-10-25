@@ -1711,6 +1711,12 @@ Subcommands:
 
 Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
   for detailed options and YAML structure.
+
+Companion binaries (same module):
+  rwrun         Start a long run detached and stop it with SIGTERM twice
+  rayweave-mcp  Serve these subcommands to AI agents over MCP (stdio)
+
+Manual: docs/rwrun.md, docs/mcp.md.
 `)
 	case "list":
 		fmt.Print(`Usage: rayweave list [--format table|yaml|json|csv] [--config ID]

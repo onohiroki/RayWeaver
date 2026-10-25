@@ -33,10 +33,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
-	"syscall"
 	"time"
+
+	"github.com/hiroki/rayweaver/internal/runctl"
 )
 
 func main() {
@@ -92,7 +92,7 @@ func run(argv []string) error {
 	if *pidfile == "" {
 		*pidfile = *name + ".pid"
 	}
-	absPid := absPath(*pidfile)
+	absPid := runctl.AbsPath(*pidfile)
 
 	switch {
 	case *status:
@@ -108,7 +108,7 @@ func run(argv []string) error {
 	}
 
 	// Start mode: resolve the command.
-	rayweave, err := resolveRayweave(*binPath)
+	rayweave, err := runctl.Resolve(*binPath)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func run(argv []string) error {
 	work := *dir
 	if work == "" {
 		if *input != "" {
-			work = filepath.Dir(absPath(*input))
+			work = filepath.Dir(runctl.AbsPath(*input))
 		} else if wd, err := os.Getwd(); err == nil {
 			work = wd
 		}
@@ -143,63 +143,37 @@ func run(argv []string) error {
 // reparented to init, so nothing in the caller's process group or process tree
 // can signal it as a side effect.
 func runDetached(bin string, argv []string, work, input, output, errPath, pidfile, name string) error {
-	cmd := exec.Command(bin, argv...)
-	cmd.Dir = work
-	// Setsid alone: setsid(2) creates a new session with no controlling
-	// terminal, which is exactly the isolation needed. Do NOT add
-	// SysProcAttr.Noctty here - on darwin it issues ioctl(0, TIOCNOTTY), which
-	// fails with ENOTTY whenever fd 0 is not a terminal (a pipe, /dev/null, a
-	// script), i.e. exactly how a long job is normally launched. It is also
-	// redundant: a session leader has no controlling tty to begin with.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-
-	if input != "" {
-		f, err := os.Open(input)
-		if err != nil {
-			return fmt.Errorf("input: %w", err)
-		}
-		defer f.Close()
-		cmd.Stdin = f
-	}
-	if output != "" {
-		f, err := os.Create(output)
-		if err != nil {
-			return fmt.Errorf("output: %w", err)
-		}
-		defer f.Close()
-		cmd.Stdout = f
-	}
-	f, err := os.Create(errPath)
+	pid, err := runctl.Launch(runctl.LaunchOptions{
+		Binary: bin,
+		Args:   argv,
+		Dir:    work,
+		Stdin:  input,
+		Stdout: output,
+		Stderr: errPath,
+	})
 	if err != nil {
-		return fmt.Errorf("log: %w", err)
-	}
-	defer f.Close()
-	cmd.Stderr = f
-
-	if err := cmd.Start(); err != nil {
 		return err
 	}
-	pid := cmd.Process.Pid
-	if err := writePid(pidfile, pid); err != nil {
+	if err := runctl.WritePid(pidfile, pid); err != nil {
 		return err
 	}
 
 	fmt.Printf("detached: name=%s  pid=%d  session=%d\n", name, pid, pid)
 	fmt.Printf("  cwd     : %s\n", work)
 	if input != "" {
-		fmt.Printf("  stdin   : %s\n", absPath(input))
+		fmt.Printf("  stdin   : %s\n", runctl.AbsPath(input))
 	} else {
 		fmt.Printf("  stdin   : /dev/null\n")
 	}
 	if output != "" {
-		fmt.Printf("  stdout  : %s   (the pipeline document, written at the very end)\n", absPath(output))
+		fmt.Printf("  stdout  : %s   (the pipeline document, written at the very end)\n", runctl.AbsPath(output))
 	} else {
 		fmt.Printf("  stdout  : inherited\n")
 	}
-	fmt.Printf("  stderr  : %s   (diagnostics; never merged with stdout)\n", absPath(errPath))
+	fmt.Printf("  stderr  : %s   (diagnostics; never merged with stdout)\n", runctl.AbsPath(errPath))
 	fmt.Printf("  command : %s %s\n", bin, strings.Join(argv, " "))
-	fmt.Printf("  status  : go run ./cmd/rwrun -status -name %s -pidfile %s\n", name, absPath(pidfile))
-	fmt.Printf("  stop    : go run ./cmd/rwrun -stop   -name %s -pidfile %s   (SIGTERM twice)\n", name, absPath(pidfile))
+	fmt.Printf("  status  : go run ./cmd/rwrun -status -name %s -pidfile %s\n", name, runctl.AbsPath(pidfile))
+	fmt.Printf("  stop    : go run ./cmd/rwrun -stop   -name %s -pidfile %s   (SIGTERM twice)\n", name, runctl.AbsPath(pidfile))
 	return nil
 }
 
@@ -239,7 +213,7 @@ func runForeground(bin string, argv []string, work, input, output, errPath strin
 
 // reportStatus prints the liveness of the recorded pid plus the artefact sizes.
 func reportStatus(pidfile, output, errPath string) error {
-	pid, err := readPid(pidfile)
+	pid, err := runctl.ReadPid(pidfile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			fmt.Println("state   : no pidfile (never launched, or already purged)")
@@ -247,11 +221,11 @@ func reportStatus(pidfile, output, errPath string) error {
 		}
 		return err
 	}
-	elapsed, comm, perr := procInfo(pid)
+	elapsed, comm, perr := runctl.ProcInfo(pid)
 	switch {
-	case !pidAlive(pid):
-		fmt.Printf("state   : not running (stale pidfile %s, pid %d)\n", absPath(pidfile), pid)
-		fmt.Printf("          purge it with: go run ./cmd/rwrun -purge -pidfile %s\n", absPath(pidfile))
+	case !runctl.PidAlive(pid):
+		fmt.Printf("state   : not running (stale pidfile %s, pid %d)\n", runctl.AbsPath(pidfile), pid)
+		fmt.Printf("          purge it with: go run ./cmd/rwrun -purge -pidfile %s\n", runctl.AbsPath(pidfile))
 		return nil
 	case perr != nil:
 		fmt.Printf("state   : RUNNING  pid=%d\n", pid)
@@ -271,57 +245,23 @@ func reportStatus(pidfile, output, errPath string) error {
 	return nil
 }
 
-// doStop implements the two-stage graceful stop documented in docs/escape.md
-// ("Interrupting the search") and docs/rwrun.md: the
-// first signal cancels the context and lets the running DLS finish (minutes on a
-// large system, and the stdout document is only written after ParallelEscape
-// returns), the second aborts that DLS within one iteration so the run still
-// writes the document and exits 0. A third signal force-quits, so it is never
-// sent; SIGKILL always loses the document.
+// doStop runs the two-stage graceful stop (see runctl.Stop) and prints what it
+// did. A run that is still alive after the wait is a warning, not a failure:
+// the caller can re-run -stop, and the document is not lost.
 func doStop(pidfile string, grace, wait int) error {
-	pid, err := readPid(pidfile)
+	res, err := runctl.Stop(runctl.StopOptions{
+		PidFile: pidfile,
+		Grace:   time.Duration(grace) * time.Second,
+		Wait:    time.Duration(wait) * time.Second,
+		Report:  func(format string, args ...any) { fmt.Printf(format+"\n", args...) },
+	})
 	if err != nil {
-		if os.IsNotExist(err) {
-			return fmt.Errorf("no pidfile %s (never launched, or already purged)", absPath(pidfile))
-		}
-		return err
-	}
-	if !pidAlive(pid) {
-		fmt.Printf("not running (stale pidfile %s, pid %d)\n", absPath(pidfile), pid)
-		return nil
-	}
-	// Refuse to signal a recycled pid: only rwrun writes these files, so a
-	// non-rayweave command means the pidfile is stale.
-	if _, comm, perr := procInfo(pid); perr == nil && comm != "" && !strings.Contains(comm, "rayweave") {
-		return fmt.Errorf("pid %d is now %q, not a rayweave run - the pidfile is stale; remove %s if you are sure",
-			pid, comm, absPath(pidfile))
-	}
-
-	fmt.Printf("SIGTERM #1 -> graceful: the workers finish the running DLS (this can take minutes)\n")
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-		return err
-	}
-	time.Sleep(time.Duration(grace) * time.Second)
-	if pidAlive(pid) {
-		fmt.Printf("SIGTERM #2 -> that DLS aborts within one iteration; the run then writes its document and exits 0\n")
-		if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
-			return err
-		}
-	} else {
-		fmt.Printf("already exited after the first signal\n")
-	}
-
-	deadline := time.Now().Add(time.Duration(wait) * time.Second)
-	for time.Now().Before(deadline) {
-		if !pidAlive(pid) {
-			fmt.Printf("exited.\n")
-			fmt.Printf("never use kill -9: it always loses the assembled document (the --save minima survive).\n")
+		if res.Signalled {
+			fmt.Printf("WARNING: %v\n", err)
 			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+		return err
 	}
-	fmt.Printf("WARNING: pid %d is still alive after %ds. Do NOT send kill -9 - it always loses\n", pid, wait)
-	fmt.Printf("         the assembled document. Re-run -stop, or accept the --save minima.\n")
 	return nil
 }
 
@@ -392,49 +332,6 @@ func looksLikeBinary(p string) bool {
 	return isExecutableFile(p) || filepath.Base(p) == "rayweave" || strings.ContainsRune(p, os.PathSeparator)
 }
 
-// resolveRayweave locates the rayweave binary. Order: the explicit -rayweave
-// path, $RAYWEAVE, ./rayweave, $PATH, and only then the directory holding rwrun.
-// "Next to the executable" is last on purpose: when rwrun is built somewhere
-// unrelated (a scratch /tmp, say) that directory can hold a completely unrelated
-// and badly outdated `rayweave`, which is exactly what happened during
-// development. The resolved path is always printed in the launch summary, and
-// -rayweave/$RAYWEAVE override the search.
-func resolveRayweave(explicit string) (string, error) {
-	var cands []string
-	if explicit != "" {
-		cands = append(cands, explicit)
-	} else {
-		if env := os.Getenv("RAYWEAVE"); env != "" {
-			cands = append(cands, env)
-		}
-		// "./rayweave" explicitly: LookPath on a bare name searches $PATH, which
-		// does not normally include the working directory, so a freshly built
-		// ./rayweave would be shadowed by an older copy elsewhere on $PATH.
-		cands = append(cands, "./rayweave")
-		if p, err := exec.LookPath("rayweave"); err == nil {
-			cands = append(cands, p)
-		}
-		if exe, err := os.Executable(); err == nil {
-			d := filepath.Dir(exe)
-			cands = append(cands, filepath.Join(d, "rayweave"), filepath.Join(d, "..", "rayweave"))
-		}
-	}
-	seen := map[string]bool{}
-	for _, c := range cands {
-		if seen[c] {
-			continue
-		}
-		seen[c] = true
-		if p, err := exec.LookPath(c); err == nil {
-			if abs, err := filepath.Abs(p); err == nil {
-				return abs, nil
-			}
-			return p, nil
-		}
-	}
-	return "", fmt.Errorf("rayweave not found (tried %s; pass -rayweave PATH or set $RAYWEAVE)", strings.Join(cands, ", "))
-}
-
 // commandFor returns the executable and its arguments (the binary itself is NOT
 // repeated in the argument list - exec.Command takes it separately). An existing
 // executable file as the first argument is honoured verbatim; otherwise the
@@ -455,48 +352,6 @@ func isExecutableFile(p string) bool {
 	}
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir() && st.Mode()&0o111 != 0
-}
-
-// pidAlive reports whether a signal can be delivered to pid. EPERM means it
-// exists but belongs to someone else, which still counts as alive.
-func pidAlive(pid int) bool {
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
-}
-
-// procInfo returns the elapsed time and the command name of pid, via ps.
-func procInfo(pid int) (string, string, error) {
-	out, err := exec.Command("ps", "-o", "etime=,comm=", "-p", strconv.Itoa(pid)).Output()
-	if err != nil {
-		return "", "", err
-	}
-	f := strings.Fields(string(out))
-	if len(f) == 0 {
-		return "", "", fmt.Errorf("no ps output for pid %d", pid)
-	}
-	comm := f[len(f)-1]
-	elapsed := strings.Join(f[:len(f)-1], " ")
-	return elapsed, comm, nil
-}
-
-func writePid(path string, pid int) error {
-	return os.WriteFile(path, []byte(strconv.Itoa(pid)+"\n"), 0o644)
-}
-
-func readPid(path string) (int, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(strings.TrimSpace(string(b)))
-}
-
-func absPath(p string) string {
-	a, err := filepath.Abs(p)
-	if err != nil {
-		return p
-	}
-	return a
 }
 
 func usage(fs *flag.FlagSet) {

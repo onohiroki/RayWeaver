@@ -70,6 +70,13 @@ issues `ioctl(0, TIOCNOTTY)`, which fails with `ENOTTY` whenever fd 0 is not a
 terminal (a pipe, `/dev/null`, a script), i.e. exactly how an agent launches a
 job. It is also redundant: a session leader has no controlling terminal anyway.
 
+The launch and stop policy itself lives in [`internal/runctl`](../internal/runctl)
+and is shared by `rwrun` and the [MCP server](mcp.md), whose `escape`/`pso` jobs
+need exactly the same isolation. Because the MCP server stays alive (unlike
+`rwrun`, which exits), it also reaps the child when it finishes — otherwise the
+finished run would linger as a zombie and `kill(pid, 0)` would report it alive
+forever.
+
 ## Options
 
 ```
