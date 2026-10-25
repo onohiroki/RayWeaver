@@ -16,6 +16,7 @@
 *.exe
 *.pid
 /rayweave
+/rayweave-mcp
 /rwrun
 /target/
 
