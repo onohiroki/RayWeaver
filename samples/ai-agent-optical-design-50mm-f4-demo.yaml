@@ -1,0 +1,895 @@
+chief:
+    dump_map: true
+    fields:
+        - angle: 0
+          direction:
+            - 0
+            - 1
+        - angle: 10
+          direction:
+            - 0
+            - 1
+        - angle: 16
+          direction:
+            - 0
+            - 1
+        - angle: 23.4
+          direction:
+            - 0
+            - 1
+    grid_type: hex
+    num_rays: 512
+    reference_surface: 14
+    reference_wavelength: 0.0005876
+configs:
+    - active: true
+      constraints:
+        - active: true
+          kind: band
+          lower: 49.5
+          measure: focal_length
+          target: 50
+          upper: 50.5
+          weight: 3
+        - active: true
+          kind: band
+          lower: 12.25
+          measure: entrance_pupil_diameter
+          target: 12.5
+          upper: 12.75
+          weight: 3
+      fields:
+        - angle_deg: 0
+          id: 0
+          weight: 1
+        - angle_deg: 10
+          id: 1
+          weight: 1
+        - angle_deg: 16
+          id: 2
+          weight: 1
+        - angle_deg: 23.4
+          id: 3
+          weight: 1
+      id: config0
+      merit_modes:
+        - name: spot_phase
+          terms:
+            - kind: glass_role
+              surface_set:
+                - 1
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 3
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 5
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 8
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 10
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 12
+              weight: 0.01
+            - field: 0
+              kind: spot_rms
+              wavelength: 0.0004861
+              weight: 2
+            - field: 0
+              kind: spot_rms
+              wavelength: 0.0005876
+              weight: 2
+            - field: 0
+              kind: spot_rms
+              wavelength: 0.0006563
+              weight: 2
+            - field: 1
+              kind: spot_rms
+              wavelength: 0.0004861
+              weight: 1
+            - field: 1
+              kind: spot_rms
+              wavelength: 0.0005876
+              weight: 1
+            - field: 1
+              kind: spot_rms
+              wavelength: 0.0006563
+              weight: 1
+            - field: 1
+              kind: spot_rms_t
+              wavelength: 0.0005876
+              weight: 1
+            - field: 1
+              kind: spot_rms_s
+              wavelength: 0.0005876
+              weight: 1
+            - field: 1
+              kind: spot_rms_worst
+              wavelength: 0.0005876
+              weight: 1
+            - field: 2
+              kind: spot_rms
+              wavelength: 0.0004861
+              weight: 1
+            - field: 2
+              kind: spot_rms
+              wavelength: 0.0005876
+              weight: 1
+            - field: 2
+              kind: spot_rms
+              wavelength: 0.0006563
+              weight: 1
+            - field: 2
+              kind: spot_rms_t
+              wavelength: 0.0005876
+              weight: 1
+            - field: 2
+              kind: spot_rms_s
+              wavelength: 0.0005876
+              weight: 1
+            - field: 2
+              kind: spot_rms_worst
+              wavelength: 0.0005876
+              weight: 1
+            - field: 3
+              kind: spot_rms
+              wavelength: 0.0004861
+              weight: 0.5
+            - field: 3
+              kind: spot_rms
+              wavelength: 0.0005876
+              weight: 0.5
+            - field: 3
+              kind: spot_rms
+              wavelength: 0.0006563
+              weight: 0.5
+            - field: 3
+              kind: spot_rms_worst
+              wavelength: 0.0005876
+              weight: 0.5
+            - comparison_wavelength: 0.0006563
+              field: 0
+              kind: lateral_color
+              wavelength: 0.0004861
+              weight: 0.6
+            - comparison_wavelength: 0.0006563
+              field: 1
+              kind: lateral_color
+              wavelength: 0.0004861
+              weight: 0.3
+            - comparison_wavelength: 0.0006563
+              field: 2
+              kind: lateral_color
+              wavelength: 0.0004861
+              weight: 0.3
+            - comparison_wavelength: 0.0006563
+              field: 3
+              kind: lateral_color
+              wavelength: 0.0004861
+              weight: 0.15
+            - field: 0
+              kind: field_alive
+              target: 1
+              weight: 10000
+            - field: 0
+              kind: pupil_fill
+              weight: 1000
+            - field: 1
+              kind: field_alive
+              target: 1
+              weight: 10000
+            - field: 1
+              kind: pupil_fill
+              weight: 1000
+            - field: 2
+              kind: field_alive
+              target: 1
+              weight: 10000
+            - field: 2
+              kind: pupil_fill
+              weight: 1000
+            - field: 3
+              kind: field_alive
+              target: 1
+              weight: 10000
+            - field: 3
+              kind: pupil_fill
+              weight: 1000
+        - name: wavefront_phase
+          terms:
+            - kind: glass_role
+              surface_set:
+                - 1
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 3
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 5
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 8
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 10
+              weight: 0.01
+            - kind: glass_role
+              surface_set:
+                - 12
+              weight: 0.01
+            - field: 0
+              kind: opd_rms
+              wavelength: 0.0005876
+              weight: 30000
+            - field: 1
+              kind: opd_rms
+              wavelength: 0.0005876
+              weight: 50000
+            - field: 2
+              kind: opd_rms
+              wavelength: 0.0005876
+              weight: 80000
+            - field: 3
+              kind: opd_rms
+              wavelength: 0.0005876
+              weight: 40000
+            - field: 1
+              kind: wavefront_astigmatism
+              target: 0
+              wavelength: 0.0005876
+              weight: 1000
+            - field: 2
+              kind: wavefront_astigmatism
+              target: 0
+              wavelength: 0.0005876
+              weight: 2000
+            - field: 3
+              kind: wavefront_astigmatism
+              target: 0
+              wavelength: 0.0005876
+              weight: 1000
+            - field: 0
+              kind: spot_rms
+              wavelength: 0.0005876
+              weight: 2
+            - field: 1
+              kind: spot_rms
+              wavelength: 0.0005876
+              weight: 1
+            - field: 1
+              kind: spot_rms_t
+              wavelength: 0.0005876
+              weight: 1
+            - field: 1
+              kind: spot_rms_s
+              wavelength: 0.0005876
+              weight: 1
+            - field: 2
+              kind: spot_rms
+              wavelength: 0.0005876
+              weight: 1
+            - field: 2
+              kind: spot_rms_t
+              wavelength: 0.0005876
+              weight: 1
+            - field: 2
+              kind: spot_rms_s
+              wavelength: 0.0005876
+              weight: 1
+            - field: 3
+              kind: spot_rms
+              wavelength: 0.0005876
+              weight: 0.5
+            - field: 3
+              kind: spot_rms_worst
+              wavelength: 0.0005876
+              weight: 0.5
+            - comparison_wavelength: 0.0006563
+              field: 0
+              kind: lateral_color
+              wavelength: 0.0004861
+              weight: 0.6
+            - comparison_wavelength: 0.0006563
+              field: 1
+              kind: lateral_color
+              wavelength: 0.0004861
+              weight: 0.3
+            - comparison_wavelength: 0.0006563
+              field: 2
+              kind: lateral_color
+              wavelength: 0.0004861
+              weight: 0.3
+            - comparison_wavelength: 0.0006563
+              field: 3
+              kind: lateral_color
+              wavelength: 0.0004861
+              weight: 0.15
+            - field: 0
+              kind: field_alive
+              target: 1
+              weight: 10000
+            - field: 0
+              kind: pupil_fill
+              weight: 1000
+            - field: 1
+              kind: field_alive
+              target: 1
+              weight: 10000
+            - field: 1
+              kind: pupil_fill
+              weight: 1000
+            - field: 2
+              kind: field_alive
+              target: 1
+              weight: 10000
+            - field: 2
+              kind: pupil_fill
+              weight: 1000
+            - field: 3
+              kind: field_alive
+              target: 1
+              weight: 10000
+            - field: 3
+              kind: pupil_fill
+              weight: 1000
+      name: nominal
+      surfaces:
+        - auto_aperture: true
+          diameter: 36
+          id: 1
+          material:
+            nd: 1.63854
+            vd: 55.42
+          radius: 60.606061
+          thickness: 3.5
+          type: sphere
+        - auto_aperture: true
+          diameter: 36
+          id: 2
+          material: AIR
+          radius: -454.545455
+          thickness: 0.5
+          type: sphere
+        - auto_aperture: true
+          diameter: 28
+          id: 3
+          material:
+            nd: 1.64831
+            vd: 33.84
+          radius: 121.212121
+          thickness: 1.2
+          type: sphere
+        - auto_aperture: true
+          diameter: 28
+          id: 4
+          material: AIR
+          radius: 45.454545
+          thickness: 3
+          type: sphere
+        - auto_aperture: true
+          diameter: 26
+          id: 5
+          material:
+            nd: 1.63854
+            vd: 55.42
+          radius: 54.545455
+          thickness: 2.5
+          type: sphere
+        - auto_aperture: true
+          diameter: 26
+          id: 6
+          material: AIR
+          radius: 181.818182
+          thickness: 3
+          type: sphere
+        - diameter: 12.5
+          id: 7
+          material: AIR
+          radius: 0
+          thickness: 3
+          type: sphere
+        - auto_aperture: true
+          diameter: 26
+          id: 8
+          material:
+            nd: 1.63854
+            vd: 55.42
+          radius: -181.818182
+          thickness: 2.5
+          type: sphere
+        - auto_aperture: true
+          diameter: 26
+          id: 9
+          material: AIR
+          radius: -54.545455
+          thickness: 3
+          type: sphere
+        - auto_aperture: true
+          diameter: 28
+          id: 10
+          material:
+            nd: 1.64831
+            vd: 33.84
+          radius: -45.454545
+          thickness: 1.2
+          type: sphere
+        - auto_aperture: true
+          diameter: 28
+          id: 11
+          material: AIR
+          radius: -121.212121
+          thickness: 0.5
+          type: sphere
+        - auto_aperture: true
+          diameter: 36
+          id: 12
+          material:
+            nd: 1.63854
+            vd: 55.42
+          radius: 454.545455
+          thickness: 3.5
+          type: sphere
+        - auto_aperture: true
+          diameter: 36
+          id: 13
+          material: AIR
+          radius: -60.606061
+          thickness: 42
+          type: sphere
+        - diameter: 44
+          id: 14
+          material: AIR
+          radius: 0
+          thickness: 0
+          type: sphere
+      wavelengths:
+        - id: 0
+          value: 0.0004861
+          weight: 1
+        - id: 1
+          value: 0.0005876
+          weight: 1
+        - id: 2
+          value: 0.0006563
+          weight: 1
+glass_catalog:
+    entries:
+        - name: SK18
+          nd: 1.63854
+          type: model
+          vd: 55.42
+        - name: SF12
+          nd: 1.64831
+          type: model
+          vd: 33.84
+metadata:
+    notes: 'AI-agent demonstration input: six-element air-spaced lens in a double-Gauss-like layout, adapted from 6elements-init.yaml for 35 mm full-frame, 50 mm F/4. The parent 6elements-init.yaml lens-data prescription was generated by an AI agent without an existing prescription as a seed, using curvature-scale search to reach EFL about 50 mm. Other settings in the parent sample, including optimization merit, constraints, and multi-field/wavelength evaluation, were added later through human-user and AI-agent interactions. All elements are singlets; there are no cemented doublets. The initial layout is approximately symmetric, but independent optimization variables do not constrain symmetry. EFL target 50 mm; entrance pupil 12.5 mm; fields 0, 10, 16, and 23.4 degrees; F/d/C wavelengths. Aperture variables are fixed and field_alive/pupil_fill terms guard pupil coverage. This F/4 adaptation starts from the earlier AI-generated lens data.'
+    tool:
+        name: RayWeaver
+        schema_version: 1
+        url: https://github.com/onohiroki/RayWeaver
+optimization:
+    aperture_margin: 1.2
+    epsilon: 1e-06
+    max_iter: 500
+    merit_schedule:
+        anchor_from: 1
+        anchor_to: 0.1
+        curve: step
+        metric: merit_ratio
+        modes:
+            - name: spot_phase
+              weight_from: 1
+              weight_to: 0
+            - name: wavefront_phase
+              weight_from: 0
+              weight_to: 1
+    method: dls
+    num_rays: 256
+    power_solve:
+        enabled: true
+        surfaces:
+            - 2
+            - 4
+            - 6
+            - 9
+            - 11
+            - 13
+    tol: 1e-07
+    variables:
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s1_c
+          target:
+            id: 1
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s2_c
+          target:
+            id: 2
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s3_c
+          target:
+            id: 3
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s4_c
+          target:
+            id: 4
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s5_c
+          target:
+            id: 5
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s6_c
+          target:
+            id: 6
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s8_c
+          target:
+            id: 8
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s9_c
+          target:
+            id: 9
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s10_c
+          target:
+            id: 10
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s11_c
+          target:
+            id: 11
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s12_c
+          target:
+            id: 12
+            param: curvature
+            type: surface
+        - active: true
+          max: 0.04
+          min: -0.04
+          name: s13_c
+          target:
+            id: 13
+            param: curvature
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s1_thk
+          target:
+            id: 1
+            param: thickness
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s2_thk
+          target:
+            id: 2
+            param: thickness
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s3_thk
+          target:
+            id: 3
+            param: thickness
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s4_thk
+          target:
+            id: 4
+            param: thickness
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s5_thk
+          target:
+            id: 5
+            param: thickness
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s6_thk
+          target:
+            id: 6
+            param: thickness
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s8_thk
+          target:
+            id: 8
+            param: thickness
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s9_thk
+          target:
+            id: 9
+            param: thickness
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s10_thk
+          target:
+            id: 10
+            param: thickness
+            type: surface
+        - active: true
+          max: 8
+          min: 0.5
+          name: s12_thk
+          target:
+            id: 12
+            param: thickness
+            type: surface
+        - active: true
+          max: 52
+          min: 36
+          name: s13_thk
+          target:
+            id: 13
+            param: thickness
+            type: surface
+        - active: false
+          max: 45
+          min: 20
+          name: s1_dia
+          target:
+            id: 1
+            param: diameter
+            type: surface
+        - active: false
+          max: 45
+          min: 20
+          name: s2_dia
+          target:
+            id: 2
+            param: diameter
+            type: surface
+        - active: false
+          max: 40
+          min: 18
+          name: s3_dia
+          target:
+            id: 3
+            param: diameter
+            type: surface
+        - active: false
+          max: 40
+          min: 18
+          name: s4_dia
+          target:
+            id: 4
+            param: diameter
+            type: surface
+        - active: false
+          max: 38
+          min: 16
+          name: s5_dia
+          target:
+            id: 5
+            param: diameter
+            type: surface
+        - active: false
+          max: 38
+          min: 16
+          name: s6_dia
+          target:
+            id: 6
+            param: diameter
+            type: surface
+        - active: false
+          max: 14
+          min: 12
+          name: s7_dia
+          target:
+            id: 7
+            param: diameter
+            type: surface
+        - active: false
+          max: 38
+          min: 16
+          name: s8_dia
+          target:
+            id: 8
+            param: diameter
+            type: surface
+        - active: false
+          max: 38
+          min: 16
+          name: s9_dia
+          target:
+            id: 9
+            param: diameter
+            type: surface
+        - active: false
+          max: 40
+          min: 18
+          name: s10_dia
+          target:
+            id: 10
+            param: diameter
+            type: surface
+        - active: false
+          max: 40
+          min: 18
+          name: s11_dia
+          target:
+            id: 11
+            param: diameter
+            type: surface
+        - active: false
+          max: 45
+          min: 20
+          name: s12_dia
+          target:
+            id: 12
+            param: diameter
+            type: surface
+        - active: false
+          max: 45
+          min: 20
+          name: s13_dia
+          target:
+            id: 13
+            param: diameter
+            type: surface
+        - active: true
+          max: 2
+          min: 1.4
+          name: s3_sf12_nd
+          target:
+            id: 3
+            param: nd
+            type: surface
+        - active: true
+          max: 80
+          min: 20
+          name: s3_sf12_vd
+          target:
+            id: 3
+            param: vd
+            type: surface
+        - active: true
+          max: 2
+          min: 1.4
+          name: s10_sf12_nd
+          target:
+            id: 10
+            param: nd
+            type: surface
+        - active: true
+          max: 80
+          min: 20
+          name: s10_sf12_vd
+          target:
+            id: 10
+            param: vd
+            type: surface
+        - active: true
+          max: 2
+          min: 1.4
+          name: s1_sk18_nd
+          target:
+            id: 1
+            param: nd
+            type: surface
+        - active: true
+          max: 80
+          min: 20
+          name: s1_sk18_vd
+          target:
+            id: 1
+            param: vd
+            type: surface
+        - active: true
+          max: 2
+          min: 1.4
+          name: s5_sk18_nd
+          target:
+            id: 5
+            param: nd
+            type: surface
+        - active: true
+          max: 80
+          min: 20
+          name: s5_sk18_vd
+          target:
+            id: 5
+            param: vd
+            type: surface
+        - active: true
+          max: 2
+          min: 1.4
+          name: s8_sk18_nd
+          target:
+            id: 8
+            param: nd
+            type: surface
+        - active: true
+          max: 80
+          min: 20
+          name: s8_sk18_vd
+          target:
+            id: 8
+            param: vd
+            type: surface
+        - active: true
+          max: 2
+          min: 1.4
+          name: s12_sk18_nd
+          target:
+            id: 12
+            param: nd
+            type: surface
+        - active: true
+          max: 80
+          min: 20
+          name: s12_sk18_vd
+          target:
+            id: 12
+            param: vd
+            type: surface
