@@ -125,6 +125,69 @@ func (s *Store) sameAs(x []float64, p Point) bool {
 	return true
 }
 
+// Record is the atomic record decision used by the cycle. It inserts p as a new
+// minimum when no stored point is close enough to be the same local minimum,
+// otherwise it strengthens that point's escape bump and replaces it when p has
+// a better merit.
+//
+// Deciding and mutating under one lock is what makes the recorded set
+// independent of worker arrival order: the old IsNew -> Add / FindNearest ->
+// Replace sequence let two workers both insert a near-identical minimum (or
+// one add while the other replaced), so a multi-worker run could end with
+// different minima or representatives on each run.
+//
+// It returns the index, the kind ("new", "improved" or "repeat") and whether an
+// existing point was improved.
+func (s *Store) Record(p Point) (int, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.fingerprint != nil && s.params.DtFp > 0 {
+		p.Fingerprint = s.fingerprint(p.X)
+	}
+	p.H = s.params.H
+	p.W = s.params.W
+
+	nearest, bestD := -1, math.Inf(1)
+	for i := range s.points {
+		d := s.Distance(p.X, s.points[i])
+		if d >= bestD || !s.sameAs(p.X, s.points[i]) {
+			continue
+		}
+		nearest, bestD = i, d
+	}
+	if nearest < 0 {
+		s.points = append(s.points, p)
+		s.versions = append(s.versions, 0)
+		idx := len(s.points) - 1
+		if s.onRecord != nil {
+			s.onRecord(idx, p, true, 0)
+		}
+		return idx, "new", false
+	}
+
+	cur := &s.points[nearest]
+	if s.params.HMult != 0 {
+		cur.H *= s.params.HMult
+	}
+	if s.params.WMult != 0 {
+		cur.W *= s.params.WMult
+	}
+	if p.Merit < cur.Merit {
+		cur.X = p.X
+		cur.Merit = p.Merit
+		if s.fingerprint != nil && s.params.DtFp > 0 {
+			cur.Fingerprint = p.Fingerprint
+		}
+		s.versions[nearest]++
+		if s.onRecord != nil {
+			s.onRecord(nearest, *cur, false, s.versions[nearest])
+		}
+		return nearest, "improved", true
+	}
+	return nearest, "repeat", false
+}
+
 // Add appends a new point and returns its index. The caller is responsible
 // for checking distance against Dt (and the fingerprint criterion) beforehand
 // (see IsNew). The onRecord handler fires with isNew=true and version=0.

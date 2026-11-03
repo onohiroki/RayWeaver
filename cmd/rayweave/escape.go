@@ -508,14 +508,13 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 	// streamed records and the completed document agree by construction.
 	buildMinimum := func(position, storeIdx int, p escape.Point) types.GlobalMinimum {
 		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
-		// Register the optimised nd/vd model glasses so the element powers use
-		// the values at this minimum, not the original catalogue entries.
-		for _, g := range newGlasses {
-			gc.Add(g)
-		}
+		// The optimised nd/vd model glasses must be visible to the element
+		// powers and the back-focus solve, so add them to a per-point view of
+		// the catalog rather than to the shared one (see catalogView).
+		view := catalogView(gc, newGlasses)
 		// Element powers come from the variable-only projection, matching the
 		// fingerprint the escape store used during the run.
-		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
+		powers := paraxial.ElementPowers(surf, paraxial.DLine, view)
 		// Then bring the surfaces to the prescription the optimizer evaluated,
 		// apertures first: the sized diameters are the beam the solve has to
 		// focus (the same order materializeSingleInput uses), so
@@ -543,10 +542,8 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 	// index inside global_result.infeasible_basins.
 	buildInfeasible := func(position int, p escape.Point) types.GlobalMinimum {
 		surf, newGlasses := applyEscapeX(surfaces, variables, p.X, gc)
-		for _, g := range newGlasses {
-			gc.Add(g)
-		}
-		powers := paraxial.ElementPowers(surf, paraxial.DLine, gc)
+		view := catalogView(gc, newGlasses)
+		powers := paraxial.ElementPowers(surf, paraxial.DLine, view)
 		applyApertures(surf, finalAperturesAt(factory, p.X)["config1"])
 		applySavedBackFocusSolve(input, outCfg, surf, gc, pupilModelForX(&input, variables, p.X))
 		return types.GlobalMinimum{
@@ -616,11 +613,10 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 			// The feasibility grid must trace the prescription EvaluateMerit
 			// traced: variables plus the power/back-focus hard solves, with the
 			// sized auto apertures (see validationSurfaces).
+			gcForTrace := gc
 			surf := validationSurfaces(inner, x, "config1", func() []types.Surface {
 				s, newGlasses := applyEscapeX(surfaces, variables, x, gc)
-				for _, g := range newGlasses {
-					gc.Add(g)
-				}
+				gcForTrace = catalogView(gc, newGlasses)
 				return s
 			})
 			// Check for numerical failure: NaN or Inf merit.
@@ -646,7 +642,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 				sys := types.System{Surfaces: surf, StopSurface: stopSurface}
 				pm := effectivePupilModel(inner, x, "config1", pupilModel)
 				results := chief.DetermineChiefRaysGridMode(
-					sys, fieldDefs, refSurf, validationNumRays, gc,
+					sys, fieldDefs, refSurf, validationNumRays, gcForTrace,
 					types.NewCircularJones(true), wl,
 					false, types.GridPolar, nil, nil, nil, pm, 0, 0,
 					chiefRayDefinition(input),
@@ -1218,6 +1214,23 @@ func applyApertures(surfaces []types.Surface, apertures map[int]float64) {
 
 // applyEscapeX applies a flat variable vector to a copy of the surfaces,
 // producing the full lens prescription at that point.
+// catalogView returns base plus the optimised model glasses at one point,
+// without mutating the shared catalog. Recording a minimum happens while other
+// workers are evaluating merit against the same *glass.Catalog; adding the
+// point's glasses in place would let a recorded minimum change another worker's
+// index lookups. The view is a cheap copy and is only made when the point
+// actually carries model glasses.
+func catalogView(base *glass.Catalog, add []types.Glass) *glass.Catalog {
+	if len(add) == 0 {
+		return base
+	}
+	view := base.Clone()
+	for _, g := range add {
+		view.Add(g)
+	}
+	return view
+}
+
 func applyEscapeX(surfaces []types.Surface, variables []optimize.Variable, x []float64, gc *glass.Catalog) ([]types.Surface, []types.Glass) {
 	result := make([]types.Surface, len(surfaces))
 	copy(result, surfaces)

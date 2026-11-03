@@ -674,6 +674,16 @@ repeat visit improved appears there with its old merit; the final value lives in
 `minima_improvements` at the position it supersedes. `list global` merges the
 two before ranking; a raw `query` on `global_result.minima[]` does not.
 
+With more than one `global_workers`, which worker discovers a shared minimum
+first depends on scheduling, so a **streamed** document's raw `minima[]`
+entries can differ between two runs of the same input — in their order, and in
+the first-discovery merit/prescription of an entry that was later improved.
+`best_merit`, `minima_improvements`, the merged view (`list global`) and the
+`--save` files are deterministic; so is the whole document with
+`--stream false`, which materialises the minima after the search when their
+final values are known. Use `--stream false` (or `global_workers: 1`) when a
+byte-identical document matters.
+
 ### Reading a document mid-run
 
 `list global`, `query` and `escape extract` work on a half-finished document —

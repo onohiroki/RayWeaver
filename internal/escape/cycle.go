@@ -782,8 +782,11 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			}
 		}
 
-		if c.store.IsNew(trueX) {
-			idx := c.store.Add(Point{X: trueX, Merit: trueMerit, Status: status, InvalidReason: invalidReason})
+		// Record decides insert/strengthen/replace under one lock, so two
+		// workers cannot both insert a near-identical minimum or lose an
+		// improvement (the old IsNew/Add/Replace sequence was arrival-ordered).
+		idx, kind, improved := c.store.Record(Point{X: trueX, Merit: trueMerit, Status: status, InvalidReason: invalidReason})
+		if kind == "new" {
 			c.noteRecorded(trueMerit)
 			c.progress.Event("minimum", map[string]any{
 				"cycle":          cyc,
@@ -797,35 +800,22 @@ func (c *Cycle) Run(x0 []float64) ([]float64, float64) {
 			repeatStreak = 0
 			restartAmp = restartPerturb
 		} else {
-			_, nearest := c.store.FindNearest(trueX)
-			// Strengthen the escape bump first so the recorded H/W are the
-			// grown values, then replace the stored X/Merit when the new point
-			// is better.
-			c.store.Strengthen(nearest)
-			if _, improved := c.store.Replace(nearest, Point{X: trueX, Merit: trueMerit, Status: status, InvalidReason: invalidReason}); improved {
-				c.progress.Event("minimum", map[string]any{
-					"cycle":          cyc,
-					"worker":         c.workerID,
-					"kind":           "improved",
-					"index":          nearest,
-					"merit":          trueMerit,
-					"min_status":     statusString(status),
-					"invalid_reason": reasonString(invalidReason),
-				})
-			} else {
-				c.progress.Event("minimum", map[string]any{
-					"cycle":          cyc,
-					"worker":         c.workerID,
-					"kind":           "repeat",
-					"index":          nearest,
-					"merit":          trueMerit,
-					"min_status":     statusString(status),
-					"invalid_reason": reasonString(invalidReason),
-				})
+			kindName := "repeat"
+			if improved {
+				kindName = "improved"
 			}
-			// Repeatedly returning to the same minimum: strengthen the escape
-			// (done above) and push the next restart farther out so the
-			// escape DLS starts on a steeper part of the bump.
+			c.progress.Event("minimum", map[string]any{
+				"cycle":          cyc,
+				"worker":         c.workerID,
+				"kind":           kindName,
+				"index":          idx,
+				"merit":          trueMerit,
+				"min_status":     statusString(status),
+				"invalid_reason": reasonString(invalidReason),
+			})
+			// Repeatedly returning to the same minimum: the bump was
+			// strengthened inside Record; push the next restart farther out so
+			// the escape DLS starts on a steeper part of the bump.
 			repeatStreak++
 			if repeatStreak > 1 {
 				restartAmp *= 2
@@ -877,8 +867,8 @@ func (c *Cycle) recordInterrupted(res dls.Result, cyc int, phase string) {
 		"dls_status": res.Status,
 		"merit":      m,
 	})
-	if c.store.IsNew(x) {
-		idx := c.store.Add(Point{X: x, Merit: m})
+	idx, kind, _ := c.store.Record(Point{X: x, Merit: m})
+	if kind == "new" {
 		c.noteRecorded(m)
 		c.progress.Event("minimum", map[string]any{
 			"cycle":  cyc,
@@ -889,25 +879,13 @@ func (c *Cycle) recordInterrupted(res dls.Result, cyc int, phase string) {
 		})
 		return
 	}
-	_, nearest := c.store.FindNearest(x)
-	c.store.Strengthen(nearest)
-	if _, improved := c.store.Replace(nearest, Point{X: x, Merit: m}); improved {
-		c.progress.Event("minimum", map[string]any{
-			"cycle":  cyc,
-			"worker": c.workerID,
-			"kind":   "improved",
-			"index":  nearest,
-			"merit":  m,
-		})
-	} else {
-		c.progress.Event("minimum", map[string]any{
-			"cycle":  cyc,
-			"worker": c.workerID,
-			"kind":   "repeat",
-			"index":  nearest,
-			"merit":  m,
-		})
-	}
+	c.progress.Event("minimum", map[string]any{
+		"cycle":  cyc,
+		"worker": c.workerID,
+		"kind":   kind,
+		"index":  idx,
+		"merit":  m,
+	})
 }
 
 // Retired reports whether the resource guard retired this worker. It is set

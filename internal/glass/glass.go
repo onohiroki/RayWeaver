@@ -75,6 +75,21 @@ func NewCatalog() *Catalog {
 	}
 }
 
+// Clone returns a catalog that can be extended without affecting the original:
+// the name map is copied (glass values are treated as immutable and replaced,
+// never modified in place) and the index cache starts empty, so it can be
+// filled without touching the source catalog's cache.
+func (c *Catalog) Clone() *Catalog {
+	if c == nil {
+		return nil
+	}
+	n := NewCatalog()
+	for k, g := range c.ByName {
+		n.ByName[k] = g
+	}
+	return n
+}
+
 // Has reports whether the catalog contains an entry for the given key (including
 // normalised variants).
 func (c *Catalog) Has(key string) bool {

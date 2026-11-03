@@ -98,6 +98,13 @@ The true minimum is then classified:
   version counter (`Store.Replace`, exposed to `--save` file versioning)
   records how many times a minimum has been improved.
 
+The classify-and-record step is one atomic operation (`Store.Record`: find the
+same minimum, strengthen it, replace it when better, else append). Checking and
+mutating under one lock is what keeps a multi-worker run deterministic: the old
+check-then-act sequence let two workers both append a near-identical minimum, or
+one append while the other replaced, so the recorded set depended on arrival
+order.
+
 Infeasible basins are additionally classified by an optional `ValidateFn` (see
 [Infeasible basins](#infeasible-basins) below). A feasible minimum is recorded
 as before; an infeasible one is recorded as an infeasible basin (with its own
@@ -160,7 +167,9 @@ near 0.9 for a design that is not deliberately over-vignetted (see
 ## 3. Parallel workers
 
 `global_workers` (default 4) goroutines each run their own cycle, sharing a
-single store of recorded minima. Each worker's initial state is perturbed by a
+single store of recorded minima. Recording a minimum is atomic, so the stored
+set (its points, merits and version counters) does not depend on which worker
+happens to finish first. Each worker's initial state is perturbed by a
 deterministic, seed-derived offset (`initialPerturb = 0.05` default) so the
 workers explore distinct neighbourhoods. Each worker builds an **isolated model**
 (a fresh optimizer) so concurrent merit evaluations never share mutable state.
