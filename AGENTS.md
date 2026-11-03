@@ -234,6 +234,9 @@ Exemptions (deliberate, documented in the owning manual):
   mutation) so the finite-difference Jacobian columns stay independent; the
   Delaunay cavity rebuild sorts its boundary edges and the wavefront-sample sort
   uses an index tiebreak, so results are bit-identical for any worker count.
+  The asphere surface metrics likewise contract their bins over a slice and visit
+  field ids in a fixed order (see `TestSurfaceMetricsDeterministic`), so two
+  `asphere` runs on one document agree bit-for-bit.
   Read [methods/dls-optimization.md §2a](docs/methods/dls-optimization.md) (and the
   `TestTriangulateDeterministic` regression test) before touching either.
 - Code comments and commit messages are in English and explain *why*, not *what*.

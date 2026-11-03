@@ -240,8 +240,9 @@ Unresolved keys produce a stderr warning instead of aborting.
 The `fields` target shows the field-of-view definitions of the selected
 configuration: `--config` supplies that position's fields, falling back to
 `configs[0].fields[]` and then `chief.fields[]` — the same resolution order as
-`chief`, `trace` and `psf`. It runs the chief ray trace internally to provide
-computed values alongside the YAML input values.
+`chief` and `vignette`. (`psf`, `wavefront` and `focus` read `chief.fields[]`
+only.) It runs the chief ray trace internally to provide computed values
+alongside the YAML input values.
 
 ```sh
 rayweave list fields < lens.yaml

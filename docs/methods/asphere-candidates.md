@@ -163,6 +163,13 @@ The terms:
 `coverage` is `E^common + E^unique` (the aspherisable fraction of the surface's
 OPD energy) and is reported separately.
 
+The terms are accumulated in a fixed order — the beam-frame bins are a slice
+indexed by bin number, and the per-field aggregates are visited in sorted
+(first-seen) field order — so the analysis is bit-identical between runs of the
+same document. `TestSurfaceMetricsDeterministic` guards this: the old
+map-iterated sums changed the last bits of `asym_residual`, `conflict` and the
+consistency R² on every run.
+
 ## 6. Pupil-grid ray and ray weights
 
 Field weights come from the config's `fields[].weight` (default 1); each grid

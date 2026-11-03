@@ -470,7 +470,9 @@ func chiefFieldDefs(input types.Input) []types.FieldDef {
 }
 
 // resolveConfigFieldDefs returns the field definitions a single-system command
-// should analyse, in the same order `psf`/`focus`/`asphere` use:
+// should analyse. `chief`, `vignette` and `list fields` use it; `psf`,
+// `wavefront` and `focus` read the top-level chief fields only (their manuals
+// require a chief section with fields). Resolution order:
 //
 //  1. the config named by --config, when it declares fields;
 //  2. configs[0], when it declares fields;

@@ -14,6 +14,7 @@ package asphere
 
 import (
 	"math"
+	"sort"
 
 	"github.com/hiroki/rayweaver/internal/raymath"
 )
@@ -221,7 +222,10 @@ func BeamFrameAsym(footprints []FieldFootprintData, surfaceID int, coef []float6
 			plusSum, minusSum float64
 			plusN, minusN     int
 		}
-		bins := make(map[int]*tbin, tBins)
+		// A slice, not a map: the bins are contracted by index, and summing the
+		// per-bin asymmetry in map order would make the last bits of `asym`
+		// depend on Go's randomised map iteration (non-deterministic output).
+		bins := make([]tbin, tBins)
 		tMin, tMax := math.Inf(1), math.Inf(-1)
 		for _, h := range fd.RayHits {
 			if !h.OK {
@@ -264,11 +268,7 @@ func BeamFrameAsym(footprints []FieldFootprintData, surfaceID int, coef []float6
 			if bi < 0 {
 				bi = 0
 			}
-			b := bins[bi]
-			if b == nil {
-				b = &tbin{}
-				bins[bi] = b
-			}
+			b := &bins[bi]
 			if s >= 0 {
 				b.plusW += w
 				b.plusSum += w * e
@@ -279,7 +279,8 @@ func BeamFrameAsym(footprints []FieldFootprintData, surfaceID int, coef []float6
 				b.minusN++
 			}
 		}
-		for _, b := range bins {
+		for i := range bins {
+			b := &bins[i]
 			if b.plusN < minRays || b.minusN < minRays || b.plusW <= 0 || b.minusW <= 0 {
 				continue
 			}
@@ -378,8 +379,17 @@ func SharedConflictUnique(footprints []FieldFootprintData, surfaceID int, coef [
 			f.has = true
 		}
 	}
+	// fieldMu is keyed by FieldID because one field can carry several
+	// wavelengths; iterate the ids in sorted order so the accumulations below
+	// are bit-identical between runs (map order is randomised).
+	ids := make([]int, 0, len(fieldMu))
+	for id := range fieldMu {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
 	var muBar, wTotal float64
-	for _, f := range fieldMu {
+	for _, id := range ids {
+		f := fieldMu[id]
 		if !f.has || f.wsum <= 0 {
 			continue
 		}
@@ -391,7 +401,8 @@ func SharedConflictUnique(footprints []FieldFootprintData, surfaceID int, coef [
 		muBar /= wTotal
 	}
 	var conflictE float64
-	for _, f := range fieldMu {
+	for _, id := range ids {
+		f := fieldMu[id]
 		if !f.has {
 			continue
 		}
@@ -447,10 +458,15 @@ func FieldLowOrderPortrait(footprints []FieldFootprintData, surfaceID int, coef 
 		return out
 	}
 	byField := make(map[int][]FieldFootprintData)
+	var fieldOrder []int // first-seen order: keeps the accumulation deterministic
 	for _, fd := range footprints {
+		if _, seen := byField[fd.FieldID]; !seen {
+			fieldOrder = append(fieldOrder, fd.FieldID)
+		}
 		byField[fd.FieldID] = append(byField[fd.FieldID], fd)
 	}
-	for fieldID, fds := range byField {
+	for _, fieldID := range fieldOrder {
+		fds := byField[fieldID]
 		var cx, cy, wsum float64
 		var tx, ty float64
 		for _, fd := range fds {
