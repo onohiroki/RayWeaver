@@ -1,0 +1,4 @@
+exit: 0
+stderr:
+probe -r focus_comparison.spot.rows[0].file.spot_rms: 0.004881018825052745
+probe -r focus_comparison.spot.rows[0].field_angle: 0

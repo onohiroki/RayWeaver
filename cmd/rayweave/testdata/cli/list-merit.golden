@@ -1,0 +1,15 @@
+exit: 0
+stderr:
+stdout:
+Merit Terms (nominal, weighted_sum):
+Kind      Field       λ[mm]    Weight  Target  Surface Set
+spot_rms      0  4.8610e-04  1.000000       0  -          
+spot_rms      0  5.8760e-04  1.000000       0  -          
+spot_rms      0  6.5630e-04  1.000000       0  -          
+spot_rms      1  4.8610e-04  1.000000       0  -          
+spot_rms      1  5.8760e-04  1.000000       0  -          
+spot_rms      1  6.5630e-04  1.000000       0  -          
+spot_rms      2  4.8610e-04  0.500000       0  -          
+spot_rms      2  5.8760e-04  0.500000       0  -          
+spot_rms      2  6.5630e-04  0.500000       0  -          
+

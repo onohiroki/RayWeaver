@@ -1,0 +1,15 @@
+exit: 0
+stderr:
+stdout:
+Optimization (dls):
+Property            Value
+Method                dls
+Aperture Margin  1.000000
+
+Variables:
+Name          Config  Surface  Param            Min       Max  Step  Active
+s1_curvature                1  curvature  -0.500000  0.500000     0  true  
+s3_curvature                3  curvature  -0.500000  0.500000     0  true  
+s6_curvature                6  curvature  -0.500000  0.500000     0  true  
+s7_curvature                7  curvature  -0.500000  0.500000     0  true  
+

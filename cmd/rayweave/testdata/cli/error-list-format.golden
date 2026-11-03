@@ -1,0 +1,4 @@
+exit: 1
+stderr:
+rayweave[list]: Error: unknown --format "nope" (supported: table, yaml, json, csv)
+stdout:

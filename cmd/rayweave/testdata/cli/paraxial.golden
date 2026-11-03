@@ -1,0 +1,4 @@
+exit: 0
+stderr:
+probe -r paraxial_result.focal_length: 25.03330446879033
+probe -r paraxial_result.entrance_pupil_diameter: 3.7825297358

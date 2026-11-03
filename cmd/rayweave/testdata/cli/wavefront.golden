@@ -1,0 +1,4 @@
+exit: 0
+stderr:
+probe -r wavefront_result.fields[0].statistics.rms: 8.457268277469025e-06
+probe -r wavefront_result.fields[0].statistics.strehl: 0.9918490842520604

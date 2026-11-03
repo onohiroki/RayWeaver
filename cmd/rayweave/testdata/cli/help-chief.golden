@@ -1,0 +1,80 @@
+exit: 0
+stderr:
+stdout:
+Usage: rayweave chief [--config ID] [--pass-through N] < system.yaml
+
+Determines chief rays for each field.
+
+Options:
+  --config ID          select config by id (multi-config mode)
+  --pass-through N     constrain chief ray to pass through (0,0) centre of
+                         surface N (overrides YAML pass_through.surface)
+  --clear-aperture     trace grid rays (all fields) through every surface and
+                         set auto_aperture: true surfaces' diameter = 2x max
+                         radial extent + 2x --clear-aperture-margin-mm
+  --clear-aperture-margin-mm 0.2   clearance added to each side of the beam
+                         footprint (mm, default 0.2)
+  --marginal-rays      extract marginal (max/min) rays from grid points and
+                         append them for piping into trace/plot
+  --ray-fan            compute ray fan (transverse aberration) for each field
+                         (YZ + XZ planes, all fields)
+  --fan-plane yz|xz    compute only the YZ (meridional) or XZ (sagittal) fan
+                         (implies --ray-fan)
+  --fan-rotation DEG   compute fan(s) in planes rotated by DEG around Z
+                         (0 = XZ, 90 = YZ; implies --ray-fan; repeatable or
+                         space-separated: --fan-rotation 0 45 90)
+  --epd D              shorthand for --pupil-model-diameter (mm): virtual
+                         entrance pupil diameter
+  --fnum N             F-number; sets the virtual entrance pupil diameter to
+                         the paraxial EFL / N (mutually exclusive with --epd)
+  --epz Z              shorthand for a virtual entrance pupil at axial position
+                         Z (mm); activates virtual_entrance_pupil mode
+  --pupil-model-axial-position Z  virtual entrance pupil Z (mm; activates
+                         virtual pupil mode)
+  --pupil-model-diameter D        virtual entrance pupil diameter (mm)
+  --pupil-model-mode MODE         pupil model mode (default
+                         virtual_entrance_pupil)
+	  --wl 0.00058756      reference wavelength (mm; overrides chief.reference_wavelength)
+
+Input YAML — chief section:
+  fields:
+    - angle: 10.0              # field angle (degrees)
+      direction: [0, 1]        # [dx, dy] field vector (default [0, 1])
+    - image_height: 17.666     # or specify by image height (mm)
+    - height: 10.0             # or object height (mm, finite conjugate)
+      object_z: -500           #   object plane Z (default -1000)
+
+  reference_surface: 8         # surface ID for centroid/image height
+  num_rays: 512                # pupil samples (≈ √n × √n)
+  grid_type: polar             # pupil grid: polar | square | hex
+  dump_map: false              # output per-ray spot data (grid_points)
+  wavelength: 0.00058756       # reference wavelength (mm); overridden by --wl
+
+  pass_through:                # optional: constrain chief ray to pass
+    surface: 3                 #   through a specific surface coordinate
+    coordinate: [0, 0, 0]      #   (default [0, 0, 0] = surface centre)
+
+  pupil_model:                 # optional: virtual entrance pupil
+    mode: virtual_entrance_pupil
+    axial_position: 12.5       # pupil Z (mm); chief ray of every field passes
+                               #   through (0,0,axial_position)
+    diameter: 12.5             # entrance pupil diameter (mm)
+                               # CLI shorthand: --epz Z + (--epd D | --fnum N)
+                               #   where --fnum sets diameter = EFL / N
+
+Output: augmented YAML with chief_rays[] section.
+  Pipe into "rayweave trace" to trace each chief ray through the system.
+
+Without pass_through, the chief ray passes through the spot centroid on
+  the reference surface.  This definition is robust during optimisation
+  where the stop may be ill-defined.
+
+With pass_through, the chief ray is defined as the ray from the field
+  that passes through the given coordinate on the given surface
+  (traditional "stop-centre" definition).
+
+With pupil_model, the pupil is a fixed virtual plane: every field's chief
+  ray passes through its centre, the dynamic-pupil iteration and the
+  low-angle probe are skipped, and the grid radius is diameter/2.
+
+See also: samples/us2645157.yaml

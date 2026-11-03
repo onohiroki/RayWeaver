@@ -1,0 +1,4 @@
+exit: 0
+stderr:
+probe -r metadata.tool.generator: clean
+probe --len configs: 1

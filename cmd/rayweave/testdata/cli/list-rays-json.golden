@@ -1,0 +1,4 @@
+exit: 0
+stderr:
+probe --len summary: 3
+probe -r summary[0].opl_total: 132.04996369611302

@@ -1,0 +1,4 @@
+exit: 0
+stderr:
+probe -r zoom_summary.configs[0].focal_length: 129.81617262925937
+probe -r zoom_summary.configs[2].fields[1].spot_rms: 3.3389176102294096

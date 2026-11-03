@@ -1,0 +1,5 @@
+exit: 0
+stderr:
+probe -r asphere_candidate_result.rankings[0].surface_id: 8
+probe -r asphere_candidate_result.rankings[0].score: 0.3775720187151719
+probe -r asphere_candidate_result.rankings[0].conflict: 0.001883753616765402

@@ -1,0 +1,15 @@
+exit: 0
+stderr:
+stdout:
+input:
+    n_air: 1
+    n_substrate: 1.62
+    layers:
+        - thickness: 99.6
+          "n": 1.38
+    lambda: 0.00055
+    theta_deg: 0
+rs: 0.006511634639349047
+ts: 0.9934883653606509
+rp: 0.006511634639349047
+tp: 0.9934883653606509

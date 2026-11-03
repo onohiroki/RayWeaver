@@ -1,0 +1,7 @@
+exit: 0
+stderr:
+=== Scale complete ===
+  EFL:      49.6527 -> 50.0000 mm
+  Factor:   1.006994
+probe -r scale.efl: 50
+probe --len configs: 1

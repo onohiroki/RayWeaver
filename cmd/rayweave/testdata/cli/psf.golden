@@ -1,0 +1,4 @@
+exit: 0
+stderr:
+probe -r psf_results[0].strehl_ratio: 0.35212884220109403
+probe -r psf_results[0].fwhm_x: 0.0034756557053385005
