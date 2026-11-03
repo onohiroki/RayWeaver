@@ -259,6 +259,21 @@ func (o *Options) Floats(name string) []float64 {
 	return nil
 }
 
+// BoolString reads a two-valued flag (`--lenient true|false`) and reports
+// whether it was given. The value is parsed with strconv.ParseBool, the same
+// spelling the CLI accepts (true/false/1/0/t/f).
+func (o *Options) BoolString(name string) (value bool, given bool, err error) {
+	if !o.Set(name) {
+		return false, false, nil
+	}
+	s := o.String(name)
+	v, perr := strconv.ParseBool(s)
+	if perr != nil {
+		return false, true, fmt.Errorf("--%s expects a boolean (true/false), got %q", name, s)
+	}
+	return v, true, nil
+}
+
 // WriteBack applies the effective value of every setting flag that was given,
 // in declaration order. YAML-path flags are written into input directly;
 // Apply hooks handle settings whose write-back is conditional or computed.
@@ -470,4 +485,4 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 // All lists the command flag tables. The help-consistency test and the MCP
 // drift test walk it, so a new table must be added here when a command is
 // migrated.
-var All = []*Spec{&Chief}
+var All = []*Spec{&Chief, &Trace}

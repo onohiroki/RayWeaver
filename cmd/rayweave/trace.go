@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -18,19 +19,17 @@ func runTrace(data []byte, singleMode bool) {
 		runTraceSingle(data)
 		return
 	}
-	args := os.Args[2:]
 	fs := flag.NewFlagSet("trace", flag.ExitOnError)
-	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	traceVerbose := fs.Bool("verbose", false, "print per-ray trace info to stderr")
-	traceDetails := fs.Bool("details", false, "add per-surface detail (AOI, n1/n2, Fresnel) to output YAML")
-	fs.String("lenient", "", "trace rays leniently: true|false (default: rays.lenient from the input YAML, else false)")
-	fs.Parse(args)
+	opts := clispec.Bind(clispec.Trace, fs)
+	if err := opts.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
 
 	input := parseYAML[types.Input](data)
 
-	gc, cc := openGlass(&input, *glassDir)
-	surfaces := configSurfaces(input.Configs, configFlag)
+	configFlag := opts.String("config")
+	gc, cc := openGlass(&input, opts.String("glass-dir"))
+	surfaces := configSurfaces(input.Configs, &configFlag)
 	surface.Precompute(surfaces)
 
 	engine := ray.NewEngine(gc, cc)
@@ -53,20 +52,16 @@ func runTrace(data []byte, singleMode bool) {
 		pol = input.Rays.Polarization
 	}
 	// Lenient tracing: --lenient true|false (flag) wins over rays.lenient (YAML).
-	lenient, lenientSet, err := boolFlag(fs, "lenient")
+	lenient, lenientSet, err := opts.BoolString("lenient")
 	if err != nil {
 		errExitf("Error: %s", err)
 	}
 	if !lenientSet && input.Rays != nil && input.Rays.Lenient {
 		lenient = input.Rays.Lenient
 	}
-	if lenientSet {
-		// Principle 3: echo the effective value back into the output section.
-		if input.Rays == nil {
-			input.Rays = &types.RayInput{Polarization: pol}
-		}
-		input.Rays.Lenient = lenient
-	}
+	// Write back the flags that were given (the table owns the effective
+	// lenient value and its rays section).
+	opts.WriteBack(&input)
 	rayList := gatherTraceRays(input.Rays, chiefRays, pol)
 	if len(rayList) == 0 {
 		errExitf("Error: 'rays' or 'chief_rays' section is required")
@@ -98,11 +93,11 @@ func runTrace(data []byte, singleMode bool) {
 					r.Lenient = true
 				}
 				ray.ResolveRay(r, surfaces, engine)
-				result := engine.TraceRay(*r, surfaces, *traceDetails)
+				result := engine.TraceRay(*r, surfaces, opts.Bool("details"))
 				if result.Error != "" {
 					errMsg := fmt.Sprintf("{\"ray\":%q,\"error\":%q,\"error_code\":%q}\n", r.ID, result.Error, result.ErrorCode)
 					errorsMu.Lock()
-					if *traceVerbose {
+					if opts.Bool("verbose") {
 						fmt.Fprint(os.Stderr, errMsg)
 					} else {
 						errOut("Warning: ray %q error: %s", r.ID, result.Error)

@@ -282,20 +282,16 @@ func (s *server) addChief() {
 type traceIn struct {
 	DocInput
 	settings
-	Details bool `json:"details,omitempty" jsonschema:"add per-surface detail (AOI, n1/n2, Fresnel) to the output"`
-	Lenient bool `json:"lenient,omitempty" jsonschema:"skip aperture and glass-path checks"`
-	Verbose bool `json:"verbose,omitempty" jsonschema:"print per-surface info to stderr (returned as logs)"`
+	Details bool  `json:"details,omitempty" jsonschema:"add per-surface detail (AOI, n1/n2, Fresnel) to the output"`
+	Lenient *bool `json:"lenient,omitempty" jsonschema:"skip aperture and glass-path checks"`
+	Verbose bool  `json:"verbose,omitempty" jsonschema:"print per-surface info to stderr (returned as logs)"`
 }
 
 func (s *server) addTrace() {
 	addStage(s, "trace", "Trace rays",
 		"Trace the rays and chief_rays the document already carries through every surface. Needs a preceding chief (or a document with a rays section); results[] is appended. Use chief first in the same pipeline.",
 		"trace", func(in traceIn) []string {
-			args := in.settings.args()
-			args = boolFlag(args, in.Details, "--details")
-			args = boolFlag(args, in.Lenient, "--lenient")
-			args = boolFlag(args, in.Verbose, "--verbose")
-			return args
+			return clispec.Args(clispec.Trace, in, nil)
 		})
 }
 
