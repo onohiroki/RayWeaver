@@ -102,3 +102,58 @@ func TestSurfaceMetricsDeterministic(t *testing.T) {
 		}
 	}
 }
+
+// TestSharedConflictSeparatesWavelengths pins the (field, wavelength) sample
+// semantics of SharedConflictUnique: two wavelengths of the same field that
+// demand different OPD at the same pupil region are inter-sample conflict. The
+// old code collapsed footprints by FieldID, merged both wavelengths into one
+// field mean, and therefore reported exactly zero conflict for this case.
+func TestSharedConflictSeparatesWavelengths(t *testing.T) {
+	const sid = 9
+	makeSample := func(wl, offset float64) FieldFootprintData {
+		var hits []RayHit
+		for i := 0; i < 120; i++ {
+			th := float64(i) / 120 * 2 * math.Pi
+			rr := 1.0 + 0.25*math.Sin(3*th)
+			x := 4.0 + rr*math.Cos(th)
+			y := -2.0 + rr*math.Sin(th)
+			r := math.Hypot(x, y)
+			hits = append(hits, RayHit{
+				OPD:    1e-4*r*r*r*r + offset,
+				Weight: 1,
+				Hits:   map[int]SurfaceHit{sid: {Position: types.Vec3{X: x, Y: y}}},
+				OK:     true,
+			})
+		}
+		return FieldFootprintData{
+			FieldID:    1,
+			Wavelength: wl,
+			Weight:     1,
+			Direction:  []float64{1, 0},
+			RayHits:    hits,
+		}
+	}
+
+	// One field, two wavelengths, opposite OPD offsets at the same region.
+	fp := []FieldFootprintData{makeSample(0.0004861, 5e-4), makeSample(0.0006563, -5e-4)}
+	res := JointRadialFit(fp, sid, 2)
+	conf, uniq := SharedConflictUnique(fp, sid, res.Coef, res.RMax, 2.5, res.Total)
+	// The fraction is small (the total OPD energy is dominated by the r⁴ term
+	// both wavelengths share); what matters is that it is no longer exactly
+	// zero, which is what the FieldID collapse produced.
+	if conf <= 1e-5 {
+		t.Fatalf("conflict = %v, want > 0: the two wavelengths disagree at the same region", conf)
+	}
+	if uniq > 1e-6 {
+		t.Fatalf("unique = %v, want ~0: every ray lies inside the other sample's region", uniq)
+	}
+
+	// Control: identical samples agree, so there is neither conflict nor unique
+	// energy (every ray is shared).
+	same := []FieldFootprintData{makeSample(0.0004861, 0), makeSample(0.0006563, 0)}
+	resSame := JointRadialFit(same, sid, 2)
+	confSame, uniqSame := SharedConflictUnique(same, sid, resSame.Coef, resSame.RMax, 2.5, resSame.Total)
+	if confSame > 1e-9 || uniqSame > 1e-9 {
+		t.Fatalf("identical samples: conflict/unique = %v/%v, want 0/0", confSame, uniqSame)
+	}
+}

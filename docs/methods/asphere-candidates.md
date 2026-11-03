@@ -133,13 +133,14 @@ asym 0.10, manufacturing 0.05`). `A` is the sagittal-asymmetry residual and
 
 The terms:
 
-- **E^common** — the shared (multi-field cell) OPD energy of the surface,
+- **E^common** — the shared (multi-sample) OPD energy of the surface,
   normalised by its total cell OPD energy. A rotationally-symmetric asphere can
-  correct this part jointly across fields.
-- **E^unique** — the single-field-cell OPD energy fraction. Rewarded because a
-  surface dominated by one field's footprint is still aspherisable, but
-  penalised less than common energy (unique energy often comes from radial
-  region where only the edge field reaches).
+  correct this part jointly across samples.
+- **E^unique** — the single-sample OPD energy fraction (a sample is one
+  (field, wavelength) footprint). Rewarded because a surface dominated by one
+  sample's footprint is still aspherisable, but penalised less than common
+  energy (unique energy often comes from a radial region where only the edge
+  field reaches).
 - **F** — the fit quality: R² of fitting the shared-cell common OPD to the
   rotationally-symmetric even-order basis (see §7). A surface whose common OPD
   is smoothly radial fits well.
@@ -147,9 +148,12 @@ The terms:
   relative merit improvement `1 − asphere_merit/base_merit` (§8). Otherwise the
   analytic proxy `(|n2−n1| / max|Δn|) · coverage`, i.e. the index contrast
   across the surface scaled by how much OPD energy the asphere can address.
-- **C** — the weighted inter-field conflict: the normalised per-cell conflict
-  of the shared cells. A surface where the fields demand *different* shapes
-  scores down.
+- **C** — the weighted inter-sample conflict: the normalised variance of the
+  per-sample mean residual at shared footprint regions. A surface where the
+  samples demand *different* shapes scores down. Samples are (field, wavelength)
+  footprints: two wavelengths of the same field that disagree at the same pupil
+  region are conflict too, because one rotationally-symmetric asphere cannot
+  satisfy both.
 - **M** — the manufacturing penalty, combining base curvature magnitude (0.6)
   and the footprint radius `meanR` (0.4, scaled against 50 mm). Steep, large
   surfaces are harder to make.

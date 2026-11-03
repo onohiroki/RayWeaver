@@ -14,7 +14,6 @@ package asphere
 
 import (
 	"math"
-	"sort"
 
 	"github.com/hiroki/rayweaver/internal/raymath"
 )
@@ -294,23 +293,26 @@ func BeamFrameAsym(footprints []FieldFootprintData, surfaceID int, coef []float6
 	return asym / total
 }
 
-// SharedConflictUnique decomposes the joint-fit residual into the inter-field
-// conflict (fields disagreeing at shared footprint regions) and the unique
-// residual (rays in regions covered by a single field). A field's footprint
+// SharedConflictUnique decomposes the joint-fit residual into the inter-sample
+// conflict (samples disagreeing at shared footprint regions) and the unique
+// residual (rays in regions covered by a single sample). A sample is one
+// (field, wavelength) footprint: two wavelengths of the same field demand
+// different OPD at the same pupil region, so they are separate samples —
+// collapsing them by field id hid that chromatic disagreement. A sample's
 // region is its weighted centroid ± k·RMS radius; a ray is shared when it falls
-// inside another field's region. Returns (conflictFrac, uniqueFrac) of the
+// inside another sample's region. Returns (conflictFrac, uniqueFrac) of the
 // surface's total OPD energy.
 func SharedConflictUnique(footprints []FieldFootprintData, surfaceID int, coef []float64, rMax, k, total float64) (conflictFrac, uniqueFrac float64) {
 	if len(footprints) == 0 || total <= 0 || len(coef) == 0 || rMax <= 0 {
 		return 0, 0
 	}
-	// Per-field ray lists with positions.
+	// Per-sample ray lists with positions and footprint regions.
 	rayList := make([][]raySample, len(footprints))
-	radii := make(map[int]float64, len(footprints))
-	centroids := make(map[int][2]float64, len(footprints))
+	radii := make([]float64, len(footprints))
+	centroids := make([][2]float64, len(footprints))
 	for gi, fd := range footprints {
 		cx, cy, _, _ := fieldFootprintFrame(fd, surfaceID)
-		centroids[fd.FieldID] = [2]float64{cx, cy}
+		centroids[gi] = [2]float64{cx, cy}
 		for _, h := range fd.RayHits {
 			if !h.OK {
 				continue
@@ -330,20 +332,20 @@ func SharedConflictUnique(footprints []FieldFootprintData, surfaceID int, coef [
 			wsum += s.w
 		}
 		if wsum > 0 {
-			radii[fd.FieldID] = math.Sqrt(s2 / wsum)
+			radii[gi] = math.Sqrt(s2 / wsum)
 		}
 	}
-	// Per-ray shared flag: in any other field's region.
+	// Per-ray shared flag: inside any other sample's region.
 	shared := make([][]bool, len(rayList))
 	for gi := range footprints {
 		shared[gi] = make([]bool, len(rayList[gi]))
 		for ri, s := range rayList[gi] {
-			for gj, gfd := range footprints {
+			for gj := range footprints {
 				if gj == gi {
 					continue
 				}
-				c := centroids[gfd.FieldID]
-				a := radii[gfd.FieldID]
+				c := centroids[gj]
+				a := radii[gj]
 				if a <= 0 {
 					continue
 				}
@@ -356,18 +358,14 @@ func SharedConflictUnique(footprints []FieldFootprintData, surfaceID int, coef [
 			}
 		}
 	}
-	// Conflict: per-field mean residual over its shared rays.
+	// Conflict: per-sample mean residual over its shared rays.
 	type fm struct {
 		mu, wsum float64
 		has      bool
 	}
-	fieldMu := make(map[int]*fm, len(footprints))
-	for gi, fd := range footprints {
-		f := fieldMu[fd.FieldID]
-		if f == nil {
-			f = &fm{}
-			fieldMu[fd.FieldID] = f
-		}
+	sampleMu := make([]fm, len(footprints))
+	for gi := range footprints {
+		f := &sampleMu[gi]
 		for ri, s := range rayList[gi] {
 			if !shared[gi][ri] {
 				continue
@@ -379,17 +377,9 @@ func SharedConflictUnique(footprints []FieldFootprintData, surfaceID int, coef [
 			f.has = true
 		}
 	}
-	// fieldMu is keyed by FieldID because one field can carry several
-	// wavelengths; iterate the ids in sorted order so the accumulations below
-	// are bit-identical between runs (map order is randomised).
-	ids := make([]int, 0, len(fieldMu))
-	for id := range fieldMu {
-		ids = append(ids, id)
-	}
-	sort.Ints(ids)
 	var muBar, wTotal float64
-	for _, id := range ids {
-		f := fieldMu[id]
+	for gi := range sampleMu {
+		f := &sampleMu[gi]
 		if !f.has || f.wsum <= 0 {
 			continue
 		}
@@ -401,8 +391,8 @@ func SharedConflictUnique(footprints []FieldFootprintData, surfaceID int, coef [
 		muBar /= wTotal
 	}
 	var conflictE float64
-	for _, id := range ids {
-		f := fieldMu[id]
+	for gi := range sampleMu {
+		f := &sampleMu[gi]
 		if !f.has {
 			continue
 		}

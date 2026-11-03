@@ -106,64 +106,66 @@ removed (accepted but never used by the analysis) — see
 ## Output
 
 The output preserves the input and appends `asphere_candidate_result:`. The
-`rankings` array is sorted by descending score:
+`rankings` array is sorted by descending score. The example below is the first
+entry for `samples/asphere-demo-init.yaml` run with `--validate`; long arrays
+are abridged with `# ...`:
 
 ```yaml
 asphere_candidate_result:
   rankings:
     - surface_id: 8
-      score: 0.49082103748858696
-      coverage: 0.8326042802440168
-      common_energy: 0.8326042802440168
-      conflict: 0.3355717403069528
+      score: 0.3775720187151719
+      coverage: 0.4764124030834245
+      common_energy: 0.4764124030834245
+      conflict: 0.001883753616765402
       unique_energy: 0
-      fit_quality: 0.7373492238882969
-      manufacturing_penalty: 0.35553455625429586
-       sensitivity_penalty: 0.6884906431262114
-       asym_residual: 0.034
-       field_consistency: 0.72
-       astig_y0_r2: 0.81
-       defocus_y0_r2: 0.63
+      fit_quality: 0.6854831196382771
+      manufacturing_penalty: 0.3652340067847657
+      sensitivity_penalty: 0.6201885183812164
+      asym_residual: 0.012895741112952264
+      field_consistency: 0.3430789742677929
+      astig_y0_r2: 0.6861579485355858
+      defocus_y0_r2: -0.03937051607119213
       coefficients:
-        A4: -1.1110577872376941e-05
-        A6: -1.9934022308602345e-07
-        A8: -2.8788375617480384e-09
-        A10: -4.12459203574251e-11
+        A4: -1.1620020421590248e-05
+        A6: -2.603853329011191e-07
+        A8: -4.3666971295690456e-09
+        A10: -6.887794673041962e-11
       scaled_coefficients:
-        A4: -2.222115574475388e-06
+        A4: -2.32400408431805e-06
         # ...
       calibrated_coefficients:
-        A4: -2.168328e-06
+        A4: -1.7774424525707818e-06
         # ...
       sensitivity:
-        base_merit: 0.03531941389044646
-        asphere_merit: 0.011002327906172131
-        improvement: 0.6884906431262114
-        d_merit_d_coef: [-1133.28, -48128.41, -2.55e+06, 1.67e+08, 4.09e+08]
-        calibrated_scale: 0.184
-        calibrated_merit: 0.010874
-        calibrated_improvement: 0.692
-      warnings:
-        - "removed defocus r² term (2·a2=0.00138725); not part of the asphere coefficients"
+        base_merit: 0.03192706624453839
+        asphere_merit: 0.021541475991339407
+        improvement: 0.3252910923181235
+        d_merit_d_coef: [-2101.495130008936, -158278.89937038752, -1.5813359522043336e+06, 3.836039107071514e+08, 5.389956830351863e+09]
+        calibrated_scale: 0.152963797659792
+        calibrated_merit: 0.012126266334079178
+        calibrated_improvement: 0.6201885183812164
       # only with --validate:
       validation:
         surface_id: 8
-        before_merit: 4.2e-3
-        after_merit: 1.8e-3
-        improvement: 0.57
+        before_merit: 0.33045111017863443
+        after_merit: 0.15547360457690781
+        improvement: 0.529511023603878
         iterations: 20
         status: converged
         coefficients:
-          A4: -1.2e-05
+          A4: 3.097370177028437e-06
           # ...
+      warnings:
+        - "removed defocus r² term (2·a2=0.00133457); not part of the asphere coefficients"
   opd_profiles:
     - surface_id: 1
-      max_r: 14.96131269998368
+      max_r: 14.908153906902898
       fields:
         - field_id: 0
-           t_radius: [-1.2, -0.6, 0.0, 0.6, 1.2]
-           opd_plus: [-0.0085, -0.0109, -0.0112, 0.0023, 0.0406]
-           opd_minus: [-0.0079, -0.0101, -0.0108, 0.0028, 0.0398]
+          ring_radius: [0.8339456150656154, 2.7103232489632507, 4.58670088286088, 6.463078516758521, 8.13096974688978]
+          opd: [-0.008517984760985087, -0.010880497925785453, -0.01122193289500236, 0.002304588913825899, 0.040613071896529324]
+          # ...
   warnings: []
 ```
 
@@ -173,8 +175,8 @@ Meaning of the ranking fields (see the method document for the exact formulas):
 |---|---|
 | `score` | composite score with the exact-ray common fit, conflict, and asymmetry terms |
 | `coverage` | fraction of the surface's cell OPD energy that an asphere could address |
-| `common_energy` / `unique_energy` | shared (multi-field) vs single-field OPD energy fractions |
-| `conflict` | weighted inter-field variance in shared cells (0..1) |
+| `common_energy` / `unique_energy` | shared (multi-sample) vs single-sample OPD energy fractions |
+| `conflict` | weighted inter-sample variance at shared footprint regions (0..1); a sample is one (field, wavelength) footprint |
 | `asym_residual` | sagittal-antisymmetric residual energy fraction |
 | `field_consistency` | clamped average of the astigmatism/defocus y₀² consistency R²; reduces the asymmetry penalty |
 | `astig_y0_r2` / `defocus_y0_r2` | field-law consistency diagnostics |
