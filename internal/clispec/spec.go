@@ -578,7 +578,7 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 // All lists the command flag tables. The help-consistency test and the MCP
 // drift test walk it, so a new table must be added here when a command is
 // migrated.
-var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette, &Plot, &Zoom, &Cam, &Scale, &TMM, &Clean, &Wavefront, &Asphere}
+var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette, &Plot, &Zoom, &Cam, &Scale, &TMM, &Clean, &Wavefront, &Asphere, &PSF}
 
 // stringListValue is the flag.Value behind a StringList flag: every Set
 // appends the raw value, so repeated flags accumulate.

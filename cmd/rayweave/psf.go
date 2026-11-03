@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/psf"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -32,49 +33,49 @@ import (
 // pipeline reflects what was actually computed.
 func runPSF(data []byte) {
 	fs := flag.NewFlagSet("psf", flag.ExitOnError)
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
-	refSurface := fs.Int("ref-surface", 0, "reference surface ID for wavefront sampling (default: last optical surface)")
-	gridSize := fs.Int("psf-grid", 0, "image-plane pixels per side (default 64)")
-	halfWidth := fs.Float64("psf-width", 0, "evaluation half-width mm (0 = auto from Airy disk + spot)")
-	numRays := fs.Int("num-rays", 0, "pupil grid rays (default 400)")
-	fieldsFlag := fs.String("fields", "", "comma-separated field indices to compute (default: all)")
-	wlFlag := fs.String("wavelengths", "", "comma-separated wavelengths in mm (default: config wavelengths, else reference wavelength)")
-	polFlag := fs.String("polarization", "", "input polarization: RCP (default) | LCP | X | Y | RCP+LCP (unpolarised average)")
-	spectralFlag := fs.String("spectral", "", "polychromatic (white) PSF: D65 (default) | FLAT")
-	psfWorkers := fs.Int("psf-workers", 0, "Huygens/wavefront parallel workers (default: GOMAXPROCS)")
-	maxFreq := fs.Float64("max-freq", 0, "MTF frequency cap in cycles/mm (0 = Nyquist; default psf.mtf_config.max_frequency)")
-	mtfSpectral := fs.String("mtf-spectral", "", "MTF polychromatic weighting: D65 (default) | FLAT (independent of PSF spectral)")
-	mtfCombination := fs.String("mtf-combination", "", "MTF combination method: intensity (default) | otf")
-	yamlOut := fs.String("yaml", "", "write full structured PSF data to FILE (index-suffixed per result)")
-	csvOut := fs.String("csv", "", "write gnuplot x,y,intensity map to FILE (index-suffixed per result)")
-	bestFocus := fs.Bool("best-focus", false, "evaluate each field at its best-focus image plane (removes field-curvature defocus)")
-	focusPlane := fs.String("focus-plane", "", "focus plane: '' (as-is) | all (move the image plane to the single all-field best focus before evaluating)")
-	fs.String("converge-check", "", "label sampling convergence by re-evaluating each result at a higher ray count (default: on; true|false)")
-	convergeTol := fs.Float64("converge-tol", 0, "relative Strehl change threshold for convergence (default 0.10)")
-	fs.Parse(os.Args[2:])
+	flags := clispec.Bind(clispec.PSF, fs)
+	if err := flags.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
+	configFlag := flags.String("config")
+	fieldsFlag := flags.IntsString("fields")
+	polFlag := flags.String("polarization")
+	spectralFlag := flags.String("spectral")
+	mtfSpectral := flags.String("mtf-spectral")
+	mtfCombination := flags.String("mtf-combination")
+	focusPlane := flags.String("focus-plane")
+	yamlOut := flags.String("yaml")
+	csvOut := flags.String("csv")
+	refSurface := flags.Int("ref-surface")
+	gridSize := flags.Int("psf-grid")
+	halfWidth := flags.Float("psf-width")
+	numRays := flags.Int("num-rays")
+	psfWorkers := flags.Int("psf-workers")
+	maxFreq := flags.Float("max-freq")
+	convergeTol := flags.Float("converge-tol")
+	bestFocus := flags.Bool("best-focus")
 
 	input := parseFieldInput(data, "(for fields)")
 
-	gc, _ := openGlass(&input, *glassDir)
-	surfaces := surfacesFor(input.Configs, configFlag)
+	gc, _ := openGlass(&input, flags.String("glass-dir"))
+	surfaces := surfacesFor(input.Configs, &configFlag)
 	system := types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface}
 
 	// Field definitions: the --config-selected position supplies its own
 	// fields, then configs[0], then the top-level chief section — the same
 	// resolution order as chief, vignette, asphere and list fields. The
 	// back-focus solve below uses this same list.
-	fields := resolveConfigFieldDefs(input, configFlag)
+	fields := resolveConfigFieldDefs(input, &configFlag)
 
 	// --focus-plane all: move the image plane to the single all-field
 	// best-focus position — the uniform-weighted wavefront best focus, the same
 	// solve the escape save applies — so the fixed-plane PSF/MTF is evaluated
 	// at the plane the deliverable carries. The applied shift is reported on
 	// stderr (stdout stays a clean pipeline document).
-	if strings.EqualFold(strings.TrimSpace(*focusPlane), "all") {
+	if strings.EqualFold(strings.TrimSpace(focusPlane), "all") {
 		cfgIdx := 0
-		if *configFlag != "" {
-			i, err := resolveConfig(input.Configs, *configFlag)
+		if configFlag != "" {
+			i, err := resolveConfig(input.Configs, flags.String("config"))
 			if i < 0 {
 				errExitf("Error: %s", err)
 			}
@@ -93,9 +94,9 @@ func runPSF(data []byte) {
 		// document's optimization.back_focus_solve so `all` is the plane a
 		// saved escape/optimize minimum carries — otherwise the shift reported
 		// here is measured against a plane the deliverable never had.
-		bfRays := *numRays
+		bfRays := numRays
 		if input.PSF != nil {
-			bfRays = intOrYAML(*numRays, input.PSF.NumRays)
+			bfRays = intOrYAML(numRays, input.PSF.NumRays)
 		}
 		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform",
 			NumRays: effectivePSFNumRays(bfRays)}
@@ -116,7 +117,7 @@ func runPSF(data []byte) {
 			maxThicknessDelta(before, surfaces))
 	}
 
-	selected := selectedFieldIndices(fields, input.PSF, *fieldsFlag)
+	selected := selectedFieldIndices(fields, input.PSF, fieldsFlag)
 	fields = applySelectedFields(fields, selected)
 	if len(fields) == 0 {
 		errExitf("Error: no fields to compute")
@@ -125,27 +126,27 @@ func runPSF(data []byte) {
 	// Wavelengths: flag > psf.wavelengths > spectral default grid > selected
 	// config wavelengths > the system reference wavelength.
 	var wavelengths []float64
-	spectralMode := *spectralFlag != "" ||
+	spectralMode := spectralFlag != "" ||
 		(input.PSF != nil && (input.PSF.SpectralCurve != "" || len(input.PSF.SpectralEntries) > 0))
 	switch {
-	case *wlFlag != "":
-		wavelengths = parseFloatList(*wlFlag, "wavelength")
+	case len(flags.Floats("wavelengths")) > 0:
+		wavelengths = flags.Floats("wavelengths")
 	case input.PSF != nil && len(input.PSF.Wavelengths) > 0:
 		wavelengths = input.PSF.Wavelengths
 	case spectralMode:
 		for wl := 400.0; wl <= 700; wl += 10 {
 			wavelengths = append(wavelengths, wl*1e-6)
 		}
-	case len(configWavelengthValues(input.Configs, configFlag)) > 0:
-		wavelengths = configWavelengthValues(input.Configs, configFlag)
+	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
+		wavelengths = configWavelengthValues(input.Configs, &configFlag)
 	default:
 		wavelengths = []float64{effectiveReferenceWavelength(input.Chief)}
 	}
 
 	var polLabels []string
 	switch {
-	case *polFlag != "":
-		polLabels = parsePolLabels(*polFlag)
+	case polFlag != "":
+		polLabels = parsePolLabels(polFlag)
 	case input.PSF != nil && input.PSF.Polarization != "":
 		polLabels = parsePolLabels(input.PSF.Polarization)
 	default:
@@ -160,41 +161,41 @@ func runPSF(data []byte) {
 	if input.PSF != nil && input.PSF.SpectralCurve != "" {
 		spectralCurve = input.PSF.SpectralCurve
 	}
-	if *spectralFlag != "" {
-		switch strings.ToUpper(strings.TrimSpace(*spectralFlag)) {
+	if spectralFlag != "" {
+		switch strings.ToUpper(strings.TrimSpace(spectralFlag)) {
 		case "D65":
 			spectralCurve = "D65"
 		case "FLAT":
 			spectralCurve = "FLAT"
 		default:
-			errExitf("Error: invalid --spectral %q (D65 | FLAT)", *spectralFlag)
+			errExitf("Error: invalid --spectral %q (D65 | FLAT)", spectralFlag)
 		}
 	}
 
 	opts := psf.Options{
-		ReferenceSurface: *refSurface,
-		NumRays:          *numRays,
-		GridSize:         *gridSize,
-		HalfWidth:        *halfWidth,
+		ReferenceSurface: refSurface,
+		NumRays:          numRays,
+		GridSize:         gridSize,
+		HalfWidth:        halfWidth,
 		Polarizations:    polLabels,
-		Workers:          *psfWorkers,
+		Workers:          psfWorkers,
 		SpectralCurve:    spectralCurve,
 		SpectralEntries:  spectralEntries,
 		PupilModel:       input.Chief.PupilModel,
 		RayDefinition:    chiefRayDefinition(input),
 	}
 	if input.PSF != nil {
-		opts.ReferenceSurface = intOrYAML(*refSurface, input.PSF.ReferenceSurface)
-		opts.GridSize = intOrYAML(*gridSize, input.PSF.GridSize)
-		opts.HalfWidth = floatOrYAML(*halfWidth, input.PSF.HalfWidth)
-		opts.NumRays = intOrYAML(*numRays, input.PSF.NumRays)
+		opts.ReferenceSurface = intOrYAML(refSurface, input.PSF.ReferenceSurface)
+		opts.GridSize = intOrYAML(gridSize, input.PSF.GridSize)
+		opts.HalfWidth = floatOrYAML(halfWidth, input.PSF.HalfWidth)
+		opts.NumRays = intOrYAML(numRays, input.PSF.NumRays)
 		if opts.Workers <= 0 {
 			opts.Workers = input.PSF.Workers
 		}
 		if opts.GridType == "" {
 			opts.GridType = input.PSF.GridType
 		}
-		if !flagWasSet(fs, "best-focus") {
+		if !flags.Set("best-focus") {
 			opts.BestFocus = input.PSF.BestFocus
 		}
 		opts.MTFCfg = input.PSF.MTFCfg
@@ -202,13 +203,13 @@ func runPSF(data []byte) {
 			opts.ConvergeTol = input.PSF.ConvergeTol
 		}
 	}
-	if *bestFocus {
+	if bestFocus {
 		opts.BestFocus = true
 	}
 	// Sampling-convergence labelling. The command default is ON; an explicit
 	// --converge-check false disables it (CLI wins). `psf.converge_check: false`
 	// in the input YAML also disables it; a YAML-absence keeps the default ON.
-	cc, ccSet, err := boolFlag(fs, "converge-check")
+	cc, ccSet, err := flags.BoolString("converge-check")
 	if err != nil {
 		errExitf("Error: %s", err)
 	}
@@ -219,34 +220,34 @@ func runPSF(data []byte) {
 	if ccSet {
 		opts.ConvergeCheck = cc
 	}
-	if *convergeTol > 0 {
-		opts.ConvergeTol = *convergeTol
+	if convergeTol > 0 {
+		opts.ConvergeTol = convergeTol
 	}
-	if *maxFreq > 0 {
+	if maxFreq > 0 {
 		if opts.MTFCfg == nil {
 			opts.MTFCfg = &types.PSFMTFConfig{}
 		}
-		opts.MTFCfg.MaxFrequency = *maxFreq
+		opts.MTFCfg.MaxFrequency = maxFreq
 	}
 	// MTF spectral configuration (CLI overrides YAML)
-	if *mtfSpectral != "" {
+	if mtfSpectral != "" {
 		if opts.MTFCfg == nil {
 			opts.MTFCfg = &types.PSFMTFConfig{}
 		}
-		switch strings.ToUpper(strings.TrimSpace(*mtfSpectral)) {
+		switch strings.ToUpper(strings.TrimSpace(mtfSpectral)) {
 		case "D65":
 			opts.MTFCfg.SpectralCurve = "D65"
 		case "FLAT":
 			opts.MTFCfg.SpectralCurve = "FLAT"
 		default:
-			errExitf("Error: invalid --mtf-spectral %q (D65 | FLAT)", *mtfSpectral)
+			errExitf("Error: invalid --mtf-spectral %q (D65 | FLAT)", mtfSpectral)
 		}
 	}
-	if *mtfCombination != "" {
+	if mtfCombination != "" {
 		if opts.MTFCfg == nil {
 			opts.MTFCfg = &types.PSFMTFConfig{}
 		}
-		opts.MTFCfg.CombinationMethod = strings.ToLower(strings.TrimSpace(*mtfCombination))
+		opts.MTFCfg.CombinationMethod = strings.ToLower(strings.TrimSpace(mtfCombination))
 	}
 
 	results, err := psf.Compute(system, gc, fields, wavelengths, opts)
@@ -259,22 +260,22 @@ func runPSF(data []byte) {
 
 	// Write the effective options back into the output's psf: section so the
 	// pipeline reflects what was actually computed (flags override YAML).
-	writeBackPSF(&input, wavelengths, selected, opts, flagWasSet(fs, "best-focus"))
+	writeBackPSF(&input, wavelengths, selected, opts, flags.Set("best-focus"))
 
 	output := types.Output{Input: input}
 	withOutputMetadata(&output.Input, "psf", subcmdArgs())
 	for i := range results {
 		r := results[i]
 		outFile := ""
-		if *yamlOut != "" {
-			file := suffixFile(*yamlOut, i)
+		if yamlOut != "" {
+			file := suffixFile(yamlOut, i)
 			if err := writePSFYAML(file, &r); err != nil {
 				errExitf("Error writing %s: %v", file, err)
 			}
 			outFile = file
 		}
-		if *csvOut != "" {
-			file := suffixFile(*csvOut, i)
+		if csvOut != "" {
+			file := suffixFile(csvOut, i)
 			if err := writePSFCSV(file, &r); err != nil {
 				errExitf("Error writing %s: %v", file, err)
 			}

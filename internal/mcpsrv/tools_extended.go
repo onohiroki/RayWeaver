@@ -157,23 +157,7 @@ func (s *server) addPSF() {
 	addStage(s, "psf", "PSF and MTF",
 		"Point-spread function on the flat image plane via direct vector Huygens integration, with the MTF derived from it. The document carries the PSF results; large grids are summarised.",
 		"psf", func(in psfIn) []string {
-			args := in.settings.args()
-			args = intFlag(args, in.RefSurface, "--ref-surface")
-			args = intFlag(args, in.Grid, "--psf-grid")
-			args = floatFlag(args, in.Width, "--psf-width")
-			args = intFlag(args, in.NumRays, "--num-rays")
-			args = listIntFlag(args, in.Fields, "--fields")
-			args = listFloatFlag(args, in.Wavelengths, "--wavelengths")
-			args = strFlag(args, in.Polarization, "--polarization")
-			args = strFlag(args, in.Spectral, "--spectral")
-			args = intFlag(args, in.Workers, "--psf-workers")
-			args = floatFlag(args, in.MaxFrequency, "--max-freq")
-			args = strFlag(args, in.MTFSpectral, "--mtf-spectral")
-			args = strFlag(args, in.MTFCombine, "--mtf-combination")
-			args = boolFlag(args, in.BestFocus, "--best-focus")
-			args = strFlag(args, in.FocusPlane, "--focus-plane")
-			args = boolPtrFlag(args, in.ConvergeCheck, "--converge-check")
-			return args
+			return clispec.Args(clispec.PSF, in, nil)
 		})
 }
 
