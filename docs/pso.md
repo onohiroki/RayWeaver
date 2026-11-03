@@ -61,6 +61,12 @@ See [escape.md](escape.md#reading-a-run-log) for what a run log can and cannot
 show, and [list.md §11](list.md#11-global-section--escapepso-global-search-results)
 for the full output shape.
 
+### Diagnostics
+
+`--mem-limit`, `--cpuprofile`, `--memprofile`, `--gorprofile` and `--gogc` have
+the same meaning as in [escape.md §Diagnostics](escape.md#diagnostics); `--debug`
+is an escape-only switch.
+
 ## Input YAML — `optimization.pso`
 
 ```yaml

@@ -34,6 +34,18 @@ damping) have no command-line counterpart.
 `optimize snap` accepts only `--glass-dir`
 (the snap settings are read from the input's `optimization`/`glass_catalog`).
 
+### Diagnostics
+
+| Flag | Description |
+|---|---|
+| `--cpuprofile FILE` | write a CPU profile (pprof) to FILE |
+| `--memprofile FILE` | write a heap profile (pprof) to FILE at exit |
+| `--gorprofile FILE` | write a goroutine profile to FILE at exit |
+| `--gogc N` | GC target percentage for the run (0 uses the compute-command default, 400) |
+
+These are developer diagnostics: they do not change the optimisation, and an
+empty file name disables the profile.
+
 ## Input — single-config mode
 
 ```yaml

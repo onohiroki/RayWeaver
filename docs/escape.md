@@ -59,6 +59,21 @@ Sub-commands:
   that position (`minima_improvements`, when present) is applied, so the
   extracted lens is that minimum's final version
 
+### Diagnostics
+
+| Flag | Description |
+|---|---|
+| `--debug` | emit every DLS-internal JSONL event (`iter`, `final`, `adaptive_damping`, `mode_change`) plus enriched cycle diagnostics; combine with `--verbose`/`--log` for full visibility |
+| `--mem-limit VALUE` | cap the Go heap: `2GiB`, `2048MiB`, `2048` (MB) or `-1` (unlimited); default `optimization.mem_limit_mb` |
+| `--cpuprofile FILE` | write a CPU profile (pprof) to FILE |
+| `--memprofile FILE` | write a heap profile (pprof) to FILE at exit |
+| `--gorprofile FILE` | write a goroutine profile to FILE at exit |
+| `--gogc N` | GC target percentage for the run (0 uses the compute-command default, 400) |
+
+These are developer diagnostics: they do not change the search, and an empty
+file name disables the profile. `--debug` is verbose-only (it writes to the
+JSONL stream, never to the pipeline document).
+
 ## Input YAML — `optimization.escape`
 
 ```yaml
