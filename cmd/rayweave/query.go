@@ -1355,41 +1355,9 @@ func applyDelete(root any, d *deleteNode) error {
 // mapNode/filterNode distribute the operation to matching elements.
 // Missing paths are silently ignored (no-op).
 func deleteWalk(container any, pathExpr expr) {
-	switch p := pathExpr.(type) {
-	case *identNode:
-		if m, ok := container.(map[string]any); ok {
-			delete(m, p.name)
-		}
-
-	case *dotNode:
-		parents := collectContainers(container, p.x)
-		for _, parent := range parents {
-			if m, ok := parent.(map[string]any); ok {
-				delete(m, p.key)
-			}
-		}
-
-	case *idxNode:
-		writeIdxDeletion(container, p.x, int(p.n))
-
-	case *mapNode:
-		parents := collectContainers(container, p.x)
-		for _, parent := range parents {
-			elems := toIterable(parent)
-			for i, elem := range elems {
-				elems[i] = deleteWalkReturn(elem, p.x)
-			}
-		}
-
-	case *filterNode:
-		parents := collectContainers(container, p.x)
-		for _, parent := range parents {
-			filtered := filterElements(parent, p.key, p.val)
-			for _, elem := range filtered {
-				_ = deleteWalkReturn(elem, p.x)
-			}
-		}
-	}
+	// The return value only matters when an array element is replaced; at the
+	// top level the container is mutated in place.
+	deleteWalkReturn(container, pathExpr)
 }
 
 // deleteWalkReturn is like deleteWalk but returns the (potentially modified)
@@ -1640,9 +1608,31 @@ func setAtPath(root any, keys []any, val any) error {
 	return setDirect(parent, keys[len(keys)-1], val)
 }
 
+// replaceAtPath writes newValue over the value at keys. A top-level array
+// cannot be replaced through the document root (only the element's slice is
+// reachable), so that case returns topLevelErr.
+func replaceAtPath(root any, keys []any, newValue any, topLevelErr string) error {
+	if len(keys) == 1 {
+		m, ok := root.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s", topLevelErr)
+		}
+		name, ok := keys[0].(string)
+		if !ok {
+			return fmt.Errorf("%s", topLevelErr)
+		}
+		m[name] = newValue
+		return nil
+	}
+	holder, err := getAtPath(root, keys[:len(keys)-1])
+	if err != nil {
+		return err
+	}
+	return setDirect(holder, keys[len(keys)-1], newValue)
+}
+
 // appendAtPath appends val to the array at keys.
 func appendAtPath(root any, keys []any, val any) error {
-	// keys points to the array itself
 	target, err := getAtPath(root, keys)
 	if err != nil {
 		return err
@@ -1651,22 +1641,7 @@ func appendAtPath(root any, keys []any, val any) error {
 	if !ok {
 		return fmt.Errorf("+= requires array")
 	}
-	newArr := append(arr, val)
-	if len(keys) == 1 {
-		if m, ok := root.(map[string]any); ok {
-			if s, ok := keys[0].(string); ok {
-				m[s] = newArr
-				return nil
-			}
-		}
-		return fmt.Errorf("cannot append to top-level array directly")
-	}
-	holderKeys := keys[:len(keys)-1]
-	holder, err := getAtPath(root, holderKeys)
-	if err != nil {
-		return err
-	}
-	return setDirect(holder, keys[len(keys)-1], newArr)
+	return replaceAtPath(root, keys, append(arr, val), "cannot append to top-level array directly")
 }
 
 // appendViaMapNode handles arr[] += val where arr[] is a mapNode.
@@ -1675,31 +1650,7 @@ func appendViaMapNode(root any, mn *mapNode, val any) error {
 	if err != nil {
 		return err
 	}
-	target, err := getAtPath(root, keys)
-	if err != nil {
-		return err
-	}
-	arr, ok := target.([]any)
-	if !ok {
-		return fmt.Errorf("+= requires array")
-	}
-	newArr := append(arr, val)
-	if len(keys) == 1 {
-		if m, ok := root.(map[string]any); ok {
-			if s, ok := keys[0].(string); ok {
-				m[s] = newArr
-				return nil
-			}
-		}
-		return fmt.Errorf("cannot append to top-level array directly")
-	}
-	// Same write-back logic as appendAtPath but target is at keys
-	holderKeys := keys[:len(keys)-1]
-	holder, err := getAtPath(root, holderKeys)
-	if err != nil {
-		return err
-	}
-	return setDirect(holder, keys[len(keys)-1], newArr)
+	return appendAtPath(root, keys, val)
 }
 
 // removeAtPath handles  arr -= value  and  map -= "key"  semantics.
@@ -1723,21 +1674,7 @@ func removeAtPath(root any, keys []any, val any) error {
 				return fmt.Errorf("index out of bounds: %d (len=%d)", idx, len(arr))
 			}
 			newArr := append(arr[:idx], arr[idx+1:]...)
-			if len(keys) == 1 {
-				if m, ok := root.(map[string]any); ok {
-					if s, ok := keys[0].(string); ok {
-						m[s] = newArr
-						return nil
-					}
-				}
-				return fmt.Errorf("cannot delete from top-level array directly")
-			}
-			holderKeys := keys[:len(keys)-1]
-			holder, err := getAtPath(root, holderKeys)
-			if err != nil {
-				return err
-			}
-			return setDirect(holder, keys[len(keys)-1], newArr)
+			return replaceAtPath(root, keys, newArr, "cannot delete from top-level array directly")
 		}
 	}
 	// Fallback: treat as map-key removal where last key is deleted from parent.
@@ -1767,22 +1704,7 @@ func deleteAtPath(root any, keys []any) error {
 			return fmt.Errorf("index out of bounds: %d (len=%d)", idx, len(arr))
 		}
 		newArr := append(arr[:idx], arr[idx+1:]...)
-		if len(parentKeys) == 1 {
-			holderKey := parentKeys[0]
-			if s, ok := holderKey.(string); ok {
-				if m, ok := root.(map[string]any); ok {
-					m[s] = newArr
-					return nil
-				}
-			}
-			return fmt.Errorf("cannot write back array")
-		}
-		holderKeys := parentKeys[:len(parentKeys)-1]
-		holder, err := getAtPath(root, holderKeys)
-		if err != nil {
-			return err
-		}
-		return setDirect(holder, parentKeys[len(parentKeys)-1], newArr)
+		return replaceAtPath(root, keys, newArr, "cannot write back array")
 	}
 	return deleteDirect(parent, finalKey)
 }
