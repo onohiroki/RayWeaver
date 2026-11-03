@@ -1,0 +1,6 @@
+exit: 0
+stderr:
+probe --len results: 1
+probe -r results[0].opl_total: 32.049963696113004
+probe -r results[0].surfaces[3].position: [0 0 3.8607999999999993]
+probe -r results[0].intensity_s: 1

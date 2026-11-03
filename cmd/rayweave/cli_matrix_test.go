@@ -56,6 +56,16 @@ var cliCases = []cliCase{
 			{"-r", "results[3].opl_total"},
 		}},
 
+	// `trace single` is the one-ray debugging path: it reads the document
+	// directly (no chief_rays needed) and writes a single trace_single result.
+	{name: "trace-single", stdin: "us2645157.yaml", steps: [][]string{{"trace", "single"}},
+		probes: [][]string{
+			{"--len", "results"},
+			{"-r", "results[0].opl_total"},
+			{"-r", "results[0].surfaces[3].position"},
+			{"-r", "results[0].intensity_s"},
+		}},
+
 	{name: "zoom", stdin: "simple-zoom.yaml", steps: [][]string{{"zoom"}},
 		probes: [][]string{
 			{"-r", "zoom_summary.configs[0].focal_length"},
