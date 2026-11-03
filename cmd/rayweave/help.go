@@ -1364,6 +1364,11 @@ and implies --auto-aperture, --all-glasses, and --roles):
              psf, spot or through_focus sub-section and renders the per-(field,
              wavelength) x plane table (file / focus_plane_all / best_focus), the
              through-focus scan (base x focus_mm), plus the MTF/PSF/spot metrics.
+  summary    compact, JSON-safe view of the document (yaml/json only): configs
+             become ids and surface counts, rays/grid_points become counts,
+             results[] keeps its scalars and drops the per-surface path, and
+             chief_rays[] keeps the per-field spot_stats. This is also what the
+             MCP server returns as its tool summary.
 
 Options:
   --format table|yaml|json|csv   output format (default table)
