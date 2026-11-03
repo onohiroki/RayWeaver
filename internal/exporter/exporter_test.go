@@ -653,3 +653,19 @@ func TestGenuinelyMixedFieldsStillWarn(t *testing.T) {
 		t.Errorf("expected a mixed-field warning, got %v", log)
 	}
 }
+
+func TestFormatFromExt(t *testing.T) {
+	cases := []struct{ path, want string }{
+		{"out.zmx", "zemax"},
+		{"lens.ZMX", "zemax"},
+		{"out.seq", "codev"},
+		{"out.len", "oslo"},
+		{"out.txt", ""},
+		{"noext", ""},
+	}
+	for _, c := range cases {
+		if got := FormatFromExt(c.path); got != c.want {
+			t.Errorf("FormatFromExt(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}

@@ -3,8 +3,6 @@ package main
 import (
 	"flag"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/hiroki/rayweaver/internal/exporter"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -78,21 +76,7 @@ func resolveExportFormat(format, outPath string) string {
 	if format != "" {
 		return format
 	}
-	return formatFromExt(outPath)
-}
-
-// formatFromExt maps an output file extension to the export format, or "" when
-// the extension is not one of .zmx / .seq / .len.
-func formatFromExt(path string) string {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".zmx":
-		return "zemax"
-	case ".seq":
-		return "codev"
-	case ".len":
-		return "oslo"
-	}
-	return ""
+	return exporter.FormatFromExt(outPath)
 }
 
 // exportOutput writes the exported foreign format. With outPath the format is

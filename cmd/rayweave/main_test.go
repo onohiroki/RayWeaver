@@ -676,22 +676,6 @@ func TestExportOutput(t *testing.T) {
 	}
 }
 
-func TestFormatFromExt(t *testing.T) {
-	cases := []struct{ path, want string }{
-		{"out.zmx", "zemax"},
-		{"lens.ZMX", "zemax"},
-		{"out.seq", "codev"},
-		{"out.len", "oslo"},
-		{"out.txt", ""},
-		{"noext", ""},
-	}
-	for _, c := range cases {
-		if got := formatFromExt(c.path); got != c.want {
-			t.Errorf("formatFromExt(%q) = %q, want %q", c.path, got, c.want)
-		}
-	}
-}
-
 func TestResolveExportFormat(t *testing.T) {
 	cases := []struct{ format, outPath, want string }{
 		{"zemax", "", "zemax"},        // explicit flag wins

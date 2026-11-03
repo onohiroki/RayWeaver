@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/exporter"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -453,15 +454,7 @@ func exportFormatName(format, output string) string {
 	if format != "" {
 		return format
 	}
-	switch strings.ToLower(filepath.Ext(output)) {
-	case ".zmx":
-		return "zemax"
-	case ".seq":
-		return "codev"
-	case ".len":
-		return "oslo"
-	}
-	return ""
+	return exporter.FormatFromExt(output)
 }
 
 // ---- list helpers ---------------------------------------------------------

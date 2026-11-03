@@ -14,7 +14,9 @@ package exporter
 
 import (
 	"fmt"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -227,4 +229,20 @@ func codeVLetter(order int) string {
 // formats use (ZEMAX DIAM, CODE V CIR, OSLO AP).
 func semiDiameter(d float64) float64 {
 	return d / 2
+}
+
+// FormatFromExt maps an output file extension to the export format it selects
+// (.zmx -> zemax, .seq -> codev, .len -> oslo), or "" when the extension names
+// no format. The CLI's -o inference and the MCP export tool share it, so the
+// mapping has one definition.
+func FormatFromExt(path string) string {
+	switch strings.ToLower(filepath.Ext(path)) {
+	case ".zmx":
+		return "zemax"
+	case ".seq":
+		return "codev"
+	case ".len":
+		return "oslo"
+	}
+	return ""
 }
