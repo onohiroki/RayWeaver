@@ -275,8 +275,9 @@ func maxInt(a, b int) int {
 
 // ComputePolychromaticMTF computes the polychromatic MTF from per-wavelength
 // physical intensity grids using OTF complex-weighted averaging:
-//   OTF_poly(f) = Σ(w_i * OTF_i(f)) / Σ(w_i)
-//   MTF_poly(f) = |OTF_poly(f)|
+//
+//	OTF_poly(f) = Σ(w_i * OTF_i(f)) / Σ(w_i)
+//	MTF_poly(f) = |OTF_poly(f)|
 //
 // wavelengths: slice of wavelengths in mm (must match intensities length)
 // intensities: per-wavelength physical intensity grids (unnormalized, same spec)

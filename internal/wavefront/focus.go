@@ -21,9 +21,9 @@ type FocusField struct {
 
 // FocusResult is the weighted combination of the per-field focus distances.
 type FocusResult struct {
-	WeightType      string
-	WeightedFocusZ  float64 // Σ w·f / Σ w (mm)
-	PerField        []FocusField
+	WeightType     string
+	WeightedFocusZ float64 // Σ w·f / Σ w (mm)
+	PerField       []FocusField
 }
 
 // ComputeBestFocus weights the per-field best-fit-sphere focus distances

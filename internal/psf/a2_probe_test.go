@@ -18,7 +18,7 @@ func makeCurvedSamples(rings, angles int, apR, sag float64) ([]types.Vec3, []mes
 	var trueA []float64
 	for i := 0; i < rings; i++ {
 		rin := step * float64(i)
-		rout := step * float64(i + 1)
+		rout := step * float64(i+1)
 		// annular area per cell
 		cellArea := math.Pi * (rout*rout - rin*rin) / float64(angles)
 		rc := (rin + rout) / 2

@@ -644,10 +644,10 @@ func TestMeritScheduleNumRaysMaxAcrossConfigs(t *testing.T) {
 	surface.Precompute(s)
 
 	cfg0 := ConfigInput{
-		ID:       "cfg0",
-		Weight:   0.5,
-		Surfaces: s,
-		Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+		ID:          "cfg0",
+		Weight:      0.5,
+		Surfaces:    s,
+		Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 		MeritModes: []types.MeritMode{
 			{Name: "A", NumRays: 16, Terms: []types.MeritTerm{
@@ -656,10 +656,10 @@ func TestMeritScheduleNumRaysMaxAcrossConfigs(t *testing.T) {
 		},
 	}
 	cfg1 := ConfigInput{
-		ID:       "cfg1",
-		Weight:   0.5,
-		Surfaces: s,
-		Fields:   []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
+		ID:          "cfg1",
+		Weight:      0.5,
+		Surfaces:    s,
+		Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0.0, Weight: 1.0}},
 		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1.0}},
 		MeritModes: []types.MeritMode{
 			{Name: "A", NumRays: 48, Terms: []types.MeritTerm{

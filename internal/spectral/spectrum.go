@@ -136,7 +136,7 @@ func (c *Curve) IntegratedWeight(wavelengthMM float64) float64 {
 	// Exact match at sample point
 	if i > 0 && math.Abs(c.mm[i-1]-wavelengthMM) <= 1e-12 {
 		if v := c.rel[i-1]; v > 0 {
-			return v * c.deltaLambdaMM(i - 1)
+			return v * c.deltaLambdaMM(i-1)
 		}
 		return 0
 	}

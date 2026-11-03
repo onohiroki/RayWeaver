@@ -15,20 +15,20 @@ type GlassInfo struct {
 }
 
 type Config struct {
-	Surfaces         []types.Surface
-	Results          []types.RayResult
-	ChiefRays        []types.ChiefRayResult
-	GlassMap         map[string]GlassInfo
-	LensWidth        float64
-	RayWidth         float64
-	ScaleOverride    float64
-	RightMarginPct   float64
-	MaxFanRays       int
-	FanInvalid       FanInvalidMode
-	StopSurfaceID    int
-	ElementColors    map[int]string
-	AsphereColors    map[int]string
-	AsphereColorAll  string
+	Surfaces        []types.Surface
+	Results         []types.RayResult
+	ChiefRays       []types.ChiefRayResult
+	GlassMap        map[string]GlassInfo
+	LensWidth       float64
+	RayWidth        float64
+	ScaleOverride   float64
+	RightMarginPct  float64
+	MaxFanRays      int
+	FanInvalid      FanInvalidMode
+	StopSurfaceID   int
+	ElementColors   map[int]string
+	AsphereColors   map[int]string
+	AsphereColorAll string
 }
 
 const (

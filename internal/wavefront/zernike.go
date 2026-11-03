@@ -31,16 +31,16 @@ type ZernikeTerm struct {
 // standard Zemax ordering. Positive m means the cos(m·θ) angular term, negative
 // m the sin(|m|·θ) term, m = 0 the constant term.
 var fringeNM = [38][2]int{
-	0: {0, 0},   // unused
-	1: {0, 0},   // Z1 piston
-	2: {1, 1},   // Z2 tilt x
-	3: {1, -1},  // Z3 tilt y
-	4: {2, 0},   // Z4 defocus
-	5: {2, 2},   // Z5 astigmatism 0°
-	6: {2, -2},  // Z6 astigmatism 45°
-	7: {3, 1},   // Z7 coma x
-	8: {3, -1},  // Z8 coma y
-	9: {4, 0},   // Z9 primary spherical
+	0:  {0, 0},  // unused
+	1:  {0, 0},  // Z1 piston
+	2:  {1, 1},  // Z2 tilt x
+	3:  {1, -1}, // Z3 tilt y
+	4:  {2, 0},  // Z4 defocus
+	5:  {2, 2},  // Z5 astigmatism 0°
+	6:  {2, -2}, // Z6 astigmatism 45°
+	7:  {3, 1},  // Z7 coma x
+	8:  {3, -1}, // Z8 coma y
+	9:  {4, 0},  // Z9 primary spherical
 	10: {3, 3},  // Z10 trefoil x
 	11: {3, -3}, // Z11 trefoil y
 	12: {4, 2},  // Z12 secondary astigmatism x
@@ -73,16 +73,16 @@ var fringeNM = [38][2]int{
 
 // fringeZernikeName returns the human-readable name of Fringe index k.
 var fringeZernikeName = [38]string{
-	0: "",
-	1: "piston",
-	2: "tilt x",
-	3: "tilt y",
-	4: "defocus",
-	5: "astigmatism 0deg",
-	6: "astigmatism 45deg",
-	7: "primary coma x",
-	8: "primary coma y",
-	9: "primary spherical",
+	0:  "",
+	1:  "piston",
+	2:  "tilt x",
+	3:  "tilt y",
+	4:  "defocus",
+	5:  "astigmatism 0deg",
+	6:  "astigmatism 45deg",
+	7:  "primary coma x",
+	8:  "primary coma y",
+	9:  "primary spherical",
 	10: "trefoil x",
 	11: "trefoil y",
 	12: "secondary astigmatism x",
@@ -231,7 +231,7 @@ func FitZernike(samples []psf.WavefrontSample, residual []float64, maxOrder int)
 			w = 1
 		}
 		dx, dy := s.Position.X-cx, s.Position.Y-cy
-		rho := math.Sqrt((dx*dx+dy*dy)/rMaxSq)
+		rho := math.Sqrt((dx*dx + dy*dy) / rMaxSq)
 		theta := math.Atan2(dy, dx)
 		resid := residual[i]
 		cols := make([]float64, dim)
@@ -274,7 +274,7 @@ func FitZernike(samples []psf.WavefrontSample, residual []float64, maxOrder int)
 			w = 1
 		}
 		dx, dy := s.Position.X-cx, s.Position.Y-cy
-		rho := math.Sqrt((dx*dx+dy*dy)/rMaxSq)
+		rho := math.Sqrt((dx*dx + dy*dy) / rMaxSq)
 		theta := math.Atan2(dy, dx)
 		fit := 0.0
 		for j, k := range indices {

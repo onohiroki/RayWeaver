@@ -158,13 +158,13 @@ func TestComputePolychromaticMTF(t *testing.T) {
 		n  = 128
 		dx = 6.25e-4
 	)
-	spec := ImageGridSpec{NX: n, NY: n, X0: -float64(n)/2*dx, Y0: -float64(n)/2*dx, DX: dx, DY: dx}
+	spec := ImageGridSpec{NX: n, NY: n, X0: -float64(n) / 2 * dx, Y0: -float64(n) / 2 * dx, DX: dx, DY: dx}
 
 	// Two wavelengths with different Gaussian sigmas
 	sigma1 := 8e-3
 	sigma2 := 10e-3
-	wl1 := 486.13e-6  // F line
-	wl2 := 656.28e-6  // C line
+	wl1 := 486.13e-6 // F line
+	wl2 := 656.28e-6 // C line
 
 	I1 := make([]float64, n*n)
 	I2 := make([]float64, n*n)
@@ -237,7 +237,7 @@ func TestComputePolychromaticMTFWithShift(t *testing.T) {
 		n  = 128
 		dx = 6.25e-4
 	)
-	spec := ImageGridSpec{NX: n, NY: n, X0: -float64(n)/2*dx, Y0: -float64(n)/2*dx, DX: dx, DY: dx}
+	spec := ImageGridSpec{NX: n, NY: n, X0: -float64(n) / 2 * dx, Y0: -float64(n) / 2 * dx, DX: dx, DY: dx}
 
 	// Same Gaussian, but second wavelength shifted by 0.005mm in x
 	// This creates a linear phase difference in the OTF

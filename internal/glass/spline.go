@@ -54,7 +54,7 @@ func EvalSpline(knots []IndexEntry, s []float64, lambda float64) float64 {
 	B := t
 
 	interp := A*knots[i].Index + B*knots[i+1].Index +
-		((A*A*A-A)*h*h*s[i]+(B*B*B-B)*h*h*s[i+1]) / 6.0
+		((A*A*A-A)*h*h*s[i]+(B*B*B-B)*h*h*s[i+1])/6.0
 
 	return interp
 }

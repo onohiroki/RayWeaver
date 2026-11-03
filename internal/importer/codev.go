@@ -23,12 +23,12 @@ type codeVSurf struct {
 	decActive bool
 
 	// Diffractive (DOE) fields
-	DiffractiveType string            // "DOE", "GRT", "HOE", "MET"
-	DiffrOrder      float64           // HOR value
-	DiffrWL         float64           // HWL in nm
-	DiffrSymm       string            // HCT "R" or "N"
-	DiffrBLT        string            // BLT "KIN" etc.
-	DiffrCoeffs     map[int]float64   // HCO Cj → OPD [mm], 1-indexed
+	DiffractiveType string          // "DOE", "GRT", "HOE", "MET"
+	DiffrOrder      float64         // HOR value
+	DiffrWL         float64         // HWL in nm
+	DiffrSymm       string          // HCT "R" or "N"
+	DiffrBLT        string          // BLT "KIN" etc.
+	DiffrCoeffs     map[int]float64 // HCO Cj → OPD [mm], 1-indexed
 }
 
 func ParseCodeV(input string) (*ParseResult, error) {
@@ -289,63 +289,63 @@ func ParseCodeV(input string) (*ParseResult, error) {
 				case "THC":
 					inAspBlock = false
 					continue
-			case "DAR":
-				// Decenter-and-return: the current surface is shifted/tilted
-				// locally and the axis returns after it. rayweave models this
-				// with a per-surface DecenterStep; the decenter components are
-				// supplied by following YDE/XDE/ZDE/ADE/BDE/CDE statements.
-				getOrCreate(surfMap, lastSurfNum).decActive = true
-				inAspBlock = false
-				continue
-			case "DIF":
-				// Diffractive surface type declaration (e.g. "DIF DOE").
-				if len(tokens) >= 2 {
-					getOrCreate(surfMap, lastSurfNum).DiffractiveType = strings.ToUpper(tokens[1])
-				}
-				inAspBlock = false
-				continue
-			case "HOR":
-				if len(tokens) >= 2 {
-					getOrCreate(surfMap, lastSurfNum).DiffrOrder = parseFloat(tokens[1])
-				}
-				inAspBlock = false
-				continue
-			case "HWL":
-				if len(tokens) >= 2 {
-					getOrCreate(surfMap, lastSurfNum).DiffrWL = parseFloat(tokens[1])
-				}
-				inAspBlock = false
-				continue
-			case "HCT":
-				if len(tokens) >= 2 {
-					getOrCreate(surfMap, lastSurfNum).DiffrSymm = strings.ToUpper(tokens[1])
-				}
-				inAspBlock = false
-				continue
-			case "BLT":
-				if len(tokens) >= 2 {
-					getOrCreate(surfMap, lastSurfNum).DiffrBLT = strings.ToUpper(tokens[1])
-				}
-				inAspBlock = false
-				continue
-			case "HCO":
-				// HCO Cj value — j-th phase-polynomial coefficient (OPD in mm).
-				if len(tokens) >= 3 {
-					surf := getOrCreate(surfMap, lastSurfNum)
-					if surf.DiffrCoeffs == nil {
-						surf.DiffrCoeffs = make(map[int]float64)
+				case "DAR":
+					// Decenter-and-return: the current surface is shifted/tilted
+					// locally and the axis returns after it. rayweave models this
+					// with a per-surface DecenterStep; the decenter components are
+					// supplied by following YDE/XDE/ZDE/ADE/BDE/CDE statements.
+					getOrCreate(surfMap, lastSurfNum).decActive = true
+					inAspBlock = false
+					continue
+				case "DIF":
+					// Diffractive surface type declaration (e.g. "DIF DOE").
+					if len(tokens) >= 2 {
+						getOrCreate(surfMap, lastSurfNum).DiffractiveType = strings.ToUpper(tokens[1])
 					}
-					idx := parseHCOIndex(tokens[1])
-					if idx > 0 {
-						surf.DiffrCoeffs[idx] = parseFloat(tokens[2])
+					inAspBlock = false
+					continue
+				case "HOR":
+					if len(tokens) >= 2 {
+						getOrCreate(surfMap, lastSurfNum).DiffrOrder = parseFloat(tokens[1])
 					}
-				}
-				inAspBlock = false
-				continue
-			case "HCC":
-				// HCC Cj value — optimisation control; ignored for ray tracing.
-				inAspBlock = false
-				continue
+					inAspBlock = false
+					continue
+				case "HWL":
+					if len(tokens) >= 2 {
+						getOrCreate(surfMap, lastSurfNum).DiffrWL = parseFloat(tokens[1])
+					}
+					inAspBlock = false
+					continue
+				case "HCT":
+					if len(tokens) >= 2 {
+						getOrCreate(surfMap, lastSurfNum).DiffrSymm = strings.ToUpper(tokens[1])
+					}
+					inAspBlock = false
+					continue
+				case "BLT":
+					if len(tokens) >= 2 {
+						getOrCreate(surfMap, lastSurfNum).DiffrBLT = strings.ToUpper(tokens[1])
+					}
+					inAspBlock = false
+					continue
+				case "HCO":
+					// HCO Cj value — j-th phase-polynomial coefficient (OPD in mm).
+					if len(tokens) >= 3 {
+						surf := getOrCreate(surfMap, lastSurfNum)
+						if surf.DiffrCoeffs == nil {
+							surf.DiffrCoeffs = make(map[int]float64)
+						}
+						idx := parseHCOIndex(tokens[1])
+						if idx > 0 {
+							surf.DiffrCoeffs[idx] = parseFloat(tokens[2])
+						}
+					}
+					inAspBlock = false
+					continue
+				case "HCC":
+					// HCC Cj value — optimisation control; ignored for ray tracing.
+					inAspBlock = false
+					continue
 				case "YDE", "XDE", "ZDE", "ADE", "BDE", "CDE":
 					surf := getOrCreate(surfMap, lastSurfNum)
 					surf.decActive = true

@@ -122,9 +122,9 @@ func weightedPV(samples []psf.WavefrontSample, model func(x, y float64) float64)
 // S(x,y) = a + b·x + c·y + d·(x²+y²) — piston, tilt and defocus only. The
 // residual is the standard wavefront aberration (astigmatism retained).
 type ReferenceSphere struct {
-	A, B, C, D float64
+	A, B, C, D  float64
 	RMSResidual float64
-	PV         float64
+	PV          float64
 }
 
 // FitReferenceSphere fits the 4-coefficient piston/tilt/defocus model to the

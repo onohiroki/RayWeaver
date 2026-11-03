@@ -313,7 +313,7 @@ func decodeDispersionCode(code string) (nd, vd float64, ok bool) {
 	if !ok1 || !ok2 {
 		return 0, 0, false
 	}
-	return 1 + nd3/1000.0, vd3/10.0, true
+	return 1 + nd3/1000.0, vd3 / 10.0, true
 }
 
 // parseLeadingDigits returns the integer value of the leading run of digits,

@@ -118,4 +118,3 @@ func TestTriangulateDeterministic(t *testing.T) {
 		}
 	}
 }
-

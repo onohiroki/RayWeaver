@@ -64,8 +64,8 @@ func TestComputeGeometricMTF_TwoPoints_Symmetric(t *testing.T) {
 	// Zero crossing at ν = 1/(2D) = 2.5 lp/mm
 	D := 0.2 // total separation
 	pts := []IPoint{
-		{X: -D/2, Y: 0, OK: true, Area: 1, Intensity: 1},
-		{X: D/2, Y: 0, OK: true, Area: 1, Intensity: 1},
+		{X: -D / 2, Y: 0, OK: true, Area: 1, Intensity: 1},
+		{X: D / 2, Y: 0, OK: true, Area: 1, Intensity: 1},
 	}
 
 	// At zero crossing
@@ -124,8 +124,8 @@ func TestComputeGeometricMTF_Weighted(t *testing.T) {
 	// Unweighted centroid = 0, so phases at 50 lp/mm: 2π*50*0.1 = 10π → cos=1
 	// Use a frequency that gives non-trivial result
 	pts := []IPoint{
-		{X: -0.1, Y: 0, OK: true, Area: 1, Intensity: 1},  // w=1
-		{X: 0.1, Y: 0, OK: true, Area: 2, Intensity: 1},   // w=2
+		{X: -0.1, Y: 0, OK: true, Area: 1, Intensity: 1}, // w=1
+		{X: 0.1, Y: 0, OK: true, Area: 2, Intensity: 1},  // w=2
 	}
 	sag, tan := ComputeGeometricMTF(pts, 17.5) // 17.5 avoids 2π multiples
 	if sag >= 1 || sag <= 0 {

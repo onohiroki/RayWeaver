@@ -68,7 +68,7 @@ func DiffractionEfficiency(lambda, lambda0, thetaInc, dPhiDr float64, order int)
 	if math.Abs(x) < 1e-12 {
 		return 1
 	}
-	sinc := math.Sin(math.Pi*x) / (math.Pi*x)
+	sinc := math.Sin(math.Pi*x) / (math.Pi * x)
 	return sinc * sinc
 }
 
