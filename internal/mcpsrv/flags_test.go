@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/hiroki/rayweaver/internal/clispec"
 )
 
 // The MCP tools re-declare the CLI's flag surface one line per flag (floatFlag,
@@ -74,6 +76,20 @@ func TestMCPFlagsExistInCLI(t *testing.T) {
 		for _, m := range cliFlagConst.FindAllStringSubmatch(s, -1) {
 			if name, ok := consts[m[1]]; ok {
 				registered[name] = true
+			}
+		}
+	}
+
+	// Flags migrated to a clispec table no longer appear as fs.*("name")
+	// literals in cmd/rayweave; the table is the registration.
+	for _, spec := range clispec.All {
+		for _, f := range spec.Flags {
+			registered[f.Name] = true
+			if f.Short != "" {
+				registered[f.Short] = true
+			}
+			if f.Alias != "" {
+				registered[f.Alias] = true
 			}
 		}
 	}

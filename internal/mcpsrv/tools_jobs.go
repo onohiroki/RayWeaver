@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -19,18 +20,6 @@ type globalToolArgs struct {
 	GlassVariables     bool     `json:"glass_variables,omitempty" jsonschema:"auto-generate nd/vd variables for every refractive element"`
 	MemLimit           string   `json:"mem_limit,omitempty" jsonschema:"Go soft memory limit (e.g. 8GiB, -1 = unlimited)"`
 	GOGC               int      `json:"gogc,omitempty" jsonschema:"GC target percentage (0 = the compute default)"`
-}
-
-func (g globalToolArgs) args() []string {
-	args := g.settings.args()
-	args = boolPtrFlag(args, g.Stream, "--stream")
-	args = boolFlag(args, g.KeepInfeasible, "--keep-infeasible")
-	args = boolFlag(args, g.PowerSolve, "--power-solve")
-	args = listFlag(args, g.PowerSolveSurfaces, "--power-solve-surfaces")
-	args = boolFlag(args, g.GlassVariables, "--glass-variables")
-	args = strFlag(args, g.MemLimit, "--mem-limit")
-	args = intFlag(args, g.GOGC, "--gogc")
-	return args
 }
 
 type escapeIn struct {
@@ -58,7 +47,7 @@ func (s *server) addEscape() {
 		if err != nil {
 			return nil, JobStatus{}, err
 		}
-		args := in.globalToolArgs.args()
+		args := clispec.Args(clispec.Escape, in, nil)
 		meta, err := s.jobs.Start("escape", args, doc)
 		if err != nil {
 			return nil, JobStatus{}, err
@@ -79,11 +68,7 @@ func (s *server) addPSO() {
 		if err != nil {
 			return nil, JobStatus{}, err
 		}
-		args := in.globalToolArgs.args()
-		args = intFlag(args, in.SwarmSize, "--swarm-size")
-		args = intFlag(args, in.Iterations, "--pso-iterations")
-		args = floatFlag(args, in.ConstraintPenalty, "--constraint-penalty")
-		args = strFlag(args, in.Gbest, "--gbest")
+		args := clispec.Args(clispec.PSO, in, map[string]string{"iterations": "pso-iterations"})
 		meta, err := s.jobs.Start("pso", args, doc)
 		if err != nil {
 			return nil, JobStatus{}, err
