@@ -1028,13 +1028,14 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSetting
 				apertures := finalAperturesAt(factory, best.X)
 				for i := range input.Configs {
 					if s, ok := bestSurfaces[input.Configs[i].ID]; ok {
-						// Same prescription as the --save file: back-focus hard solve
-						// + sized auto apertures (see the single-config path). The
-						// solve focuses the best minimum's own pupil, matching the
+						// Same order as the save-file materialiser: size the
+						// apertures first, then run the back-focus hard solve so
+						// it focuses the sized beam that is shipped. The solve
+						// uses the best minimum's own pupil, matching the
 						// applyPupilVariablesMulti write-back below.
+						applyApertures(s, apertures[input.Configs[i].ID])
 						applySavedBackFocusSolve(*input, &input.Configs[i], s, gc,
 							pupilModelForXMulti(input, input.Optimization, best.X))
-						applyApertures(s, apertures[input.Configs[i].ID])
 						input.Configs[i].Surfaces = s
 					}
 				}
