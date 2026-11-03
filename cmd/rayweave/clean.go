@@ -5,13 +5,16 @@ import (
 	"flag"
 	"os"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
 func runClean(data []byte) {
 	fs := flag.NewFlagSet("clean", flag.ExitOnError)
-	verbose := fs.Bool("verbose", false, "print removed fields as JSONL to stderr")
-	fs.Parse(os.Args[2:])
+	opts := clispec.Bind(clispec.Clean, fs)
+	if err := opts.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
 
 	output := parseYAML[types.Output](data)
 
@@ -74,7 +77,7 @@ func runClean(data []byte) {
 
 	withOutputMetadata(&output.Input, "clean", subcmdArgs())
 
-	if *verbose {
+	if opts.Bool("verbose") {
 		for _, r := range removed {
 			line, _ := json.Marshal(r)
 			os.Stderr.Write(line)

@@ -59,12 +59,7 @@ func (s *server) addCam() {
 	addStage(s, "cam", "Cam solve",
 		"First-order cam solve: adjust the zoom group airspaces so every position hits its EFL with the focus on one fixed image plane.",
 		"cam", func(in camIn) []string {
-			args := in.settings.args()
-			args = floatFlag(args, in.Wavelength, "--wl")
-			args = intFlag(args, in.MaxIter, "--max-iter")
-			args = floatFlag(args, in.Tolerance, "--tolerance")
-			args = boolFlag(args, in.Verbose, "--verbose")
-			return args
+			return clispec.Args(clispec.Cam, in, map[string]string{"wavelength": "wl"})
 		})
 }
 
@@ -137,7 +132,7 @@ type tmmIn struct {
 func (s *server) addTMM() {
 	addStage(s, "tmm", "Thin-film coating analysis",
 		"Transfer-matrix analysis of the document's coating stacks: reflectance/transmittance per wavelength and angle.",
-		"tmm", func(in tmmIn) []string { return in.settings.args() })
+		"tmm", func(in tmmIn) []string { return clispec.Args(clispec.TMM, in, nil) })
 }
 
 type scaleIn struct {
@@ -150,9 +145,7 @@ func (s *server) addScale() {
 	addStage(s, "scale", "Scale to a target EFL",
 		"Scale every length in the system so its effective focal length matches the target.",
 		"scale", func(in scaleIn) []string {
-			args := in.settings.args()
-			args = floatFlag(args, in.EFL, "--efl")
-			return args
+			return clispec.Args(clispec.Scale, in, nil)
 		})
 }
 
@@ -279,7 +272,7 @@ func (s *server) addClean() {
 	addStage(s, "clean", "Strip results",
 		"Strip every calculation result from a pipeline document, leaving a loadable input. Use it before re-running a long search on a document that already carries results.",
 		"clean", func(in cleanIn) []string {
-			return boolFlag(nil, in.Verbose, "--verbose")
+			return clispec.Args(clispec.Clean, in, nil)
 		})
 }
 

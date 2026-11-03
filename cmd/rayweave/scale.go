@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -18,33 +19,29 @@ import (
 // balance.
 func runScale(data []byte) {
 	fs := flag.NewFlagSet("scale", flag.ExitOnError)
-	eflTarget := fs.Float64("efl", 0, "target effective focal length (mm)")
-	configFlag := fs.String("config", "", "select config by id (multi-config mode); its EFL sets the scale for all configs")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	fs.Parse(os.Args[2:])
+	opts := clispec.Bind(clispec.Scale, fs)
+	if err := opts.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
+	configFlag := opts.String("config")
 
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
 
 	// Target EFL: --efl (flag) wins over scale.efl (YAML).
-	target := *eflTarget
-	if !flagWasSet(fs, "efl") && input.Scale != nil && input.Scale.EFL > 0 {
+	target := opts.Float("efl")
+	if !opts.Set("efl") && input.Scale != nil && input.Scale.EFL > 0 {
 		target = input.Scale.EFL
 	}
 	if target <= 0 {
 		errExitf("Error: --efl TARGET (mm) is required (or set scale.efl in the input YAML)")
 	}
-	if flagWasSet(fs, "efl") {
-		// Principle 3: echo the effective value back into the output section.
-		if input.Scale == nil {
-			input.Scale = &types.ScaleConfig{}
-		}
-		input.Scale.EFL = target
-	}
+	// Principle 3: the table echoes the given --efl into scale.efl.
+	opts.WriteBack(&input)
 
-	gc, _ := openGlass(&input, *glassDir)
+	gc, _ := openGlass(&input, opts.String("glass-dir"))
 
-	refSurfaces := configSurfaces(input.Configs, configFlag)
+	refSurfaces := configSurfaces(input.Configs, &configFlag)
 	if len(refSurfaces) == 0 {
 		errExitf("Error: no surfaces defined")
 	}

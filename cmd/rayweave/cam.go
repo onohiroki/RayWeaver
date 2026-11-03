@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/hiroki/rayweaver/internal/cam"
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -23,22 +24,19 @@ import (
 // reported in a cam_result section.
 func runCam(data []byte) {
 	fs := flag.NewFlagSet("cam", flag.ExitOnError)
-	maxIter := fs.Int("max-iter", 0, "maximum solver iterations (default: cam.max_iterations, else 50)")
-	tolerance := fs.Float64("tolerance", 0, "convergence tolerance on the residuals in mm (default: cam.tolerance, else 1e-9)")
-	configFlag := fs.String("config", "", "solve only this config by id (default: every active config)")
-	wlFlag := fs.Float64("wl", 0, "reference wavelength in mm for the paraxial solve")
-	verbose := fs.Bool("verbose", false, "print one line per accepted solver iteration to stderr")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	fs.Parse(os.Args[2:])
+	flags := clispec.Bind(clispec.Cam, fs)
+	if err := flags.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
 
-	if flagWasSet(fs, "max-iter") && *maxIter <= 0 {
-		errExitf("Error: --max-iter must be positive (got %d)", *maxIter)
+	if flags.Set("max-iter") && flags.Int("max-iter") <= 0 {
+		errExitf("Error: --max-iter must be positive (got %d)", flags.Int("max-iter"))
 	}
-	if flagWasSet(fs, "tolerance") && *tolerance <= 0 {
-		errExitf("Error: --tolerance must be positive (got %g)", *tolerance)
+	if flags.Set("tolerance") && flags.Float("tolerance") <= 0 {
+		errExitf("Error: --tolerance must be positive (got %g)", flags.Float("tolerance"))
 	}
-	if flagWasSet(fs, "wl") && *wlFlag <= 0 {
-		errExitf("Error: --wl must be positive (got %g)", *wlFlag)
+	if flags.Set("wl") && flags.Float("wl") <= 0 {
+		errExitf("Error: --wl must be positive (got %g)", flags.Float("wl"))
 	}
 
 	input := parseYAML[types.Input](data)
@@ -48,19 +46,19 @@ func runCam(data []byte) {
 	if input.Cam == nil || len(input.Cam.Surfaces) == 0 {
 		errExitf("Error: 'cam.surfaces' is required (the surface IDs whose following airspace is a cam variable)")
 	}
+	// Write back the effective settings the table declares (only the given
+	// flags: the reference wavelength, solver iterations and tolerance).
+	flags.WriteBack(&input)
+	configFlag := flags.String("config")
 
 	// Reference wavelength: --wl wins over chief.reference_wavelength, with the
 	// built-in default last; a flag-set value is written back (CLI/YAML rule).
 	wavelength := effectiveReferenceWavelength(input.Chief)
-	if flagWasSet(fs, "wl") {
-		wavelength = *wlFlag
-		if input.Chief == nil {
-			input.Chief = &types.ChiefInput{}
-		}
-		input.Chief.ReferenceWavelength = wavelength
+	if flags.Set("wl") {
+		wavelength = flags.Float("wl")
 	}
 
-	gc, _ := openGlass(&input, *glassDir)
+	gc, _ := openGlass(&input, flags.String("glass-dir"))
 
 	// Targets: every solved position needs one.
 	if len(input.Cam.Targets) == 0 {
@@ -82,8 +80,8 @@ func runCam(data []byte) {
 
 	// Which positions: the --config selector, else every active one.
 	var sel []int
-	if *configFlag != "" {
-		idx, err := resolveConfig(input.Configs, *configFlag)
+	if configFlag != "" {
+		idx, err := resolveConfig(input.Configs, configFlag)
 		if idx < 0 {
 			errExitf("Error: %s", err)
 		}
@@ -147,17 +145,15 @@ func runCam(data []byte) {
 	if maxIterations <= 0 {
 		maxIterations = 50
 	}
-	if flagWasSet(fs, "max-iter") {
-		maxIterations = *maxIter
-		input.Cam.MaxIterations = maxIterations
+	if flags.Set("max-iter") {
+		maxIterations = flags.Int("max-iter")
 	}
 	tol := input.Cam.Tolerance
 	if tol <= 0 {
 		tol = 1e-9
 	}
-	if flagWasSet(fs, "tolerance") {
-		tol = *tolerance
-		input.Cam.Tolerance = tol
+	if flags.Set("tolerance") {
+		tol = flags.Float("tolerance")
 	}
 	input.Cam.ImagePlane = imagePlane
 	input.Cam.ImagePlaneZ = imagePlaneZ
@@ -179,7 +175,7 @@ func runCam(data []byte) {
 		Tolerance:      tol,
 		MotionWeight:   input.Cam.MotionWeight,
 	}
-	if *verbose {
+	if flags.Bool("verbose") {
 		opts.Logf = func(format string, args ...any) { errOut(format, args...) }
 	}
 
