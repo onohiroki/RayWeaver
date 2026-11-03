@@ -20,7 +20,8 @@ rayweave psf [--ref-surface N] [--psf-grid 64] [--psf-width W]
              [--converge-tol T] [--max-freq N] [--yaml FILE] [--csv FILE] < system.yaml
 ```
 
-It reads standard system YAML (a `chief` section is required for the fields),
+It reads standard system YAML (a `chief` section is required for the stop
+surface and the fallback fields),
 and writes pipeline-compatible YAML with a lightweight `psf_results[]` summary
 appended. The full intensity grids are written to `--yaml` / `--csv` files so
 the pipeline stream stays small.
@@ -47,7 +48,7 @@ single flat exit pupil would break down.
 | `--psf-grid N` | image-plane pixels per side (default 64) |
 | `--psf-width W` | evaluation half-width in mm (default: auto from the Airy disk and the geometric spot) |
 | `--num-rays N` | pupil grid rays (default 400 ≈ 20×20 polar) |
-| `--fields I1,I2,...` | field indices to compute (default: all fields in the `chief` section) |
+| `--fields I1,I2,...` | field indices to compute (default: all fields of the selected configuration) |
 | `--wavelengths W1,...` | wavelengths in mm (default: selected config wavelengths, else reference wavelength) |
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` (unpolarised average) |
 | `--spectral S` | polychromatic ("white") PSF: `D65` (default when given) \| `FLAT` (YAML `psf.spectral_curve`; without it the PSF is monochromatic at the selected wavelengths) |
@@ -91,10 +92,14 @@ oblique-incidence and large-field polarization effects are included.
 
 ## Input
 
-The system must carry a `chief` section so the fields (and optionally the stop
-surface) are known. Without an explicit stop, each field's pupil is centred on
-the **dynamic pupil** (the per-field chief-ray crossing), the same convention as
-`chief`.
+The system must carry a `chief` section so the stop surface (and the fallback
+fields) are known. The analysed fields come from the `--config`-selected
+position, then `configs[0].fields`, then the top-level `chief.fields` /
+`chief.field_angles` — the same resolution order as `chief` and `vignette`
+(see [chief.md](chief.md)), so the fields always belong to the position whose
+surfaces are analysed. Without an explicit stop, each field's pupil is centred
+on the **dynamic pupil** (the per-field chief-ray crossing), the same convention
+as `chief`.
 
 ```yaml
 chief:

@@ -52,7 +52,10 @@ func runWavefront(data []byte) {
 	surfaces := surfacesFor(input.Configs, configFlag)
 	system := types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface}
 
-	fields := chiefFieldDefs(input)
+	// Field definitions: the --config-selected position supplies its own
+	// fields, then configs[0], then the top-level chief section — the same
+	// resolution order as chief, vignette, asphere and list fields.
+	fields := resolveConfigFieldDefs(input, configFlag)
 	selected := selectedFieldIndices(fields, nil, *fieldsFlag)
 	if input.Wavefront != nil && *fieldsFlag == "" && len(input.Wavefront.Fields) > 0 {
 		selected = input.Wavefront.Fields

@@ -208,22 +208,18 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 		}
 		cfgIdx = i
 	}
-	var cfgFields []types.FieldItem
+	// Field definitions: the --config-selected position supplies its own
+	// fields, then configs[0], then the top-level chief section — the same
+	// resolution order as chief, vignette, asphere and list fields. The
+	// back-focus solve below uses this same list.
+	fields := resolveConfigFieldDefs(*input, &fl.configFlag)
 	var cfgWLs []types.WavelengthItem
 	if len(input.Configs) > 0 {
-		cfgFields = input.Configs[cfgIdx].Fields
 		cfgWLs = input.Configs[cfgIdx].Wavelengths
 	}
+	cfgFields := fieldItemsFromDefs(fields)
 	bfSolve := backFocusSolveOf(input)
-	// A hand-written single-config document carries its fields in chief.fields,
-	// not configs[].fields. The all-field back-focus solve needs the field list,
-	// so fall back to the chief fields rather than silently solving a zero-field
-	// system (which no-ops and leaves the file plane unchanged).
-	if len(cfgFields) == 0 {
-		cfgFields = fieldItemsFromDefs(chiefFieldDefs(*input))
-	}
 
-	fields := chiefFieldDefs(*input)
 	selected := focusFieldIndices(fields, y.fields, fl.fields)
 	fields = applySelectedFields(fields, selected)
 	if len(fields) == 0 {

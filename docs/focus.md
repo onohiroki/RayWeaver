@@ -81,6 +81,12 @@ focus, so the spot RMS there is not necessarily the geometric minimum.
 
 ## CLI / YAML
 
+The analysed fields come from the `--config`-selected position, then
+`configs[0].fields`, then the top-level `chief.fields` / `chief.field_angles` —
+the same resolution order as `chief`, `vignette`, `psf` and `wavefront` (see
+[chief.md](chief.md)). The `--config` selector therefore changes the field list
+and the surfaces together.
+
 Every flag mirrors the `focus:` section (CLI wins; the effective values are
 written back). The section is split to match the sub-subcommands:
 
@@ -208,10 +214,9 @@ with one sagittal/tangential column pair per frequency). See `docs/list.md`.
 ## Notes
 
 - The `all` plane needs a field list for the uniform wavefront solve. It uses
-  the config's `configs[].fields` when present and otherwise falls back to
-  `chief.fields`, so a hand-written single-config document (fields only in
-  `chief`) is solved rather than silently left at the file plane (the same
-  fallback as `psf --focus-plane all`). It is sampled at the command's
+  the same fields the comparison analyses (the `--config`-selected position,
+  then `configs[0].fields`, then `chief.fields`), so the solved plane and the
+  reported metrics belong to one position. It is sampled at the command's
   `--num-rays` (default 400), matching the plane evaluation — the solve's
   coherent-peak objective is sampling-sensitive for strongly aberrated fields.
 - Best-focus planes are per **field** (not per wavelength): the shift listed on

@@ -60,6 +60,12 @@ func runPSF(data []byte) {
 	surfaces := surfacesFor(input.Configs, configFlag)
 	system := types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface}
 
+	// Field definitions: the --config-selected position supplies its own
+	// fields, then configs[0], then the top-level chief section — the same
+	// resolution order as chief, vignette, asphere and list fields. The
+	// back-focus solve below uses this same list.
+	fields := resolveConfigFieldDefs(input, configFlag)
+
 	// --focus-plane all: move the image plane to the single all-field
 	// best-focus position — the uniform-weighted wavefront best focus, the same
 	// solve the escape save applies — so the fixed-plane PSF/MTF is evaluated
@@ -74,17 +80,11 @@ func runPSF(data []byte) {
 			}
 			cfgIdx = i
 		}
-		var cfgFields []types.FieldItem
 		var cfgWLs []types.WavelengthItem
 		if len(input.Configs) > 0 {
-			cfgFields = input.Configs[cfgIdx].Fields
 			cfgWLs = input.Configs[cfgIdx].Wavelengths
 		}
-		// Hand-written single-config documents carry their fields in
-		// chief.fields; fall back so the solve is not a silent no-op.
-		if len(cfgFields) == 0 {
-			cfgFields = fieldItemsFromDefs(chiefFieldDefs(input))
-		}
+		cfgFields := fieldItemsFromDefs(fields)
 		before := append([]types.Surface(nil), surfaces...)
 		// Sample the back-focus solve with the same pupil grid the PSF/MTF is
 		// evaluated at (CLI > YAML > psf.Compute's default); the solve's
@@ -116,7 +116,6 @@ func runPSF(data []byte) {
 			maxThicknessDelta(before, surfaces))
 	}
 
-	fields := chiefFieldDefs(input)
 	selected := selectedFieldIndices(fields, input.PSF, *fieldsFlag)
 	fields = applySelectedFields(fields, selected)
 	if len(fields) == 0 {

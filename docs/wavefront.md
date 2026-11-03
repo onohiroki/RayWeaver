@@ -29,7 +29,7 @@ rayweave wavefront [--ref-surface N] [--num-rays 400] [--fields I1,I2,...]
              [--yaml FILE] [--csv FILE] < pipeline.yaml
 ```
 
-It reads pipeline YAML (a `chief` section is required for the fields) and writes
+It reads pipeline YAML (a `chief` section is required) and writes
 pipeline-compatible YAML with a lightweight `wavefront_result` appended
 (coefficients only — the maps go to `--yaml`/`--csv` files).
 
@@ -57,7 +57,7 @@ yields the standard wavefront-aberration definition (the statistics
 |---|---|
 | `--ref-surface N` | reference surface ID for wavefront sampling (default: the last optical surface) |
 | `--num-rays N` | entrance-pupil grid rays per field (default 400) |
-| `--fields I1,I2,...` | field indices to analyse (default: all chief fields) |
+| `--fields I1,I2,...` | field indices to analyse (default: all fields of the selected configuration) |
 | `--wavelengths W1,...` | wavelengths in mm (default: selected config wavelengths, else reference wavelength) |
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` |
 | `--zernike-order N` | highest Fringe Zernike index to fit (default 15; clamped to **7..37** — the Zemax/Fringe index range, with terms 1–6 already removed by the paraboloid + best-fit-sphere fit, so only 7..N enter the basis) |
@@ -71,6 +71,14 @@ yields the standard wavefront-aberration definition (the statistics
 | `--csv FILE` | write a gnuplot `x,y,opd` wavefront map to FILE, one index-suffixed file per result |
 | `--config ID` | select config by id (multi-config mode) |
 | `--glass-dir DIR` | AGF glass catalog directory |
+
+## Fields
+
+The analysed fields come from the `--config`-selected position, then
+`configs[0].fields`, then the top-level `chief.fields` / `chief.field_angles` —
+the same resolution order as `chief`, `vignette` and `psf` (see
+[chief.md](chief.md)). `--fields` then indexes that list, and `wavefront.fields`
+supplies the default selection when the flag is absent.
 
 ## Input YAML — `wavefront` section
 
