@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/hiroki/rayweaver/internal/clispec"
 )
 
 // The help text is hand-written (help.go), so a flag can drift out of it in two
@@ -82,6 +84,20 @@ func TestHelpDocumentsEveryFlag(t *testing.T) {
 		}
 		for _, m := range flagConstName.FindAllStringSubmatch(s, -1) {
 			add(consts[m[1]])
+		}
+	}
+
+	// Flags migrated to a clispec table no longer appear as fs.*("name")
+	// literals in the source; the table is the registration.
+	for _, spec := range clispec.All {
+		for _, f := range spec.Flags {
+			add(f.Name)
+			if f.Short != "" {
+				add(f.Short)
+			}
+			if f.Alias != "" {
+				add(f.Alias)
+			}
 		}
 	}
 

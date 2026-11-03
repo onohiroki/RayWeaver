@@ -2,13 +2,12 @@ package main
 
 import (
 	"flag"
-	"fmt"
 	"math"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/hiroki/rayweaver/internal/chief"
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
@@ -18,50 +17,34 @@ import (
 
 func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
-	clearAperture := fs.Bool("clear-aperture", false, "trace grid rays (all fields) through every surface, compute the maximum radial extent (max |Y|,|X|) at each surface, and set auto_aperture: true surfaces' diameter = 2x that extent + margin")
-	clearApertureMarginMM := fs.Float64("clear-aperture-margin-mm", 0.2, "with --clear-aperture, extra clearance added to each side of the beam footprint (mm)")
-	clearApertureRays := fs.Int("clear-aperture-rays", 0, "ray count for --clear-aperture beam tracing (0 = use chief.num_rays); use a dense grid for accurate footprints")
-	marginalRays := fs.Bool("marginal-rays", false, "from each field's grid points find the rays with max/min image Y (and X for off-axis fields) and append them as marginal rays to the output 'rays' section for piping into trace/plot")
-	preserveRays := fs.Bool("preserve-rays", false, "with --clear-aperture, keep the existing 'rays' section instead of replacing it with chief rays, and omit chief_rays from the output (aperture adjustment only)")
-	passThrough := fs.Int("pass-through", 0, "constrain chief ray to pass through (0,0,0) center of surface N (overrides YAML pass_through.surface)")
-	rayFan := fs.Bool("ray-fan", false, "compute ray fan (transverse aberration) for each field")
-	fanPlane := fs.String("fan-plane", "", "fan plane selection: yz | xz (implies --ray-fan)")
-	var fanRotation floatList
-	fs.Var(&fanRotation, "fan-rotation", "fan plane Z-rotation angle in degrees (implies --ray-fan; 0=XZ, 90=YZ; repeatable or space-separated)")
-	wlFlag := fs.Float64("wl", types.DefaultWavelength, "wavelength (mm) for grid ray tracing")
-	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	pupilAxialPos := fs.Float64("pupil-model-axial-position", 0, "virtual entrance pupil axial position Z (mm); activates virtual pupil mode")
-	pupilDiameter := fs.Float64("pupil-model-diameter", 0, "virtual entrance pupil diameter (mm); activates virtual pupil mode")
-	pupilMode := fs.String("pupil-model-mode", "virtual_entrance_pupil", "pupil model mode: virtual_entrance_pupil")
-	epd := fs.Float64("epd", 0, "shorthand for --pupil-model-diameter (mm)")
-	fnum := fs.Float64("fnum", 0, "F-number; sets pupil diameter = EFL / FNUM")
-	epz := fs.Float64("epz", 0, "shorthand for virtual entrance pupil at Z mm (activates virtual_entrance_pupil mode)")
-	rayDefinition := fs.String("chief-ray", "", "chief-ray definition: entrance_pupil_centre | centroid | vignetting_centre (empty = chief.chief_ray_definition)")
-	fs.Parse(expandFanRotationArgs(os.Args[2:]))
-	wlSet := flagWasSet(fs, "wl")
+	opts := clispec.Bind(clispec.Chief, fs)
+	if err := opts.Parse(expandFanRotationArgs(os.Args[2:])); err != nil {
+		errExitf("Error: %v", err)
+	}
 
-	if *fanPlane != "" && len(fanRotation) > 0 {
+	fanPlane := opts.String("fan-plane")
+	fanRotation := opts.Floats("fan-rotation")
+	if fanPlane != "" && len(fanRotation) > 0 {
 		errExitf("Error: --fan-plane and --fan-rotation are mutually exclusive")
 	}
-	if *fanPlane != "" && *fanPlane != "yz" && *fanPlane != "xz" {
-		errExitf("Error: --fan-plane must be 'yz' or 'xz' (got %q)", *fanPlane)
+	if fanPlane != "" && fanPlane != "yz" && fanPlane != "xz" {
+		errExitf("Error: --fan-plane must be 'yz' or 'xz' (got %q)", fanPlane)
 	}
 
-	epdSet := flagWasSet(fs, "epd")
-	fnumSet := flagWasSet(fs, "fnum")
-	epzSet := flagWasSet(fs, "epz")
-	if epdSet && flagWasSet(fs, "pupil-model-diameter") {
+	epdSet := opts.Set("epd")
+	fnumSet := opts.Set("fnum")
+	epzSet := opts.Set("epz")
+	if opts.Given("epd") && opts.Given("pupil-model-diameter") {
 		errExitf("Error: --epd and --pupil-model-diameter are mutually exclusive")
 	}
-	if fnumSet && (epdSet || flagWasSet(fs, "pupil-model-diameter")) {
+	if fnumSet && epdSet {
 		errExitf("Error: --fnum and --epd/--pupil-model-diameter are mutually exclusive")
 	}
-	if epzSet && flagWasSet(fs, "pupil-model-axial-position") {
+	if opts.Given("epz") && opts.Given("pupil-model-axial-position") {
 		errExitf("Error: --epz and --pupil-model-axial-position are mutually exclusive")
 	}
-	if fnumSet && *fnum <= 0 {
-		errExitf("Error: --fnum must be positive (got %g)", *fnum)
+	if fnumSet && opts.Float("fnum") <= 0 {
+		errExitf("Error: --fnum must be positive (got %g)", opts.Float("fnum"))
 	}
 
 	input := parseYAML[types.Input](data)
@@ -69,22 +52,28 @@ func runChief(data []byte) {
 	if input.Chief == nil {
 		errExitf("Error: 'chief' section is required")
 	}
+	// Write back the settings the table declares (only the flags that were
+	// given; the reference wavelength below is resolved separately because its
+	// effective value depends on the document).
+	opts.WriteBack(&input)
 
 	pt := input.Chief.PassThrough
-	if *passThrough > 0 {
+	if opts.Int("pass-through") > 0 {
 		if pt == nil {
-			pt = &types.PassThroughTarget{Surface: *passThrough, Coordinate: types.Vec3{}}
+			pt = &types.PassThroughTarget{Surface: opts.Int("pass-through"), Coordinate: types.Vec3{}}
 		} else {
-			pt.Surface = *passThrough
+			pt.Surface = opts.Int("pass-through")
 		}
-		input.Chief.StopSurface = *passThrough
+		input.Chief.StopSurface = opts.Int("pass-through")
 	}
+
+	configFlag := opts.String("config")
 
 	// Resolve field definitions: the config selected by --config supplies its
 	// own fields (a zoom position carries its own field angles / target image
 	// heights), falling back to configs[0] and then the top-level chief section
 	// — the same order as trace / psf / focus / asphere.
-	fields := resolveConfigFieldDefs(input, configFlag)
+	fields := resolveConfigFieldDefs(input, &configFlag)
 	if len(fields) == 0 {
 		errExitf("Error: 'fields' or 'field_angles' is required")
 	}
@@ -92,19 +81,19 @@ func runChief(data []byte) {
 	// Reference wavelength: --wl wins over chief.reference_wavelength, with
 	// the built-in default as the final fallback. Always write the effective
 	// value so every pipeline stage sees the same reference.
-	wavelength := *wlFlag
-	if !wlSet && input.Chief.ReferenceWavelength > 0 {
+	wavelength := opts.Float("wl")
+	if !opts.Set("wl") && input.Chief.ReferenceWavelength > 0 {
 		wavelength = input.Chief.ReferenceWavelength
 	}
 	if wavelength <= 0 {
 		wavelength = types.DefaultWavelength
 	}
 	input.Chief.ReferenceWavelength = wavelength
-	configWavelengths := configWavelengthValues(input.Configs, configFlag)
+	configWavelengths := configWavelengthValues(input.Configs, &configFlag)
 
-	gc, _ := openGlass(&input, *glassDir)
+	gc, _ := openGlass(&input, opts.String("glass-dir"))
 
-	surfaces := configSurfaces(input.Configs, configFlag)
+	surfaces := configSurfaces(input.Configs, &configFlag)
 	surface.Precompute(surfaces)
 
 	selectedSys := input.System
@@ -120,30 +109,30 @@ func runChief(data []byte) {
 	// --epz sets the axial position and activates virtual mode; --epd sets the
 	// diameter; --fnum sets the diameter from the paraxial EFL (EPD = EFL/N).
 	if epdSet || fnumSet || epzSet ||
-		flagWasSet(fs, "pupil-model-axial-position") || flagWasSet(fs, "pupil-model-diameter") {
+		opts.Given("pupil-model-axial-position") || opts.Given("pupil-model-diameter") {
 		if input.Chief.PupilModel == nil {
 			input.Chief.PupilModel = &types.PupilModelConfig{}
 		}
 		if epzSet {
 			input.Chief.PupilModel.Mode = "virtual_entrance_pupil"
-			input.Chief.PupilModel.AxialPosition = *epz
+			input.Chief.PupilModel.AxialPosition = opts.Float("epz")
 		} else {
-			input.Chief.PupilModel.Mode = *pupilMode
-			if flagWasSet(fs, "pupil-model-axial-position") {
-				input.Chief.PupilModel.AxialPosition = *pupilAxialPos
+			input.Chief.PupilModel.Mode = opts.String("pupil-model-mode")
+			if opts.Given("pupil-model-axial-position") {
+				input.Chief.PupilModel.AxialPosition = opts.Float("epz")
 			}
 		}
 		switch {
 		case epdSet:
-			input.Chief.PupilModel.Diameter = *epd
+			input.Chief.PupilModel.Diameter = opts.Float("epd")
 		case fnumSet:
 			pResult := paraxial.Compute(selectedSys, wavelength, gc, 0, nil)
 			if pResult.FocalLength == 0 {
 				errExitf("Error: cannot compute EFL for --fnum conversion")
 			}
-			input.Chief.PupilModel.Diameter = math.Abs(pResult.FocalLength) / *fnum
-		case flagWasSet(fs, "pupil-model-diameter"):
-			input.Chief.PupilModel.Diameter = *pupilDiameter
+			input.Chief.PupilModel.Diameter = math.Abs(pResult.FocalLength) / opts.Float("fnum")
+		case opts.Given("pupil-model-diameter"):
+			input.Chief.PupilModel.Diameter = opts.Float("epd")
 		}
 	}
 	if input.Chief.PupilModel != nil &&
@@ -157,18 +146,15 @@ func runChief(data []byte) {
 	// system cannot honour — a prescribed-pupil definition without a stop or a
 	// virtual pupil model, or an unknown name — is an error rather than a
 	// silent fallback, so a document never means two different things.
-	if flagWasSet(fs, "chief-ray") {
-		input.Chief.ChiefRayDefinition = *rayDefinition
-	}
 	if err := chief.ValidateRayDefinition(input.Chief.StopSurface, input.Chief.PupilModel, input.Chief.ChiefRayDefinition); err != nil {
 		errExitf("Error: %v", err)
 	}
 
-	fanCfg := resolveRayFanConfig(*rayFan, *fanPlane, fanRotation)
+	fanCfg := resolveRayFanConfig(opts.Bool("ray-fan"), fanPlane, fanRotation)
 
 	// effective dumpMap: --clear-aperture or --marginal-rays implies grid_points
 	dumpMap := input.Chief.DumpMap
-	if *clearAperture || *marginalRays {
+	if opts.Bool("clear-aperture") || opts.Bool("marginal-rays") {
 		dumpMap = true
 	}
 
@@ -193,7 +179,7 @@ func runChief(data []byte) {
 
 	// --- default clear-aperture: size unset-diameter surfaces ---
 	{
-		margin := *clearApertureMarginMM
+		margin := opts.Float("clear-aperture-margin-mm")
 		envEngine := ray.NewEngine(gc, nil)
 		surface.Precompute(surfaces)
 		path := dls.BuildPath(surfaces)
@@ -215,11 +201,11 @@ func runChief(data []byte) {
 	}
 
 	// --- --clear-aperture: scale grid points by entrance-pupil-based radius and set Diameter ---
-	if *clearAperture && len(results) > 0 {
-		if *clearApertureRays > 0 && *clearApertureRays != input.Chief.NumRays {
+	if opts.Bool("clear-aperture") && len(results) > 0 {
+		if opts.Int("clear-aperture-rays") > 0 && opts.Int("clear-aperture-rays") != input.Chief.NumRays {
 			// Re-trace with a denser grid so the beam footprint is accurate.
 			results = chief.DetermineChiefRaysGridMode(
-				selectedSys, fields, input.Chief.ReferenceSurface, *clearApertureRays,
+				selectedSys, fields, input.Chief.ReferenceSurface, opts.Int("clear-aperture-rays"),
 				gc, pol, wavelength, dumpMap, input.Chief.GridType, pt, fanCfg, configWavelengths,
 				input.Chief.PupilModel, input.Chief.NumRings, input.Chief.NumSpokes,
 				input.Chief.ChiefRayDefinition,
@@ -239,7 +225,7 @@ func runChief(data []byte) {
 				continue
 			}
 			if e := envelope[surfaces[i].ID]; e > 0 {
-				surfaces[i].Diameter = e*2 + 2**clearApertureMarginMM
+				surfaces[i].Diameter = e*2 + 2*opts.Float("clear-aperture-margin-mm")
 			}
 		}
 	}
@@ -272,7 +258,7 @@ func runChief(data []byte) {
 	// the polarization, so the output stays pipe-compatible without duplicating
 	// every chief ray.
 	rayList := []types.Ray(nil)
-	if !*preserveRays {
+	if !opts.Bool("preserve-rays") {
 		input.Rays = &types.RayInput{
 			Polarization: pol,
 			Rays:         rayList,
@@ -280,7 +266,7 @@ func runChief(data []byte) {
 	}
 
 	// --- --marginal-rays: extract marginal rays from grid points ---
-	if *marginalRays && len(results) > 0 {
+	if opts.Bool("marginal-rays") && len(results) > 0 {
 		engine := ray.NewEngine(gc, nil)
 		input.Rays.Rays = append(input.Rays.Rays, extractMarginalRays(results, input.Chief.StopSurface, engine, wavelength, surfaces, pol)...)
 	}
@@ -289,7 +275,7 @@ func runChief(data []byte) {
 		Input:     input,
 		ChiefRays: chiefRays,
 	}
-	if *preserveRays {
+	if opts.Bool("preserve-rays") {
 		output.ChiefRays = nil
 	}
 	withOutputMetadata(&output.Input, "chief", subcmdArgs())
@@ -323,22 +309,6 @@ func extractMarginalRays(results []chief.Result, stopSurfaceID int, engine *ray.
 		rays = append(rays, chief.MarginalRays(fi, r, stopSurfaceID, surfaces, engine, wavelength, path, pol)...)
 	}
 	return rays
-}
-
-// floatList is a repeatable float64 flag value.
-type floatList []float64
-
-func (f *floatList) String() string {
-	return fmt.Sprint([]float64(*f))
-}
-
-func (f *floatList) Set(v string) error {
-	fv, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return err
-	}
-	*f = append(*f, fv)
-	return nil
 }
 
 // expandFanRotationArgs rewrites "--fan-rotation 0 45 90" into

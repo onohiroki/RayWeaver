@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -274,26 +275,7 @@ func (s *server) addChief() {
 	addStage(s, "chief", "Chief rays",
 		"Determine the chief ray of each field and trace the pupil grid: fields, chief_rays[] with per-field spot statistics, and optionally the ray fan and clear apertures. This is the usual first stage before trace or plot.",
 		"chief", func(in chiefIn) []string {
-			args := in.settings.args()
-			args = floatFlag(args, in.Wavelength, "--wl")
-			args = intFlag(args, in.PassThrough, "--pass-through")
-			args = boolFlag(args, in.ClearAperture, "--clear-aperture")
-			args = floatFlag(args, in.ClearApertureMargin, "--clear-aperture-margin-mm")
-			args = boolFlag(args, in.MarginalRays, "--marginal-rays")
-			args = boolFlag(args, in.RayFan, "--ray-fan")
-			args = strFlag(args, in.FanPlane, "--fan-plane")
-			if len(in.FanRotation) > 0 {
-				for _, r := range in.FanRotation {
-					args = append(args, "--fan-rotation", fmt.Sprintf("%g", r))
-				}
-			}
-			args = floatFlag(args, in.EPD, "--epd")
-			args = floatFlag(args, in.FNum, "--fnum")
-			args = floatFlag(args, in.EPZ, "--epz")
-			args = floatFlag(args, in.PupilAxial, "--pupil-model-axial-position")
-			args = floatFlag(args, in.PupilDiameter, "--pupil-model-diameter")
-			args = strFlag(args, in.PupilMode, "--pupil-model-mode")
-			return args
+			return clispec.Args(clispec.Chief, in, map[string]string{"wavelength": "wl"})
 		})
 }
 
