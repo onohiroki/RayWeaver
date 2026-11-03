@@ -273,8 +273,10 @@ type optimizeIn struct {
 	PowerSolve         bool     `json:"power_solve,omitempty" jsonschema:"hold each lens element's thin-lens power while only the glass dispersions are free"`
 	PowerSolveSurfaces []string `json:"power_solve_surfaces,omitempty" jsonschema:"surface ids whose curvature is recomputed to hold the element power"`
 	GlassVariables     bool     `json:"glass_variables,omitempty" jsonschema:"auto-generate nd/vd variables for every refractive element"`
-	MemLimit           string   `json:"mem_limit,omitempty" jsonschema:"Go soft memory limit (e.g. 8GiB, -1 = unlimited)"`
-	GOGC               int      `json:"gogc,omitempty" jsonschema:"GC target percentage (0 = the compute default)"`
+	// mem_limit was advertised here but the optimize CLI has never accepted it
+	// (only escape/pso do), so the argument was silently ignored; the field is
+	// gone rather than lying about it.
+	GOGC int `json:"gogc,omitempty" jsonschema:"GC target percentage (0 = the compute default)"`
 }
 
 func (s *server) addOptimize() {
@@ -302,20 +304,9 @@ func buildOptimize(in optimizeIn) ([]string, error) {
 		if in.Config != "" {
 			return nil, fmt.Errorf("config is not supported by optimize snap (it operates on the document's own nd/vd variables)")
 		}
-		var args []string
-		if in.GlassDir != "" {
-			args = append(args, "--glass-dir", in.GlassDir)
-		}
-		return args, nil
+		return clispec.Args(clispec.OptimizeSnap, in, nil), nil
 	}
-	args := in.settings.args()
-	args = listFlag(args, in.ExcludeParam, "--exclude-param")
-	args = boolFlag(args, in.PowerSolve, "--power-solve")
-	args = listFlag(args, in.PowerSolveSurfaces, "--power-solve-surfaces")
-	args = boolFlag(args, in.GlassVariables, "--glass-variables")
-	args = strFlag(args, in.MemLimit, "--mem-limit")
-	args = intFlag(args, in.GOGC, "--gogc")
-	return args, nil
+	return clispec.Args(clispec.Optimize, in, nil), nil
 }
 
 // ---- plot -----------------------------------------------------------------
