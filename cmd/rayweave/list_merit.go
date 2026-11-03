@@ -197,7 +197,7 @@ func listMerit(input types.Input, output types.Output, format string) {
 	default: // "table"
 		// Group terms by config for display.
 		termsByConfig := groupMeritTermsByConfig(terms)
-		for _, cfgID := range sortedConfigKeys(termsByConfig) {
+		for _, cfgID := range configKeysInOrder(terms) {
 			cfgTerms := termsByConfig[cfgID]
 			// Find the merit type from the first term's config.
 			meritType := "weighted_sum"
@@ -235,7 +235,7 @@ func listMerit(input types.Input, output types.Output, format string) {
 		// Merit modes.
 		if len(modes) > 0 {
 			modesByConfig := groupMeritModesByConfig(modes)
-			for _, cfgID := range sortedConfigKeys(modesByConfig) {
+			for _, cfgID := range configKeysInOrder(modes) {
 				cfgModes := modesByConfig[cfgID]
 				fmt.Printf("Merit Modes (%s):\n", cfgID)
 				cols := []tableColumn{
@@ -254,7 +254,7 @@ func listMerit(input types.Input, output types.Output, format string) {
 		// Constraints.
 		if len(constraints) > 0 {
 			constraintsByConfig := groupMeritConstraintsByConfig(constraints)
-			for _, cfgID := range sortedConfigKeys(constraintsByConfig) {
+			for _, cfgID := range configKeysInOrder(constraints) {
 				cfgConstraints := constraintsByConfig[cfgID]
 				if len(cfgConstraints) > 0 && cfgConstraints[0].Inherited {
 					fmt.Printf("Constraints (%s, inherited from optimization):\n", cfgID)
@@ -332,28 +332,28 @@ func groupMeritConstraintsByConfig(constraints []MeritConstraintRow) map[string]
 	return out
 }
 
-// sortedConfigKeys returns the keys of a map in the order they first appear
-// in the values' Config field (insertion order).
-func sortedConfigKeys[T any](m map[string][]T) []string {
+// configKeysInOrder returns the distinct config keys of a row slice in first
+// appearance order (the document's config order). The rows are grouped into a
+// map for rendering, but the order must come from the slice: iterating the map
+// made the section order depend on Go's randomised map order.
+func configKeysInOrder[T any](items []T) []string {
 	seen := map[string]bool{}
 	var keys []string
-	for _, items := range m {
-		for _, item := range items {
-			var key string
-			switch v := any(item).(type) {
-			case MeritTermRow:
-				key = v.Config
-			case MeritModeRow:
-				key = v.Config
-			case MeritConstraintRow:
-				key = v.Config
-			default:
-				continue
-			}
-			if !seen[key] {
-				seen[key] = true
-				keys = append(keys, key)
-			}
+	for _, item := range items {
+		var key string
+		switch v := any(item).(type) {
+		case MeritTermRow:
+			key = v.Config
+		case MeritModeRow:
+			key = v.Config
+		case MeritConstraintRow:
+			key = v.Config
+		default:
+			continue
+		}
+		if key != "" && !seen[key] {
+			seen[key] = true
+			keys = append(keys, key)
 		}
 	}
 	return keys
