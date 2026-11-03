@@ -694,122 +694,53 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 		}
 	}
 
-	// Streaming output (default): the settled top-level part of the document is
-	// written now and one global_result.minima entry follows each discovered
-	// solution, so a run killed mid-way still leaves a readable document.
-	// metadata is stamped here, which makes created_at the run start.
-	var st *escapeStream
-	if enabled, _ := escapeStreamEnabled(settings.config, command); enabled {
-		st = newEscapeStream(os.Stdout, escapeStreamTails{chief: hasPupilModelVariables(variables)})
-		inner := onRecord
-		onRecord = func(idx int, p escape.Point, isNew bool, version int) {
-			if inner != nil {
-				inner(idx, p, isNew, version)
+	runEscapeTail(escapeTail{
+		input:           &input,
+		command:         command,
+		settings:        settings,
+		progress:        progress,
+		factory:         factory,
+		fingerprint:     fingerprint,
+		validateFn:      validateFn,
+		ctx:             ctx,
+		hardStop:        hardStop,
+		gctx:            gctx,
+		debug:           debug,
+		newExplorer:     newExplorer,
+		onRecord:        onRecord,
+		saver:           saver,
+		keepInfeasible:  keepInfeasible,
+		streamChief:     hasPupilModelVariables(variables),
+		buildMinimum:    buildMinimum,
+		buildInfeasible: buildInfeasible,
+		applyBest: func(input *types.Input, res escape.Result) {
+			// Apply the best solution to the top-level surfaces (pipeline-compatible).
+			bestSurfaces := make([]types.Surface, len(surfaces))
+			copy(bestSurfaces, surfaces)
+			var bestGlasses []types.Glass
+			if len(res.Minima) > 0 {
+				bestSurfaces, bestGlasses = applyEscapeX(surfaces, variables, res.Minima[res.BestIdx].X, gc)
+				applyPupilVariables(input, variables, res.Minima[res.BestIdx].X)
 			}
-			st.record(idx, p, isNew, buildMinimum)
-		}
-		withOutputMetadata(&input, command, subcmdArgs())
-		st.header(input, escape.ReportParams(*settings.config, settings.tuning, factory().Variables()))
-	}
 
-	res := escape.ParallelEscape(factory, *settings.config, escape.RunOptions{
-		Tuning:      settings.tuning,
-		Progress:    progress,
-		OnRecord:    onRecord,
-		Fingerprint: fingerprint,
-		ValidateFn:  validateFn,
-		Context:     ctx,
-		HardStop:    hardStop,
-		GlassPhase:  gctx.enabled,
-		Debug:       debug,
-		NewPhaseLog: newPhaseLogIfDebug(progress, debug),
-		NewExplorer: newExplorer,
+			input.Configs[0].Surfaces = bestSurfaces
+
+			// Keep the pipeline output consistent with the saved minima: the
+			// variable-only projection would otherwise retain the template image
+			// plane and the stale stored diameters, diverging from both the saved
+			// minimum file and what the merit evaluated. Apertures go first so the
+			// back-focus solve focuses the sized beam that is shipped.
+			if len(res.Minima) > 0 {
+				applyApertures(input.Configs[0].Surfaces, finalAperturesAt(factory, res.Minima[res.BestIdx].X)["config1"])
+				applySavedBackFocusSolve(*input, outCfg, input.Configs[0].Surfaces, gc,
+					pupilModelForX(input, variables, res.Minima[res.BestIdx].X))
+			}
+
+			for _, g := range bestGlasses {
+				input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
+			}
+		},
 	})
-	progress.Event("done", map[string]any{
-		"workers":      res.Workers,
-		"cycles":       res.Cycles,
-		"explorations": res.Explorations,
-		"minima":       len(res.Minima),
-		"best_merit":   safeF(res.BestMerit),
-		"timed_out":    res.TimedOut,
-		"interrupted":  res.Interrupted,
-	})
-	if saver != nil && saver.err != nil {
-		progress.Event("error", map[string]any{"message": saver.err.Error()})
-	}
-
-	// The streamed records already carry the feasible minima; the one-shot
-	// output builds them here, in merit order (buildMinimum is shared, so both
-	// forms produce identical entries).
-	var minima []types.GlobalMinimum
-	if st == nil {
-		minima = make([]types.GlobalMinimum, len(res.Minima))
-		for i, p := range res.Minima {
-			minima[i] = buildMinimum(i, res.MinimaIdx[i], p)
-		}
-	}
-
-	// Build infeasible basins list.
-	infeasibleMinima := make([]types.GlobalMinimum, len(res.InfeasibleBasins))
-	for i, p := range res.InfeasibleBasins {
-		infeasibleMinima[i] = buildInfeasible(i, p)
-	}
-
-	// Apply the best solution to the top-level surfaces (pipeline-compatible).
-	bestSurfaces := make([]types.Surface, len(surfaces))
-	copy(bestSurfaces, surfaces)
-	var bestGlasses []types.Glass
-	if len(res.Minima) > 0 {
-		bestSurfaces, bestGlasses = applyEscapeX(surfaces, variables, res.Minima[res.BestIdx].X, gc)
-		applyPupilVariables(&input, variables, res.Minima[res.BestIdx].X)
-	}
-
-	input.Configs[0].Surfaces = bestSurfaces
-
-	// Keep the pipeline output consistent with the saved minima: the
-	// variable-only projection would otherwise retain the template image
-	// plane and the stale stored diameters, diverging from both the saved
-	// minimum file and what the merit evaluated. Apertures go first so the
-	// back-focus solve focuses the sized beam that is shipped.
-	if len(res.Minima) > 0 {
-		applyApertures(input.Configs[0].Surfaces, finalAperturesAt(factory, res.Minima[res.BestIdx].X)["config1"])
-		applySavedBackFocusSolve(input, outCfg, input.Configs[0].Surfaces, gc,
-			pupilModelForX(&input, variables, res.Minima[res.BestIdx].X))
-	}
-
-	for _, g := range bestGlasses {
-		input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
-	}
-
-	// Discard infeasible basins from output unless --keep-infeasible is set.
-	if !keepInfeasible {
-		infeasibleMinima = nil
-	}
-
-	// Streamed run: the feasible minima are already in the document, so only
-	// the run outcome, the improved points and the deferred top-level keys
-	// remain to be written — configs carries the best solution and must be
-	// written after it has been applied, not before the search started.
-	if st != nil {
-		reportEscape(res, progress)
-		st.complete(streamCompletion{
-			BestIndex:          bestStreamIndex(res, st),
-			BestMerit:          res.BestMerit,
-			TimedOut:           res.TimedOut,
-			Interrupted:        res.Interrupted,
-			InfeasibleBasins:   infeasibleMinima,
-			MinimaImprovements: st.improvements(res, buildMinimum),
-		}, streamTailKeys(input, st))
-		if err := st.Err(); err != nil {
-			progress.Event("error", map[string]any{"message": err.Error()})
-			errOut("Error writing streamed escape output: %v", err)
-		}
-		return
-	}
-
-	escResult := assembleGlobalResult(res, minima, infeasibleMinima)
-	reportEscape(res, progress)
-	writeGlobalOutput(input, escResult, command)
 }
 
 func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSettings, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
@@ -1070,116 +1001,47 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSetting
 		}
 	}
 
-	// Streaming output (default): the settled top-level part of the document is
-	// written now and one global_result.minima entry follows each discovered
-	// solution, so a run killed mid-way still leaves a readable document.
-	// metadata is stamped here, which makes created_at the run start.
-	var st *escapeStream
-	if enabled, _ := escapeStreamEnabled(settings.config, command); enabled {
-		st = newEscapeStream(os.Stdout, escapeStreamTails{chief: hasPupilModelVariablesMulti(input.Optimization)})
-		inner := onRecord
-		onRecord = func(idx int, p escape.Point, isNew bool, version int) {
-			if inner != nil {
-				inner(idx, p, isNew, version)
+	runEscapeTail(escapeTail{
+		input:           &input,
+		command:         command,
+		settings:        settings,
+		progress:        progress,
+		factory:         factory,
+		fingerprint:     fingerprint,
+		validateFn:      validateFn,
+		ctx:             ctx,
+		hardStop:        hardStop,
+		gctx:            gctx,
+		debug:           debug,
+		newExplorer:     newExplorer,
+		onRecord:        onRecord,
+		saver:           saver,
+		keepInfeasible:  keepInfeasible,
+		streamChief:     hasPupilModelVariablesMulti(input.Optimization),
+		buildMinimum:    buildMinimum,
+		buildInfeasible: buildInfeasible,
+		applyBest: func(input *types.Input, res escape.Result) {
+			// Apply the best solution to the top-level configs.
+			if len(res.Minima) > 0 {
+				best := res.Minima[res.BestIdx]
+				bestSurfaces := applyEscapeMulti(template, input.Optimization, best.X)
+				apertures := finalAperturesAt(factory, best.X)
+				for i := range input.Configs {
+					if s, ok := bestSurfaces[input.Configs[i].ID]; ok {
+						// Same prescription as the --save file: back-focus hard solve
+						// + sized auto apertures (see the single-config path). The
+						// solve focuses the best minimum's own pupil, matching the
+						// applyPupilVariablesMulti write-back below.
+						applySavedBackFocusSolve(*input, &input.Configs[i], s, gc,
+							pupilModelForXMulti(input, input.Optimization, best.X))
+						applyApertures(s, apertures[input.Configs[i].ID])
+						input.Configs[i].Surfaces = s
+					}
+				}
+				applyPupilVariablesMulti(input, input.Optimization, best.X)
 			}
-			st.record(idx, p, isNew, buildMinimum)
-		}
-		withOutputMetadata(&input, command, subcmdArgs())
-		st.header(input, escape.ReportParams(*settings.config, settings.tuning, factory().Variables()))
-	}
-
-	res := escape.ParallelEscape(factory, *settings.config, escape.RunOptions{
-		Tuning:      settings.tuning,
-		Progress:    progress,
-		OnRecord:    onRecord,
-		Fingerprint: fingerprint,
-		ValidateFn:  validateFn,
-		Context:     ctx,
-		HardStop:    hardStop,
-		GlassPhase:  gctx.enabled,
-		Debug:       debug,
-		NewPhaseLog: newPhaseLogIfDebug(progress, debug),
-		NewExplorer: newExplorer,
+		},
 	})
-	progress.Event("done", map[string]any{
-		"workers":      res.Workers,
-		"cycles":       res.Cycles,
-		"explorations": res.Explorations,
-		"minima":       len(res.Minima),
-		"best_merit":   safeF(res.BestMerit),
-		"timed_out":    res.TimedOut,
-		"interrupted":  res.Interrupted,
-	})
-	if saver != nil && saver.err != nil {
-		progress.Event("error", map[string]any{"message": saver.err.Error()})
-	}
-
-	// The streamed records already carry the feasible minima; the one-shot
-	// output builds them here, in merit order (buildMinimum is shared, so both
-	// forms produce identical entries).
-	var minima []types.GlobalMinimum
-	if st == nil {
-		minima = make([]types.GlobalMinimum, len(res.Minima))
-		for i, p := range res.Minima {
-			minima[i] = buildMinimum(i, res.MinimaIdx[i], p)
-		}
-	}
-
-	// Build infeasible basins list.
-	infeasibleMinima := make([]types.GlobalMinimum, len(res.InfeasibleBasins))
-	for i, p := range res.InfeasibleBasins {
-		infeasibleMinima[i] = buildInfeasible(i, p)
-	}
-
-	// Apply the best solution to the top-level configs.
-	if len(res.Minima) > 0 {
-		best := res.Minima[res.BestIdx]
-		bestSurfaces := applyEscapeMulti(template, input.Optimization, best.X)
-		apertures := finalAperturesAt(factory, best.X)
-		for i := range input.Configs {
-			if s, ok := bestSurfaces[input.Configs[i].ID]; ok {
-				// Same prescription as the --save file: back-focus hard solve
-				// + sized auto apertures (see the single-config path). The
-				// solve focuses the best minimum's own pupil, matching the
-				// applyPupilVariablesMulti write-back below.
-				applySavedBackFocusSolve(input, &input.Configs[i], s, gc,
-					pupilModelForXMulti(&input, input.Optimization, best.X))
-				applyApertures(s, apertures[input.Configs[i].ID])
-				input.Configs[i].Surfaces = s
-			}
-		}
-		applyPupilVariablesMulti(&input, input.Optimization, best.X)
-	}
-
-	// Discard infeasible basins from output unless --keep-infeasible is set.
-	if !keepInfeasible {
-		infeasibleMinima = nil
-	}
-
-	// Streamed run: the feasible minima are already in the document, so only
-	// the run outcome, the improved points and the deferred top-level keys
-	// remain to be written — configs carry the best solution and must be
-	// written after it has been applied, not before the search started.
-	if st != nil {
-		reportEscape(res, progress)
-		st.complete(streamCompletion{
-			BestIndex:          bestStreamIndex(res, st),
-			BestMerit:          res.BestMerit,
-			TimedOut:           res.TimedOut,
-			Interrupted:        res.Interrupted,
-			InfeasibleBasins:   infeasibleMinima,
-			MinimaImprovements: st.improvements(res, buildMinimum),
-		}, streamTailKeys(input, st))
-		if err := st.Err(); err != nil {
-			progress.Event("error", map[string]any{"message": err.Error()})
-			errOut("Error writing streamed escape output: %v", err)
-		}
-		return
-	}
-
-	globalResult := assembleGlobalResult(res, minima, infeasibleMinima)
-	reportEscape(res, progress)
-	writeGlobalOutput(input, globalResult, command)
 }
 
 // assembleGlobalResult wraps the minima list with the report metadata.
