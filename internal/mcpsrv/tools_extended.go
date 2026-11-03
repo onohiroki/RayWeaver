@@ -247,19 +247,7 @@ func (s *server) addWavefront() {
 	addStage(s, "wavefront", "Wavefront analysis",
 		"Wavefront analysis: paraboloid and best-focus sphere reference, Fringe-Zernike coefficients and the best image plane.",
 		"wavefront", func(in wavefrontIn) []string {
-			args := in.settings.args()
-			args = intFlag(args, in.RefSurface, "--ref-surface")
-			args = intFlag(args, in.NumRays, "--num-rays")
-			args = listIntFlag(args, in.Fields, "--fields")
-			args = listFloatFlag(args, in.Wavelengths, "--wavelengths")
-			args = strFlag(args, in.Polarization, "--polarization")
-			args = intFlag(args, in.ZernikeOrder, "--zernike-order")
-			args = intFlag(args, in.Workers, "--wavefront-workers")
-			args = intFlag(args, in.MapGrid, "--map-grid")
-			args = boolFlag(args, in.BestFocus, "--best-focus")
-			args = strFlag(args, in.FocusWeight, "--focus-weight")
-			args = listFloatFlag(args, in.FocusWeights, "--focus-weights")
-			return args
+			return clispec.Args(clispec.Wavefront, in, nil)
 		})
 }
 

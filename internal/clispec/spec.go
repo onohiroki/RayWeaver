@@ -30,6 +30,7 @@ const (
 	Float
 	String
 	FloatList  // repeatable or space-separated numbers (--fan-rotation)
+	IntList    // repeatable or comma-separated integers (--fields)
 	StringList // repeatable string values (--element-color)
 	BoolString // a two-valued flag written as --name true|false (--stream)
 )
@@ -99,6 +100,7 @@ type Options struct {
 	strs     map[string]*string
 	lists    map[string]*[]float64
 	strLists map[string]*[]string
+	intLists map[string]*[]int
 
 	given map[string]bool // raw registered name was on the command line
 	set   map[string]bool // canonical name was given (via any spelling)
@@ -116,6 +118,7 @@ func Bind(spec Spec, fs *flag.FlagSet) *Options {
 		strs:      map[string]*string{},
 		lists:     map[string]*[]float64{},
 		strLists:  map[string]*[]string{},
+		intLists:  map[string]*[]int{},
 		given:     map[string]bool{},
 		set:       map[string]bool{},
 	}
@@ -185,6 +188,12 @@ func (o *Options) register(f *Flag) {
 		o.lists[f.Name] = v
 		for _, n := range names {
 			o.fs.Var(&floatListValue{v: v}, n, f.Help)
+		}
+	case IntList:
+		v := &[]int{}
+		o.intLists[f.Name] = v
+		for _, n := range names {
+			o.fs.Var(&intListValue{v: v}, n, f.Help)
 		}
 	case StringList:
 		v := &[]string{}
@@ -266,6 +275,24 @@ func (o *Options) Floats(name string) []float64 {
 		return *v
 	}
 	return nil
+}
+
+func (o *Options) Ints(name string) []int {
+	if v, ok := o.intLists[name]; ok {
+		return *v
+	}
+	return nil
+}
+
+// IntsString renders an IntList as the comma-separated form the CLI helpers
+// take (--fields 0,1,2).
+func (o *Options) IntsString(name string) string {
+	vals := o.Ints(name)
+	parts := make([]string, len(vals))
+	for i, v := range vals {
+		parts[i] = strconv.Itoa(v)
+	}
+	return strings.Join(parts, ",")
 }
 
 func (o *Options) Strings(name string) []string {
@@ -482,6 +509,20 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 			if len(parts) > 0 {
 				out = append(out, arg{name: canon, value: strings.Join(parts, ",")})
 			}
+		case IntList:
+			arr, ok := v.([]any)
+			if !ok || len(arr) == 0 {
+				continue
+			}
+			parts := make([]string, 0, len(arr))
+			for _, e := range arr {
+				if n, ok := e.(float64); ok {
+					parts = append(parts, strconv.Itoa(int(n)))
+				}
+			}
+			if len(parts) > 0 {
+				out = append(out, arg{name: canon, value: strings.Join(parts, ",")})
+			}
 		case StringList:
 			// Values may contain commas (colour maps), so every element is
 			// emitted as its own flag occurrence.
@@ -513,7 +554,7 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 // All lists the command flag tables. The help-consistency test and the MCP
 // drift test walk it, so a new table must be added here when a command is
 // migrated.
-var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette, &Plot, &Zoom, &Cam, &Scale, &TMM, &Clean}
+var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette, &Plot, &Zoom, &Cam, &Scale, &TMM, &Clean, &Wavefront}
 
 // stringListValue is the flag.Value behind a StringList flag: every Set
 // appends the raw value, so repeated flags accumulate.
@@ -530,5 +571,37 @@ func (s *stringListValue) String() string {
 
 func (s *stringListValue) Set(v string) error {
 	*s.v = append(*s.v, v)
+	return nil
+}
+
+// intListValue is the flag.Value behind an IntList flag: each Set appends the
+// comma-separated integers it contains.
+type intListValue struct {
+	v *[]int
+}
+
+func (s *intListValue) String() string {
+	if s == nil || s.v == nil {
+		return ""
+	}
+	parts := make([]string, len(*s.v))
+	for i, x := range *s.v {
+		parts[i] = strconv.Itoa(x)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (s *intListValue) Set(v string) error {
+	for _, part := range strings.Split(v, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		n, err := strconv.Atoi(part)
+		if err != nil {
+			return fmt.Errorf("invalid integer %q", part)
+		}
+		*s.v = append(*s.v, n)
+	}
 	return nil
 }

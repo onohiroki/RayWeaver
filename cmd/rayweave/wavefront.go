@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/psf"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -28,36 +29,36 @@ import (
 // effective values are written back into the output's wavefront: section.
 func runWavefront(data []byte) {
 	fs := flag.NewFlagSet("wavefront", flag.ExitOnError)
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
-	refSurface := fs.Int("ref-surface", 0, "reference surface ID for wavefront sampling (default: last optical surface)")
-	numRays := fs.Int("num-rays", 0, "pupil grid rays (default 400)")
-	fieldsFlag := fs.String("fields", "", "comma-separated field indices to compute (default: all)")
-	wlFlag := fs.String("wavelengths", "", "comma-separated wavelengths in mm (default: config wavelengths, else reference wavelength)")
-	polFlag := fs.String("polarization", "", "input polarization: RCP (default) | LCP | X | Y | RCP+LCP")
-	zernikeOrder := fs.Int("zernike-order", 0, "highest Fringe Zernike index to fit (default 15)")
-	wfWorkers := fs.Int("wavefront-workers", 0, "per-field task parallelism (default: GOMAXPROCS)")
-	mapGrid := fs.Int("map-grid", 0, "wavefront map resolution per side for --csv (default 64)")
-	bestFocus := fs.Bool("best-focus", false, "compute the weighted best image-plane shift and apply it to the configs")
-	focusWeight := fs.String("focus-weight", "", "best-focus weighting: uniform (default) | custom")
-	focusWeights := fs.String("focus-weights", "", "comma-separated per-field weights when --focus-weight custom")
-	shiftedLens := fs.String("output-shifted-lens", "", "write the shifted lens document to FILE")
-	yamlOut := fs.String("yaml", "", "write full structured wavefront data to FILE (index-suffixed per result)")
-	csvOut := fs.String("csv", "", "write gnuplot x,y,opd wavefront map to FILE (index-suffixed per result)")
-	fs.Parse(os.Args[2:])
+	flags := clispec.Bind(clispec.Wavefront, fs)
+	if err := flags.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
+	configFlag := flags.String("config")
+	fieldsFlag := flags.IntsString("fields")
+	refSurface := flags.Int("ref-surface")
+	numRays := flags.Int("num-rays")
+	zernikeOrder := flags.Int("zernike-order")
+	wfWorkers := flags.Int("wavefront-workers")
+	mapGrid := flags.Int("map-grid")
+	bestFocus := flags.Bool("best-focus")
+	focusWeight := flags.String("focus-weight")
+	focusWeights := flags.Floats("focus-weights")
+	shiftedLens := flags.String("output-shifted-lens")
+	yamlOut := flags.String("yaml")
+	csvOut := flags.String("csv")
 
 	input := parseFieldInput(data, "(for fields)")
 
-	gc, _ := openGlass(&input, *glassDir)
-	surfaces := surfacesFor(input.Configs, configFlag)
+	gc, _ := openGlass(&input, flags.String("glass-dir"))
+	surfaces := surfacesFor(input.Configs, &configFlag)
 	system := types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface}
 
 	// Field definitions: the --config-selected position supplies its own
 	// fields, then configs[0], then the top-level chief section — the same
 	// resolution order as chief, vignette, asphere and list fields.
-	fields := resolveConfigFieldDefs(input, configFlag)
-	selected := selectedFieldIndices(fields, nil, *fieldsFlag)
-	if input.Wavefront != nil && *fieldsFlag == "" && len(input.Wavefront.Fields) > 0 {
+	fields := resolveConfigFieldDefs(input, &configFlag)
+	selected := selectedFieldIndices(fields, nil, fieldsFlag)
+	if input.Wavefront != nil && fieldsFlag == "" && len(input.Wavefront.Fields) > 0 {
 		selected = input.Wavefront.Fields
 	}
 	fields = applySelectedFields(fields, selected)
@@ -67,31 +68,31 @@ func runWavefront(data []byte) {
 
 	var wavelengths []float64
 	switch {
-	case *wlFlag != "":
-		wavelengths = parseFloatList(*wlFlag, "wavelength")
+	case len(flags.Floats("wavelengths")) > 0:
+		wavelengths = flags.Floats("wavelengths")
 	case input.Wavefront != nil && len(input.Wavefront.Wavelengths) > 0:
 		wavelengths = input.Wavefront.Wavelengths
-	case len(configWavelengthValues(input.Configs, configFlag)) > 0:
-		wavelengths = configWavelengthValues(input.Configs, configFlag)
+	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
+		wavelengths = configWavelengthValues(input.Configs, &configFlag)
 	default:
 		wavelengths = []float64{effectiveReferenceWavelength(input.Chief)}
 	}
 
 	var polLabels []string
 	switch {
-	case *polFlag != "":
-		polLabels = parsePolLabels(*polFlag)
+	case flags.String("polarization") != "":
+		polLabels = parsePolLabels(flags.String("polarization"))
 	case input.Wavefront != nil && input.Wavefront.Polarization != "":
 		polLabels = parsePolLabels(input.Wavefront.Polarization)
 	default:
 		polLabels = []string{string(types.PolRCP)}
 	}
 
-	refSurfaceID := intOrYAML(*refSurface, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.ReferenceSurface }))
-	numRaysVal := intOrYAML(*numRays, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.NumRays }))
-	workers := intOrYAML(*wfWorkers, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.Workers }))
-	zOrder := intOrYAML(*zernikeOrder, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.ZernikeMaxOrder }))
-	mapGridVal := intOrYAML(*mapGrid, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.MapGrid }))
+	refSurfaceID := intOrYAML(refSurface, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.ReferenceSurface }))
+	numRaysVal := intOrYAML(numRays, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.NumRays }))
+	workers := intOrYAML(wfWorkers, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.Workers }))
+	zOrder := intOrYAML(zernikeOrder, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.ZernikeMaxOrder }))
+	mapGridVal := intOrYAML(mapGrid, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.MapGrid }))
 
 	opts := wavefront.Options{
 		NumRays:         numRaysVal,
@@ -101,7 +102,7 @@ func runWavefront(data []byte) {
 		PupilModel:      input.Chief.PupilModel,
 		RayDefinition:   chiefRayDefinition(input),
 	}
-	opts.BestFocus = resolveBestFocus(input, fs, *bestFocus, *focusWeight, *focusWeights, len(fields))
+	opts.BestFocus = resolveBestFocus(input, flags, bestFocus, focusWeight, focusWeights, len(fields))
 
 	result, err := wavefront.Compute(system, gc, fields, wavelengths, opts)
 	if err != nil {
@@ -115,16 +116,16 @@ func runWavefront(data []byte) {
 	var shiftMM float64
 	if result.BestFocus != nil {
 		shiftMM = result.BestFocus.ShiftMM
-		applyImagePlaneShift(input.Configs, configFlag, refSurfaceID, result.BestFocus.WeightedFocusZ)
-		if *shiftedLens != "" {
-			if err := writeShiftedLens(*shiftedLens, &input); err != nil {
-				errExitf("Error writing %s: %v", *shiftedLens, err)
+		applyImagePlaneShift(input.Configs, &configFlag, refSurfaceID, result.BestFocus.WeightedFocusZ)
+		if shiftedLens != "" {
+			if err := writeShiftedLens(shiftedLens, &input); err != nil {
+				errExitf("Error writing %s: %v", shiftedLens, err)
 			}
 		}
 	}
 
 	// Write the effective options back into the output's wavefront: section.
-	writeBackWavefront(&input, wavelengths, selected, polLabels, refSurfaceID, numRaysVal, workers, zOrder, mapGridVal, *bestFocus, *focusWeight, *focusWeights, *shiftedLens)
+	writeBackWavefront(&input, wavelengths, selected, polLabels, refSurfaceID, numRaysVal, workers, zOrder, mapGridVal, bestFocus, focusWeight, focusWeights, shiftedLens)
 
 	output := types.Output{Input: input}
 	withOutputMetadata(&output.Input, "wavefront", subcmdArgs())
@@ -151,8 +152,8 @@ func runWavefront(data []byte) {
 		}
 		wb.WeightedAverage = types.WavefrontFocusAverage{ShiftWavelengths: shiftMM / wlRef, ShiftMM: shiftMM}
 		wb.ShiftedLens = types.WavefrontShiftedLens{ShiftMM: shiftMM}
-		if *shiftedLens != "" {
-			wb.ShiftedLens.OutputFile = *shiftedLens
+		if shiftedLens != "" {
+			wb.ShiftedLens.OutputFile = shiftedLens
 		}
 		wr.BestFocus = wb
 	}
@@ -160,15 +161,15 @@ func runWavefront(data []byte) {
 	for i := range result.Fields {
 		r := result.Fields[i]
 		outFile := ""
-		if *yamlOut != "" {
-			file := suffixFile(*yamlOut, i)
+		if yamlOut != "" {
+			file := suffixFile(yamlOut, i)
 			if err := writeWavefrontYAML(file, &r, mapGridVal); err != nil {
 				errExitf("Error writing %s: %v", file, err)
 			}
 			outFile = file
 		}
-		if *csvOut != "" {
-			file := suffixFile(*csvOut, i)
+		if csvOut != "" {
+			file := suffixFile(csvOut, i)
 			if err := writeWavefrontCSV(file, &r, mapGridVal); err != nil {
 				errExitf("Error writing %s: %v", file, err)
 			}
@@ -181,13 +182,13 @@ func runWavefront(data []byte) {
 } // resolveBestFocus builds the engine best-focus configuration from the CLI
 // flags and the wavefront: YAML section (CLI wins). Returns nil when best
 // focus is disabled.
-func resolveBestFocus(input types.Input, fs *flag.FlagSet, bf bool, weightFlag, weightsFlag string, numFields int) *wavefront.FocusConfig {
+func resolveBestFocus(input types.Input, opts *clispec.Options, bf bool, weightFlag string, weights []float64, numFields int) *wavefront.FocusConfig {
 	yamlCfg := (*types.WavefrontBestFocusConfig)(nil)
 	if input.Wavefront != nil {
 		yamlCfg = input.Wavefront.BestFocus
 	}
 	enabled := false
-	if flagWasSet(fs, "best-focus") {
+	if opts.Set("best-focus") {
 		enabled = bf
 	} else if yamlCfg != nil {
 		enabled = yamlCfg.Enabled
@@ -197,13 +198,13 @@ func resolveBestFocus(input types.Input, fs *flag.FlagSet, bf bool, weightFlag, 
 	}
 
 	cfg := &wavefront.FocusConfig{WeightType: "uniform"}
-	if flagWasSet(fs, "focus-weight") && weightFlag != "" {
+	if opts.Set("focus-weight") && weightFlag != "" {
 		cfg.WeightType = weightFlag
 	} else if yamlCfg != nil && yamlCfg.WeightType != "" {
 		cfg.WeightType = yamlCfg.WeightType
 	}
-	if flagWasSet(fs, "focus-weights") && weightsFlag != "" {
-		cfg.CustomWeights = parseFloatList(weightsFlag, "focus weight")
+	if opts.Set("focus-weights") && len(weights) > 0 {
+		cfg.CustomWeights = weights
 	} else if yamlCfg != nil && len(yamlCfg.CustomWeights) > 0 {
 		cfg.CustomWeights = yamlCfg.CustomWeights
 	}
@@ -285,7 +286,7 @@ func writeShiftedLens(path string, input *types.Input) error {
 // writeBackWavefront stores the effective options into the output wavefront:
 // section (CLI wins over YAML, principle 3).
 func writeBackWavefront(input *types.Input, wavelengths []float64, selected []int, pols []string,
-	refSurfaceID, numRays, workers, zOrder, mapGrid int, bf bool, weightType, weights, shiftedLens string) {
+	refSurfaceID, numRays, workers, zOrder, mapGrid int, bf bool, weightType string, weights []float64, shiftedLens string) {
 	if input.Wavefront == nil {
 		input.Wavefront = &types.WavefrontConfig{}
 	}
@@ -305,8 +306,8 @@ func writeBackWavefront(input *types.Input, wavelengths []float64, selected []in
 	if weightType != "" {
 		w.BestFocus.WeightType = weightType
 	}
-	if weights != "" {
-		w.BestFocus.CustomWeights = parseFloatList(weights, "focus weight")
+	if len(weights) > 0 {
+		w.BestFocus.CustomWeights = weights
 	}
 	w.BestFocus.OutputShiftedLens = shiftedLens
 }
