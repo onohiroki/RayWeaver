@@ -38,8 +38,7 @@ func runExport(data []byte) {
 	// (.zmx / .seq / .len), like plot inferring SVG/PNG from the extension.
 	formatName := resolveExportFormat(*format, *outPath)
 	if formatName == "" {
-		errOut("Error: --format is required (zemax|codev|oslo), or give -o FILE with a .zmx/.seq/.len extension")
-		os.Exit(1)
+		errExitf("Error: --format is required (zemax|codev|oslo), or give -o FILE with a .zmx/.seq/.len extension")
 	}
 
 	input := parseYAML[types.Input](data)
@@ -64,12 +63,10 @@ func runExport(data []byte) {
 		}
 		out, err = exporter.WriteOslo(&input, idx, gc, warn)
 	default:
-		errOut("Error: unknown format %q", formatName)
-		os.Exit(1)
+		errExitf("Error: unknown format %q", formatName)
 	}
 	if err != nil {
-		errOut("Error: export failed: %v", err)
-		os.Exit(1)
+		errExitf("Error: export failed: %v", err)
 	}
 	exportOutput(*outPath, out, data)
 }
@@ -108,8 +105,7 @@ func exportOutput(outPath string, foreign, data []byte) {
 		return
 	}
 	if err := os.WriteFile(outPath, foreign, 0644); err != nil {
-		errOut("Error writing %s: %v", outPath, err)
-		os.Exit(1)
+		errExitf("Error writing %s: %v", outPath, err)
 	}
 	os.Stdout.Write(data)
 }
@@ -120,15 +116,13 @@ func configIndicesForExport(input *types.Input, format string, configFlag *strin
 	if configFlag != nil && *configFlag != "" {
 		idx, msg := resolveConfig(input.Configs, *configFlag)
 		if idx < 0 {
-			errOut("Error: %s", msg)
-			os.Exit(1)
+			errExitf("Error: %s", msg)
 		}
 		return []int{idx}
 	}
 	if format == "oslo" {
 		if len(input.Configs) == 0 {
-			errOut("Error: no configs to export")
-			os.Exit(1)
+			errExitf("Error: no configs to export")
 		}
 		return []int{0}
 	}
@@ -137,8 +131,7 @@ func configIndicesForExport(input *types.Input, format string, configFlag *strin
 		configs = append(configs, i)
 	}
 	if len(configs) == 0 {
-		errOut("Error: no configs to export")
-		os.Exit(1)
+		errExitf("Error: no configs to export")
 	}
 	return configs
 }

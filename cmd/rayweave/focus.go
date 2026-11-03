@@ -30,8 +30,7 @@ import (
 func runFocus(data []byte) {
 	args := os.Args[2:]
 	if len(args) == 0 {
-		errOut("Error: focus requires a sub-subcommand: focus mtf | focus psf | focus spot")
-		os.Exit(1)
+		errExitf("Error: focus requires a sub-subcommand: focus mtf | focus psf | focus spot")
 	}
 	switch args[0] {
 	case "mtf":
@@ -41,8 +40,7 @@ func runFocus(data []byte) {
 	case "spot":
 		runFocusSpot(data, args[1:])
 	default:
-		errOut("Error: unknown focus sub-subcommand %q (expected mtf | psf | spot)", args[0])
-		os.Exit(1)
+		errExitf("Error: unknown focus sub-subcommand %q (expected mtf | psf | spot)", args[0])
 	}
 }
 
@@ -192,15 +190,9 @@ type focusKey struct {
 // comparison for a normal run, or the file/all/on_axis base planes for a
 // through-focus scan.
 func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func(flagVal string, yamlPlanes []string) ([]string, error)) *focusRun {
-	gc, _ := loadCatalogs(input, fl.glassDir)
-	writeBackGlassDir(input, fl.glassDir)
+	gc, _ := openGlass(input, fl.glassDir)
 
-	baseSurfaces := configSurfaces(input.Configs, &fl.configFlag)
-	if len(baseSurfaces) == 0 {
-		errOut("Error: no surfaces to process")
-		os.Exit(1)
-	}
-	surface.Precompute(baseSurfaces)
+	baseSurfaces := surfacesFor(input.Configs, &fl.configFlag)
 
 	stopSurface := 0
 	if input.Chief != nil {
@@ -212,8 +204,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 	if fl.configFlag != "" {
 		i, err := resolveConfig(input.Configs, fl.configFlag)
 		if i < 0 {
-			errOut("Error: %s", err)
-			os.Exit(1)
+			errExitf("Error: %s", err)
 		}
 		cfgIdx = i
 	}
@@ -236,8 +227,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 	selected := focusFieldIndices(fields, y.fields, fl.fields)
 	fields = applySelectedFields(fields, selected)
 	if len(fields) == 0 {
-		errOut("Error: no fields to compute")
-		os.Exit(1)
+		errExitf("Error: no fields to compute")
 	}
 
 	// Wavelengths: flag > YAML > config wavelengths > the reference.
@@ -265,8 +255,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 
 	planes, err := planeFn(fl.planes, y.planes)
 	if err != nil {
-		errOut("Error: %s", err)
-		os.Exit(1)
+		errExitf("Error: %s", err)
 	}
 
 	opts := psf.Options{
@@ -282,8 +271,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 	// is about the plane, not the sampling); an explicit flag or YAML wins.
 	cc, ccSet, ccErr := boolFlag(fl.fs, "converge-check")
 	if ccErr != nil {
-		errOut("Error: %s", ccErr)
-		os.Exit(1)
+		errExitf("Error: %s", ccErr)
 	}
 	switch {
 	case ccSet:
@@ -328,8 +316,7 @@ func focusFieldIndices(fields []types.FieldDef, yamlFields []int, flagVal string
 	for _, tok := range strings.Split(spec, ",") {
 		idx, err := strconv.Atoi(strings.TrimSpace(tok))
 		if err != nil || idx < 0 || idx >= len(fields) {
-			errOut("Error: invalid field index %q", tok)
-			os.Exit(1)
+			errExitf("Error: invalid field index %q", tok)
 		}
 		if !seen[idx] {
 			kept = append(kept, idx)
@@ -440,8 +427,7 @@ func resolveThroughFocus(fl *focusFlags, y focusYAML) *types.FocusThroughFocus {
 	if strings.TrimSpace(fl.throughFocus) != "" {
 		tf, err := parseThroughFocus(fl.throughFocus)
 		if err != nil {
-			errOut("Error: %s", err)
-			os.Exit(1)
+			errExitf("Error: %s", err)
 		}
 		return tf
 	}
@@ -486,8 +472,7 @@ func throughFocusPoints(run *focusRun, system types.System, o psf.Options, metri
 	if metric == "spot" {
 		spotRes, err := psf.ComputeSpot(system, run.gc, run.fields, run.wavelengths, o)
 		if err != nil {
-			errOut("Error: %v", err)
-			os.Exit(1)
+			errExitf("Error: %v", err)
 		}
 		out := make([]tfKeyedPoint, 0, len(spotRes))
 		for _, r := range spotRes {
@@ -510,8 +495,7 @@ func throughFocusPoints(run *focusRun, system types.System, o psf.Options, metri
 	}
 	results, err := psf.Compute(system, run.gc, run.fields, run.wavelengths, o)
 	if err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 	out := make([]tfKeyedPoint, 0, len(results))
 	for _, r := range results {
@@ -685,6 +669,16 @@ func firstFocusResult(byPlane map[string]map[focusKey]*psf.Result, k focusKey) *
 	return nil
 }
 
+// writeFocusDocument emits the pipeline document for one `focus` comparison.
+// The caller writes the effective settings back first (that is what creates a
+// missing input.Focus section), optionally records the through-focus request,
+// and then hands the comparison over here.
+func writeFocusDocument(input types.Input, comp *types.FocusComparison, command string) {
+	output := types.Output{Input: input, FocusComparison: comp}
+	withOutputMetadata(&output.Input, command, subcmdArgs())
+	writeYAML(&output)
+}
+
 // runFocusMTF implements `focus mtf`.
 func runFocusMTF(data []byte, args []string) {
 	fs := flag.NewFlagSet("focus mtf", flag.ExitOnError)
@@ -692,12 +686,7 @@ func runFocusMTF(data []byte, args []string) {
 	freqFlag := fs.String("frequencies", "", "comma-separated spatial frequencies in cycles/mm (default: focus.mtf.frequencies, else 50)")
 	fs.Parse(args)
 
-	input := parseYAML[types.Input](data)
-	setReferenceWavelength(input.Chief)
-	if input.Chief == nil {
-		errOut("Error: 'chief' section is required (for fields)")
-		os.Exit(1)
-	}
+	input := parseFieldInput(data, "(for fields)")
 	var mtfCfg *types.FocusMTFConfig
 	if input.Focus != nil {
 		mtfCfg = input.Focus.MTF
@@ -710,9 +699,7 @@ func runFocusMTF(data []byte, args []string) {
 		comp := computeThroughFocus(run, tf, "mtf", freqs)
 		writeBackFocusMTF(&input, run, freqs)
 		input.Focus.MTF.ThroughFocus = tf
-		output := types.Output{Input: input, FocusComparison: &types.FocusComparison{ThroughFocus: comp}}
-		withOutputMetadata(&output.Input, "focus mtf", subcmdArgs())
-		writeYAML(&output)
+		writeFocusDocument(input, &types.FocusComparison{ThroughFocus: comp}, "focus mtf")
 		return
 	}
 
@@ -721,13 +708,11 @@ func runFocusMTF(data []byte, args []string) {
 
 	byPlane, order, shiftAll, err := computeFocusPlanes(run)
 	if err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 	rows := buildFocusMTFRows(byPlane, order, freqs)
 	if len(rows) == 0 {
-		errOut("Error: no focus comparison rows computed (check fields/wavelengths/planes)")
-		os.Exit(1)
+		errExitf("Error: no focus comparison rows computed (check fields/wavelengths/planes)")
 	}
 
 	comp := &types.FocusMTFComparison{
@@ -739,9 +724,7 @@ func runFocusMTF(data []byte, args []string) {
 	}
 
 	writeBackFocusMTF(&input, run, freqs)
-	output := types.Output{Input: input, FocusComparison: &types.FocusComparison{MTF: comp}}
-	withOutputMetadata(&output.Input, "focus mtf", subcmdArgs())
-	writeYAML(&output)
+	writeFocusDocument(input, &types.FocusComparison{MTF: comp}, "focus mtf")
 }
 
 // runFocusPSF implements `focus psf`.
@@ -750,12 +733,7 @@ func runFocusPSF(data []byte, args []string) {
 	fl := registerFocusFlags(fs)
 	fs.Parse(args)
 
-	input := parseYAML[types.Input](data)
-	setReferenceWavelength(input.Chief)
-	if input.Chief == nil {
-		errOut("Error: 'chief' section is required (for fields)")
-		os.Exit(1)
-	}
+	input := parseFieldInput(data, "(for fields)")
 	var psfCfg *types.FocusPSFConfig
 	if input.Focus != nil {
 		psfCfg = input.Focus.PSF
@@ -767,9 +745,7 @@ func runFocusPSF(data []byte, args []string) {
 		comp := computeThroughFocus(run, tf, "psf", nil)
 		writeBackFocusPSF(&input, run)
 		input.Focus.PSF.ThroughFocus = tf
-		output := types.Output{Input: input, FocusComparison: &types.FocusComparison{ThroughFocus: comp}}
-		withOutputMetadata(&output.Input, "focus psf", subcmdArgs())
-		writeYAML(&output)
+		writeFocusDocument(input, &types.FocusComparison{ThroughFocus: comp}, "focus psf")
 		return
 	}
 
@@ -777,13 +753,11 @@ func runFocusPSF(data []byte, args []string) {
 
 	byPlane, order, shiftAll, err := computeFocusPlanes(run)
 	if err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 	rows := buildFocusPSFRows(byPlane, order)
 	if len(rows) == 0 {
-		errOut("Error: no focus comparison rows computed (check fields/wavelengths/planes)")
-		os.Exit(1)
+		errExitf("Error: no focus comparison rows computed (check fields/wavelengths/planes)")
 	}
 
 	comp := &types.FocusPSFComparison{
@@ -794,9 +768,7 @@ func runFocusPSF(data []byte, args []string) {
 	}
 
 	writeBackFocusPSF(&input, run)
-	output := types.Output{Input: input, FocusComparison: &types.FocusComparison{PSF: comp}}
-	withOutputMetadata(&output.Input, "focus psf", subcmdArgs())
-	writeYAML(&output)
+	writeFocusDocument(input, &types.FocusComparison{PSF: comp}, "focus psf")
 }
 
 // runFocusSpot implements `focus spot`: the geometric (ray) spot RMS and its
@@ -807,12 +779,7 @@ func runFocusSpot(data []byte, args []string) {
 	fl := registerFocusFlags(fs)
 	fs.Parse(args)
 
-	input := parseYAML[types.Input](data)
-	setReferenceWavelength(input.Chief)
-	if input.Chief == nil {
-		errOut("Error: 'chief' section is required (for fields)")
-		os.Exit(1)
-	}
+	input := parseFieldInput(data, "(for fields)")
 	var spotCfg *types.FocusSpotConfig
 	if input.Focus != nil {
 		spotCfg = input.Focus.Spot
@@ -824,9 +791,7 @@ func runFocusSpot(data []byte, args []string) {
 		comp := computeThroughFocus(run, tf, "spot", nil)
 		writeBackFocusSpot(&input, run)
 		input.Focus.Spot.ThroughFocus = tf
-		output := types.Output{Input: input, FocusComparison: &types.FocusComparison{ThroughFocus: comp}}
-		withOutputMetadata(&output.Input, "focus spot", subcmdArgs())
-		writeYAML(&output)
+		writeFocusDocument(input, &types.FocusComparison{ThroughFocus: comp}, "focus spot")
 		return
 	}
 
@@ -834,13 +799,11 @@ func runFocusSpot(data []byte, args []string) {
 
 	byPlane, order, shiftAll, err := computeFocusSpotPlanes(run)
 	if err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 	rows := buildFocusSpotRows(byPlane, order)
 	if len(rows) == 0 {
-		errOut("Error: no focus comparison rows computed (check fields/wavelengths/planes)")
-		os.Exit(1)
+		errExitf("Error: no focus comparison rows computed (check fields/wavelengths/planes)")
 	}
 
 	comp := &types.FocusSpotComparison{
@@ -851,9 +814,7 @@ func runFocusSpot(data []byte, args []string) {
 	}
 
 	writeBackFocusSpot(&input, run)
-	output := types.Output{Input: input, FocusComparison: &types.FocusComparison{Spot: comp}}
-	withOutputMetadata(&output.Input, "focus spot", subcmdArgs())
-	writeYAML(&output)
+	writeFocusDocument(input, &types.FocusComparison{Spot: comp}, "focus spot")
 }
 
 // computeFocusSpotPlane evaluates one plane convention for the geometric spot:

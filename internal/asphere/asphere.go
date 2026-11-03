@@ -468,21 +468,6 @@ func refractiveIndex(gc *glass.Catalog, mat types.Material, wl float64) float64 
 	return n
 }
 
-func totalWeightOnSurface(footprints []FieldFootprintData, surfaceID int) float64 {
-	var w float64
-	for _, fd := range footprints {
-		for _, h := range fd.RayHits {
-			if !h.OK {
-				continue
-			}
-			if _, ok := h.Hits[surfaceID]; ok {
-				w += h.Weight
-			}
-		}
-	}
-	return w
-}
-
 func stopSurfaceZ(surfaces []types.Surface, stopSurface int) (float64, bool) {
 	if stopSurface <= 0 {
 		return 0, false

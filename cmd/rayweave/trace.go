@@ -3,324 +3,157 @@ package main
 import (
 	"flag"
 	"fmt"
-	"math"
 	"os"
-	"strconv"
-	"strings"
+	"runtime"
+	"sync"
 
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
+	"gopkg.in/yaml.v3"
 )
 
-func runTraceSingle(data []byte) {
-	// Strip "single" from os.Args so the flag parser doesn't choke on it.
-	args := os.Args[2:]
-	for i, a := range args {
-		if a == "single" {
-			args = append(args[:i], args[i+1:]...)
-			break
-		}
+func runTrace(data []byte, singleMode bool) {
+	if singleMode {
+		runTraceSingle(data)
+		return
 	}
-	fs := flag.NewFlagSet("trace single", flag.ExitOnError)
-	originFlag := fs.String("origin", "", "ray origin [x,y,z] mm")
-	directionFlag := fs.String("direction", "", "ray direction [dx,dy,dz]")
-	aimFlag := fs.String("aim", "", "aim target [x,y,z]")
-	angleYZFlag := fs.Float64("angle-yz", 0, "incidence angle in YZ plane (degrees)")
-	passThroughFlag := fs.String("pass-through", "", "pass through surface:Y:X")
-	pathFlag := fs.String("path", "", "surface path (comma-separated IDs)")
-	wavelengthFlag := fs.Float64("wavelength", 0, "wavelength (mm)")
-	idFlag := fs.String("id", "", "ray ID (default: trace_single)")
-	lenientFlag := fs.Bool("lenient", false, "skip aperture/glass-path checks")
-	detailsFlag := fs.Bool("details", false, "add per-surface detail to output YAML")
-	verboseFlag := fs.Bool("verbose", false, "print per-surface info to stderr")
-	configFlag := fs.String("config", "", "config ID (multi-config mode)")
+	args := os.Args[2:]
+	fs := flag.NewFlagSet("trace", flag.ExitOnError)
+	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
 	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
+	traceVerbose := fs.Bool("verbose", false, "print per-ray trace info to stderr")
+	traceDetails := fs.Bool("details", false, "add per-surface detail (AOI, n1/n2, Fresnel) to output YAML")
+	fs.String("lenient", "", "trace rays leniently: true|false (default: rays.lenient from the input YAML, else false)")
 	fs.Parse(args)
 
 	input := parseYAML[types.Input](data)
 
-	// Resolve wavelength: CLI > YAML > chief.reference_wavelength > default.
-	wavelength := *wavelengthFlag
-	if !flagWasSet(fs, "wavelength") {
-		if input.TraceSingle != nil && input.TraceSingle.Wavelength > 0 {
-			wavelength = input.TraceSingle.Wavelength
-		}
-	}
-	if wavelength <= 0 {
-		wavelength = effectiveReferenceWavelength(input.Chief)
-	}
-
-	// Resolve ray ID.
-	rayID := *idFlag
-	if !flagWasSet(fs, "id") {
-		if input.TraceSingle != nil && input.TraceSingle.ID != "" {
-			rayID = input.TraceSingle.ID
-		}
-	}
-	if rayID == "" {
-		rayID = "trace_single"
-	}
-
-	// Resolve lenient.
-	lenient := *lenientFlag
-	if !flagWasSet(fs, "lenient") && input.TraceSingle != nil {
-		lenient = input.TraceSingle.Lenient
-	}
-
-	// Resolve details.
-	details := *detailsFlag
-	if !flagWasSet(fs, "details") && input.TraceSingle != nil {
-		details = input.TraceSingle.Details
-	}
-
-	// --- Resolve ray specification (CLI > YAML) ---
-	rayCfg := input.TraceSingle
-	origin, direction, aim, passThrough := resolveRaySpec(fs, rayCfg, originFlag, directionFlag, aimFlag, angleYZFlag, passThroughFlag)
-
-	// --- Resolve path ---
-	path := resolvePath(fs, rayCfg, pathFlag, input.Configs, configFlag)
-
-	// --- Build types.Ray ---
-	// Default to right-circular polarization (matching the pipeline `trace`
-	// default) unless the input `rays` section carries an explicit one.
-	pol := types.NewCircularJones(true)
-	if input.Rays != nil {
-		pol = input.Rays.Polarization
-	}
-	r := types.Ray{
-		ID:                   rayID,
-		Wavelength:           wavelength,
-		Path:                 path,
-		Lenient:              lenient,
-		Jones:                pol,
-		IncludeErrorSurfaces: true,
-	}
-	r.Initial.Origin = origin
-
-	if aim != nil {
-		r.Aim = aim
-	} else if passThrough != nil {
-		r.PassThrough = passThrough
-	} else {
-		r.Initial.Direction = direction
-	}
-
-	// --- Write-back ---
-	if anyFlagSet(fs, "origin", "direction", "aim", "angle-yz", "pass-through",
-		"path", "wavelength", "id", "lenient", "details") {
-		if input.TraceSingle == nil {
-			input.TraceSingle = &types.RayTraceConfig{}
-		}
-		if flagWasSet(fs, "origin") {
-			input.TraceSingle.Origin = []float64{origin.X, origin.Y, origin.Z}
-		}
-		if flagWasSet(fs, "direction") {
-			input.TraceSingle.Direction = []float64{direction.X, direction.Y, direction.Z}
-		}
-		if flagWasSet(fs, "aim") && aim != nil {
-			input.TraceSingle.Aim = []float64{aim.X, aim.Y, aim.Z}
-		}
-		if flagWasSet(fs, "angle-yz") {
-			v := *angleYZFlag
-			input.TraceSingle.AngleYZ = &v
-		}
-		if flagWasSet(fs, "pass-through") {
-			input.TraceSingle.PassThrough = parseFloatList(*passThroughFlag, "pass-through")
-		}
-		if flagWasSet(fs, "path") {
-			input.TraceSingle.Path = path
-		}
-		if flagWasSet(fs, "wavelength") {
-			input.TraceSingle.Wavelength = wavelength
-		}
-		if flagWasSet(fs, "id") {
-			input.TraceSingle.ID = rayID
-		}
-		if flagWasSet(fs, "lenient") {
-			input.TraceSingle.Lenient = lenient
-		}
-		if flagWasSet(fs, "details") {
-			input.TraceSingle.Details = details
-		}
-	}
-	writeBackGlassDir(&input, *glassDir)
-
-	// --- Trace ---
-	gc, cc := loadCatalogs(&input, *glassDir)
+	gc, cc := openGlass(&input, *glassDir)
 	surfaces := configSurfaces(input.Configs, configFlag)
 	surface.Precompute(surfaces)
 
 	engine := ray.NewEngine(gc, cc)
-	ray.ResolveRay(&r, surfaces, engine)
-	result := engine.TraceRay(r, surfaces, details)
 
-	if result.Error != "" {
-		errOut("Warning: ray %q error: %s", rayID, result.Error)
+	// Preserve chief_rays from input data if present
+	var chiefRays []types.ChiefRayResult
+	var temp struct {
+		ChiefRays []types.ChiefRayResult `yaml:"chief_rays"`
+	}
+	if err := yaml.Unmarshal(data, &temp); err == nil {
+		chiefRays = temp.ChiefRays
 	}
 
-	// --- Verbose output (stderr) ---
-	if *verboseFlag {
-		printTraceSingleVerbose(result)
+	// The ray list to trace: the `rays` section (marginal / user rays) plus
+	// the per-field chief rays from `chief_rays` (see gatherTraceRays). Chief
+	// rays are the authoritative copy, so `trace` must accept a chief output
+	// whose rays section only carries the extras.
+	pol := types.NewCircularJones(true)
+	if input.Rays != nil {
+		pol = input.Rays.Polarization
+	}
+	// Lenient tracing: --lenient true|false (flag) wins over rays.lenient (YAML).
+	lenient, lenientSet, err := boolFlag(fs, "lenient")
+	if err != nil {
+		errExitf("Error: %s", err)
+	}
+	if !lenientSet && input.Rays != nil && input.Rays.Lenient {
+		lenient = input.Rays.Lenient
+	}
+	if lenientSet {
+		// Principle 3: echo the effective value back into the output section.
+		if input.Rays == nil {
+			input.Rays = &types.RayInput{Polarization: pol}
+		}
+		input.Rays.Lenient = lenient
+	}
+	rayList := gatherTraceRays(input.Rays, chiefRays, pol)
+	if len(rayList) == 0 {
+		errExitf("Error: 'rays' or 'chief_rays' section is required")
 	}
 
-	// --- Output (overwrite results) ---
-	output := types.Output{Input: input, Results: []types.RayResult{result}}
+	output := types.Output{
+		Input:     input,
+		Results:   make([]types.RayResult, len(rayList)),
+		ChiefRays: chiefRays,
+	}
 	withOutputMetadata(&output.Input, "trace", subcmdArgs())
+
+	results := make([]types.RayResult, len(rayList))
+	var errorsMu sync.Mutex
+	var wg sync.WaitGroup
+	workers := runtime.GOMAXPROCS(0)
+	if workers > len(rayList) {
+		workers = len(rayList)
+	}
+	jobs := make(chan int)
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				r := &rayList[i]
+				r.Jones = pol
+				if lenient {
+					r.Lenient = true
+				}
+				ray.ResolveRay(r, surfaces, engine)
+				result := engine.TraceRay(*r, surfaces, *traceDetails)
+				if result.Error != "" {
+					errMsg := fmt.Sprintf("{\"ray\":%q,\"error\":%q,\"error_code\":%q}\n", r.ID, result.Error, result.ErrorCode)
+					errorsMu.Lock()
+					if *traceVerbose {
+						fmt.Fprint(os.Stderr, errMsg)
+					} else {
+						errOut("Warning: ray %q error: %s", r.ID, result.Error)
+					}
+					errorsMu.Unlock()
+				}
+				results[i] = result
+			}
+		}()
+	}
+	for i := range rayList {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+
+	output.Results = append(output.Results, results...)
+
 	writeYAML(&output)
 }
 
-// resolveRaySpec resolves the ray specification from CLI flags or YAML config.
-func resolveRaySpec(fs *flag.FlagSet, cfg *types.RayTraceConfig,
-	originFlag, directionFlag, aimFlag *string, angleYZFlag *float64,
-	passThroughFlag *string,
-) (origin types.Vec3, direction types.Vec3, aim *types.Vec3, passThrough *types.PassThroughTarget) {
+// gatherTraceRays returns the merged ray list to trace: the input `rays`
+// section plus the per-field chief rays from `chief_rays`. Chief rays are
+// identified in the rays section by the synthetic "chief_<angle>deg" ids, so a
+// duplicate copy there is not traced twice.
+func gatherTraceRays(rays *types.RayInput, chiefRays []types.ChiefRayResult, pol types.JonesVector) []types.Ray {
+	total := 0
+	if rays != nil {
+		total += len(rays.Rays)
+	}
+	total += len(chiefRays)
+	rayList := make([]types.Ray, 0, total)
 
-	// --- Origin ---
-	originStr := *originFlag
-	if !flagWasSet(fs, "origin") && cfg != nil && len(cfg.Origin) >= 3 {
-		originStr = fmt.Sprintf("%f,%f,%f", cfg.Origin[0], cfg.Origin[1], cfg.Origin[2])
-	}
-	if originStr != "" {
-		parts := parseFloatList(originStr, "origin")
-		if len(parts) >= 3 {
-			origin = types.Vec3{X: parts[0], Y: parts[1], Z: parts[2]}
-		}
-	}
-
-	// --- Direction / Aim / AngleYZ / PassThrough ---
-	directionStr := *directionFlag
-	aimStr := *aimFlag
-	angleYZ := *angleYZFlag
-	passThroughStr := *passThroughFlag
-
-	if !flagWasSet(fs, "direction") && cfg != nil && len(cfg.Direction) >= 3 {
-		directionStr = fmt.Sprintf("%f,%f,%f", cfg.Direction[0], cfg.Direction[1], cfg.Direction[2])
-	}
-	if !flagWasSet(fs, "aim") && cfg != nil && len(cfg.Aim) >= 3 {
-		aimStr = fmt.Sprintf("%f,%f,%f", cfg.Aim[0], cfg.Aim[1], cfg.Aim[2])
-	}
-	if !flagWasSet(fs, "angle-yz") && cfg != nil && cfg.AngleYZ != nil {
-		angleYZ = *cfg.AngleYZ
-	}
-	if !flagWasSet(fs, "pass-through") && cfg != nil && len(cfg.PassThrough) >= 3 {
-		passThroughStr = fmt.Sprintf("%d:%f:%f", int(cfg.PassThrough[0]), cfg.PassThrough[1], cfg.PassThrough[2])
-	}
-
-	// Determine which method is active (CLI wins; aim > direction > angle-yz > pass-through).
-	switch {
-	case flagWasSet(fs, "aim") || (cfg != nil && len(cfg.Aim) >= 3 && !flagWasSet(fs, "direction") && !flagWasSet(fs, "angle-yz")):
-		parts := parseFloatList(aimStr, "aim")
-		if len(parts) >= 3 {
-			v := types.Vec3{X: parts[0], Y: parts[1], Z: parts[2]}
-			aim = &v
-		}
-	case flagWasSet(fs, "direction") || (cfg != nil && len(cfg.Direction) >= 3 && !flagWasSet(fs, "angle-yz")):
-		parts := parseFloatList(directionStr, "direction")
-		if len(parts) >= 3 {
-			direction = types.Vec3{X: parts[0], Y: parts[1], Z: parts[2]}
-		}
-	case flagWasSet(fs, "angle-yz") || (cfg != nil && cfg.AngleYZ != nil):
-		rad := angleYZ * math.Pi / 180.0
-		direction = types.Vec3{X: 0, Y: math.Sin(rad), Z: math.Cos(rad)}
-	case flagWasSet(fs, "pass-through") || (cfg != nil && len(cfg.PassThrough) >= 3):
-		rad := angleYZ * math.Pi / 180.0
-		direction = types.Vec3{X: 0, Y: math.Sin(rad), Z: math.Cos(rad)}
-		parts := parseFloatList(passThroughStr, "pass-through")
-		if len(parts) >= 3 {
-			surfaceID := int(parts[0])
-			passThrough = &types.PassThroughTarget{
-				Surface:    surfaceID,
-				Coordinate: types.Vec3{Y: parts[1], X: parts[2]},
+	seen := make(map[string]bool, len(chiefRays))
+	if rays != nil {
+		for _, r := range rays.Rays {
+			if r.ID != "" {
+				seen[r.ID] = true
 			}
-		}
-	default:
-		direction = types.Vec3{X: 0, Y: 0, Z: 1}
-	}
-
-	return origin, direction, aim, passThrough
-}
-
-// resolvePath resolves the surface path from CLI flag or YAML config.
-func resolvePath(fs *flag.FlagSet, cfg *types.RayTraceConfig, pathFlag *string,
-	configs []types.Config, configFlag *string,
-) []int {
-	pathStr := *pathFlag
-	if !flagWasSet(fs, "path") && cfg != nil && len(cfg.Path) > 0 {
-		pathStr = intSliceToString(cfg.Path)
-	}
-	if pathStr != "" {
-		return parseIntList(pathStr, "path")
-	}
-	// Default: sequential [0, 1, ..., N]
-	surfaces := configSurfaces(configs, configFlag)
-	path := make([]int, len(surfaces)+1)
-	for i := range path {
-		path[i] = i
-	}
-	return path
-}
-
-// printTraceSingleVerbose prints per-surface detail to stderr.
-func printTraceSingleVerbose(result types.RayResult) {
-	for _, sr := range result.Surfaces {
-		interact := string(sr.Interaction)
-		surfID := sr.SurfaceID
-		y := sr.Position.Y
-		z := sr.Position.Z
-		marker := ""
-		if sr.ErrorCode != "" {
-			marker = fmt.Sprintf("  [ERROR: %s]", sr.ErrorCode)
-		}
-
-		if sr.AngleOfIncidence != nil && sr.N1 != nil && sr.N2 != nil {
-			n1 := *sr.N1
-			n2 := *sr.N2
-			aoi := *sr.AngleOfIncidence
-			if sr.CoatingRs != nil {
-				fmt.Fprintf(os.Stderr, "  s%-2d  %9s  y=%8.4f  z=%8.4f  \u03b8=%6.2f\u00b0  n1=%.3f  n2=%.3f  coating_Rs=%.4f  Rp=%.4f  Ts=%.4f  Tp=%.4f%s\n",
-					surfID, interact, y, z, aoi, n1, n2,
-					*sr.CoatingRs, *sr.CoatingRp, *sr.CoatingTs, *sr.CoatingTp, marker)
-			} else if sr.Rs != nil {
-				fmt.Fprintf(os.Stderr, "  s%-2d  %9s  y=%8.4f  z=%8.4f  \u03b8=%6.2f\u00b0  n1=%.3f  n2=%.3f  Rs=%.4f  Rp=%.4f  Ts=%.4f  Tp=%.4f%s\n",
-					surfID, interact, y, z, aoi, n1, n2,
-					*sr.Rs, *sr.Rp, *sr.Ts, *sr.Tp, marker)
-			}
-		} else {
-			fmt.Fprintf(os.Stderr, "  s%-2d  %9s  y=%8.4f  z=%8.4f%s\n", surfID, interact, y, z, marker)
+			rayList = append(rayList, r)
 		}
 	}
-	if result.Error != "" {
-		fmt.Fprintf(os.Stderr, "  !!! Trace stopped: %s: %s\n", result.ErrorCode, result.Error)
-	}
-	fmt.Fprintf(os.Stderr, "  OPL_total = %.4f mm  Is=%.4f  Ip=%.4f\n",
-		result.OPLTotal, result.IntensityS, result.IntensityP)
-}
-
-// parseIntList parses a comma-separated list of ints.
-func parseIntList(s, name string) []int {
-	parts := strings.Split(s, ",")
-	var result []int
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
+	for _, cr := range chiefRays {
+		id := fmt.Sprintf("chief_%.0fdeg", cr.FieldAngle)
+		if seen[id] {
 			continue
 		}
-		v, err := strconv.Atoi(p)
-		if err != nil {
-			errOut("Error: invalid %s value %q: %v", name, p, err)
-			os.Exit(1)
-		}
-		result = append(result, v)
+		r := cr.ChiefRay
+		r.ID = id
+		r.Jones = pol
+		rayList = append(rayList, r)
 	}
-	return result
-}
-
-// intSliceToString formats an int slice as a comma-separated string.
-func intSliceToString(vals []int) string {
-	parts := make([]string, len(vals))
-	for i, v := range vals {
-		parts[i] = strconv.Itoa(v)
-	}
-	return strings.Join(parts, ",")
+	return rayList
 }

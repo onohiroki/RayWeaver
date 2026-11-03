@@ -26,8 +26,7 @@ func runImport(data []byte) {
 	fs.Parse(os.Args[2:])
 
 	if *format == "" {
-		errOut("Error: --format is required (zemax|oslo|codev)")
-		os.Exit(1)
+		errExitf("Error: --format is required (zemax|oslo|codev)")
 	}
 
 	var result *importer.ParseResult
@@ -40,24 +39,20 @@ func runImport(data []byte) {
 	case "codev":
 		result, err = importer.ParseCodeV(string(data))
 	default:
-		errOut("Error: unknown format %q", *format)
-		os.Exit(1)
+		errExitf("Error: unknown format %q", *format)
 	}
 	if err != nil {
-		errOut("Error: parse error: %v", err)
-		os.Exit(1)
+		errExitf("Error: parse error: %v", err)
 	}
 	if len(result.Surfaces) == 0 {
-		errOut("Error: no surfaces found in input")
-		os.Exit(1)
+		errExitf("Error: no surfaces found in input")
 	}
 
 	var mfrOrder []string
 	if *glassDir != "" {
 		agfGlasses, err := glass.LoadAGFDir(*glassDir)
 		if err != nil {
-			errOut("Error loading AGF files: %v", err)
-			os.Exit(1)
+			errExitf("Error loading AGF files: %v", err)
 		}
 		mfrOrder = glass.BuildManufacturerOrder(*glassDir)
 		if len(mfrOrder) == 0 {

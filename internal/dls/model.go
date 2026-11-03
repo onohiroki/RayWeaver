@@ -32,15 +32,6 @@ type VariableInfo struct {
 	Max       float64
 }
 
-type MeritTerm struct {
-	FieldAngle  float64
-	FieldDir    []float64
-	FieldWeight float64
-	Wavelength  float64
-	WavWeight   float64
-	Weight      float64
-}
-
 type Result struct {
 	BeforeMerit float64
 	AfterMerit  float64

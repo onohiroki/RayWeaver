@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -89,8 +88,7 @@ func hasGlassVariable(input *types.Input) bool {
 // merit is always preserved instead of being silently replaced.
 func applyGlassVariables(input *types.Input, gc *glass.Catalog) {
 	if len(input.Configs) == 0 {
-		errOut("Error: --glass-variables requires at least one config (or chief.fields + surfaces)")
-		os.Exit(1)
+		errExitf("Error: --glass-variables requires at least one config (or chief.fields + surfaces)")
 	}
 
 	// A multi-config (zoom) run keeps one shared nd/vd pair per physical element,
@@ -100,8 +98,7 @@ func applyGlassVariables(input *types.Input, gc *glass.Catalog) {
 	if activeConfigCount(input) > 1 {
 		shared := buildSharedGlassVariables(input, gc)
 		if len(shared) == 0 {
-			errOut("Error: --glass-variables found no refractive lens elements to optimize")
-			os.Exit(1)
+			errExitf("Error: --glass-variables found no refractive lens elements to optimize")
 		}
 		input.Optimization.SharedVariables = append(input.Optimization.SharedVariables, shared...)
 		return
@@ -109,8 +106,7 @@ func applyGlassVariables(input *types.Input, gc *glass.Catalog) {
 
 	vars := buildGlassVariables(input, gc)
 	if len(vars) == 0 {
-		errOut("Error: --glass-variables found no refractive lens elements to optimize")
-		os.Exit(1)
+		errExitf("Error: --glass-variables found no refractive lens elements to optimize")
 	}
 	input.Optimization.Variables = append(input.Optimization.Variables, vars...)
 }

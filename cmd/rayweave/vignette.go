@@ -4,7 +4,6 @@ import (
 	"flag"
 	"os"
 
-	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/vignette"
 )
@@ -22,8 +21,7 @@ func runVignette(data []byte) {
 	input := parseYAML[types.Input](data)
 
 	if input.Chief == nil {
-		errOut("Error: 'chief' section is required")
-		os.Exit(1)
+		errExitf("Error: 'chief' section is required")
 	}
 
 	// Resolve effective settings. The reference wavelength is system-wide and is
@@ -69,15 +67,9 @@ func runVignette(data []byte) {
 		}
 	}
 
-	gc, _ := loadCatalogs(&input, *glassDir)
-	writeBackGlassDir(&input, *glassDir)
+	gc, _ := openGlass(&input, *glassDir)
 
-	surfaces := configSurfaces(input.Configs, configFlag)
-	if len(surfaces) == 0 {
-		errOut("Error: no surfaces to process")
-		os.Exit(1)
-	}
-	surface.Precompute(surfaces)
+	surfaces := surfacesFor(input.Configs, configFlag)
 
 	// Snapshot the input auto_aperture diameters for the before/after report.
 	beforeByID := make(map[int]float64, len(surfaces))
@@ -89,8 +81,7 @@ func runVignette(data []byte) {
 	// win (see resolveConfigFieldDefs).
 	fields := resolveConfigFieldDefs(input, configFlag)
 	if len(fields) == 0 {
-		errOut("Error: 'fields' or 'field_angles' is required")
-		os.Exit(1)
+		errExitf("Error: 'fields' or 'field_angles' is required")
 	}
 
 	pol := types.NewCircularJones(true)

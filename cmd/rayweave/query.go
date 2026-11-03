@@ -64,16 +64,13 @@ func runQuery(data []byte) {
 	fs.Parse(os.Args[2:])
 
 	if *yamlOut && *jsonOut {
-		errOut("Error: --yaml and --json are mutually exclusive")
-		os.Exit(1)
+		errExitf("Error: --yaml and --json are mutually exclusive")
 	}
 	if *csvArg != "" && *eachArg != "" {
-		errOut("Error: --csv and --each are mutually exclusive")
-		os.Exit(1)
+		errExitf("Error: --csv and --each are mutually exclusive")
 	}
 	if *exprArg != "" && len(fs.Args()) > 0 {
-		errOut("Error: --expr and a positional SELECTOR are mutually exclusive")
-		os.Exit(1)
+		errExitf("Error: --expr and a positional SELECTOR are mutually exclusive")
 	}
 	agg := ""
 	aggPath := ""
@@ -84,14 +81,12 @@ func runQuery(data []byte) {
 			continue
 		}
 		if agg != "" {
-			errOut("Error: --count/--len/--sum/--product/--stdev are mutually exclusive")
-			os.Exit(1)
+			errExitf("Error: --count/--len/--sum/--product/--stdev are mutually exclusive")
 		}
 		agg, aggPath = a.name, a.val
 	}
 	if *whereExpr != "" && !*jsonlMode {
-		errOut("Error: --where requires --jsonl")
-		os.Exit(1)
+		errExitf("Error: --where requires --jsonl")
 	}
 
 	selector := *exprArg
@@ -108,8 +103,7 @@ func runQuery(data []byte) {
 		var err error
 		defaultNumVal, err = parseDefaultNum(*defaultNumStr)
 		if err != nil {
-			errOut("Error: --default-num: %v", err)
-			os.Exit(1)
+			errExitf("Error: --default-num: %v", err)
 		}
 	}
 
@@ -127,8 +121,7 @@ func runQuery(data []byte) {
 			for _, ln := range lines {
 				ok, err := evalExpr(*whereExpr, &evalCtx{root: ln})
 				if err != nil {
-					errOut("Error in --where expression: %v", err)
-					os.Exit(1)
+					errExitf("Error in --where expression: %v", err)
 				}
 				if truthy(ok) {
 					filtered = append(filtered, ln)
@@ -146,8 +139,7 @@ func runQuery(data []byte) {
 	} else {
 		var root any
 		if err := yaml.Unmarshal(data, &root); err != nil {
-			errOut("Error parsing YAML: %v", err)
-			os.Exit(1)
+			errExitf("Error parsing YAML: %v", err)
 		}
 		root = normalizeNumbers(root)
 		docRoot = root
@@ -159,13 +151,11 @@ func runQuery(data []byte) {
 	for _, kv := range setFlags {
 		eq := strings.Index(kv, "=")
 		if eq <= 0 {
-			errOut("Error: --set expects VAR=EXPR (got %q)", kv)
-			os.Exit(1)
+			errExitf("Error: --set expects VAR=EXPR (got %q)", kv)
 		}
 		v, err := evalExpr(kv[eq+1:], &evalCtx{root: docRoot, bindings: bindings})
 		if err != nil {
-			errOut("Error in --set %s: %v", kv[:eq], err)
-			os.Exit(1)
+			errExitf("Error in --set %s: %v", kv[:eq], err)
 		}
 		bindings[kv[:eq]] = v
 	}
@@ -175,14 +165,12 @@ func runQuery(data []byte) {
 		// Tokenize each edit expression separately
 		toks, err := lexQuery(editStr)
 		if err != nil {
-			errOut("Error tokenizing --edit %q: %v", editStr, err)
-			os.Exit(1)
+			errExitf("Error tokenizing --edit %q: %v", editStr, err)
 		}
 		p := &parser{toks: toks}
 		n, err := p.parseExpr()
 		if err != nil {
-			errOut("Error parsing --edit %q: %v", editStr, err)
-			os.Exit(1)
+			errExitf("Error parsing --edit %q: %v", editStr, err)
 		}
 		edits = append(edits, n)
 	}
@@ -191,8 +179,7 @@ func runQuery(data []byte) {
 		var err error
 		docRoot, err = applyMutations(docRoot, edits)
 		if err != nil {
-			errOut("Error applying mutations: %v", err)
-			os.Exit(1)
+			errExitf("Error applying mutations: %v", err)
 		}
 	}
 	ctx := &evalCtx{root: docRoot, bindings: bindings}
@@ -231,12 +218,10 @@ func runQuery(data []byte) {
 		} else if len(bindings) > 0 {
 			result = bindings
 		} else {
-			errOut("Error: nothing to evaluate (give a SELECTOR, --expr, --set, --each, --csv or an aggregate)")
-			os.Exit(1)
+			errExitf("Error: nothing to evaluate (give a SELECTOR, --expr, --set, --each, --csv or an aggregate)")
 		}
 		if err != nil {
-			errOut("Error evaluating expression: %v", err)
-			os.Exit(1)
+			errExitf("Error evaluating expression: %v", err)
 		}
 		emitResult(result, *defaultStr, *printfFmt, *yamlOut, *jsonOut, rawMode, *printfNanEmpty)
 	}
@@ -270,8 +255,7 @@ func emitResult(v any, defaultStr, printfFmt string, yamlOut, jsonOut, raw bool,
 		return
 	}
 	if _, ok := v.(map[string]any); ok {
-		errOut("Error: result is a mapping; use --yaml or --json to print it")
-		os.Exit(1)
+		errExitf("Error: result is a mapping; use --yaml or --json to print it")
 	}
 	emitScalar(v, printfFmt, nanEmpty)
 }
@@ -288,8 +272,7 @@ func emitScalar(v any, printfFmt string, nanEmpty bool) {
 func emitYAML(v any) {
 	data, err := yaml.Marshal(v)
 	if err != nil {
-		errOut("Error marshaling YAML: %v", err)
-		os.Exit(1)
+		errExitf("Error marshaling YAML: %v", err)
 	}
 	os.Stdout.Write(data)
 }
@@ -297,8 +280,7 @@ func emitYAML(v any) {
 func emitJSON(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
-		errOut("Error marshaling JSON: %v", err)
-		os.Exit(1)
+		errExitf("Error marshaling JSON: %v", err)
 	}
 	fmt.Println(string(data))
 }
@@ -312,8 +294,7 @@ func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, pri
 	path, cols := splitEachArg(arg)
 	v, err := resolve(path)
 	if err != nil {
-		errOut("Error evaluating --each path: %v", err)
-		os.Exit(1)
+		errExitf("Error evaluating --each path: %v", err)
 	}
 	var elems []any
 	switch t := v.(type) {
@@ -348,8 +329,7 @@ func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, pri
 				writeRow(e)
 			} else {
 				if _, ok := e.(map[string]any); ok {
-					errOut("Error: element is a mapping; give columns (PATH:col1,col2,...) or use --yaml/--json")
-					os.Exit(1)
+					errExitf("Error: element is a mapping; give columns (PATH:col1,col2,...) or use --yaml/--json")
 				}
 				emitScalar(e, printfFmt, printfNanEmpty)
 			}
@@ -361,8 +341,7 @@ func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, pri
 		for i, col := range cols {
 			cv, err := evalExpr(col, elemCtx)
 			if err != nil {
-				errOut("Error evaluating column %q: %v", col, err)
-				os.Exit(1)
+				errExitf("Error evaluating column %q: %v", col, err)
 			}
 			if cv == nil {
 				if defaultNumSet {
@@ -406,13 +385,11 @@ func runQueryEach(arg string, resolve func(string) (any, error), defaultStr, pri
 func runQueryCSV(arg string, resolve func(string) (any, error), header, keepAll bool, defaultStr, printfFmt string) {
 	path, cols := splitEachArg(arg)
 	if len(cols) == 0 {
-		errOut("Error: --csv requires columns (PATH:col1,col2,...)")
-		os.Exit(1)
+		errExitf("Error: --csv requires columns (PATH:col1,col2,...)")
 	}
 	v, err := resolve(path)
 	if err != nil {
-		errOut("Error evaluating --csv path: %v", err)
-		os.Exit(1)
+		errExitf("Error evaluating --csv path: %v", err)
 	}
 	var elems []any
 	switch t := v.(type) {
@@ -436,8 +413,7 @@ func runQueryCSV(arg string, resolve func(string) (any, error), header, keepAll 
 		for i, col := range cols {
 			cv, err := evalExpr(col, elemCtx)
 			if err != nil {
-				errOut("Error evaluating column %q: %v", col, err)
-				os.Exit(1)
+				errExitf("Error evaluating column %q: %v", col, err)
 			}
 			if cv == nil && !keepAll {
 				skip = true
@@ -461,8 +437,7 @@ func runQueryCSV(arg string, resolve func(string) (any, error), header, keepAll 
 func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr, printfFmt string, nanEmpty bool) {
 	v, err := resolve(path)
 	if err != nil {
-		errOut("Error evaluating --%s path: %v", agg, err)
-		os.Exit(1)
+		errExitf("Error evaluating --%s path: %v", agg, err)
 	}
 	switch agg {
 	case "len":
@@ -576,8 +551,7 @@ func runQueryAgg(agg, path string, resolve func(string) (any, error), defaultStr
 func runQueryGate(gate string, ctx *evalCtx, bindings map[string]any, yamlOut, jsonOut bool, defaultStr string, nanEmpty bool) {
 	v, err := evalExpr(gate, ctx)
 	if err != nil {
-		errOut("Error in --gate expression: %v", err)
-		os.Exit(1)
+		errExitf("Error in --gate expression: %v", err)
 	}
 	pass := truthy(v)
 	if yamlOut || jsonOut {
@@ -1049,7 +1023,7 @@ func evalExpr(src string, ctx *evalCtx) (any, error) {
 
 func (c *evalCtx) eval(n expr) (any, error) {
 	switch t := n.(type) {
-case *numNode:
+	case *numNode:
 		return t.v, nil
 	case *strNode:
 		return t.v, nil

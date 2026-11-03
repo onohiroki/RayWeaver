@@ -32,8 +32,7 @@ func runScale(data []byte) {
 		target = input.Scale.EFL
 	}
 	if target <= 0 {
-		errOut("Error: --efl TARGET (mm) is required (or set scale.efl in the input YAML)")
-		os.Exit(1)
+		errExitf("Error: --efl TARGET (mm) is required (or set scale.efl in the input YAML)")
 	}
 	if flagWasSet(fs, "efl") {
 		// Principle 3: echo the effective value back into the output section.
@@ -43,13 +42,11 @@ func runScale(data []byte) {
 		input.Scale.EFL = target
 	}
 
-	gc, _ := loadCatalogs(&input, *glassDir)
-	writeBackGlassDir(&input, *glassDir)
+	gc, _ := openGlass(&input, *glassDir)
 
 	refSurfaces := configSurfaces(input.Configs, configFlag)
 	if len(refSurfaces) == 0 {
-		errOut("Error: no surfaces defined")
-		os.Exit(1)
+		errExitf("Error: no surfaces defined")
 	}
 	surface.Precompute(refSurfaces)
 
@@ -57,8 +54,7 @@ func runScale(data []byte) {
 	refSys := types.System{Surfaces: refSurfaces}
 	cur := paraxial.Compute(refSys, wavelength, gc, 0, nil).FocalLength
 	if math.Abs(cur) < 1e-9 {
-		errOut("Error: current EFL is zero; cannot scale")
-		os.Exit(1)
+		errExitf("Error: current EFL is zero; cannot scale")
 	}
 
 	s := target / cur

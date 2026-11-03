@@ -33,12 +33,10 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
 	if input.Optimization == nil {
-		errOut("Error: 'optimization' section is required")
-		os.Exit(1)
+		errExitf("Error: 'optimization' section is required")
 	}
 	if input.Optimization.Escape == nil {
-		errOut("Error: 'optimization.escape' section is required")
-		os.Exit(1)
+		errExitf("Error: 'optimization.escape' section is required")
 	}
 
 	// Resolve the power-preserving glass phase under the CLI/YAML rule (CLI
@@ -54,14 +52,12 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	progress, finishProgress := newEscapeProgress(verbose, logFile)
 	defer finishProgress()
 
-	gc, _ := loadCatalogs(&input, glassDir)
-	writeBackGlassDir(&input, glassDir)
+	gc, _ := openGlass(&input, glassDir)
 	if glassVariables {
 		applyGlassVariables(&input, gc)
 	}
 	if err := validateSharedGlassVariables(&input, gc); err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 
 	runEscapeCore(input, gc, progress, saveBase, keepInfeasible, debug, "escape", newExplorer)
@@ -85,20 +81,17 @@ type globalSettings struct {
 // their own section, so the two never alias one another's settings.
 func resolveGlobalSettings(input *types.Input, command string) globalSettings {
 	if input.Optimization == nil {
-		errOut("Error: 'optimization' section is required")
-		os.Exit(1)
+		errExitf("Error: 'optimization' section is required")
 	}
 	if command == "pso" {
 		if input.Optimization.PSO == nil {
-			errOut("Error: 'optimization.pso' section is required")
-			os.Exit(1)
+			errExitf("Error: 'optimization.pso' section is required")
 		}
 		p := input.Optimization.PSO
 		return globalSettings{config: &p.GlobalConfig}
 	}
 	if input.Optimization.Escape == nil {
-		errOut("Error: 'optimization.escape' section is required")
-		os.Exit(1)
+		errExitf("Error: 'optimization.escape' section is required")
 	}
 	e := input.Optimization.Escape
 	return globalSettings{config: &e.GlobalConfig, tuning: escape.TuningFrom(*e)}
@@ -419,15 +412,13 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 		surfaces = input.Configs[0].Surfaces
 	}
 	if len(surfaces) == 0 {
-		errOut("Error: no surfaces defined (add 'configs[0].surfaces')")
-		os.Exit(1)
+		errExitf("Error: no surfaces defined (add 'configs[0].surfaces')")
 	}
 	surface.Precompute(surfaces)
 
 	variables := buildOptimizeVariables(input.Optimization, gc)
 	if len(variables) == 0 {
-		errOut("Error: no optimization variables defined")
-		os.Exit(1)
+		errExitf("Error: no optimization variables defined")
 	}
 	meritTerms := buildMeritTerms(input)
 	if len(meritTerms) == 0 {
@@ -440,8 +431,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 			}
 		}
 		if !hasModes {
-			errOut("Error: no merit terms defined (add 'optimization.merit', 'configs[].merit' or 'configs[].merit_modes')")
-			os.Exit(1)
+			errExitf("Error: no merit terms defined (add 'optimization.merit', 'configs[].merit' or 'configs[].merit_modes')")
 		}
 	}
 
@@ -823,101 +813,22 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 }
 
 func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSettings, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
-	var configs []optimize.ConfigInput
-	for _, cfg := range input.Configs {
-		if !cfg.Active {
-			continue
-		}
-		surfaces := cfg.Surfaces
-		if len(surfaces) == 0 {
-			errOut("Error: config %q has no surfaces defined", cfg.ID)
-			os.Exit(1)
-		}
-		var fields []types.FieldItem
-		for _, f := range cfg.Fields {
-			fields = append(fields, f)
-		}
-		if len(fields) == 0 && input.Chief != nil {
-			for _, f := range input.Chief.Fields {
-				fields = append(fields, types.FieldItem{ID: 0, AngleDeg: f.Angle, Weight: 1.0})
-			}
-		}
-		var wavelengths []types.WavelengthItem
-		for _, w := range cfg.Wavelengths {
-			wavelengths = append(wavelengths, w)
-		}
-		var meritTerms []types.MeritTerm
-		if cfg.Merit != nil {
-			for _, mt := range cfg.Merit.Terms {
-				meritTerms = append(meritTerms, mt)
-			}
-		}
-		constraints := input.Optimization.Constraints
-		if len(cfg.Constraints) > 0 {
-			constraints = cfg.Constraints
-		}
-		stopSurface := 0
-		if input.Chief != nil {
-			stopSurface = input.Chief.StopSurface
-		}
-		configs = append(configs, optimize.ConfigInput{
-			ID:                  cfg.ID,
-			Weight:              cfg.Weight,
-			StopSurface:         stopSurface,
-			RefSurface:          chiefRefSurface(input),
-			PupilZ:              computePupilZ(input, surfaces, gc),
-			ReferenceWavelength: effectiveReferenceWavelength(input.Chief),
-			Surfaces:            surfaces,
-			Fields:              fields,
-			Wavelengths:         wavelengths,
-			MeritTerms:          meritTerms,
-			MeritModes:          cfg.MeritModes,
-			Constraints:         constraints,
-			PupilModel:          input.Chief.PupilModel,
-			Normalization:       input.Optimization.MeritNormalization,
-			RayDefinition:       chiefRayDefinition(input),
-			WavefrontReference:  input.Optimization.WavefrontReference,
-		})
-	}
+	configs := buildConfigInputs(input, gc)
 	if len(configs) == 0 {
-		errOut("Error: no active configs found")
-		os.Exit(1)
+		errExitf("Error: no active configs found")
 	}
 
 	sharedVars := input.Optimization.SharedVariables
 	localVars := input.Optimization.LocalVariables
 
-	maxIter := input.Optimization.MaxIter
-	if maxIter <= 0 {
-		maxIter = defaultMaxIter
-	}
-	tol := input.Optimization.Tol
-	if tol <= 0 {
-		tol = defaultTol
-	}
-	epsilon := input.Optimization.Epsilon
-	if epsilon <= 0 {
-		epsilon = defaultEpsilon
-	}
-	mu := input.Optimization.Mu
-	if mu <= 0 {
-		mu = defaultMu
-	}
-	numRays := input.Optimization.NumRays
-	if numRays <= 0 {
-		numRays = defaultNumRays
-	}
-	apertureMargin := input.Optimization.ApertureMargin
-	if apertureMargin <= 0 {
-		apertureMargin = 1.0
-	}
-	if apertureMargin < 1.0 {
-		apertureMargin = 1.0
-	}
-	apertureMarginMM := input.Optimization.ApertureMarginMM
-	if apertureMarginMM <= 0 {
-		apertureMarginMM = types.DefaultApertureMarginMM
-	}
+	tuning := resolveDLSTuning(input.Optimization, false)
+	maxIter := tuning.maxIter
+	tol := tuning.tol
+	epsilon := tuning.epsilon
+	mu := tuning.mu
+	numRays := tuning.numRays
+	apertureMargin := tuning.apertureMargin
+	apertureMarginMM := tuning.apertureMarginMM
 	muConMax := input.Optimization.MuConMax
 
 	jacobianWorkers := input.Optimization.JacobianWorkers
@@ -1714,8 +1625,7 @@ func newEscapeProgress(verbose bool, logFile string) (progress *escape.Progress,
 	if logFile != "" {
 		f, err := os.Create(logFile)
 		if err != nil {
-			errOut("Error creating log file: %v", err)
-			os.Exit(1)
+			errExitf("Error creating log file: %v", err)
 		}
 		logFiles = append(logFiles, f)
 		progress.AddWriter(f)
@@ -1888,12 +1798,10 @@ func effectiveGlobalMinima(esc *types.GlobalResult) []types.GlobalMinimum {
 func runEscapeExtract(data []byte, index int, command string) {
 	output := parseYAML[types.Output](data)
 	if output.GlobalResult == nil {
-		errOut("Error: input has no 'global_result' section (was it produced by 'rayweave escape' or 'rayweave pso'?)")
-		os.Exit(1)
+		errExitf("Error: input has no 'global_result' section (was it produced by 'rayweave escape' or 'rayweave pso'?)")
 	}
 	if index < 0 || index >= len(output.GlobalResult.Minima) {
-		errOut("Error: index %d out of range (minima count: %d)", index, len(output.GlobalResult.Minima))
-		os.Exit(1)
+		errExitf("Error: index %d out of range (minima count: %d)", index, len(output.GlobalResult.Minima))
 	}
 	// A streamed document keeps its first-discovery values in minima (the list
 	// is append-only) and carries the replacements in minima_improvements, so
@@ -1919,8 +1827,7 @@ func runEscapeExtract(data []byte, index int, command string) {
 		}
 		output.Configs[0].Surfaces = min.Surfaces
 	} else {
-		errOut("Error: local minimum %d has no surface data", index)
-		os.Exit(1)
+		errExitf("Error: local minimum %d has no surface data", index)
 	}
 
 	withOutputMetadata(&output.Input, command, subcmdArgs())

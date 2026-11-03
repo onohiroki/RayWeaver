@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"io"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -311,8 +310,7 @@ func escapeStreamFlag(command string) (value, set bool) {
 	}
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
-		errOut("Error: --stream %q: expected true or false", raw)
-		os.Exit(1)
+		errExitf("Error: --stream %q: expected true or false", raw)
 	}
 	return v, true
 }

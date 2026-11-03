@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/hiroki/rayweaver/internal/chief"
+	"github.com/hiroki/rayweaver/internal/coating"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
@@ -113,6 +114,41 @@ func writeBackGlassDir(input *types.Input, dir string) {
 	input.GlassCatalog.Directory = dir
 }
 
+// openGlass loads the AGF catalogs and records the effective --glass-dir in
+// the document (CLI wins, principle 3). Every document-consuming command needs
+// both, in this order; keeping them together means the write-back cannot be
+// forgotten when a command is added.
+func openGlass(input *types.Input, glassDir string) (*glass.Catalog, *coating.Catalog) {
+	gc, cc := loadCatalogs(input, glassDir)
+	writeBackGlassDir(input, glassDir)
+	return gc, cc
+}
+
+// surfacesFor returns the surfaces of the --config-selected configuration with
+// their derived geometry precomputed. A selected configuration with no
+// surfaces is fatal: there is nothing for the analysis to trace.
+func surfacesFor(configs []types.Config, configFlag *string) []types.Surface {
+	surfaces := configSurfaces(configs, configFlag)
+	if len(surfaces) == 0 {
+		errExitf("Error: no surfaces to process")
+	}
+	surface.Precompute(surfaces)
+	return surfaces
+}
+
+// parseFieldInput parses the pipeline document, stamps the effective reference
+// wavelength and requires a chief section: every field-based analysis (psf,
+// wavefront, focus, asphere) needs both. what names the missing pieces in the
+// error text ("(for fields)", "(for fields and stop surface)").
+func parseFieldInput(data []byte, what string) types.Input {
+	input := parseYAML[types.Input](data)
+	setReferenceWavelength(input.Chief)
+	if input.Chief == nil {
+		errExitf("Error: 'chief' section is required %s", what)
+	}
+	return input
+}
+
 // Version is the RayWeaver build version, intended to be injected at link time
 // via `-ldflags "-X main.Version=..."`. It defaults to "dev" for ad-hoc builds
 // and is stamped into output metadata.tool.version when set.
@@ -185,8 +221,7 @@ func warnToolMismatch(in *types.Input) {
 func parseYAML[T any](data []byte) T {
 	var out T
 	if err := yaml.Unmarshal(data, &out); err != nil {
-		errOut("Error parsing YAML: %v", err)
-		os.Exit(1)
+		errExitf("Error parsing YAML: %v", err)
 	}
 	switch v := any(&out).(type) {
 	case *types.Input:
@@ -451,8 +486,7 @@ func resolveConfigFieldDefs(input types.Input, configFlag *string) []types.Field
 	if configFlag != nil && *configFlag != "" {
 		idx, err := resolveConfig(input.Configs, *configFlag)
 		if idx < 0 {
-			errOut("Error: %s", err)
-			os.Exit(1)
+			errExitf("Error: %s", err)
 		}
 		if defs := fieldDefsFromItems(input.Configs[idx].Fields); len(defs) > 0 {
 			return defs
@@ -578,8 +612,7 @@ func dynamicPupilForInput(input types.Input, configFlag *string, surfaces []type
 // declares.
 func requireFieldResolution(name string, results []chief.Result) {
 	if err := chief.CheckFieldResolution(name, results); err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 }
 
@@ -647,8 +680,7 @@ func freezeFieldReport(input *types.Input, model any) {
 func writeYAML(v any) {
 	outData, err := yaml.Marshal(v)
 	if err != nil {
-		errOut("Error marshaling output: %v", err)
-		os.Exit(1)
+		errExitf("Error marshaling output: %v", err)
 	}
 	os.Stdout.Write(outData)
 }

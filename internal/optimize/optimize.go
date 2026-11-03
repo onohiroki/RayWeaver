@@ -2043,12 +2043,6 @@ func (o *Optimizer) SetPowerSolve(solveSurfaces []int) {
 	o.powerSolveEnabled = true
 }
 
-// SetAdaptiveDamping configures per-variable adaptive damping. nil uses
-// built-in class defaults (no YAML configuration needed).
-func (o *Optimizer) SetAdaptiveDamping(cfg *types.AdaptiveDampingConfig) {
-	o.adaptiveDamping = cfg
-}
-
 // SetDiffractionMTF configures the sampling of the diffraction_mtf_sag /
 // diffraction_mtf_tan merit kinds (optimization.diffraction_mtf). A nil
 // config keeps the built-in defaults: 128 entrance-pupil rays, the psf image

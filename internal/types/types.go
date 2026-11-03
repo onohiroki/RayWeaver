@@ -1680,22 +1680,6 @@ type AsphereScoreWeights struct {
 	Asym          float64 `yaml:"asym,omitempty"`
 }
 
-// AsphereCellStat is one polar cell's aggregated statistics over the fields
-// that occupy it.
-type AsphereCellStat struct {
-	SurfaceID       int     `yaml:"surface_id"`
-	Ring            int     `yaml:"ring"`
-	Sector          int     `yaml:"sector"`
-	MeanR           float64 `yaml:"mean_r"`
-	OccupiedFields  []int   `yaml:"occupied_fields"`
-	CommonOPD       float64 `yaml:"common_opd"`
-	Conflict        float64 `yaml:"conflict"`
-	UniqueResidual  float64 `yaml:"unique_residual"`
-	AzimuthVariance float64 `yaml:"azimuth_variance"`
-	RadialGradient  float64 `yaml:"radial_gradient"`
-	Weight          float64 `yaml:"weight"`
-}
-
 // AsphereCoeffs holds an even-order polynomial asphere's coefficients.
 type AsphereCoeffs struct {
 	Conic float64 `yaml:"conic,omitempty"`
@@ -2424,9 +2408,9 @@ type FocusPSFConfig struct {
 // FocusThroughFocus defines a through-focus scan: Count image planes at
 // From + i*Step (mm, relative to the scan's base plane), i = 0..Count-1.
 type FocusThroughFocus struct {
-	From  float64 `yaml:"from"`
-	Step  float64 `yaml:"step"`
-	Count int     `yaml:"count"`
+	From  float64 `yaml:"from" json:"from"`
+	Step  float64 `yaml:"step" json:"step"`
+	Count int     `yaml:"count" json:"count"`
 }
 
 // FocusSpotConfig configures `focus spot`: the geometric (ray) spot RMS and its
@@ -2542,44 +2526,44 @@ type PSFResult struct {
 // plane-comparison table under either the MTF or the PSF metric set, or a
 // through-focus scan. Exactly one of MTF/PSF/ThroughFocus is populated.
 type FocusComparison struct {
-	MTF          *FocusMTFComparison          `yaml:"mtf,omitempty"`
-	PSF          *FocusPSFComparison          `yaml:"psf,omitempty"`
-	Spot         *FocusSpotComparison         `yaml:"spot,omitempty"`
-	ThroughFocus *FocusThroughFocusComparison `yaml:"through_focus,omitempty"`
+	MTF          *FocusMTFComparison          `yaml:"mtf,omitempty" json:"mtf,omitempty"`
+	PSF          *FocusPSFComparison          `yaml:"psf,omitempty" json:"psf,omitempty"`
+	Spot         *FocusSpotComparison         `yaml:"spot,omitempty" json:"spot,omitempty"`
+	ThroughFocus *FocusThroughFocusComparison `yaml:"through_focus,omitempty" json:"through_focus,omitempty"`
 }
 
 // FocusSpotComparison is the `focus spot` table: per (field, wavelength) the
 // geometric spot RMS (and its decompositions) under each plane convention.
 type FocusSpotComparison struct {
-	Planes               []string       `yaml:"planes"`
-	FocusPlaneAllShiftMM float64        `yaml:"focus_plane_all_shift_mm,omitempty"`
-	Polarization         string         `yaml:"polarization,omitempty"`
-	Rows                 []FocusSpotRow `yaml:"rows"`
+	Planes               []string       `yaml:"planes" json:"planes"`
+	FocusPlaneAllShiftMM float64        `yaml:"focus_plane_all_shift_mm,omitempty" json:"focus_plane_all_shift_mm,omitempty"`
+	Polarization         string         `yaml:"polarization,omitempty" json:"polarization,omitempty"`
+	Rows                 []FocusSpotRow `yaml:"rows" json:"rows"`
 }
 
 // FocusSpotRow is one (field, wavelength) spot comparison row.
 type FocusSpotRow struct {
-	FieldIndex    int             `yaml:"field_index"`
-	FieldAngle    float64         `yaml:"field_angle"`
-	Wavelength    float64         `yaml:"wavelength"`
-	File          *FocusSpotPlane `yaml:"file,omitempty"`
-	FocusPlaneAll *FocusSpotPlane `yaml:"focus_plane_all,omitempty"`
-	BestFocus     *FocusSpotPlane `yaml:"best_focus,omitempty"`
+	FieldIndex    int             `yaml:"field_index" json:"field_index"`
+	FieldAngle    float64         `yaml:"field_angle" json:"field_angle"`
+	Wavelength    float64         `yaml:"wavelength" json:"wavelength"`
+	File          *FocusSpotPlane `yaml:"file,omitempty" json:"file,omitempty"`
+	FocusPlaneAll *FocusSpotPlane `yaml:"focus_plane_all,omitempty" json:"focus_plane_all,omitempty"`
+	BestFocus     *FocusSpotPlane `yaml:"best_focus,omitempty" json:"best_focus,omitempty"`
 }
 
 // FocusSpotPlane is the geometric spot summary at one plane convention. All
 // values are mm (radii about the flux-weighted centroid).
 type FocusSpotPlane struct {
-	SpotRMS   float64 `yaml:"spot_rms"`
-	SpotRMSX  float64 `yaml:"spot_rms_x"`
-	SpotRMSY  float64 `yaml:"spot_rms_y"`
-	SpotRMST  float64 `yaml:"spot_rms_t"`
-	SpotRMSS  float64 `yaml:"spot_rms_s"`
-	CentroidX float64 `yaml:"centroid_x"`
-	CentroidY float64 `yaml:"centroid_y"`
+	SpotRMS   float64 `yaml:"spot_rms" json:"spot_rms"`
+	SpotRMSX  float64 `yaml:"spot_rms_x" json:"spot_rms_x"`
+	SpotRMSY  float64 `yaml:"spot_rms_y" json:"spot_rms_y"`
+	SpotRMST  float64 `yaml:"spot_rms_t" json:"spot_rms_t"`
+	SpotRMSS  float64 `yaml:"spot_rms_s" json:"spot_rms_s"`
+	CentroidX float64 `yaml:"centroid_x" json:"centroid_x"`
+	CentroidY float64 `yaml:"centroid_y" json:"centroid_y"`
 	// BestFocusShiftMM is the per-field best-focus shift (mm) applied for the
 	// best_focus convention; 0 for the fixed planes.
-	BestFocusShiftMM float64 `yaml:"best_focus_shift_mm,omitempty"`
+	BestFocusShiftMM float64 `yaml:"best_focus_shift_mm,omitempty" json:"best_focus_shift_mm,omitempty"`
 }
 
 // FocusThroughFocusComparison is the `focus mtf|psf --through-focus` result: a
@@ -2587,54 +2571,54 @@ type FocusSpotPlane struct {
 // plane) around every requested base plane.
 type FocusThroughFocusComparison struct {
 	// Metric is "psf" or "mtf".
-	Metric string  `yaml:"metric"`
-	From   float64 `yaml:"from"`
-	Step   float64 `yaml:"step"`
-	Count  int     `yaml:"count"`
+	Metric string  `yaml:"metric" json:"metric"`
+	From   float64 `yaml:"from" json:"from"`
+	Step   float64 `yaml:"step" json:"step"`
+	Count  int     `yaml:"count" json:"count"`
 	// Frequencies are the reported MTF frequencies (cycles/mm); present for
 	// metric == "mtf".
-	Frequencies  []float64               `yaml:"frequencies,omitempty"`
-	Polarization string                  `yaml:"polarization,omitempty"`
-	Scans        []FocusThroughFocusScan `yaml:"scans"`
+	Frequencies  []float64               `yaml:"frequencies,omitempty" json:"frequencies,omitempty"`
+	Polarization string                  `yaml:"polarization,omitempty" json:"polarization,omitempty"`
+	Scans        []FocusThroughFocusScan `yaml:"scans" json:"scans"`
 }
 
 // FocusThroughFocusScan is the through-focus scan around one base plane.
 type FocusThroughFocusScan struct {
 	// Base is the base plane selector: file | all | on_axis.
-	Base string `yaml:"base"`
+	Base string `yaml:"base" json:"base"`
 	// BaseShiftMM is the base plane's image-plane shift from the file plane
 	// (mm); 0 for file.
-	BaseShiftMM float64                `yaml:"base_shift_mm,omitempty"`
-	Rows        []FocusThroughFocusRow `yaml:"rows"`
+	BaseShiftMM float64                `yaml:"base_shift_mm,omitempty" json:"base_shift_mm,omitempty"`
+	Rows        []FocusThroughFocusRow `yaml:"rows" json:"rows"`
 }
 
 // FocusThroughFocusRow is one (field, wavelength) scan row: one point per
 // scanned plane.
 type FocusThroughFocusRow struct {
-	FieldIndex int                      `yaml:"field_index"`
-	FieldAngle float64                  `yaml:"field_angle"`
-	Wavelength float64                  `yaml:"wavelength"`
-	Points     []FocusThroughFocusPoint `yaml:"points"`
+	FieldIndex int                      `yaml:"field_index" json:"field_index"`
+	FieldAngle float64                  `yaml:"field_angle" json:"field_angle"`
+	Wavelength float64                  `yaml:"wavelength" json:"wavelength"`
+	Points     []FocusThroughFocusPoint `yaml:"points" json:"points"`
 }
 
 // FocusThroughFocusPoint is one scanned plane's metrics. FocusMM is the plane
 // position relative to the scan's base plane (mm). FWHM/EE/centroid are filled
 // for metric == "psf"; the MTF arrays for metric == "mtf".
 type FocusThroughFocusPoint struct {
-	FocusMM           float64   `yaml:"focus_mm"`
-	Strehl            float64   `yaml:"strehl,omitempty"`
-	FWHMX             float64   `yaml:"fwhm_x,omitempty"`
-	FWHMY             float64   `yaml:"fwhm_y,omitempty"`
-	EncircledEnergy50 float64   `yaml:"encircled_energy_50,omitempty"`
-	CentroidX         float64   `yaml:"centroid_x,omitempty"`
-	CentroidY         float64   `yaml:"centroid_y,omitempty"`
-	SpotRMS           float64   `yaml:"spot_rms,omitempty"`
-	SpotRMSX          float64   `yaml:"spot_rms_x,omitempty"`
-	SpotRMSY          float64   `yaml:"spot_rms_y,omitempty"`
-	SpotRMST          float64   `yaml:"spot_rms_t,omitempty"`
-	SpotRMSS          float64   `yaml:"spot_rms_s,omitempty"`
-	Sagittal          []float64 `yaml:"mtf_sagittal,omitempty"`
-	Tangential        []float64 `yaml:"mtf_tangential,omitempty"`
+	FocusMM           float64   `yaml:"focus_mm" json:"focus_mm"`
+	Strehl            float64   `yaml:"strehl,omitempty" json:"strehl,omitempty"`
+	FWHMX             float64   `yaml:"fwhm_x,omitempty" json:"fwhm_x,omitempty"`
+	FWHMY             float64   `yaml:"fwhm_y,omitempty" json:"fwhm_y,omitempty"`
+	EncircledEnergy50 float64   `yaml:"encircled_energy_50,omitempty" json:"encircled_energy_50,omitempty"`
+	CentroidX         float64   `yaml:"centroid_x,omitempty" json:"centroid_x,omitempty"`
+	CentroidY         float64   `yaml:"centroid_y,omitempty" json:"centroid_y,omitempty"`
+	SpotRMS           float64   `yaml:"spot_rms,omitempty" json:"spot_rms,omitempty"`
+	SpotRMSX          float64   `yaml:"spot_rms_x,omitempty" json:"spot_rms_x,omitempty"`
+	SpotRMSY          float64   `yaml:"spot_rms_y,omitempty" json:"spot_rms_y,omitempty"`
+	SpotRMST          float64   `yaml:"spot_rms_t,omitempty" json:"spot_rms_t,omitempty"`
+	SpotRMSS          float64   `yaml:"spot_rms_s,omitempty" json:"spot_rms_s,omitempty"`
+	Sagittal          []float64 `yaml:"mtf_sagittal,omitempty" json:"mtf_sagittal,omitempty"`
+	Tangential        []float64 `yaml:"mtf_tangential,omitempty" json:"mtf_tangential,omitempty"`
 }
 
 // FocusMTFComparison is the `focus mtf` table: per (field, wavelength) the MTF
@@ -2642,69 +2626,69 @@ type FocusThroughFocusPoint struct {
 type FocusMTFComparison struct {
 	// Planes are the compared conventions in canonical order (file,
 	// focus_plane_all, best_focus).
-	Planes []string `yaml:"planes"`
+	Planes []string `yaml:"planes" json:"planes"`
 	// Frequencies are the reported spatial frequencies (cycles/mm); each
 	// plane's sagittal/tangential arrays are aligned to this list.
-	Frequencies []float64 `yaml:"frequencies"`
+	Frequencies []float64 `yaml:"frequencies" json:"frequencies"`
 	// FocusPlaneAllShiftMM is the image-plane shift the `all` convention
 	// applied (mm); 0 when the `all` plane was not requested.
-	FocusPlaneAllShiftMM float64       `yaml:"focus_plane_all_shift_mm,omitempty"`
-	Polarization         string        `yaml:"polarization,omitempty"`
-	Rows                 []FocusMTFRow `yaml:"rows"`
+	FocusPlaneAllShiftMM float64       `yaml:"focus_plane_all_shift_mm,omitempty" json:"focus_plane_all_shift_mm,omitempty"`
+	Polarization         string        `yaml:"polarization,omitempty" json:"polarization,omitempty"`
+	Rows                 []FocusMTFRow `yaml:"rows" json:"rows"`
 }
 
 // FocusMTFRow is one (field, wavelength) comparison row. The plane blocks are
 // present only for the conventions that were requested.
 type FocusMTFRow struct {
-	FieldIndex    int            `yaml:"field_index"`
-	FieldAngle    float64        `yaml:"field_angle"`
-	Wavelength    float64        `yaml:"wavelength"`
-	File          *FocusMTFPlane `yaml:"file,omitempty"`
-	FocusPlaneAll *FocusMTFPlane `yaml:"focus_plane_all,omitempty"`
-	BestFocus     *FocusMTFPlane `yaml:"best_focus,omitempty"`
+	FieldIndex    int            `yaml:"field_index" json:"field_index"`
+	FieldAngle    float64        `yaml:"field_angle" json:"field_angle"`
+	Wavelength    float64        `yaml:"wavelength" json:"wavelength"`
+	File          *FocusMTFPlane `yaml:"file,omitempty" json:"file,omitempty"`
+	FocusPlaneAll *FocusMTFPlane `yaml:"focus_plane_all,omitempty" json:"focus_plane_all,omitempty"`
+	BestFocus     *FocusMTFPlane `yaml:"best_focus,omitempty" json:"best_focus,omitempty"`
 }
 
 // FocusMTFPlane is the MTF summary at one plane convention. FWHM is a
 // PSF-domain metric and is reported by `focus psf` (FocusPSFPlane), not here.
 type FocusMTFPlane struct {
-	Strehl float64 `yaml:"strehl"`
+	Strehl float64 `yaml:"strehl" json:"strehl"`
 	// BestFocusShiftMM is the per-field best-focus shift (mm) applied for the
 	// best_focus convention; 0 for the fixed planes.
-	BestFocusShiftMM float64 `yaml:"best_focus_shift_mm,omitempty"`
+	BestFocusShiftMM float64 `yaml:"best_focus_shift_mm,omitempty" json:"best_focus_shift_mm,omitempty"`
 	// Sagittal/Tangential are the MTF values at the comparison frequencies, in
 	// the same order as FocusMTFComparison.Frequencies.
-	Sagittal   []float64 `yaml:"mtf_sagittal,omitempty"`
-	Tangential []float64 `yaml:"mtf_tangential,omitempty"`
+	Sagittal   []float64 `yaml:"mtf_sagittal,omitempty" json:"mtf_sagittal,omitempty"`
+	Tangential []float64 `yaml:"mtf_tangential,omitempty" json:"mtf_tangential,omitempty"`
 }
 
 // FocusPSFComparison is the `focus psf` table: per (field, wavelength) the PSF
 // metrics under each plane convention.
 type FocusPSFComparison struct {
-	Planes               []string      `yaml:"planes"`
-	FocusPlaneAllShiftMM float64       `yaml:"focus_plane_all_shift_mm,omitempty"`
-	Polarization         string        `yaml:"polarization,omitempty"`
-	Rows                 []FocusPSFRow `yaml:"rows"`
+	Planes               []string      `yaml:"planes" json:"planes"`
+	FocusPlaneAllShiftMM float64       `yaml:"focus_plane_all_shift_mm,omitempty" json:"focus_plane_all_shift_mm,omitempty"`
+	Polarization         string        `yaml:"polarization,omitempty" json:"polarization,omitempty"`
+	Rows                 []FocusPSFRow `yaml:"rows" json:"rows"`
 }
 
 // FocusPSFRow is one (field, wavelength) PSF comparison row.
 type FocusPSFRow struct {
-	FieldIndex    int            `yaml:"field_index"`
-	FieldAngle    float64        `yaml:"field_angle"`
-	Wavelength    float64        `yaml:"wavelength"`
-	File          *FocusPSFPlane `yaml:"file,omitempty"`
-	FocusPlaneAll *FocusPSFPlane `yaml:"focus_plane_all,omitempty"`
-	BestFocus     *FocusPSFPlane `yaml:"best_focus,omitempty"`
+	FieldIndex    int            `yaml:"field_index" json:"field_index"`
+	FieldAngle    float64        `yaml:"field_angle" json:"field_angle"`
+	Wavelength    float64        `yaml:"wavelength" json:"wavelength"`
+	File          *FocusPSFPlane `yaml:"file,omitempty" json:"file,omitempty"`
+	FocusPlaneAll *FocusPSFPlane `yaml:"focus_plane_all,omitempty" json:"focus_plane_all,omitempty"`
+	BestFocus     *FocusPSFPlane `yaml:"best_focus,omitempty" json:"best_focus,omitempty"`
 }
 
 // FocusPSFPlane is the PSF metric summary at one plane convention.
 type FocusPSFPlane struct {
-	Strehl            float64 `yaml:"strehl"`
-	FWHMX             float64 `yaml:"fwhm_x"`
-	FWHMY             float64 `yaml:"fwhm_y"`
-	EncircledEnergy50 float64 `yaml:"encircled_energy_50"`
-	CentroidX         float64 `yaml:"centroid_x"`
-	CentroidY         float64 `yaml:"centroid_y"`
-	BestFocusShiftMM  float64 `yaml:"best_focus_shift_mm,omitempty"`
+	Strehl            float64 `yaml:"strehl" json:"strehl"`
+	FWHMX             float64 `yaml:"fwhm_x" json:"fwhm_x"`
+	FWHMY             float64 `yaml:"fwhm_y" json:"fwhm_y"`
+	EncircledEnergy50 float64 `yaml:"encircled_energy_50" json:"encircled_energy_50"`
+	CentroidX         float64 `yaml:"centroid_x" json:"centroid_x"`
+	CentroidY         float64 `yaml:"centroid_y" json:"centroid_y"`
+	BestFocusShiftMM  float64 `yaml:"best_focus_shift_mm,omitempty" json:"best_focus_shift_mm,omitempty"`
 }
 
 // WavefrontResult is the per-run wavefront analysis carried in the pipeline

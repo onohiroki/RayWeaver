@@ -36,21 +36,13 @@ func runAsphere(data []byte) {
 	focusFans := fs.String("focus-fans", "", "comma-separated: tangential,sagittal (default both)")
 	fs.Parse(os.Args[2:])
 
-	input := parseYAML[types.Input](data)
-	setReferenceWavelength(input.Chief)
+	input := parseFieldInput(data, "(for fields and stop surface)")
 
-	if input.Chief == nil {
-		errOut("Error: 'chief' section is required (for fields and stop surface)")
-		os.Exit(1)
-	}
-
-	gc, _ := loadCatalogs(&input, *glassDir)
-	writeBackGlassDir(&input, *glassDir)
+	gc, _ := openGlass(&input, *glassDir)
 
 	surfaces := configSurfaces(input.Configs, configFlag)
 	if len(surfaces) == 0 {
-		errOut("Error: no surfaces to process")
-		os.Exit(1)
+		errExitf("Error: no surfaces to process")
 	}
 
 	cfg := asphere.ConfigFromYAML(input.Asphere)
@@ -64,8 +56,7 @@ func runAsphere(data []byte) {
 	cfg.TopK = intOrYAML(*topK, cfg.TopK)
 	cfg.SagScale = floatOrYAML(*sagScale, cfg.SagScale)
 	if cs, csSet, err := boolFlag(fs, "calibrate-scale"); err != nil {
-		errOut("Error: %s", err)
-		os.Exit(1)
+		errExitf("Error: %s", err)
 	} else if csSet {
 		cfg.CalibrateScale = cs
 	}
@@ -107,8 +98,7 @@ func runAsphere(data []byte) {
 
 	fields, err := resolveAsphereFields(input, configFlag)
 	if err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 	wavelengths := resolveAsphereWavelengths(input, configFlag)
 	stopSurface := input.Chief.StopSurface
@@ -142,8 +132,7 @@ func runAsphere(data []byte) {
 			if v := bestValidatedAsphere(res.Rankings); v != nil {
 				applyAsphereToConfigs(&input.Configs, v.SurfaceID, v.Coefficients)
 			} else {
-				errOut("Error: --apply requires at least one validated asphere (--dls-iter > 0)")
-				os.Exit(1)
+				errExitf("Error: --apply requires at least one validated asphere (--dls-iter > 0)")
 			}
 		}
 	}

@@ -626,7 +626,6 @@ func TestQueryCLIJSONL(t *testing.T) {
 	}
 }
 
-
 // ---- del() tests ----------------------------------------------------------
 
 func applyDelForTest(t *testing.T, editStr string, root any) any {

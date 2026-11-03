@@ -33,8 +33,7 @@ func runZoom(data []byte) {
 	fs.Parse(os.Args[2:])
 
 	if flagWasSet(fs, "num-rays") && *numRaysFlag <= 0 {
-		errOut("Error: --num-rays must be positive (got %d)", *numRaysFlag)
-		os.Exit(1)
+		errExitf("Error: --num-rays must be positive (got %d)", *numRaysFlag)
 	}
 
 	input := parseYAML[types.Input](data)
@@ -70,15 +69,13 @@ func runZoom(data []byte) {
 		objectHeight = input.Paraxial.ObjectHeight
 	}
 
-	gc, _ := loadCatalogs(&input, *glassDir)
-	writeBackGlassDir(&input, *glassDir)
+	gc, _ := openGlass(&input, *glassDir)
 
 	// Which configurations: the --config selector, else every active one.
 	// Surfaces live under configs[].surfaces, so a document without configs has
 	// nothing to summarise.
 	if len(input.Configs) == 0 {
-		errOut("Error: 'configs' is required (a multi-config document declares one config per zoom position)")
-		os.Exit(1)
+		errExitf("Error: 'configs' is required (a multi-config document declares one config per zoom position)")
 	}
 	type target struct {
 		id          string
@@ -91,8 +88,7 @@ func runZoom(data []byte) {
 	if *configFlag != "" {
 		idx, err := resolveConfig(input.Configs, *configFlag)
 		if idx < 0 {
-			errOut("Error: %s", err)
-			os.Exit(1)
+			errExitf("Error: %s", err)
 		}
 		cfg := &input.Configs[idx]
 		targets = append(targets, target{id: cfg.ID, active: cfg.Active, fields: cfg.Fields,
@@ -108,8 +104,7 @@ func runZoom(data []byte) {
 		}
 	}
 	if len(targets) == 0 {
-		errOut("Error: no active config to summarise")
-		os.Exit(1)
+		errExitf("Error: no active config to summarise")
 	}
 
 	pol := polarization(input)
@@ -196,8 +191,7 @@ func runZoom(data []byte) {
 	}
 
 	if len(summary.Configs) == 0 {
-		errOut("Error: no config could be summarised")
-		os.Exit(1)
+		errExitf("Error: no config could be summarised")
 	}
 
 	output := types.Output{Input: input, ZoomSummary: summary}

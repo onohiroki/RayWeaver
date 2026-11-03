@@ -32,26 +32,21 @@ func runCam(data []byte) {
 	fs.Parse(os.Args[2:])
 
 	if flagWasSet(fs, "max-iter") && *maxIter <= 0 {
-		errOut("Error: --max-iter must be positive (got %d)", *maxIter)
-		os.Exit(1)
+		errExitf("Error: --max-iter must be positive (got %d)", *maxIter)
 	}
 	if flagWasSet(fs, "tolerance") && *tolerance <= 0 {
-		errOut("Error: --tolerance must be positive (got %g)", *tolerance)
-		os.Exit(1)
+		errExitf("Error: --tolerance must be positive (got %g)", *tolerance)
 	}
 	if flagWasSet(fs, "wl") && *wlFlag <= 0 {
-		errOut("Error: --wl must be positive (got %g)", *wlFlag)
-		os.Exit(1)
+		errExitf("Error: --wl must be positive (got %g)", *wlFlag)
 	}
 
 	input := parseYAML[types.Input](data)
 	if len(input.Configs) == 0 {
-		errOut("Error: 'configs' is required (one config per zoom position)")
-		os.Exit(1)
+		errExitf("Error: 'configs' is required (one config per zoom position)")
 	}
 	if input.Cam == nil || len(input.Cam.Surfaces) == 0 {
-		errOut("Error: 'cam.surfaces' is required (the surface IDs whose following airspace is a cam variable)")
-		os.Exit(1)
+		errExitf("Error: 'cam.surfaces' is required (the surface IDs whose following airspace is a cam variable)")
 	}
 
 	// Reference wavelength: --wl wins over chief.reference_wavelength, with the
@@ -65,27 +60,22 @@ func runCam(data []byte) {
 		input.Chief.ReferenceWavelength = wavelength
 	}
 
-	gc, _ := loadCatalogs(&input, *glassDir)
-	writeBackGlassDir(&input, *glassDir)
+	gc, _ := openGlass(&input, *glassDir)
 
 	// Targets: every solved position needs one.
 	if len(input.Cam.Targets) == 0 {
-		errOut("Error: 'cam.targets' is required (one {config, efl} per solved position)")
-		os.Exit(1)
+		errExitf("Error: 'cam.targets' is required (one {config, efl} per solved position)")
 	}
 	targets := make(map[string]float64, len(input.Cam.Targets))
 	for _, t := range input.Cam.Targets {
 		if t.Config == "" {
-			errOut("Error: cam.targets[] needs a config id")
-			os.Exit(1)
+			errExitf("Error: cam.targets[] needs a config id")
 		}
 		if t.EFL <= 0 {
-			errOut("Error: cam.targets[%s].efl must be positive (got %g)", t.Config, t.EFL)
-			os.Exit(1)
+			errExitf("Error: cam.targets[%s].efl must be positive (got %g)", t.Config, t.EFL)
 		}
 		if _, dup := targets[t.Config]; dup {
-			errOut("Error: cam.targets names %q twice", t.Config)
-			os.Exit(1)
+			errExitf("Error: cam.targets names %q twice", t.Config)
 		}
 		targets[t.Config] = t.EFL
 	}
@@ -95,8 +85,7 @@ func runCam(data []byte) {
 	if *configFlag != "" {
 		idx, err := resolveConfig(input.Configs, *configFlag)
 		if idx < 0 {
-			errOut("Error: %s", err)
-			os.Exit(1)
+			errExitf("Error: %s", err)
 		}
 		sel = []int{idx}
 	} else {
@@ -107,8 +96,7 @@ func runCam(data []byte) {
 		}
 	}
 	if len(sel) == 0 {
-		errOut("Error: no active config to solve")
-		os.Exit(1)
+		errExitf("Error: no active config to solve")
 	}
 	var missing []string
 	for _, i := range sel {
@@ -117,8 +105,7 @@ func runCam(data []byte) {
 		}
 	}
 	if len(missing) > 0 {
-		errOut("Error: cam.targets is missing an EFL for %s (every solved position needs one)", strings.Join(missing, ", "))
-		os.Exit(1)
+		errExitf("Error: cam.targets is missing an EFL for %s (every solved position needs one)", strings.Join(missing, ", "))
 	}
 
 	// Image plane: cam.image_plane, else the chief reference surface, else the
@@ -136,8 +123,7 @@ func runCam(data []byte) {
 		}
 	}
 	if imagePlane <= 0 {
-		errOut("Error: cannot determine the image plane (set cam.image_plane or chief.reference_surface)")
-		os.Exit(1)
+		errExitf("Error: cannot determine the image plane (set cam.image_plane or chief.reference_surface)")
 	}
 
 	imagePlaneZ := input.Cam.ImagePlaneZ
@@ -146,8 +132,7 @@ func runCam(data []byte) {
 		surface.Precompute(refSurfaces)
 		z, ok := camSurfaceZ(refSurfaces, imagePlane)
 		if !ok {
-			errOut("Error: image plane %d is not in config %q", imagePlane, input.Configs[refIdx].ID)
-			os.Exit(1)
+			errExitf("Error: image plane %d is not in config %q", imagePlane, input.Configs[refIdx].ID)
 		}
 		imagePlaneZ = z
 	}
@@ -209,8 +194,7 @@ func runCam(data []byte) {
 
 	res, err := cam.Solve(solveConfigs, gc, opts)
 	if err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 
 	// Write the solved airspaces back and report them.

@@ -46,21 +46,10 @@ func runWavefront(data []byte) {
 	csvOut := fs.String("csv", "", "write gnuplot x,y,opd wavefront map to FILE (index-suffixed per result)")
 	fs.Parse(os.Args[2:])
 
-	input := parseYAML[types.Input](data)
-	setReferenceWavelength(input.Chief)
-	if input.Chief == nil {
-		errOut("Error: 'chief' section is required (for fields)")
-		os.Exit(1)
-	}
+	input := parseFieldInput(data, "(for fields)")
 
-	gc, _ := loadCatalogs(&input, *glassDir)
-	writeBackGlassDir(&input, *glassDir)
-	surfaces := configSurfaces(input.Configs, configFlag)
-	if len(surfaces) == 0 {
-		errOut("Error: no surfaces to process")
-		os.Exit(1)
-	}
-	surface.Precompute(surfaces)
+	gc, _ := openGlass(&input, *glassDir)
+	surfaces := surfacesFor(input.Configs, configFlag)
 	system := types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface}
 
 	fields := chiefFieldDefs(input)
@@ -70,8 +59,7 @@ func runWavefront(data []byte) {
 	}
 	fields = applySelectedFields(fields, selected)
 	if len(fields) == 0 {
-		errOut("Error: no fields to compute")
-		os.Exit(1)
+		errExitf("Error: no fields to compute")
 	}
 
 	var wavelengths []float64
@@ -114,12 +102,10 @@ func runWavefront(data []byte) {
 
 	result, err := wavefront.Compute(system, gc, fields, wavelengths, opts)
 	if err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 	if len(result.Fields) == 0 {
-		errOut("Error: no wavefront results computed (check fields/wavelengths/reference surface)")
-		os.Exit(1)
+		errExitf("Error: no wavefront results computed (check fields/wavelengths/reference surface)")
 	}
 
 	// Apply the best-focus shift to the target configs' image-plane decenter.
@@ -129,8 +115,7 @@ func runWavefront(data []byte) {
 		applyImagePlaneShift(input.Configs, configFlag, refSurfaceID, result.BestFocus.WeightedFocusZ)
 		if *shiftedLens != "" {
 			if err := writeShiftedLens(*shiftedLens, &input); err != nil {
-				errOut("Error writing %s: %v", *shiftedLens, err)
-				os.Exit(1)
+				errExitf("Error writing %s: %v", *shiftedLens, err)
 			}
 		}
 	}
@@ -175,16 +160,14 @@ func runWavefront(data []byte) {
 		if *yamlOut != "" {
 			file := suffixFile(*yamlOut, i)
 			if err := writeWavefrontYAML(file, &r, mapGridVal); err != nil {
-				errOut("Error writing %s: %v", file, err)
-				os.Exit(1)
+				errExitf("Error writing %s: %v", file, err)
 			}
 			outFile = file
 		}
 		if *csvOut != "" {
 			file := suffixFile(*csvOut, i)
 			if err := writeWavefrontCSV(file, &r, mapGridVal); err != nil {
-				errOut("Error writing %s: %v", file, err)
-				os.Exit(1)
+				errExitf("Error writing %s: %v", file, err)
 			}
 		}
 		wr.Fields = append(wr.Fields, wavefrontFieldToTypes(&r, outFile))
@@ -222,8 +205,7 @@ func resolveBestFocus(input types.Input, fs *flag.FlagSet, bf bool, weightFlag, 
 		cfg.CustomWeights = yamlCfg.CustomWeights
 	}
 	if cfg.WeightType == "custom" && len(cfg.CustomWeights) != numFields {
-		errOut("Error: --focus-weights needs %d values, got %d", numFields, len(cfg.CustomWeights))
-		os.Exit(1)
+		errExitf("Error: --focus-weights needs %d values, got %d", numFields, len(cfg.CustomWeights))
 	}
 	return cfg
 }
@@ -237,8 +219,7 @@ func applyImagePlaneShift(configs []types.Config, configFlag *string, refSurface
 	if configFlag != nil && *configFlag != "" {
 		idx, err := resolveConfig(configs, *configFlag)
 		if idx < 0 {
-			errOut("Error: %s", err)
-			os.Exit(1)
+			errExitf("Error: %s", err)
 		}
 		targets = append(targets, idx)
 	} else {

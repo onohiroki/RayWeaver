@@ -54,21 +54,10 @@ func runPSF(data []byte) {
 	convergeTol := fs.Float64("converge-tol", 0, "relative Strehl change threshold for convergence (default 0.10)")
 	fs.Parse(os.Args[2:])
 
-	input := parseYAML[types.Input](data)
-	setReferenceWavelength(input.Chief)
-	if input.Chief == nil {
-		errOut("Error: 'chief' section is required (for fields)")
-		os.Exit(1)
-	}
+	input := parseFieldInput(data, "(for fields)")
 
-	gc, _ := loadCatalogs(&input, *glassDir)
-	writeBackGlassDir(&input, *glassDir)
-	surfaces := configSurfaces(input.Configs, configFlag)
-	if len(surfaces) == 0 {
-		errOut("Error: no surfaces to process")
-		os.Exit(1)
-	}
-	surface.Precompute(surfaces)
+	gc, _ := openGlass(&input, *glassDir)
+	surfaces := surfacesFor(input.Configs, configFlag)
 	system := types.System{Surfaces: surfaces, StopSurface: input.Chief.StopSurface}
 
 	// --focus-plane all: move the image plane to the single all-field
@@ -81,8 +70,7 @@ func runPSF(data []byte) {
 		if *configFlag != "" {
 			i, err := resolveConfig(input.Configs, *configFlag)
 			if i < 0 {
-				errOut("Error: %s", err)
-				os.Exit(1)
+				errExitf("Error: %s", err)
 			}
 			cfgIdx = i
 		}
@@ -132,8 +120,7 @@ func runPSF(data []byte) {
 	selected := selectedFieldIndices(fields, input.PSF, *fieldsFlag)
 	fields = applySelectedFields(fields, selected)
 	if len(fields) == 0 {
-		errOut("Error: no fields to compute")
-		os.Exit(1)
+		errExitf("Error: no fields to compute")
 	}
 
 	// Wavelengths: flag > psf.wavelengths > spectral default grid > selected
@@ -181,8 +168,7 @@ func runPSF(data []byte) {
 		case "FLAT":
 			spectralCurve = "FLAT"
 		default:
-			errOut("Error: invalid --spectral %q (D65 | FLAT)", *spectralFlag)
-			os.Exit(1)
+			errExitf("Error: invalid --spectral %q (D65 | FLAT)", *spectralFlag)
 		}
 	}
 
@@ -225,8 +211,7 @@ func runPSF(data []byte) {
 	// in the input YAML also disables it; a YAML-absence keeps the default ON.
 	cc, ccSet, err := boolFlag(fs, "converge-check")
 	if err != nil {
-		errOut("Error: %s", err)
-		os.Exit(1)
+		errExitf("Error: %s", err)
 	}
 	opts.ConvergeCheck = true
 	if input.PSF != nil && !ccSet && input.PSF.ConvergeCheck != nil {
@@ -255,8 +240,7 @@ func runPSF(data []byte) {
 		case "FLAT":
 			opts.MTFCfg.SpectralCurve = "FLAT"
 		default:
-			errOut("Error: invalid --mtf-spectral %q (D65 | FLAT)", *mtfSpectral)
-			os.Exit(1)
+			errExitf("Error: invalid --mtf-spectral %q (D65 | FLAT)", *mtfSpectral)
 		}
 	}
 	if *mtfCombination != "" {
@@ -268,12 +252,10 @@ func runPSF(data []byte) {
 
 	results, err := psf.Compute(system, gc, fields, wavelengths, opts)
 	if err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 	if len(results) == 0 {
-		errOut("Error: no PSF results computed (check fields/wavelengths/reference surface)")
-		os.Exit(1)
+		errExitf("Error: no PSF results computed (check fields/wavelengths/reference surface)")
 	}
 
 	// Write the effective options back into the output's psf: section so the
@@ -288,16 +270,14 @@ func runPSF(data []byte) {
 		if *yamlOut != "" {
 			file := suffixFile(*yamlOut, i)
 			if err := writePSFYAML(file, &r); err != nil {
-				errOut("Error writing %s: %v", file, err)
-				os.Exit(1)
+				errExitf("Error writing %s: %v", file, err)
 			}
 			outFile = file
 		}
 		if *csvOut != "" {
 			file := suffixFile(*csvOut, i)
 			if err := writePSFCSV(file, &r); err != nil {
-				errOut("Error writing %s: %v", file, err)
-				os.Exit(1)
+				errExitf("Error writing %s: %v", file, err)
 			}
 		}
 		wl := r.Wavelength
@@ -354,8 +334,7 @@ func selectedFieldIndices(fields []types.FieldDef, pc *types.PSFConfig, flagVal 
 	for _, tok := range strings.Split(spec, ",") {
 		idx, err := strconv.Atoi(strings.TrimSpace(tok))
 		if err != nil || idx < 0 || idx >= len(fields) {
-			errOut("Error: invalid field index %q", tok)
-			os.Exit(1)
+			errExitf("Error: invalid field index %q", tok)
 		}
 		if !keptSet[idx] {
 			kept = append(kept, idx)
@@ -470,8 +449,7 @@ func parseFloatList(s, what string) []float64 {
 	for _, tok := range strings.Split(s, ",") {
 		v, err := strconv.ParseFloat(strings.TrimSpace(tok), 64)
 		if err != nil {
-			errOut("Error: invalid %s %q", what, tok)
-			os.Exit(1)
+			errExitf("Error: invalid %s %q", what, tok)
 		}
 		out = append(out, v)
 	}

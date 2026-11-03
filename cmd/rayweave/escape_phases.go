@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"strconv"
 
 	"github.com/hiroki/rayweaver/internal/types"
@@ -54,8 +53,7 @@ func cleanDLSEnabled(cfg *types.GlobalConfig, command string) (enabled, writeBac
 	}
 	v, err := strconv.ParseBool(raw)
 	if err != nil {
-		errOut("Error: --clean-dls %q: expected true or false", raw)
-		os.Exit(1)
+		errExitf("Error: --clean-dls %q: expected true or false", raw)
 	}
 	return v, true
 }

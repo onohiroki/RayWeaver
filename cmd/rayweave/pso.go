@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-
 	"github.com/hiroki/rayweaver/internal/escape"
 	"github.com/hiroki/rayweaver/internal/pso"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -19,12 +17,10 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
 	if input.Optimization == nil {
-		errOut("Error: 'optimization' section is required")
-		os.Exit(1)
+		errExitf("Error: 'optimization' section is required")
 	}
 	if input.Optimization.PSO == nil {
-		errOut("Error: 'optimization.pso' section is required")
-		os.Exit(1)
+		errExitf("Error: 'optimization.pso' section is required")
 	}
 
 	// Apply the Go soft memory limit (CLI --mem-limit wins over
@@ -49,8 +45,7 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 	switch input.Optimization.PSO.Gbest {
 	case "", pso.GbestMerit, pso.GbestPenalised:
 	default:
-		errOut("Error: gbest must be %q or %q, got %q", pso.GbestMerit, pso.GbestPenalised, input.Optimization.PSO.Gbest)
-		os.Exit(1)
+		errExitf("Error: gbest must be %q or %q, got %q", pso.GbestMerit, pso.GbestPenalised, input.Optimization.PSO.Gbest)
 	}
 
 	// Resolve the power-preserving glass phase.
@@ -63,14 +58,12 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 	progress, finishProgress := newEscapeProgress(verbose, logFile)
 	defer finishProgress()
 
-	gc, _ := loadCatalogs(&input, glassDir)
-	writeBackGlassDir(&input, glassDir)
+	gc, _ := openGlass(&input, glassDir)
 	if glassVariables {
 		applyGlassVariables(&input, gc)
 	}
 	if err := validateSharedGlassVariables(&input, gc); err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 
 	// Build the PSO explorer factory. Each worker gets its own Explorer

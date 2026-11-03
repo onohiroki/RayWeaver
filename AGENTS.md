@@ -55,7 +55,7 @@ GOOS=windows go vet ./...
 ```
 
 - `cmd/rayweave` — the CLI. One file per command family; every subcommand's
-  usage text lives in `main.go` (`--help` prints it).
+  usage text lives in `help.go` (`--help` prints it).
 - `cmd/rwrun` — companion binary that launches a long run detached.
 - `cmd/rayweave-mcp` — companion binary that serves the subcommands to AI agents
   over the Model Context Protocol on stdio (manual: [docs/mcp.md](docs/mcp.md)).

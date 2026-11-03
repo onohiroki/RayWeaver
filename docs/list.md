@@ -237,9 +237,11 @@ Unresolved keys produce a stderr warning instead of aborting.
 
 ## 6. Fields section — field-of-view definitions
 
-The `fields` target shows the field-of-view definitions from `chief.fields[]`
-(or `configs[].fields[]` as fallback). It runs the chief ray trace internally
-to provide computed values alongside the YAML input values.
+The `fields` target shows the field-of-view definitions of the selected
+configuration: `--config` supplies that position's fields, falling back to
+`configs[0].fields[]` and then `chief.fields[]` — the same resolution order as
+`chief`, `trace` and `psf`. It runs the chief ray trace internally to provide
+computed values alongside the YAML input values.
 
 ```sh
 rayweave list fields < lens.yaml

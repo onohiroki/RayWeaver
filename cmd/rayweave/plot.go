@@ -129,8 +129,7 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 	fs.Parse(args)
 
 	if showInvalidFan && clipInvalidFan {
-		errOut("Error: --show-invalid-ray-fan and --clip-invalid-ray-fan are mutually exclusive")
-		os.Exit(1)
+		errExitf("Error: --show-invalid-ray-fan and --clip-invalid-ray-fan are mutually exclusive")
 	}
 
 	// Parse element colors with CLI-wins semantics:
@@ -141,8 +140,7 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 		for _, flagVal := range elementColorFlags {
 			m, err := render.ParseColorMap(flagVal)
 			if err != nil {
-				errOut("Error parsing --element-color: %v", err)
-				os.Exit(1)
+				errExitf("Error parsing --element-color: %v", err)
 			}
 			for k, v := range m {
 				elementColors[k] = render.ColorToHex(v)
@@ -165,8 +163,7 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 		for _, flagVal := range asphereColorFlags {
 			all, byID, err := render.ParseAsphereColorMap(flagVal)
 			if err != nil {
-				errOut("Error parsing --asphere-color: %v", err)
-				os.Exit(1)
+				errExitf("Error parsing --asphere-color: %v", err)
 			}
 			if all != (color.NRGBA{}) {
 				asphereColorAllTemp = render.ColorToHex(all)
@@ -205,21 +202,18 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 	}
 
 	if len(output.Configs) == 0 {
-		errOut("Error: no configs to plot (define configs[].surfaces)")
-		os.Exit(1)
+		errExitf("Error: no configs to plot (define configs[].surfaces)")
 	}
 	surfaces := output.Configs[0].Surfaces
 	if configFlag != "" {
 		idx, err := resolveConfig(output.Configs, configFlag)
 		if idx < 0 {
-			errOut("Error: %s", err)
-			os.Exit(1)
+			errExitf("Error: %s", err)
 		}
 		surfaces = output.Configs[idx].Surfaces
 	}
 	if len(surfaces) == 0 {
-		errOut("Error: no surfaces to plot (define configs[].surfaces)")
-		os.Exit(1)
+		errExitf("Error: no surfaces to plot (define configs[].surfaces)")
 	}
 
 	surface.Precompute(surfaces)
@@ -266,19 +260,19 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 	}
 
 	cfg := render.Config{
-		Surfaces:         surfaces,
-		Results:          output.Results,
-		ChiefRays:        output.ChiefRays,
-		GlassMap:         glassMap,
-		LensWidth:        lensWidth,
-		RayWidth:         rayWidth,
-		ScaleOverride:    scaleOverride,
-		RightMarginPct:   rightMarginPct,
-		MaxFanRays:       fanRays,
-		StopSurfaceID:    stopSurfaceID,
-		ElementColors:    elementColors,
-		AsphereColors:    asphereColors,
-		AsphereColorAll:  asphereColorAll,
+		Surfaces:        surfaces,
+		Results:         output.Results,
+		ChiefRays:       output.ChiefRays,
+		GlassMap:        glassMap,
+		LensWidth:       lensWidth,
+		RayWidth:        rayWidth,
+		ScaleOverride:   scaleOverride,
+		RightMarginPct:  rightMarginPct,
+		MaxFanRays:      fanRays,
+		StopSurfaceID:   stopSurfaceID,
+		ElementColors:   elementColors,
+		AsphereColors:   asphereColors,
+		AsphereColorAll: asphereColorAll,
 	}
 	switch {
 	case clipInvalidFan:
@@ -301,19 +295,16 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 
 	outYAML, err := yamlMarshal(output)
 	if err != nil {
-		errOut("Error marshaling output YAML: %v", err)
-		os.Exit(1)
+		errExitf("Error marshaling output YAML: %v", err)
 	}
 
 	if outPath != "" && strings.HasSuffix(strings.ToLower(outPath), ".png") {
 		pngData, err := render.LensPNG(cfg)
 		if err != nil {
-			errOut("Error rendering PNG: %v", err)
-			os.Exit(1)
+			errExitf("Error rendering PNG: %v", err)
 		}
 		if err := os.WriteFile(outPath, pngData, 0644); err != nil {
-			errOut("Error writing PNG: %v", err)
-			os.Exit(1)
+			errExitf("Error writing PNG: %v", err)
 		}
 		os.Stdout.Write(outYAML)
 		return
@@ -323,8 +314,7 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 
 	if outPath != "" {
 		if err := os.WriteFile(outPath, []byte(svg), 0644); err != nil {
-			errOut("Error writing SVG: %v", err)
-			os.Exit(1)
+			errExitf("Error writing SVG: %v", err)
 		}
 		os.Stdout.Write(outYAML)
 	} else {

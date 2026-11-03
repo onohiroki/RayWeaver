@@ -42,66 +42,13 @@ type optimizeRun struct {
 	apertureMarginMM float64
 }
 
-// buildOptimizeRun parses and resolves the input document into the pieces both
-// `optimize` and `optimize snap` need. requireMerit controls whether missing
-// merit terms are fatal (snap only needs the input for its existing surfaces,
-// but shares the same validation for consistency). Returns ok=false when the
-// caller should stop (an error has already been reported).
-func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bool, powerSolveSurfaces string, glassVariables, requireMerit bool) (optimizeRun, bool) {
-	var run optimizeRun
-	input := parseYAML[types.Input](data)
-	setReferenceWavelength(input.Chief)
-
-	if input.Optimization == nil {
-		errOut("Error: 'optimization' section is required")
-		os.Exit(1)
-	}
-
-	// Resolve the power-preserving solve under the CLI/YAML precedence rule: a
-	// CLI surface list wins, else --power-solve turns the YAML list on, else the
-	// YAML power_solve section is used as-is. The effective config is echoed
-	// into the output (write-back).
-	psu := effectivePowerSolve(input, powerSolve, powerSolveSurfaces)
-	input.Optimization.PowerSolve = psu
-
-	excluded := map[string]bool{}
-	for _, p := range strings.Split(excludeParams, ",") {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			excluded[p] = true
-		}
-	}
-
-	// Drop excluded target params from the echoed variables too, so the
-	// output YAML reflects the reduced variable set.
-	if len(excluded) > 0 {
-		kept := input.Optimization.Variables[:0]
-		for _, v := range input.Optimization.Variables {
-			if !excluded[v.Target.Param] {
-				kept = append(kept, v)
-			}
-		}
-		input.Optimization.Variables = kept
-	}
-
-	gc, _ := loadCatalogs(&input, glassDir)
-	writeBackGlassDir(&input, glassDir)
-
-	// --glass-variables auto-generates nd/vd variables for every refractive
-	// element (one representative surface each). The merit is left untouched:
-	// the user's explicit merit is always preserved. It composes with
-	// power_solve so the user can pin the layout while the glasses are the only
-	// free variables.
-	if glassVariables {
-		applyGlassVariables(&input, gc)
-	}
-	if err := validateSharedGlassVariables(&input, gc); err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
-	}
-
-	// Build the per-config optimisation inputs (shared/local variables are
-	// read below; the unified Optimizer drives all configs together).
+// buildConfigInputs converts the document's active configs into the
+// optimize.ConfigInput list shared by optimize, escape and pso. Each config
+// carries its own surfaces, fields, wavelengths, merit and constraints, with
+// the top-level optimization sections as fallbacks. It returns nil when the
+// document declares no active config, so the caller can apply its own
+// single-config fallback (optimize) or reject the document (global search).
+func buildConfigInputs(input types.Input, gc *glass.Catalog) []optimize.ConfigInput {
 	var configs []optimize.ConfigInput
 	for _, cfg := range input.Configs {
 		if !cfg.Active {
@@ -109,14 +56,10 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 		}
 		surfaces := cfg.Surfaces
 		if len(surfaces) == 0 {
-			errOut("Error: config %q has no surfaces defined", cfg.ID)
-			os.Exit(1)
+			errExitf("Error: config %q has no surfaces defined", cfg.ID)
 		}
 
-		var fields []types.FieldItem
-		for _, f := range cfg.Fields {
-			fields = append(fields, f)
-		}
+		fields := append([]types.FieldItem(nil), cfg.Fields...)
 		if len(fields) == 0 && input.Chief != nil {
 			for _, f := range input.Chief.Fields {
 				fields = append(fields, types.FieldItem{ID: 0, AngleDeg: f.Angle, Weight: 1.0})
@@ -164,6 +107,123 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 			WavefrontReference:  input.Optimization.WavefrontReference,
 		})
 	}
+	return configs
+}
+
+// dlsTuning holds the solver settings that optimize, escape and pso resolve
+// from optimization.* in exactly the same way.
+type dlsTuning struct {
+	maxIter          int
+	tol              float64
+	epsilon          float64
+	mu               float64
+	numRays          int
+	apertureMargin   float64
+	apertureMarginMM float64
+}
+
+// resolveDLSTuning applies the built-in DLS defaults, so an unset YAML value
+// means the same thing in every entry point. warnMargin reports a below-1.0
+// aperture_margin (it clips the pupil grid and stalls convergence); the global
+// search used to clamp it silently, and both paths now resolve it here.
+func resolveDLSTuning(oc *types.OptimizationConfig, warnMargin bool) dlsTuning {
+	t := dlsTuning{
+		maxIter:          oc.MaxIter,
+		tol:              oc.Tol,
+		epsilon:          oc.Epsilon,
+		mu:               oc.Mu,
+		numRays:          oc.NumRays,
+		apertureMargin:   oc.ApertureMargin,
+		apertureMarginMM: oc.ApertureMarginMM,
+	}
+	if t.maxIter <= 0 {
+		t.maxIter = defaultMaxIter
+	}
+	if t.tol <= 0 {
+		t.tol = defaultTol
+	}
+	if t.epsilon <= 0 {
+		t.epsilon = defaultEpsilon
+	}
+	if t.mu <= 0 {
+		t.mu = defaultMu
+	}
+	if t.numRays <= 0 {
+		t.numRays = defaultNumRays
+	}
+	if t.apertureMargin <= 0 {
+		t.apertureMargin = 1.0
+	}
+	if t.apertureMargin < 1.0 {
+		if warnMargin {
+			errOut("Warning: aperture_margin %.3f < 1.0 is not recommended (pupil grid smaller than the aperture stalls DLS); clamping to 1.0", t.apertureMargin)
+		}
+		t.apertureMargin = 1.0
+	}
+	if t.apertureMarginMM <= 0 {
+		t.apertureMarginMM = types.DefaultApertureMarginMM
+	}
+	return t
+}
+
+// buildOptimizeRun parses and resolves the input document into the pieces both
+// `optimize` and `optimize snap` need. requireMerit controls whether missing
+// merit terms are fatal (snap only needs the input for its existing surfaces,
+// but shares the same validation for consistency). Returns ok=false when the
+// caller should stop (an error has already been reported).
+func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bool, powerSolveSurfaces string, glassVariables, requireMerit bool) (optimizeRun, bool) {
+	var run optimizeRun
+	input := parseYAML[types.Input](data)
+	setReferenceWavelength(input.Chief)
+
+	if input.Optimization == nil {
+		errExitf("Error: 'optimization' section is required")
+	}
+
+	// Resolve the power-preserving solve under the CLI/YAML precedence rule: a
+	// CLI surface list wins, else --power-solve turns the YAML list on, else the
+	// YAML power_solve section is used as-is. The effective config is echoed
+	// into the output (write-back).
+	psu := effectivePowerSolve(input, powerSolve, powerSolveSurfaces)
+	input.Optimization.PowerSolve = psu
+
+	excluded := map[string]bool{}
+	for _, p := range strings.Split(excludeParams, ",") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			excluded[p] = true
+		}
+	}
+
+	// Drop excluded target params from the echoed variables too, so the
+	// output YAML reflects the reduced variable set.
+	if len(excluded) > 0 {
+		kept := input.Optimization.Variables[:0]
+		for _, v := range input.Optimization.Variables {
+			if !excluded[v.Target.Param] {
+				kept = append(kept, v)
+			}
+		}
+		input.Optimization.Variables = kept
+	}
+
+	gc, _ := openGlass(&input, glassDir)
+
+	// --glass-variables auto-generates nd/vd variables for every refractive
+	// element (one representative surface each). The merit is left untouched:
+	// the user's explicit merit is always preserved. It composes with
+	// power_solve so the user can pin the layout while the glasses are the only
+	// free variables.
+	if glassVariables {
+		applyGlassVariables(&input, gc)
+	}
+	if err := validateSharedGlassVariables(&input, gc); err != nil {
+		errExitf("Error: %v", err)
+	}
+
+	// Build the per-config optimisation inputs (shared/local variables are
+	// read below; the unified Optimizer drives all configs together).
+	configs := buildConfigInputs(input, gc)
 
 	// Single-config YAML may omit the configs[] wrapper entirely or use a
 	// default config with weight 1.0; fall back to a synthetic config.
@@ -218,8 +278,7 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 	}
 
 	if len(sharedVars) == 0 && len(localVars) == 0 {
-		errOut("Error: no optimization variables defined")
-		os.Exit(1)
+		errExitf("Error: no optimization variables defined")
 	}
 
 	if requireMerit {
@@ -231,46 +290,18 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 			}
 		}
 		if !hasMerit {
-			errOut("Error: no merit terms defined (add 'optimization.merit', 'configs[].merit' or 'configs[].merit_modes')")
-			os.Exit(1)
+			errExitf("Error: no merit terms defined (add 'optimization.merit', 'configs[].merit' or 'configs[].merit_modes')")
 		}
 	}
 
-	maxIter := input.Optimization.MaxIter
-	if maxIter <= 0 {
-		maxIter = defaultMaxIter
-	}
-	tol := input.Optimization.Tol
-	if tol <= 0 {
-		tol = defaultTol
-	}
-	epsilon := input.Optimization.Epsilon
-	if epsilon <= 0 {
-		epsilon = defaultEpsilon
-	}
-	mu := input.Optimization.Mu
-	if mu <= 0 {
-		mu = defaultMu
-	}
-	numRays := input.Optimization.NumRays
-	if numRays <= 0 {
-		numRays = defaultNumRays
-	}
-	// aperture_margin < 1.0 makes the pupil grid smaller than the aperture,
-	// which clips rays at surface edges and stalls DLS convergence. Clamp it.
-	apertureMargin := input.Optimization.ApertureMargin
-	if apertureMargin <= 0 {
-		apertureMargin = 1.0
-	}
-	if apertureMargin < 1.0 {
-		errOut("Warning: aperture_margin %.3f < 1.0 is not recommended (pupil grid smaller than the aperture stalls DLS); clamping to 1.0", apertureMargin)
-		apertureMargin = 1.0
-	}
-	// Physical clearance added to each auto_aperture final diameter (mm).
-	apertureMarginMM := input.Optimization.ApertureMarginMM
-	if apertureMarginMM <= 0 {
-		apertureMarginMM = types.DefaultApertureMarginMM
-	}
+	tuning := resolveDLSTuning(input.Optimization, true)
+	maxIter := tuning.maxIter
+	tol := tuning.tol
+	epsilon := tuning.epsilon
+	mu := tuning.mu
+	numRays := tuning.numRays
+	apertureMargin := tuning.apertureMargin
+	apertureMarginMM := tuning.apertureMarginMM
 
 	run.input = input
 	run.configs = configs
@@ -319,8 +350,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	if logFile != "" {
 		f, err := os.Create(logFile)
 		if err != nil {
-			errOut("Error creating log file: %v", err)
-			os.Exit(1)
+			errExitf("Error creating log file: %v", err)
 		}
 		logWriters = append(logWriters, struct {
 			name string
@@ -361,23 +391,19 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 			}
 		}
 		if !hasModes {
-			errOut("Error: optimization.merit_schedule requires configs[].merit_modes on at least one active config")
-			os.Exit(1)
+			errExitf("Error: optimization.merit_schedule requires configs[].merit_modes on at least one active config")
 		}
 		if input.Optimization.MeritSchedule.Metric == "glass_role" && len(input.Optimization.MeritSchedule.GlassSurfaces) == 0 {
-			errOut("Error: optimization.merit_schedule metric 'glass_role' requires glass_surfaces")
-			os.Exit(1)
+			errExitf("Error: optimization.merit_schedule metric 'glass_role' requires glass_surfaces")
 		}
 		if agg := input.Optimization.MeritSchedule.MetricAggregation; agg != "" && agg != "mean" && agg != "max" {
-			errOut("Error: optimization.merit_schedule metric_aggregation must be 'mean' or 'max'")
-			os.Exit(1)
+			errExitf("Error: optimization.merit_schedule metric_aggregation must be 'mean' or 'max'")
 		}
 	}
 	checkGlassRole := func(terms []types.MeritTerm) {
 		for _, mt := range terms {
 			if mt.Kind == optimize.MeritGlassRole && len(mt.SurfaceSet) == 0 {
-				errOut("Error: glass_role merit term requires surface_set (e.g. [3, 5])")
-				os.Exit(1)
+				errExitf("Error: glass_role merit term requires surface_set (e.g. [3, 5])")
 			}
 		}
 	}
@@ -621,8 +647,7 @@ func runOptimizeSnap(data []byte, glassDir string) {
 	freezeFieldReport(&input, opt)
 
 	if !opt.HasGlassPairs() {
-		errOut("Error: optimize snap found no declared nd/vd glass variables to snap")
-		os.Exit(1)
+		errExitf("Error: optimize snap found no declared nd/vd glass variables to snap")
 	}
 
 	x := opt.InitialState()
@@ -631,8 +656,7 @@ func runOptimizeSnap(data []byte, glassDir string) {
 
 	snappedX, pairs := opt.SnapVariables(x)
 	if len(pairs) == 0 {
-		errOut("Error: optimize snap could not resolve any catalog glasses")
-		os.Exit(1)
+		errExitf("Error: optimize snap could not resolve any catalog glasses")
 	}
 	opt.UpdatePupils(snappedX)
 	after := opt.OpticalMerit(snappedX)

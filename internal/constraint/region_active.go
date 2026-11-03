@@ -137,18 +137,6 @@ func capLambda(s *RegionActiveState, maxLambda float64) {
 	}
 }
 
-// ActiveIndices returns the indices of constraints that are currently active.
-// Used by the DLS solver to filter the augmented system.
-func ActiveIndices(states []RegionActiveState) []int {
-	var indices []int
-	for i, s := range states {
-		if s.Active {
-			indices = append(indices, i)
-		}
-	}
-	return indices
-}
-
 // LagrangeMultipliers returns the current Lagrange multipliers (length == len(states)).
 func LagrangeMultipliers(states []RegionActiveState) []float64 {
 	lambdas := make([]float64, len(states))
@@ -165,29 +153,4 @@ func SetLambdas(states []RegionActiveState, lambdas []float64) {
 			states[i].Lambda = lambdas[i]
 		}
 	}
-}
-
-// ConstraintViolations computes the raw violation (before weighting) for each
-// constraint. This is the value passed to UpdateActiveSet.
-func ConstraintViolations(constraints []types.ConstraintOperand, surfaces []types.Surface, gc interface{}, numRays int, apertureMargin float64, stopSurface int, pupilZ float64, fieldAngleFn func(types.ConstraintOperand) float64) []float64 {
-	violations := make([]float64, len(constraints))
-	for i, c := range constraints {
-		if !c.Active {
-			violations[i] = 0
-			continue
-		}
-		angle := fieldAngleFn(c)
-		// The gc parameter is interface{} for import-cycle avoidance; callers
-		// must pass a concrete *glass.Catalog via the Optimizer wrapper.
-		// Here we only record the violation from ComputeError.
-		_ = angle
-		_ = surfaces
-		_ = numRays
-		_ = apertureMargin
-		_ = stopSurface
-		_ = pupilZ
-		// Placeholder: actual violation is computed by the Optimizer and
-		// passed directly to this package. See Optimize.UpdateActiveSet.
-	}
-	return violations
 }

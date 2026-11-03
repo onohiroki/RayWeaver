@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -352,8 +351,7 @@ func runEventKey(detail string) string {
 // bare `list < run.jsonl` therefore lists the global run.
 func runListGlobalLog(data []byte, positional []string, format string) {
 	if err := globalLogTargetError(positional); err != nil {
-		errOut("Error: %v", err)
-		os.Exit(1)
+		errExitf("Error: %v", err)
 	}
 	renderGlobalList(buildGlobalListDataFromLog(data), format)
 }
