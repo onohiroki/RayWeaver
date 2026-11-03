@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/hiroki/rayweaver/internal/chief"
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -26,14 +27,14 @@ import (
 // summary's own settings (`--wl`, `--num-rays`) is written back.
 func runZoom(data []byte) {
 	fs := flag.NewFlagSet("zoom", flag.ExitOnError)
-	wlFlag := fs.Float64("wl", 0, "reference wavelength (mm) for the first-order trace and the grids")
-	numRaysFlag := fs.Int("num-rays", 0, "pupil-grid rays per field (default: chief.num_rays, else 64)")
-	configFlag := fs.String("config", "", "summarise only this config by id (default: every active config)")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	fs.Parse(os.Args[2:])
+	opts := clispec.Bind(clispec.Zoom, fs)
+	if err := opts.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
+	configFlag := opts.String("config")
 
-	if flagWasSet(fs, "num-rays") && *numRaysFlag <= 0 {
-		errExitf("Error: --num-rays must be positive (got %d)", *numRaysFlag)
+	if opts.Set("num-rays") && opts.Int("num-rays") <= 0 {
+		errExitf("Error: --num-rays must be positive (got %d)", opts.Int("num-rays"))
 	}
 
 	input := parseYAML[types.Input](data)
@@ -48,17 +49,17 @@ func runZoom(data []byte) {
 	if input.Chief.ReferenceWavelength > 0 {
 		wl = input.Chief.ReferenceWavelength
 	}
-	if flagWasSet(fs, "wl") && *wlFlag > 0 {
-		wl = *wlFlag
+	if opts.Set("wl") && opts.Float("wl") > 0 {
+		wl = opts.Float("wl")
 	}
 	input.Chief.ReferenceWavelength = wl
 
 	// --num-rays mirrors chief.num_rays, so it is written back only when given:
 	// the built-in 64 is a fallback for this run, not a document setting.
 	numRays := input.Chief.NumRays
-	if flagWasSet(fs, "num-rays") {
-		numRays = *numRaysFlag
-		input.Chief.NumRays = numRays
+	if opts.Set("num-rays") {
+		numRays = opts.Int("num-rays")
+		opts.WriteBack(&input)
 	}
 	if numRays <= 0 {
 		numRays = 64
@@ -69,7 +70,7 @@ func runZoom(data []byte) {
 		objectHeight = input.Paraxial.ObjectHeight
 	}
 
-	gc, _ := openGlass(&input, *glassDir)
+	gc, _ := openGlass(&input, opts.String("glass-dir"))
 
 	// Which configurations: the --config selector, else every active one.
 	// Surfaces live under configs[].surfaces, so a document without configs has
@@ -85,8 +86,8 @@ func runZoom(data []byte) {
 		surfaces    []types.Surface
 	}
 	var targets []target
-	if *configFlag != "" {
-		idx, err := resolveConfig(input.Configs, *configFlag)
+	if configFlag != "" {
+		idx, err := resolveConfig(input.Configs, configFlag)
 		if idx < 0 {
 			errExitf("Error: %s", err)
 		}

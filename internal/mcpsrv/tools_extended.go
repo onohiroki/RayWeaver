@@ -42,10 +42,7 @@ func (s *server) addZoom() {
 	addStage(s, "zoom", "Zoom summary",
 		"Per-config summary of a multi-config (zoom) system: first order, spot RMS and vignetting for every position.",
 		"zoom", func(in zoomIn) []string {
-			args := in.settings.args()
-			args = floatFlag(args, in.Wavelength, "--wl")
-			args = intFlag(args, in.NumRays, "--num-rays")
-			return args
+			return clispec.Args(clispec.Zoom, in, map[string]string{"wavelength": "wl"})
 		})
 }
 
