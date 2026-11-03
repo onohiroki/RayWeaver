@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/psf"
@@ -42,39 +43,6 @@ func runFocus(data []byte) {
 	default:
 		errExitf("Error: unknown focus sub-subcommand %q (expected mtf | psf | spot)", args[0])
 	}
-}
-
-// focusFlags holds the common parsed flags of a focus sub-subcommand.
-type focusFlags struct {
-	fs           *flag.FlagSet
-	glassDir     string
-	configFlag   string
-	refSurface   int
-	gridSize     int
-	numRays      int
-	fields       string
-	wavelengths  string
-	polarization string
-	planes       string
-	throughFocus string
-}
-
-// registerFocusFlags declares the flags shared by `focus mtf` and `focus psf`.
-// The caller registers its own extras and then parses.
-func registerFocusFlags(fs *flag.FlagSet) *focusFlags {
-	fl := &focusFlags{fs: fs}
-	fs.StringVar(&fl.glassDir, "glass-dir", "", "AGF glass catalog directory")
-	fs.StringVar(&fl.configFlag, "config", "", "select config by id (multi-config mode)")
-	fs.IntVar(&fl.refSurface, "ref-surface", 0, "reference surface ID for wavefront sampling (default: last optical surface)")
-	fs.IntVar(&fl.gridSize, "psf-grid", 0, "image-plane pixels per side (default 64)")
-	fs.IntVar(&fl.numRays, "num-rays", 0, "pupil grid rays (default 400)")
-	fs.StringVar(&fl.fields, "fields", "", "comma-separated field indices to compute (default: all)")
-	fs.StringVar(&fl.wavelengths, "wavelengths", "", "comma-separated wavelengths in mm (default: config wavelengths, else reference)")
-	fs.StringVar(&fl.polarization, "polarization", "", "input polarization: RCP (default) | LCP | X | Y | RCP+LCP")
-	fs.StringVar(&fl.planes, "planes", "", "planes to compare: file,all,best (default: all three); with --through-focus: base planes file,all,on_axis (default: file)")
-	fs.StringVar(&fl.throughFocus, "through-focus", "", "through-focus scan FROM,STEP,COUNT (mm, number of planes); scans around each base plane in --planes")
-	fs.String("converge-check", "", "label sampling convergence by re-evaluating at 1.5x rays (default: off; true|false)")
-	return fl
 }
 
 // focusYAML is the shared subset of the focus.mtf / focus.psf sections.
@@ -189,10 +157,11 @@ type focusKey struct {
 // shape; fl the parsed flags. planeFn resolves the plane set: the file/all/best
 // comparison for a normal run, or the file/all/on_axis base planes for a
 // through-focus scan.
-func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func(flagVal string, yamlPlanes []string) ([]string, error)) *focusRun {
-	gc, _ := openGlass(input, fl.glassDir)
+func buildFocusRun(input *types.Input, fl *clispec.Options, y focusYAML, planeFn func(flagVal string, yamlPlanes []string) ([]string, error)) *focusRun {
+	gc, _ := openGlass(input, fl.String("glass-dir"))
 
-	baseSurfaces := surfacesFor(input.Configs, &fl.configFlag)
+	configFlag := fl.String("config")
+	baseSurfaces := surfacesFor(input.Configs, &configFlag)
 
 	stopSurface := 0
 	if input.Chief != nil {
@@ -201,8 +170,8 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 	refWavelength := effectiveReferenceWavelength(input.Chief)
 
 	cfgIdx := 0
-	if fl.configFlag != "" {
-		i, err := resolveConfig(input.Configs, fl.configFlag)
+	if configFlag != "" {
+		i, err := resolveConfig(input.Configs, configFlag)
 		if i < 0 {
 			errExitf("Error: %s", err)
 		}
@@ -212,7 +181,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 	// fields, then configs[0], then the top-level chief section — the same
 	// resolution order as chief, vignette, asphere and list fields. The
 	// back-focus solve below uses this same list.
-	fields := resolveConfigFieldDefs(*input, &fl.configFlag)
+	fields := resolveConfigFieldDefs(*input, &configFlag)
 	var cfgWLs []types.WavelengthItem
 	if len(input.Configs) > 0 {
 		cfgWLs = input.Configs[cfgIdx].Wavelengths
@@ -220,7 +189,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 	cfgFields := fieldItemsFromDefs(fields)
 	bfSolve := backFocusSolveOf(input)
 
-	selected := focusFieldIndices(fields, y.fields, fl.fields)
+	selected := focusFieldIndices(fields, y.fields, fl.IntsString("fields"))
 	fields = applySelectedFields(fields, selected)
 	if len(fields) == 0 {
 		errExitf("Error: no fields to compute")
@@ -229,35 +198,35 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 	// Wavelengths: flag > YAML > config wavelengths > the reference.
 	var wavelengths []float64
 	switch {
-	case fl.wavelengths != "":
-		wavelengths = parseFloatList(fl.wavelengths, "wavelength")
+	case len(fl.Floats("wavelengths")) > 0:
+		wavelengths = fl.Floats("wavelengths")
 	case len(y.wavelengths) > 0:
 		wavelengths = y.wavelengths
-	case len(configWavelengthValues(input.Configs, &fl.configFlag)) > 0:
-		wavelengths = configWavelengthValues(input.Configs, &fl.configFlag)
+	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
+		wavelengths = configWavelengthValues(input.Configs, &configFlag)
 	default:
 		wavelengths = []float64{refWavelength}
 	}
 
 	var polLabels []string
 	switch {
-	case fl.polarization != "":
-		polLabels = parsePolLabels(fl.polarization)
+	case fl.String("polarization") != "":
+		polLabels = parsePolLabels(fl.String("polarization"))
 	case y.polarization != "":
 		polLabels = parsePolLabels(y.polarization)
 	default:
 		polLabels = []string{string(types.PolRCP)}
 	}
 
-	planes, err := planeFn(fl.planes, y.planes)
+	planes, err := planeFn(fl.String("planes"), y.planes)
 	if err != nil {
 		errExitf("Error: %s", err)
 	}
 
 	opts := psf.Options{
-		ReferenceSurface: intOrYAML(fl.refSurface, y.referenceSurface),
-		NumRays:          intOrYAML(fl.numRays, y.numRays),
-		GridSize:         intOrYAML(fl.gridSize, y.gridSize),
+		ReferenceSurface: intOrYAML(fl.Int("ref-surface"), y.referenceSurface),
+		NumRays:          intOrYAML(fl.Int("num-rays"), y.numRays),
+		GridSize:         intOrYAML(fl.Int("psf-grid"), y.gridSize),
 		Polarizations:    polLabels,
 		PupilModel:       pupilModelForConfig(*input),
 		RayDefinition:    chiefRayDefinition(*input),
@@ -265,7 +234,7 @@ func buildFocusRun(input *types.Input, fl *focusFlags, y focusYAML, planeFn func
 
 	// The focus commands default the convergence labelling OFF (the comparison
 	// is about the plane, not the sampling); an explicit flag or YAML wins.
-	cc, ccSet, ccErr := boolFlag(fl.fs, "converge-check")
+	cc, ccSet, ccErr := fl.BoolString("converge-check")
 	if ccErr != nil {
 		errExitf("Error: %s", ccErr)
 	}
@@ -419,9 +388,9 @@ func parseThroughFocus(spec string) (*types.FocusThroughFocus, error) {
 
 // resolveThroughFocus resolves the through-focus scan: an explicit flag wins
 // over the YAML section; nil means a normal plane comparison.
-func resolveThroughFocus(fl *focusFlags, y focusYAML) *types.FocusThroughFocus {
-	if strings.TrimSpace(fl.throughFocus) != "" {
-		tf, err := parseThroughFocus(fl.throughFocus)
+func resolveThroughFocus(fl *clispec.Options, y focusYAML) *types.FocusThroughFocus {
+	if strings.TrimSpace(fl.String("through-focus")) != "" {
+		tf, err := parseThroughFocus(fl.String("through-focus"))
 		if err != nil {
 			errExitf("Error: %s", err)
 		}
@@ -678,9 +647,10 @@ func writeFocusDocument(input types.Input, comp *types.FocusComparison, command 
 // runFocusMTF implements `focus mtf`.
 func runFocusMTF(data []byte, args []string) {
 	fs := flag.NewFlagSet("focus mtf", flag.ExitOnError)
-	fl := registerFocusFlags(fs)
-	freqFlag := fs.String("frequencies", "", "comma-separated spatial frequencies in cycles/mm (default: focus.mtf.frequencies, else 50)")
-	fs.Parse(args)
+	fl := clispec.Bind(clispec.FocusMTF, fs)
+	if err := fl.Parse(args); err != nil {
+		errExitf("Error: %v", err)
+	}
 
 	input := parseFieldInput(data, "(for fields)")
 	var mtfCfg *types.FocusMTFConfig
@@ -688,7 +658,7 @@ func runFocusMTF(data []byte, args []string) {
 		mtfCfg = input.Focus.MTF
 	}
 	y := focusYAMLFromMTF(mtfCfg)
-	freqs := focusFrequencies(*freqFlag, mtfCfg)
+	freqs := focusFrequencies(fl.Floats("frequencies"), mtfCfg)
 
 	if tf := resolveThroughFocus(fl, y); tf != nil {
 		run := buildFocusRun(&input, fl, y, parseThroughFocusPlanes)
@@ -726,8 +696,10 @@ func runFocusMTF(data []byte, args []string) {
 // runFocusPSF implements `focus psf`.
 func runFocusPSF(data []byte, args []string) {
 	fs := flag.NewFlagSet("focus psf", flag.ExitOnError)
-	fl := registerFocusFlags(fs)
-	fs.Parse(args)
+	fl := clispec.Bind(clispec.Focus, fs)
+	if err := fl.Parse(args); err != nil {
+		errExitf("Error: %v", err)
+	}
 
 	input := parseFieldInput(data, "(for fields)")
 	var psfCfg *types.FocusPSFConfig
@@ -772,8 +744,10 @@ func runFocusPSF(data []byte, args []string) {
 // conventions (or a through-focus scan). It needs no Huygens integral.
 func runFocusSpot(data []byte, args []string) {
 	fs := flag.NewFlagSet("focus spot", flag.ExitOnError)
-	fl := registerFocusFlags(fs)
-	fs.Parse(args)
+	fl := clispec.Bind(clispec.Focus, fs)
+	if err := fl.Parse(args); err != nil {
+		errExitf("Error: %v", err)
+	}
 
 	input := parseFieldInput(data, "(for fields)")
 	var spotCfg *types.FocusSpotConfig
@@ -915,9 +889,9 @@ func focusSpotPlane(r *psf.SpotResult) *types.FocusSpotPlane {
 
 // focusFrequencies resolves the reported spatial frequencies: the flag, else
 // the YAML list, else the 50 lp/mm default.
-func focusFrequencies(flagVal string, cfg *types.FocusMTFConfig) []float64 {
-	if strings.TrimSpace(flagVal) != "" {
-		return parseFloatList(flagVal, "frequency")
+func focusFrequencies(flagVals []float64, cfg *types.FocusMTFConfig) []float64 {
+	if len(flagVals) > 0 {
+		return flagVals
 	}
 	if cfg != nil && len(cfg.Frequencies) > 0 {
 		return cfg.Frequencies

@@ -164,6 +164,7 @@ func (s *server) addPSF() {
 type focusIn struct {
 	DocInput
 	settings
+	Mode          string    `json:"mode,omitempty" jsonschema:"comparison to run: mtf (default), psf or spot"`
 	Wavelengths   []float64 `json:"wavelengths,omitempty" jsonschema:"wavelengths in mm"`
 	Fields        []int     `json:"fields,omitempty" jsonschema:"field indices"`
 	Planes        string    `json:"planes,omitempty" jsonschema:"file,all,best (default all three)"`
@@ -180,18 +181,15 @@ func (s *server) addFocus() {
 	addStage(s, "focus", "Focus comparison",
 		"Compare MTF/PSF/spot across focus conventions (file plane, all planes, best focus) and optionally a through-focus scan.",
 		"focus", func(in focusIn) []string {
-			args := in.settings.args()
-			args = listFloatFlag(args, in.Wavelengths, "--wavelengths")
-			args = listIntFlag(args, in.Fields, "--fields")
-			args = strFlag(args, in.Planes, "--planes")
-			args = strFlag(args, in.ThroughFocus, "--through-focus")
-			args = intFlag(args, in.NumRays, "--num-rays")
-			args = intFlag(args, in.Grid, "--psf-grid")
-			args = intFlag(args, in.RefSurface, "--ref-surface")
-			args = strFlag(args, in.Polarization, "--polarization")
-			args = boolPtrFlag(args, in.ConvergeCheck, "--converge-check")
-			args = listFloatFlag(args, in.Frequencies, "--frequencies")
-			return args
+			mode := strings.ToLower(strings.TrimSpace(in.Mode))
+			if mode == "" {
+				mode = "mtf"
+			}
+			spec := clispec.Focus
+			if mode == "mtf" {
+				spec = clispec.FocusMTF
+			}
+			return append([]string{mode}, clispec.Args(spec, in, nil)...)
 		})
 }
 
