@@ -9,11 +9,19 @@ Options:
   --config ID          select config by id (multi-config mode)
   --pass-through N     constrain chief ray to pass through (0,0) centre of
                          surface N (overrides YAML pass_through.surface)
+  --chief-ray NAME     chief-ray definition: entrance_pupil_centre | centroid |
+                         vignetting_centre (empty = chief.chief_ray_definition)
   --clear-aperture     trace grid rays (all fields) through every surface and
                          set auto_aperture: true surfaces' diameter = 2x max
                          radial extent + 2x --clear-aperture-margin-mm
   --clear-aperture-margin-mm 0.2   clearance added to each side of the beam
                          footprint (mm, default 0.2)
+  --clear-aperture-rays N  ray count for --clear-aperture beam tracing
+                         (default: chief.num_rays); use a dense grid for
+                         accurate footprints
+  --preserve-rays      with --clear-aperture, keep the existing 'rays' section
+                         instead of replacing it with chief rays, and omit
+                         chief_rays from the output
   --marginal-rays      extract marginal (max/min) rays from grid points and
                          append them for piping into trace/plot
   --ray-fan            compute ray fan (transverse aberration) for each field

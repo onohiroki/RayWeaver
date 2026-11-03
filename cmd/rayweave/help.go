@@ -21,11 +21,19 @@ Options:
   --config ID          select config by id (multi-config mode)
   --pass-through N     constrain chief ray to pass through (0,0) centre of
                          surface N (overrides YAML pass_through.surface)
+  --chief-ray NAME     chief-ray definition: entrance_pupil_centre | centroid |
+                         vignetting_centre (empty = chief.chief_ray_definition)
   --clear-aperture     trace grid rays (all fields) through every surface and
                          set auto_aperture: true surfaces' diameter = 2x max
                          radial extent + 2x --clear-aperture-margin-mm
   --clear-aperture-margin-mm 0.2   clearance added to each side of the beam
                          footprint (mm, default 0.2)
+  --clear-aperture-rays N  ray count for --clear-aperture beam tracing
+                         (default: chief.num_rays); use a dense grid for
+                         accurate footprints
+  --preserve-rays      with --clear-aperture, keep the existing 'rays' section
+                         instead of replacing it with chief rays, and omit
+                         chief_rays from the output
   --marginal-rays      extract marginal (max/min) rays from grid points and
                          append them for piping into trace/plot
   --ray-fan            compute ray fan (transverse aberration) for each field
@@ -313,6 +321,9 @@ Sub-subcommand:
 Options:
   --verbose        print per-iteration progress to stderr (JSONL)
   --log FILE       write per-iteration progress to FILE (JSONL)
+  --glass-dir DIR  AGF glass catalog directory
+  --exclude-param LIST  comma-separated target param names to drop from the
+                   optimization variables (e.g. conic,a4,a6)
   --cpuprofile FILE  write a CPU profile (pprof) to FILE
   --memprofile FILE  write a heap profile (pprof) to FILE at exit
   --gorprofile FILE  write a goroutine profile to FILE at exit
@@ -427,6 +438,8 @@ Options:
                    atomic, so a killed process never loses already-found minima.
   --keep-infeasible include infeasible basins in stdout YAML and --save files
                    (default: feasible minima only)
+  --mem-limit VALUE  cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1
+                   (unlimited); default optimization.mem_limit_mb
   --stream BOOL     stream the pipeline document to stdout as the run progresses
                    (default on): the settled top-level part is written first,
                    then one global_result.minima entry per discovered solution,
@@ -545,6 +558,8 @@ Options:
   --log FILE       write the full JSONL progress stream to FILE
   --save FILE      save each discovered local minimum to FILE0.yaml, FILE1.yaml, ...
   --keep-infeasible include infeasible basins in stdout YAML (default: discard)
+  --mem-limit VALUE  cap the Go heap: 2GiB, 2048MiB, 2048 (MB) or -1
+                   (unlimited); default optimization.mem_limit_mb
   --stream BOOL     stream the pipeline document to stdout as the run progresses (default on); --stream=false restores the one-shot write after the run
   --clean-dls BOOL  run the clean DLS that closes each cycle (default true).
                    --clean-dls false records the PSO result as-is (or the
@@ -834,8 +849,9 @@ Flags override the asphere_candidate: values; the effective (flag-won) values
 are written back into the output's asphere_candidate: section (CLI/YAML rule).
 
 Piston is always removed (per-field OPD referenced to the field mean);
-remove_piston is accepted but has no effect. max_sag / max_slope_deg /
-max_curvature_variation are accepted for forward-compatibility but unused.
+remove_piston is accepted but has no effect. The former max_sag /
+max_slope_deg / max_curvature_variation keys were removed from the document
+schema and are ignored.
 
 Output: YAML with an asphere_candidate_result: section (rankings with
 coefficients, scaled_coefficients, calibrated_coefficients, sensitivity with
@@ -892,6 +908,8 @@ Options:
   --converge-check BOOL  label sampling convergence by re-evaluating each result
                          at a higher ray count (on by default; --converge-check
                          false skips the 1.5x re-evaluation)
+  --converge-tol T     relative Strehl change threshold for --converge-check
+                         (default 0.10)
   --yaml FILE         write full structured data (intensity, Ex/Ey/Ez,
                          encircled energy, wavefront OPD) to FILE, one
                          index-suffixed file per result
