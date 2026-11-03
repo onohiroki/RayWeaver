@@ -247,8 +247,7 @@ func (s *server) addParaxial() {
 	addStage(s, "paraxial", "Paraxial analysis",
 		"First-order analysis: EFL, BFL, F-number, NA, pupils, cardinal points and element glass roles. Writes paraxial_result into the returned document.",
 		"paraxial", func(in paraxialIn) []string {
-			args := in.settings.args()
-			return floatFlag(args, in.Wavelength, "--wl")
+			return clispec.Args(clispec.Paraxial, in, map[string]string{"wavelength": "wl"})
 		})
 }
 

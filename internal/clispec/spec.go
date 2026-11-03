@@ -485,4 +485,4 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 // All lists the command flag tables. The help-consistency test and the MCP
 // drift test walk it, so a new table must be added here when a command is
 // migrated.
-var All = []*Spec{&Chief, &Trace}
+var All = []*Spec{&Chief, &Trace, &Paraxial}

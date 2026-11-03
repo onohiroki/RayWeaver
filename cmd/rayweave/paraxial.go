@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -11,18 +12,18 @@ import (
 )
 
 func runParaxial(data []byte) {
-	args := os.Args[2:]
 	fs := flag.NewFlagSet("paraxial", flag.ExitOnError)
-	wlFlag := fs.Float64("wl", 0, "reference wavelength (mm) for paraxial calculation")
-	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	fs.Parse(args)
+	opts := clispec.Bind(clispec.Paraxial, fs)
+	if err := opts.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
+	configFlag := opts.String("config")
 
 	input := parseYAML[types.Input](data)
 
-	gc, _ := openGlass(&input, *glassDir)
+	gc, _ := openGlass(&input, opts.String("glass-dir"))
 
-	surfaces := configSurfaces(input.Configs, configFlag)
+	surfaces := configSurfaces(input.Configs, &configFlag)
 	surface.Precompute(surfaces)
 
 	selectedSys := input.System
@@ -35,8 +36,8 @@ func runParaxial(data []byte) {
 	if input.Chief != nil && input.Chief.ReferenceWavelength > 0 {
 		wavelength = input.Chief.ReferenceWavelength
 	}
-	if flagWasSet(fs, "wl") && *wlFlag > 0 {
-		wavelength = *wlFlag
+	if opts.Set("wl") && opts.Float("wl") > 0 {
+		wavelength = opts.Float("wl")
 	}
 	if input.Chief == nil {
 		input.Chief = &types.ChiefInput{}
@@ -62,7 +63,7 @@ func runParaxial(data []byte) {
 	// chief pass (selected config's fields under --config) so EPD is reported
 	// even when the document carries no chief_rays.
 	if selectedSys.StopSurface <= 0 && len(chiefRays) == 0 {
-		pupil, err := dynamicPupilForInput(input, configFlag, surfaces, gc)
+		pupil, err := dynamicPupilForInput(input, &configFlag, surfaces, gc)
 		if err != nil {
 			// The pupil is derived from the first field only, and paraxial
 			// reports no field of its own, so an unreachable image_height is a
