@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,47 +36,24 @@ import (
 // (see docs/query.md §10).
 func runQuery(data []byte) {
 	fs := flag.NewFlagSet("query", flag.ExitOnError)
-	yamlOut := fs.Bool("yaml", false, "output the result as YAML")
-	jsonOut := fs.Bool("json", false, "output the result as JSON")
-	csvArg := fs.String("csv", "", "CSV output: iterate PATH and emit one row per element (PATH[:col1,col2,...])")
-	csvHeader := fs.Bool("csv-header", false, "with --csv, emit a header row with the column names")
-	csvKeepAll := fs.Bool("csv-keep-all", false, "with --csv, keep rows where a column is missing/null (emit empty cells)")
-	eachArg := fs.String("each", "", "iterate PATH and print one row per element (PATH[:col1,col2,...])")
-	countArg := fs.String("count", "", "count non-null values resolved by PATH")
-	lenArg := fs.String("len", "", "length of the array/mapping resolved by PATH")
-	sumArg := fs.String("sum", "", "sum of the numeric values resolved by PATH")
-	productArg := fs.String("product", "", "product of the numeric values resolved by PATH")
-	stdevArg := fs.String("stdev", "", "population standard deviation of the numeric values resolved by PATH")
-	jsonlMode := fs.Bool("jsonl", false, "read JSON Lines instead of a single YAML document (optimize/escape --log output)")
-	whereExpr := fs.String("where", "", "with --jsonl, keep only lines where EXPR is truthy")
-	first := fs.Bool("first", false, "with --jsonl, use the first matching line instead of the last")
-	gateExpr := fs.String("gate", "", "evaluate EXPR, print a pass record and exit 0/1 by truthiness")
-	printfFmt := fs.String("printf", "", "Go fmt format string applied to the output value(s)")
-	defaultStr := fs.String("default", "-1", "value printed when a scalar result is missing/null (default -1)")
-	defaultNumStr := fs.String("default-num", "", "numeric default for missing/null --each column values (e.g. NaN, 0, -1)")
-	printfNanEmpty := fs.Bool("printf-nan-empty", false, "with --printf, replace NaN values with width-matched spaces")
-	exprArg := fs.String("expr", "", "expression to evaluate (same as the positional SELECTOR)")
-	var editFlags multiSet
-	fs.Var(&editFlags, "edit", "mutation expression (repeatable, applied in order); supports =, +=, -=, |=, del PATH")
-	var setFlags multiSet
-	fs.Var(&setFlags, "set", "bind VAR=EXPR (repeatable, evaluated in order; later bindings may reference earlier ones)")
-	raw := fs.Bool("raw", false, "raw text output (the default for scalars; accepted for clarity)")
-	rShort := fs.Bool("r", false, "shorthand for --raw")
-	fs.Parse(os.Args[2:])
+	opts := clispec.Bind(clispec.Query, fs)
+	if err := opts.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
 
-	if *yamlOut && *jsonOut {
+	if opts.Bool("yaml") && opts.Bool("json") {
 		errExitf("Error: --yaml and --json are mutually exclusive")
 	}
-	if *csvArg != "" && *eachArg != "" {
+	if opts.String("csv") != "" && opts.String("each") != "" {
 		errExitf("Error: --csv and --each are mutually exclusive")
 	}
-	if *exprArg != "" && len(fs.Args()) > 0 {
+	if opts.String("expr") != "" && len(fs.Args()) > 0 {
 		errExitf("Error: --expr and a positional SELECTOR are mutually exclusive")
 	}
 	agg := ""
 	aggPath := ""
 	for _, a := range []struct{ name, val string }{
-		{"count", *countArg}, {"len", *lenArg}, {"sum", *sumArg}, {"product", *productArg}, {"stdev", *stdevArg},
+		{"count", opts.String("count")}, {"len", opts.String("len")}, {"sum", opts.String("sum")}, {"product", opts.String("product")}, {"stdev", opts.String("stdev")},
 	} {
 		if a.val == "" {
 			continue
@@ -85,23 +63,23 @@ func runQuery(data []byte) {
 		}
 		agg, aggPath = a.name, a.val
 	}
-	if *whereExpr != "" && !*jsonlMode {
+	if opts.String("where") != "" && !opts.Bool("jsonl") {
 		errExitf("Error: --where requires --jsonl")
 	}
 
-	selector := *exprArg
+	selector := opts.String("expr")
 	if selector == "" && len(fs.Args()) > 0 {
 		selector = fs.Args()[0]
 	}
 
-	rawMode := *raw || *rShort
+	rawMode := opts.Bool("raw")
 
 	// Parse --default-num
 	var defaultNumVal float64
-	defaultNumSet := *defaultNumStr != ""
+	defaultNumSet := opts.String("default-num") != ""
 	if defaultNumSet {
 		var err error
-		defaultNumVal, err = parseDefaultNum(*defaultNumStr)
+		defaultNumVal, err = parseDefaultNum(opts.String("default-num"))
 		if err != nil {
 			errExitf("Error: --default-num: %v", err)
 		}
@@ -110,16 +88,16 @@ func runQuery(data []byte) {
 	// ---- 1. Load the document(s) ----
 	var docRoot any  // used by SELECTOR / --set / --gate
 	var iterRoot any // used by --each / --csv / aggregates
-	if *jsonlMode {
+	if opts.Bool("jsonl") {
 		lines := parseJSONL(data)
 		for i := range lines {
 			lines[i] = normalizeNumbers(lines[i])
 		}
 		filtered := lines
-		if *whereExpr != "" {
+		if opts.String("where") != "" {
 			filtered = filtered[:0:0]
 			for _, ln := range lines {
-				ok, err := evalExpr(*whereExpr, &evalCtx{root: ln})
+				ok, err := evalExpr(opts.String("where"), &evalCtx{root: ln})
 				if err != nil {
 					errExitf("Error in --where expression: %v", err)
 				}
@@ -130,7 +108,7 @@ func runQuery(data []byte) {
 		}
 		iterRoot = filtered
 		if len(filtered) > 0 {
-			if *first {
+			if opts.Bool("first") {
 				docRoot = filtered[0]
 			} else {
 				docRoot = filtered[len(filtered)-1]
@@ -148,7 +126,7 @@ func runQuery(data []byte) {
 
 	// ---- 2. Evaluate bindings in order ----
 	bindings := map[string]any{}
-	for _, kv := range setFlags {
+	for _, kv := range opts.Strings("set") {
 		eq := strings.Index(kv, "=")
 		if eq <= 0 {
 			errExitf("Error: --set expects VAR=EXPR (got %q)", kv)
@@ -161,7 +139,7 @@ func runQuery(data []byte) {
 	}
 	// Parse --edit expressions
 	var edits []expr
-	for _, editStr := range editFlags {
+	for _, editStr := range opts.Strings("edit") {
 		// Tokenize each edit expression separately
 		toks, err := lexQuery(editStr)
 		if err != nil {
@@ -185,7 +163,7 @@ func runQuery(data []byte) {
 	ctx := &evalCtx{root: docRoot, bindings: bindings}
 
 	resolve := func(path string) (any, error) {
-		if *jsonlMode && (path == "[]" || path == ".") {
+		if opts.Bool("jsonl") && (path == "[]" || path == ".") {
 			return iterRoot, nil
 		}
 		return evalExpr(path, ctx)
@@ -193,14 +171,14 @@ func runQuery(data []byte) {
 
 	// ---- 3. Dispatch ----
 	switch {
-	case *csvArg != "":
-		runQueryCSV(*csvArg, resolve, *csvHeader, *csvKeepAll, *defaultStr, *printfFmt)
-	case *eachArg != "":
-		runQueryEach(*eachArg, resolve, *defaultStr, *printfFmt, *yamlOut, *jsonOut, defaultNumVal, defaultNumSet, *printfNanEmpty)
+	case opts.String("csv") != "":
+		runQueryCSV(opts.String("csv"), resolve, opts.Bool("csv-header"), opts.Bool("csv-keep-all"), opts.String("default"), opts.String("printf"))
+	case opts.String("each") != "":
+		runQueryEach(opts.String("each"), resolve, opts.String("default"), opts.String("printf"), opts.Bool("yaml"), opts.Bool("json"), defaultNumVal, defaultNumSet, opts.Bool("printf-nan-empty"))
 	case agg != "":
-		runQueryAgg(agg, aggPath, resolve, *defaultStr, *printfFmt, *printfNanEmpty)
-	case *gateExpr != "":
-		runQueryGate(*gateExpr, ctx, bindings, *yamlOut, *jsonOut, *defaultStr, *printfNanEmpty)
+		runQueryAgg(agg, aggPath, resolve, opts.String("default"), opts.String("printf"), opts.Bool("printf-nan-empty"))
+	case opts.String("gate") != "":
+		runQueryGate(opts.String("gate"), ctx, bindings, opts.Bool("yaml"), opts.Bool("json"), opts.String("default"), opts.Bool("printf-nan-empty"))
 	default:
 		var result any
 		var err error
@@ -223,7 +201,7 @@ func runQuery(data []byte) {
 		if err != nil {
 			errExitf("Error evaluating expression: %v", err)
 		}
-		emitResult(result, *defaultStr, *printfFmt, *yamlOut, *jsonOut, rawMode, *printfNanEmpty)
+		emitResult(result, opts.String("default"), opts.String("printf"), opts.Bool("yaml"), opts.Bool("json"), rawMode, opts.Bool("printf-nan-empty"))
 	}
 }
 

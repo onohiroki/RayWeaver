@@ -188,31 +188,7 @@ func (s *server) addQuery() {
 			}
 			doc = data
 		}
-		args := []string{}
-		args = boolFlag(args, in.JSON, "--json")
-		args = boolFlag(args, in.YAML, "--yaml")
-		args = boolFlag(args, in.Raw, "--raw")
-		args = boolFlag(args, in.JSONL, "--jsonl")
-		args = boolFlag(args, in.First, "--first")
-		args = boolFlag(args, in.CSVHeader, "--csv-header")
-		args = strFlag(args, in.Count, "--count")
-		args = strFlag(args, in.Len, "--len")
-		args = strFlag(args, in.Sum, "--sum")
-		args = strFlag(args, in.Stdev, "--stdev")
-		args = strFlag(args, in.Each, "--each")
-		args = strFlag(args, in.CSV, "--csv")
-		args = strFlag(args, in.Printf, "--printf")
-		args = strFlag(args, in.Default, "--default")
-		args = strFlag(args, in.DefaultNum, "--default-num")
-		args = strFlag(args, in.Where, "--where")
-		args = strFlag(args, in.Gate, "--gate")
-		args = strFlag(args, in.Expr, "--expr")
-		for _, e := range in.Edit {
-			args = append(args, "--edit", e)
-		}
-		for _, e := range in.Set {
-			args = append(args, "--set", e)
-		}
+		args := clispec.Args(clispec.Query, in, nil)
 		if in.Selector != "" {
 			args = append(args, in.Selector)
 		}
