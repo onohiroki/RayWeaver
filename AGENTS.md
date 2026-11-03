@@ -60,7 +60,8 @@ GOOS=windows go vet ./...
 - `cmd/rayweave-mcp` — companion binary that serves the subcommands to AI agents
   over the Model Context Protocol on stdio (manual: [docs/mcp.md](docs/mcp.md)).
 - `cmd/importsweep` — batch sweep of a lens directory through
-  `import | trace | paraxial`, CSV status report.
+  `import | trace | paraxial`, CSV status report (manual:
+  [docs/importsweep.md](docs/importsweep.md)).
 - `internal/<domain>` — `asphere`, `chief`, `coating`, `constraint`, `dls`,
   `escape`, `exporter`, `fft`, `glass`, `importer`, `mcpsrv`, `mesh`, `optimize`,
   `paraxial`, `polarization`, `psf`, `pso`, `pupil`, `ray`, `raymath`, `render`,
@@ -162,6 +163,7 @@ everywhere, add it to the document that owns the topic, not to this file.
 | Read-only listing, YAML/JSONL selection | [docs/list.md](docs/list.md), [docs/query.md](docs/query.md) |
 | Stripping results from a document | [docs/clean.md](docs/clean.md) |
 | Detached long runs | [docs/rwrun.md](docs/rwrun.md) |
+| Batch lens-directory sweep | [docs/importsweep.md](docs/importsweep.md) |
 | MCP server, tools, jobs, resources, client setup | [docs/mcp.md](docs/mcp.md) |
 | Windows / PowerShell notes | [docs/windows.md](docs/windows.md) |
 | Demo scripts and their inputs, generated outputs | [samples/README.md](samples/README.md) |

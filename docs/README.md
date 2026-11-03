@@ -38,6 +38,7 @@ system → ray bundle → quantities
 | [clean.md](clean.md) | `rayweave clean` | strip calculation results from a pipeline document, back to a loadable input |
 | [rwrun.md](rwrun.md) | _companion binary_ `cmd/rwrun` | start a long run detached, so an AI agent's shell teardown cannot kill it |
 | [mcp.md](mcp.md) | _companion binary_ `cmd/rayweave-mcp` | serve the subcommands to AI agents over the Model Context Protocol (stdio) |
+| [importsweep.md](importsweep.md) | _companion binary_ `cmd/importsweep` | sweep a lens directory through import → chief → trace → paraxial and write CSV reports |
 
 ## Calculation methods
 
