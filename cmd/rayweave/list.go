@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -22,27 +23,23 @@ import (
 func runList(data []byte) {
 	args := splitFlagsAndPositional(os.Args[2:])
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
-	format := fs.String("format", "table", "output format: table | yaml | json | csv")
-	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	showCurvature := fs.Bool("curvature", false, "show curvature instead of radius")
-	showAutoAperture := fs.Bool("auto-aperture", false, "for surfaces: show the auto_aperture state column (auto/fixed)")
-	showAllGlasses := fs.Bool("all-glasses", false, "show all glasses: include glass_catalog entries not used by any surface")
-	showRoles := fs.Bool("roles", false, "for paraxial: also show element roles table")
-	showSummaryOnly := fs.Bool("summary", false, "for rays: show only summary (no per-surface detail)")
-	fs.Parse(args.flags)
+	opts := clispec.Bind(clispec.List, fs)
+	if err := opts.Parse(args.flags); err != nil {
+		errExitf("Error: %v", err)
+	}
+	configFlag := opts.String("config")
 
-	switch *format {
+	switch opts.String("format") {
 	case "table", "yaml", "json", "csv":
 	default:
-		errExitf("Error: unknown --format %q (supported: table, yaml, json, csv)", *format)
+		errExitf("Error: unknown --format %q (supported: table, yaml, json, csv)", opts.String("format"))
 	}
 
 	// An escape/pso JSONL run log is detected before any YAML parsing: it
 	// carries no system definition, so only the global target can be served
 	// from it (a bare `list < run.jsonl` therefore lists the escape run).
 	if looksLikeGlobalJSONL(data) {
-		runListGlobalLog(data, args.positional, *format)
+		runListGlobalLog(data, args.positional, opts.String("format"))
 		return
 	}
 	// JSON Lines that carries no escape/pso event (an `optimize --log` stream,
@@ -84,9 +81,9 @@ func runList(data []byte) {
 	// "all" implies --auto-aperture, --all-glasses, and --roles.
 	for _, t := range args.positional {
 		if t == "all" {
-			*showAutoAperture = true
-			*showAllGlasses = true
-			*showRoles = true
+			opts.SetBool("auto-aperture", true)
+			opts.SetBool("all-glasses", true)
+			opts.SetBool("roles", true)
 			break
 		}
 	}
@@ -107,8 +104,8 @@ func runList(data []byte) {
 		input = parseYAML[types.Input](data)
 	}
 
-	gc, _ := loadCatalogs(&input, *glassDir)
-	surfaces := configSurfaces(input.Configs, configFlag)
+	gc, _ := loadCatalogs(&input, opts.String("glass-dir"))
+	surfaces := configSurfaces(input.Configs, &configFlag)
 
 	printed := map[string]bool{}
 	first := true
@@ -117,31 +114,31 @@ func runList(data []byte) {
 			continue
 		}
 		printed[target] = true
-		if !first && (*format == "table" || *format == "csv") {
+		if !first && (opts.String("format") == "table" || opts.String("format") == "csv") {
 			fmt.Println()
 		}
 		first = false
 		switch target {
 		case "surfaces":
-			listSurfaces(surfaces, gc, *showCurvature, *showAutoAperture, *format, input.Configs, *configFlag != "")
+			listSurfaces(surfaces, gc, opts.Bool("curvature"), opts.Bool("auto-aperture"), opts.String("format"), input.Configs, configFlag != "")
 		case "glasses":
-			listGlasses(surfaces, input, gc, *format, *showAllGlasses)
+			listGlasses(surfaces, input, gc, opts.String("format"), opts.Bool("all-glasses"))
 		case "paraxial":
-			listParaxial(data, input, gc, *format, *configFlag, *showRoles)
+			listParaxial(data, input, gc, opts.String("format"), configFlag, opts.Bool("roles"))
 		case "rays":
-			listRays(output, *showSummaryOnly, *format)
+			listRays(output, opts.Bool("summary"), opts.String("format"))
 		case "fields":
-			listFields(input, *format, *glassDir, *configFlag)
+			listFields(input, opts.String("format"), opts.String("glass-dir"), configFlag)
 		case "merit":
-			listMerit(input, output, *format)
+			listMerit(input, output, opts.String("format"))
 		case "optimization":
-			listOptimization(input, output, *format)
+			listOptimization(input, output, opts.String("format"))
 		case "global":
-			listGlobal(output, *format)
+			listGlobal(output, opts.String("format"))
 		case "focus":
-			listFocus(output, *format)
+			listFocus(output, opts.String("format"))
 		case "summary":
-			listSummary(data, *format)
+			listSummary(data, opts.String("format"))
 		default:
 			errExitf("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, global, focus, summary, \"default\", or \"all\")", target)
 		}

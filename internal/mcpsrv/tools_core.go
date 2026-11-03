@@ -121,12 +121,7 @@ func (s *server) addList() {
 		}
 		args := append([]string{}, in.Targets...)
 		args = append(args, "--format", format)
-		args = append(args, in.settings.args()...)
-		args = boolFlag(args, in.Curvature, "--curvature")
-		args = boolFlag(args, in.AutoAperture, "--auto-aperture")
-		args = boolFlag(args, in.AllGlasses, "--all-glasses")
-		args = boolFlag(args, in.Roles, "--roles")
-		args = boolFlag(args, in.SummaryOnly, "--summary")
+		args = append(args, clispec.Args(clispec.List, in, nil)...)
 		res, err := s.runner.Run(ctx, Call{Command: "list", Args: args, Stdin: doc})
 		if err != nil {
 			return nil, ViewOut{}, err

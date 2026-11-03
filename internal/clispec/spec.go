@@ -302,6 +302,15 @@ func (o *Options) Strings(name string) []string {
 	return nil
 }
 
+// SetBool overrides a bool flag from the command itself, for a keyword that
+// implies options (e.g. `list all` turning on --auto-aperture, --all-glasses
+// and --roles).
+func (o *Options) SetBool(name string, v bool) {
+	if p, ok := o.bools[name]; ok {
+		*p = v
+	}
+}
+
 // BoolString reads a two-valued flag (`--lenient true|false`) and reports
 // whether it was given. The value is parsed with strconv.ParseBool, the same
 // spelling the CLI accepts (true/false/1/0/t/f).
@@ -578,7 +587,7 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 // All lists the command flag tables. The help-consistency test and the MCP
 // drift test walk it, so a new table must be added here when a command is
 // migrated.
-var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette, &Plot, &Zoom, &Cam, &Scale, &TMM, &Clean, &Wavefront, &Asphere, &PSF, &Focus, &FocusMTF, &Import, &Export, &Query}
+var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette, &Plot, &Zoom, &Cam, &Scale, &TMM, &Clean, &Wavefront, &Asphere, &PSF, &Focus, &FocusMTF, &Import, &Export, &Query, &List}
 
 // stringListValue is the flag.Value behind a StringList flag: every Set
 // appends the raw value, so repeated flags accumulate.
