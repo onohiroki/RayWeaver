@@ -401,17 +401,7 @@ func (s *server) addPlot() {
 			return nil, ArtifactOut{}, err
 		}
 		args := append(s.commonArgs(), "-o", outPath)
-		args = append(args, in.settings.args()...)
-		args = floatFlag(args, in.LensWidth, "--lens-width")
-		args = floatFlag(args, in.RayWidth, "--ray-width")
-		args = floatFlag(args, in.Scale, "--scale")
-		args = floatFlag(args, in.RightMargin, "--right-margin")
-		args = intFlag(args, in.FanRays, "--fan-rays")
-		args = boolFlag(args, in.ShowInvalidRayFan, "--show-invalid-ray-fan")
-		args = boolFlag(args, in.ClipInvalidRayFan, "--clip-invalid-ray-fan")
-		for _, c := range in.ElementColor {
-			args = append(args, "--element-color", c)
-		}
+		args = append(args, clispec.Args(clispec.Plot, in, nil)...)
 		res, err := s.runner.Run(ctx, Call{Command: "plot", Args: args, Stdin: doc})
 		if err != nil {
 			return nil, ArtifactOut{}, err

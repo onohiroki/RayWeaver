@@ -30,6 +30,7 @@ const (
 	Float
 	String
 	FloatList  // repeatable or space-separated numbers (--fan-rotation)
+	StringList // repeatable string values (--element-color)
 	BoolString // a two-valued flag written as --name true|false (--stream)
 )
 
@@ -92,11 +93,12 @@ type Options struct {
 	fs        *flag.FlagSet
 	canonical map[string]string // registered name (canonical/short/alias) -> canonical
 
-	bools  map[string]*bool
-	ints   map[string]*int
-	floats map[string]*float64
-	strs   map[string]*string
-	lists  map[string]*[]float64
+	bools    map[string]*bool
+	ints     map[string]*int
+	floats   map[string]*float64
+	strs     map[string]*string
+	lists    map[string]*[]float64
+	strLists map[string]*[]string
 
 	given map[string]bool // raw registered name was on the command line
 	set   map[string]bool // canonical name was given (via any spelling)
@@ -113,6 +115,7 @@ func Bind(spec Spec, fs *flag.FlagSet) *Options {
 		floats:    map[string]*float64{},
 		strs:      map[string]*string{},
 		lists:     map[string]*[]float64{},
+		strLists:  map[string]*[]string{},
 		given:     map[string]bool{},
 		set:       map[string]bool{},
 	}
@@ -182,6 +185,12 @@ func (o *Options) register(f *Flag) {
 		o.lists[f.Name] = v
 		for _, n := range names {
 			o.fs.Var(&floatListValue{v: v}, n, f.Help)
+		}
+	case StringList:
+		v := &[]string{}
+		o.strLists[f.Name] = v
+		for _, n := range names {
+			o.fs.Var(&stringListValue{v: v}, n, f.Help)
 		}
 	case BoolString:
 		v := new(string)
@@ -254,6 +263,13 @@ func (o *Options) String(name string) string {
 
 func (o *Options) Floats(name string) []float64 {
 	if v, ok := o.lists[name]; ok {
+		return *v
+	}
+	return nil
+}
+
+func (o *Options) Strings(name string) []string {
+	if v, ok := o.strLists[name]; ok {
 		return *v
 	}
 	return nil
@@ -466,6 +482,18 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 			if len(parts) > 0 {
 				out = append(out, arg{name: canon, value: strings.Join(parts, ",")})
 			}
+		case StringList:
+			// Values may contain commas (colour maps), so every element is
+			// emitted as its own flag occurrence.
+			arr, ok := v.([]any)
+			if !ok {
+				continue
+			}
+			for _, e := range arr {
+				if s, ok := e.(string); ok && s != "" {
+					out = append(out, arg{name: canon, value: s})
+				}
+			}
 		}
 	}
 
@@ -485,4 +513,22 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 // All lists the command flag tables. The help-consistency test and the MCP
 // drift test walk it, so a new table must be added here when a command is
 // migrated.
-var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette}
+var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette, &Plot}
+
+// stringListValue is the flag.Value behind a StringList flag: every Set
+// appends the raw value, so repeated flags accumulate.
+type stringListValue struct {
+	v *[]string
+}
+
+func (s *stringListValue) String() string {
+	if s == nil || s.v == nil {
+		return ""
+	}
+	return strings.Join(*s.v, ",")
+}
+
+func (s *stringListValue) Set(v string) error {
+	*s.v = append(*s.v, v)
+	return nil
+}

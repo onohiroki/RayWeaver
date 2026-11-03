@@ -9,6 +9,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/render"
 	"github.com/hiroki/rayweaver/internal/surface"
@@ -74,60 +75,15 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 		}
 	}
 
-	var outPath string
-	var lensWidth, rayWidth, scaleOverride, rightMarginPct float64
-	var fanRays int
-	var showInvalidFan, clipInvalidFan bool
-	var configFlag, glassDir string
-	var elementColorStr, asphereColorStr string
 	args := os.Args[2:] // skip "plot"
 	fs := flag.NewFlagSet("plot", flag.ExitOnError)
-	fs.StringVar(&outPath, "o", "", "output file path (.svg or .png; default: stdout = SVG)")
-	fs.StringVar(&outPath, "output", "", "alias for -o")
-	fs.Float64Var(&lensWidth, "lens-width", 1.5, "lens body stroke width in pixels (default 1.5)")
-	fs.Float64Var(&rayWidth, "ray-width", 1.5, "ray path stroke width in pixels (default 1.5)")
-	fs.Float64Var(&scaleOverride, "scale", 0, "SVG scale factor (0 = auto)")
-	fs.Float64Var(&rightMarginPct, "right-margin", 20, "right-side margin beyond image plane (% of lens length, default 20)")
-	fs.IntVar(&fanRays, "fan-rays", 11, "max fan rays drawn per field in the lens diagram (0 = hide fan rays)")
-	fs.StringVar(&configFlag, "config", "", "select config by id (multi-config mode)")
-	fs.StringVar(&glassDir, "glass-dir", "", "AGF glass catalog directory")
-	fs.StringVar(&elementColorStr, "element-color", "", "element fill colors: \"0=#ff0000,2=#00ff00\" (repeatable)")
-	fs.StringVar(&asphereColorStr, "asphere-color", "", "aspheric surface edge colors: \"#ff0000\" or \"3=#ff0000,7=#0000ff\" (repeatable)")
-	fs.BoolVar(&showInvalidFan, "show-invalid-ray-fan", false, "draw fan rays that carry an error code in full (boolean, default false = off: they are hidden)")
-	fs.BoolVar(&clipInvalidFan, "clip-invalid-ray-fan", false, "draw error-coded fan rays only up to the first erroring surface (boolean, default false = off; mutually exclusive with --show-invalid-ray-fan)")
-
-	// Track whether --element-color and --asphere-color were explicitly set on CLI
-	elementColorFlagSet := false
-	asphereColorFlagSet := false
-
-	// Handle repeated flags by scanning args manually
-	var elementColorFlags []string
-	var asphereColorFlags []string
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--element-color" || args[i] == "-element-color" {
-			elementColorFlagSet = true
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				elementColorFlags = append(elementColorFlags, args[i+1])
-				i++
-			}
-		} else if args[i] == "--asphere-color" || args[i] == "-asphere-color" {
-			asphereColorFlagSet = true
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				asphereColorFlags = append(asphereColorFlags, args[i+1])
-				i++
-			}
-		}
-	}
-	// Also include the flag-parsed values (first occurrence)
-	if elementColorStr != "" {
-		elementColorFlags = append([]string{elementColorStr}, elementColorFlags...)
-	}
-	if asphereColorStr != "" {
-		asphereColorFlags = append([]string{asphereColorStr}, asphereColorFlags...)
+	opts := clispec.Bind(clispec.Plot, fs)
+	if err := opts.Parse(args); err != nil {
+		errExitf("Error: %v", err)
 	}
 
-	fs.Parse(args)
-
+	showInvalidFan := opts.Bool("show-invalid-ray-fan")
+	clipInvalidFan := opts.Bool("clip-invalid-ray-fan")
 	if showInvalidFan && clipInvalidFan {
 		errExitf("Error: --show-invalid-ray-fan and --clip-invalid-ray-fan are mutually exclusive")
 	}
@@ -136,8 +92,8 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 	// If --element-color was given on CLI, use it (overrides YAML); otherwise
 	// fall back to output.Plot.ElementColors from the input YAML.
 	elementColors := make(map[int]string)
-	if elementColorFlagSet {
-		for _, flagVal := range elementColorFlags {
+	if opts.Set("element-color") {
+		for _, flagVal := range opts.Strings("element-color") {
 			m, err := render.ParseColorMap(flagVal)
 			if err != nil {
 				errExitf("Error parsing --element-color: %v", err)
@@ -158,9 +114,9 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 	// fall back to output.Plot.AsphereColors / AsphereColorAll from the input YAML.
 	var asphereColorAll string
 	asphereColors := make(map[int]string)
-	if asphereColorFlagSet {
+	if opts.Set("asphere-color") {
 		var asphereColorAllTemp string
-		for _, flagVal := range asphereColorFlags {
+		for _, flagVal := range opts.Strings("asphere-color") {
 			all, byID, err := render.ParseAsphereColorMap(flagVal)
 			if err != nil {
 				errExitf("Error parsing --asphere-color: %v", err)
@@ -185,10 +141,10 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 		}
 	}
 
-	if glassDir != "" {
-		agfGlasses, err := glass.LoadAGFDir(glassDir)
+	if opts.String("glass-dir") != "" {
+		agfGlasses, err := glass.LoadAGFDir(opts.String("glass-dir"))
 		if err != nil {
-			errOut("Warning: cannot load AGF directory %s: %v", glassDir, err)
+			errOut("Warning: cannot load AGF directory %s: %v", opts.String("glass-dir"), err)
 		} else {
 			if output.GlassCatalog == nil {
 				output.GlassCatalog = &types.GlassCatalog{}
@@ -205,8 +161,8 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 		errExitf("Error: no configs to plot (define configs[].surfaces)")
 	}
 	surfaces := output.Configs[0].Surfaces
-	if configFlag != "" {
-		idx, err := resolveConfig(output.Configs, configFlag)
+	if opts.String("config") != "" {
+		idx, err := resolveConfig(output.Configs, opts.String("config"))
 		if idx < 0 {
 			errExitf("Error: %s", err)
 		}
@@ -264,11 +220,11 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 		Results:         output.Results,
 		ChiefRays:       output.ChiefRays,
 		GlassMap:        glassMap,
-		LensWidth:       lensWidth,
-		RayWidth:        rayWidth,
-		ScaleOverride:   scaleOverride,
-		RightMarginPct:  rightMarginPct,
-		MaxFanRays:      fanRays,
+		LensWidth:       opts.Float("lens-width"),
+		RayWidth:        opts.Float("ray-width"),
+		ScaleOverride:   opts.Float("scale"),
+		RightMarginPct:  opts.Float("right-margin"),
+		MaxFanRays:      opts.Int("fan-rays"),
 		StopSurfaceID:   stopSurfaceID,
 		ElementColors:   elementColors,
 		AsphereColors:   asphereColors,
@@ -298,12 +254,12 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 		errExitf("Error marshaling output YAML: %v", err)
 	}
 
-	if outPath != "" && strings.HasSuffix(strings.ToLower(outPath), ".png") {
+	if opts.String("output") != "" && strings.HasSuffix(strings.ToLower(opts.String("output")), ".png") {
 		pngData, err := render.LensPNG(cfg)
 		if err != nil {
 			errExitf("Error rendering PNG: %v", err)
 		}
-		if err := os.WriteFile(outPath, pngData, 0644); err != nil {
+		if err := os.WriteFile(opts.String("output"), pngData, 0644); err != nil {
 			errExitf("Error writing PNG: %v", err)
 		}
 		os.Stdout.Write(outYAML)
@@ -312,8 +268,8 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 
 	svg := render.LensSVG(cfg)
 
-	if outPath != "" {
-		if err := os.WriteFile(outPath, []byte(svg), 0644); err != nil {
+	if opts.String("output") != "" {
+		if err := os.WriteFile(opts.String("output"), []byte(svg), 0644); err != nil {
 			errExitf("Error writing SVG: %v", err)
 		}
 		os.Stdout.Write(outYAML)
