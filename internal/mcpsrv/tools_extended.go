@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/exporter"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -83,12 +84,7 @@ func (s *server) addVignette() {
 	addStage(s, "vignette", "Settle vignetting",
 		"Settle the per-field vignetting and auto_aperture diameters with the dynamic pupil.",
 		"vignette", func(in vignetteIn) []string {
-			args := in.settings.args()
-			args = intFlag(args, in.Iterations, "--iterations")
-			args = floatFlag(args, in.MinGlassPath, "--min-glass-path")
-			args = floatFlag(args, in.MarginMM, "--margin-mm")
-			args = floatFlag(args, in.Wavelength, "--wl")
-			return args
+			return clispec.Args(clispec.Vignette, in, map[string]string{"wavelength": "wl"})
 		})
 }
 

@@ -4,19 +4,18 @@ import (
 	"flag"
 	"os"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/vignette"
 )
 
 func runVignette(data []byte) {
 	fs := flag.NewFlagSet("vignette", flag.ExitOnError)
-	iterations := fs.Int("iterations", 0, "number of diameter/pupil passes (default 3)")
-	minGlassPath := fs.Float64("min-glass-path", 0.5, "minimum glass path (edge thickness) below which a ray fails, applied to every glass element (mm)")
-	marginMM := fs.Float64("margin-mm", 0.2, "clearance added to each side of the beam footprint when sizing auto_aperture surfaces (mm)")
-	wlFlag := fs.Float64("wl", types.DefaultWavelength, "wavelength (mm) for grid ray tracing")
-	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	fs.Parse(os.Args[2:])
+	opts := clispec.Bind(clispec.Vignette, fs)
+	if err := opts.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
+	configFlag := opts.String("config")
 
 	input := parseYAML[types.Input](data)
 
@@ -30,46 +29,38 @@ func runVignette(data []byte) {
 	if vcfg == nil {
 		vcfg = &types.VignetteConfig{}
 	}
-	iterationsEff := *iterations
-	if !flagWasSet(fs, "iterations") && vcfg.Iterations > 0 {
+	iterationsEff := opts.Int("iterations")
+	if !opts.Set("iterations") && vcfg.Iterations > 0 {
 		iterationsEff = vcfg.Iterations
 	}
-	minGlassPathEff := *minGlassPath
-	if !flagWasSet(fs, "min-glass-path") && vcfg.MinGlassPath > 0 {
+	minGlassPathEff := opts.Float("min-glass-path")
+	if !opts.Set("min-glass-path") && vcfg.MinGlassPath > 0 {
 		minGlassPathEff = vcfg.MinGlassPath
 	}
-	marginMMEff := *marginMM
-	if !flagWasSet(fs, "margin-mm") && vcfg.MarginMM > 0 {
+	marginMMEff := opts.Float("margin-mm")
+	if !opts.Set("margin-mm") && vcfg.MarginMM > 0 {
 		marginMMEff = vcfg.MarginMM
 	}
 	wlEff := effectiveReferenceWavelength(input.Chief)
-	if flagWasSet(fs, "wl") && *wlFlag > 0 {
-		wlEff = *wlFlag
+	if opts.Set("wl") && opts.Float("wl") > 0 {
+		wlEff = opts.Float("wl")
 	}
 	input.Chief.ReferenceWavelength = wlEff
-	// Principle 3: echo the flag-won values back into the output section
-	// (only for flags actually set; unset flags never inject defaults).
-	if anyFlagSet(fs, "iterations", "min-glass-path", "margin-mm", "wl") {
+	// Principle 3: the table writes the given settings back into vignette:; the
+	// reference wavelength is shared with chief/paraxial and is always written.
+	opts.WriteBack(&input)
+	if opts.Set("wl") {
+		input.Chief.ReferenceWavelength = wlEff
+		// Preserve the pre-table output shape: any of these flags used to
+		// materialise the (possibly empty) vignette section.
 		if input.Vignette == nil {
 			input.Vignette = &types.VignetteConfig{}
 		}
-		if flagWasSet(fs, "iterations") {
-			input.Vignette.Iterations = iterationsEff
-		}
-		if flagWasSet(fs, "min-glass-path") {
-			input.Vignette.MinGlassPath = minGlassPathEff
-		}
-		if flagWasSet(fs, "margin-mm") {
-			input.Vignette.MarginMM = marginMMEff
-		}
-		if flagWasSet(fs, "wl") && input.Chief != nil {
-			input.Chief.ReferenceWavelength = wlEff
-		}
 	}
 
-	gc, _ := openGlass(&input, *glassDir)
+	gc, _ := openGlass(&input, opts.String("glass-dir"))
 
-	surfaces := surfacesFor(input.Configs, configFlag)
+	surfaces := surfacesFor(input.Configs, &configFlag)
 
 	// Snapshot the input auto_aperture diameters for the before/after report.
 	beforeByID := make(map[int]float64, len(surfaces))
@@ -79,7 +70,7 @@ func runVignette(data []byte) {
 
 	// Resolve field definitions like `chief`: the selected config's own fields
 	// win (see resolveConfigFieldDefs).
-	fields := resolveConfigFieldDefs(input, configFlag)
+	fields := resolveConfigFieldDefs(input, &configFlag)
 	if len(fields) == 0 {
 		errExitf("Error: 'fields' or 'field_angles' is required")
 	}
