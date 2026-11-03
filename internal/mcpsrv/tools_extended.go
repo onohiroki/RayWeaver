@@ -104,23 +104,7 @@ func (s *server) addAsphere() {
 	addStage(s, "asphere", "Asphere candidates",
 		"Rank surfaces for asphere introduction and estimate initial coefficients, optionally validating each candidate with a short DLS and applying the best one.",
 		"asphere", func(in asphereIn) []string {
-			args := in.settings.args()
-			args = intFlag(args, in.Rings, "--rings")
-			args = intFlag(args, in.Angles, "--angles")
-			args = intFlag(args, in.TBins, "--t-bins")
-			args = intFlag(args, in.PupilSamples, "--pupil-samples")
-			args = intFlag(args, in.SensitivitySamples, "--sensitivity-samples")
-			args = intFlag(args, in.TopK, "--top-k")
-			args = floatFlag(args, in.SagScale, "--sag-scale")
-			args = listFlag(args, in.ScaleProbes, "--scale-probes")
-			args = boolFlag(args, in.Validate, "--validate")
-			args = boolFlag(args, in.Apply, "--apply")
-			args = intFlag(args, in.DLSIter, "--dls-iter")
-			args = intFlag(args, in.NumRays, "--num-rays")
-			args = listFlag(args, in.Diagnostics, "--diagnostics")
-			args = intFlag(args, in.FocusSamples, "--focus-samples")
-			args = listFlag(args, in.FocusFans, "--focus-fans")
-			return args
+			return clispec.Args(clispec.Asphere, in, nil)
 		})
 }
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/hiroki/rayweaver/internal/asphere"
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -16,91 +17,92 @@ import (
 // coefficients from the per-field OPD residuals.
 func runAsphere(data []byte) {
 	fs := flag.NewFlagSet("asphere", flag.ExitOnError)
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	configFlag := fs.String("config", "", "select config by id (multi-config mode)")
-	rings := fs.Int("rings", 0, "polar cell radial rings (default 8)")
-	angles := fs.Int("angles", 0, "polar cell angular sectors (default 16)")
-	tBins := fs.Int("t-bins", 0, "beam-frame tangential bins (default 8)")
-	pupilSamples := fs.Int("pupil-samples", 0, "pupil grid radial samples (default 21)")
-	sensitivitySamples := fs.Int("sensitivity-samples", -1, "sensitivity trace radial samples (default 9; 0 = disable, use analytic proxy)")
-	topK := fs.Int("top-k", 0, "number of top-ranked surfaces to fit (default 3)")
-	sagScale := fs.Float64("sag-scale", 0, "initial sag scale alpha (default 0.2)")
-	fs.String("calibrate-scale", "", "derive each candidate's embedded asphere scale from the measured ray-trace response (default: on; true|false)")
-	scaleProbes := fs.String("scale-probes", "", "comma-separated scales to verify instead of the quadratic estimate (e.g. 0.1,0.25,0.5,1.0)")
-	validate := fs.Bool("validate", false, "run a short DLS per fitted surface to verify the asphere improves the merit")
-	apply := fs.Bool("apply", false, "insert the top-ranked DLS-validated asphere onto its surface (implies --validate) and output the modified system")
-	dlsIter := fs.Int("dls-iter", 20, "DLS iterations per validated surface (with --validate)")
-	numRays := fs.Int("num-rays", 0, "pupil grid rays for validation DLS (default 64)")
-	diagnostics := fs.String("diagnostics", "", "comma-separated diagnostics to emit: opd (OPD map, existing), focus (T/S focus channel). Empty = no extra data (backward compatible)")
-	focusSamples := fs.Int("focus-samples", 0, "rays per T/S fan for focus channel (default 17)")
-	focusFans := fs.String("focus-fans", "", "comma-separated: tangential,sagittal (default both)")
-	fs.Parse(os.Args[2:])
+	flags := clispec.Bind(clispec.Asphere, fs)
+	if err := flags.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
+	configFlag := flags.String("config")
+	rings := flags.Int("rings")
+	angles := flags.Int("angles")
+	tBins := flags.Int("t-bins")
+	pupilSamples := flags.Int("pupil-samples")
+	sensitivitySamples := flags.Int("sensitivity-samples")
+	topK := flags.Int("top-k")
+	sagScale := flags.Float("sag-scale")
+	scaleProbes := flags.String("scale-probes")
+	validate := flags.Bool("validate")
+	apply := flags.Bool("apply")
+	dlsIter := flags.Int("dls-iter")
+	numRays := flags.Int("num-rays")
+	diagnostics := flags.String("diagnostics")
+	focusSamples := flags.Int("focus-samples")
+	focusFans := flags.String("focus-fans")
 
 	input := parseFieldInput(data, "(for fields and stop surface)")
 
-	gc, _ := openGlass(&input, *glassDir)
+	gc, _ := openGlass(&input, flags.String("glass-dir"))
 
-	surfaces := configSurfaces(input.Configs, configFlag)
+	surfaces := configSurfaces(input.Configs, &configFlag)
 	if len(surfaces) == 0 {
 		errExitf("Error: no surfaces to process")
 	}
 
 	cfg := asphere.ConfigFromYAML(input.Asphere)
-	cfg.CellRings = intOrYAML(*rings, cfg.CellRings)
-	cfg.CellAngles = intOrYAML(*angles, cfg.CellAngles)
-	cfg.TBins = intOrYAML(*tBins, cfg.TBins)
-	cfg.PupilSamplesRadial = intOrYAML(*pupilSamples, cfg.PupilSamplesRadial)
-	if *sensitivitySamples >= 0 {
-		cfg.SensitivitySamples = *sensitivitySamples
+	cfg.CellRings = intOrYAML(rings, cfg.CellRings)
+	cfg.CellAngles = intOrYAML(angles, cfg.CellAngles)
+	cfg.TBins = intOrYAML(tBins, cfg.TBins)
+	cfg.PupilSamplesRadial = intOrYAML(pupilSamples, cfg.PupilSamplesRadial)
+	if sensitivitySamples >= 0 {
+		cfg.SensitivitySamples = sensitivitySamples
 	}
-	cfg.TopK = intOrYAML(*topK, cfg.TopK)
-	cfg.SagScale = floatOrYAML(*sagScale, cfg.SagScale)
-	if cs, csSet, err := boolFlag(fs, "calibrate-scale"); err != nil {
+	cfg.TopK = intOrYAML(topK, cfg.TopK)
+	cfg.SagScale = floatOrYAML(sagScale, cfg.SagScale)
+	if cs, csSet, err := flags.BoolString("calibrate-scale"); err != nil {
 		errExitf("Error: %s", err)
 	} else if csSet {
 		cfg.CalibrateScale = cs
 	}
-	if *scaleProbes != "" {
-		cfg.ScaleProbes = parseFloatList(*scaleProbes, "scale probe")
+	if scaleProbes != "" {
+		cfg.ScaleProbes = parseFloatList(scaleProbes, "scale probe")
 	}
 
 	// Focus channel flags: --diagnostics, --focus-fans, --focus-samples, --ranking.
 	if input.Asphere == nil {
 		input.Asphere = &types.AsphereCandidateConfig{}
 	}
-	if *diagnostics != "" {
-		input.Asphere.Diagnostics = parseDiagnostics(*diagnostics)
+	if diagnostics != "" {
+		input.Asphere.Diagnostics = parseDiagnostics(diagnostics)
 	}
-	if *focusSamples > 0 {
-		input.Asphere.FocusSamples = *focusSamples
+	if focusSamples > 0 {
+		input.Asphere.FocusSamples = focusSamples
 	}
-	if *focusFans != "" {
-		input.Asphere.FocusFans = parseCommaList(*focusFans)
+	if focusFans != "" {
+		input.Asphere.FocusFans = parseCommaList(focusFans)
 	}
 
 	// Principle 3: echo the flag-won analysis values back into the output's
 	// asphere_candidate: section (only for flags actually set).
-	writeBackAsphereConfig(&input, cfg, fs)
+	writeBackAsphereConfig(&input, cfg, flags)
 
 	// Validation settings: --validate/--apply/--dls-iter/--num-rays (flags)
 	// win over asphere_candidate.validate/apply/validation_dls_iter/
 	// validation_num_rays (YAML).
-	validateEff, applyEff := resolveAsphereValidation(&input, *validate, *apply, fs)
-	dlsIterEff := *dlsIter
-	if !flagWasSet(fs, "dls-iter") && input.Asphere != nil && input.Asphere.ValidationDLSIter > 0 {
+	validateEff, applyEff := resolveAsphereValidation(&input, validate, apply, flags)
+	dlsIterEff := dlsIter
+	if !flags.Set("dls-iter") && input.Asphere != nil && input.Asphere.ValidationDLSIter > 0 {
 		dlsIterEff = input.Asphere.ValidationDLSIter
 	}
-	numRaysEff := *numRays
-	if !flagWasSet(fs, "num-rays") && input.Asphere != nil && input.Asphere.ValidationNumRays > 0 {
+	numRaysEff := numRays
+	if !flags.Set("num-rays") && input.Asphere != nil && input.Asphere.ValidationNumRays > 0 {
 		numRaysEff = input.Asphere.ValidationNumRays
 	}
-	writeBackAsphereValidation(&input, validateEff, applyEff, dlsIterEff, numRaysEff, fs)
+	writeBackAsphereValidation(&input, validateEff, applyEff, dlsIterEff, numRaysEff, flags)
 
-	fields, err := resolveAsphereFields(input, configFlag)
+	fields, err := resolveAsphereFields(input, &configFlag)
 	if err != nil {
 		errExitf("Error: %v", err)
 	}
-	wavelengths := resolveAsphereWavelengths(input, configFlag)
+	wavelengths := resolveAsphereWavelengths(input, &configFlag)
 	stopSurface := input.Chief.StopSurface
 
 	// Ensure precompute is fresh for the PhysicalZ / ParaxialRadius data used
@@ -153,8 +155,8 @@ func runAsphere(data []byte) {
 // writeBackAsphereConfig echoes the flag-won analysis settings into the
 // output's asphere_candidate: section (principle 3 of the CLI/YAML rule).
 // Only flags actually given are written back; untouched YAML stays as-is.
-func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.FlagSet) {
-	if !anyFlagSet(fs, "rings", "angles", "t-bins", "pupil-samples", "sensitivity-samples",
+func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, flags *clispec.Options) {
+	if !flags.AnySet("rings", "angles", "t-bins", "pupil-samples", "sensitivity-samples",
 		"top-k", "sag-scale", "calibrate-scale", "scale-probes",
 		"diagnostics", "focus-samples", "focus-fans") {
 		return
@@ -162,43 +164,43 @@ func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.Fla
 	if input.Asphere == nil {
 		input.Asphere = &types.AsphereCandidateConfig{}
 	}
-	if flagWasSet(fs, "rings") {
+	if flags.Set("rings") {
 		input.Asphere.CellRings = cfg.CellRings
 	}
-	if flagWasSet(fs, "angles") {
+	if flags.Set("angles") {
 		input.Asphere.CellAngles = cfg.CellAngles
 	}
-	if flagWasSet(fs, "t-bins") {
+	if flags.Set("t-bins") {
 		input.Asphere.TBins = cfg.TBins
 	}
-	if flagWasSet(fs, "pupil-samples") {
+	if flags.Set("pupil-samples") {
 		input.Asphere.PupilSamplesRadial = cfg.PupilSamplesRadial
 	}
-	if flagWasSet(fs, "sensitivity-samples") {
+	if flags.Set("sensitivity-samples") {
 		v := cfg.SensitivitySamples
 		input.Asphere.SensitivitySamples = &v
 	}
-	if flagWasSet(fs, "top-k") {
+	if flags.Set("top-k") {
 		input.Asphere.TopK = cfg.TopK
 	}
-	if flagWasSet(fs, "sag-scale") {
+	if flags.Set("sag-scale") {
 		input.Asphere.SagScale = cfg.SagScale
 	}
-	if flagWasSet(fs, "calibrate-scale") {
+	if flags.Set("calibrate-scale") {
 		v := cfg.CalibrateScale
 		input.Asphere.CalibrateScale = &v
 	}
-	if flagWasSet(fs, "scale-probes") {
+	if flags.Set("scale-probes") {
 		input.Asphere.ScaleProbes = cfg.ScaleProbes
 	}
-	if flagWasSet(fs, "diagnostics") {
+	if flags.Set("diagnostics") {
 		// --diagnostics is handled by buildFocusConfig; write back here for YAML round-trip.
 		// The value was already applied to input.Asphere.Diagnostics by the caller.
 	}
-	if flagWasSet(fs, "focus-samples") {
+	if flags.Set("focus-samples") {
 		// Already applied to input.Asphere.FocusSamples by the caller.
 	}
-	if flagWasSet(fs, "focus-fans") {
+	if flags.Set("focus-fans") {
 		// Already applied to input.Asphere.FocusFans by the caller.
 	}
 }
@@ -206,14 +208,14 @@ func writeBackAsphereConfig(input *types.Input, cfg asphere.Config, fs *flag.Fla
 // resolveAsphereValidation resolves whether the Phase-4 validation (and its
 // --apply insertion) runs: --validate/--apply (flags) win over
 // asphere_candidate.validate/apply (YAML). --apply implies --validate.
-func resolveAsphereValidation(input *types.Input, validateFlag, applyFlag bool, fs *flag.FlagSet) (validate, apply bool) {
+func resolveAsphereValidation(input *types.Input, validateFlag, applyFlag bool, flags *clispec.Options) (validate, apply bool) {
 	validate = validateFlag
 	apply = applyFlag
-	if !flagWasSet(fs, "validate") && !flagWasSet(fs, "apply") &&
+	if !flags.Set("validate") && !flags.Set("apply") &&
 		input.Asphere != nil && input.Asphere.Validate != nil {
 		validate = *input.Asphere.Validate
 	}
-	if !flagWasSet(fs, "apply") && input.Asphere != nil && input.Asphere.Apply != nil {
+	if !flags.Set("apply") && input.Asphere != nil && input.Asphere.Apply != nil {
 		apply = *input.Asphere.Apply
 	}
 	if apply {
@@ -225,25 +227,25 @@ func resolveAsphereValidation(input *types.Input, validateFlag, applyFlag bool, 
 // writeBackAsphereValidation echoes the flag-won validation settings into the
 // output's asphere_candidate: section (principle 3). Only flags actually
 // given are written back.
-func writeBackAsphereValidation(input *types.Input, validate, apply bool, dlsIter, numRays int, fs *flag.FlagSet) {
-	if !anyFlagSet(fs, "validate", "apply", "dls-iter", "num-rays") {
+func writeBackAsphereValidation(input *types.Input, validate, apply bool, dlsIter, numRays int, flags *clispec.Options) {
+	if !flags.AnySet("validate", "apply", "dls-iter", "num-rays") {
 		return
 	}
 	if input.Asphere == nil {
 		input.Asphere = &types.AsphereCandidateConfig{}
 	}
-	if flagWasSet(fs, "validate") {
+	if flags.Set("validate") {
 		v := validate
 		input.Asphere.Validate = &v
 	}
-	if flagWasSet(fs, "apply") {
+	if flags.Set("apply") {
 		v := apply
 		input.Asphere.Apply = &v
 	}
-	if flagWasSet(fs, "dls-iter") {
+	if flags.Set("dls-iter") {
 		input.Asphere.ValidationDLSIter = dlsIter
 	}
-	if flagWasSet(fs, "num-rays") {
+	if flags.Set("num-rays") {
 		input.Asphere.ValidationNumRays = numRays
 	}
 }

@@ -317,6 +317,16 @@ func (o *Options) BoolString(name string) (value bool, given bool, err error) {
 	return v, true, nil
 }
 
+// AnySet reports whether at least one of the named flags was given.
+func (o *Options) AnySet(names ...string) bool {
+	for _, n := range names {
+		if o.Set(n) {
+			return true
+		}
+	}
+	return false
+}
+
 // WriteBack applies the effective value of every setting flag that was given,
 // in declaration order. YAML-path flags are written into input directly;
 // Apply hooks handle settings whose write-back is conditional or computed.
@@ -492,8 +502,22 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 				out = append(out, arg{name: canon, value: strconv.FormatFloat(n, 'g', -1, 64)})
 			}
 		case String:
-			if s, ok := v.(string); ok && s != "" {
-				out = append(out, arg{name: canon, value: s})
+			switch val := v.(type) {
+			case string:
+				if val != "" {
+					out = append(out, arg{name: canon, value: val})
+				}
+			case []any:
+				// A comma-separated flag whose MCP field is an array.
+				parts := make([]string, 0, len(val))
+				for _, e := range val {
+					if s, ok := e.(string); ok && s != "" {
+						parts = append(parts, s)
+					}
+				}
+				if len(parts) > 0 {
+					out = append(out, arg{name: canon, value: strings.Join(parts, ",")})
+				}
 			}
 		case FloatList:
 			arr, ok := v.([]any)
@@ -554,7 +578,7 @@ func Args(spec Spec, in any, overrides map[string]string) []string {
 // All lists the command flag tables. The help-consistency test and the MCP
 // drift test walk it, so a new table must be added here when a command is
 // migrated.
-var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette, &Plot, &Zoom, &Cam, &Scale, &TMM, &Clean, &Wavefront}
+var All = []*Spec{&Chief, &Trace, &Paraxial, &Vignette, &Plot, &Zoom, &Cam, &Scale, &TMM, &Clean, &Wavefront, &Asphere}
 
 // stringListValue is the flag.Value behind a StringList flag: every Set
 // appends the raw value, so repeated flags accumulate.
