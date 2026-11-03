@@ -268,10 +268,7 @@ func (s *server) addImport() {
 			return nil, ResultOut{}, fmt.Errorf("format is required (zemax, oslo or codev)")
 		}
 		args := append(s.commonArgs(), "--format", in.Format)
-		args = strFlag(args, in.ConfigID, "--config-id")
-		args = strFlag(args, in.ConfigName, "--config-name")
-		args = boolFlag(args, in.NoChief, "--no-chief")
-		args = strFlag(args, in.GlassDir, "--glass-dir")
+		args = append(args, clispec.Args(clispec.Import, in, nil)...)
 		res, err := s.runner.Run(ctx, Call{Command: "import", Args: args, Stdin: data})
 		if err != nil {
 			return nil, ResultOut{}, err
@@ -324,9 +321,8 @@ func (s *server) addExport() {
 		if format == "" {
 			return nil, ViewOut{}, fmt.Errorf("give format (zemax, codev, oslo) or an output path whose extension names the format")
 		}
-		args := append(s.commonArgs(), in.settings.args()...)
-		args = append(args, "--format", format)
-		args = boolFlag(args, in.NDVD, "--nd-vd")
+		args := append(s.commonArgs(), "--format", format)
+		args = append(args, clispec.Args(clispec.Export, in, nil)...)
 		res, err := s.runner.Run(ctx, Call{Command: "export", Args: args, Stdin: doc})
 		if err != nil {
 			return nil, ViewOut{}, err

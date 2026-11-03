@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"github.com/hiroki/rayweaver/internal/chief"
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/importer"
@@ -18,20 +19,19 @@ import (
 
 func runImport(data []byte) {
 	fs := flag.NewFlagSet("import", flag.ContinueOnError)
-	format := fs.String("format", "", "zemax|oslo|codev")
-	configID := fs.String("config-id", "config1", "")
-	configName := fs.String("config-name", "Config1", "")
-	noChief := fs.Bool("no-chief", false, "skip chief ray computation")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	fs.Parse(os.Args[2:])
+	opts := clispec.Bind(clispec.Import, fs)
+	if err := opts.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
+	format := opts.String("format")
 
-	if *format == "" {
+	if format == "" {
 		errExitf("Error: --format is required (zemax|oslo|codev)")
 	}
 
 	var result *importer.ParseResult
 	var err error
-	switch *format {
+	switch format {
 	case "zemax":
 		result, err = importer.ParseZemax(string(data))
 	case "oslo":
@@ -39,7 +39,7 @@ func runImport(data []byte) {
 	case "codev":
 		result, err = importer.ParseCodeV(string(data))
 	default:
-		errExitf("Error: unknown format %q", *format)
+		errExitf("Error: unknown format %q", format)
 	}
 	if err != nil {
 		errExitf("Error: parse error: %v", err)
@@ -49,12 +49,12 @@ func runImport(data []byte) {
 	}
 
 	var mfrOrder []string
-	if *glassDir != "" {
-		agfGlasses, err := glass.LoadAGFDir(*glassDir)
+	if opts.String("glass-dir") != "" {
+		agfGlasses, err := glass.LoadAGFDir(opts.String("glass-dir"))
 		if err != nil {
 			errExitf("Error loading AGF files: %v", err)
 		}
-		mfrOrder = glass.BuildManufacturerOrder(*glassDir)
+		mfrOrder = glass.BuildManufacturerOrder(opts.String("glass-dir"))
 		if len(mfrOrder) == 0 {
 			mfrOrder = glass.DefaultManufacturerOrder
 		}
@@ -77,7 +77,7 @@ func runImport(data []byte) {
 	// PhysicalZ reflects the computed distance.
 	surfaces := result.Surfaces
 	surface.Precompute(surfaces)
-	if *format == "oslo" {
+	if format == "oslo" {
 		wl := importedReferenceWavelength(result)
 		importer.ApplyImageDistance(result, gc, wl)
 		surfaces = result.Surfaces
@@ -159,8 +159,8 @@ func runImport(data []byte) {
 		} else {
 			cfgSurfaces = importer.ConfigSurfaceSet(result, c)
 		}
-		cfgID := *configID
-		cfgName := *configName
+		cfgID := opts.String("config-id")
+		cfgName := opts.String("config-name")
 		if c != 0 {
 			cfgID = fmt.Sprintf("config%d", c)
 			cfgName = fmt.Sprintf("Config%d", c)
@@ -217,8 +217,8 @@ func runImport(data []byte) {
 	outputOut := types.Output{
 		Input: output,
 	}
-	if *glassDir != "" {
-		outputOut.GlassCatalog.Directory = *glassDir
+	if opts.String("glass-dir") != "" {
+		outputOut.GlassCatalog.Directory = opts.String("glass-dir")
 	}
 	if len(mfrOrder) > 0 {
 		outputOut.GlassCatalog.ManufacturerOrder = mfrOrder
@@ -239,7 +239,7 @@ func runImport(data []byte) {
 		}
 	}
 
-	if !*noChief && len(result.Fields) > 0 {
+	if !opts.Bool("no-chief") && len(result.Fields) > 0 {
 		wavelength := importedReferenceWavelength(result)
 		pol := types.NewCircularJones(true)
 

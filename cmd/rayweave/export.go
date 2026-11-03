@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 
+	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/exporter"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -24,28 +25,28 @@ import (
 // pipeline keeps flowing; without it the foreign format goes to stdout.
 func runExport(data []byte) {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
-	format := fs.String("format", "", "zemax|codev|oslo (defaults to the -o file extension)")
-	configFlag := fs.String("config", "", "select config by id (single-config export)")
-	ndVD := fs.Bool("nd-vd", false, "CODE V: write every glass as its inline nd:vd model form instead of the catalog name")
-	glassDir := fs.String("glass-dir", "", "AGF glass catalog directory")
-	outPath := fs.String("o", "", "output file path (default: stdout); with -o the foreign format is written to FILE and the YAML passes through to stdout")
-	fs.StringVar(outPath, "output", "", "alias for -o")
-	fs.Parse(os.Args[2:])
+	opts := clispec.Bind(clispec.Export, fs)
+	if err := opts.Parse(os.Args[2:]); err != nil {
+		errExitf("Error: %v", err)
+	}
+	configFlag := opts.String("config")
+	ndVD := opts.Bool("nd-vd")
+	outPath := opts.String("output")
 
 	// The format is the explicit --format flag, else the -o file extension
 	// (.zmx / .seq / .len), like plot inferring SVG/PNG from the extension.
-	formatName := resolveExportFormat(*format, *outPath)
+	formatName := resolveExportFormat(opts.String("format"), outPath)
 	if formatName == "" {
 		errExitf("Error: --format is required (zemax|codev|oslo), or give -o FILE with a .zmx/.seq/.len extension")
 	}
 
 	input := parseYAML[types.Input](data)
-	gc, _ := loadCatalogs(&input, *glassDir)
+	gc, _ := loadCatalogs(&input, opts.String("glass-dir"))
 	warn := func(format string, args ...any) {
 		errOut(format, args...)
 	}
 
-	configs := configIndicesForExport(&input, formatName, configFlag)
+	configs := configIndicesForExport(&input, formatName, &configFlag)
 
 	var out []byte
 	var err error
@@ -53,7 +54,7 @@ func runExport(data []byte) {
 	case "zemax":
 		out, err = exporter.WriteZemax(&input, configs, gc, warn)
 	case "codev":
-		out, err = exporter.WriteCodeV(&input, configs, gc, warn, *ndVD)
+		out, err = exporter.WriteCodeV(&input, configs, gc, warn, ndVD)
 	case "oslo":
 		idx := 0
 		if len(configs) > 0 {
@@ -66,7 +67,7 @@ func runExport(data []byte) {
 	if err != nil {
 		errExitf("Error: export failed: %v", err)
 	}
-	exportOutput(*outPath, out, data)
+	exportOutput(outPath, out, data)
 }
 
 // resolveExportFormat returns the effective export format: the explicit
