@@ -27,7 +27,6 @@ type Config struct {
 	TBins                   int
 	PupilSamplesRadial      int
 	SensitivitySamples      int
-	RemovePiston            bool
 	RemoveTilt              bool
 	RemoveDefocus           bool
 	TopK                    int
@@ -54,7 +53,6 @@ func DefaultConfig() Config {
 		TBins:                   8,
 		PupilSamplesRadial:      21,
 		SensitivitySamples:      9,
-		RemovePiston:            true,
 		RemoveTilt:              true,
 		RemoveDefocus:           false,
 		TopK:                    3,
@@ -108,9 +106,6 @@ func ConfigFromYAML(c *types.AsphereCandidateConfig) Config {
 	}
 	if c.SensitivitySamples != nil {
 		cfg.SensitivitySamples = *c.SensitivitySamples
-	}
-	if c.RemovePiston != nil {
-		cfg.RemovePiston = *c.RemovePiston
 	}
 	if c.RemoveTilt != nil {
 		cfg.RemoveTilt = *c.RemoveTilt

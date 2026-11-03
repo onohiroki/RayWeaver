@@ -98,9 +98,9 @@ asphere_candidate:
 ```
 
 Piston is **always** removed (per-field OPD is referenced to the field's mean
-OPL); `remove_piston` is accepted for compatibility but has no effect. The
-former `max_sag`, `max_slope_deg` and `max_curvature_variation` fields were
-removed (accepted but never used by the analysis) — see
+OPL), so there is no piston knob. The former `remove_piston`, `max_sag`,
+`max_slope_deg` and `max_curvature_variation` fields were removed from the
+document schema and are ignored — see
 [asphere-candidates.md](methods/asphere-candidates.md) for what actually happens.
 
 ## Output

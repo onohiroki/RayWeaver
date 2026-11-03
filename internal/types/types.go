@@ -1626,7 +1626,6 @@ type AsphereCandidateConfig struct {
 	TBins                   int                 `yaml:"t_bins,omitempty"`
 	PupilSamplesRadial      int                 `yaml:"pupil_samples_radial,omitempty"`
 	SensitivitySamples      *int                `yaml:"sensitivity_samples,omitempty"`
-	RemovePiston            *bool               `yaml:"remove_piston,omitempty"`
 	RemoveTilt              *bool               `yaml:"remove_tilt,omitempty"`
 	RemoveDefocus           *bool               `yaml:"remove_defocus,omitempty"`
 	TopK                    int                 `yaml:"top_k,omitempty"`

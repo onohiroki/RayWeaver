@@ -92,8 +92,8 @@ coeffs = (AᵀWA)⁻¹ AᵀWb
 `remove_tilt` and `remove_defocus` default to `true` / `false`. The `r²` term
 that dominates the asphere's low-order behaviour is therefore usually removed
 from the OPD before the fit; `FitAsphereCoeffsJoint` reports the magnitude of that
-removed term as a warning. (The YAML field `remove_piston` is accepted but has
-no effect — piston removal is implicit in the mean reference.)
+removed term as a warning. (Piston removal is implicit in the mean reference,
+so there is no `remove_piston` setting.)
 
 ## 4. Exact-ray joint fit
 

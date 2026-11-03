@@ -848,10 +848,10 @@ with the asphere_candidate: section:
 Flags override the asphere_candidate: values; the effective (flag-won) values
 are written back into the output's asphere_candidate: section (CLI/YAML rule).
 
-Piston is always removed (per-field OPD referenced to the field mean);
-remove_piston is accepted but has no effect. The former max_sag /
-max_slope_deg / max_curvature_variation keys were removed from the document
-schema and are ignored.
+Piston is always removed (per-field OPD referenced to the field mean), so
+there is no piston knob. The former remove_piston / max_sag / max_slope_deg /
+max_curvature_variation keys were removed from the document schema and are
+ignored.
 
 Output: YAML with an asphere_candidate_result: section (rankings with
 coefficients, scaled_coefficients, calibrated_coefficients, sensitivity with
