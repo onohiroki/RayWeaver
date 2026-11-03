@@ -140,8 +140,10 @@ func runList(data []byte) {
 			listGlobal(output, *format)
 		case "focus":
 			listFocus(output, *format)
+		case "summary":
+			listSummary(data, *format)
 		default:
-			errExitf("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, global, focus, \"default\", or \"all\")", target)
+			errExitf("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, global, focus, summary, \"default\", or \"all\")", target)
 		}
 	}
 }

@@ -399,13 +399,15 @@ dedicated tool owns those outputs.
 
 ### Summaries
 
-`paraxial`, `chief`, `trace`, `optimize`, `escape`, `pso` and `focus` reuse the
-CLI's own `list ... --format json` view, so the summary means the same thing as
-the terminal table. The other commands summarise the result sections directly:
-configs become ids and surface counts, `rays`/`grid_points` become counts,
-`results[]` keeps its scalars and drops the per-surface path, `chief_rays[]`
-keeps per-field `spot_stats`. A summary is compacted (array head + count, then
-lower limits) until it fits the budget; `truncated` says so and the full
+Every summary is produced by the CLI. `paraxial`, `chief`, `trace`, `optimize`,
+`escape`, `pso` and `focus` use their dedicated `list ... --format json` view, so
+the summary means the same thing as the terminal table; every other command uses
+`list summary --format json`, which folds the bulk sections (configs become ids
+and surface counts, `rays`/`grid_points` become counts, `results[]` keeps its
+scalars and drops the per-surface path, `chief_rays[]` keeps per-field
+`spot_stats`) and passes the remaining sections through. The server no longer
+interprets documents itself; it only compacts a summary (array head + count,
+then lower limits) until it fits the budget. `truncated` says so, and the full
 document stays one resource read away.
 
 ## Jobs: `escape` and `pso`

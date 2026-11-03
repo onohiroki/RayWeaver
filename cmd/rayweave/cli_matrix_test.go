@@ -122,6 +122,16 @@ var cliCases = []cliCase{
 	{name: "list-optimization", stdin: "optimize-demo.yaml", steps: [][]string{{"list", "optimization"}}},
 	{name: "list-global", stdin: "escape-demo.yaml", steps: [][]string{{"list", "global"}}},
 
+	// `list summary` is the compact view the MCP server returns as its tool
+	// summary; it folds the bulk sections and passes the rest through.
+	{name: "list-summary", stdin: "us2645157.yaml",
+		steps: [][]string{{"chief"}, {"trace"}, {"list", "summary", "--format", "json"}},
+		probes: [][]string{
+			{"--len", "results"},
+			{"-r", "results[3].opl_total"},
+			{"-r", "chief_rays[0].spot_stats.rms_r"},
+		}},
+
 	{name: "list-rays-json", stdin: "us2645157.yaml",
 		steps: [][]string{{"chief"}, {"trace"}, {"list", "rays", "--format", "json"}},
 		probes: [][]string{
