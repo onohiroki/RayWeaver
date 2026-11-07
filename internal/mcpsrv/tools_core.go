@@ -226,6 +226,8 @@ type chiefIn struct {
 	DocInput
 	settings
 	Wavelength          float64   `json:"wavelength,omitempty" jsonschema:"reference wavelength in mm"`
+	Wavelengths         []float64 `json:"wavelengths,omitempty" jsonschema:"custom per-wavelength stats list in mm"`
+	WavelengthSet       string    `json:"wavelength_set,omitempty" jsonschema:"per-wavelength stats set: design, spectral or custom"`
 	PassThrough         int       `json:"pass_through,omitempty" jsonschema:"constrain the chief ray to the centre of surface N"`
 	ClearAperture       bool      `json:"clear_aperture,omitempty" jsonschema:"trace the grid through every surface and size auto_aperture surfaces from the beam footprint"`
 	ClearApertureMargin float64   `json:"clear_aperture_margin_mm,omitempty" jsonschema:"clearance added to each side of the beam footprint in mm"`

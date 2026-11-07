@@ -9,6 +9,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/paraxial"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -79,11 +80,12 @@ func runZoom(data []byte) {
 		errExitf("Error: 'configs' is required (a multi-config document declares one config per zoom position)")
 	}
 	type target struct {
-		id          string
-		active      bool
-		fields      []types.FieldItem
-		wavelengths []float64
-		surfaces    []types.Surface
+		id              string
+		active          bool
+		fields          []types.FieldItem
+		wavelengths     []float64
+		wavelengthItems []types.WavelengthItem
+		surfaces        []types.Surface
 	}
 	var targets []target
 	if configFlag != "" {
@@ -93,7 +95,8 @@ func runZoom(data []byte) {
 		}
 		cfg := &input.Configs[idx]
 		targets = append(targets, target{id: cfg.ID, active: cfg.Active, fields: cfg.Fields,
-			wavelengths: wavelengthValues(cfg.Wavelengths), surfaces: cfg.Surfaces})
+			wavelengths: wavelengthValues(cfg.Wavelengths), wavelengthItems: cfg.Wavelengths,
+			surfaces: cfg.Surfaces})
 	} else {
 		for i := range input.Configs {
 			cfg := &input.Configs[i]
@@ -101,7 +104,8 @@ func runZoom(data []byte) {
 				continue
 			}
 			targets = append(targets, target{id: cfg.ID, active: true, fields: cfg.Fields,
-				wavelengths: wavelengthValues(cfg.Wavelengths), surfaces: cfg.Surfaces})
+				wavelengths: wavelengthValues(cfg.Wavelengths), wavelengthItems: cfg.Wavelengths,
+				surfaces: cfg.Surfaces})
 		}
 	}
 	if len(targets) == 0 {
@@ -161,6 +165,12 @@ func runZoom(data []byte) {
 			})
 		}
 		first := paraxial.Compute(sys, wl, gc, objectHeight, chiefRays)
+		var color *types.ParaxialColor
+		var samples []types.WavelengthSample
+		if len(t.wavelengthItems) > 0 {
+			samples = spectral.DesignSamples(t.wavelengthItems)
+			_, color = paraxialSweep(sys, gc, objectHeight, chiefRays, wl, samples)
+		}
 
 		row := types.ZoomConfigSummary{
 			ID:                       t.id,
@@ -171,12 +181,20 @@ func runZoom(data []byte) {
 			InfConjImageSpaceFNumber: first.InfConjImageSpaceFNumber,
 			TotalTrack:               first.TotalTrack,
 			ImagePlaneZ:              referenceSurfaceZ(surfaces, refSurface),
+			Color:                    color,
 		}
 		for i, r := range results {
 			field := types.ZoomFieldSummary{
 				FieldIndex:  i,
 				AngleDeg:    r.FieldAngle,
 				ImageHeight: math.Hypot(r.ImageHeight.X, r.ImageHeight.Y),
+			}
+			if len(samples) > 0 {
+				white, lateral := chief.SummarizeWavelengths(r.Wavelengths, samples, wl)
+				if white != nil {
+					field.WhiteSpotRMS = white.RMS_R
+				}
+				field.LateralColor = lateral
 			}
 			if r.SpotStats != nil {
 				field.SpotRMS = r.SpotStats.RMS_R

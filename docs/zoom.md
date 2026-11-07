@@ -54,11 +54,20 @@ zoom_summary:
       inf_conj_image_space_f_number: 4.0007
       total_track: 110.067           # first surface → image plane (mm)
       image_plane_z: 110.067         # reference-surface vertex Z, document frame
+      color:                         # when the config declares wavelengths
+        reference: 0.00058756
+        axial_color:
+          - {value: 0.00048613, label: F, shift_mm: -0.12}
+        secondary_spectrum_mm: 0.03
+        white_focal_length: 28.01
+        white_back_focal: 63.72
       fields:
         - field_index: 0
           angle_deg: 0.0
           image_height: 0.0
           spot_rms: 2.5573           # mm at the reference surface
+          white_spot_rms: 2.60       # weighted over the config wavelengths
+          lateral_color: {reference: 0.00058756, max_mm: 0.0, rms_mm: 0.0}
           vignetting: 1.0            # surviving / launched grid rays
           grid_total: 64
           grid_surviving: 64
@@ -70,6 +79,9 @@ zoom_summary:
 | `image_plane_z` | the `reference_surface` vertex Z in the document frame — the same position `psf` / `focus` treat as the image plane |
 | `fields[].angle_deg`, `image_height` | the field's angle and the chief ray's image-plane height (mm) |
 | `fields[].spot_rms` | RMS spot radius at the reference surface (mm), over the grid rays that reached it — the same statistic as `chief_rays[].spot_stats.rms_r` |
+| `color` | the config's `paraxial_result.color`: axial colour, secondary spectrum and weighted white EFL/BFL, when it declares wavelengths |
+| `fields[].white_spot_rms` | wavelength-weighted spot RMS about the common centroid (mm) |
+| `fields[].lateral_color` | chief-ray height spread over the config wavelengths (max/rms) |
 | `fields[].vignetting`, `grid_surviving` / `grid_total` | the fraction of the prescribed pupil grid that survives an aperture clip or the glass-path (edge-thickness) check |
 
 `vignetting` is measured on the config's surfaces as they are in the document:

@@ -94,6 +94,8 @@ var cliCases = []cliCase{
 		probes: [][]string{
 			{"-r", "zoom_summary.configs[0].focal_length"},
 			{"-r", "zoom_summary.configs[2].fields[1].spot_rms"},
+			{"-r", "zoom_summary.configs[0].fields[0].white_spot_rms"},
+			{"-r", "zoom_summary.configs[0].color.white_back_focal"},
 		}},
 
 	{name: "scale", stdin: "6elements-init.yaml", steps: [][]string{{"scale", "--efl", "50"}},

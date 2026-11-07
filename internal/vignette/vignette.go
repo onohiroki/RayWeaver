@@ -26,12 +26,15 @@ import (
 
 // Options configures one vignette run.
 type Options struct {
-	Fields       []types.FieldDef
-	RefSurface   int
-	StopSurface  int
-	NumRays      int
-	GridType     types.GridType
-	Wavelength   float64
+	Fields      []types.FieldDef
+	RefSurface  int
+	StopSurface int
+	NumRays     int
+	GridType    types.GridType
+	Wavelength  float64
+	// Wavelengths is the set the diameter sizing must envelope (default:
+	// Wavelength only). The per-field vignetting report stays at Wavelength.
+	Wavelengths  []float64
 	MinGlassPath float64
 	MarginMM     float64
 	Iterations   int
@@ -84,6 +87,9 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 	if opts.Wavelength == 0 {
 		opts.Wavelength = types.DefaultWavelength
 	}
+	if len(opts.Wavelengths) == 0 {
+		opts.Wavelengths = []float64{opts.Wavelength}
+	}
 	if opts.Iterations <= 0 {
 		opts.Iterations = 3
 	}
@@ -128,7 +134,7 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 		)
 		last = results
 
-		_, extents := analyze(work, results, opts, gc, pol)
+		_, extents := analyze(work, results, opts, opts.Wavelengths, gc, pol)
 		changed := false
 		for i := range work {
 			if !work[i].AutoAperture || work[i].ID == opts.StopSurface {
@@ -149,7 +155,7 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 		}
 	}
 
-	fields, _ := analyze(work, last, opts, gc, pol)
+	fields, _ := analyze(work, last, opts, opts.Wavelengths, gc, pol)
 
 	return &Result{
 		Surfaces:       work,
@@ -170,40 +176,44 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 // surfaces being sized never clip their own measurement; vignetting is driven
 // only by the glass-path (edge-thickness) check, the fixed (auto_aperture:
 // false) surface apertures, and the crossing-Z bound.
-func analyze(work []types.Surface, results []chief.Result, opts Options, gc *glass.Catalog, pol types.JonesVector) ([]FieldResult, map[int]float64) {
+func analyze(work []types.Surface, results []chief.Result, opts Options, wavelengths []float64, gc *glass.Catalog, pol types.JonesVector) ([]FieldResult, map[int]float64) {
 	path := dls.BuildPath(work)
 	engine := ray.NewEngine(gc, nil)
 
-	all := make([][]tracedRay, len(results))
-	for fi, r := range results {
-		for _, gp := range r.GridPoints {
-			tr := engine.TraceRay(types.Ray{
-				Wavelength:            opts.Wavelength,
-				Initial:               types.RayState{Origin: gp.Origin, Direction: gp.Direction},
-				Path:                  path,
-				Jones:                 pol,
-				SkipAutoApertureCheck: true,
-			}, work, false)
-			if tr.Error != "" || len(tr.Surfaces) == 0 {
-				continue
+	traceAt := func(wavelength float64) [][]tracedRay {
+		all := make([][]tracedRay, len(results))
+		for fi, r := range results {
+			for _, gp := range r.GridPoints {
+				tr := engine.TraceRay(types.Ray{
+					Wavelength:            wavelength,
+					Initial:               types.RayState{Origin: gp.Origin, Direction: gp.Direction},
+					Path:                  path,
+					Jones:                 pol,
+					SkipAutoApertureCheck: true,
+				}, work, false)
+				if tr.Error != "" || len(tr.Surfaces) == 0 {
+					continue
+				}
+				ids := make([]int, len(tr.Surfaces))
+				positions := make([]types.Vec3, len(tr.Surfaces))
+				for j, sr := range tr.Surfaces {
+					ids[j] = sr.SurfaceID
+					positions[j] = sr.Position
+				}
+				last := tr.Surfaces[len(tr.Surfaces)-1]
+				all[fi] = append(all[fi], tracedRay{
+					ids:    ids,
+					pos:    positions,
+					imgX:   last.Position.X,
+					imgY:   last.Position.Y,
+					origin: gp.Origin,
+					dir:    gp.Direction,
+				})
 			}
-			ids := make([]int, len(tr.Surfaces))
-			positions := make([]types.Vec3, len(tr.Surfaces))
-			for j, sr := range tr.Surfaces {
-				ids[j] = sr.SurfaceID
-				positions[j] = sr.Position
-			}
-			last := tr.Surfaces[len(tr.Surfaces)-1]
-			all[fi] = append(all[fi], tracedRay{
-				ids:    ids,
-				pos:    positions,
-				imgX:   last.Position.X,
-				imgY:   last.Position.Y,
-				origin: gp.Origin,
-				dir:    gp.Direction,
-			})
 		}
+		return all
 	}
+	all := traceAt(opts.Wavelength)
 
 	// Vignetting comparison frames: an off-axis field's rays must fall within
 	// field 0's marginal-ray envelope, measured in the plane perpendicular to
@@ -220,17 +230,28 @@ func analyze(work []types.Surface, results []chief.Result, opts Options, gc *gla
 	// the bounding cut, so a narrowed off-axis bundle never shrinks the lens: an
 	// auto_aperture surface is sized to cover the union envelope of all fields'
 	// marginal rays. Only then are the per-field marginal rays re-derived
-	// against those diameters (via the bounding cut below).
+	// against those diameters (via the bounding cut below). The extent is also
+	// taken over every sizing wavelength, so wide F/C/g beams do not get
+	// clipped by an aperture sized at d alone.
 	extents := make(map[int]float64)
-	for fi := range results {
-		for _, t := range all[fi] {
-			for j, p := range t.pos {
-				e := math.Max(math.Abs(p.X), math.Abs(p.Y))
-				if e > extents[t.ids[j]] {
-					extents[t.ids[j]] = e
+	addExtents := func(traces [][]tracedRay) {
+		for fi := range traces {
+			for _, t := range traces[fi] {
+				for j, p := range t.pos {
+					e := math.Max(math.Abs(p.X), math.Abs(p.Y))
+					if e > extents[t.ids[j]] {
+						extents[t.ids[j]] = e
+					}
 				}
 			}
 		}
+	}
+	addExtents(all)
+	for _, wl := range wavelengths {
+		if math.Abs(wl-opts.Wavelength) <= 1e-15 {
+			continue
+		}
+		addExtents(traceAt(wl))
 	}
 
 	// Crossing-plane bounding: an off-axis field's rays must fall within field

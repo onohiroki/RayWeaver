@@ -31,6 +31,31 @@ func listWavelengths(input types.Input, format, configFlag string) {
 	}
 
 	out := WavelengthListOutput{Reference: reference, Spectrum: input.Spectrum}
+	mode := ""
+	if input.Chief != nil {
+		mode = strings.ToLower(strings.TrimSpace(input.Chief.WavelengthSet))
+	}
+	if cfg != nil && mode == "" && len(cfg.Wavelengths) > 0 {
+		mode = spectral.ModeDesign
+	}
+	out.Mode = mode
+	switch mode {
+	case spectral.ModeDesign:
+		if cfg != nil {
+			out.Resolved = spectral.DesignSamples(cfg.Wavelengths)
+		}
+	case spectral.ModeSpectral:
+		if s, err := spectral.SpectralSamples(input.Spectrum, 0); err == nil {
+			out.Resolved = s
+		}
+	case spectral.ModeCustom:
+		if input.Chief != nil {
+			if s, err := spectral.CustomSamples(input.Chief.Wavelengths); err == nil {
+				out.Resolved = s
+			}
+		}
+	}
+	out.ResolvedCount = len(out.Resolved)
 	if cfg != nil {
 		normalized := spectral.DesignSamples(cfg.Wavelengths)
 		excluded := map[float64]bool{}
@@ -111,6 +136,23 @@ func listWavelengths(input types.Input, format, configFlag string) {
 				cols[5].cells = append(cols[5].cells, included)
 			}
 			fmt.Print(renderTable(cols))
+		}
+		if out.Mode == "" {
+			fmt.Println("Set: (none)")
+		} else if len(out.Resolved) == 0 {
+			fmt.Printf("Set: %s (unresolved)\n", out.Mode)
+		} else {
+			lo, hi := out.Resolved[0].Value, out.Resolved[0].Value
+			for _, s := range out.Resolved[1:] {
+				if s.Value < lo {
+					lo = s.Value
+				}
+				if s.Value > hi {
+					hi = s.Value
+				}
+			}
+			fmt.Printf("Set: %s, %d samples, %.1f-%.1f nm\n",
+				out.Mode, len(out.Resolved), lo*1e6, hi*1e6)
 		}
 		if input.Spectrum != nil {
 			curve := input.Spectrum.Curve

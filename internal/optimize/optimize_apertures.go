@@ -240,6 +240,25 @@ func apertureSizingWavelengths(cfg *config) []float64 {
 		}
 		wls = append(wls, v)
 	}
+	// Terms can evaluate wavelengths outside the config table (custom sets,
+	// spectral expansion or aggregate polychromatic kinds); size for all of
+	// them, not only the declared design lines.
+	scan := func(terms []meritTerm) {
+		for _, t := range terms {
+			if t.wavelength > 0 && !covered(t.wavelength) {
+				wls = append(wls, t.wavelength)
+			}
+			for _, s := range t.wavelengths {
+				if s.Value > 0 && !covered(s.Value) {
+					wls = append(wls, s.Value)
+				}
+			}
+		}
+	}
+	scan(cfg.meritTerms)
+	for _, terms := range cfg.meritModes {
+		scan(terms)
+	}
 	if !covered(ref) {
 		wls = append(wls, ref)
 	}

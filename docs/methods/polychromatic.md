@@ -156,7 +156,14 @@ axial-colour shifts and the secondary spectrum together.
   full set and normalised weights; per-λ rows are emitted, and the white
   aggregates sit beside them. `chief --wavelength-set spectral` runs the white
   spot/lateral-colour analysis over the continuous spectrum; `wavefront`
-  reports `white.fields[]` (weighted RMS/Strehl) for a multi-wavelength run.
+  reports `white.fields[]` (weighted RMS/Strehl) for a multi-wavelength run;
+  `zoom` reports each position's paraxial colour summary plus white spot and
+  lateral colour. `list wavelengths` shows the effective set and resolved
+  samples.
+- **Aperture sizing** takes the maximum beam envelope over every wavelength a
+  merit term evaluates (`optimize`), every declared wavelength
+  (`vignette`) and the resolved/reference set (`chief --clear-aperture`), so an
+  off-design F/C/g beam is not clipped by an aperture sized at d alone.
 - **Optimisation** (`optimize`, `escape`, `pso`) uses the coarse spectral grid
   when `wavelength_set: spectral` is requested. Expanding a spectral set into
   ordinary terms is expensive; prefer the aggregate kinds. The white
@@ -169,13 +176,13 @@ axial-colour shifts and the secondary spectrum together.
   stage or a short local refinement, with a reduced
   `optimization.diffraction_mtf.num_rays`/`grid_size`. They are not suitable
   for a global `escape`/`pso` merit. They use the diffraction-MTF sampling
-  configuration and the delivered image plane. A virtual entrance pupil is
-  forwarded with the optimizer's frozen axial position and diameter, the
+  configuration and the delivered image plane. The PSF is forced onto the
+  optimizer's frozen pupil centre (`gridCentring`) and the same
+  `ApertureRadiusForGrid` radius (including the aperture margin), the
   vignetting compensation is applied to `num_rays`, and
-  `optimization.diffraction_mtf.max_grid` caps the image grid. For a
-  stop-based (non-virtual) pupil the PSF still lets `psf.ComputeFieldGrid`
-  resolve the pupil, so a small sampling difference from the grid terms is
-  possible.
+  `optimization.diffraction_mtf.max_grid` caps the image grid. The gate's
+  physical-pupil PSF can still differ by the aperture-margin oversampling, but
+  the merit and the grid terms see the same bundle.
 
 ## 6. Determinism
 

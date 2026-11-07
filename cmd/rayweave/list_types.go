@@ -176,9 +176,14 @@ type WavelengthListRow struct {
 
 // WavelengthListOutput is the structured shape of `list wavelengths`.
 type WavelengthListOutput struct {
-	Reference float64               `json:"reference,omitempty" yaml:"reference,omitempty"`
-	Rows      []WavelengthListRow   `json:"wavelengths" yaml:"wavelengths"`
-	Spectrum  *types.SpectralConfig `json:"spectrum,omitempty" yaml:"spectrum,omitempty"`
+	Reference float64 `json:"reference,omitempty" yaml:"reference,omitempty"`
+	// Mode is the resolved chief.wavelength_set (design | spectral | custom).
+	Mode string `json:"wavelength_set,omitempty" yaml:"wavelength_set,omitempty"`
+	// Resolved is the actual set a per-wavelength command would evaluate.
+	Resolved      []types.WavelengthSample `json:"resolved,omitempty" yaml:"resolved,omitempty"`
+	ResolvedCount int                      `json:"resolved_count,omitempty" yaml:"resolved_count,omitempty"`
+	Rows          []WavelengthListRow      `json:"wavelengths" yaml:"wavelengths"`
+	Spectrum      *types.SpectralConfig    `json:"spectrum,omitempty" yaml:"spectrum,omitempty"`
 }
 
 // MeritTermRow is one row of the `list merit` terms table.

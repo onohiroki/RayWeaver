@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/hiroki/rayweaver/internal/clispec"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/vignette"
 )
@@ -80,6 +81,30 @@ func runVignette(data []byte) {
 		pol = input.Rays.Polarization
 	}
 
+	// Diameter sizing envelopes every declared/evaluated wavelength, not only
+	// the reference: F/C/g (or a continuous spectrum) can shift the footprint
+	// enough that a d-line aperture clips them.
+	sizingWavelengths := []float64{wlEff}
+	seenWL := map[float64]bool{wlEff: true}
+	addWL := func(wl float64) {
+		if wl > 0 && !seenWL[wl] {
+			seenWL[wl] = true
+			sizingWavelengths = append(sizingWavelengths, wl)
+		}
+	}
+	for _, w := range selectedConfigWavelengths(input.Configs, configFlag) {
+		addWL(w.Value)
+	}
+	if input.Spectrum != nil {
+		samples, err := spectral.SpectralSamples(input.Spectrum, 10)
+		if err != nil {
+			errExitf("Error: %v", err)
+		}
+		for _, s := range samples {
+			addWL(s.Value)
+		}
+	}
+
 	res := vignette.Run(surfaces, vignette.Options{
 		Fields:        fields,
 		RefSurface:    input.Chief.ReferenceSurface,
@@ -87,6 +112,7 @@ func runVignette(data []byte) {
 		NumRays:       input.Chief.NumRays,
 		GridType:      input.Chief.GridType,
 		Wavelength:    wlEff,
+		Wavelengths:   sizingWavelengths,
 		MinGlassPath:  minGlassPathEff,
 		MarginMM:      marginMMEff,
 		Iterations:    iterationsEff,

@@ -74,6 +74,45 @@ func TestApertureSizingWavelengths(t *testing.T) {
 	}
 }
 
+func TestApertureSizingWavelengthsIncludesTermSets(t *testing.T) {
+	cfg := &config{
+		referenceWavelength: 0.00058756,
+		wavelengths:         []types.WavelengthItem{{ID: 0, Value: 0.00058756}},
+		meritTerms: []meritTerm{{
+			wavelengths: []types.WavelengthSample{
+				{Value: 0.00048613}, {Value: 0.00058756}, {Value: 0.00065627}, {Value: 0.00043583},
+			},
+		}},
+	}
+	got := apertureSizingWavelengths(cfg)
+	if len(got) != 4 {
+		t.Fatalf("aggregate term wavelengths: got %v, want 4 samples", got)
+	}
+	for _, want := range []float64{0.00048613, 0.00058756, 0.00065627, 0.00043583} {
+		found := false
+		for _, v := range got {
+			if math.Abs(v-want) <= 1e-12 {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing term wavelength %v in %v", want, got)
+		}
+	}
+
+	// A single term at a custom wavelength outside the table is included too.
+	custom := &config{
+		referenceWavelength: 0.00058756,
+		wavelengths:         []types.WavelengthItem{{ID: 0, Value: 0.00058756}},
+		meritTerms:          []meritTerm{{wavelength: 0.0005}},
+	}
+	got = apertureSizingWavelengths(custom)
+	if len(got) != 2 {
+		t.Fatalf("custom term wavelength: got %v, want 2 entries", got)
+	}
+}
+
 // TestFinalAutoAperturesCoversAllWavelengths verifies that the output sizing
 // envelopes every config wavelength: the image-plane diameter it produces must
 // be at least the widest per-wavelength footprint plus the clearance, so

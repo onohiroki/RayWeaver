@@ -137,6 +137,22 @@ func runChief(data []byte) {
 	for i, s := range wavelengthSamples {
 		configWavelengths[i] = s.Value
 	}
+	// Aperture sizing is conservative: cover every declared/evaluated line
+	// plus the reference, even a line excluded from the white combination.
+	clearWavelengths := append([]float64(nil), wavelength)
+	seenClear := map[float64]bool{wavelength: true}
+	addClear := func(wl float64) {
+		if wl > 0 && !seenClear[wl] {
+			seenClear[wl] = true
+			clearWavelengths = append(clearWavelengths, wl)
+		}
+	}
+	for _, w := range selectedConfigWavelengths(input.Configs, configFlag) {
+		addClear(w.Value)
+	}
+	for _, s := range wavelengthSamples {
+		addClear(s.Value)
+	}
 
 	gc, _ := openGlass(&input, opts.String("glass-dir"))
 
@@ -230,7 +246,7 @@ func runChief(data []byte) {
 		envEngine := ray.NewEngine(gc, nil)
 		surface.Precompute(surfaces)
 		path := dls.BuildPath(surfaces)
-		envelope := chief.BeamEnvelope(results, envEngine, surfaces, path, wavelength, pol)
+		envelope := chief.BeamEnvelopeMax(results, envEngine, surfaces, path, clearWavelengths, pol)
 
 		refID := input.Chief.ReferenceSurface
 		stopID := input.Chief.StopSurface
@@ -263,7 +279,7 @@ func runChief(data []byte) {
 		engine2 := ray.NewEngine(gc, nil)
 		surface.Precompute(surfaces)
 		path := dls.BuildPath(surfaces)
-		envelope := chief.BeamEnvelope(results, engine2, surfaces, path, wavelength, pol)
+		envelope := chief.BeamEnvelopeMax(results, engine2, surfaces, path, clearWavelengths, pol)
 
 		refID := input.Chief.ReferenceSurface
 		stopID := input.Chief.StopSurface

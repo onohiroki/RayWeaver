@@ -2305,6 +2305,11 @@ type ZoomFieldSummary struct {
 	Vignetting    float64 `yaml:"vignetting"`
 	GridTotal     int     `yaml:"grid_total"`
 	GridSurviving int     `yaml:"grid_surviving"`
+	// WhiteSpotRMS is the wavelength-weighted spot RMS (mm) over the
+	// config's resolved wavelength set.
+	WhiteSpotRMS float64 `yaml:"white_spot_rms,omitempty"`
+	// LateralColor is the chief-ray height spread over the set.
+	LateralColor *LateralColorStats `yaml:"lateral_color,omitempty"`
 }
 
 // ZoomConfigSummary is one configuration's row in a ZoomSummary: the first-order
@@ -2321,8 +2326,11 @@ type ZoomConfigSummary struct {
 	TotalTrack               float64 `yaml:"total_track,omitempty"`
 	// ImagePlaneZ is the reference surface's vertex Z in the document frame
 	// (the same PhysicalZ the psf/focus commands use as the image plane).
-	ImagePlaneZ float64            `yaml:"image_plane_z,omitempty"`
-	Fields      []ZoomFieldSummary `yaml:"fields,omitempty"`
+	ImagePlaneZ float64 `yaml:"image_plane_z,omitempty"`
+	// Color is the config's paraxial colour summary (axial colour, secondary
+	// spectrum and weighted white EFL/BFL) when it declares wavelengths.
+	Color  *ParaxialColor     `yaml:"color,omitempty"`
+	Fields []ZoomFieldSummary `yaml:"fields,omitempty"`
 }
 
 // ZoomSummary is the report emitted by the `zoom` subcommand: one row per

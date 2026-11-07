@@ -15,6 +15,21 @@ import (
 // grid points already fill the effective aperture, so the envelope reflects
 // the true bundle. Rays failing for other reasons (geometry miss, fixed-surface
 // clip, glass path) are skipped, so fixed apertures still bound the envelope.
+func BeamEnvelopeMax(results []Result, engine *ray.Engine, surfaces []types.Surface, path []int, wavelengths []float64, pol types.JonesVector) map[int]float64 {
+	if len(wavelengths) == 0 {
+		return nil
+	}
+	out := make(map[int]float64)
+	for _, wl := range wavelengths {
+		for id, extent := range BeamEnvelope(results, engine, surfaces, path, wl, pol) {
+			if extent > out[id] {
+				out[id] = extent
+			}
+		}
+	}
+	return out
+}
+
 func BeamEnvelope(results []Result, engine *ray.Engine, surfaces []types.Surface, path []int, wavelength float64, pol types.JonesVector) map[int]float64 {
 	type job struct{ origin, direction types.Vec3 }
 	var jobs []job

@@ -336,10 +336,11 @@ run one Huygens PSF per field and wavelength set; use them in a final
 `merit_modes` stage or a short local refinement with a reduced
 `optimization.diffraction_mtf.num_rays`/`grid_size`, never as a global
 `escape`/`pso` merit. Their `target` is the desired Strehl/MTF (Strehl defaults
-to 1; MTF needs a non-zero target). The virtual entrance pupil (frozen axial
-position and diameter), the vignetting ray-count compensation and
-`optimization.diffraction_mtf.max_grid` are forwarded; a stop-based pupil is
-still resolved by the PSF's own field-grid builder.
+to 1; MTF needs a non-zero target). The PSF uses the optimizer's frozen pupil
+centre and `ApertureRadiusForGrid` radius (including the aperture margin), the
+vignetting ray-count compensation and `optimization.diffraction_mtf.max_grid`
+are forwarded. The gate's physical-pupil PSF can differ by that margin
+oversampling, but the merit and grid terms see the same bundle.
 
 The wavefront kinds fit the least-squares quadratic
 `P(x,y) = a·x² + b·y² + c·xy + d·x + e·y + f` to the field's OPD sampled on the
@@ -770,7 +771,8 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   pupil grid smaller than the aperture and stall DLS.
 - `optimization.aperture_margin_mm` is the physical clearance (mm) added to
   every sized `auto_aperture` diameter (default `0.4`). The auto-aperture sizing
-  envelopes **every** config wavelength (`apertureSizingWavelengths`), not one
+  envelopes **every wavelength any merit term evaluates** (`apertureSizingWavelengths`:
+  the config table, custom terms and aggregate/spectral sets), not one
   representative: transverse colour moves the footprint between wavelengths, and
   a diameter sized from the narrow one came out below the widest — on a 50 mm
   f/4 six-element that was 0.12 mm at 23°, enough for the image plane to clip

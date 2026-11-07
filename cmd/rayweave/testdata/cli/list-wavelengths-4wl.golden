@@ -7,4 +7,5 @@ visible  587.560000  d      1.000000  0.285714  yes
 visible  486.130000  F      1.000000  0.285714  yes     
 visible  656.270000  C      1.000000  0.285714  yes     
 visible  435.830000  g      0.500000  0.142857  yes     
+Set: design, 4 samples, 435.8-656.3 nm
 Spectrum: D65, 400-700 nm, step 10 nm

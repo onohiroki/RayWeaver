@@ -30,6 +30,11 @@ rayweave vignette < lens.yaml | rayweave trace | rayweave plot -o out.png
 | `--config ID` | select config by id (multi-config mode) |
 | `--glass-dir DIR` | AGF glass catalog directory |
 
+Diameter sizing envelopes **every declared config wavelength** and, when the
+document carries a `spectrum`, its 10 nm samples. The per-field vignetting
+report stays at the `--wl` reference wavelength, so the settled diameters cover
+the F/C/g (or continuous) beams while the table remains the design reference.
+
 ## Input YAML — `vignette` section (optional)
 
 Every setting can be given under a top-level `vignette:` section (also valid as

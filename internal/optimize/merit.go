@@ -582,16 +582,21 @@ func (o *Optimizer) whitePSFResult(cfg *config, term *meritTerm, surfaces []type
 		numRays = vignettedNumRays(numRays, fd.Vignetting)
 	}
 	pupilModel := cfg.pupilModel
-	if p.dia > 0 {
-		// Match the frozen entrance pupil the grid terms use: the PSF's
-		// dynamic pupil would otherwise sample a different bundle.
+	// Match the frozen entrance pupil the grid terms use: the PSF's dynamic
+	// pupil would otherwise sample a different bundle. ApertureRadiusForGrid
+	// applies the same aperture margin the grid launch uses, so the white PSF
+	// sees the same pupil centre and oversampling.
+	pupilZ := o.gridCentring(cfg, p, angle)
+	radius := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface,
+		effectiveReferenceWavelength(cfg.referenceWavelength), gc, o.apertureMargin, p.dia)
+	if radius > 0 {
 		pm := types.PupilModelConfig{}
 		if cfg.pupilModel != nil {
 			pm = *cfg.pupilModel
 		}
 		pm.Mode = "virtual_entrance_pupil"
-		pm.AxialPosition = o.gridCentring(cfg, p, angle)
-		pm.Diameter = p.dia
+		pm.AxialPosition = pupilZ
+		pm.Diameter = 2 * radius
 		pupilModel = &pm
 	}
 	opts := psf.Options{
