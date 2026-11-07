@@ -194,7 +194,7 @@ requires an analytic Jacobian and a sparse solver.
 | `internal/constraint/constraint.go` (`evaluateBeamClearance`) | use Layer D; a surface with no reaching ray is a violation, never `diameter/2` — **implemented** (`beamClearanceFromExtents`) | D |
 | `internal/optimize/optimize_eval.go` (degenerate penalties) | replace the constant with the margin-dependent residual (the same distance, scaled) | D |
 | `internal/optimize/optimize_apertures.go` | keep `auto_aperture` sizing as the structural phase: it removes clear-aperture clipping before the search starts | D |
-| `internal/paraxial` | expose per-surface marginal height/angle as the Layer P initializer and surrogate | P |
+| `internal/paraxial` | expose per-surface marginal height/angle as the Layer P initializer and surrogate — **accessor implemented** (`MarginalRayStates`); the initializer wiring is not | P |
 | `internal/dls` (tracer entry) | add the nested solve behind the same interface, fail-over from the forward march; residual norm as penalty | S |
 | `internal/optimize`, `internal/escape`, `internal/pso` | expose the residual as a merit kind and a constraint (merit kind **implemented** as `beam_clearance`); add the `ray_validity` schedule metric | R |
 
