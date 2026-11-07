@@ -58,7 +58,8 @@ configs:
 - The reference wavelength `chief.reference_wavelength` is always evaluated for
   reference quantities, even when it is excluded from the white combination. If
   it is not declared, it resolves to the line labelled `d`, else the largest
-  weight, else 587.56 nm.
+  weight, else 587.56 nm. The optimiser warns when the reference wavelength is
+  not in the design set or when a non-positive weight excludes a declared line.
 
 ### 1.2 Resolving a set
 

@@ -106,6 +106,15 @@ func buildConfigInputs(input types.Input, gc *glass.Catalog) []optimize.ConfigIn
 			}
 		}
 
+		var declared []types.MeritTerm
+		if cfg.Merit != nil {
+			declared = append(declared, cfg.Merit.Terms...)
+		}
+		for _, m := range cfg.MeritModes {
+			declared = append(declared, m.Terms...)
+		}
+		warnWavelengthCoverage(cfg.ID, cfg.Wavelengths, declared, ref)
+
 		constraints := input.Optimization.Constraints
 		if len(cfg.Constraints) > 0 {
 			constraints = cfg.Constraints
@@ -651,6 +660,9 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	// mm), so the run's field curvature can be read straight from the result.
 	if rows := opt.SpotFlatnessDiagnostics(finalX); len(rows) > 0 {
 		optResults.SpotFlatness = rows
+	}
+	if rows := opt.WavelengthBreakdown(finalX); len(rows) > 0 {
+		optResults.WavelengthSummary = rows
 	}
 	output.OptResults = optResults
 

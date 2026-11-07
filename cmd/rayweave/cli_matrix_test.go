@@ -43,11 +43,27 @@ var cliCases = []cliCase{
 			{"-r", "paraxial_result.entrance_pupil_diameter"},
 		}},
 
+	{name: "paraxial-4wl", stdin: "polychromatic-4wl.yaml",
+		steps: [][]string{{"paraxial", "--wavelength-set", "design"}},
+		probes: [][]string{
+			{"-r", "paraxial_result.color.secondary_spectrum_mm"},
+			{"-r", "paraxial_result.color.axial_color[2].shift_mm"},
+			{"-r", "paraxial_result.color.white_back_focal"},
+		}},
+
 	{name: "chief", stdin: "us2645157.yaml", steps: [][]string{{"chief"}},
 		probes: [][]string{
 			{"--len", "chief_rays"},
 			{"-r", "chief_rays[0].spot_stats.rms_r"},
 			{"-r", "chief_rays[1].field_angle"},
+		}},
+
+	{name: "chief-4wl", stdin: "polychromatic-4wl.yaml",
+		steps: [][]string{{"chief"}},
+		probes: [][]string{
+			{"-r", "chief_rays[1].lateral_color.max_mm"},
+			{"-r", "chief_rays[1].white_spot_stats.rms_r"},
+			{"-r", "chief_rays[1].wavelengths[3].label"},
 		}},
 
 	{name: "trace", stdin: "us2645157.yaml", steps: [][]string{{"chief"}, {"trace"}},
@@ -97,6 +113,31 @@ var cliCases = []cliCase{
 		probes: [][]string{
 			{"-r", "focus_comparison.spot.rows[0].file.spot_rms"},
 			{"-r", "focus_comparison.spot.rows[0].field_angle"},
+		}},
+
+	{name: "psf-white-4wl", stdin: "polychromatic-4wl.yaml",
+		steps: [][]string{{"psf", "--wavelength-set", "design", "--focus-plane", "white",
+			"--psf-grid", "12", "--num-rays", "32", "--fields", "0", "--converge-check", "false"}},
+		probes: [][]string{
+			{"-r", "psf_results[0].spectral_curve"},
+			{"-r", "psf_results[0].strehl_ratio"},
+		}},
+
+	{name: "focus-white-4wl", stdin: "polychromatic-4wl.yaml",
+		steps: [][]string{{"focus", "mtf", "--planes", "file,white", "--wavelength-set", "design",
+			"--num-rays", "32", "--psf-grid", "12", "--fields", "0", "--frequencies", "30"}},
+		probes: [][]string{
+			{"-r", "focus_comparison.mtf.focus_plane_white_shift_mm"},
+			{"-r", "focus_comparison.mtf.rows[0].focus_plane_white.strehl"},
+		}},
+
+	{name: "optimize-4wl", stdin: "polychromatic-4wl.yaml",
+		steps: [][]string{{"optimize"}},
+		probes: [][]string{
+			{"-r", "opt_results.status"},
+			{"-r", "opt_results.back_focus.method"},
+			{"-r", "opt_results.wavelength_summary[1].weight"},
+			{"--len", "opt_results.wavelength_summary"},
 		}},
 
 	{name: "wavefront", stdin: "us2645157.yaml",

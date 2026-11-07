@@ -753,6 +753,25 @@ func buildOptimizeVariables(opt *types.OptimizationConfig, gc *glass.Catalog) []
 	return variables
 }
 
+// warnWavelengthCoverage reports the two silent footguns of a design set: the
+// reference wavelength is not in the table, or a non-positive weight excludes
+// a declared line from the white combination.
+func warnWavelengthCoverage(configID string, items []types.WavelengthItem, terms []types.MeritTerm, reference float64) {
+	if !spectral.HasDesignSet(terms) {
+		return
+	}
+	if reference > 0 {
+		if set := spectral.DesignSamples(items); !spectral.SetContains(set, reference) {
+			errOut("Warning: config %q: reference wavelength %.3f nm is not in wavelength_set: design; white metrics exclude it",
+				configID, reference*1e6)
+		}
+	}
+	if excluded := spectral.ExcludedDesignValues(items); len(excluded) > 0 {
+		errOut("Warning: config %q: weight <= 0 excludes %.3f nm from wavelength_set: design",
+			configID, excluded[0]*1e6)
+	}
+}
+
 // writeBackWavelengthNormalization records the effective wavelength_set
 // weight rule. The "sum" default is injected only when the document actually
 // uses wavelength_set, so an ordinary single-wavelength run keeps its input
@@ -797,6 +816,7 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 		cfg := input.Configs[0]
 		if cfg.Merit != nil {
 			ref := effectiveReferenceWavelength(input.Chief)
+			warnWavelengthCoverage(cfg.ID, cfg.Wavelengths, cfg.Merit.Terms, ref)
 			resolver := spectral.NewResolver(cfg.Wavelengths, input.Spectrum, ref)
 			norm := ""
 			if input.Optimization != nil {

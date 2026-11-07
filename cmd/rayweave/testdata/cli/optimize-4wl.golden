@@ -1,0 +1,13 @@
+exit: 0
+stderr:
+=== Optimization complete ===
+  Status:      max_iterations
+  Iterations:  2
+  Accepted:    2 (iterations that improved the merit)
+  Before:      5.825403e+00
+  After:       2.541702e+00
+  Improvement: 56.37%
+probe -r opt_results.status: max_iterations
+probe -r opt_results.back_focus.method: white
+probe -r opt_results.wavelength_summary[1].weight: 0.2857142857142857
+probe --len opt_results.wavelength_summary: 4

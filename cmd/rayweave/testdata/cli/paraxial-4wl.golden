@@ -1,0 +1,5 @@
+exit: 0
+stderr:
+probe -r paraxial_result.color.secondary_spectrum_mm: 0.17037885021359322
+probe -r paraxial_result.color.axial_color[2].shift_mm: 0.22947436300594148
+probe -r paraxial_result.color.white_back_focal: 4.809058705283385

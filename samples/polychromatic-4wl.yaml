@@ -1,0 +1,89 @@
+metadata:
+  tool:
+    name: RayWeaver
+    url: https://github.com/onohiroki/RayWeaver
+    schema_version: 1
+  notes: |
+    Four-wavelength (d/F/C/g) polychromatic evaluation and optimisation sample.
+    The design table carries explicit weights (d=1, F=1, C=1, g=0.5); the merit
+    uses a white spot plus axial and secondary colour, and the image plane is
+    solved at the wavelength-weighted white focus. The singlet is intentionally
+    simple so the colour numbers are easy to read; it is the input of
+    polychromatic-demo.bash. A D65 spectrum is also declared so
+    --wavelength-set spectral works with the same document.
+spectrum:
+  curve: D65
+  range: [400, 700]   # nm
+  step: 10            # nm, evaluation
+  optimize_step: 10   # nm, optimisation
+glass_catalog: {}
+chief:
+  stop_surface: 1
+  reference_surface: 3
+  reference_wavelength: 0.00058756
+  num_rays: 64
+  fields:
+    - id: 0
+      angle: 0
+    - id: 1
+      angle: 10
+configs:
+  - id: visible
+    name: Four-line visible
+    weight: 1
+    active: true
+    fields:
+      - {id: 0, angle_deg: 0, weight: 1}
+      - {id: 1, angle_deg: 10, weight: 1}
+    wavelengths:
+      - {id: 0, value: 0.00058756, label: d, weight: 1.0}
+      - {id: 1, value: 0.00048613, label: F, weight: 1.0}
+      - {id: 2, value: 0.00065627, label: C, weight: 1.0}
+      - {id: 3, value: 0.00043583, label: g, weight: 0.5}
+    merit:
+      terms:
+        - {kind: polychromatic_spot_rms, field: 0, wavelength_set: design, weight: 1.0}
+        - {kind: axial_color, wavelength: 0.00048613,
+           comparison_wavelength: 0.00065627, weight: 10.0}
+        - {kind: secondary_spectrum, wavelength: 0.00048613,
+           comparison_wavelength: 0.00065627, wavelength_set: design, weight: 10.0}
+    surfaces:
+      - id: 1
+        type: sphere
+        radius: 50
+        thickness: 8
+        material: {nd: 1.5168, vd: 64.17}
+        diameter: 20
+        auto_aperture: false
+      - id: 2
+        type: sphere
+        radius: -50
+        thickness: 42
+        material: AIR
+        diameter: 20
+        auto_aperture: false
+      - id: 3
+        type: sphere
+        radius: 0
+        thickness: 10
+        material: AIR
+        diameter: 40
+        auto_aperture: true
+optimization:
+  method: dls
+  max_iter: 2
+  num_rays: 32
+  wavelength_normalization: sum
+  back_focus_solve:
+    enabled: true
+    type: white
+    objective: spot
+    wavelength_set: design
+    weight_type: uniform
+    num_rays: 32
+  variables:
+    - name: s1_curvature
+      target: {type: surface, id: 1, param: curvature}
+      min: 0.01
+      max: 0.04
+      active: true

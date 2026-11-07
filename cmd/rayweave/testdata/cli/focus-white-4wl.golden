@@ -1,0 +1,4 @@
+exit: 0
+stderr:
+probe -r focus_comparison.mtf.focus_plane_white_shift_mm: 2.061587705526712
+probe -r focus_comparison.mtf.rows[0].focus_plane_white.strehl: 0.6049545898582522

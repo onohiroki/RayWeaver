@@ -188,9 +188,10 @@ func runPSF(data []byte) {
 		}
 		if plane == "white" {
 			bfType = "white"
-			if bf.Objective == "" {
-				bf.Objective = "wavefront"
-			}
+			// Evaluation always uses the wavefront objective: the document's
+			// optimization.back_focus_solve.objective is an optimizer setting
+			// (typically spot), not the evaluation plane definition.
+			bf.Objective = "wavefront"
 			if len(wavelengths) > 0 {
 				samples := make([]types.WavelengthSample, len(wavelengths))
 				for i, wl := range wavelengths {

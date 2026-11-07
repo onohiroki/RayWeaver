@@ -344,6 +344,48 @@ func HasSpectralSet(terms []types.MeritTerm) bool {
 	return false
 }
 
+// HasDesignSet reports whether any term asks for the config wavelength table.
+func HasDesignSet(terms []types.MeritTerm) bool {
+	for _, t := range terms {
+		if strings.EqualFold(strings.TrimSpace(t.WavelengthSet), ModeDesign) {
+			return true
+		}
+	}
+	return false
+}
+
+// SetContains reports whether a resolved set contains value (1e-12 mm).
+func SetContains(samples []types.WavelengthSample, value float64) bool {
+	for _, s := range samples {
+		if math.Abs(s.Value-value) <= 1e-12 {
+			return true
+		}
+	}
+	return false
+}
+
+// ExcludedDesignValues lists table values excluded by a non-positive weight.
+// It returns nil when every weight is non-positive (the legacy all-equal case).
+func ExcludedDesignValues(items []types.WavelengthItem) []float64 {
+	positive := false
+	for _, w := range items {
+		if w.Weight > 0 {
+			positive = true
+			break
+		}
+	}
+	if !positive {
+		return nil
+	}
+	var out []float64
+	for _, w := range items {
+		if w.Value > 0 && w.Weight <= 0 {
+			out = append(out, w.Value)
+		}
+	}
+	return out
+}
+
 func isAggregateKind(kind string) bool {
 	switch kind {
 	case "polychromatic_spot_rms", "polychromatic_ee_radius",

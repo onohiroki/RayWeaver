@@ -11,6 +11,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/psf"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/wavefront"
 )
@@ -896,6 +897,126 @@ func (o *Optimizer) MeritBreakdown(x []float64) map[string]float64 {
 		objTotal += attraction
 	}
 	out["objective_total"] = objTotal
+	return out
+}
+
+// WavelengthBreakdown attributes the optical merit at x to each resolved
+// wavelength. It is intended for the pipeline's opt_results.wavelength_summary
+// and is computed only for a multi-wavelength merit. Aggregate polychromatic
+// terms are split by their normalised weights, so the rows sum to the optical
+// merit (hull and glass-attraction penalties excluded, like MeritBreakdown).
+// White diffraction kinds are skipped: recomputing their Huygens PSFs just for
+// a report is too expensive.
+func (o *Optimizer) WavelengthBreakdown(x []float64) []types.WavelengthSummaryRow {
+	multi := false
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		seen := make(map[float64]bool)
+		for _, st := range o.scheduledTerms(cfg) {
+			if st.term.kind == MeritPolychromaticStrehl ||
+				st.term.kind == MeritPolychromaticMTFSag ||
+				st.term.kind == MeritPolychromaticMTFTan {
+				return nil
+			}
+			if len(st.term.wavelengths) > 0 {
+				multi = true
+			}
+			seen[st.term.wavelength] = true
+		}
+		if len(seen) > 1 {
+			multi = true
+		}
+	}
+	if !multi {
+		return nil
+	}
+
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+	cache := newEvalGridCache()
+	type key struct {
+		config     string
+		wavelength float64
+	}
+	type row struct {
+		label        string
+		weight       float64
+		contribution float64
+	}
+	rows := make(map[key]*row)
+	add := func(configID string, wavelength float64, label string, weight, contribution float64) {
+		k := key{configID, wavelength}
+		r := rows[k]
+		if r == nil {
+			r = &row{}
+			rows[k] = r
+		}
+		if r.label == "" {
+			r.label = label
+		}
+		if r.weight == 0 {
+			r.weight = weight
+		}
+		r.contribution += contribution
+	}
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+		p := pupils[cfg.id]
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc, cache, p)
+		o.precomputeGrids(cfg, surfaces, gc, cache, p)
+		design := spectral.DesignSamples(cfg.wavelengths)
+		labelFor := func(wavelength float64) (string, float64) {
+			for _, s := range design {
+				if math.Abs(s.Value-wavelength) <= 1e-12 {
+					return s.Label, s.Weight
+				}
+			}
+			return "", 0
+		}
+		for _, st := range o.scheduledTerms(cfg) {
+			term := st.term
+			var val float64
+			if isGridKind(term.kind) {
+				val = o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
+			} else {
+				val = o.evaluateKindTerm(cfg, term, surfaces, gc, cache, p)
+			}
+			diff := (val - term.residualTarget()) / term.normDivisor()
+			contrib := st.scale * term.weight * term.fieldWeight * term.wavWeight * diff * diff * cfg.weight
+			if len(term.wavelengths) > 0 {
+				for _, s := range term.wavelengths {
+					add(cfg.id, s.Value, s.Label, s.Weight, contrib*s.Weight)
+				}
+				continue
+			}
+			label, weight := labelFor(term.wavelength)
+			if term.wavWeight > 0 {
+				weight = term.wavWeight
+			}
+			add(cfg.id, term.wavelength, label, weight, contrib)
+		}
+	}
+	out := make([]types.WavelengthSummaryRow, 0, len(rows))
+	for k, r := range rows {
+		out = append(out, types.WavelengthSummaryRow{
+			Config:       k.config,
+			Wavelength:   k.wavelength,
+			Label:        r.label,
+			Weight:       r.weight,
+			Contribution: r.contribution,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Config != out[j].Config {
+			return out[i].Config < out[j].Config
+		}
+		if out[i].Wavelength != out[j].Wavelength {
+			return out[i].Wavelength < out[j].Wavelength
+		}
+		return out[i].Label < out[j].Label
+	})
 	return out
 }
 

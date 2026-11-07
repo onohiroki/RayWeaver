@@ -587,6 +587,25 @@ against it. Dropped fields are counted in `opt_results.back_focus`
 (`fields_used` / `fields_dropped` / `failures`) and reported on stderr
 (throttled: the first three, then one in fifty).
 
+#### Wavelength summary
+
+A multi-wavelength merit also writes `opt_results.wavelength_summary`, one row
+per config and resolved wavelength:
+
+```yaml
+opt_results:
+  wavelength_summary:
+    - {config: visible, wavelength: 0.00043583, label: g, weight: 0.142857, contribution: 0.0234}
+    - {config: visible, wavelength: 0.00048613, label: F, weight: 0.285714, contribution: 2.9044}
+    ...
+```
+
+`contribution` is the optical merit attributed to that wavelength (aggregate
+`polychromatic_*` terms are split by their normalised weights), so the rows sum
+to the optical merit. The section is omitted for a single-wavelength merit and
+for a merit containing the white diffraction kinds (recomputing their Huygens
+PSFs just for the report is too expensive).
+
 #### Dynamic type switching (`back_focus_solve.schedule`)
 
 When a merit schedule is active, the back-focus type can switch between

@@ -1,0 +1,5 @@
+exit: 0
+stderr:
+probe -r chief_rays[1].lateral_color.max_mm: 0.011296129696463098
+probe -r chief_rays[1].white_spot_stats.rms_r: 0.2513596844354083
+probe -r chief_rays[1].wavelengths[3].label: g

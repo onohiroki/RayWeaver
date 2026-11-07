@@ -1389,6 +1389,21 @@ type OptimizationResult struct {
 	// and the astigmatic line-foci deviation — the spot-side read of the field
 	// curvature a gate measures with a through-focus sweep.
 	SpotFlatness []SpotFlatnessRow `yaml:"spot_flatness,omitempty"`
+	// WavelengthSummary reports the optical merit contribution attributed to
+	// each resolved wavelength (present only for a multi-wavelength merit).
+	// Aggregate polychromatic terms are split by their normalised wavelength
+	// weights, so the rows sum to the optical merit (hull and glass-attraction
+	// penalties excluded).
+	WavelengthSummary []WavelengthSummaryRow `yaml:"wavelength_summary,omitempty"`
+}
+
+// WavelengthSummaryRow is one config's contribution at one wavelength.
+type WavelengthSummaryRow struct {
+	Config       string  `yaml:"config,omitempty"`
+	Wavelength   float64 `yaml:"wavelength"`
+	Label        string  `yaml:"label,omitempty"`
+	Weight       float64 `yaml:"weight,omitempty"`
+	Contribution float64 `yaml:"contribution"`
 }
 
 // BackFocusDiagnostics is the run-level report of the back-focus hard solve.

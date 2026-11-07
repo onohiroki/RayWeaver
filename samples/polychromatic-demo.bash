@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Polychromatic evaluation: the design wavelength table (F/d/C) is used with
-# its weights by paraxial (colour sweep), chief (white spot + lateral colour)
-# and psf (design-weight white PSF at the white best focus).
+# Polychromatic evaluation: the four-line design table (d/F/C/g) is used with
+# its weights by paraxial (colour sweep), chief (white spot + lateral colour),
+# psf (design-weight white PSF at the white best focus), focus (file vs white
+# plane) and a short weighted optimisation.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -16,14 +17,15 @@ if [ -z "$RAYWEAVE" ]; then
   fi
 fi
 
-INPUT="$SCRIPT_DIR/6elements-init.yaml"
+INPUT="$SCRIPT_DIR/polychromatic-4wl.yaml"
 PARAXIAL="$SCRIPT_DIR/polychromatic-paraxial.yaml"
 CHIEF="$SCRIPT_DIR/polychromatic-chief.yaml"
 PSF="$SCRIPT_DIR/polychromatic-psf.yaml"
 FOCUS="$SCRIPT_DIR/polychromatic-focus.yaml"
+OPTIMIZED="$SCRIPT_DIR/polychromatic-optimized.yaml"
 
 clean() {
-  rm -f "$PARAXIAL" "$CHIEF" "$PSF" "$FOCUS"
+  rm -f "$PARAXIAL" "$CHIEF" "$PSF" "$FOCUS" "$OPTIMIZED"
 }
 
 if [ "${1:-}" = "--clean" ]; then
@@ -31,7 +33,12 @@ if [ "${1:-}" = "--clean" ]; then
   exit 0
 fi
 
-echo "== paraxial: design set (F/d/C), axial colour and secondary spectrum =="
+if [ "${1:-}" = "--lens" ] && [ $# -ge 2 ]; then
+  INPUT="$2"
+  shift 2
+fi
+
+echo "== paraxial: design set (d/F/C/g), axial colour and secondary spectrum =="
 "$RAYWEAVE" paraxial --wavelength-set design < "$INPUT" > "$PARAXIAL"
 "$RAYWEAVE" list paraxial < "$PARAXIAL" || true
 "$RAYWEAVE" query -r 'paraxial_result.color.axial_color[2].shift_mm' < "$PARAXIAL" || true
@@ -59,8 +66,15 @@ echo "== focus: file plane vs the wavelength-weighted white plane =="
 "$RAYWEAVE" list focus < "$FOCUS" || true
 
 echo
+echo "== optimize: weighted white merit and the per-wavelength summary =="
+"$RAYWEAVE" optimize < "$INPUT" > "$OPTIMIZED"
+"$RAYWEAVE" query -r 'opt_results.back_focus.method' < "$OPTIMIZED" || true
+"$RAYWEAVE" query --len 'opt_results.wavelength_summary' < "$OPTIMIZED" || true
+
+echo
 echo "Outputs written to:"
 echo "  $PARAXIAL"
 echo "  $CHIEF"
 echo "  $PSF"
 echo "  $FOCUS"
+echo "  $OPTIMIZED"
