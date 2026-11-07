@@ -573,6 +573,9 @@ func NewOptimizer(cfg Config) *Optimizer {
 		for _, m := range cfg.MeritModes {
 			modeTerms := m.Terms
 			if expanded, err := spectral.ExpandTerms(modeTerms, resolver, cfg.WavelengthNormalization); err == nil {
+				if len(expanded) > 20 && spectral.HasSpectralSet(modeTerms) {
+					Warnf("warning: merit mode %q: wavelength_set: spectral expanded %d merit terms; prefer an aggregate polychromatic kind or a coarser spectrum.optimize_step", m.Name, len(expanded))
+				}
 				modeTerms = expanded
 			} else {
 				Warnf("warning: merit mode %q: %v; the unexpanded terms are used", m.Name, err)
@@ -679,6 +682,9 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 	for i, ci := range configs {
 		resolver := spectral.NewResolver(ci.Wavelengths, ci.Spectrum, ci.ReferenceWavelength)
 		if expanded, err := spectral.ExpandTerms(ci.MeritTerms, resolver, ci.WavelengthNormalization); err == nil {
+			if len(expanded) > 20 && spectral.HasSpectralSet(ci.MeritTerms) {
+				Warnf("warning: config %q: wavelength_set: spectral expanded %d merit terms; prefer an aggregate polychromatic kind or a coarser spectrum.optimize_step", ci.ID, len(expanded))
+			}
 			ci.MeritTerms = expanded
 		} else {
 			Warnf("warning: config %q merit: %v; the unexpanded terms are used", ci.ID, err)
@@ -688,6 +694,9 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			for mi, m := range ci.MeritModes {
 				modes[mi] = m
 				if expanded, err := spectral.ExpandTerms(m.Terms, resolver, ci.WavelengthNormalization); err == nil {
+					if len(expanded) > 20 && spectral.HasSpectralSet(m.Terms) {
+						Warnf("warning: config %q mode %q: wavelength_set: spectral expanded %d merit terms; prefer an aggregate polychromatic kind or a coarser spectrum.optimize_step", ci.ID, m.Name, len(expanded))
+					}
 					modes[mi].Terms = expanded
 				} else {
 					Warnf("warning: config %q mode %q: %v; the unexpanded terms are used", ci.ID, m.Name, err)

@@ -115,7 +115,12 @@ func runPSF(data []byte) {
 			wavelengths = append(wavelengths, wl*1e-6)
 		}
 	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
-		wavelengths = configWavelengthValues(input.Configs, &configFlag)
+		// The PSF itself stays per-wavelength, but the white plane solve
+		// uses the design table's weights by default.
+		for _, s := range configWavelengthSamples(input.Configs, &configFlag) {
+			wavelengths = append(wavelengths, s.Value)
+			wavelengthWeights = append(wavelengthWeights, s.Weight)
+		}
 	default:
 		wavelengths = []float64{effectiveReferenceWavelength(input.Chief)}
 	}

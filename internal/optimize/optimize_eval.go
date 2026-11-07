@@ -115,6 +115,9 @@ func (o *Optimizer) OpticalMerit(x []float64) float64 {
 }
 
 func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput, gc *glass.Catalog) meritTerm {
+	if (t.Kind == MeritAxialColor || t.Kind == MeritSecondarySpectrum) && t.ComparisonWavelength <= 0 {
+		Warnf("warning: merit kind %q needs comparison_wavelength; it evaluates to 0", t.Kind)
+	}
 	wl := t.Wavelength
 	if wl <= 0 {
 		wl = effectiveReferenceWavelength(ci.ReferenceWavelength)

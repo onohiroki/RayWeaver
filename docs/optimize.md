@@ -336,7 +336,10 @@ run one Huygens PSF per field and wavelength set; use them in a final
 `merit_modes` stage or a short local refinement with a reduced
 `optimization.diffraction_mtf.num_rays`/`grid_size`, never as a global
 `escape`/`pso` merit. Their `target` is the desired Strehl/MTF (Strehl defaults
-to 1; MTF needs a non-zero target).
+to 1; MTF needs a non-zero target). The virtual entrance pupil (frozen axial
+position and diameter), the vignetting ray-count compensation and
+`optimization.diffraction_mtf.max_grid` are forwarded; a stop-based pupil is
+still resolved by the PSF's own field-grid builder.
 
 The wavefront kinds fit the least-squares quadratic
 `P(x,y) = a·x² + b·y² + c·xy + d·x + e·y + f` to the field's OPD sampled on the

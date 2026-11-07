@@ -806,10 +806,16 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 			if err != nil {
 				errExitf("Error: %v", err)
 			}
+			if len(expanded) > 20 && spectral.HasSpectralSet(cfg.Merit.Terms) {
+				errOut("Warning: wavelength_set: spectral expanded %d merit terms; prefer an aggregate polychromatic kind or a coarser spectrum.optimize_step", len(expanded))
+			}
 			for _, mt := range expanded {
 				kind := mt.Kind
 				if kind == "" {
 					kind = "spot_rms"
+				}
+				if (kind == "axial_color" || kind == "secondary_spectrum") && mt.ComparisonWavelength <= 0 {
+					errOut("Warning: merit kind %q needs comparison_wavelength; it evaluates to 0", kind)
 				}
 
 				fieldIndex := mt.Field

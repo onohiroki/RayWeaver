@@ -142,6 +142,7 @@ type psfIn struct {
 	NumRays       int       `json:"num_rays,omitempty" jsonschema:"pupil grid rays"`
 	Fields        []int     `json:"fields,omitempty" jsonschema:"field indices (default: all)"`
 	Wavelengths   []float64 `json:"wavelengths,omitempty" jsonschema:"wavelengths in mm (default: the chief wavelengths)"`
+	WavelengthSet string    `json:"wavelength_set,omitempty" jsonschema:"wavelength set: design, spectral or custom"`
 	Polarization  string    `json:"polarization,omitempty" jsonschema:"RCP (default), LCP, X, Y or RCP+LCP"`
 	Spectral      string    `json:"spectral,omitempty" jsonschema:"polychromatic PSF weighting: D65 or FLAT"`
 	Workers       int       `json:"psf_workers,omitempty" jsonschema:"parallel Huygens workers"`
@@ -149,7 +150,7 @@ type psfIn struct {
 	MTFSpectral   string    `json:"mtf_spectral,omitempty" jsonschema:"MTF polychromatic weighting: D65 or FLAT"`
 	MTFCombine    string    `json:"mtf_combination,omitempty" jsonschema:"MTF combination: intensity or otf"`
 	BestFocus     bool      `json:"best_focus,omitempty" jsonschema:"evaluate each field at its best-focus image plane"`
-	FocusPlane    string    `json:"focus_plane,omitempty" jsonschema:"common image plane: \"\" (input plane) or all"`
+	FocusPlane    string    `json:"focus_plane,omitempty" jsonschema:"common image plane: input plane, all (reference-wavelength) or white (wavelength-weighted)"`
 	ConvergeCheck *bool     `json:"converge_check,omitempty" jsonschema:"label sampling convergence by re-evaluating each result"`
 }
 
@@ -166,8 +167,9 @@ type focusIn struct {
 	settings
 	Mode          string    `json:"mode,omitempty" jsonschema:"comparison to run: mtf (default), psf or spot"`
 	Wavelengths   []float64 `json:"wavelengths,omitempty" jsonschema:"wavelengths in mm"`
+	WavelengthSet string    `json:"wavelength_set,omitempty" jsonschema:"wavelength set: design, spectral or custom"`
 	Fields        []int     `json:"fields,omitempty" jsonschema:"field indices"`
-	Planes        string    `json:"planes,omitempty" jsonschema:"file,all,best (default all three)"`
+	Planes        string    `json:"planes,omitempty" jsonschema:"file,all,best,white (default the first three)"`
 	ThroughFocus  string    `json:"through_focus,omitempty" jsonschema:"through-focus scan FROM,STEP,COUNT in mm"`
 	NumRays       int       `json:"num_rays,omitempty" jsonschema:"pupil grid rays"`
 	Grid          int       `json:"psf_grid,omitempty" jsonschema:"image-plane pixels per side"`
@@ -196,17 +198,18 @@ func (s *server) addFocus() {
 type wavefrontIn struct {
 	DocInput
 	settings
-	RefSurface   int       `json:"ref_surface,omitempty" jsonschema:"reference surface id for wavefront sampling"`
-	NumRays      int       `json:"num_rays,omitempty" jsonschema:"pupil grid rays"`
-	Fields       []int     `json:"fields,omitempty" jsonschema:"field indices"`
-	Wavelengths  []float64 `json:"wavelengths,omitempty" jsonschema:"wavelengths in mm"`
-	Polarization string    `json:"polarization,omitempty" jsonschema:"RCP (default), LCP, X, Y or RCP+LCP"`
-	ZernikeOrder int       `json:"zernike_order,omitempty" jsonschema:"highest Fringe Zernike index to fit"`
-	Workers      int       `json:"wavefront_workers,omitempty" jsonschema:"per-field task parallelism"`
-	MapGrid      int       `json:"map_grid,omitempty" jsonschema:"wavefront map resolution per side"`
-	BestFocus    bool      `json:"best_focus,omitempty" jsonschema:"compute and apply the weighted best image-plane shift"`
-	FocusWeight  string    `json:"focus_weight,omitempty" jsonschema:"best-focus weighting: uniform or custom"`
-	FocusWeights []float64 `json:"focus_weights,omitempty" jsonschema:"per-field weights when focus_weight is custom"`
+	RefSurface    int       `json:"ref_surface,omitempty" jsonschema:"reference surface id for wavefront sampling"`
+	NumRays       int       `json:"num_rays,omitempty" jsonschema:"pupil grid rays"`
+	Fields        []int     `json:"fields,omitempty" jsonschema:"field indices"`
+	Wavelengths   []float64 `json:"wavelengths,omitempty" jsonschema:"wavelengths in mm"`
+	WavelengthSet string    `json:"wavelength_set,omitempty" jsonschema:"wavelength set: design, spectral or custom"`
+	Polarization  string    `json:"polarization,omitempty" jsonschema:"RCP (default), LCP, X, Y or RCP+LCP"`
+	ZernikeOrder  int       `json:"zernike_order,omitempty" jsonschema:"highest Fringe Zernike index to fit"`
+	Workers       int       `json:"wavefront_workers,omitempty" jsonschema:"per-field task parallelism"`
+	MapGrid       int       `json:"map_grid,omitempty" jsonschema:"wavefront map resolution per side"`
+	BestFocus     bool      `json:"best_focus,omitempty" jsonschema:"compute and apply the weighted best image-plane shift"`
+	FocusWeight   string    `json:"focus_weight,omitempty" jsonschema:"best-focus weighting: uniform or custom"`
+	FocusWeights  []float64 `json:"focus_weights,omitempty" jsonschema:"per-field weights when focus_weight is custom"`
 }
 
 func (s *server) addWavefront() {

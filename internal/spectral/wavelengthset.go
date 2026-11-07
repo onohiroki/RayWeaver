@@ -333,6 +333,17 @@ func ExpandTerms(terms []types.MeritTerm, r Resolver, normalization string) ([]t
 	return out, nil
 }
 
+// HasSpectralSet reports whether any term asks for the continuous spectrum.
+// Callers use it to warn when a spectral set expands into a large term list.
+func HasSpectralSet(terms []types.MeritTerm) bool {
+	for _, t := range terms {
+		if strings.EqualFold(strings.TrimSpace(t.WavelengthSet), ModeSpectral) {
+			return true
+		}
+	}
+	return false
+}
+
 func isAggregateKind(kind string) bool {
 	switch kind {
 	case "polychromatic_spot_rms", "polychromatic_ee_radius",

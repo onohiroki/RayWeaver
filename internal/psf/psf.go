@@ -16,7 +16,11 @@ type Options struct {
 	GridType         types.GridType
 	GridSize         int     // image-plane pixels per side (0 = auto)
 	HalfWidth        float64 // evaluation half-width mm (0 = auto)
-	Polarizations    []string
+	// MaxGrid caps the auto-enlarged image grid (0 = no cap, negative =
+	// default from the caller). The window is kept when the cap applies, so
+	// the pixels get coarser instead of truncating the PSF.
+	MaxGrid       int
+	Polarizations []string
 	// Workers bounds the Huygens-integration and wavefront-tracing parallelism
 	// (0 = runtime.NumCPU()).
 	Workers int
@@ -563,6 +567,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 		half = 5e-3
 	}
 	spec := DefaultImageGrid(ref.samples[refIdx], center, ref.nImage, ref.wl, evaluateZ, cx, cy, half, opts.GridSize)
+	spec = capImageGrid(spec, opts.MaxGrid)
 
 	label := group[0].label
 	if len(group) == 2 {

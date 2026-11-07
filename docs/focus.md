@@ -222,7 +222,9 @@ with one sagittal/tangential column pair per frequency). See `docs/list.md`.
   coherent-peak objective is sampling-sensitive for strongly aberrated fields.
 - `white` is one plane for **all fields and wavelengths** (the wavelength-
   weighted evaluation focus), unlike `best` (per field, reference wavelength).
-  It uses the run's resolved wavelength set/weights; see
+  It uses the run's resolved wavelength set/weights; with no explicit set it
+  takes the config table's weights for the white plane while the comparison
+  rows stay per-wavelength. See
   [methods/polychromatic.md](methods/polychromatic.md).
 - Best-focus planes are per **field** (not per wavelength): the shift listed on
   the `best_focus` block is the coherent-peak-maximizing shift applied for that

@@ -86,6 +86,9 @@ func buildConfigInputs(input types.Input, gc *glass.Catalog) []optimize.ConfigIn
 				errExitf("Error: config %q: %v", cfg.ID, err)
 			}
 			meritTerms = expanded
+			if len(meritTerms) > 20 && spectral.HasSpectralSet(cfg.Merit.Terms) {
+				errOut("Warning: config %q: wavelength_set: spectral expanded %d merit terms; prefer an aggregate polychromatic kind or a coarser spectrum.optimize_step", cfg.ID, len(meritTerms))
+			}
 		}
 		var meritModes []types.MeritMode
 		if len(cfg.MeritModes) > 0 {
@@ -97,6 +100,9 @@ func buildConfigInputs(input types.Input, gc *glass.Catalog) []optimize.ConfigIn
 				}
 				meritModes[i] = m
 				meritModes[i].Terms = expanded
+				if len(expanded) > 20 && spectral.HasSpectralSet(m.Terms) {
+					errOut("Warning: config %q mode %q: wavelength_set: spectral expanded %d merit terms; prefer an aggregate polychromatic kind or a coarser spectrum.optimize_step", cfg.ID, m.Name, len(expanded))
+				}
 			}
 		}
 

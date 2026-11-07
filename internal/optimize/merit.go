@@ -576,17 +576,35 @@ func (o *Optimizer) whitePSFResult(cfg *config, term *meritTerm, surfaces []type
 		weights[i] = s.Weight
 	}
 	sampling := o.diffractionSampling()
+	fd := meritFieldDef(cfg, term, angle)
+	numRays := sampling.numRays
+	if fd.Vignetting != nil {
+		numRays = vignettedNumRays(numRays, fd.Vignetting)
+	}
+	pupilModel := cfg.pupilModel
+	if p.dia > 0 {
+		// Match the frozen entrance pupil the grid terms use: the PSF's
+		// dynamic pupil would otherwise sample a different bundle.
+		pm := types.PupilModelConfig{}
+		if cfg.pupilModel != nil {
+			pm = *cfg.pupilModel
+		}
+		pm.Mode = "virtual_entrance_pupil"
+		pm.AxialPosition = o.gridCentring(cfg, p, angle)
+		pm.Diameter = p.dia
+		pupilModel = &pm
+	}
 	opts := psf.Options{
 		ReferenceSurface:  refSurf,
-		NumRays:           sampling.numRays,
+		NumRays:           numRays,
 		GridSize:          sampling.gridSize,
+		MaxGrid:           sampling.maxGrid,
 		Polarizations:     sampling.polarizations,
 		WavelengthWeights: weights,
-		PupilModel:        cfg.pupilModel,
+		PupilModel:        pupilModel,
 		RayDefinition:     cfg.rayDefinition,
 		Workers:           o.gridWorkers(),
 	}
-	fd := meritFieldDef(cfg, term, angle)
 	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
 	res, err := psf.Compute(sys, gc, []types.FieldDef{fd}, vals, opts)
 	if err != nil || len(res) == 0 {

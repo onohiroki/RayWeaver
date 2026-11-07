@@ -132,7 +132,9 @@ optimization:
 
 `psf --focus-plane white` and `focus --planes white` use the evaluation
 objective (wavefront by default). The `focus` path uses the run's resolved
-wavelength set and weights as a custom set for the solve.
+wavelength set and weights as a custom set for the solve. When no explicit set
+is given, both commands take the design table's weights for the white plane
+while leaving the per-wavelength PSF/comparison rows unchanged.
 
 ## 4. Axial colour and secondary spectrum
 
@@ -164,9 +166,13 @@ axial-colour shifts and the secondary spectrum together.
   stage or a short local refinement, with a reduced
   `optimization.diffraction_mtf.num_rays`/`grid_size`. They are not suitable
   for a global `escape`/`pso` merit. They use the diffraction-MTF sampling
-  configuration and the delivered image plane; the virtual-pupil model is
-  forwarded, but the optimizer's frozen-EPD override is not (the PSF samples
-  the pupil `psf.ComputeFieldGrid` would use).
+  configuration and the delivered image plane. A virtual entrance pupil is
+  forwarded with the optimizer's frozen axial position and diameter, the
+  vignetting compensation is applied to `num_rays`, and
+  `optimization.diffraction_mtf.max_grid` caps the image grid. For a
+  stop-based (non-virtual) pupil the PSF still lets `psf.ComputeFieldGrid`
+  resolve the pupil, so a small sampling difference from the grid terms is
+  possible.
 
 ## 6. Determinism
 

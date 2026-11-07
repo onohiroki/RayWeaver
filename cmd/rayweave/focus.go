@@ -272,7 +272,12 @@ func buildFocusRun(input *types.Input, fl *clispec.Options, y focusYAML, planeFn
 			wavelengthWeights = append(wavelengthWeights, s.Weight)
 		}
 	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
-		wavelengths = configWavelengthValues(input.Configs, &configFlag)
+		// The comparison rows stay per-wavelength; the white plane solve uses
+		// the design table's weights by default.
+		for _, s := range configWavelengthSamples(input.Configs, &configFlag) {
+			wavelengths = append(wavelengths, s.Value)
+			wavelengthWeights = append(wavelengthWeights, s.Weight)
+		}
 	default:
 		wavelengths = []float64{refWavelength}
 	}
