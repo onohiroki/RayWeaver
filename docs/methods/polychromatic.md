@@ -154,7 +154,9 @@ axial-colour shifts and the secondary spectrum together.
 
 - **Evaluation** (`paraxial`, `chief`, `psf`, `focus`, `wavefront`) uses the
   full set and normalised weights; per-λ rows are emitted, and the white
-  aggregates sit beside them.
+  aggregates sit beside them. `chief --wavelength-set spectral` runs the white
+  spot/lateral-colour analysis over the continuous spectrum; `wavefront`
+  reports `white.fields[]` (weighted RMS/Strehl) for a multi-wavelength run.
 - **Optimisation** (`optimize`, `escape`, `pso`) uses the coarse spectral grid
   when `wavelength_set: spectral` is requested. Expanding a spectral set into
   ordinary terms is expensive; prefer the aggregate kinds. The white

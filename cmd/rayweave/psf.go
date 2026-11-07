@@ -110,6 +110,8 @@ func runPSF(data []byte) {
 			wavelengths = append(wavelengths, s.Value)
 			wavelengthWeights = append(wavelengthWeights, s.Weight)
 		}
+	case wavelengthSet == "custom":
+		errExitf("Error: psf.wavelength_set: custom needs --wavelengths or psf.wavelengths")
 	case spectralMode:
 		for wl := 400.0; wl <= 700; wl += 10 {
 			wavelengths = append(wavelengths, wl*1e-6)

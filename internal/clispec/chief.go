@@ -45,6 +45,10 @@ var Chief = Spec{Command: "chief", Flags: []Flag{
 
 	{Name: "wl", Kind: Float, Default: types.DefaultWavelength, Role: RoleSetting, Always: true,
 		Help: "reference wavelength in mm for grid ray tracing"},
+	{Name: "wavelengths", Kind: FloatList, Role: RoleSetting, Repeat: true,
+		Help: "explicit per-wavelength stats list in mm (custom set)"},
+	{Name: "wavelength-set", Kind: String, Role: RoleSetting,
+		Help: "per-wavelength stats set: design | spectral | custom"},
 	{Name: "glass-dir", Kind: String, Role: RoleSetting,
 		Help: "AGF glass catalog directory"},
 }}

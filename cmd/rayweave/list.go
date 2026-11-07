@@ -55,7 +55,7 @@ func runList(data []byte) {
 	defaultListTargets := []string{"surfaces", "glasses", "paraxial", "fields"}
 	// allListTargets is the full target set; the "all" keyword expands to it
 	// and implies --auto-aperture, --all-glasses, and --roles.
-	allListTargets := []string{"surfaces", "glasses", "paraxial", "fields", "rays", "merit", "optimization", "global", "focus"}
+	allListTargets := []string{"surfaces", "glasses", "paraxial", "fields", "wavelengths", "rays", "merit", "optimization", "global", "focus"}
 
 	targets := args.positional
 	if len(targets) == 0 {
@@ -129,6 +129,8 @@ func runList(data []byte) {
 			listRays(output, opts.Bool("summary"), opts.String("format"))
 		case "fields":
 			listFields(input, opts.String("format"), opts.String("glass-dir"), configFlag)
+		case "wavelengths":
+			listWavelengths(input, opts.String("format"), configFlag)
 		case "merit":
 			listMerit(input, output, opts.String("format"))
 		case "optimization":
@@ -140,7 +142,7 @@ func runList(data []byte) {
 		case "summary":
 			listSummary(data, opts.String("format"))
 		default:
-			errExitf("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, rays, merit, optimization, global, focus, summary, \"default\", or \"all\")", target)
+			errExitf("Error: unknown list target %q (supported: surfaces, glasses, paraxial, fields, wavelengths, rays, merit, optimization, global, focus, summary, \"default\", or \"all\")", target)
 		}
 	}
 }

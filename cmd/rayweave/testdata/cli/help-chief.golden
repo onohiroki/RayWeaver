@@ -42,7 +42,9 @@ Options:
   --pupil-model-diameter D        virtual entrance pupil diameter (mm)
   --pupil-model-mode MODE         pupil model mode (default
                          virtual_entrance_pupil)
-	  --wl 0.00058756      reference wavelength (mm; overrides chief.reference_wavelength)
+  --wl 0.00058756      reference wavelength (mm; overrides chief.reference_wavelength)
+  --wavelengths W1,... explicit per-wavelength stats list (custom set)
+  --wavelength-set S   per-wavelength stats set: design | spectral | custom
 
 Input YAML — chief section:
   fields:
@@ -53,6 +55,7 @@ Input YAML — chief section:
       object_z: -500           #   object plane Z (default -1000)
 
   reference_surface: 8         # surface ID for centroid/image height
+  wavelength_set: design       # per-wavelength stats: design | spectral | custom
   num_rays: 512                # pupil samples (≈ √n × √n)
   grid_type: polar             # pupil grid: polar | square | hex
   dump_map: false              # output per-ray spot data (grid_points)

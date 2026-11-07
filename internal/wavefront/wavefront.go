@@ -36,6 +36,10 @@ type Options struct {
 	// how the chief ray — whose direction sets the polarization frame of the
 	// traced bundle — is constructed from the pupil grid.
 	RayDefinition string
+	// WavelengthWeights aligns with the wavelengths slice and weights the
+	// white summary (nil = equal). It does not change the per-wavelength
+	// analysis.
+	WavelengthWeights []float64
 	// Partial continues past a failing (field, wavelength, polarization) task:
 	// the failure is recorded in Result.Errors and its result is omitted
 	// instead of aborting the whole analysis, and Compute only returns an
@@ -120,6 +124,8 @@ type Result struct {
 	// Fields. Empty for an all-or-nothing analysis (any failure aborts it).
 	Errors    []FieldError
 	BestFocus *BestFocusOut
+	// White is the weighted multi-wavelength summary (nil for one wavelength).
+	White *types.WavefrontWhiteSummary
 }
 
 // polState is one requested input polarization label plus the Jones vector
@@ -306,6 +312,9 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 	})
 
 	out := &Result{Fields: results, Errors: taskErrs}
+	if len(wavelengths) > 1 {
+		out.White = whiteSummary(results, wavelengths, opts.WavelengthWeights)
+	}
 	if opts.BestFocus != nil {
 		bf, err := computeBestFocus(results, imagePlaneZ, *opts.BestFocus, len(fields))
 		if err != nil {
@@ -314,6 +323,99 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef, wa
 		out.BestFocus = bf
 	}
 	return out, nil
+}
+
+// whiteSummary aggregates the per-(field, wavelength) wavefront statistics by
+// the resolved wavelength weights. One polarization per (field, wavelength) is
+// used (the OPD is polarization-independent). RMS is the weighted quadratic
+// mean sqrt(Σw·RMS²), Strehl the weighted arithmetic mean.
+func whiteSummary(results []FieldResult, wavelengths, weights []float64) *types.WavefrontWhiteSummary {
+	if len(weights) != len(wavelengths) {
+		weights = make([]float64, len(wavelengths))
+		for i := range weights {
+			weights[i] = 1
+		}
+	}
+	var sum float64
+	for _, w := range weights {
+		if w > 0 {
+			sum += w
+		}
+	}
+	if sum <= 0 {
+		for i := range weights {
+			weights[i] = 1
+		}
+		sum = float64(len(weights))
+	}
+	weightAt := func(wl float64) float64 {
+		for i, w := range wavelengths {
+			if math.Abs(w-wl) <= 1e-15 {
+				return weights[i] / sum
+			}
+		}
+		return 0
+	}
+	type acc struct {
+		angle  float64
+		rms    float64
+		strehl float64
+		wSum   float64
+		count  int
+	}
+	byField := make(map[int]*acc)
+	lastWl := make(map[int]float64)
+	var order []int
+	for _, r := range results {
+		w := weightAt(r.Wavelength)
+		if w <= 0 {
+			continue
+		}
+		// Results are sorted field, wavelength, polarization: use the first
+		// polarization per (field, wavelength) so a pol pair is not counted
+		// twice.
+		if prev, ok := lastWl[r.FieldIndex]; ok && math.Abs(prev-r.Wavelength) <= 1e-15 {
+			continue
+		}
+		lastWl[r.FieldIndex] = r.Wavelength
+		a := byField[r.FieldIndex]
+		if a == nil {
+			a = &acc{angle: r.FieldAngle}
+			byField[r.FieldIndex] = a
+			order = append(order, r.FieldIndex)
+		}
+		a.rms += w * r.Statistics.RMS * r.Statistics.RMS
+		a.strehl += w * r.Statistics.Strehl
+		a.wSum += w
+		a.count++
+	}
+	if len(order) == 0 {
+		return nil
+	}
+	sort.Ints(order)
+	out := &types.WavefrontWhiteSummary{}
+	for _, wl := range wavelengths {
+		out.Wavelengths = append(out.Wavelengths, types.WavelengthSample{
+			Value: wl, Weight: weightAt(wl),
+		})
+	}
+	for _, fi := range order {
+		a := byField[fi]
+		if a.wSum <= 0 {
+			continue
+		}
+		out.Fields = append(out.Fields, types.WavefrontWhiteField{
+			FieldIndex: fi,
+			FieldAngle: a.angle,
+			RMS:        math.Sqrt(a.rms / a.wSum),
+			Strehl:     a.strehl / a.wSum,
+			Samples:    a.count,
+		})
+	}
+	if len(out.Fields) == 0 {
+		return nil
+	}
+	return out
 }
 
 // computeField performs the single-field analysis pipeline for one

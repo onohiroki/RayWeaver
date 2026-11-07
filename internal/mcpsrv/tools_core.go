@@ -95,7 +95,7 @@ func (s *server) addValidate() {
 type listIn struct {
 	DocInput
 	settings
-	Targets      []string `json:"targets,omitempty" jsonschema:"what to list: surfaces, glasses, paraxial, fields, rays, merit, optimization, global, focus, default or all (default: default)"`
+	Targets      []string `json:"targets,omitempty" jsonschema:"what to list: surfaces, glasses, paraxial, fields, wavelengths, rays, merit, optimization, global, focus, default or all (default: default)"`
 	Format       string   `json:"format,omitempty" jsonschema:"output format: json (default), yaml, csv or table"`
 	Curvature    bool     `json:"curvature,omitempty" jsonschema:"show curvature instead of radius (surfaces)"`
 	AutoAperture bool     `json:"auto_aperture,omitempty" jsonschema:"surfaces: show the auto_aperture state column"`

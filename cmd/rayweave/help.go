@@ -54,7 +54,9 @@ Options:
   --pupil-model-diameter D        virtual entrance pupil diameter (mm)
   --pupil-model-mode MODE         pupil model mode (default
                          virtual_entrance_pupil)
-	  --wl 0.00058756      reference wavelength (mm; overrides chief.reference_wavelength)
+  --wl 0.00058756      reference wavelength (mm; overrides chief.reference_wavelength)
+  --wavelengths W1,... explicit per-wavelength stats list (custom set)
+  --wavelength-set S   per-wavelength stats set: design | spectral | custom
 
 Input YAML — chief section:
   fields:
@@ -65,6 +67,7 @@ Input YAML — chief section:
       object_z: -500           #   object plane Z (default -1000)
 
   reference_surface: 8         # surface ID for centroid/image height
+  wavelength_set: design       # per-wavelength stats: design | spectral | custom
   num_rays: 512                # pupil samples (≈ √n × √n)
   grid_type: polar             # pupil grid: polar | square | hex
   dump_map: false              # output per-ray spot data (grid_points)
@@ -1312,7 +1315,7 @@ not pipeline YAML.
 Targets (space-separated, flags may appear before or after them;
 default: surfaces, glasses, paraxial and fields — the keyword "default"
 expands to this set in place, e.g. "list default merit" shows the default
-targets followed by merit; the keyword "all" expands to all nine targets
+targets followed by merit; the keyword "all" expands to all ten targets
 and implies --auto-aperture, --all-glasses, and --roles):
   surfaces   surface table of the selected config (object plane 0 excluded)
               With --auto-aperture, also shows the per-surface auto_aperture
@@ -1329,6 +1332,9 @@ and implies --auto-aperture, --all-glasses, and --roles):
              image height) from the real-ray chief trace. When input and computed
              values match, only one is shown; when they differ (e.g. image_height
              mode where the angle is solved iteratively), both are shown.
+  wavelengths design wavelength table of the selected config: value (nm), label,
+             declared and normalised weight, whether weight <= 0 excludes it,
+             plus chief.reference_wavelength and the document spectrum.
   rays       ray trace results from results[] section (requires trace output).
              Shows a summary table (ID, λ, OPL, Is/Ip, final cumulative
              transmittance Tcum s/p, surface/transmit/miss counts) plus

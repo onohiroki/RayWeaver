@@ -70,6 +70,7 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `glasses` | Refractive-index table of the glasses used by the selected config. |
 | `paraxial` | First-order optical properties (EFL, F/#, NA, EPD, BFL, …). With `--roles`, appends the per-element glass-role table. |
 | `fields` | Field-of-view definitions from `chief.fields[]` (or `configs[].fields[]` as fallback). Shows each field's type (`angle`, `image_height`, `height`) with input values from the YAML and computed values (actual angle, image height) from the real-ray chief trace. When input and computed values match, only one is shown; when they differ (e.g. `image_height` mode where the angle is solved iteratively), both are shown as `input (computed)`. |
+| `wavelengths` | The selected config's design wavelength table: value (nm), label, declared (`Raw`) and normalised `Weight`, and whether the line is included (`weight <= 0` excludes it). Also reports `chief.reference_wavelength` and the document `spectrum` (curve/range/step). |
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
 | `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, `wavelength_set`, comparison_wavelength, weight, target), merit modes with term counts, the effective `wavelength_normalization` (`sum` default | `none`), and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize` or a global run, also shows the optimization result (status, iterations, merit). |
 | `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables/variable links, `merit_schedule`, and the sub-configs (`escape`, `pso`, `glass_hull`, `glass_attraction`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
@@ -81,9 +82,10 @@ Default (no target arguments): `surfaces glasses paraxial fields`. The
 explicit keyword `default` expands to this set **in place**, preserving the
 order of the remaining targets — `rayweave list default merit` shows the
 default targets followed by merit, and `rayweave list merit default` shows
-merit first. The explicit keyword `all` expands to all nine targets
-(`surfaces`, `glasses`, `paraxial`, `fields`, `rays`, `merit`, `optimization`,
-`global`, `focus`) and implies `--auto-aperture`, `--all-glasses`, and `--roles`
+merit first. The explicit keyword `all` expands to all ten targets
+(`surfaces`, `glasses`, `paraxial`, `fields`, `wavelengths`, `rays`, `merit`,
+`optimization`, `global`, `focus`) and implies `--auto-aperture`,
+`--all-glasses`, and `--roles`
 so every optional detail is shown without specifying each flag individually.
 Duplicate targets (e.g. `default surfaces`, `all merit`) are shown once.
 
@@ -91,6 +93,7 @@ Duplicate targets (e.g. `default surfaces`, `all merit`) are shown once.
 rayweave list paraxial < lens.yaml            # first-order properties
 rayweave list paraxial --roles < lens.yaml    # + element glass roles
 rayweave list fields < lens.yaml              # field-of-view definitions
+rayweave list wavelengths < lens.yaml         # design table + normalised weights
 rayweave list merit < lens.yaml               # merit function definition
 rayweave list default < lens.yaml             # same as the bare invocation
 rayweave list default merit < lens.yaml       # default targets, then merit

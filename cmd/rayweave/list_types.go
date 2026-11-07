@@ -164,6 +164,23 @@ type fieldsListOutput struct {
 	Fields []FieldListRow `json:"fields" yaml:"fields"`
 }
 
+// WavelengthListRow is one row of the `list wavelengths` table.
+type WavelengthListRow struct {
+	Config    string  `json:"config" yaml:"config"`
+	Value     float64 `json:"value" yaml:"value"`
+	Label     string  `json:"label,omitempty" yaml:"label,omitempty"`
+	RawWeight float64 `json:"raw_weight" yaml:"raw_weight"`
+	Weight    float64 `json:"weight" yaml:"weight"`
+	Included  bool    `json:"included" yaml:"included"`
+}
+
+// WavelengthListOutput is the structured shape of `list wavelengths`.
+type WavelengthListOutput struct {
+	Reference float64               `json:"reference,omitempty" yaml:"reference,omitempty"`
+	Rows      []WavelengthListRow   `json:"wavelengths" yaml:"wavelengths"`
+	Spectrum  *types.SpectralConfig `json:"spectrum,omitempty" yaml:"spectrum,omitempty"`
+}
+
 // MeritTermRow is one row of the `list merit` terms table.
 type MeritTermRow struct {
 	Config               string  `json:"config" yaml:"config"`

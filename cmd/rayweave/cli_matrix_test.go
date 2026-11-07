@@ -66,6 +66,14 @@ var cliCases = []cliCase{
 			{"-r", "chief_rays[1].wavelengths[3].label"},
 		}},
 
+	{name: "chief-spectral-4wl", stdin: "polychromatic-4wl.yaml",
+		steps: [][]string{{"chief", "--wavelength-set", "spectral"}},
+		probes: [][]string{
+			{"-r", "chief_rays[1].lateral_color.rms_mm"},
+			{"-r", "chief_rays[1].white_spot_stats.rms_r"},
+			{"--len", "chief_rays[0].wavelengths"},
+		}},
+
 	{name: "trace", stdin: "us2645157.yaml", steps: [][]string{{"chief"}, {"trace"}},
 		probes: [][]string{
 			{"--len", "results"},
@@ -115,6 +123,9 @@ var cliCases = []cliCase{
 			{"-r", "focus_comparison.spot.rows[0].field_angle"},
 		}},
 
+	{name: "list-wavelengths-4wl", stdin: "polychromatic-4wl.yaml",
+		steps: [][]string{{"list", "wavelengths"}}},
+
 	{name: "psf-white-4wl", stdin: "polychromatic-4wl.yaml",
 		steps: [][]string{{"psf", "--wavelength-set", "design", "--focus-plane", "white",
 			"--psf-grid", "12", "--num-rays", "32", "--fields", "0", "--converge-check", "false"}},
@@ -145,6 +156,14 @@ var cliCases = []cliCase{
 		probes: [][]string{
 			{"-r", "wavefront_result.fields[0].statistics.rms"},
 			{"-r", "wavefront_result.fields[0].statistics.strehl"},
+		}},
+
+	{name: "wavefront-white-4wl", stdin: "polychromatic-4wl.yaml",
+		steps: [][]string{{"wavefront", "--wavelength-set", "design", "--num-rays", "64", "--fields", "0"}},
+		probes: [][]string{
+			{"-r", "wavefront_result.white.fields[0].rms"},
+			{"-r", "wavefront_result.white.fields[0].strehl"},
+			{"--len", "wavefront_result.white.wavelengths"},
 		}},
 
 	{name: "clean", stdin: "us2645157.yaml", steps: [][]string{{"chief"}, {"clean"}},

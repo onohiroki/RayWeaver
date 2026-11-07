@@ -1,0 +1,5 @@
+exit: 0
+stderr:
+probe -r chief_rays[1].lateral_color.rms_mm: 0.014360822821173869
+probe -r chief_rays[1].white_spot_stats.rms_r: 0.25155156748814683
+probe --len chief_rays[0].wavelengths: 31

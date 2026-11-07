@@ -68,6 +68,7 @@ func runWavefront(data []byte) {
 	}
 
 	var wavelengths []float64
+	var wavelengthWeights []float64
 	wavelengthSet := ""
 	if input.Wavefront != nil {
 		wavelengthSet = input.Wavefront.WavelengthSet
@@ -86,6 +87,7 @@ func runWavefront(data []byte) {
 	case wavelengthSet == "design":
 		for _, s := range configWavelengthSamples(input.Configs, &configFlag) {
 			wavelengths = append(wavelengths, s.Value)
+			wavelengthWeights = append(wavelengthWeights, s.Weight)
 		}
 		if len(wavelengths) == 0 {
 			errExitf("Error: wavefront.wavelength_set: design has no config wavelengths")
@@ -97,9 +99,15 @@ func runWavefront(data []byte) {
 		}
 		for _, s := range samples {
 			wavelengths = append(wavelengths, s.Value)
+			wavelengthWeights = append(wavelengthWeights, s.Weight)
 		}
+	case wavelengthSet == "custom":
+		errExitf("Error: wavefront.wavelength_set: custom needs --wavelengths or wavefront.wavelengths")
 	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
-		wavelengths = configWavelengthValues(input.Configs, &configFlag)
+		for _, s := range configWavelengthSamples(input.Configs, &configFlag) {
+			wavelengths = append(wavelengths, s.Value)
+			wavelengthWeights = append(wavelengthWeights, s.Weight)
+		}
 	default:
 		wavelengths = []float64{effectiveReferenceWavelength(input.Chief)}
 	}
@@ -121,12 +129,13 @@ func runWavefront(data []byte) {
 	mapGridVal := intOrYAML(mapGrid, wavefrontSetting(input, func(c *types.WavefrontConfig) int { return c.MapGrid }))
 
 	opts := wavefront.Options{
-		NumRays:         numRaysVal,
-		Workers:         workers,
-		ZernikeMaxOrder: zOrder,
-		Polarizations:   polLabels,
-		PupilModel:      input.Chief.PupilModel,
-		RayDefinition:   chiefRayDefinition(input),
+		NumRays:           numRaysVal,
+		Workers:           workers,
+		ZernikeMaxOrder:   zOrder,
+		Polarizations:     polLabels,
+		WavelengthWeights: wavelengthWeights,
+		PupilModel:        input.Chief.PupilModel,
+		RayDefinition:     chiefRayDefinition(input),
 	}
 	opts.BestFocus = resolveBestFocus(input, flags, bestFocus, focusWeight, focusWeights, len(fields))
 
@@ -162,7 +171,7 @@ func runWavefront(data []byte) {
 	output := types.Output{Input: input}
 	withOutputMetadata(&output.Input, "wavefront", subcmdArgs())
 
-	wr := &types.WavefrontResult{}
+	wr := &types.WavefrontResult{White: result.White}
 	bestFocusOut := result.BestFocus
 	if bestFocusOut != nil {
 		wb := &types.WavefrontBestFocus{

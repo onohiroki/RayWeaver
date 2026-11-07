@@ -437,6 +437,12 @@ type ChiefInput struct {
 	// chief-ray and paraxial calculations. The effective value is written back
 	// by commands that resolve it.
 	ReferenceWavelength float64 `yaml:"reference_wavelength"`
+	// WavelengthSet selects the per-wavelength stats set: "design" (config
+	// table, default when it has wavelengths), "spectral" (document spectrum)
+	// or "custom" (Wavelengths).
+	WavelengthSet string `yaml:"wavelength_set,omitempty"`
+	// Wavelengths is the explicit set for WavelengthSet: custom.
+	Wavelengths []WavelengthSample `yaml:"wavelengths,omitempty"`
 }
 
 type RayInput struct {
@@ -2836,6 +2842,25 @@ type WavefrontResult struct {
 	Fields []WavefrontFieldResult `yaml:"fields"`
 	// BestFocus is present when the best-focus shift was computed.
 	BestFocus *WavefrontBestFocus `yaml:"best_focus,omitempty"`
+	// White is the wavelength-weighted wavefront summary (present for a
+	// multi-wavelength analysis).
+	White *WavefrontWhiteSummary `yaml:"white,omitempty"`
+}
+
+// WavefrontWhiteSummary aggregates the per-wavelength wavefront statistics by
+// the resolved wavelength weights. RMS is sqrt(Σw·RMS²); Strehl is Σw·Strehl.
+type WavefrontWhiteSummary struct {
+	Wavelengths []WavelengthSample    `yaml:"wavelengths,omitempty"`
+	Fields      []WavefrontWhiteField `yaml:"fields,omitempty"`
+}
+
+// WavefrontWhiteField is one field's weighted white wavefront summary.
+type WavefrontWhiteField struct {
+	FieldIndex int     `yaml:"field_index"`
+	FieldAngle float64 `yaml:"field_angle"`
+	RMS        float64 `yaml:"rms"`
+	Strehl     float64 `yaml:"strehl"`
+	Samples    int     `yaml:"samples,omitempty"`
 }
 
 // WavefrontFieldResult is the wavefront analysis of one (field, wavelength,

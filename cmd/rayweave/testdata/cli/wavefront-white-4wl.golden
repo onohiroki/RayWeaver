@@ -1,0 +1,5 @@
+exit: 0
+stderr:
+probe -r wavefront_result.white.fields[0].rms: 0.002204123990059545
+probe -r wavefront_result.white.fields[0].strehl: 0.20399002950690612
+probe --len wavefront_result.white.wavelengths: 4

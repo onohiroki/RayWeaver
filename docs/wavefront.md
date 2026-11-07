@@ -142,6 +142,13 @@ wavefront_result:
         strehl: 0.991
       samples: {total: 400, valid: 385, missed: 15}
       output_file: wf_0.yaml   # when --yaml given
+  white:                       # present for a multi-wavelength run
+    wavelengths:
+      - {value: 0.00048613, weight: 0.333333}
+      - {value: 0.00058756, weight: 0.333333}
+      - {value: 0.00065627, weight: 0.333333}
+    fields:
+      - {field_index: 0, field_angle: 0, rms: 1.02e-05, strehl: 0.982, samples: 3}
   best_focus:                  # when --best-focus given
     weight_type: uniform
     per_field:
@@ -152,6 +159,11 @@ wavefront_result:
 ```
 
 All OPD/RMS/PV values are in mm. `shift_wavelengths = shift_mm / λ_ref`.
+`white.fields[]` is present when more than one wavelength is analysed: its
+`rms` is the weighted quadratic mean `sqrt(Σw·rms²)` and `strehl` the weighted
+arithmetic mean over the resolved set (one polarization per field/wavelength,
+since the OPD is polarization-independent). The per-wavelength rows stay in
+`fields[]`.
 
 ### Best-focus image-plane shift
 

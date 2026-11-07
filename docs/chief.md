@@ -15,6 +15,8 @@ rayweave chief [flags] < system.yaml
 |---|---|
 | `--config ID` | select a config by id (multi-config mode) |
 | `--wl W` | reference wavelength in mm (default `0.00058756`) |
+| `--wavelength-set S` | per-wavelength stats set: `design` (config table), `spectral` (document `spectrum`) or `custom` |
+| `--wavelengths W1,...` | explicit per-wavelength stats list in mm (custom set; equal weights) |
 | `--pass-through N` | constrain the chief ray to pass through `(0,0,0)` (centre) of surface N; overrides the YAML `pass_through.surface` |
 | `--chief-ray MODE` | chief-ray definition `entrance_pupil_centre` \| `centroid` \| `vignetting_centre` (empty = `chief.chief_ray_definition`); written back into the output when given. A definition the system cannot honour (a prescribed pupil without `stop_surface` or a virtual `pupil_model`), or an unknown name, exits 1 |
 | `--marginal-rays` | extract marginal (max/min) rays from the grid points and append them for piping into trace/plot |
@@ -33,6 +35,12 @@ rayweave chief [flags] < system.yaml
 | `--pupil-model-mode MODE` | pupil model mode (default `virtual_entrance_pupil`) |
 | `--glass-dir DIR` | AGF glass catalog directory |
 
+`wavelength_set: spectral` samples the document `spectrum` (400–700 nm by
+default) and traces the pupil grid at every sample, so a 31-line spectrum is
+31× the grid cost; lower `num_rays` for interactive use. `design` uses the
+config table and its weights; `custom` uses `chief.wavelengths` (or the CLI
+list, with equal weights).
+
 ## Input YAML — `chief` section
 
 ```yaml
@@ -44,6 +52,7 @@ chief:
     - height: 10.0             # or object height (mm, finite conjugate)
       object_z: -500           #   object plane Z (default -1000)
   reference_surface: 8         # surface ID for centroid/image height
+  wavelength_set: design       # per-wavelength stats: design | spectral | custom
   num_rays: 512                # pupil samples (≈ √n × √n)
   chief_ray_definition: vignetting_centre  # optional: chief-ray definition
                                            #   entrance_pupil_centre | centroid | vignetting_centre

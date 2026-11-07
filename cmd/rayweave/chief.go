@@ -11,6 +11,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -89,7 +90,53 @@ func runChief(data []byte) {
 		wavelength = types.DefaultWavelength
 	}
 	input.Chief.ReferenceWavelength = wavelength
-	configWavelengths := configWavelengthValues(input.Configs, &configFlag)
+
+	// Per-wavelength stats set: CLI > chief.wavelength_set > the config table
+	// (or no set when the config declares no wavelengths).
+	wavelengthSet := input.Chief.WavelengthSet
+	if opts.Set("wavelength-set") {
+		wavelengthSet = opts.String("wavelength-set")
+	}
+	explicit := opts.Floats("wavelengths")
+	wavelengthSamples := []types.WavelengthSample(nil)
+	switch {
+	case len(explicit) > 0:
+		for _, wl := range explicit {
+			if wl > 0 {
+				wavelengthSamples = append(wavelengthSamples, types.WavelengthSample{Value: wl, RawWeight: 1})
+			}
+		}
+		wavelengthSamples = spectral.NormalizeSet(wavelengthSamples)
+		wavelengthSet = spectral.ModeCustom
+		input.Chief.WavelengthSet = wavelengthSet
+		input.Chief.Wavelengths = append([]types.WavelengthSample(nil), wavelengthSamples...)
+	case strings.EqualFold(wavelengthSet, spectral.ModeDesign):
+		wavelengthSamples = spectral.DesignSamples(selectedConfigWavelengths(input.Configs, configFlag))
+		input.Chief.WavelengthSet = spectral.ModeDesign
+	case strings.EqualFold(wavelengthSet, spectral.ModeSpectral):
+		var err error
+		wavelengthSamples, err = spectral.SpectralSamples(input.Spectrum, 0)
+		if err != nil {
+			errExitf("Error: %v", err)
+		}
+		input.Chief.WavelengthSet = spectral.ModeSpectral
+	case strings.EqualFold(wavelengthSet, spectral.ModeCustom):
+		var err error
+		wavelengthSamples, err = spectral.CustomSamples(input.Chief.Wavelengths)
+		if err != nil {
+			errExitf("Error: %v", err)
+		}
+	case strings.TrimSpace(wavelengthSet) == "":
+		if items := selectedConfigWavelengths(input.Configs, configFlag); len(items) > 0 {
+			wavelengthSamples = spectral.DesignSamples(items)
+		}
+	default:
+		errExitf("Error: unknown chief.wavelength_set %q (design | spectral | custom)", wavelengthSet)
+	}
+	configWavelengths := make([]float64, len(wavelengthSamples))
+	for i, s := range wavelengthSamples {
+		configWavelengths[i] = s.Value
+	}
 
 	gc, _ := openGlass(&input, opts.String("glass-dir"))
 
@@ -231,10 +278,9 @@ func runChief(data []byte) {
 	}
 
 	// Build ChiefRayResult for YAML output
-	samples := configWavelengthSamples(input.Configs, &configFlag)
 	chiefRays := make([]types.ChiefRayResult, len(results))
 	for i, r := range results {
-		white, lateral := chief.SummarizeWavelengths(r.Wavelengths, samples, wavelength)
+		white, lateral := chief.SummarizeWavelengths(r.Wavelengths, wavelengthSamples, wavelength)
 		cr := types.ChiefRayResult{
 			WhiteSpotStats: white,
 			LateralColor:   lateral,
