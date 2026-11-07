@@ -57,6 +57,7 @@ documents explain *how* each quantity is computed, not *how to invoke* it.
 - [methods/region-active.md](methods/region-active.md) — Okudaira Region Active Method: dynamic active-set with hysteresis for inequality constraints
 - [methods/escape-function.md](methods/escape-function.md) — escape-function global optimization
 - [methods/pso.md](methods/pso.md) — particle-swarm exploration phase of the `pso` global cycle
+- [methods/feasibility-continuation.md](methods/feasibility-continuation.md) — total, differentiable merit: signed-distance residuals, paraxial initialization, nested ray solve, paraxial-to-real continuation
 - [methods/glass-dispersion.md](methods/glass-dispersion.md) — Sellmeier / Schott / Cauchy / nd-vd models, glass hull
 - [methods/thin-film-tmm.md](methods/thin-film-tmm.md) — transfer-matrix method for coatings
 - [methods/asphere-candidates.md](methods/asphere-candidates.md) — asphere candidate ranking, initial sag estimation, measured sensitivity, DLS validation

@@ -18,6 +18,7 @@ instead.
 | [region-active.md](region-active.md) | Okudaira Region Active Method: Lagrange-multiplier-based dynamic active-set with hysteresis for inequality constraints |
 | [escape-function.md](escape-function.md) | escape-function global optimization |
 | [pso.md](pso.md) | particle-swarm exploration phase of the `pso` global cycle: swarm in normalised variable space, constraint penalty |
+| [feasibility-continuation.md](feasibility-continuation.md) | total, differentiable merit: signed-distance residuals, paraxial initialization, nested ray solve, paraxial-to-real continuation |
 | [glass-dispersion.md](glass-dispersion.md) | Sellmeier / Schott / Cauchy / nd-vd dispersion models, glass hull |
 | [thin-film-tmm.md](thin-film-tmm.md) | transfer-matrix method for thin-film coatings |
 | [asphere-candidates.md](asphere-candidates.md) | asphere candidate ranking, initial sag estimation, measured sensitivity, DLS validation |
