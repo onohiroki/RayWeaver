@@ -862,13 +862,17 @@ func pupilFillValue(ratio float64) float64 {
 // dls.UnreachedClearance: a definite violation, not a vanishing term exactly
 // where the design is broken.
 //
-// The measurement uses the same extents machinery as the beam_clearance
+// The measurement uses the extents machinery shared with the beam_clearance
 // constraint and the end-of-solve clipping warning (aperture checks disabled,
-// the field's prescribed pupil); the merit kind resolves the pupil through the
-// config's stop, which the constraint operand does not carry. The extents are
-// accumulated over partial ray paths, so a point that already fails later in
-// the system still contributes the surfaces it reached — the gradient this term
-// provides in the infeasible region.
+// the field's prescribed pupil), but in its *relaxed* form: a ray that misses a
+// surface is extended to that surface's vertex tangent plane and the surfaces
+// beyond it are measured too. Sizing, the warning and the constraint keep the
+// physical envelope; this term wants a slope where the physical trace has no
+// beam. The merit kind resolves the pupil through the config's stop, which the
+// constraint operand does not carry. The extents are accumulated over partial
+// ray paths, so a point that already fails later in the system still
+// contributes the surfaces it reached — the gradient this term provides in the
+// infeasible region.
 func (o *Optimizer) evaluateBeamClearanceTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, p appliedPupil) float64 {
 	if len(term.surfaceSet) == 0 {
 		return term.target
@@ -878,7 +882,7 @@ func (o *Optimizer) evaluateBeamClearanceTerm(cfg *config, term *meritTerm, surf
 		wl = effectiveReferenceWavelength(cfg.referenceWavelength)
 	}
 	pupilZ := o.gridCentring(cfg, p, term.fieldAngle)
-	extents := dls.TraceFieldGridExtentsVignetted(
+	extents := dls.TraceFieldGridExtentsRelaxed(
 		gc, surfaces, cfg.stopSurface, pupilZ, term.fieldAngle, []float64{0, 1},
 		wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), p.dia,
 		o.fieldVignetting(cfg, term),

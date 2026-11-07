@@ -33,6 +33,11 @@ const (
 	// Missed indicates the ray passed through a surface location without
 	// intersecting it (used in Lenient mode to record a skipped surface).
 	Missed InteractionType = "MISSED"
+	// Virtual marks a point where the ray did not meet the surface but was
+	// extended to its vertex tangent plane so the trace could continue. The
+	// position is a real point on the ray; the surface was not physically hit,
+	// so a ray containing a Virtual result is not a physically valid ray.
+	Virtual InteractionType = "VIRTUAL"
 )
 
 type GlassType string
@@ -258,6 +263,12 @@ type Ray struct {
 	// Chief rays and marginal rays use Lenient mode so they trace as far as the
 	// geometry allows even when partially vignetted.
 	Lenient bool `yaml:"lenient,omitempty"`
+	// VirtualMiss, when true, extends the ray to the vertex tangent plane of a
+	// surface it misses (recording a Virtual result at that point) instead of
+	// stopping, so the surfaces beyond the miss still report a beam. It is the
+	// geometric-envelope (extents) trace's scaffolding for feasibility
+	// continuation; a physical merit trace leaves it false.
+	VirtualMiss bool `yaml:"-"`
 	// IncludeErrorSurfaces, when true, appends a MISSED SurfaceResult for the
 	// surface where a non-lenient trace stops (aperture, TIR, missed,
 	// glass-path, surface-not-found), so the partial result shows where the ray

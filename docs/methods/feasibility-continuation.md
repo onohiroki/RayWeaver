@@ -161,6 +161,23 @@ Implementation rules:
   real trace. The reported merit and every acceptance gate (`zoom` vignetting,
   `chief`, `psf`) still evaluate the physical ray trace.
 
+#### 4.3.1 Virtual extension (scaffolding until the node solve)
+
+A ray that misses a surface is extended to that surface's **vertex tangent
+plane** (`types.Ray.VirtualMiss`, `ray.virtualHit`) and recorded with
+`types.Virtual`, so the surfaces beyond the miss still report a beam and the
+clearance residuals keep a slope. This is deliberately a scaffold, not the
+node solve: the direction is not refracted at the missed surface, and a ray
+containing a Virtual result is not counted as a survivor.
+
+The relaxed envelope (`dls.TraceFieldGridExtentsRelaxed`) is used by the
+`beam_clearance` merit kind only. Sizing, the end-of-solve clipping warning and
+the `beam_clearance` constraint keep the **physical** envelope, because a ray
+that misses a surface entirely is not part of the delivered beam and extending
+it can only inflate the envelope (measured: an off-axis edge ray that misses
+the first surface's finite sphere inflated a 31 mm beam to 41 mm). The node
+solve in §4.3 replaces this scaffold and removes the distinction.
+
 ### 4.4 Layer R — outer continuation
 
 ```
@@ -190,7 +207,7 @@ requires an analytic Jacobian and a sparse solver.
 
 | Location | Change | Layer |
 |---|---|---|
-| `internal/dls/grid.go` (`traceGridRays`) | accumulate per-surface extents over **partial** paths (a ray that fails at surface k still contributes 1…k−1); measure the radial height in the local frame — **implemented** (`surfaceExtents`) | D |
+| `internal/dls/grid.go` (`traceGridRays`) | accumulate per-surface extents over **partial** paths (a ray that fails at surface k still contributes 1…k−1); measure the radial height in the local frame — **implemented** (`surfaceExtents`); the relaxed variant is `TraceFieldGridExtentsRelaxed` | D |
 | `internal/constraint/constraint.go` (`evaluateBeamClearance`) | use Layer D; a surface with no reaching ray is a violation, never `diameter/2` — **implemented** (`beamClearanceFromExtents`) | D |
 | `internal/optimize/optimize_eval.go` (degenerate penalties) | replace the constant with the margin-dependent residual (the same distance, scaled) | D |
 | `internal/optimize/optimize_apertures.go` | keep `auto_aperture` sizing as the structural phase: it removes clear-aperture clipping before the search starts | D |
@@ -260,7 +277,7 @@ On a zoom document known to produce no feasible minimum:
 |---|---|---|
 | D | residual layer + local-frame extents over partial paths | unit tests for every residual; the current `beam_clearance` no longer reports `D/2` for an unreached surface |
 | P | paraxial marginal-height accessor | a dead design has a finite paraxial path and merit |
-| S | nested ray solve behind the tracer interface | a ray that misses a surface returns a finite residual and a path; warm started Jacobian stays affordable |
+| S | nested ray solve behind the tracer interface (the virtual-extension scaffold is implemented) | a ray that misses a surface returns a finite residual and a path; warm started Jacobian stays affordable |
 | R | `ray_validity` metric + merit-kind exposure | a dead zoom bootstraps to rays-passing under `optimize` |
 | X | simultaneous solve | only if S is the measured bottleneck |
 
