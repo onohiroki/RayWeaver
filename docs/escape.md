@@ -411,7 +411,10 @@ applied, ready for `chief`/`trace`/`plot` or a re-optimisation):
   treated as the extension).
 - When a minimum is improved, the current `FILE N.yaml` is renamed to
   `FILE N.<version>.yaml` (the old, worse version is kept) and the better point
-  is written to `FILE N.yaml`.
+  is written to `FILE N.yaml`. The version files are the improvement history:
+  how many appear depends on how often the run improved that minimum before it
+  ended, so the set varies between runs even though the unsuffixed `FILE N.yaml`
+  carries the final, deterministic value.
 - Writes are atomic (temp file + fsync + rename), so a killed process never
   leaves a partial file. The per-minimum file name is also recorded in
   `global_result.minima[].file`.

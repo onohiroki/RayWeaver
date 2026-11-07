@@ -26,10 +26,13 @@ var updateCLIGoldens = flag.Bool("update-cli-goldens", false, "rewrite CLI matri
 // verbatim, which is only done for small outputs — the document-producing
 // commands are pinned by a handful of probe values so the goldens stay reviewable.
 type cliCase struct {
-	name   string
-	stdin  string     // sample file under samples/, "" for no input
-	steps  [][]string // argv without the program name
-	probes [][]string // query argv applied to the final stdout
+	name  string
+	stdin string // sample file under samples/, "" for no input
+	// stdinFile is a package-relative input used when the fixture is synthetic
+	// (e.g. a tiny deterministic escape document that samples/ does not carry).
+	stdinFile string
+	steps     [][]string // argv without the program name
+	probes    [][]string // query argv applied to the final stdout
 }
 
 // cliCases is the regression matrix. Inputs are the tracked demo documents in
@@ -209,6 +212,23 @@ var cliCases = []cliCase{
 	{name: "export-codev", stdin: "us2645157.yaml",
 		steps: [][]string{{"export", "--format", "codev"}}},
 
+	// The global search is the one long-running family the matrix used to skip.
+	// With --stream false and one worker its document is deterministic, so a
+	// probe-pinned smoke run is cheap enough (about two seconds) to keep here.
+	{name: "escape-single", stdinFile: "testdata/cli/escape-input.yaml",
+		steps: [][]string{{"escape", "--stream", "false"}},
+		probes: [][]string{
+			{"-r", "global_result.best_merit"},
+			{"--len", "global_result.minima"},
+			{"-r", "global_result.minima[0].index"},
+		}},
+	{name: "escape-clean-dls-off", stdinFile: "testdata/cli/escape-input.yaml",
+		steps: [][]string{{"escape", "--stream", "false", "--clean-dls", "false"}},
+		probes: [][]string{
+			{"-r", "global_result.best_merit"},
+			{"--len", "global_result.minima"},
+		}},
+
 	{name: "error-list-format", stdin: "us2645157.yaml",
 		steps: [][]string{{"list", "surfaces", "--format", "nope"}}},
 }
@@ -259,7 +279,14 @@ func normalizeCLI(s string) string {
 func runPipeline(t *testing.T, c cliCase) (stdout, stderr string, exit int) {
 	t.Helper()
 	in := ""
-	if c.stdin != "" {
+	switch {
+	case c.stdinFile != "":
+		data, err := os.ReadFile(c.stdinFile)
+		if err != nil {
+			t.Fatalf("read %s: %v", c.stdinFile, err)
+		}
+		in = string(data)
+	case c.stdin != "":
 		data, err := os.ReadFile(filepath.Join("..", "..", "samples", c.stdin))
 		if err != nil {
 			t.Fatalf("read samples/%s: %v", c.stdin, err)

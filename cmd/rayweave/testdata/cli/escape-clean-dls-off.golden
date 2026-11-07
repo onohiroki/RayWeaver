@@ -1,0 +1,4 @@
+exit: 0
+stderr:
+probe -r global_result.best_merit: 0.004404160709539097
+probe --len global_result.minima: 1
