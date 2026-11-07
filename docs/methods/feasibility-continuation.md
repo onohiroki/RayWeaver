@@ -196,7 +196,7 @@ requires an analytic Jacobian and a sparse solver.
 | `internal/optimize/optimize_apertures.go` | keep `auto_aperture` sizing as the structural phase: it removes clear-aperture clipping before the search starts | D |
 | `internal/paraxial` | expose per-surface marginal height/angle as the Layer P initializer and surrogate | P |
 | `internal/dls` (tracer entry) | add the nested solve behind the same interface, fail-over from the forward march; residual norm as penalty | S |
-| `internal/optimize`, `internal/escape`, `internal/pso` | expose the residual as a merit kind and a constraint; add the `ray_validity` schedule metric | R |
+| `internal/optimize`, `internal/escape`, `internal/pso` | expose the residual as a merit kind and a constraint (merit kind **implemented** as `beam_clearance`); add the `ray_validity` schedule metric | R |
 
 ## 6. Merit or constraint?
 
@@ -211,6 +211,9 @@ Both, deliberately:
   exploration phases see the slope.
 
 The two must share one implementation (Layer D), not duplicate the formula.
+The merit kind is `beam_clearance` (`internal/optimize/merit.go`) and the
+constraint is the `beam_clearance` measure (`internal/constraint`); both call
+`dls.BeamClearance`, so the clearance formula has one implementation.
 
 ## 7. Determinism and performance
 

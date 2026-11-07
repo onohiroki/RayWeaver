@@ -497,12 +497,14 @@ Cooke-triplet example.
 | `pupil_diameter` | Entrance-pupil diameter (mm) | `field`; `target` = desired EPD |
 | `vignetting` | Vignetted fraction of the pupil grid (0 = none) | `field`, `surface_set[0]` |
 | `clear_aperture` | Beam-envelope diameter at the surface (mm) | `field`, `surface_set[0]` |
+| `beam_clearance` | Clearance `surfaceRadius − beam extent` (mm), clamped at `target` so only under-clearance is penalised | `field`, `surface_set[0]`; `target` = required clearance (default 0 = only clipping) |
 | `edge_thickness` | Glass-path span at the surface (mm) | `surface_set[0]`; nonzero only when `min_glass_path`/`max_glass_path` are set |
 
 ```yaml
 - {kind: focal_length, weight: 5000, target: 50.0}
 - {kind: pupil_diameter, field: 0, weight: 1000, target: 25.4}
 - {kind: clear_aperture, field: 2, surface_set: [7], target: 40.0, weight: 10}
+- {kind: beam_clearance, field: 2, surface_set: [7], target: 0.3, weight: 200}
 ```
 
 `focal_length` is the system-level EFL term (it replaces the older
@@ -510,6 +512,18 @@ constraint-based EFL preference); the sign is preserved, so a flipped
 (negative-EFL) system receives a large penalty. `pupil_position`,
 `pupil_diameter` and `clear_aperture` run a chief pass mirroring the document's
 own stop and chief-ray definition, so they measure what `chief` reports.
+
+`beam_clearance` is the merit-side twin of the constraint of the same name: it
+measures the same kind of beam envelope (aperture checks disabled, the field's
+prescribed pupil) and returns the clearance, clamped at `target`. The residual
+is therefore the one-sided hinge `max(0, target − clearance)²`: an aperture at
+or above the required clearance contributes nothing, and only clipping (or a
+shortfall against `target`) is penalised. It exists because the constraint
+alone reaches only the DLS augmented Lagrangian — the escape bump and the PSO
+fitness rank on the **merit**, so a clearance that lives only in constraints
+leaves their landscape flat ([methods/feasibility-continuation.md](methods/feasibility-continuation.md)).
+A surface no traced ray reaches reports a negative clearance (a violation), not
+a vanishing term.
 
 ### 3.9 Contrast / MTF kinds
 
@@ -954,6 +968,7 @@ per-config constraints when present, else `optimization.constraints` (marked
 | `pupil_position` / `_diameter` | pin the pupil | `field`, `target` | Z / EPD (mm) |
 | `vignetting` | bound vignetting | `field`, `surface_set[0]` | vignetted fraction |
 | `clear_aperture` | size a surface | `field`, `surface_set[0]` | beam-envelope diameter |
+| `beam_clearance` | keep the beam off the clear aperture | `field`, `surface_set[0]`, `target` | clearance (mm), hinged at `target` |
 | `edge_thickness` | control glass path | `surface_set[0]` | glass-path span |
 | `geometric_mtf_sag` / `_tan` | raise MTF | `frequency`, `target` | MTF (hinge) |
 | `wavefront_shift_sag` / `_tan` | raise MTF at ν (not defocus) | `frequency` | Var(δW) over the pupil shear |

@@ -140,6 +140,30 @@ func surfaceExtents(samples []pupil.Sample, surfaces []types.Surface) map[int]fl
 	return perSurfMax
 }
 
+// UnreachedClearance is the clearance a caller should use for a surface no
+// traced ray reached. It is negative, so an inequality-lower bound treats the
+// absent measurement as a violation instead of reading it as the safest
+// surface; a caller that needs the distinction can use BeamClearance directly.
+const UnreachedClearance = -1.0 // mm
+
+// BeamClearance returns surfaceRadius - radial beam extent for one surface.
+// reached is false when the traced samples produced no hit on that surface (a
+// missed surface, total internal reflection before it, or a grid that could not
+// be launched), so the caller can apply the "absence is a violation" policy.
+func BeamClearance(extents map[int]float64, surfaces []types.Surface, surfaceID int) (clearance float64, reached bool) {
+	for _, s := range surfaces {
+		if s.ID != surfaceID {
+			continue
+		}
+		e, ok := extents[surfaceID]
+		if !ok {
+			return 0, false
+		}
+		return s.Diameter/2 - e, true
+	}
+	return 0, false
+}
+
 func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int, gridType types.GridType, epdOverride float64, vig *types.VignettingDef) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)

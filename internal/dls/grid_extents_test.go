@@ -58,3 +58,17 @@ func TestSurfaceExtentsIgnoresFailurePositions(t *testing.T) {
 		t.Errorf("surfaceExtents = %v, want no entry for a failure-only surface", got)
 	}
 }
+
+func TestBeamClearance(t *testing.T) {
+	surfaces := []types.Surface{{ID: 2, Diameter: 20}}
+
+	if c, ok := BeamClearance(map[int]float64{2: 4}, surfaces, 2); !ok || math.Abs(c-6) > 1e-12 {
+		t.Errorf("BeamClearance = (%v, %v), want (6, true)", c, ok)
+	}
+	if _, ok := BeamClearance(map[int]float64{1: 4}, surfaces, 2); ok {
+		t.Error("BeamClearance reported an unreached surface as reached")
+	}
+	if _, ok := BeamClearance(map[int]float64{2: 4}, surfaces, 99); ok {
+		t.Error("BeamClearance reported an unknown surface as reached")
+	}
+}
