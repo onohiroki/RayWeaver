@@ -255,3 +255,23 @@ func TestSurfaceRange(t *testing.T) {
 		t.Errorf("surface_range(unknown) = %v, want 0", got)
 	}
 }
+
+// TestBeamClearanceUnreachedSurface pins the "absence is not safety" rule: a
+// surface no traced ray reached has no extent, and that must read as a
+// violated clearance, not as the largest one.
+func TestBeamClearanceUnreachedSurface(t *testing.T) {
+	surfaces := []types.Surface{{ID: 2, Diameter: 20}}
+
+	if got := beamClearanceFromExtents(nil, surfaces, 2); got >= 0 {
+		t.Errorf("nil extents clearance = %v, want a violation (< 0)", got)
+	}
+	if got := beamClearanceFromExtents(map[int]float64{1: 4}, surfaces, 2); got >= 0 {
+		t.Errorf("unreached surface clearance = %v, want a violation (< 0)", got)
+	}
+	if got := beamClearanceFromExtents(map[int]float64{2: 4}, surfaces, 2); math.Abs(got-6) > 1e-12 {
+		t.Errorf("reached surface clearance = %v, want 6", got)
+	}
+	if got := beamClearanceFromExtents(map[int]float64{2: 4}, surfaces, 99); got >= 0 {
+		t.Errorf("unknown surface clearance = %v, want a violation (< 0)", got)
+	}
+}

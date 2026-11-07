@@ -191,7 +191,7 @@ requires an analytic Jacobian and a sparse solver.
 | Location | Change | Layer |
 |---|---|---|
 | `internal/dls/grid.go` (`traceGridRays`) | accumulate per-surface extents over **partial** paths (a ray that fails at surface k still contributes 1…k−1); measure the radial height in the local frame — **implemented** (`surfaceExtents`) | D |
-| `internal/constraint/constraint.go` (`evaluateBeamClearance`) | use Layer D; a surface with no reaching ray is a violation, never `diameter/2` | D |
+| `internal/constraint/constraint.go` (`evaluateBeamClearance`) | use Layer D; a surface with no reaching ray is a violation, never `diameter/2` — **implemented** (`beamClearanceFromExtents`) | D |
 | `internal/optimize/optimize_eval.go` (degenerate penalties) | replace the constant with the margin-dependent residual (the same distance, scaled) | D |
 | `internal/optimize/optimize_apertures.go` | keep `auto_aperture` sizing as the structural phase: it removes clear-aperture clipping before the search starts | D |
 | `internal/paraxial` | expose per-surface marginal height/angle as the Layer P initializer and surrogate | P |

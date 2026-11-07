@@ -848,7 +848,10 @@ is measured to).
 beam-clipping warning does (a dense grid of the field's prescribed pupil with
 aperture checks disabled), and declaring either one suppresses that warning:
 the config is already managing the clearance, and the constraint reporting names
-the violation.
+the violation. A surface the trace never reached has no envelope;
+`beam_clearance` then reports a negative value (a violation) instead of the
+surface's radius, so a dead field cannot satisfy a clearance requirement by
+having no rays.
 
 `system_length` sums every thickness, so it pins the whole track — the image
 plane measured from surface 1 — but cannot express a single group's position.

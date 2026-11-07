@@ -247,15 +247,28 @@ func evaluateBeamClearance(surfaces []types.Surface, pupilZ float64, fieldAngle,
 		wavelength = types.DefaultWavelength
 	}
 	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, 0, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, 0)
-	if perSurfMax == nil {
-		return 0
-	}
+	return beamClearanceFromExtents(perSurfMax, surfaces, surfaceID)
+}
+
+// unreachedClearance is the clearance reported for a surface no traced ray
+// reached. It is negative so that an inequality_lower constraint treats the
+// absent measurement as a violation. The previous code returned
+// diameter/2 - 0 == diameter/2 (a Go map zero value), i.e. reported the one
+// surface the beam never reached as the safest one; that reads as "absence is
+// safety" and lets a dead design satisfy its clearance constraints.
+const unreachedClearance = -1.0 // mm
+
+func beamClearanceFromExtents(extents map[int]float64, surfaces []types.Surface, surfaceID int) float64 {
 	for _, s := range surfaces {
 		if s.ID == surfaceID {
-			return s.Diameter/2 - perSurfMax[surfaceID]
+			e, ok := extents[surfaceID]
+			if !ok {
+				return unreachedClearance
+			}
+			return s.Diameter/2 - e
 		}
 	}
-	return 0
+	return unreachedClearance
 }
 
 func evaluateBeamDiameter(surfaces []types.Surface, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
