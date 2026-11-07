@@ -1014,10 +1014,8 @@ func (c *evalCtx) eval(n expr) (any, error) {
 			return b, nil
 		}
 		// Strip leading . for .prefix syntax (e.g., .ray → ray)
-		lookupName := t.name
-		if strings.HasPrefix(lookupName, ".") {
-			lookupName = lookupName[1:]
-		}
+		// Strip leading . for .prefix syntax (e.g., .ray → ray)
+		lookupName := strings.TrimPrefix(t.name, ".")
 		if lookupName == "pi" {
 			return math.Pi, nil
 		}
@@ -1227,17 +1225,39 @@ func splitPath(e expr) ([]any, error) {
 
 // getAtPath navigates from root following keys, returning the value at that path.
 func getAtPath(root any, keys []any) (any, error) {
+	return walkPath(root, keys, false)
+}
+
+// walkPath resolves keys from root. With create, a missing map key (and a nil
+// value the next key would descend into) is replaced by an empty map so a
+// setter can build the path; without it a missing key is an error.
+func walkPath(root any, keys []any, create bool) (any, error) {
 	cur := root
-	for _, k := range keys {
+	for i, k := range keys {
 		switch kk := k.(type) {
 		case string:
 			m, ok := cur.(map[string]any)
 			if !ok {
 				return nil, fmt.Errorf("not a map at %q", kk)
 			}
-			child, ok := m[kk]
-			if !ok {
-				return nil, fmt.Errorf("key %q not found", kk)
+			child, exists := m[kk]
+			if !exists {
+				if !create {
+					return nil, fmt.Errorf("key %q not found", kk)
+				}
+				child = map[string]any{}
+				m[kk] = child
+			} else if child == nil && create {
+				// A nil value counts as a missing map when the next step is a
+				// key (or this is the final step).
+				nextIsString := true
+				if i+1 < len(keys) {
+					_, nextIsString = keys[i+1].(string)
+				}
+				if nextIsString {
+					child = map[string]any{}
+					m[kk] = child
+				}
 			}
 			cur = child
 		case int:
@@ -1436,12 +1456,6 @@ func collectContainers(container any, path expr) []any {
 		return result
 	}
 	return nil
-}
-
-// writeIdxDeletion removes the element at idx from all arrays found by
-// pathToArrays, writing the shortened array back to its parent container.
-func writeIdxDeletion(container any, pathToArrays expr, idx int) {
-	applyIdxDeletion(container, pathToArrays, idx)
 }
 
 // applyIdxDeletion is the core array-index removal. It returns the
@@ -1689,56 +1703,7 @@ func deleteAtPath(root any, keys []any) error {
 
 // getOrCreateParent navigates to parentKeys, auto-creating missing intermediate maps.
 func getOrCreateParent(root any, parentKeys []any) (any, error) {
-	cur := root
-	for i, k := range parentKeys {
-		switch kk := k.(type) {
-		case string:
-			m, ok := cur.(map[string]any)
-			if !ok {
-				return nil, fmt.Errorf("not a map at %q", kk)
-			}
-			child, exists := m[kk]
-			if !exists {
-				// Auto-create intermediate map if next step is a map key (string).
-				// If the final target is an array index, we still need a map here —
-				// but if the missing key itself should be an array, caller must create it explicitly.
-				newMap := make(map[string]any)
-				m[kk] = newMap
-				child = newMap
-			} else if child == nil {
-				// Treat nil as missing map for auto-create when next key is string.
-				nextIsString := false
-				if i+1 < len(parentKeys) {
-					_, nextIsString = parentKeys[i+1].(string)
-				} else {
-					// final key type determines — peek via closure is messy; assume map
-					nextIsString = true
-				}
-				if nextIsString {
-					newMap := make(map[string]any)
-					m[kk] = newMap
-					child = newMap
-				}
-			}
-			cur = child
-		case int:
-			arr, ok := cur.([]any)
-			if !ok {
-				return nil, fmt.Errorf("not an array")
-			}
-			idx := kk
-			if idx < 0 {
-				idx += len(arr)
-			}
-			if idx < 0 || idx >= len(arr) {
-				return nil, fmt.Errorf("index out of bounds: %d (len=%d)", idx, len(arr))
-			}
-			cur = arr[idx]
-		default:
-			return nil, fmt.Errorf("invalid key type %T", k)
-		}
-	}
-	return cur, nil
+	return walkPath(root, parentKeys, true)
 }
 
 // Helper functions for container manipulation
@@ -1794,60 +1759,6 @@ func deleteDirect(container any, key any) error {
 		return fmt.Errorf("direct array delete not supported, use grandparent")
 	default:
 		return fmt.Errorf("cannot delete from non-container")
-	}
-}
-
-// getFromContainer gets a value from a container (map or array) by key.
-func getFromContainer(container any, key any) (any, error) {
-	switch c := container.(type) {
-	case map[string]any:
-		k, ok := key.(string)
-		if !ok {
-			return nil, fmt.Errorf("map key must be string")
-		}
-		return c[k], nil
-	case []any:
-		i, ok := key.(int)
-		if !ok {
-			return nil, fmt.Errorf("array index must be int")
-		}
-		if i < 0 {
-			i += len(c)
-		}
-		if i < 0 || i >= len(c) {
-			return nil, fmt.Errorf("index out of bounds: %d (len=%d)", i, len(c))
-		}
-		return c[i], nil
-	default:
-		return nil, fmt.Errorf("cannot get from non-container")
-	}
-}
-
-// putToContainer puts a value back into a container (map or array) by key.
-func putToContainer(container any, key any, val any) error {
-	switch c := container.(type) {
-	case map[string]any:
-		k, ok := key.(string)
-		if !ok {
-			return fmt.Errorf("map key must be string")
-		}
-		c[k] = val
-		return nil
-	case []any:
-		i, ok := key.(int)
-		if !ok {
-			return fmt.Errorf("array index must be int")
-		}
-		if i < 0 {
-			i += len(c)
-		}
-		if i < 0 || i >= len(c) {
-			return fmt.Errorf("index out of bounds: %d (len=%d)", i, len(c))
-		}
-		c[i] = val
-		return nil
-	default:
-		return fmt.Errorf("cannot put to non-container")
 	}
 }
 
@@ -2645,16 +2556,4 @@ func (p *parser) parseArray() (expr, error) {
 	}
 	p.advance()
 	return &arrNode{vals: vals}, nil
-}
-
-// multiSet is a repeatable string flag value.
-type multiSet []string
-
-func (m *multiSet) String() string {
-	return strings.Join(*m, ",")
-}
-
-func (m *multiSet) Set(v string) error {
-	*m = append(*m, v)
-	return nil
 }

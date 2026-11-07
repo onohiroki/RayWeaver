@@ -434,10 +434,6 @@ type Optimizer struct {
 	// the active/inactive flag and Lagrange multiplier for each constraint.
 	regionActiveCfg *types.RegionActiveConfig
 	regionActive    []*regionActiveState // per-config region-active state
-	// pupilModel is the virtual entrance pupil configuration (nil when not in
-	// use). When set, UpdatePupils writes the model's axial_position/diameter
-	// into the config's pupilZ/aperture instead of running chief.
-	pupilModel *types.PupilModelConfig
 	// backFocusSolve holds the back-focus solve configuration. When set,
 	// applyBackFocusSolve adjusts the target surface thickness after every
 	// variable application so the image plane stays at the desired focus.

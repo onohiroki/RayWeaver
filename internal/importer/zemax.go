@@ -626,9 +626,7 @@ func isConfigOverrideLine(args []string) bool {
 
 func parseIntToken(s string) (int, bool) {
 	orig := s
-	if strings.HasPrefix(s, "-") {
-		s = s[1:]
-	}
+	s = strings.TrimPrefix(s, "-")
 	if s == "" {
 		return 0, false
 	}

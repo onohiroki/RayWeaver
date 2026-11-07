@@ -407,33 +407,3 @@ func buildStopLines(surfaces []types.Surface, zPos []float64, stopID int) []stri
 	}
 	return out
 }
-
-// buildMirrorPaths returns sag-curved paths for reflect (mirror) surfaces.
-// They are drawn as a curved line spanning the mirror semi-diameter, with a
-// light hatch on the reflective side so the fold is visible.
-func buildMirrorPaths(surfaces []types.Surface, zPos []float64) []string {
-	var out []string
-	for i := 0; i < len(surfaces); i++ {
-		s := surfaces[i]
-		if !s.Reflects() || s.Diameter <= 0 {
-			continue
-		}
-		h := s.Diameter / 2
-		var b strings.Builder
-		b.WriteString("M ")
-		b.WriteString(f64str(zPos[i] + globalSag(s, h)))
-		b.WriteByte(',')
-		b.WriteString(f64str(h))
-		n := 20
-		for j := 1; j <= n; j++ {
-			t := float64(j) / float64(n)
-			y := h - 2*h*t
-			b.WriteString(" L ")
-			b.WriteString(f64str(zPos[i] + globalSag(s, y)))
-			b.WriteByte(',')
-			b.WriteString(f64str(y))
-		}
-		out = append(out, b.String())
-	}
-	return out
-}

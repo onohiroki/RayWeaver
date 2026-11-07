@@ -78,7 +78,7 @@ func TestComputeGeometricMTF_TwoPoints_Symmetric(t *testing.T) {
 	}
 
 	// At ν = 1/D = 5 → cos(π) = -1 → MTF = 1
-	sag, tan = ComputeGeometricMTF(pts, 5.0)
+	sag, _ = ComputeGeometricMTF(pts, 5.0)
 	if math.Abs(sag-1) > 1e-10 {
 		t.Errorf("sag at ν=1/D: got %f, want 1", sag)
 	}

@@ -223,7 +223,6 @@ func main() {
 	if subcommand == "trace" {
 		if len(args) >= 2 && args[1] == "single" {
 			traceSingleMode = true
-			args = append([]string{"trace"}, args[2:]...)
 		}
 	}
 

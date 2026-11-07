@@ -150,6 +150,19 @@ func parseFieldInput(data []byte, what string) types.Input {
 	return input
 }
 
+// constraintInfos converts the solver's constraint states into the JSONL
+// record shape shared by the optimize logger and the escape progress events.
+func constraintInfos(states []dls.ConstraintState) []constraintInfo {
+	if len(states) == 0 {
+		return nil
+	}
+	out := make([]constraintInfo, len(states))
+	for i, cs := range states {
+		out[i] = constraintInfo{Residual: cs.Residual}
+	}
+	return out
+}
+
 // Version is the RayWeaver build version, intended to be injected at link time
 // via `-ldflags "-X main.Version=..."`. It defaults to "dev" for ad-hoc builds
 // and is stamped into output metadata.tool.version when set.

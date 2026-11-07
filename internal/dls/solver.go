@@ -108,7 +108,6 @@ func Solve(m Model) Result {
 
 	bestKnownNorm := make([]float64, nVars)
 	copy(bestKnownNorm, xNorm)
-	bestKnownMerit := merit
 
 	bestMeritWindowAgo := bestMerit
 	lastCheckIter := 0
@@ -472,7 +471,6 @@ func Solve(m Model) Result {
 			}
 			if merit < bestMerit {
 				bestMerit = merit
-				bestKnownMerit = merit
 				copy(bestXNorm, xNorm)
 				copy(bestKnownNorm, xNorm)
 			}
@@ -543,9 +541,9 @@ func Solve(m Model) Result {
 		// (its penalty dominates the merit with no descent direction), a
 		// vignetting discontinuity, or a degenerate spot evaluation.
 		if consecStall >= 10 && totalIter < opts.MaxIter-10 && !opts.DisableStallEscape {
-			// Reset to best known state before perturbing
+			// Reset to best known state before perturbing (the merit of the
+			// perturbed state is recomputed below).
 			copy(xNorm, bestKnownNorm)
-			merit = bestKnownMerit
 
 			// Deterministic pseudo-random perturbation (±10% of normalized range)
 			for j := 0; j < nVars; j++ {
@@ -565,9 +563,7 @@ func Solve(m Model) Result {
 			meritNew := m.EvaluateMerit(xPhys)
 			if hasConstraints {
 				cNew := m.ComputeConstraints(xPhys)
-				for j, cj := range cNew {
-					cPrev[j] = cj
-				}
+				copy(cPrev, cNew)
 				meritNew += sumConstraintTerms(cNew, activeIndices, lambdas, muConJ)
 			}
 			merit = meritNew

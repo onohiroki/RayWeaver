@@ -353,14 +353,6 @@ type ndvdPoint struct {
 	label  string
 }
 
-// BarycentricCoordinates stores pre-computed barycentric coordinates for a
-// point (with its signed distance to the hull boundary).
-type barycentricCoordinates struct {
-	coords     []float64 // barycentric weights relative to hull vertices
-	dist       float64   // signed distance; negative inside the hull
-	facetIndex int       // index of nearest facet
-}
-
 func (h *ConvexHull) ReferencePoints() []HullPoint {
 	if len(h.hull) == 0 {
 		out := make([]HullPoint, 0, len(h.points))

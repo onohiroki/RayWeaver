@@ -68,9 +68,7 @@ func buildConfigInputs(input types.Input, gc *glass.Catalog) []optimize.ConfigIn
 		}
 
 		var wavelengths []types.WavelengthItem
-		for _, w := range cfg.Wavelengths {
-			wavelengths = append(wavelengths, w)
-		}
+		wavelengths = append(wavelengths, cfg.Wavelengths...)
 
 		ref := effectiveReferenceWavelength(input.Chief)
 		resolver := spectral.NewResolver(cfg.Wavelengths, input.Spectrum, ref)
@@ -621,9 +619,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	if input.GlassCatalog == nil {
 		input.GlassCatalog = &types.GlassCatalog{}
 	}
-	for _, g := range newGlasses {
-		input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
-	}
+	input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, newGlasses...)
 
 	output := types.Output{
 		Input: input,
@@ -730,9 +726,7 @@ func runOptimizeSnap(data []byte, glassDir string) {
 	if input.GlassCatalog == nil {
 		input.GlassCatalog = &types.GlassCatalog{}
 	}
-	for _, g := range newGlasses {
-		input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
-	}
+	input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, newGlasses...)
 
 	output := types.Output{Input: input}
 	withOutputMetadata(&output.Input, "optimize", subcmdArgs())
@@ -915,11 +909,8 @@ func (j *jsonLogger) LogIter(iter int, merit, improvement, stepNorm float64, var
 		StepNorm:    safeF(stepNorm),
 		Variables:   safeVars(variables),
 	}
-	if len(constraints) > 0 {
-		entry.Constraints = make([]constraintInfo, len(constraints))
-		for i, cs := range constraints {
-			entry.Constraints[i] = constraintInfo{Residual: cs.Residual}
-		}
+	if ci := constraintInfos(constraints); len(ci) > 0 {
+		entry.Constraints = ci
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {
@@ -937,11 +928,8 @@ func (j *jsonLogger) LogFinal(iter int, status string, merit float64, stepNorm f
 		Variables: safeVars(variables),
 		Status:    status,
 	}
-	if len(constraints) > 0 {
-		entry.Constraints = make([]constraintInfo, len(constraints))
-		for i, cs := range constraints {
-			entry.Constraints[i] = constraintInfo{Residual: cs.Residual}
-		}
+	if ci := constraintInfos(constraints); len(ci) > 0 {
+		entry.Constraints = ci
 	}
 	data, err := json.Marshal(entry)
 	if err != nil {

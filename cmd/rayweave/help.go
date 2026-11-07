@@ -1265,44 +1265,6 @@ Examples:
   rayweave zoom --config config2 --num-rays 128 < zoom.yaml
   rayweave zoom < zoom.yaml | rayweave query --each 'zoom_summary.configs[]:id,focal_length,image_plane_z'
 `)
-	default:
-		fmt.Print(`Usage: rayweave <subcommand> [< input.yaml]
-
-RayWeave — geometric ray tracing and optical design toolkit.
-
-Subcommands:
-  chief      Determine chief rays (spot centroid) for each field
-  trace      Trace ray(s) through the system
-  paraxial   Paraxial (first-order) ray trace
-  zoom       Per-config summary of a multi-config system (first order, spot,
-             vignetting)
-  tmm        Thin-film coating analysis (transfer-matrix method)
-  vignette   Iteratively settle vignetting and auto_aperture diameters
-  plot       Generate SVG cross-section drawing
-  optimize   DLS optimization of lens surfaces
-  escape     Escape-function global optimization (multiple local minima)
-  pso        PSO global optimization (particle swarm, no escape bumps)
-  scale      Scale a system so its EFL equals --efl TARGET
-  cam        First-order cam solve of a zoom (airspaces, fixed image plane)
-  asphere    Rank surfaces for asphere introduction, estimate initial coefficients
-  psf        Point-spread function via direct vector Huygens integration
-  focus      Image-plane comparison of MTF/PSF across focus conventions
-  wavefront  Wavefront analysis (paraboloid, best-fit sphere, Fringe Zernike, best focus)
-  import     Import system from ZEMAX ZMX / CODE V SEQ / OSLO LEN
-  export     Export system to ZEMAX ZMX / CODE V SEQ / OSLO LEN
-  query      YAML/JSONL selector with in-memory edits
-  clean      Strip calculation results, keeping only configuration
-  list       Read-only listing of system data (surfaces, glasses, rays)
-
-Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
-  for detailed options and YAML structure.
-
-Companion binaries (same module):
-  rwrun         Start a long run detached and stop it with SIGTERM twice
-  rayweave-mcp  Serve these subcommands to AI agents over MCP (stdio)
-
-Manual: docs/rwrun.md, docs/mcp.md.
-`)
 	case "list":
 		fmt.Print(`Usage: rayweave list [--format table|yaml|json|csv] [--config ID]
                    [--glass-dir DIR] [--curvature] [--auto-aperture] [--all-glasses]
@@ -1478,6 +1440,44 @@ Options:
 Examples:
   rayweave chief < lens.yaml | rayweave clean > clean.yaml
   rayweave optimize < lens.yaml | rayweave clean --verbose > clean.yaml
+`)
+	default:
+		fmt.Print(`Usage: rayweave <subcommand> [< input.yaml]
+
+RayWeave — geometric ray tracing and optical design toolkit.
+
+Subcommands:
+  chief      Determine chief rays (spot centroid) for each field
+  trace      Trace ray(s) through the system
+  paraxial   Paraxial (first-order) ray trace
+  zoom       Per-config summary of a multi-config system (first order, spot,
+             vignetting)
+  tmm        Thin-film coating analysis (transfer-matrix method)
+  vignette   Iteratively settle vignetting and auto_aperture diameters
+  plot       Generate SVG cross-section drawing
+  optimize   DLS optimization of lens surfaces
+  escape     Escape-function global optimization (multiple local minima)
+  pso        PSO global optimization (particle swarm, no escape bumps)
+  scale      Scale a system so its EFL equals --efl TARGET
+  cam        First-order cam solve of a zoom (airspaces, fixed image plane)
+  asphere    Rank surfaces for asphere introduction, estimate initial coefficients
+  psf        Point-spread function via direct vector Huygens integration
+  focus      Image-plane comparison of MTF/PSF across focus conventions
+  wavefront  Wavefront analysis (paraboloid, best-fit sphere, Fringe Zernike, best focus)
+  import     Import system from ZEMAX ZMX / CODE V SEQ / OSLO LEN
+  export     Export system to ZEMAX ZMX / CODE V SEQ / OSLO LEN
+  query      YAML/JSONL selector with in-memory edits
+  clean      Strip calculation results, keeping only configuration
+  list       Read-only listing of system data (surfaces, glasses, rays)
+
+Use "rayweave help <subcommand>" or "rayweave <subcommand> --help"
+  for detailed options and YAML structure.
+
+Companion binaries (same module):
+  rwrun         Start a long run detached and stop it with SIGTERM twice
+  rayweave-mcp  Serve these subcommands to AI agents over MCP (stdio)
+
+Manual: docs/rwrun.md, docs/mcp.md.
 `)
 	}
 }

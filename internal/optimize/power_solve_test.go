@@ -88,7 +88,7 @@ func TestPowerSolveDisabledByDefault(t *testing.T) {
 		},
 	}
 	opt := NewOptimizer(cfg)
-	if opt.powerSolve != nil && len(opt.powerSolve) > 0 {
+	if len(opt.powerSolve) > 0 {
 		t.Error("powerSolve should be empty by default")
 	}
 }

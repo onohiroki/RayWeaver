@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -408,58 +407,4 @@ func addStage[In interface{ base() *DocInput }](s *server, name, title, desc, co
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in In) (*mcp.CallToolResult, ResultOut, error) {
 		return s.runDocTool(ctx, req, command, build(in), *in.base())
 	})
-}
-
-// sortStrings is used by the doc/resource listings.
-func sortStrings(v []string) []string { sort.Strings(v); return v }
-
-// boolFlag renders a flag that takes no value.
-func boolFlag(args []string, set bool, flag string) []string {
-	if set {
-		return append(args, flag)
-	}
-	return args
-}
-
-// strFlag renders a flag with a value when the value was given.
-func strFlag(args []string, value, flag string) []string {
-	if value != "" {
-		return append(args, flag, value)
-	}
-	return args
-}
-
-// floatFlag renders a numeric flag when the value is non-zero (an unset MCP
-// argument must not override the document, mirroring the CLI's flagWasSet rule).
-func floatFlag(args []string, value float64, flag string) []string {
-	if value != 0 {
-		return append(args, flag, fmt.Sprintf("%g", value))
-	}
-	return args
-}
-
-// intFlag renders an integer flag when the value is non-zero.
-func intFlag(args []string, value int, flag string) []string {
-	if value != 0 {
-		return append(args, flag, fmt.Sprintf("%d", value))
-	}
-	return args
-}
-
-// boolPtrFlag renders a two-valued flag (`--stream true|false`) only when the
-// caller set it explicitly.
-func boolPtrFlag(args []string, v *bool, flag string) []string {
-	if v == nil {
-		return args
-	}
-	return append(args, flag, fmt.Sprintf("%t", *v))
-}
-
-// listFlag renders a repeatable or comma-joined flag. RayWeaver accepts the
-// comma-separated form for most list options, so the values are joined.
-func listFlag(args []string, values []string, flag string) []string {
-	if len(values) == 0 {
-		return args
-	}
-	return append(args, flag, strings.Join(values, ","))
 }

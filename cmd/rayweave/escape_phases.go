@@ -24,10 +24,6 @@ var (
 	optPSOPhases    phaseFlagValues
 )
 
-// phaseCleanDLSFlag is the flag name of the cycle-phase switch (the YAML key
-// it writes back to uses '_').
-const phaseCleanDLSFlag = "clean-dls"
-
 // phaseFlag returns the raw --clean-dls value of the running subcommand's flag
 // set and whether it was given.
 func phaseFlag(command string) (value string, set bool) {

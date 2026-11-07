@@ -330,7 +330,8 @@ func Release(samples []Sample) {
 	// Clear the entire capacity before pooling so a future detail trace or a
 	// shorter path cannot keep stale objects alive.
 	clear(slab[:cap(slab)])
-	surfaceResultSlabs.Put(slab[:0])
+	pooled := slab[:0]
+	surfaceResultSlabs.Put(&pooled)
 }
 
 func acquireSurfaceResultSlab(n int) []types.SurfaceResult {
@@ -338,7 +339,7 @@ func acquireSurfaceResultSlab(n int) []types.SurfaceResult {
 		return nil
 	}
 	if v := surfaceResultSlabs.Get(); v != nil {
-		slab := v.([]types.SurfaceResult)
+		slab := *v.(*[]types.SurfaceResult)
 		if cap(slab) >= n {
 			return slab[:n]
 		}

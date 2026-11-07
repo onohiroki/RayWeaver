@@ -414,6 +414,114 @@ func singleEscapeConfig(input types.Input, surfaces []types.Surface, variables [
 	return cfg
 }
 
+// escapeValidator builds the feasibility check shared by the single- and
+// multi-config paths: numerical failure, geometry, throughput (the optimizer's
+// own grids when it can report them, else a chief-grid trace), the glass hull
+// and the hard constraints. configID names the optimizer config whose grids and
+// pupil model are inspected; fallback materialises the prescription the merit
+// evaluated at x for the chief-grid fallback.
+func escapeValidator(input types.Input, settings globalSettings, gc *glass.Catalog, configID string,
+	fallback func(x []float64) ([]types.Surface, *glass.Catalog)) func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
+
+	fieldDefs := input.Chief.Fields
+	refSurf := chiefRefSurface(input)
+	numRays := input.Optimization.NumRays
+	if numRays <= 0 {
+		numRays = 64
+	}
+	// ValidationNumRays overrides the ray count for the feasibility grid. A
+	// higher value (e.g. 64) prevents valid low-ray-count solutions from being
+	// rejected as infeasible due to statistical grid sampling at the DLS ray
+	// count.
+	validationNumRays := numRays
+	if settings.config.ValidationNumRays > 0 {
+		validationNumRays = settings.config.ValidationNumRays
+	}
+	wl := effectiveReferenceWavelength(input.Chief)
+	pupilModel := input.Chief.PupilModel
+	stopSurface := input.Chief.StopSurface
+	rayDefinition := chiefRayDefinition(input)
+	throughputThreshold := 0.3
+	if settings.config.MinThroughputRatio > 0 {
+		throughputThreshold = settings.config.MinThroughputRatio
+	}
+
+	return func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
+		// The feasibility grid must trace the prescription EvaluateMerit
+		// traced: variables plus the power/back-focus hard solves, with the
+		// sized auto apertures (see validationSurfaces).
+		gcForTrace := gc
+		surf := validationSurfaces(inner, x, configID, func() []types.Surface {
+			s, view := fallback(x)
+			gcForTrace = view
+			return s
+		})
+		if math.IsNaN(merit) || math.IsInf(merit, 0) {
+			return escape.MinStatusEvaluationFailure, escape.ReasonNumericalFailure
+		}
+		for i := range surf {
+			if i > 0 && surf[i].Thickness < -1e-9 {
+				return escape.MinStatusInfeasibleBasin, escape.ReasonGeometryViolation
+			}
+		}
+		// Feasibility must mean what the merit means: the optimizer's own grids
+		// decide when it can report them (see checkThroughput).
+		if st, reason := checkThroughput(inner, x, validationNumRays, throughputThreshold, func() (escape.MinStatus, escape.InvalidReason) {
+			// Fallback for a model without the hook: trace pupil grids for each
+			// field and count valid rays. The virtual entrance pupil must use the
+			// optimised axial_position/diameter (not the static input model),
+			// otherwise the grid is centred on the initial pupil and most rays
+			// miss the aperture.
+			sys := types.System{Surfaces: surf, StopSurface: stopSurface}
+			pm := effectivePupilModel(inner, x, configID, pupilModel)
+			results := chief.DetermineChiefRaysGridMode(
+				sys, fieldDefs, refSurf, validationNumRays, gcForTrace,
+				types.NewCircularJones(true), wl,
+				false, types.GridPolar, nil, nil, nil, pm, 0, 0,
+				rayDefinition,
+			)
+			for _, r := range results {
+				total := len(r.GridPoints)
+				if total == 0 {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
+				}
+				nValid := 0
+				for _, gp := range r.GridPoints {
+					if gp.ImageX != nil && gp.ImageY != nil && gp.ErrorCode == "" {
+						nValid++
+					}
+				}
+				if ratio := float64(nValid) / float64(total); ratio < throughputThreshold {
+					return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
+				}
+			}
+			return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
+		}); st != escape.MinStatusFeasibleLocalMinimum {
+			return st, reason
+		}
+		// Glass convex-hull constraint: a converged point whose nd/vd lies
+		// outside the real-glass hull is infeasible (core constraint, not merely
+		// penalised), so the escape store never records it.
+		if hv, ok := inner.(interface {
+			GlassHullViolations([]float64) []int
+		}); ok {
+			if ids := hv.GlassHullViolations(x); len(ids) > 0 {
+				return escape.MinStatusInfeasibleBasin, escape.ReasonGlassHullViolation
+			}
+		}
+		// Hard-constraint feasibility: the recorded merit does not include
+		// constraints (only the DLS augmented Lagrangian does), so a violated
+		// constraint would otherwise ship as a low-merit feasible minimum. A
+		// constraint is violated when its error exceeds 1% of its natural scale.
+		if reporter, ok := inner.(constraintFeasibilityReporter); ok {
+			if vs := reporter.FeasibilityConstraintViolations(x); len(vs) > 0 {
+				return escape.MinStatusInfeasibleBasin, escape.ReasonConstraintViolation
+			}
+		}
+		return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
+	}
+}
+
 func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettings, progress *escape.Progress, dlsLogger dls.Logger, saveBase string, ctx context.Context, hardStop <-chan struct{}, gctx glassPhaseCtx, keepInfeasible bool, debug bool, command string, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	var surfaces []types.Surface
 	if len(input.Configs) > 0 {
@@ -441,11 +549,6 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 		if !hasModes {
 			errExitf("Error: no merit terms defined (add 'optimization.merit', 'configs[].merit' or 'configs[].merit_modes')")
 		}
-	}
-
-	stopSurface := 0
-	if input.Chief != nil {
-		stopSurface = input.Chief.StopSurface
 	}
 
 	cfg := singleEscapeConfig(input, surfaces, variables, meritTerms, gc, gctx, dlsLogger)
@@ -596,106 +699,10 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 	// validation grid matches the one the DLS merit traced.
 	var validateFn func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason)
 	if input.Chief != nil && len(input.Chief.Fields) > 0 {
-		fieldDefs := input.Chief.Fields
-		refSurf := chiefRefSurface(input)
-		numRays := input.Optimization.NumRays
-		if numRays <= 0 {
-			numRays = 64
-		}
-		// ValidationNumRays overrides the ray count for the feasibility
-		// validation grid. A higher value (e.g. 64) prevents valid
-		// low-ray-count solutions from being rejected as infeasible due
-		// to statistical grid sampling at the DLS ray count.
-		validationNumRays := numRays
-		if settings.config.ValidationNumRays > 0 {
-			validationNumRays = settings.config.ValidationNumRays
-		}
-		wl := effectiveReferenceWavelength(input.Chief)
-		pupilModel := input.Chief.PupilModel
-		throughputThreshold := 0.3
-		if settings.config.MinThroughputRatio > 0 {
-			throughputThreshold = settings.config.MinThroughputRatio
-		}
-
-		validateFn = func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
-			// The feasibility grid must trace the prescription EvaluateMerit
-			// traced: variables plus the power/back-focus hard solves, with the
-			// sized auto apertures (see validationSurfaces).
-			gcForTrace := gc
-			surf := validationSurfaces(inner, x, "config1", func() []types.Surface {
-				s, newGlasses := applyEscapeX(surfaces, variables, x, gc)
-				gcForTrace = catalogView(gc, newGlasses)
-				return s
-			})
-			// Check for numerical failure: NaN or Inf merit.
-			if math.IsNaN(merit) || math.IsInf(merit, 0) {
-				return escape.MinStatusEvaluationFailure, escape.ReasonNumericalFailure
-			}
-			// Check for geometry violations: negative thickness.
-			for i := range surf {
-				if i == 0 || surf[i].Thickness < -1e-9 {
-					if i > 0 {
-						return escape.MinStatusInfeasibleBasin, escape.ReasonGeometryViolation
-					}
-				}
-			}
-			// Feasibility must mean what the merit means: the optimizer's own
-			// grids decide when it can report them (see checkThroughput).
-			if st, reason := checkThroughput(inner, x, validationNumRays, throughputThreshold, func() (escape.MinStatus, escape.InvalidReason) {
-				// Fallback for a model without the hook: trace pupil grids for
-				// each field and count valid rays. The virtual entrance pupil
-				// must use the optimised axial_position/diameter (not the
-				// static input model), otherwise the grid is centred on the
-				// initial pupil and most rays miss the aperture.
-				sys := types.System{Surfaces: surf, StopSurface: stopSurface}
-				pm := effectivePupilModel(inner, x, "config1", pupilModel)
-				results := chief.DetermineChiefRaysGridMode(
-					sys, fieldDefs, refSurf, validationNumRays, gcForTrace,
-					types.NewCircularJones(true), wl,
-					false, types.GridPolar, nil, nil, nil, pm, 0, 0,
-					chiefRayDefinition(input),
-				)
-				for _, r := range results {
-					total := len(r.GridPoints)
-					if total == 0 {
-						return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
-					}
-					nValid := 0
-					for _, gp := range r.GridPoints {
-						if gp.ImageX != nil && gp.ImageY != nil && gp.ErrorCode == "" {
-							nValid++
-						}
-					}
-					if ratio := float64(nValid) / float64(total); ratio < throughputThreshold {
-						return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
-					}
-				}
-				return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
-			}); st != escape.MinStatusFeasibleLocalMinimum {
-				return st, reason
-			}
-			// Glass convex-hull constraint: a converged point whose nd/vd lies
-			// outside the real-glass hull is infeasible (core constraint, not
-			// merely penalised), so the escape store never records it.
-			if hv, ok := inner.(interface {
-				GlassHullViolations([]float64) []int
-			}); ok {
-				if ids := hv.GlassHullViolations(x); len(ids) > 0 {
-					return escape.MinStatusInfeasibleBasin, escape.ReasonGlassHullViolation
-				}
-			}
-			// Hard-constraint feasibility: the recorded merit does not include
-			// constraints (only the DLS augmented Lagrangian does), so a
-			// violated constraint would otherwise ship as a low-merit feasible
-			// minimum. The rule is scale-free: a constraint is violated when
-			// its error exceeds 1% of its natural scale (target / bound).
-			if reporter, ok := inner.(constraintFeasibilityReporter); ok {
-				if vs := reporter.FeasibilityConstraintViolations(x); len(vs) > 0 {
-					return escape.MinStatusInfeasibleBasin, escape.ReasonConstraintViolation
-				}
-			}
-			return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
-		}
+		validateFn = escapeValidator(input, settings, gc, "config1", func(x []float64) ([]types.Surface, *glass.Catalog) {
+			s, newGlasses := applyEscapeX(surfaces, variables, x, gc)
+			return s, catalogView(gc, newGlasses)
+		})
 	}
 
 	runEscapeTail(escapeTail{
@@ -740,9 +747,7 @@ func runEscapeSingle(input types.Input, gc *glass.Catalog, settings globalSettin
 					pupilModelForX(input, variables, res.Minima[res.BestIdx].X))
 			}
 
-			for _, g := range bestGlasses {
-				input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, g)
-			}
+			input.GlassCatalog.Entries = append(input.GlassCatalog.Entries, bestGlasses...)
 		},
 	})
 }
@@ -911,98 +916,14 @@ func runEscapeMulti(input types.Input, gc *glass.Catalog, settings globalSetting
 	// closure.
 	var validateFn func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason)
 	if input.Chief != nil && len(input.Chief.Fields) > 0 && len(template) > 0 {
-		fieldDefs := input.Chief.Fields
-		refSurf := chiefRefSurface(input)
-		numRays := input.Optimization.NumRays
-		if numRays <= 0 {
-			numRays = 64
-		}
-		validationNumRays := numRays
-		if settings.config.ValidationNumRays > 0 {
-			validationNumRays = settings.config.ValidationNumRays
-		}
-		wl := effectiveReferenceWavelength(input.Chief)
-		pupilModel := input.Chief.PupilModel
-		throughputThreshold := 0.3
-		if settings.config.MinThroughputRatio > 0 {
-			throughputThreshold = settings.config.MinThroughputRatio
-		}
-		// Use the first config's surfaces as the primary validation target.
 		primarySurfaces := template[0].Surfaces
-		primaryStop := 0
-		if input.Chief != nil {
-			primaryStop = input.Chief.StopSurface
-		}
-
-		validateFn = func(x []float64, merit float64, inner dls.Model) (escape.MinStatus, escape.InvalidReason) {
-			// Mirror the merit's geometry, exactly as in the single-config path.
-			surf := validationSurfaces(inner, x, template[0].ID, func() []types.Surface {
-				configSurfaces := applyEscapeMulti(template, input.Optimization, x)
-				if s, ok := configSurfaces[template[0].ID]; ok {
-					return s
-				}
-				return primarySurfaces
-			})
-			if math.IsNaN(merit) || math.IsInf(merit, 0) {
-				return escape.MinStatusEvaluationFailure, escape.ReasonNumericalFailure
+		validateFn = escapeValidator(input, settings, gc, template[0].ID, func(x []float64) ([]types.Surface, *glass.Catalog) {
+			configSurfaces := applyEscapeMulti(template, input.Optimization, x)
+			if s, ok := configSurfaces[template[0].ID]; ok {
+				return s, gc
 			}
-			for i := range surf {
-				if i > 0 && surf[i].Thickness < -1e-9 {
-					return escape.MinStatusInfeasibleBasin, escape.ReasonGeometryViolation
-				}
-			}
-			// Same reconciliation as the single-config path: the optimizer's
-			// own grids decide, so feasibility covers every config's fields
-			// (the fallback below traces one config's surfaces with the
-			// top-level chief fields).
-			if st, reason := checkThroughput(inner, x, validationNumRays, throughputThreshold, func() (escape.MinStatus, escape.InvalidReason) {
-				sys := types.System{Surfaces: surf, StopSurface: primaryStop}
-				pm := effectivePupilModel(inner, x, template[0].ID, pupilModel)
-				results := chief.DetermineChiefRaysGridMode(
-					sys, fieldDefs, refSurf, validationNumRays, gc,
-					types.NewCircularJones(true), wl,
-					false, types.GridPolar, nil, nil, nil, pm, 0, 0,
-					chiefRayDefinition(input),
-				)
-				for _, r := range results {
-					total := len(r.GridPoints)
-					if total == 0 {
-						return escape.MinStatusInfeasibleBasin, escape.ReasonFieldUnreachable
-					}
-					nValid := 0
-					for _, gp := range r.GridPoints {
-						if gp.ImageX != nil && gp.ImageY != nil && gp.ErrorCode == "" {
-							nValid++
-						}
-					}
-					if ratio := float64(nValid) / float64(total); ratio < throughputThreshold {
-						return escape.MinStatusInfeasibleBasin, escape.ReasonInsufficientFieldThroughput
-					}
-				}
-				return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
-			}); st != escape.MinStatusFeasibleLocalMinimum {
-				return st, reason
-			}
-			// Glass convex-hull core constraint (see runEscapeSingle).
-			if hv, ok := inner.(interface {
-				GlassHullViolations([]float64) []int
-			}); ok {
-				if ids := hv.GlassHullViolations(x); len(ids) > 0 {
-					return escape.MinStatusInfeasibleBasin, escape.ReasonGlassHullViolation
-				}
-			}
-			// Hard-constraint feasibility: the recorded merit does not include
-			// constraints (only the DLS augmented Lagrangian does), so a
-			// violated constraint would otherwise ship as a low-merit feasible
-			// minimum. The rule is scale-free: a constraint is violated when
-			// its error exceeds 1% of its natural scale (target / bound).
-			if reporter, ok := inner.(constraintFeasibilityReporter); ok {
-				if vs := reporter.FeasibilityConstraintViolations(x); len(vs) > 0 {
-					return escape.MinStatusInfeasibleBasin, escape.ReasonConstraintViolation
-				}
-			}
-			return escape.MinStatusFeasibleLocalMinimum, escape.ReasonNone
-		}
+			return primarySurfaces, gc
+		})
 	}
 
 	runEscapeTail(escapeTail{
@@ -1802,19 +1723,15 @@ type debugLogger struct {
 func (d *debugLogger) LogIter(iter int, merit, improvement, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	fields := map[string]any{
 		"iter":        iter,
-		"merit":       safeF64(merit),
-		"improvement": safeF64(improvement),
-		"step_norm":   safeF64(stepNorm),
-		"variables":   safeVars64(variables),
+		"merit":       safeF(merit),
+		"improvement": safeF(improvement),
+		"step_norm":   safeF(stepNorm),
+		"variables":   safeVars(variables),
 		"phase":       d.phase,
 		"cycle":       d.cycle,
 		"worker":      d.worker,
 	}
-	if len(constraints) > 0 {
-		ci := make([]constraintInfo, len(constraints))
-		for i, cs := range constraints {
-			ci[i] = constraintInfo{Residual: cs.Residual}
-		}
+	if ci := constraintInfos(constraints); len(ci) > 0 {
 		fields["constraints"] = ci
 	}
 	d.progress.Event("iter", fields)
@@ -1823,19 +1740,15 @@ func (d *debugLogger) LogIter(iter int, merit, improvement, stepNorm float64, va
 func (d *debugLogger) LogFinal(iter int, status string, merit float64, stepNorm float64, variables []float64, constraints []dls.ConstraintState) {
 	fields := map[string]any{
 		"iter":      iter,
-		"merit":     safeF64(merit),
-		"step_norm": safeF64(stepNorm),
-		"variables": safeVars64(variables),
+		"merit":     safeF(merit),
+		"step_norm": safeF(stepNorm),
+		"variables": safeVars(variables),
 		"status":    status,
 		"phase":     d.phase,
 		"cycle":     d.cycle,
 		"worker":    d.worker,
 	}
-	if len(constraints) > 0 {
-		ci := make([]constraintInfo, len(constraints))
-		for i, cs := range constraints {
-			ci[i] = constraintInfo{Residual: cs.Residual}
-		}
+	if ci := constraintInfos(constraints); len(ci) > 0 {
 		fields["constraints"] = ci
 	}
 	d.progress.Event("final", fields)
@@ -1847,7 +1760,7 @@ func (d *debugLogger) LogModeChange(iter int, from, to string, weights map[strin
 		"from":    from,
 		"to":      to,
 		"weights": weights,
-		"metric":  safeF64(metric),
+		"metric":  safeF(metric),
 		"phase":   d.phase,
 		"cycle":   d.cycle,
 		"worker":  d.worker,
@@ -1857,12 +1770,12 @@ func (d *debugLogger) LogModeChange(iter int, from, to string, weights map[strin
 func (d *debugLogger) LogDamping(iter int, mu, ref float64, summary dls.DampingSummary) {
 	d.progress.Event("adaptive_damping", map[string]any{
 		"iteration":             iter,
-		"mu":                    safeF64(mu),
-		"sensitivity_reference": safeF64(ref),
+		"mu":                    safeF(mu),
+		"sensitivity_reference": safeF(ref),
 		"classes":               summary.Classes,
-		"d_min":                 safeF64(summary.DMin),
-		"d_max":                 safeF64(summary.DMax),
-		"d_mean":                safeF64(summary.DMean),
+		"d_min":                 safeF(summary.DMin),
+		"d_max":                 safeF(summary.DMax),
+		"d_mean":                safeF(summary.DMean),
 		"phase":                 d.phase,
 		"cycle":                 d.cycle,
 		"worker":                d.worker,
@@ -1895,23 +1808,5 @@ func newPhaseLogIfDebug(progress *escape.Progress, debug bool) func() escape.Pha
 	return newPhaseLog(progress)
 }
 
-// safeF64 sanitises NaN/Inf to 0 for JSON serialisation.
-func safeF64(v float64) float64 {
-	if math.IsNaN(v) || math.IsInf(v, 0) {
-		return 0
-	}
-	return v
-}
-
-// safeVars64 sanitises a float64 slice element-wise.
-func safeVars64(v []float64) []float64 {
-	s := make([]float64, len(v))
-	for i, x := range v {
-		if math.IsNaN(x) || math.IsInf(x, 0) {
-			s[i] = 0
-		} else {
-			s[i] = x
-		}
-	}
-	return s
-}
+// safeVars64 was removed: the sanitising helpers live in optimize.go as
+// safeF / safeVars and are shared by the escape progress logger.

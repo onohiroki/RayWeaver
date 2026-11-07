@@ -285,10 +285,10 @@ func TestEscapeStreamChiefTail(t *testing.T) {
 		t.Fatalf("stream write failed: %v", err)
 	}
 
-	if strings.Count(string(buf.Bytes()), "chief:") != 1 {
+	if strings.Count(buf.String(), "chief:") != 1 {
 		t.Error("chief section must be written exactly once")
 	}
-	if strings.Count(string(buf.Bytes()), "configs:") != 1 {
+	if strings.Count(buf.String(), "configs:") != 1 {
 		t.Error("configs section must be written exactly once")
 	}
 	got := parseYAML[types.Output](buf.Bytes())

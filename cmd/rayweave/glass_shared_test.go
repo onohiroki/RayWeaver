@@ -175,8 +175,7 @@ func TestGlassVariablesUnionAcrossConfigs(t *testing.T) {
 		t.Fatalf("yaml.Unmarshal: %v", err)
 	}
 
-	var stderr string
-	stderr = captureStderr(t, func() { applyGlassVariables(&in, sharedGlassCatalog()) })
+	stderr := captureStderr(t, func() { applyGlassVariables(&in, sharedGlassCatalog()) })
 
 	byName := map[string]types.SharedVariable{}
 	for _, sv := range in.Optimization.SharedVariables {

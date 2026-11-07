@@ -45,9 +45,7 @@ func TestDiffractionMTFBench(t *testing.T) {
 	angles := []float64{0, 19.55, 23}
 	if v := os.Getenv("RW_BENCH_ANGLES"); v != "" {
 		angles = nil
-		for _, a := range parseFloats(v) {
-			angles = append(angles, a)
-		}
+		angles = append(angles, parseFloats(v)...)
 	}
 	freq := 10.0
 	if v := os.Getenv("RW_BENCH_FREQ"); v != "" {

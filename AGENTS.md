@@ -52,6 +52,15 @@ go build -o rayweave-mcp ./cmd/rayweave-mcp/     # optional MCP server (stdio)
 go test ./...                                    # full suite; there is no CI
 GOOS=windows go build ./...                      # Windows build gate (rwrun, MCP)
 GOOS=windows go vet ./...
+staticcheck ./...                                # static analysis gate
+```
+
+`staticcheck` must be **2026.2.2 (0.8.2) or newer**: older releases (e.g.
+2024.1.1) cannot read Go 1.27 export data and fail with "unsupported version:
+5". Install it outside the module so it does not enter `go.mod`:
+
+```sh
+GOBIN=$HOME/.local/bin go install honnef.co/go/tools/cmd/staticcheck@latest
 ```
 
 - `cmd/rayweave` — the CLI. One file per command family; every subcommand's

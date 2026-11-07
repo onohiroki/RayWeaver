@@ -395,27 +395,3 @@ func exportFormatName(format, output string) string {
 	}
 	return exporter.FormatFromExt(output)
 }
-
-// ---- list helpers ---------------------------------------------------------
-
-func listIntFlag(args []string, values []int, flag string) []string {
-	if len(values) == 0 {
-		return args
-	}
-	parts := make([]string, 0, len(values))
-	for _, v := range values {
-		parts = append(parts, fmt.Sprintf("%d", v))
-	}
-	return append(args, flag, strings.Join(parts, ","))
-}
-
-func listFloatFlag(args []string, values []float64, flag string) []string {
-	if len(values) == 0 {
-		return args
-	}
-	parts := make([]string, 0, len(values))
-	for _, v := range values {
-		parts = append(parts, fmt.Sprintf("%g", v))
-	}
-	return append(args, flag, strings.Join(parts, ","))
-}
