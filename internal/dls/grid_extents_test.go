@@ -105,6 +105,40 @@ func TestTraceFieldGridExtentsRelaxedExtendsPastMiss(t *testing.T) {
 	}
 }
 
+func TestSolveMissedNodesReplacesVirtualPath(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 80.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 40.0, Material: types.Material{}, Diameter: 80.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 80.0},
+	}
+	surface.Precompute(surfaces)
+
+	// A ray that physically traces through the singlet, marked as a virtual
+	// miss at deliberately wrong positions. The node solve must replace them.
+	samples := []pupil.Sample{{
+		PupilX: 5, PupilY: 0,
+		Origin: types.Vec3{X: 0, Y: 5, Z: -100},
+		Dir:    types.Vec3{Z: 1},
+		Surfaces: []types.SurfaceResult{
+			{SurfaceID: 1, Interaction: types.Virtual, Position: types.Vec3{Y: 5, Z: 0}},
+			{SurfaceID: 2, Interaction: types.Virtual, Position: types.Vec3{Y: 5, Z: 5}},
+			{SurfaceID: 3, Interaction: types.Virtual, Position: types.Vec3{Y: 5, Z: 45}},
+		},
+	}}
+	solveMissedNodes(samples, surfaces, 0.00058756, gc)
+
+	for _, sr := range samples[0].Surfaces {
+		if sr.Interaction != types.Transmit {
+			t.Errorf("surface %d interaction = %q, want a solved Transmit path", sr.SurfaceID, sr.Interaction)
+		}
+	}
+	if math.Abs(samples[0].Surfaces[2].Position.Y-5) < 1e-3 {
+		t.Errorf("surface 3 position = %+v, want the physical path (the virtual Y=5 was not replaced)", samples[0].Surfaces[2].Position)
+	}
+}
+
 func TestBeamClearance(t *testing.T) {
 	surfaces := []types.Surface{{ID: 2, Diameter: 20}}
 

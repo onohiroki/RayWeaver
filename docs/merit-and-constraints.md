@@ -517,9 +517,10 @@ own stop and chief-ray definition, so they measure what `chief` reports.
 measures the same kind of beam envelope (aperture checks disabled, the field's
 prescribed pupil) and returns the clearance, clamped at `target`. Unlike the
 constraint, it uses the **relaxed** envelope: a ray that misses a surface is
-extended to that surface's vertex tangent plane so the surfaces beyond it still
-contribute. Sizing, the clipping warning and the constraint keep the physical
-envelope. The residual
+extended to that surface's vertex tangent plane, and the eight outermost missed
+rays are re-solved as a node system when a physical path exists, so the surfaces
+beyond the miss still contribute. Sizing, the clipping warning and the
+constraint keep the physical envelope. The residual
 is therefore the one-sided hinge `max(0, target − clearance)²`: an aperture at
 or above the required clearance contributes nothing, and only clipping (or a
 shortfall against `target`) is penalised. It exists because the constraint

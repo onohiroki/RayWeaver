@@ -184,7 +184,10 @@ The relaxed envelope (`dls.TraceFieldGridExtentsRelaxed`) is used by the
 the `beam_clearance` constraint keep the **physical** envelope, because a ray
 that misses a surface entirely is not part of the delivered beam and extending
 it can only inflate the envelope (measured: an off-axis edge ray that misses
-the first surface's finite sphere inflated a 31 mm beam to 41 mm). The node
+the first surface's finite sphere inflated a 31 mm beam to 41 mm). The relaxed
+trace first takes the virtual points, then re-solves the eight outermost missed
+rays with the node system and uses the solved physical points when the solve
+converges; the cost is therefore bounded by eight solves per call. The node
 solve in §4.3 replaces this scaffold and removes the distinction.
 
 ### 4.4 Layer R — outer continuation
@@ -221,7 +224,7 @@ requires an analytic Jacobian and a sparse solver.
 | `internal/optimize/optimize_eval.go` (degenerate penalties) | replace the constant with the margin-dependent residual (the same distance, scaled) | D |
 | `internal/optimize/optimize_apertures.go` | keep `auto_aperture` sizing as the structural phase: it removes clear-aperture clipping before the search starts | D |
 | `internal/paraxial` | expose per-surface marginal height/angle as the Layer P initializer and surrogate — **accessor implemented** (`MarginalRayStates`); the initializer wiring is not | P |
-| `internal/dls` (tracer entry) | add the nested solve behind the same interface, fail-over from the forward march; residual norm as penalty — **standalone solver implemented** (`feasibility.SolveNodes`); wiring pending | S |
+| `internal/dls` (tracer entry) | add the nested solve behind the same interface, fail-over from the forward march; residual norm as penalty — **standalone solver implemented** (`feasibility.SolveNodes`), **fail-over wired** into `TraceFieldGridExtentsRelaxed` (eight outermost missed rays) | S |
 | `internal/optimize`, `internal/escape`, `internal/pso` | expose the residual as a merit kind and a constraint (merit kind **implemented** as `beam_clearance`); add the `ray_validity` schedule metric | R |
 
 ## 6. Merit or constraint?
@@ -286,7 +289,7 @@ On a zoom document known to produce no feasible minimum:
 |---|---|---|
 | D | residual layer + local-frame extents over partial paths | unit tests for every residual; the current `beam_clearance` no longer reports `D/2` for an unreached surface |
 | P | paraxial marginal-height accessor | a dead design has a finite paraxial path and merit |
-| S | nested ray solve behind the tracer interface (virtual scaffold and standalone `SolveNodes` implemented; wiring pending) | a ray that misses a surface returns a finite residual and a path; warm started Jacobian stays affordable |
+| S | nested ray solve behind the tracer interface (virtual scaffold, standalone `SolveNodes`, and the eight-ray relaxed fail-over implemented) | a ray that misses a surface returns a finite residual and a path; warm started Jacobian stays affordable |
 | R | `ray_validity` metric + merit-kind exposure | a dead zoom bootstraps to rays-passing under `optimize` |
 | X | simultaneous solve | only if S is the measured bottleneck |
 

@@ -2,7 +2,9 @@ package dls
 
 import (
 	"math"
+	"sort"
 
+	"github.com/hiroki/rayweaver/internal/feasibility"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/pupil"
@@ -180,6 +182,101 @@ func BeamClearance(extents map[int]float64, surfaces []types.Surface, surfaceID 
 	return 0, false
 }
 
+// maxNodeSolves bounds the per-call node solves in the relaxed extents trace:
+// the eight outermost missed rays dominate the envelope, and solving more
+// would multiply the cost of every merit evaluation (and every finite-
+// difference Jacobian column) without moving the measured envelope.
+const maxNodeSolves = 8
+
+// solveMissedNodes replaces the virtual (vertex-plane) hits of the outermost
+// missed rays with a node-solved physical path when one exists. The node solve
+// is the feasibility Layer S fail-over: it turns "this ray has no beam past the
+// surface" into an actual path, or leaves the virtual fallback when the least-
+// squares path does not converge. It is bounded to maxNodeSolves per call.
+func solveMissedNodes(samples []pupil.Sample, surfaces []types.Surface, wavelength float64, gc *glass.Catalog) {
+	type candidate struct {
+		index  int
+		radius float64
+	}
+	var candidates []candidate
+	for i := range samples {
+		if hasVirtualHit(samples[i].Surfaces) {
+			candidates = append(candidates, candidate{i, math.Hypot(samples[i].PupilX, samples[i].PupilY)})
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+	sort.Slice(candidates, func(a, b int) bool { return candidates[a].radius > candidates[b].radius })
+	if len(candidates) > maxNodeSolves {
+		candidates = candidates[:maxNodeSolves]
+	}
+	path := BuildPath(surfaces)
+	for _, c := range candidates {
+		s := &samples[c.index]
+		np := feasibility.SolveNodes(surfaces, path,
+			types.RayState{Origin: s.Origin, Direction: s.Dir},
+			wavelength, gc,
+			feasibility.SolveOptions{MaxIter: 20, Tolerance: 1e-7, Initial: initialPath(*s, path)},
+		)
+		if !np.Converged {
+			continue
+		}
+		byID := make(map[int]types.Vec3, len(np.Surfaces))
+		for k, id := range np.Surfaces {
+			byID[id] = np.Points[k]
+		}
+		for k := range s.Surfaces {
+			sr := &s.Surfaces[k]
+			p, ok := byID[sr.SurfaceID]
+			if !ok {
+				continue
+			}
+			sr.Position = p
+			sr.Interaction = types.Transmit
+			if idx := SurfaceIndex(surfaces, sr.SurfaceID); idx >= 0 && surfaces[idx].Reflects() {
+				sr.Interaction = types.Reflect
+			}
+			sr.ErrorCode = ""
+		}
+	}
+}
+
+func hasVirtualHit(results []types.SurfaceResult) bool {
+	for _, sr := range results {
+		if sr.Interaction == types.Virtual {
+			return true
+		}
+	}
+	return false
+}
+
+// initialPath builds the node solver's warm start from the trace's per-surface
+// positions (a virtual hit is still a point on the extended ray). It returns
+// nil when a path surface has no result, which makes SolveNodes fall back to
+// its launch-line initial guess.
+func initialPath(s pupil.Sample, path []int) []types.Vec3 {
+	byID := make(map[int]types.Vec3, len(s.Surfaces))
+	for _, sr := range s.Surfaces {
+		if sr.Interaction == types.Missed {
+			continue
+		}
+		byID[sr.SurfaceID] = sr.Position
+	}
+	out := make([]types.Vec3, 0, len(path)-1)
+	for _, id := range path {
+		if id == 0 {
+			continue
+		}
+		p, ok := byID[id]
+		if !ok {
+			return nil
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck, virtualMiss bool, workers int, gridType types.GridType, epdOverride float64, vig *types.VignettingDef) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
@@ -215,6 +312,9 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 		Vig:               vig,
 	})
 	pupil.Trace(engine, p, surfaces, samples, wavelength, types.NewCircularJones(true), workers)
+	if virtualMiss {
+		solveMissedNodes(samples, surfaces, wavelength, gc)
+	}
 
 	points := make([]IPoint, len(samples))
 	for i, s := range samples {
