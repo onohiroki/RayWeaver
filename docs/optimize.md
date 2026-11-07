@@ -315,6 +315,12 @@ quick summary.
 | `distortion_pct` | percent distortion (chief-ray vs paraxial height) |
 | `lateral_color` | lateral colour (chief-ray height difference between two wavelengths) |
 | `longitudinal_color` | longitudinal colour (EFL difference between two wavelengths) |
+| `axial_color` | axial colour (back-focal-distance difference between two wavelengths) |
+| `secondary_spectrum` | largest BFL departure from the F–C line over `wavelength_set` |
+| `polychromatic_spot_rms` | white spot RMS about the common centroid (includes lateral colour) |
+| `polychromatic_ee_radius` | white encircled-energy radius about the common centroid |
+| `polychromatic_strehl` | white Strehl (target defaults to 1) |
+| `polychromatic_mtf_sag` / `_tan` | white MTF at `frequency` (set a non-zero `target`); one Huygens PSF per field/set |
 | `glass_role` | vd/nd vs the element's chromatic-role target (`surface_set[0]`, see below) |
 | `seidel_spherical` / `seidel_coma` / `seidel_astigmatism` / `seidel_distortion` | the corresponding third-order Seidel coefficient |
 | `wavefront_defocus` | paraboloid defocus `(a+b)/2` of the fitted wavefront OPD |
@@ -324,6 +330,13 @@ quick summary.
 | `wavefront_sphere_rms` | **reference-sphere residual RMS** — piston + tilt + defocus removed, **astigmatism retained**; the exact quantity `psf --best-focus` reports as `rms_opd` and the direct Strehl determinant |
 | `wavefront_sphere_pv` | reference-sphere residual PV (same model as `wavefront_sphere_rms`) |
 | `wavefront_x2` / `wavefront_y2` / `wavefront_xy` / `wavefront_x` / `wavefront_y` / `wavefront_constant` | the raw paraboloid fit coefficients `a…f` |
+
+The white diffraction kinds (`polychromatic_strehl`, `polychromatic_mtf_sag/tan`)
+run one Huygens PSF per field and wavelength set; use them in a final
+`merit_modes` stage or a short local refinement with a reduced
+`optimization.diffraction_mtf.num_rays`/`grid_size`, never as a global
+`escape`/`pso` merit. Their `target` is the desired Strehl/MTF (Strehl defaults
+to 1; MTF needs a non-zero target).
 
 The wavefront kinds fit the least-squares quadratic
 `P(x,y) = a·x² + b·y² + c·xy + d·x + e·y + f` to the field's OPD sampled on the
@@ -509,13 +522,16 @@ zoom pins each config's own back focus.
 optimization:
   back_focus_solve:
     enabled: true
-    type: paraxial             # paraxial (default) | spot | wavefront
+    type: paraxial             # paraxial (default) | spot | wavefront | white
     surface: 8                 # 0 = auto-detect (back air gap of the last powered element)
     reference_surface: 0       # spot / wavefront only; 0 = last optical surface
     num_rays: 200              # spot / wavefront only (pupil-grid rays per field)
     wavelength: 0.0005876      # spot / wavefront only; default = config reference wavelength
     weight_type: on_axis_only  # on_axis_only (default) | uniform | custom
     custom_weights: [1.0, 0.5] # weight_type: custom
+    # type: white (wavelength-weighted polychromatic focus):
+    objective: spot            # spot (closed form, default) | wavefront
+    wavelength_set: design     # design | spectral | custom
 ```
 
 `surface: 0` (the default) auto-detects the target: the back air gap after the
@@ -537,6 +553,13 @@ must exist; an invalid ID disables the solve.
 - `type: wavefront` references the wavefront to the **best-focus point**
   (`wavefront.Compute` with `BestFocus`, sphere center from the coherent-PSF-peak
   maximization) — accurate but far more expensive.
+- `type: white` places the plane at the **wavelength-weighted polychromatic
+  focus**. `objective: spot` (default) minimises
+  `Σ w_field · w_λ · spot RMS²` in closed form (one grid trace per field and
+  wavelength); `objective: wavefront` is the weighted mean of the per-wavelength
+  wavefront best-focus shifts. The wavelength set comes from
+  `wavelength_set` (`design` default, `spectral` or `custom`). See
+  [methods/polychromatic.md](methods/polychromatic.md).
 
 For the `spot` and `wavefront` types, `reference_surface: 0` uses the last
 optical surface, `num_rays` defaults to 200 (the pupil-grid rays traced per

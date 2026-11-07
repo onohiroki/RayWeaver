@@ -69,10 +69,15 @@ place.
 optimization:
   method: dls
   num_rays: 64
+  wavelength_normalization: sum   # sum (default) | none (ZEMAX WWGT)
   merit:
     type: spot_rms          # label only; the terms do the work
     terms:
-      - {kind: spot_rms, field: 0, wavelength: 0.0005876, weight: 1.0}
+      # One term per config wavelength, weighted by the table and normalised
+      # so the set averages like a single term.
+      - {kind: spot_rms, field: 0, wavelength_set: design, weight: 1.0}
+      # Or one aggregate metric that also sees lateral colour:
+      - {kind: polychromatic_spot_rms, field: 1, wavelength_set: design, weight: 1.0}
 
 configs:
   - id: config1
@@ -100,6 +105,8 @@ configs:
 | `kind` | string | Term kind (see [§3](#3-merit-term-catalog)); empty = `spot_rms` |
 | `field` | int | The field's **ID** (matches `fields[].id`), not its list index; default 0 |
 | `wavelength` | float | Wavelength in **mm** (e.g. `0.0005876` = 587.6 nm); 0 = reference |
+| `wavelength_set` | string | Expand over a resolved set: `design` (config wavelengths), `spectral` (document `spectrum`) or `custom` (the term's `wavelengths`) |
+| `wavelengths` | list | Explicit `{value, label, weight}` samples for `wavelength_set: custom` |
 | `comparison_wavelength` | float | Second wavelength (mm) for the colour kinds |
 | `target` | float | The value the term drives toward; residual is `(value − target)²`. For `field_alive` it is the **aliveness threshold**, and for the MTF kinds the **target MTF** |
 | `frequency` | float | Spatial frequency in **lp/mm** for the MTF / wavefront-shift kinds |
@@ -156,6 +163,19 @@ optimization:
 | `optimization.wavefront_reference` | `best_focus` | `best_focus` or `image_plane`: the OPD reference of the wavefront terms (see [§3.4](#34-wavefront-kinds)) |
 | `optimization.diffraction_mtf` | see [§3.8](#38-contrast--mtf-kinds) | Sampling of the `diffraction_mtf_*` kinds |
 | `optimization.merit_schedule` | – | Mode blending (see [§5](#5-conditional-merit-schedule)) |
+| `optimization.wavelength_normalization` | `sum` | How a `wavelength_set` expansion weights its terms: `sum` normalises the set to Σw = 1; `none` keeps the raw weights (ZEMAX `WWGT`) |
+
+#### Wavelength sets and weights
+
+A term with `wavelength_set` expands over the resolved set (declaration order
+for `design`; ascending for `spectral`). Ordinary kinds become one term per
+wavelength, each carrying the normalised table weight (`sum`) or the raw weight
+(`none`). The aggregate kinds (`polychromatic_*`, `secondary_spectrum`) stay one
+term and receive the whole normalised set. The reference wavelength is always
+used for reference quantities even when it is excluded (`weight <= 0`) from the
+white combination. Non-expandable kinds (`lateral_color`, `longitudinal_color`,
+`axial_color`, `focal_length`, `glass_role`) report an error if given a set.
+See [methods/polychromatic.md](methods/polychromatic.md) for the definitions.
 
 The grid-based and wavefront terms are centred on the config's **per-iteration
 frozen pupil** — settled once per DLS iteration and held for the base point and
@@ -380,7 +400,13 @@ moves. Prefer spot terms to control a strongly-aberrated corner residual.
 |---|---|
 | `distortion_pct` | `100 · (y_chief − y_paraxial) / y_paraxial` |
 | `lateral_color` | `y_chief(λ₂) − y_chief(λ₁)` (chief-ray image heights) |
-| `longitudinal_color` | `EFL(λ₂) − EFL(λ₁)` |
+| `longitudinal_color` | `EFL(λ₂) − EFL(λ₁)` (historical definition) |
+| `axial_color` | `BFL(λ₂) − BFL(λ₁)` (second principal focus) |
+| `secondary_spectrum` | Largest departure from the F–C BFL line over the term's `wavelength_set` |
+| `polychromatic_spot_rms` | White spot RMS about the common centroid over the term's set (includes lateral colour) |
+| `polychromatic_ee_radius` | White encircled-energy radius about the common centroid |
+| `polychromatic_strehl` | White Strehl (target defaults to 1) |
+| `polychromatic_mtf_sag` / `_tan` | White MTF at `frequency`; hinge at `target` (set a non-zero target) |
 
 ```yaml
 - {kind: distortion_pct, field: 2, wavelength: 0.0005876, weight: 0.5}
@@ -466,7 +492,7 @@ Cooke-triplet example.
 
 | Kind | Value | Key params |
 |---|---|---|
-| `focal_length` | Effective focal length (mm, signed) | `target` = desired EFL |
+| `focal_length` | Effective focal length (mm, signed) at the term's `wavelength` (default: the config reference) | `target` = desired EFL |
 | `pupil_position` | Entrance-pupil centre Z (mm) | `field`; `target` = desired Z |
 | `pupil_diameter` | Entrance-pupil diameter (mm) | `field`; `target` = desired EPD |
 | `vignetting` | Vignetted fraction of the pupil grid (0 = none) | `field`, `surface_set[0]` |
@@ -652,8 +678,10 @@ comparable across kinds with different units:
   normalized residual is "waves of curvature" just like the wavefront family.
 - **Other length-valued kinds** (`opd_rms`, `wavefront_rms_residual`,
   `wavefront_sphere_rms`, `wavefront_sphere_pv`, `longitudinal_color`,
-  `lateral_color`) use the term's wavelength (mm), i.e. the residual is measured
-  in waves.
+  `lateral_color`, `axial_color`, `secondary_spectrum`) use the term's
+  wavelength (mm), i.e. the residual is measured in waves. The white spot kinds
+  (`polychromatic_spot_rms`, `polychromatic_ee_radius`) use the Airy radius at
+  the reference wavelength.
 - **Kinds with no natural length scale** (MTF, `focal_length`,
   `field_alive`, `pupil_fill`, `distortion_pct`, `glass_role`, …) keep scale 1.
 
@@ -913,6 +941,10 @@ per-config constraints when present, else `optimization.constraints` (marked
 | `wavefront_x2`…`constant` | drive a raw coefficient | `field`, `target` | paraboloid `a…f` |
 | `distortion_pct` | minimize distortion | `field`, `target` | percent distortion |
 | `lateral_color` / `longitudinal_color` | achromatize | `wavelength`, `comparison_wavelength` | height / EFL difference |
+| `axial_color` | achromatize the back focal distance | `wavelength`, `comparison_wavelength` | BFL difference |
+| `secondary_spectrum` | suppress the residual after F–C | `wavelength`, `comparison_wavelength`, `wavelength_set` | max deviation from the F–C line |
+| `polychromatic_spot_rms` / `_ee_radius` | white imaging | `wavelength_set`, `fraction` | common-centroid white RMS / EE |
+| `polychromatic_strehl` / `_mtf_sag` / `_mtf_tan` | white diffraction | `wavelength_set`, `frequency`, `target` | white Strehl / MTF (one Huygens PSF) |
 | `seidel_*` | control third-order term | `field` | Seidel coefficient |
 | `glass_role` | pick correct glass | `surface_set[0]` | signed vd/nd residual |
 | `focal_length` | target EFL | `target` | EFL (mm) |

@@ -1,6 +1,7 @@
 package optimize
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/hiroki/rayweaver/internal/chief"
@@ -39,16 +40,23 @@ const (
 	// i.e. half their separation. It replaces wavefront_astigmatism at the
 	// cost of the spot grid already traced for the spot kinds instead of a
 	// wavefront trace.
-	MeritSpotAstigmatism   = "spot_astigmatism"
-	MeritDistortionPct     = "distortion_pct"
-	MeritLateralColor      = "lateral_color"
-	MeritLongitudinalColor = "longitudinal_color"
-	MeritGlassRole         = "glass_role"
-	MeritSeidelSpherical   = "seidel_spherical"
-	MeritSeidelComa        = "seidel_coma"
-	MeritSeidelAstigmatism = "seidel_astigmatism"
-	MeritSeidelDistortion  = "seidel_distortion"
-	MeritOPDRMS            = "opd_rms"
+	MeritSpotAstigmatism     = "spot_astigmatism"
+	MeritDistortionPct       = "distortion_pct"
+	MeritLateralColor        = "lateral_color"
+	MeritLongitudinalColor   = "longitudinal_color"
+	MeritAxialColor          = "axial_color"
+	MeritSecondarySpectrum   = "secondary_spectrum"
+	MeritPolychromaticSpot   = "polychromatic_spot_rms"
+	MeritPolychromaticEE     = "polychromatic_ee_radius"
+	MeritPolychromaticStrehl = "polychromatic_strehl"
+	MeritPolychromaticMTFSag = "polychromatic_mtf_sag"
+	MeritPolychromaticMTFTan = "polychromatic_mtf_tan"
+	MeritGlassRole           = "glass_role"
+	MeritSeidelSpherical     = "seidel_spherical"
+	MeritSeidelComa          = "seidel_coma"
+	MeritSeidelAstigmatism   = "seidel_astigmatism"
+	MeritSeidelDistortion    = "seidel_distortion"
+	MeritOPDRMS              = "opd_rms"
 
 	// Wavefront paraboloid fit kinds.
 	MeritWavefrontDefocus     = "wavefront_defocus"
@@ -183,6 +191,8 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		}
 		apR := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, term.wavelength, gc, o.apertureMargin, p.dia)
 		return dls.ComputeWavefrontPairPhase(points, apR, term.wavelength)
+	case MeritPolychromaticStrehl, MeritPolychromaticMTFSag, MeritPolychromaticMTFTan:
+		return o.evaluateWhiteDiffraction(cfg, term, surfaces, gc, cache, p)
 	default:
 		if isGridKind(term.kind) {
 			return o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
@@ -500,6 +510,109 @@ func (o *Optimizer) computeDiffractionMTF(cfg *config, term *meritTerm, surfaces
 	return res.Sagittal, res.Tangential
 }
 
+// evaluateWhiteDiffraction evaluates the polychromatic Strehl / MTF kinds from
+// one white PSF. The Strehl is the result's own peak ratio; the MTF is derived
+// from the cached white grid at the term's frequency (a sagittal/tangential
+// pair shares the same PSF). A failed PSF yields 0, the worst value for both
+// metrics (full Strehl/MTF deficit).
+func (o *Optimizer) evaluateWhiteDiffraction(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
+	res := o.whitePSFResult(cfg, term, surfaces, gc, cache, p)
+	if res == nil || res.Grid == nil {
+		return 0
+	}
+	if term.kind == MeritPolychromaticStrehl {
+		return res.Strehl
+	}
+	mtfCfg := &types.PSFMTFConfig{Frequencies: []float64{term.frequency}}
+	mtf := psf.ComputeMTF(res.Grid.Intensity, res.Grid.Spec, mtfCfg)
+	if mtf == nil {
+		return 0
+	}
+	axis := mtf.Sagittal
+	if term.kind == MeritPolychromaticMTFTan {
+		axis = mtf.Tangential
+	}
+	if len(axis.Evaluated) == 0 {
+		return 0
+	}
+	val := axis.Evaluated[0].MTF
+	// Hinge at the target, matching the monochromatic diffraction-MTF kinds:
+	// only under-performance is penalised.
+	if val >= term.target {
+		return term.target
+	}
+	return val
+}
+
+// whitePSFResult computes (or fetches) the polychromatic PSF of a term's field
+// over its resolved wavelength set. The cache is per evaluation and keyed by
+// (config, field, angle, reference surface, set), so the Strehl and one or more
+// MTF frequencies share one Huygens integral.
+func (o *Optimizer) whitePSFResult(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) *psf.Result {
+	angle := o.termFieldAngle(cfg, term, surfaces, gc)
+	samples := term.wavelengths
+	if len(samples) == 0 {
+		samples = []types.WavelengthSample{{
+			Value: effectiveReferenceWavelength(cfg.referenceWavelength), Weight: 1,
+		}}
+	}
+	refSurf := wavefrontRefSurface(cfg, surfaces)
+	key := whitePSFKey{
+		configID:   cfg.id,
+		fieldIndex: term.fieldIndex,
+		angle:      angle,
+		refSurface: refSurf,
+		setKey:     whiteSetKey(samples),
+	}
+	if cache != nil {
+		if res, ok := cache.whitePSF[key]; ok {
+			return res
+		}
+	}
+	vals := make([]float64, len(samples))
+	weights := make([]float64, len(samples))
+	for i, s := range samples {
+		vals[i] = s.Value
+		weights[i] = s.Weight
+	}
+	sampling := o.diffractionSampling()
+	opts := psf.Options{
+		ReferenceSurface:  refSurf,
+		NumRays:           sampling.numRays,
+		GridSize:          sampling.gridSize,
+		Polarizations:     sampling.polarizations,
+		WavelengthWeights: weights,
+		PupilModel:        cfg.pupilModel,
+		RayDefinition:     cfg.rayDefinition,
+		Workers:           o.gridWorkers(),
+	}
+	fd := meritFieldDef(cfg, term, angle)
+	sys := types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface}
+	res, err := psf.Compute(sys, gc, []types.FieldDef{fd}, vals, opts)
+	if err != nil || len(res) == 0 {
+		if cache != nil {
+			cache.whitePSF[key] = nil
+		}
+		return nil
+	}
+	out := &res[0]
+	if cache != nil {
+		cache.whitePSF[key] = out
+	}
+	return out
+}
+
+// whiteSetKey renders a wavelength set into a stable cache key. The values are
+// printed at full precision so two sets with a different weight order do not
+// collide.
+func whiteSetKey(samples []types.WavelengthSample) string {
+	var s string
+	for _, w := range samples {
+		s += fmt.Sprintf("%.12g:%.9g;", w.Value, w.Weight)
+	}
+	return s
+}
+
 // wavefrontOptions builds the per-analysis wavefront options: the applied
 // virtual-entrance-pupil diameter (so the frozen grid samples the prescribed
 // pupil instead of the paraxial/fixed-aperture radius) and the configured OPD
@@ -551,6 +664,10 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 		return evaluateLateralColor(term.fieldAngle, term.wavelength, term.comparisonWavelength, surfaces, gc, resolvedPupilZ(cfg))
 	case MeritLongitudinalColor:
 		return evaluateLongitudinalColor(term.wavelength, term.comparisonWavelength, surfaces, gc)
+	case MeritAxialColor:
+		return evaluateAxialColor(term.wavelength, term.comparisonWavelength, surfaces, gc)
+	case MeritSecondarySpectrum:
+		return evaluateSecondarySpectrum(term.wavelength, term.comparisonWavelength, term.wavelengths, surfaces, gc)
 	case MeritGlassRole:
 		if len(term.surfaceSet) == 0 {
 			return 0
@@ -575,7 +692,11 @@ func evaluateKindValue(kind string, term *meritTerm, surfaces []types.Surface, g
 	case MeritEdgeThickness:
 		return evaluateEdgeThickness(term.fieldAngle, term.wavelength, surfaces, gc, term.surfaceSet)
 	case MeritFocalLength:
-		return evaluateFocalLength(surfaces, gc)
+		wl := term.wavelength
+		if wl <= 0 && cfg != nil {
+			wl = effectiveReferenceWavelength(cfg.referenceWavelength)
+		}
+		return evaluateFocalLength(wl, surfaces, gc)
 	default:
 		return 0
 	}
@@ -619,6 +740,11 @@ func fieldAliveThreshold(target float64) float64 {
 func (t *meritTerm) residualTarget() float64 {
 	if t.kind == MeritFieldAlive {
 		return 0
+	}
+	// A white Strehl term drives toward a perfect image; target 0 would
+	// reward a worse Strehl, so the default is 1. An explicit target overrides.
+	if t.kind == MeritPolychromaticStrehl && t.target == 0 {
+		return 1
 	}
 	return t.target
 }
@@ -744,13 +870,69 @@ func evaluateLongitudinalColor(wl1, wl2 float64, surfaces []types.Surface, gc *g
 	return pr2.FocalLength - pr1.FocalLength
 }
 
+// evaluateAxialColor is the back-focal (second principal focus) difference
+// between two wavelengths: the conventional axial colour, as opposed to
+// longitudinal_color's EFL difference.
+func evaluateAxialColor(wl1, wl2 float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	if wl1 == 0 {
+		wl1 = types.DefaultWavelength
+	}
+	if wl2 == 0 {
+		return 0
+	}
+	sys := types.System{Surfaces: surfaces}
+	pr1 := paraxial.Compute(sys, wl1, gc, 0, nil)
+	pr2 := paraxial.Compute(sys, wl2, gc, 0, nil)
+	return pr2.SecondPrincipalFocus - pr1.SecondPrincipalFocus
+}
+
+// evaluateSecondarySpectrum measures the largest departure of a wavelength
+// set's back focal distance from the straight line through the two correction
+// wavelengths (wavelength and comparison_wavelength, conventionally F and C).
+// That residual is the secondary spectrum left after achromatising the pair.
+func evaluateSecondarySpectrum(wlF, wlC float64, set []types.WavelengthSample, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	if wlF <= 0 {
+		wlF = types.DefaultWavelength
+	}
+	if wlC <= 0 || len(set) == 0 || math.Abs(wlC-wlF) < 1e-15 {
+		return 0
+	}
+	sys := types.System{Surfaces: surfaces}
+	bfl := func(wl float64) float64 {
+		return paraxial.Compute(sys, wl, gc, 0, nil).SecondPrincipalFocus
+	}
+	fF, fC := bfl(wlF), bfl(wlC)
+	if !finite(fF) || !finite(fC) {
+		return 0
+	}
+	slope := (fC - fF) / (wlC - wlF)
+	worst := 0.0
+	for _, s := range set {
+		if s.Value <= 0 {
+			continue
+		}
+		line := fF + slope*(s.Value-wlF)
+		if d := math.Abs(bfl(s.Value) - line); d > worst {
+			worst = d
+		}
+	}
+	return worst
+}
+
+func finite(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0)
+}
+
 // evaluateFocalLength returns the effective focal length of the system.
 // Used as a merit term with a target value (e.g. 50.0) so the optimizer
 // penalises (EFL − target)².  The sign is preserved so that a system with
 // flipped EFL (negative focal length) receives a large penalty.
-func evaluateFocalLength(surfaces []types.Surface, gc *glass.Catalog) float64 {
+func evaluateFocalLength(wavelength float64, surfaces []types.Surface, gc *glass.Catalog) float64 {
+	if wavelength <= 0 {
+		wavelength = types.DefaultWavelength
+	}
 	sys := types.System{Surfaces: surfaces}
-	pr := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
+	pr := paraxial.Compute(sys, wavelength, gc, 0, nil)
 	return pr.FocalLength
 }
 

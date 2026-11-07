@@ -59,6 +59,7 @@ yields the standard wavefront-aberration definition (the statistics
 | `--num-rays N` | entrance-pupil grid rays per field (default 400) |
 | `--fields I1,I2,...` | field indices to analyse (default: all fields of the selected configuration) |
 | `--wavelengths W1,...` | wavelengths in mm (default: selected config wavelengths, else reference wavelength) |
+| `--wavelength-set S` | resolved set instead: `design` (config wavelengths with weights), `spectral` (document spectrum) or `custom` |
 | `--polarization S` | input polarization: `RCP` (default) \| `LCP` \| `X` \| `Y` \| `RCP+LCP` |
 | `--zernike-order N` | highest Fringe Zernike index to fit (default 15; clamped to **7..37** — the Zemax/Fringe index range, with terms 1–6 already removed by the paraboloid + best-fit-sphere fit, so only 7..N enter the basis) |
 | `--wavefront-workers N` | per-field task parallelism (default: GOMAXPROCS) |

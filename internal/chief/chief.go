@@ -373,7 +373,7 @@ func determineChiefRays(
 	if len(wavelengths) > 0 {
 		for i := range results {
 			results[i].Wavelengths = computeWavelengthStats(
-				engine, system, results[i].ChiefRay.Path, refSurfaceID, pol,
+				engine, system, results[i].ChiefRay, refSurfaceID, pol,
 				results[i].GridPoints, wavelengths,
 			)
 		}
@@ -2186,15 +2186,16 @@ func computeSpotStats(grid []types.GridPoint) *types.SpotStats {
 func computeWavelengthStats(
 	engine *ray.Engine,
 	system types.System,
-	path []int,
+	chief types.Ray,
 	refSurfaceID int,
 	pol types.JonesVector,
 	grid []types.GridPoint,
 	wavelengths []float64,
 ) []types.WavelengthStats {
 	type wlResult struct {
-		index int
-		stats types.SpotStats
+		index  int
+		stats  types.SpotStats
+		height float64
 	}
 	ch := make(chan wlResult, len(wavelengths))
 	var wg sync.WaitGroup
@@ -2209,7 +2210,7 @@ func computeWavelengthStats(
 				r := types.Ray{
 					Wavelength: wl,
 					Initial:    types.RayState{Origin: gp.Origin, Direction: gp.Direction},
-					Path:       path,
+					Path:       chief.Path,
 					Jones:      pol,
 				}
 				tr := engine.TraceRay(r, system.Surfaces, false)
@@ -2233,7 +2234,26 @@ func computeWavelengthStats(
 				}
 			}
 			ss := computeSpotStats(traced)
-			ch <- wlResult{i, *ss}
+			// Chief-ray height at this wavelength: the same launch geometry,
+			// traced through the same path. It is the lateral-colour reference
+			// the grid centroid approximates, and avoids inventing a re-aim.
+			height := ss.Centroid.Y
+			cr := chief
+			cr.Wavelength = wl
+			cr.Jones = pol
+			// The chief ray may carry the reference trace's shared index map;
+			// keeping it would trace every wavelength with the reference
+			// indices and erase lateral colour.
+			cr.IndexByMaterial = nil
+			if tr := engine.TraceRay(cr, system.Surfaces, false); tr.Error == "" {
+				for _, sr := range tr.Surfaces {
+					if sr.SurfaceID == refSurfaceID {
+						height = sr.Position.Y
+						break
+					}
+				}
+			}
+			ch <- wlResult{i, *ss, height}
 		}(i, wl)
 	}
 	wg.Wait()
@@ -2241,7 +2261,7 @@ func computeWavelengthStats(
 
 	stats := make([]types.WavelengthStats, len(wavelengths))
 	for r := range ch {
-		stats[r.index] = types.WavelengthStats{Value: wavelengths[r.index], SpotStats: r.stats}
+		stats[r.index] = types.WavelengthStats{Value: wavelengths[r.index], SpotStats: r.stats, ChiefHeight: r.height}
 	}
 	return stats
 }

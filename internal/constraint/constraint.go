@@ -30,9 +30,9 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 	case types.MeasureThickness:
 		return evaluateThickness(surfaces, op.Surface)
 	case types.MeasureEFL:
-		return evaluateEFL(surfaces, gc)
+		return evaluateEFL(surfaces, op.Wavelength, gc)
 	case types.MeasureFocalLength:
-		return math.Abs(evaluateEFL(surfaces, gc))
+		return math.Abs(evaluateEFL(surfaces, op.Wavelength, gc))
 	case types.MeasureSystemLength:
 		return evaluateSystemLength(surfaces)
 	case types.MeasureSurfaceRange:
@@ -50,7 +50,7 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 		}
 		return evaluateEdgeThickness(surfaces, op.Surface, backID, gc, stopSurface, epd)
 	case types.MeasureFNumber:
-		return evaluateFNumber(surfaces, gc, stopSurface)
+		return evaluateFNumber(surfaces, op.Wavelength, gc, stopSurface)
 	case types.MeasureBeamClearance:
 		return evaluateBeamClearance(surfaces, pupilZ, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin)
 	case types.MeasureVignettingFactor:
@@ -224,9 +224,12 @@ func evaluateThickness(surfaces []types.Surface, targetSurface int) float64 {
 	return 0
 }
 
-func evaluateEFL(surfaces []types.Surface, gc *glass.Catalog) float64 {
+func evaluateEFL(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) float64 {
+	if wavelength <= 0 {
+		wavelength = types.DefaultWavelength
+	}
 	sys := types.System{Surfaces: surfaces}
-	res := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
+	res := paraxial.Compute(sys, wavelength, gc, 0, nil)
 	return res.FocalLength
 }
 
@@ -367,9 +370,12 @@ func prescribedPupilRadius(surfaces []types.Surface, gc *glass.Catalog, stopSurf
 	return 0
 }
 
-func evaluateFNumber(surfaces []types.Surface, gc *glass.Catalog, stopSurface int) float64 {
+func evaluateFNumber(surfaces []types.Surface, wavelength float64, gc *glass.Catalog, stopSurface int) float64 {
+	if wavelength <= 0 {
+		wavelength = types.DefaultWavelength
+	}
 	sys := types.System{Surfaces: surfaces, StopSurface: stopSurface}
-	res := paraxial.Compute(sys, types.DefaultWavelength, gc, 0, nil)
+	res := paraxial.Compute(sys, wavelength, gc, 0, nil)
 	if res.InfConjImageSpaceFNumber > 0 {
 		return res.InfConjImageSpaceFNumber
 	}

@@ -71,6 +71,7 @@ Top-level sections (all except `metadata` may be `omitempty`):
 |---|---|---|
 | `glass_catalog`     | `glass_catalog,omitempty`    | Glass / dispersion definitions. |
 | `coating_catalog`   | `coating_catalog,omitempty`  | Thin-film coating material definitions. |
+| `spectrum`          | `spectrum,omitempty`         | Continuous source spectrum (`curve`, `range` nm, `step`/`optimize_step` nm, `entries`) used by the `spectral` wavelength set. |
 | `metadata`          | `metadata,omitempty`         | Document identity & provenance (above). |
 | `optimization`      | `optimization,omitempty`     | Multi-config optimizer definition. |
 | `configs`           | `configs,omitempty`          | Lens surfaces, fields, wavelengths, ray paths (one or more). |
@@ -82,6 +83,14 @@ Top-level sections (all except `metadata` may be `omitempty`):
 | `vignette`          | `vignette,omitempty`         | Vignetting solver settings. |
 | `scale`             | `scale,omitempty`            | EFL-scaling settings. |
 | `cam`               | `cam,omitempty`              | First-order cam-solve settings (cam surfaces, per-position EFL targets, fixed image plane). |
+
+`configs[].wavelengths[]` is the design wavelength table: `value` (mm),
+optional `label` (d/F/C/g), and `weight` (a non-positive weight excludes the
+line). A merit term or an evaluation command selects it with
+`wavelength_set: design`; the other modes are `spectral` (the document
+`spectrum`) and `custom` (an explicit `wavelengths: [{value, label, weight}]`
+list). The definitions and weighting rules are in
+[methods/polychromatic.md](methods/polychromatic.md).
 
 Output documents inline the full input (preserving every section and `metadata`)
 and append the computed result sections on top (e.g. `chief_rays`, `results`,

@@ -10,6 +10,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
+	"github.com/hiroki/rayweaver/internal/psf"
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/wavefront"
 )
@@ -29,11 +30,14 @@ type MeritTerm struct {
 	Wavelength           float64
 	ComparisonWavelength float64
 	WavWeight            float64
-	Weight               float64
-	Target               float64
-	Fraction             float64
-	Frequency            float64
-	SurfaceSet           []int
+	// Wavelengths carries the resolved set for the aggregate polychromatic
+	// kinds and secondary_spectrum; nil for ordinary per-wavelength terms.
+	Wavelengths []types.WavelengthSample
+	Weight      float64
+	Target      float64
+	Fraction    float64
+	Frequency   float64
+	SurfaceSet  []int
 	// Scale is an explicit normalization denominator (0 = automatic when
 	// optimization.merit_normalization is enabled, else no normalization).
 	Scale float64
@@ -111,16 +115,21 @@ func (o *Optimizer) OpticalMerit(x []float64) float64 {
 }
 
 func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput, gc *glass.Catalog) meritTerm {
+	wl := t.Wavelength
+	if wl <= 0 {
+		wl = effectiveReferenceWavelength(ci.ReferenceWavelength)
+	}
 	mt := meritTerm{
 		kind:                 t.Kind,
 		fieldIndex:           -1,
-		wavelength:           t.Wavelength,
+		wavelength:           wl,
 		comparisonWavelength: t.ComparisonWavelength,
 		weight:               t.Weight,
 		target:               t.Target,
 		fraction:             t.Fraction,
 		frequency:            t.Frequency,
 		surfaceSet:           append([]int(nil), t.SurfaceSet...),
+		wavelengths:          append([]types.WavelengthSample(nil), t.ResolvedWavelengths...),
 		fieldDirX:            0,
 		fieldDirY:            1,
 		fieldWeight:          1.0,
@@ -144,12 +153,16 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput, gc *glass.Catalo
 			break
 		}
 	}
-	for _, w := range ci.Wavelengths {
-		if math.Abs(w.Value-t.Wavelength) < 1e-12 {
-			if w.Weight > 0 {
-				mt.wavWeight = w.Weight
+	if t.WavelengthWeight > 0 {
+		mt.wavWeight = t.WavelengthWeight
+	} else {
+		for _, w := range ci.Wavelengths {
+			if math.Abs(w.Value-wl) < 1e-12 {
+				if w.Weight > 0 {
+					mt.wavWeight = w.Weight
+				}
+				break
 			}
-			break
 		}
 	}
 	mt.normScale = resolveNormScale(t, ci, gc)
@@ -190,6 +203,22 @@ type evalGridCache struct {
 	// spotMeans memoises the field-weighted mean defocus (mm) per (config,
 	// wavelength) that spot_flatness measures against.
 	spotMeans map[flatKey]float64
+	// whitePSF caches one polychromatic PSF per (config, field, angle,
+	// reference surface, wavelength set), shared by the white Strehl and MTF
+	// terms. The MTF is derived from the cached grid at the requested
+	// frequency, so two frequencies do not repeat the Huygens integral.
+	whitePSF map[whitePSFKey]*psf.Result
+}
+
+// whitePSFKey identifies one polychromatic PSF evaluation. setKey is a stable
+// rendering of the resolved wavelength/weight list; different sets must not
+// share a result.
+type whitePSFKey struct {
+	configID   string
+	fieldIndex int
+	angle      float64
+	refSurface int
+	setKey     string
 }
 
 // flatKey identifies an across-field combination within one merit evaluation:
@@ -232,6 +261,7 @@ func newEvalGridCache() *evalGridCache {
 		diffraction: make(map[diffractionMTFKey]diffractionMTFValue),
 		spotScales:  make(map[flatKey]float64),
 		spotMeans:   make(map[flatKey]float64),
+		whitePSF:    make(map[whitePSFKey]*psf.Result),
 	}
 }
 
@@ -296,6 +326,14 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 				enqueue(&t)
 			}
 		}
+		// The polychromatic spot kinds trace one grid per wavelength sample.
+		if st.term.kind == MeritPolychromaticSpot || st.term.kind == MeritPolychromaticEE {
+			for _, s := range st.term.wavelengths {
+				t := *st.term
+				t.wavelength = s.Value
+				enqueue(&t)
+			}
+		}
 	}
 	if len(jobs) == 0 {
 		return
@@ -342,7 +380,8 @@ func isGridKind(kind string) bool {
 	switch kind {
 	case "", dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
 		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius,
-		dls.MeritSpotFlatness, dls.MeritSpotAstigmatism:
+		dls.MeritSpotFlatness, dls.MeritSpotAstigmatism,
+		MeritPolychromaticSpot, MeritPolychromaticEE:
 		return true
 	}
 	return false
@@ -378,7 +417,10 @@ func isTraceKind(kind string) bool {
 // (o.spotDegenerate) instead of the legacy 1e6 sentinel, so a fully clipped
 // off-axis beam pushes the solver without exploding the merit.
 func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
-	points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+	var points []dls.IPoint
+	if term.kind != MeritPolychromaticSpot && term.kind != MeritPolychromaticEE {
+		points = o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+	}
 	var val float64
 	switch term.kind {
 	case dls.MeritSpotRMST:
@@ -408,6 +450,17 @@ func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []ty
 			return o.spotDegenerate
 		}
 		val = fit.astigMM
+	case MeritPolychromaticSpot, MeritPolychromaticEE:
+		groups, weights := o.polychromaticSpotGroups(cfg, term, surfaces, gc, cache, p)
+		var ok bool
+		if term.kind == MeritPolychromaticEE {
+			val, ok = dls.WhiteSpotEERadius(groups, weights, term.fraction)
+		} else {
+			val, ok = dls.WhiteSpotRMS(groups, weights)
+		}
+		if !ok {
+			return o.spotDegenerate
+		}
 	default:
 		val = dls.ComputeSpotRMS(points)
 	}
@@ -415,6 +468,25 @@ func (o *Optimizer) evaluateGridKind(cfg *config, term *meritTerm, surfaces []ty
 		return o.spotDegenerate
 	}
 	return val
+}
+
+// polychromaticSpotGroups traces (or fetches from the evaluation cache) the
+// pupil grid of every wavelength in an aggregate polychromatic spot term. A
+// term without a resolved set falls back to its single wavelength, so a
+// hand-written term still evaluates.
+func (o *Optimizer) polychromaticSpotGroups(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) ([][]dls.IPoint, []float64) {
+	if len(term.wavelengths) == 0 {
+		return [][]dls.IPoint{o.gridForTerm(cache, gc, surfaces, cfg, term, p)}, []float64{1}
+	}
+	groups := make([][]dls.IPoint, 0, len(term.wavelengths))
+	weights := make([]float64, 0, len(term.wavelengths))
+	for _, s := range term.wavelengths {
+		t := *term
+		t.wavelength = s.Value
+		groups = append(groups, o.gridForTerm(cache, gc, surfaces, cfg, &t, p))
+		weights = append(weights, s.Weight)
+	}
+	return groups, weights
 }
 
 // spotFit is one (field, wavelength) spot-slope decomposition expressed as

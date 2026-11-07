@@ -367,6 +367,17 @@ psf:
       relative: 1.0
 ```
 
+A **design-weight** white PSF uses the config table instead of an SPD:
+```yaml
+psf:
+  wavelength_set: design      # or spectral
+```
+The weights are the normalised `configs[].wavelengths[].weight` values; the
+physical transmittance τ still multiplies each sample, and the result records
+`spectral_curve: DESIGN`. The wavefront best focus can likewise be solved for
+the whole set (`psf --focus-plane white`, `objective: wavefront`); see
+[polychromatic.md](polychromatic.md).
+
 **MTF spectral settings** (`psf.mtf_config:` section, independent of PSF):
 ```yaml
 psf:

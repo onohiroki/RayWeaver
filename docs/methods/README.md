@@ -22,6 +22,7 @@ instead.
 | [thin-film-tmm.md](thin-film-tmm.md) | transfer-matrix method for thin-film coatings |
 | [asphere-candidates.md](asphere-candidates.md) | asphere candidate ranking, initial sag estimation, measured sensitivity, DLS validation |
 | [psf.md](psf.md) | point-spread function: polarized ray tracing, Delaunay-weighted wavefront sampling, vector Huygens integration |
+| [polychromatic.md](polychromatic.md) | wavelength sets and weights, white spot, white best focus, axial colour, secondary spectrum |
 | [efl-scaling.md](efl-scaling.md) | uniform EFL scaling and why it preserves f/# |
 
 ## Units and conventions used throughout

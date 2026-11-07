@@ -12,6 +12,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -29,31 +30,37 @@ var Warnf = func(format string, args ...interface{}) {
 // over the unified Optimizer: the configuration becomes config "config1" and
 // the variables become local variables of that config.
 type Config struct {
-	Surfaces         []types.Surface
-	Variables        []Variable
-	MeritTerms       []MeritTerm
-	Fields           []types.FieldItem
-	Constraints      []types.ConstraintOperand
-	GlassCatalog     *glass.Catalog
-	CoatingCatalog   interface{}
-	StopSurface      int
-	RefSurface       int
-	PupilZ           float64
-	MaxIter          int
-	Mu               float64
-	Tol              float64
-	Epsilon          float64
-	NumRays          int
-	ApertureMargin   float64
-	ApertureMarginMM float64
-	MuConMax         float64
-	Workers          int
-	Logger           dls.Logger
-	CentralDiff      bool
-	BFGS             bool
-	Hull             *glass.ConvexHull
-	HullMargin       float64
-	HullWeight       float64
+	Surfaces            []types.Surface
+	Variables           []Variable
+	MeritTerms          []MeritTerm
+	Fields              []types.FieldItem
+	Wavelengths         []types.WavelengthItem
+	Spectrum            *types.SpectralConfig
+	ReferenceWavelength float64
+	// WavelengthNormalization is "sum" (default) or "none"; it applies to
+	// wavelength_set expansion in MeritModes.
+	WavelengthNormalization string
+	Constraints             []types.ConstraintOperand
+	GlassCatalog            *glass.Catalog
+	CoatingCatalog          interface{}
+	StopSurface             int
+	RefSurface              int
+	PupilZ                  float64
+	MaxIter                 int
+	Mu                      float64
+	Tol                     float64
+	Epsilon                 float64
+	NumRays                 int
+	ApertureMargin          float64
+	ApertureMarginMM        float64
+	MuConMax                float64
+	Workers                 int
+	Logger                  dls.Logger
+	CentralDiff             bool
+	BFGS                    bool
+	Hull                    *glass.ConvexHull
+	HullMargin              float64
+	HullWeight              float64
 	// Normalization enables automatic per-term scale normalization (nil =
 	// disabled; residuals keep their raw units).
 	Normalization *types.MeritNormalizationConfig
@@ -91,21 +98,23 @@ type Config struct {
 // ConfigInput describes one configuration (zoom position) of a
 // multi-configuration optimisation.
 type ConfigInput struct {
-	ID                  string
-	Weight              float64
-	StopSurface         int
-	RefSurface          int
-	PupilZ              float64
-	ReferenceWavelength float64
-	Surfaces            []types.Surface
-	Fields              []types.FieldItem
-	Wavelengths         []types.WavelengthItem
-	MeritTerms          []types.MeritTerm
-	MeritModes          []types.MeritMode
-	Constraints         []types.ConstraintOperand
-	RegionActive        *types.RegionActiveConfig
-	PupilModel          *types.PupilModelConfig
-	Normalization       *types.MeritNormalizationConfig
+	ID                      string
+	Weight                  float64
+	StopSurface             int
+	RefSurface              int
+	PupilZ                  float64
+	ReferenceWavelength     float64
+	Surfaces                []types.Surface
+	Fields                  []types.FieldItem
+	Wavelengths             []types.WavelengthItem
+	Spectrum                *types.SpectralConfig
+	WavelengthNormalization string
+	MeritTerms              []types.MeritTerm
+	MeritModes              []types.MeritMode
+	Constraints             []types.ConstraintOperand
+	RegionActive            *types.RegionActiveConfig
+	PupilModel              *types.PupilModelConfig
+	Normalization           *types.MeritNormalizationConfig
 	// RayDefinition is the document's chief-ray definition
 	// (chief.chief_ray_definition; "" = the per-system default).
 	RayDefinition string
@@ -163,6 +172,7 @@ type config struct {
 	surfaces      []types.Surface
 	fields        []types.FieldItem
 	wavelengths   []types.WavelengthItem
+	spectrum      *types.SpectralConfig
 	meritTerms    []meritTerm
 	// fieldResolutions holds one entry per position in fields — the angle the
 	// run froze for it at the start geometry — and is produced by
@@ -209,8 +219,11 @@ type meritTerm struct {
 	wavelength           float64
 	comparisonWavelength float64
 	wavWeight            float64
-	weight               float64
-	target               float64
+	// wavelengths is the resolved set for the aggregate polychromatic kinds
+	// and secondary_spectrum; nil for ordinary per-wavelength terms.
+	wavelengths []types.WavelengthSample
+	weight      float64
+	target      float64
 	// surfaceSet identifies the glass surfaces a kind operates on
 	// (glass_role uses surfaceSet[0] as the element's glass surface).
 	surfaceSet []int
@@ -496,18 +509,21 @@ func (o *Optimizer) SetDiffractionMTF(cfg *types.DiffractionMTFConfig) {
 // entry point).
 func NewOptimizer(cfg Config) *Optimizer {
 	c := config{
-		id:            "config1",
-		weight:        1.0,
-		stopSurface:   cfg.StopSurface,
-		refSurface:    cfg.RefSurface,
-		pupilZ:        resolvePupilZ(cfg.Surfaces, cfg.StopSurface, cfg.PupilZ),
-		pupilResolved: seedPupilResolved(cfg.StopSurface, cfg.PupilZ, cfg.PupilModel),
-		fieldDefs:     fieldDefsFromItems(cfg.Fields),
-		surfaces:      cfg.Surfaces,
-		fields:        cfg.Fields,
-		constraints:   cfg.Constraints,
-		pupilModel:    cfg.PupilModel,
-		rayDefinition: cfg.RayDefinition,
+		id:                  "config1",
+		weight:              1.0,
+		stopSurface:         cfg.StopSurface,
+		refSurface:          cfg.RefSurface,
+		pupilZ:              resolvePupilZ(cfg.Surfaces, cfg.StopSurface, cfg.PupilZ),
+		pupilResolved:       seedPupilResolved(cfg.StopSurface, cfg.PupilZ, cfg.PupilModel),
+		fieldDefs:           fieldDefsFromItems(cfg.Fields),
+		surfaces:            cfg.Surfaces,
+		fields:              cfg.Fields,
+		wavelengths:         cfg.Wavelengths,
+		spectrum:            cfg.Spectrum,
+		referenceWavelength: cfg.ReferenceWavelength,
+		constraints:         cfg.Constraints,
+		pupilModel:          cfg.PupilModel,
+		rayDefinition:       cfg.RayDefinition,
 
 		wavefrontPlaneRef: planeReference(cfg.WavefrontReference),
 	}
@@ -532,6 +548,7 @@ func NewOptimizer(cfg Config) *Optimizer {
 			wavelength:           t.Wavelength,
 			comparisonWavelength: t.ComparisonWavelength,
 			wavWeight:            t.WavWeight,
+			wavelengths:          t.Wavelengths,
 			weight:               t.Weight,
 			target:               t.Target,
 			fraction:             t.Fraction,
@@ -551,10 +568,17 @@ func NewOptimizer(cfg Config) *Optimizer {
 		c.meritTerms = append(c.meritTerms, mt)
 	}
 	if len(cfg.MeritModes) > 0 {
+		resolver := spectral.NewResolver(cfg.Wavelengths, cfg.Spectrum, cfg.ReferenceWavelength)
 		c.meritModes = make(map[string][]meritTerm, len(cfg.MeritModes))
 		for _, m := range cfg.MeritModes {
+			modeTerms := m.Terms
+			if expanded, err := spectral.ExpandTerms(modeTerms, resolver, cfg.WavelengthNormalization); err == nil {
+				modeTerms = expanded
+			} else {
+				Warnf("warning: merit mode %q: %v; the unexpanded terms are used", m.Name, err)
+			}
 			var terms []meritTerm
-			for _, t := range m.Terms {
+			for _, t := range modeTerms {
 				// Resolve field index/angle/direction from the config fields, by
 				// id like buildMeritTermFromTypes: the term carries the position
 				// (for the vignetting ellipse and the frozen field angle), not
@@ -577,6 +601,14 @@ func NewOptimizer(cfg Config) *Optimizer {
 				if fieldWeight == 0 {
 					fieldWeight = 1.0
 				}
+				wl := t.Wavelength
+				if wl <= 0 {
+					wl = effectiveReferenceWavelength(cfg.ReferenceWavelength)
+				}
+				wavWeight := t.WavelengthWeight
+				if wavWeight <= 0 {
+					wavWeight = 1
+				}
 				mt := meritTerm{
 					kind:                 t.Kind,
 					fieldAngle:           fieldAngle,
@@ -584,9 +616,10 @@ func NewOptimizer(cfg Config) *Optimizer {
 					fieldDirY:            fieldDirY,
 					fieldIndex:           fieldIndex,
 					fieldWeight:          fieldWeight,
-					wavelength:           t.Wavelength,
+					wavelength:           wl,
 					comparisonWavelength: t.ComparisonWavelength,
-					wavWeight:            1.0,
+					wavWeight:            wavWeight,
+					wavelengths:          append([]types.WavelengthSample(nil), t.ResolvedWavelengths...),
 					weight:               t.Weight,
 					target:               t.Target,
 					fraction:             t.Fraction,
@@ -644,6 +677,24 @@ func NewOptimizer(cfg Config) *Optimizer {
 func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable, localVars []types.LocalVariableDef, variableLinks []types.VariableLink, gc *glass.Catalog, maxIter int, mu, tol, epsilon, apertureMargin float64, numRays int, muConMax float64, workers int, logger dls.Logger, hull *glass.ConvexHull, hullMargin, hullWeight float64, centralDiff, bfgs bool, adaptiveDamping *types.AdaptiveDampingConfig, raCfg *types.RegionActiveConfig) *Optimizer {
 	internal := make([]config, len(configs))
 	for i, ci := range configs {
+		resolver := spectral.NewResolver(ci.Wavelengths, ci.Spectrum, ci.ReferenceWavelength)
+		if expanded, err := spectral.ExpandTerms(ci.MeritTerms, resolver, ci.WavelengthNormalization); err == nil {
+			ci.MeritTerms = expanded
+		} else {
+			Warnf("warning: config %q merit: %v; the unexpanded terms are used", ci.ID, err)
+		}
+		if len(ci.MeritModes) > 0 {
+			modes := make([]types.MeritMode, len(ci.MeritModes))
+			for mi, m := range ci.MeritModes {
+				modes[mi] = m
+				if expanded, err := spectral.ExpandTerms(m.Terms, resolver, ci.WavelengthNormalization); err == nil {
+					modes[mi].Terms = expanded
+				} else {
+					Warnf("warning: config %q mode %q: %v; the unexpanded terms are used", ci.ID, m.Name, err)
+				}
+			}
+			ci.MeritModes = modes
+		}
 		c := config{
 			id:            ci.ID,
 			weight:        ci.Weight,
@@ -655,6 +706,7 @@ func NewMultiOptimizer(configs []ConfigInput, sharedVars []types.SharedVariable,
 			surfaces:      ci.Surfaces,
 			fields:        ci.Fields,
 			wavelengths:   ci.Wavelengths,
+			spectrum:      ci.Spectrum,
 			constraints:   ci.Constraints,
 			pupilModel:    ci.PupilModel,
 			rayDefinition: ci.RayDefinition,
@@ -887,7 +939,8 @@ func normalizationScale(kind string, wavelengthMM, airyMM float64, scales map[st
 func isSpotScaledKind(kind string) bool {
 	switch kind {
 	case dls.MeritSpotRMS, dls.MeritSpotRMST, dls.MeritSpotRMSS,
-		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius:
+		dls.MeritSpotRMSWorst, dls.MeritSpotWeighted, dls.MeritSpotEERadius,
+		MeritPolychromaticSpot, MeritPolychromaticEE:
 		return true
 	}
 	return false
@@ -909,7 +962,8 @@ func isFocusShiftScaledKind(kind string) bool {
 func isWaveScaledKind(kind string) bool {
 	switch kind {
 	case MeritOPDRMS, MeritWavefrontRMSResidual, MeritWavefrontSphereRMS,
-		MeritWavefrontSpherePV, MeritLongitudinalColor, MeritLateralColor:
+		MeritWavefrontSpherePV, MeritLongitudinalColor, MeritLateralColor,
+		MeritAxialColor, MeritSecondarySpectrum:
 		return true
 	}
 	return false

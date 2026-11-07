@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -44,6 +45,23 @@ func configWavelengthValues(configs []types.Config, configFlag *string) []float6
 		}
 	}
 	return values
+}
+
+// configWavelengthSamples returns the selected config's wavelength table as a
+// normalised sample set (labels and weights preserved).
+func configWavelengthSamples(configs []types.Config, configFlag *string) []types.WavelengthSample {
+	idx := 0
+	if configFlag != nil && *configFlag != "" {
+		var msg string
+		idx, msg = resolveConfig(configs, *configFlag)
+		if idx < 0 {
+			errExitf("Error: %s", msg)
+		}
+	}
+	if idx < 0 || idx >= len(configs) {
+		return nil
+	}
+	return spectral.DesignSamples(configs[idx].Wavelengths)
 }
 
 func effectiveReferenceWavelength(chief *types.ChiefInput) float64 {

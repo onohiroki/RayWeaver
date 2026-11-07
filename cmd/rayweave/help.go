@@ -165,7 +165,7 @@ Examples:
   rayweave chief < lens.yaml | rayweave trace --details | rayweave list rays
 `)
 	case "paraxial":
-		fmt.Print(`Usage: rayweave paraxial [--wl MM] [--config ID] [--glass-dir DIR] < system.yaml
+		fmt.Print(`Usage: rayweave paraxial [--wl MM] [--wavelengths W1,...] [--wavelength-set S] [--config ID] [--glass-dir DIR] < system.yaml
 
 Performs paraxial (first-order) ray trace and cardinal analysis.
 
@@ -175,11 +175,15 @@ Options:
                        back into chief.reference_wavelength
   --config ID          select config by id (multi-config mode)
   --glass-dir DIR      AGF glass catalog directory
+  --wavelengths W1,... colour sweep: wavelengths in mm (default: reference only)
+  --wavelength-set S   colour sweep set: design | spectral | custom
 
 Input: standard system YAML (glass_catalog + surfaces)
 Optional input:
   paraxial:
     object_height: 10.0        # object height in mm (0 = infinite conjugate)
+    wavelengths: [...]         # explicit colour sweep (mm)
+    wavelength_set: design     # or spectral | custom
 
 When piped after "rayweave chief", uses chief_rays[].entrance_pupil
   for entrance pupil data and chief_rays[].field_angle for FoV.
@@ -887,6 +891,8 @@ Options:
   --fields I1,I2,...  field indices to compute (default: all)
   --wavelengths W1,...  wavelengths in mm (default: chief wavelengths,
                          else 587.56 nm)
+  --wavelength-set S  wavelength set: design (config wavelengths with
+                         weights) | spectral (document spectrum) | custom
   --polarization S    RCP (default) | LCP | X | Y | RCP+LCP
   --spectral S        polychromatic ("white") PSF: D65 (default) | FLAT
   --psf-workers N     parallel workers for the Huygens integral and wavefront
@@ -901,10 +907,11 @@ Options:
                          the geometric spot-RMS focus), so a field-curved
                          system's defocus-dominated fixed-plane Strehl is
                          replaced by the wavefront-quality number
-  --focus-plane ''|all  evaluate at a common image plane instead of the input
-                         one: 'all' moves it to the single all-field best focus
-                         (the uniform-weighted wavefront back-focus solve) and
-                         reports the applied shift on stderr
+  --focus-plane ''|all|white  evaluate at a common image plane instead of the
+                         input one: 'all' moves it to the single all-field best
+                         focus (reference wavelength); 'white' uses the
+                         wavelength-weighted white best focus; both report the
+                         applied shift on stderr
   --converge-check BOOL  label sampling convergence by re-evaluating each result
                          at a higher ray count (on by default; --converge-check
                          false skips the 1.5x re-evaluation)
@@ -970,11 +977,13 @@ Image-plane comparison: evaluate the same system at up to three focus
 conventions and report the requested metric for each, so it is clear which
 image plane the design actually delivers.
 
-Planes (--planes file,all,best; default: all three):
+Planes (--planes file,all,best,white; default: the first three):
   file   the image plane as written in the input (no solve)
   all    the single all-field best focus (uniform-weighted wavefront solve),
          the plane a saved escape/optimize minimum carries
   best   each field's own best focus (removes field-curvature defocus)
+  white  the wavelength-weighted white best focus (evaluation objective:
+         wavefront; the set comes from --wavelength-set or the input table)
 
 Through-focus (--through-focus FROM,STEP,COUNT): replaces the plane comparison
 with a scan of COUNT planes at FROM + i*STEP (mm). --planes then selects the
@@ -997,8 +1006,10 @@ is the plane-comparison layer on top of the same engine.
 Options (all sub-subcommands):
   --wavelengths W1,...  wavelengths in mm (default: config wavelengths,
                           else the chief reference wavelength)
+  --wavelength-set S    wavelength set: design (config wavelengths with
+                          weights) | spectral (document spectrum) | custom
   --fields I1,I2,...    field indices to compare (default: all)
-  --planes LIST         file,all,best (default: all three); with
+  --planes LIST         file,all,best,white (default: the first three); with
                           --through-focus: base planes file,all,on_axis
                           (default: file)
   --through-focus F,S,N through-focus scan FROM,STEP,COUNT (mm, number of
@@ -1018,6 +1029,7 @@ Input YAML — focus section (optional; flags override):
   focus:
     mtf:
       wavelengths: [0.0004861, 0.0005876, 0.0006563]
+      wavelength_set: design   # or spectral | custom
       frequencies: [30, 50, 80]
       planes: [file, all, best]
     psf:
@@ -1052,6 +1064,8 @@ Options:
   --fields I1,I2,...   field indices to compute (default: all)
   --wavelengths W1,...   wavelengths in mm (default: chief wavelengths,
                          else 587.56 nm)
+  --wavelength-set S   wavelength set: design (config wavelengths with
+                         weights) | spectral (document spectrum) | custom
   --polarization S     RCP (default) | LCP | X | Y | RCP+LCP
   --zernike-order N    highest Fringe Zernike index to fit (default 15)
   --wavefront-workers N  per-field task parallelism (default: GOMAXPROCS)
@@ -1074,6 +1088,7 @@ Input YAML — wavefront section (optional; flags override):
     num_rays: 400
     fields: [0, 1]
     wavelengths: [0.00058756]
+    wavelength_set: design    # or spectral | custom
     polarization: "RCP"
     zernike_max_order: 15
     workers: 8

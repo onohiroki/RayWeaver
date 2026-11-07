@@ -60,6 +60,10 @@ type Options struct {
 	// how the chief ray — the polarization frame of the traced bundle, and
 	// the reported entrance pupil — is constructed from the pupil grid.
 	RayDefinition string
+	// WavelengthWeights weights the wavelengths in SpotFocusShift (and the
+	// polychromatic focus solve). Nil or a different length means equal
+	// weights, preserving the legacy behaviour.
+	WavelengthWeights []float64
 }
 
 // Result is one computed PSF with its analysis summary.
@@ -190,7 +194,7 @@ func Compute(system types.System, gc *glass.Catalog, fields []types.FieldDef,
 	pols := resolvePolStates(opts.Polarizations)
 	planeZ := imagePlaneZ(system.Surfaces) + opts.PlaneShift
 
-	white := opts.SpectralCurve != "" || len(opts.SpectralEntries) > 0
+	white := opts.SpectralCurve != "" || len(opts.SpectralEntries) > 0 || len(opts.WavelengthWeights) > 0
 	var spdCurve *spectral.Curve
 	if white {
 		switch {
@@ -450,6 +454,35 @@ func whiteField(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 	return results
 }
 
+// spectralLabel names the polychromatic weighting in the result: the SPD
+// curve, or DESIGN for an explicit wavelength-weight set.
+func spectralLabel(opts Options) string {
+	if opts.SpectralCurve != "" {
+		return opts.SpectralCurve
+	}
+	if len(opts.WavelengthWeights) > 0 {
+		return "DESIGN"
+	}
+	return ""
+}
+
+// polychromaticWeight returns the weight of one wavelength sample: the
+// explicit design weight when supplied, else the SPD value. A nil curve with
+// no explicit weights weighs 0 (the caller filters it out).
+func polychromaticWeight(wl float64, wavelengths, weights []float64, curve *spectral.Curve) float64 {
+	if len(weights) == len(wavelengths) {
+		for i, w := range wavelengths {
+			if math.Abs(w-wl) <= 1e-15 {
+				return weights[i]
+			}
+		}
+	}
+	if curve != nil {
+		return curve.Weight(wl)
+	}
+	return 0
+}
+
 // whiteGroup combines the given polarization group's per-wavelength
 // monochromatic PSFs into one polychromatic result. group holds one coherent
 // state or the two members of an RCP+LCP average.
@@ -466,7 +499,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 	}
 	var tds []traceData
 	for _, wl := range wavelengths {
-		if spdCurve.Weight(wl) <= 0 {
+		if polychromaticWeight(wl, wavelengths, opts.WavelengthWeights, spdCurve) <= 0 {
 			continue
 		}
 		pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel, opts.RayDefinition)
@@ -564,7 +597,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 			}
 		}
 
-		w := spdCurve.Weight(td.wl)
+		w := polychromaticWeight(td.wl, wavelengths, opts.WavelengthWeights, spdCurve)
 		rp := 0.0
 		for p := range group {
 			rp += samplePower(td.samples[p])
@@ -708,7 +741,7 @@ func whiteGroup(engine *ray.Engine, gc *glass.Catalog, system types.System, fd t
 		Stats:             stats,
 		RawIntensitySum:   whiteRawSum,
 		Transmittance:     transmittance,
-		SpectralCurve:     opts.SpectralCurve,
+		SpectralCurve:     spectralLabel(opts),
 		BestFocusShift:    evaluateZ - planeZ,
 		Contributions:     contributions,
 		MTF:               mtfResult,

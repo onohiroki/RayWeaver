@@ -12,6 +12,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -71,10 +72,31 @@ func buildConfigInputs(input types.Input, gc *glass.Catalog) []optimize.ConfigIn
 			wavelengths = append(wavelengths, w)
 		}
 
+		ref := effectiveReferenceWavelength(input.Chief)
+		resolver := spectral.NewResolver(cfg.Wavelengths, input.Spectrum, ref)
+		norm := ""
+		if input.Optimization != nil {
+			norm = input.Optimization.WavelengthNormalization
+		}
+
 		var meritTerms []types.MeritTerm
 		if cfg.Merit != nil {
-			for _, mt := range cfg.Merit.Terms {
-				meritTerms = append(meritTerms, mt)
+			expanded, err := spectral.ExpandTerms(cfg.Merit.Terms, resolver, norm)
+			if err != nil {
+				errExitf("Error: config %q: %v", cfg.ID, err)
+			}
+			meritTerms = expanded
+		}
+		var meritModes []types.MeritMode
+		if len(cfg.MeritModes) > 0 {
+			meritModes = make([]types.MeritMode, len(cfg.MeritModes))
+			for i, m := range cfg.MeritModes {
+				expanded, err := spectral.ExpandTerms(m.Terms, resolver, norm)
+				if err != nil {
+					errExitf("Error: config %q mode %q: %v", cfg.ID, m.Name, err)
+				}
+				meritModes[i] = m
+				meritModes[i].Terms = expanded
 			}
 		}
 
@@ -89,22 +111,24 @@ func buildConfigInputs(input types.Input, gc *glass.Catalog) []optimize.ConfigIn
 		}
 
 		configs = append(configs, optimize.ConfigInput{
-			ID:                  cfg.ID,
-			Weight:              cfg.Weight,
-			StopSurface:         stopSurface,
-			RefSurface:          chiefRefSurface(input),
-			PupilZ:              computePupilZ(input, surfaces, gc),
-			ReferenceWavelength: effectiveReferenceWavelength(input.Chief),
-			Surfaces:            surfaces,
-			Fields:              fields,
-			Wavelengths:         wavelengths,
-			MeritTerms:          meritTerms,
-			MeritModes:          cfg.MeritModes,
-			Constraints:         constraints,
-			PupilModel:          pupilModelForConfig(input),
-			Normalization:       input.Optimization.MeritNormalization,
-			RayDefinition:       chiefRayDefinition(input),
-			WavefrontReference:  input.Optimization.WavefrontReference,
+			ID:                      cfg.ID,
+			Weight:                  cfg.Weight,
+			StopSurface:             stopSurface,
+			RefSurface:              chiefRefSurface(input),
+			PupilZ:                  computePupilZ(input, surfaces, gc),
+			ReferenceWavelength:     ref,
+			Surfaces:                surfaces,
+			Fields:                  fields,
+			Wavelengths:             wavelengths,
+			Spectrum:                input.Spectrum,
+			WavelengthNormalization: norm,
+			MeritTerms:              meritTerms,
+			MeritModes:              meritModes,
+			Constraints:             constraints,
+			PupilModel:              pupilModelForConfig(input),
+			Normalization:           input.Optimization.MeritNormalization,
+			RayDefinition:           chiefRayDefinition(input),
+			WavefrontReference:      input.Optimization.WavefrontReference,
 		})
 	}
 	return configs
@@ -179,6 +203,9 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 	if input.Optimization == nil {
 		errExitf("Error: 'optimization' section is required")
 	}
+	if input.Optimization.BackFocusSolve != nil {
+		input.Optimization.BackFocusSolve.Spectrum = input.Spectrum
+	}
 
 	// Resolve the power-preserving solve under the CLI/YAML precedence rule: a
 	// CLI surface list wins, else --power-solve turns the YAML list on, else the
@@ -238,6 +265,7 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 			ReferenceWavelength: effectiveReferenceWavelength(input.Chief),
 			Surfaces:            cfgSurfaces,
 			Fields:              loadFields(input),
+			Spectrum:            input.Spectrum,
 			Constraints:         input.Optimization.Constraints,
 			PupilModel:          pupilModelForConfig(input),
 			RayDefinition:       chiefRayDefinition(input),
@@ -303,6 +331,7 @@ func buildOptimizeRun(data []byte, glassDir, excludeParams string, powerSolve bo
 	apertureMargin := tuning.apertureMargin
 	apertureMarginMM := tuning.apertureMarginMM
 
+	writeBackWavelengthNormalization(&input)
 	run.input = input
 	run.configs = configs
 	run.sharedVars = sharedVars

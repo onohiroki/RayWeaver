@@ -14,6 +14,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/psf"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -48,6 +49,7 @@ func runFocus(data []byte) {
 // focusYAML is the shared subset of the focus.mtf / focus.psf sections.
 type focusYAML struct {
 	wavelengths      []float64
+	wavelengthSet    string
 	fields           []int
 	planes           []string
 	numRays          int
@@ -63,7 +65,7 @@ func focusYAMLFromMTF(c *types.FocusMTFConfig) focusYAML {
 		return focusYAML{}
 	}
 	return focusYAML{
-		wavelengths: c.Wavelengths, fields: c.Fields, planes: c.Planes,
+		wavelengths: c.Wavelengths, wavelengthSet: c.WavelengthSet, fields: c.Fields, planes: c.Planes,
 		numRays: c.NumRays, gridSize: c.GridSize, polarization: c.Polarization,
 		referenceSurface: c.ReferenceSurface, convergeCheck: c.ConvergeCheck,
 		throughFocus: c.ThroughFocus,
@@ -75,7 +77,7 @@ func focusYAMLFromPSF(c *types.FocusPSFConfig) focusYAML {
 		return focusYAML{}
 	}
 	return focusYAML{
-		wavelengths: c.Wavelengths, fields: c.Fields, planes: c.Planes,
+		wavelengths: c.Wavelengths, wavelengthSet: c.WavelengthSet, fields: c.Fields, planes: c.Planes,
 		numRays: c.NumRays, gridSize: c.GridSize, polarization: c.Polarization,
 		referenceSurface: c.ReferenceSurface, convergeCheck: c.ConvergeCheck,
 		throughFocus: c.ThroughFocus,
@@ -87,7 +89,7 @@ func focusYAMLFromSpot(c *types.FocusSpotConfig) focusYAML {
 		return focusYAML{}
 	}
 	return focusYAML{
-		wavelengths: c.Wavelengths, fields: c.Fields, planes: c.Planes,
+		wavelengths: c.Wavelengths, wavelengthSet: c.WavelengthSet, fields: c.Fields, planes: c.Planes,
 		numRays: c.NumRays, polarization: c.Polarization,
 		referenceSurface: c.ReferenceSurface, throughFocus: c.ThroughFocus,
 	}
@@ -95,12 +97,15 @@ func focusYAMLFromSpot(c *types.FocusSpotConfig) focusYAML {
 
 // focusRun is the resolved state shared by the focus plane evaluations.
 type focusRun struct {
-	gc             *glass.Catalog
-	baseSurfaces   []types.Surface
-	stopSurface    int
-	refWavelength  float64
-	cfgFields      []types.FieldItem
-	cfgWavelengths []types.WavelengthItem
+	gc                *glass.Catalog
+	baseSurfaces      []types.Surface
+	stopSurface       int
+	refWavelength     float64
+	cfgFields         []types.FieldItem
+	cfgWavelengths    []types.WavelengthItem
+	wavelengthSet     string
+	wavelengthWeights []float64
+	spectrum          *types.SpectralConfig
 	// bfSolve is the document's optimization.back_focus_solve (nil when the
 	// document does not declare one), so the `all` plane is solved the same way
 	// a saved escape/optimize minimum was.
@@ -143,6 +148,41 @@ func (run *focusRun) allFieldSolve(weightType string) *types.BackFocusSolveConfi
 		bf.Wavelength = run.refWavelength
 	}
 	return bf
+}
+
+// whiteSolve builds the wavelength-weighted white best-focus configuration
+// behind the `white` plane convention. It uses the run's resolved wavelength
+// set (with weights when the set provided them) and the evaluation objective
+// (wavefront).
+func (run *focusRun) whiteSolve() *types.BackFocusSolveConfig {
+	bf := run.allFieldSolve("uniform")
+	bf.Type = "white"
+	bf.Objective = "wavefront"
+	bf.Spectrum = run.spectrum
+	if len(run.wavelengths) > 0 {
+		samples := make([]types.WavelengthSample, len(run.wavelengths))
+		for i, wl := range run.wavelengths {
+			w := 1.0 / float64(len(run.wavelengths))
+			if len(run.wavelengthWeights) == len(run.wavelengths) {
+				w = run.wavelengthWeights[i]
+			}
+			samples[i] = types.WavelengthSample{Value: wl, Weight: w}
+		}
+		bf.WavelengthSet = "custom"
+		bf.Wavelengths = samples
+	}
+	return bf
+}
+
+// whiteFocusShift is the image-plane shift the white solve applies, measured
+// on a copy so the run's base surfaces stay untouched.
+func whiteFocusShift(run *focusRun) float64 {
+	surfaces := append([]types.Surface(nil), run.baseSurfaces...)
+	before := append([]types.Surface(nil), surfaces...)
+	optimize.ApplyBackFocusSolve(surfaces, run.whiteSolve(), "white", run.stopSurface,
+		run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc,
+		run.psfOpts.RayDefinition, run.psfOpts.PupilModel)
+	return maxThicknessDelta(before, surfaces)
 }
 
 // focusKey identifies one (field, wavelength, polarization) row.
@@ -195,13 +235,42 @@ func buildFocusRun(input *types.Input, fl *clispec.Options, y focusYAML, planeFn
 		errExitf("Error: no fields to compute")
 	}
 
-	// Wavelengths: flag > YAML > config wavelengths > the reference.
+	// Wavelengths: flag > YAML list/set > config wavelengths > the reference.
+	// The focus comparison is per wavelength, so a resolved set only selects
+	// the rows; it does not trigger a polychromatic PSF.
 	var wavelengths []float64
+	var wavelengthWeights []float64
+	wavelengthSet := y.wavelengthSet
+	if fl.Set("wavelength-set") {
+		wavelengthSet = fl.String("wavelength-set")
+	}
+	explicit := len(fl.Floats("wavelengths")) > 0 || len(y.wavelengths) > 0
+	if explicit {
+		wavelengthSet = ""
+	}
 	switch {
 	case len(fl.Floats("wavelengths")) > 0:
 		wavelengths = fl.Floats("wavelengths")
 	case len(y.wavelengths) > 0:
 		wavelengths = y.wavelengths
+	case wavelengthSet == "design":
+		samples := configWavelengthSamples(input.Configs, &configFlag)
+		if len(samples) == 0 {
+			errExitf("Error: wavelength_set: design has no config wavelengths")
+		}
+		for _, s := range samples {
+			wavelengths = append(wavelengths, s.Value)
+			wavelengthWeights = append(wavelengthWeights, s.Weight)
+		}
+	case wavelengthSet == "spectral":
+		samples, err := spectral.SpectralSamples(input.Spectrum, 0)
+		if err != nil {
+			errExitf("Error: %v", err)
+		}
+		for _, s := range samples {
+			wavelengths = append(wavelengths, s.Value)
+			wavelengthWeights = append(wavelengthWeights, s.Weight)
+		}
 	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
 		wavelengths = configWavelengthValues(input.Configs, &configFlag)
 	default:
@@ -246,19 +315,22 @@ func buildFocusRun(input *types.Input, fl *clispec.Options, y focusYAML, planeFn
 	}
 
 	return &focusRun{
-		gc:             gc,
-		baseSurfaces:   baseSurfaces,
-		stopSurface:    stopSurface,
-		refWavelength:  refWavelength,
-		cfgFields:      cfgFields,
-		cfgWavelengths: cfgWLs,
-		bfSolve:        bfSolve,
-		fields:         fields,
-		selected:       selected,
-		wavelengths:    wavelengths,
-		polLabels:      polLabels,
-		planes:         planes,
-		psfOpts:        opts,
+		gc:                gc,
+		baseSurfaces:      baseSurfaces,
+		stopSurface:       stopSurface,
+		refWavelength:     refWavelength,
+		cfgFields:         cfgFields,
+		cfgWavelengths:    cfgWLs,
+		wavelengthSet:     wavelengthSet,
+		wavelengthWeights: wavelengthWeights,
+		spectrum:          input.Spectrum,
+		bfSolve:           bfSolve,
+		fields:            fields,
+		selected:          selected,
+		wavelengths:       wavelengths,
+		polLabels:         polLabels,
+		planes:            planes,
+		psfOpts:           opts,
 	}
 }
 
@@ -305,17 +377,17 @@ func parseFocusPlanes(flagVal string, yamlPlanes []string) ([]string, error) {
 	for _, tok := range strings.Split(spec, ",") {
 		p := strings.ToLower(strings.TrimSpace(tok))
 		switch p {
-		case "file", "all", "best":
+		case "file", "all", "best", "white":
 			seen[p] = true
 		default:
-			return nil, fmt.Errorf("invalid plane %q (want file|all|best)", tok)
+			return nil, fmt.Errorf("invalid plane %q (want file|all|best|white)", tok)
 		}
 	}
 	if len(seen) == 0 {
 		return []string{"file", "all", "best"}, nil
 	}
-	ordered := make([]string, 0, 3)
-	for _, p := range []string{"file", "all", "best"} {
+	ordered := make([]string, 0, 4)
+	for _, p := range []string{"file", "all", "best", "white"} {
 		if seen[p] {
 			ordered = append(ordered, p)
 		}
@@ -537,6 +609,8 @@ func focusPlaneLabel(p string) string {
 		return "focus_plane_all"
 	case "best":
 		return "best_focus"
+	case "white":
+		return "focus_plane_white"
 	default:
 		return "file"
 	}
@@ -575,6 +649,13 @@ func computeFocusPlane(run *focusRun, plane string) ([]psf.Result, float64, erro
 		// the unsolved plane.
 		surface.Precompute(surfaces)
 		shift = maxThicknessDelta(before, surfaces)
+	case "white":
+		before := append([]types.Surface(nil), surfaces...)
+		optimize.ApplyBackFocusSolve(surfaces, run.whiteSolve(), "white", run.stopSurface,
+			run.refWavelength, run.cfgFields, run.cfgWavelengths, run.gc, opts.RayDefinition,
+			opts.PupilModel)
+		surface.Precompute(surfaces)
+		shift = maxThicknessDelta(before, surfaces)
 	case "best":
 		opts.BestFocus = true
 	}
@@ -587,18 +668,21 @@ func computeFocusPlane(run *focusRun, plane string) ([]psf.Result, float64, erro
 // computeFocusPlanes evaluates every requested plane and indexes the results by
 // (field, wavelength, polarization). order is the sorted union of the keys and
 // shiftAll the image-plane shift the `all` convention applied.
-func computeFocusPlanes(run *focusRun) (map[string]map[focusKey]*psf.Result, []focusKey, float64, error) {
+func computeFocusPlanes(run *focusRun) (map[string]map[focusKey]*psf.Result, []focusKey, float64, float64, error) {
 	byPlane := make(map[string]map[focusKey]*psf.Result, len(run.planes))
 	seen := make(map[focusKey]bool)
 	var order []focusKey
-	shiftAll := 0.0
+	shiftAll, shiftWhite := 0.0, 0.0
 	for _, plane := range run.planes {
 		results, shift, err := computeFocusPlane(run, plane)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, nil, 0, 0, err
 		}
-		if plane == "all" {
+		switch plane {
+		case "all":
 			shiftAll = shift
+		case "white":
+			shiftWhite = shift
 		}
 		m := make(map[focusKey]*psf.Result, len(results))
 		for i := range results {
@@ -621,12 +705,12 @@ func computeFocusPlanes(run *focusRun) (map[string]map[focusKey]*psf.Result, []f
 		}
 		return order[i].pol < order[j].pol
 	})
-	return byPlane, order, shiftAll, nil
+	return byPlane, order, shiftAll, shiftWhite, nil
 }
 
 // firstFocusResult returns any plane's result for a key (for row metadata).
 func firstFocusResult(byPlane map[string]map[focusKey]*psf.Result, k focusKey) *psf.Result {
-	for _, plane := range []string{"file", "all", "best"} {
+	for _, plane := range []string{"file", "all", "white", "best"} {
 		if r := byPlane[plane][k]; r != nil {
 			return r
 		}
@@ -672,7 +756,7 @@ func runFocusMTF(data []byte, args []string) {
 	run := buildFocusRun(&input, fl, y, parseFocusPlanes)
 	run.psfOpts.MTFCfg = &types.PSFMTFConfig{Frequencies: freqs}
 
-	byPlane, order, shiftAll, err := computeFocusPlanes(run)
+	byPlane, order, shiftAll, shiftWhite, err := computeFocusPlanes(run)
 	if err != nil {
 		errExitf("Error: %v", err)
 	}
@@ -682,11 +766,12 @@ func runFocusMTF(data []byte, args []string) {
 	}
 
 	comp := &types.FocusMTFComparison{
-		Planes:               focusPlaneLabels(run.planes),
-		Frequencies:          freqs,
-		FocusPlaneAllShiftMM: shiftAll,
-		Polarization:         strings.Join(run.polLabels, ","),
-		Rows:                 rows,
+		Planes:                 focusPlaneLabels(run.planes),
+		Frequencies:            freqs,
+		FocusPlaneAllShiftMM:   shiftAll,
+		FocusPlaneWhiteShiftMM: shiftWhite,
+		Polarization:           strings.Join(run.polLabels, ","),
+		Rows:                   rows,
 	}
 
 	writeBackFocusMTF(&input, run, freqs)
@@ -719,7 +804,7 @@ func runFocusPSF(data []byte, args []string) {
 
 	run := buildFocusRun(&input, fl, y, parseFocusPlanes)
 
-	byPlane, order, shiftAll, err := computeFocusPlanes(run)
+	byPlane, order, shiftAll, shiftWhite, err := computeFocusPlanes(run)
 	if err != nil {
 		errExitf("Error: %v", err)
 	}
@@ -729,10 +814,11 @@ func runFocusPSF(data []byte, args []string) {
 	}
 
 	comp := &types.FocusPSFComparison{
-		Planes:               focusPlaneLabels(run.planes),
-		FocusPlaneAllShiftMM: shiftAll,
-		Polarization:         strings.Join(run.polLabels, ","),
-		Rows:                 rows,
+		Planes:                 focusPlaneLabels(run.planes),
+		FocusPlaneAllShiftMM:   shiftAll,
+		FocusPlaneWhiteShiftMM: shiftWhite,
+		Polarization:           strings.Join(run.polLabels, ","),
+		Rows:                   rows,
 	}
 
 	writeBackFocusPSF(&input, run)
@@ -767,7 +853,7 @@ func runFocusSpot(data []byte, args []string) {
 
 	run := buildFocusRun(&input, fl, y, parseFocusPlanes)
 
-	byPlane, order, shiftAll, err := computeFocusSpotPlanes(run)
+	byPlane, order, shiftAll, shiftWhite, err := computeFocusSpotPlanes(run)
 	if err != nil {
 		errExitf("Error: %v", err)
 	}
@@ -777,10 +863,11 @@ func runFocusSpot(data []byte, args []string) {
 	}
 
 	comp := &types.FocusSpotComparison{
-		Planes:               focusPlaneLabels(run.planes),
-		FocusPlaneAllShiftMM: shiftAll,
-		Polarization:         strings.Join(run.polLabels, ","),
-		Rows:                 rows,
+		Planes:                 focusPlaneLabels(run.planes),
+		FocusPlaneAllShiftMM:   shiftAll,
+		FocusPlaneWhiteShiftMM: shiftWhite,
+		Polarization:           strings.Join(run.polLabels, ","),
+		Rows:                   rows,
 	}
 
 	writeBackFocusSpot(&input, run)
@@ -797,6 +884,9 @@ func computeFocusSpotPlane(run *focusRun, plane string) ([]psf.SpotResult, float
 	case "all":
 		shift = throughFocusBaseShift(run, "all")
 		opts.PlaneShift = shift
+	case "white":
+		shift = whiteFocusShift(run)
+		opts.PlaneShift = shift
 	case "best":
 		opts.BestFocus = true
 	}
@@ -808,18 +898,21 @@ func computeFocusSpotPlane(run *focusRun, plane string) ([]psf.SpotResult, float
 
 // computeFocusSpotPlanes evaluates every requested plane and indexes the
 // results by (field, wavelength, polarization).
-func computeFocusSpotPlanes(run *focusRun) (map[string]map[focusKey]*psf.SpotResult, []focusKey, float64, error) {
+func computeFocusSpotPlanes(run *focusRun) (map[string]map[focusKey]*psf.SpotResult, []focusKey, float64, float64, error) {
 	byPlane := make(map[string]map[focusKey]*psf.SpotResult, len(run.planes))
 	seen := make(map[focusKey]bool)
 	var order []focusKey
-	shiftAll := 0.0
+	shiftAll, shiftWhite := 0.0, 0.0
 	for _, plane := range run.planes {
 		results, shift, err := computeFocusSpotPlane(run, plane)
 		if err != nil {
-			return nil, nil, 0, err
+			return nil, nil, 0, 0, err
 		}
-		if plane == "all" {
+		switch plane {
+		case "all":
 			shiftAll = shift
+		case "white":
+			shiftWhite = shift
 		}
 		m := make(map[focusKey]*psf.SpotResult, len(results))
 		for i := range results {
@@ -842,7 +935,7 @@ func computeFocusSpotPlanes(run *focusRun) (map[string]map[focusKey]*psf.SpotRes
 		}
 		return order[i].pol < order[j].pol
 	})
-	return byPlane, order, shiftAll, nil
+	return byPlane, order, shiftAll, shiftWhite, nil
 }
 
 // buildFocusSpotRows tabulates the per-plane spot metrics for every key.
@@ -850,7 +943,7 @@ func buildFocusSpotRows(byPlane map[string]map[focusKey]*psf.SpotResult, order [
 	rows := make([]types.FocusSpotRow, 0, len(order))
 	for _, k := range order {
 		var ref *psf.SpotResult
-		for _, plane := range []string{"file", "all", "best"} {
+		for _, plane := range []string{"file", "all", "white", "best"} {
 			if r := byPlane[plane][k]; r != nil {
 				ref = r
 				break
@@ -860,12 +953,13 @@ func buildFocusSpotRows(byPlane map[string]map[focusKey]*psf.SpotResult, order [
 			continue
 		}
 		rows = append(rows, types.FocusSpotRow{
-			FieldIndex:    k.fieldIndex,
-			FieldAngle:    ref.FieldAngle,
-			Wavelength:    k.wavelength,
-			File:          focusSpotPlane(byPlane["file"][k]),
-			FocusPlaneAll: focusSpotPlane(byPlane["all"][k]),
-			BestFocus:     focusSpotPlane(byPlane["best"][k]),
+			FieldIndex:      k.fieldIndex,
+			FieldAngle:      ref.FieldAngle,
+			Wavelength:      k.wavelength,
+			File:            focusSpotPlane(byPlane["file"][k]),
+			FocusPlaneAll:   focusSpotPlane(byPlane["all"][k]),
+			FocusPlaneWhite: focusSpotPlane(byPlane["white"][k]),
+			BestFocus:       focusSpotPlane(byPlane["best"][k]),
 		})
 	}
 	return rows
@@ -908,12 +1002,13 @@ func buildFocusMTFRows(byPlane map[string]map[focusKey]*psf.Result, order []focu
 			continue
 		}
 		rows = append(rows, types.FocusMTFRow{
-			FieldIndex:    k.fieldIndex,
-			FieldAngle:    ref.FieldAngle,
-			Wavelength:    k.wavelength,
-			File:          focusMTFPlane(byPlane["file"][k], freqs),
-			FocusPlaneAll: focusMTFPlane(byPlane["all"][k], freqs),
-			BestFocus:     focusMTFPlane(byPlane["best"][k], freqs),
+			FieldIndex:      k.fieldIndex,
+			FieldAngle:      ref.FieldAngle,
+			Wavelength:      k.wavelength,
+			File:            focusMTFPlane(byPlane["file"][k], freqs),
+			FocusPlaneAll:   focusMTFPlane(byPlane["all"][k], freqs),
+			FocusPlaneWhite: focusMTFPlane(byPlane["white"][k], freqs),
+			BestFocus:       focusMTFPlane(byPlane["best"][k], freqs),
 		})
 	}
 	return rows
@@ -970,12 +1065,13 @@ func buildFocusPSFRows(byPlane map[string]map[focusKey]*psf.Result, order []focu
 			continue
 		}
 		rows = append(rows, types.FocusPSFRow{
-			FieldIndex:    k.fieldIndex,
-			FieldAngle:    ref.FieldAngle,
-			Wavelength:    k.wavelength,
-			File:          focusPSFPlane(byPlane["file"][k]),
-			FocusPlaneAll: focusPSFPlane(byPlane["all"][k]),
-			BestFocus:     focusPSFPlane(byPlane["best"][k]),
+			FieldIndex:      k.fieldIndex,
+			FieldAngle:      ref.FieldAngle,
+			Wavelength:      k.wavelength,
+			File:            focusPSFPlane(byPlane["file"][k]),
+			FocusPlaneAll:   focusPSFPlane(byPlane["all"][k]),
+			FocusPlaneWhite: focusPSFPlane(byPlane["white"][k]),
+			BestFocus:       focusPSFPlane(byPlane["best"][k]),
 		})
 	}
 	return rows
@@ -1007,6 +1103,7 @@ func writeBackFocusMTF(input *types.Input, run *focusRun, freqs []float64) {
 	}
 	c := input.Focus.MTF
 	c.Wavelengths = run.wavelengths
+	c.WavelengthSet = run.wavelengthSet
 	c.Frequencies = freqs
 	c.Fields = run.selected
 	c.Planes = run.planes
@@ -1027,6 +1124,7 @@ func writeBackFocusPSF(input *types.Input, run *focusRun) {
 	}
 	c := input.Focus.PSF
 	c.Wavelengths = run.wavelengths
+	c.WavelengthSet = run.wavelengthSet
 	c.Fields = run.selected
 	c.Planes = run.planes
 	c.Polarization = strings.Join(run.polLabels, ",")
@@ -1046,6 +1144,7 @@ func writeBackFocusSpot(input *types.Input, run *focusRun) {
 	}
 	c := input.Focus.Spot
 	c.Wavelengths = run.wavelengths
+	c.WavelengthSet = run.wavelengthSet
 	c.Fields = run.selected
 	c.Planes = run.planes
 	c.Polarization = strings.Join(run.polLabels, ",")
@@ -1064,6 +1163,7 @@ func focusSpotPlaneEntries(row types.FocusSpotRow) []struct {
 	}{
 		{"file", row.File},
 		{"focus_plane_all", row.FocusPlaneAll},
+		{"focus_plane_white", row.FocusPlaneWhite},
 		{"best_focus", row.BestFocus},
 	}
 }
@@ -1080,6 +1180,7 @@ func focusMTFPlaneEntries(row types.FocusMTFRow) []struct {
 	}{
 		{"file", row.File},
 		{"focus_plane_all", row.FocusPlaneAll},
+		{"focus_plane_white", row.FocusPlaneWhite},
 		{"best_focus", row.BestFocus},
 	}
 }
@@ -1094,6 +1195,7 @@ func focusPSFPlaneEntries(row types.FocusPSFRow) []struct {
 	}{
 		{"file", row.File},
 		{"focus_plane_all", row.FocusPlaneAll},
+		{"focus_plane_white", row.FocusPlaneWhite},
 		{"best_focus", row.BestFocus},
 	}
 }
@@ -1106,6 +1208,9 @@ func writeFocusMTFTable(w io.Writer, c *types.FocusMTFComparison) {
 		strings.Join(c.Planes, ", "), c.Polarization)
 	if c.FocusPlaneAllShiftMM != 0 {
 		fmt.Fprintf(w, "  all-field best-focus shift: %.6f mm\n", c.FocusPlaneAllShiftMM)
+	}
+	if c.FocusPlaneWhiteShiftMM != 0 {
+		fmt.Fprintf(w, "  white best-focus shift: %.6f mm\n", c.FocusPlaneWhiteShiftMM)
 	}
 	header := fmt.Sprintf("  %-4s %-7s %-9s %-16s %-8s", "fld", "angle", "wl(nm)", "plane", "strehl")
 	for _, f := range c.Frequencies {
@@ -1142,6 +1247,9 @@ func writeFocusPSFTable(w io.Writer, c *types.FocusPSFComparison) {
 	if c.FocusPlaneAllShiftMM != 0 {
 		fmt.Fprintf(w, "  all-field best-focus shift: %.6f mm\n", c.FocusPlaneAllShiftMM)
 	}
+	if c.FocusPlaneWhiteShiftMM != 0 {
+		fmt.Fprintf(w, "  white best-focus shift: %.6f mm\n", c.FocusPlaneWhiteShiftMM)
+	}
 	fmt.Fprintf(w, "  %-4s %-7s %-9s %-16s %-8s %-9s %-9s %-10s %-10s %-10s\n",
 		"fld", "angle", "wl(nm)", "plane", "strehl", "fwhm_x", "fwhm_y", "ee50", "centroid_x", "centroid_y")
 	for _, row := range c.Rows {
@@ -1165,6 +1273,9 @@ func writeFocusSpotTable(w io.Writer, c *types.FocusSpotComparison) {
 		strings.Join(c.Planes, ", "), c.Polarization)
 	if c.FocusPlaneAllShiftMM != 0 {
 		fmt.Fprintf(w, "  all-field best-focus shift: %.6f mm\n", c.FocusPlaneAllShiftMM)
+	}
+	if c.FocusPlaneWhiteShiftMM != 0 {
+		fmt.Fprintf(w, "  white best-focus shift: %.6f mm\n", c.FocusPlaneWhiteShiftMM)
 	}
 	fmt.Fprintf(w, "  %-4s %-7s %-9s %-16s %-9s %-9s %-9s %-9s %-9s %-18s\n",
 		"fld", "angle", "wl(nm)", "plane", "spot_rms", "rms_t", "rms_s", "rms_x", "rms_y", "centroid")

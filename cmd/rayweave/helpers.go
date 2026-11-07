@@ -14,6 +14,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
@@ -752,6 +753,41 @@ func buildOptimizeVariables(opt *types.OptimizationConfig, gc *glass.Catalog) []
 	return variables
 }
 
+// writeBackWavelengthNormalization records the effective wavelength_set
+// weight rule. The "sum" default is injected only when the document actually
+// uses wavelength_set, so an ordinary single-wavelength run keeps its input
+// unchanged.
+func writeBackWavelengthNormalization(input *types.Input) {
+	if input.Optimization == nil || input.Optimization.WavelengthNormalization != "" {
+		return
+	}
+	used := false
+	for _, cfg := range input.Configs {
+		if cfg.Merit != nil {
+			for _, t := range cfg.Merit.Terms {
+				if t.WavelengthSet != "" {
+					used = true
+					break
+				}
+			}
+		}
+		for _, m := range cfg.MeritModes {
+			for _, t := range m.Terms {
+				if t.WavelengthSet != "" {
+					used = true
+					break
+				}
+			}
+		}
+		if used {
+			break
+		}
+	}
+	if used {
+		input.Optimization.WavelengthNormalization = "sum"
+	}
+}
+
 // buildMeritTerms converts the first config's merit terms into the unified
 // Optimizer term list (single-config escape / evaluate paths).
 func buildMeritTerms(input types.Input) []optimize.MeritTerm {
@@ -760,7 +796,17 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 	if len(input.Configs) > 0 {
 		cfg := input.Configs[0]
 		if cfg.Merit != nil {
-			for _, mt := range cfg.Merit.Terms {
+			ref := effectiveReferenceWavelength(input.Chief)
+			resolver := spectral.NewResolver(cfg.Wavelengths, input.Spectrum, ref)
+			norm := ""
+			if input.Optimization != nil {
+				norm = input.Optimization.WavelengthNormalization
+			}
+			expanded, err := spectral.ExpandTerms(cfg.Merit.Terms, resolver, norm)
+			if err != nil {
+				errExitf("Error: %v", err)
+			}
+			for _, mt := range expanded {
 				kind := mt.Kind
 				if kind == "" {
 					kind = "spot_rms"
@@ -784,11 +830,13 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 					fieldWeight = 1.0
 				}
 
-				var wavWeight float64
-				for _, w := range cfg.Wavelengths {
-					if math.Abs(w.Value-mt.Wavelength) < 1e-12 {
-						wavWeight = w.Weight
-						break
+				wavWeight := mt.WavelengthWeight
+				if wavWeight <= 0 {
+					for _, w := range cfg.Wavelengths {
+						if math.Abs(w.Value-mt.Wavelength) < 1e-12 {
+							wavWeight = w.Weight
+							break
+						}
 					}
 				}
 				if wavWeight == 0 {
@@ -804,10 +852,13 @@ func buildMeritTerms(input types.Input) []optimize.MeritTerm {
 					Wavelength:           mt.Wavelength,
 					ComparisonWavelength: mt.ComparisonWavelength,
 					WavWeight:            wavWeight,
+					Wavelengths:          mt.ResolvedWavelengths,
 					Weight:               mt.Weight,
 					Target:               mt.Target,
 					Fraction:             mt.Fraction,
+					Frequency:            mt.Frequency,
 					SurfaceSet:           mt.SurfaceSet,
+					Scale:                mt.Scale,
 				})
 			}
 		}

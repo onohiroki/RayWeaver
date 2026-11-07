@@ -71,7 +71,7 @@ rayweave list surfaces glasses paraxial fields < lens.yaml  # all four (same as 
 | `paraxial` | First-order optical properties (EFL, F/#, NA, EPD, BFL, …). With `--roles`, appends the per-element glass-role table. |
 | `fields` | Field-of-view definitions from `chief.fields[]` (or `configs[].fields[]` as fallback). Shows each field's type (`angle`, `image_height`, `height`) with input values from the YAML and computed values (actual angle, image height) from the real-ray chief trace. When input and computed values match, only one is shown; when they differ (e.g. `image_height` mode where the angle is solved iteratively), both are shown as `input (computed)`. |
 | `rays` | Ray trace results from the `results[]` section (requires `trace` / `trace single` output). |
-| `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, comparison_wavelength, weight, target), merit modes with term counts, and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize` or a global run, also shows the optimization result (status, iterations, merit). |
+| `merit` | Merit function definition from `configs[].merit`, `configs[].merit_modes` and `configs[].constraints`. Shows merit terms (kind, field, wavelength, `wavelength_set`, comparison_wavelength, weight, target), merit modes with term counts, the effective `wavelength_normalization` (`sum` default | `none`), and constraints (per-config first, else inherited from `optimization.constraints`). When piped from `optimize` or a global run, also shows the optimization result (status, iterations, merit). |
 | `optimization` | Optimizer configuration from `optimization[]`: solver settings, variables/shared/local variables/variable links, `merit_schedule`, and the sub-configs (`escape`, `pso`, `glass_hull`, `glass_attraction`, `degenerate`, `power_solve`, `region_active`, `adaptive_damping`). No constraints (the merit target owns the effective constraint display). When piped from `optimize`, also shows the optimization result. |
 | `global` | Global-optimisation results for either global method (`escape` or `pso`). Reads either the `global_result` section of a pipeline document or, detected automatically, an escape/pso JSONL run log (`--log FILE` / a captured `--verbose` stream), showing the run parameters (escape-only ones listed for an `escape` run), the run aggregate, discovered local minima with their per-minimum element powers and variable values (both from a pipeline document; the variables only in structured output), and the per-worker completion list (run log only). See [§11](#11-global-section--escapepso-global-search-results). |
 | `focus` | Image-plane comparison results from the `focus_comparison` section (requires `focus mtf` / `focus psf` output). Auto-detects the MTF/PSF sub-section and renders the per-(field, wavelength) × plane table. |
@@ -685,7 +685,8 @@ focus psf: PSF comparison (planes: file, focus_plane_all, best_focus, polarizati
   0    0.00    587.6     best_focus       0.7622   0.00136   0.00136   0.23575    0.0000     0.0000
 ```
 
-Plane names: `file`, `focus_plane_all` (the single all-field best focus), and
+Plane names: `file`, `focus_plane_all` (the single all-field best focus),
+`focus_plane_white` (the wavelength-weighted white best focus), and
 `best_focus` (each field's own best focus). `focus mtf` adds one
 `MTF<f>(sag/tan)` column per reported frequency.
 

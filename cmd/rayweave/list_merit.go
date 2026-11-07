@@ -57,6 +57,7 @@ func listMerit(input types.Input, output types.Output, format string) {
 					Kind:                 t.Kind,
 					Field:                t.Field,
 					Wavelength:           t.Wavelength,
+					WavelengthSet:        t.WavelengthSet,
 					ComparisonWavelength: t.ComparisonWavelength,
 					Target:               t.Target,
 					Fraction:             t.Fraction,
@@ -132,12 +133,13 @@ func listMerit(input types.Input, output types.Output, format string) {
 	case "csv":
 		if len(terms) > 0 {
 			fmt.Println("Merit Terms:")
-			fmt.Println("config,kind,field,wavelength,comparison_wavelength,target,fraction,surface_set,weight")
+			fmt.Println("config,kind,field,wavelength,wavelength_set,comparison_wavelength,target,fraction,surface_set,weight")
 			for _, r := range terms {
 				cells := []string{
 					r.Config, r.Kind,
 					strconv.Itoa(r.Field),
 					strconv.FormatFloat(r.Wavelength, 'g', -1, 64),
+					r.WavelengthSet,
 					strconv.FormatFloat(r.ComparisonWavelength, 'g', -1, 64),
 					strconv.FormatFloat(r.Target, 'g', -1, 64),
 					strconv.FormatFloat(r.Fraction, 'g', -1, 64),
@@ -212,6 +214,7 @@ func listMerit(input types.Input, output types.Output, format string) {
 				{header: "Kind"},
 				{header: "Field", right: true},
 				{header: "λ[mm]", right: true},
+				{header: "Set"},
 				{header: "Weight", right: true},
 				{header: "Target", right: true},
 				{header: "Surface Set"},
@@ -220,13 +223,18 @@ func listMerit(input types.Input, output types.Output, format string) {
 				cols[0].cells = append(cols[0].cells, r.Kind)
 				cols[1].cells = append(cols[1].cells, strconv.Itoa(r.Field))
 				cols[2].cells = append(cols[2].cells, formatTableFloat(r.Wavelength))
-				cols[3].cells = append(cols[3].cells, formatTableFloat(r.Weight))
-				cols[4].cells = append(cols[4].cells, formatTableFloat(r.Target))
+				set := r.WavelengthSet
+				if set == "" {
+					set = "-"
+				}
+				cols[3].cells = append(cols[3].cells, set)
+				cols[4].cells = append(cols[4].cells, formatTableFloat(r.Weight))
+				cols[5].cells = append(cols[5].cells, formatTableFloat(r.Target))
 				sset := "-"
 				if len(r.SurfaceSet) > 0 {
 					sset = fmt.Sprintf("%v", r.SurfaceSet)
 				}
-				cols[5].cells = append(cols[5].cells, sset)
+				cols[6].cells = append(cols[6].cells, sset)
 			}
 			fmt.Print(renderTable(cols))
 			fmt.Println()

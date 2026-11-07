@@ -9,6 +9,7 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/psf"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/wavefront"
@@ -67,11 +68,36 @@ func runWavefront(data []byte) {
 	}
 
 	var wavelengths []float64
+	wavelengthSet := ""
+	if input.Wavefront != nil {
+		wavelengthSet = input.Wavefront.WavelengthSet
+	}
+	if flags.Set("wavelength-set") {
+		wavelengthSet = flags.String("wavelength-set")
+	}
+	if len(flags.Floats("wavelengths")) > 0 || (input.Wavefront != nil && len(input.Wavefront.Wavelengths) > 0) {
+		wavelengthSet = ""
+	}
 	switch {
 	case len(flags.Floats("wavelengths")) > 0:
 		wavelengths = flags.Floats("wavelengths")
 	case input.Wavefront != nil && len(input.Wavefront.Wavelengths) > 0:
 		wavelengths = input.Wavefront.Wavelengths
+	case wavelengthSet == "design":
+		for _, s := range configWavelengthSamples(input.Configs, &configFlag) {
+			wavelengths = append(wavelengths, s.Value)
+		}
+		if len(wavelengths) == 0 {
+			errExitf("Error: wavefront.wavelength_set: design has no config wavelengths")
+		}
+	case wavelengthSet == "spectral":
+		samples, err := spectral.SpectralSamples(input.Spectrum, 0)
+		if err != nil {
+			errExitf("Error: %v", err)
+		}
+		for _, s := range samples {
+			wavelengths = append(wavelengths, s.Value)
+		}
 	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
 		wavelengths = configWavelengthValues(input.Configs, &configFlag)
 	default:
@@ -126,6 +152,12 @@ func runWavefront(data []byte) {
 
 	// Write the effective options back into the output's wavefront: section.
 	writeBackWavefront(&input, wavelengths, selected, polLabels, refSurfaceID, numRaysVal, workers, zOrder, mapGridVal, bestFocus, focusWeight, focusWeights, shiftedLens)
+	if wavelengthSet != "" {
+		if input.Wavefront == nil {
+			input.Wavefront = &types.WavefrontConfig{}
+		}
+		input.Wavefront.WavelengthSet = wavelengthSet
+	}
 
 	output := types.Output{Input: input}
 	withOutputMetadata(&output.Input, "wavefront", subcmdArgs())

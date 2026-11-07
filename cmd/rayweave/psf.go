@@ -12,6 +12,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/psf"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"gopkg.in/yaml.v3"
@@ -67,12 +68,82 @@ func runPSF(data []byte) {
 	// back-focus solve below uses this same list.
 	fields := resolveConfigFieldDefs(input, &configFlag)
 
+	// Wavelengths: flag > psf.wavelengths > resolved set > spectral default
+	// grid > selected config wavelengths > the system reference wavelength.
+	// Resolved before the focus-plane solve so a white plane uses exactly the
+	// wavelengths the PSF evaluates.
+	var wavelengths []float64
+	var wavelengthWeights []float64
+	wavelengthSet := ""
+	if input.PSF != nil {
+		wavelengthSet = input.PSF.WavelengthSet
+	}
+	if flags.Set("wavelength-set") {
+		wavelengthSet = flags.String("wavelength-set")
+	}
+	spectralMode := spectralFlag != "" ||
+		(input.PSF != nil && (input.PSF.SpectralCurve != "" || len(input.PSF.SpectralEntries) > 0))
+	if spectralMode && wavelengthSet == "design" {
+		errExitf("Error: --spectral (SPD weighting) and --wavelength-set design are mutually exclusive")
+	}
+	switch {
+	case len(flags.Floats("wavelengths")) > 0:
+		wavelengths = flags.Floats("wavelengths")
+		wavelengthSet = ""
+	case input.PSF != nil && len(input.PSF.Wavelengths) > 0:
+		wavelengths = input.PSF.Wavelengths
+	case wavelengthSet == "design":
+		samples := configWavelengthSamples(input.Configs, &configFlag)
+		if len(samples) == 0 {
+			errExitf("Error: psf.wavelength_set: design has no config wavelengths")
+		}
+		for _, s := range samples {
+			wavelengths = append(wavelengths, s.Value)
+			wavelengthWeights = append(wavelengthWeights, s.Weight)
+		}
+	case wavelengthSet == "spectral":
+		samples, err := spectral.SpectralSamples(input.Spectrum, 0)
+		if err != nil {
+			errExitf("Error: %v", err)
+		}
+		for _, s := range samples {
+			wavelengths = append(wavelengths, s.Value)
+			wavelengthWeights = append(wavelengthWeights, s.Weight)
+		}
+	case spectralMode:
+		for wl := 400.0; wl <= 700; wl += 10 {
+			wavelengths = append(wavelengths, wl*1e-6)
+		}
+	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
+		wavelengths = configWavelengthValues(input.Configs, &configFlag)
+	default:
+		wavelengths = []float64{effectiveReferenceWavelength(input.Chief)}
+	}
+	if spectralMode && len(wavelengthWeights) == 0 {
+		curve := spectralFlag
+		var entries []types.SpectralEntry
+		if input.PSF != nil {
+			if curve == "" {
+				curve = input.PSF.SpectralCurve
+			}
+			entries = input.PSF.SpectralEntries
+		}
+		if curve == "" && input.Spectrum != nil {
+			curve = input.Spectrum.Curve
+			if len(entries) == 0 {
+				entries = input.Spectrum.Entries
+			}
+		}
+		wavelengthWeights = spdWeights(wavelengths, curve, entries)
+	}
+
 	// --focus-plane all: move the image plane to the single all-field
 	// best-focus position — the uniform-weighted wavefront best focus, the same
 	// solve the escape save applies — so the fixed-plane PSF/MTF is evaluated
 	// at the plane the deliverable carries. The applied shift is reported on
 	// stderr (stdout stays a clean pipeline document).
-	if strings.EqualFold(strings.TrimSpace(focusPlane), "all") {
+	plane := strings.ToLower(strings.TrimSpace(focusPlane))
+	if plane == "all" || plane == "white" {
 		cfgIdx := 0
 		if configFlag != "" {
 			i, err := resolveConfig(input.Configs, flags.String("config"))
@@ -98,49 +169,52 @@ func runPSF(data []byte) {
 		if input.PSF != nil {
 			bfRays = intOrYAML(numRays, input.PSF.NumRays)
 		}
+		bfType := "wavefront"
 		bf := &types.BackFocusSolveConfig{Enabled: true, Type: "wavefront", WeightType: "uniform",
 			NumRays: effectivePSFNumRays(bfRays)}
+		bf.Spectrum = input.Spectrum
 		if src := backFocusSolveOf(&input); src != nil {
 			bf.Surface = src.Surface
 			bf.ReferenceSurface = src.ReferenceSurface
 			bf.Wavelength = src.Wavelength
+			bf.WavelengthSet = src.WavelengthSet
+			bf.Objective = src.Objective
+			bf.Wavelengths = src.Wavelengths
+		}
+		if plane == "white" {
+			bfType = "white"
+			if bf.Objective == "" {
+				bf.Objective = "wavefront"
+			}
+			if len(wavelengths) > 0 {
+				samples := make([]types.WavelengthSample, len(wavelengths))
+				for i, wl := range wavelengths {
+					w := 1.0 / float64(len(wavelengths))
+					if len(wavelengthWeights) == len(wavelengths) {
+						w = wavelengthWeights[i]
+					}
+					samples[i] = types.WavelengthSample{Value: wl, Weight: w}
+				}
+				bf.WavelengthSet = "custom"
+				bf.Wavelengths = samples
+			}
 		}
 		if bf.Wavelength <= 0 {
 			bf.Wavelength = effectiveReferenceWavelength(input.Chief)
 		}
-		optimize.ApplyBackFocusSolve(surfaces, bf, "wavefront", input.Chief.StopSurface,
+		optimize.ApplyBackFocusSolve(surfaces, bf, bfType, input.Chief.StopSurface,
 			bf.Wavelength, cfgFields, cfgWLs, gc, chiefRayDefinition(input),
 			input.Chief.PupilModel)
 		surface.Precompute(surfaces)
 		system.Surfaces = surfaces
-		fmt.Fprintf(os.Stderr, "focus-plane all: image plane shifted by %.6f mm to the all-field best focus\n",
-			maxThicknessDelta(before, surfaces))
+		fmt.Fprintf(os.Stderr, "focus-plane %s: image plane shifted by %.6f mm to the %s best focus\n",
+			plane, maxThicknessDelta(before, surfaces), plane)
 	}
 
 	selected := selectedFieldIndices(fields, input.PSF, fieldsFlag)
 	fields = applySelectedFields(fields, selected)
 	if len(fields) == 0 {
 		errExitf("Error: no fields to compute")
-	}
-
-	// Wavelengths: flag > psf.wavelengths > spectral default grid > selected
-	// config wavelengths > the system reference wavelength.
-	var wavelengths []float64
-	spectralMode := spectralFlag != "" ||
-		(input.PSF != nil && (input.PSF.SpectralCurve != "" || len(input.PSF.SpectralEntries) > 0))
-	switch {
-	case len(flags.Floats("wavelengths")) > 0:
-		wavelengths = flags.Floats("wavelengths")
-	case input.PSF != nil && len(input.PSF.Wavelengths) > 0:
-		wavelengths = input.PSF.Wavelengths
-	case spectralMode:
-		for wl := 400.0; wl <= 700; wl += 10 {
-			wavelengths = append(wavelengths, wl*1e-6)
-		}
-	case len(configWavelengthValues(input.Configs, &configFlag)) > 0:
-		wavelengths = configWavelengthValues(input.Configs, &configFlag)
-	default:
-		wavelengths = []float64{effectiveReferenceWavelength(input.Chief)}
 	}
 
 	var polLabels []string
@@ -170,6 +244,19 @@ func runPSF(data []byte) {
 		default:
 			errExitf("Error: invalid --spectral %q (D65 | FLAT)", spectralFlag)
 		}
+	} else if wavelengthSet == "spectral" && spectralCurve == "" && len(spectralEntries) == 0 && input.Spectrum != nil {
+		if len(input.Spectrum.Entries) > 0 {
+			spectralEntries = input.Spectrum.Entries
+		} else {
+			switch strings.ToUpper(strings.TrimSpace(input.Spectrum.Curve)) {
+			case "", "D65":
+				spectralCurve = "D65"
+			case "FLAT":
+				spectralCurve = "FLAT"
+			default:
+				errExitf("Error: unsupported spectrum curve %q (D65 | FLAT | custom entries)", input.Spectrum.Curve)
+			}
+		}
 	}
 
 	opts := psf.Options{
@@ -183,6 +270,9 @@ func runPSF(data []byte) {
 		SpectralEntries:  spectralEntries,
 		PupilModel:       input.Chief.PupilModel,
 		RayDefinition:    chiefRayDefinition(input),
+	}
+	if wavelengthSet == "design" {
+		opts.WavelengthWeights = wavelengthWeights
 	}
 	if input.PSF != nil {
 		opts.ReferenceSurface = intOrYAML(refSurface, input.PSF.ReferenceSurface)
@@ -260,7 +350,7 @@ func runPSF(data []byte) {
 
 	// Write the effective options back into the output's psf: section so the
 	// pipeline reflects what was actually computed (flags override YAML).
-	writeBackPSF(&input, wavelengths, selected, opts, flags.Set("best-focus"))
+	writeBackPSF(&input, wavelengths, selected, opts, flags.Set("best-focus"), wavelengthSet)
 
 	output := types.Output{Input: input}
 	withOutputMetadata(&output.Input, "psf", subcmdArgs())
@@ -389,7 +479,54 @@ func effectivePSFNumRays(n int) int {
 	return psf.DefaultNumRays
 }
 
-func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opts psf.Options, bestFocusSet bool) {
+// spdWeights samples an SPD on the given wavelength list (mm), weights each
+// point by the trapezoidal Δλ and normalises. It is the white-focus weighting
+// for the `--spectral` mode, independent of the PSF's Huygens evaluation.
+func spdWeights(wavelengths []float64, curve string, entries []types.SpectralEntry) []float64 {
+	if len(wavelengths) == 0 {
+		return nil
+	}
+	var c *spectral.Curve
+	if len(entries) > 0 {
+		nm := make([]float64, len(entries))
+		rel := make([]float64, len(entries))
+		for i, e := range entries {
+			nm[i] = e.Wavelength
+			rel[i] = e.Relative
+		}
+		c = spectral.NewCurve(nm, rel)
+	} else if strings.EqualFold(strings.TrimSpace(curve), "FLAT") {
+		c = spectral.Flat(wavelengths[0]*1e6, wavelengths[len(wavelengths)-1]*1e6)
+	} else {
+		c = spectral.D65()
+	}
+	weights := make([]float64, len(wavelengths))
+	var sum float64
+	for i, wl := range wavelengths {
+		d := 0.0
+		switch {
+		case len(wavelengths) == 1:
+			d = 1
+		case i == 0:
+			d = (wavelengths[1] - wavelengths[0]) / 2
+		case i == len(wavelengths)-1:
+			d = (wavelengths[i] - wavelengths[i-1]) / 2
+		default:
+			d = (wavelengths[i+1] - wavelengths[i-1]) / 2
+		}
+		weights[i] = c.Weight(wl) * d
+		sum += weights[i]
+	}
+	if sum <= 0 {
+		return nil
+	}
+	for i := range weights {
+		weights[i] /= sum
+	}
+	return weights
+}
+
+func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opts psf.Options, bestFocusSet bool, wavelengthSet string) {
 	if input.PSF == nil {
 		input.PSF = &types.PSFConfig{}
 	}
@@ -401,6 +538,7 @@ func writeBackPSF(input *types.Input, wavelengths []float64, selected []int, opt
 	ps.Workers = opts.Workers
 	ps.Polarization = strings.Join(opts.Polarizations, ",")
 	ps.Wavelengths = wavelengths
+	ps.WavelengthSet = wavelengthSet
 	ps.Fields = selected
 	ps.SpectralCurve = opts.SpectralCurve
 	ps.SpectralEntries = opts.SpectralEntries

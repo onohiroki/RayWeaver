@@ -170,6 +170,7 @@ type MeritTermRow struct {
 	Kind                 string  `json:"kind" yaml:"kind"`
 	Field                int     `json:"field,omitempty" yaml:"field,omitempty"`
 	Wavelength           float64 `json:"wavelength,omitempty" yaml:"wavelength,omitempty"`
+	WavelengthSet        string  `json:"wavelength_set,omitempty" yaml:"wavelength_set,omitempty"`
 	ComparisonWavelength float64 `json:"comparison_wavelength,omitempty" yaml:"comparison_wavelength,omitempty"`
 	Target               float64 `json:"target,omitempty" yaml:"target,omitempty"`
 	Fraction             float64 `json:"fraction,omitempty" yaml:"fraction,omitempty"`

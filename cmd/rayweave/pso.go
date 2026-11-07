@@ -19,6 +19,7 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 	if input.Optimization == nil {
 		errExitf("Error: 'optimization' section is required")
 	}
+	writeBackWavelengthNormalization(&input)
 	if input.Optimization.PSO == nil {
 		errExitf("Error: 'optimization.pso' section is required")
 	}

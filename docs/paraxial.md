@@ -15,6 +15,25 @@ rayweave paraxial [--wl MM] [--config ID] [--glass-dir DIR] < system.yaml
 | `--wl MM` | reference wavelength in mm for the trace (default: the document's `chief.reference_wavelength`, else `0.00058756`); written back into `chief.reference_wavelength` |
 | `--config ID` | select a config by id (multi-config mode); defaults to `configs[0]` |
 | `--glass-dir DIR` | AGF glass catalog directory |
+| `--wavelengths W1,...` | explicit colour sweep (mm); overrides `paraxial.wavelengths` |
+| `--wavelength-set S` | colour sweep set: `design` (config wavelengths with weights), `spectral` (document `spectrum`) or `custom` |
+
+A colour sweep evaluates the same system at every set member and adds
+`paraxial_result.wavelengths[]` (EFL, BFL, f/#, NA and normalised weight) plus
+`paraxial_result.color`: the axial-colour shifts `BFL(λ) − BFL(ref)`, the
+secondary spectrum (largest departure from the F–C BFL line) and the weighted
+white EFL/BFL. Without a sweep the command keeps its reference-wavelength-only
+behaviour.
+
+```sh
+rayweave paraxial --wavelength-set design < lens.yaml
+```
+
+```yaml
+paraxial:
+  object_height: 10.0
+  wavelength_set: design       # or wavelengths: [0.00048613, 0.00065627]
+```
 
 The reference wavelength sets the glass index (nd at that wavelength) for every
 paraxial quantity, so it shifts the focal length with dispersion — useful for a
@@ -58,6 +77,10 @@ Augmented YAML with a `paraxial_result:` section:
 | `first_principal_point` | mm from first surface |
 | `second_principal_focus` | BFL in mm from last surface |
 | `second_principal_point` | mm from last surface |
+| `wavelengths[]` | colour-sweep rows: `value`, `label`, `weight`, `focal_length`, `second_principal_focus`, `image_space_f_number`, `image_space_na` |
+| `color.axial_color[]` | `BFL(λ) − BFL(reference)` in mm |
+| `color.secondary_spectrum_mm` | largest departure from the F–C BFL line |
+| `color.white_focal_length` / `white_back_focal` | weighted white EFL / BFL |
 | `element_roles` | per-lens-element glass-role classification (`surface_ids`, `phi`, `y`, `w`, `role` = `dominant`\|`compensating`\|`neutral`, `nd_target`, `vd_target`, plus `nd_actual`/`vd_actual`) — the same judgement the optimizer's `glass_role` merit kind uses |
 
 `element_roles` is always populated: it is computed from the surface groups

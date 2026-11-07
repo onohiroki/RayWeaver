@@ -173,7 +173,17 @@ Augmented YAML with a `chief_rays[]` section, one entry per field:
 - `grid_points` (only with `dump_map: true`) — per-ray pupil/image position,
   intensity, OPL, and the origin/direction for re-tracing
 - `ray_fan` (with `--ray-fan`) — meridional / sagittal / rotated fans
-- `wavelengths` (when the config defines wavelengths) — per-wavelength stats
+- `wavelengths` (when the config defines wavelengths) — per-wavelength stats:
+  `value`, `label`, `weight`, `chief_height` (the chief ray's image height at
+  that λ) and `spot_stats`
+- `white_spot_stats` — the flux- and wavelength-weighted spot over every
+  `wavelengths` entry: the common centroid and the combined RMS, which includes
+  the inter-wavelength (lateral-colour) spread that each per-λ RMS about its
+  own centroid cannot see. Both the per-λ and white stats are measured on
+  `chief.reference_surface`; with the default `0` (object plane) they carry no
+  image-plane colour information, so set it to the image/reference surface
+- `lateral_color` — `reference`, `max_mm` and `rms_mm` of the chief-height
+  spread relative to the reference wavelength
 - `pupil_probe` / `pupil_probe_z` — for a stop-free (dynamic-pupil) system,
   whether the low-angle probe supplied the aperture position and at which Z
 

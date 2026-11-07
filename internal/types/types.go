@@ -540,7 +540,20 @@ type MeritTerm struct {
 	Field                int     `yaml:"field"`
 	Wavelength           float64 `yaml:"wavelength"`
 	ComparisonWavelength float64 `yaml:"comparison_wavelength,omitempty"`
-	Target               float64 `yaml:"target,omitempty"`
+	// WavelengthSet expands a term over a resolved wavelength set:
+	// "design" (configs[].wavelengths), "spectral" (the document spectrum) or
+	// "custom" (the term's own Wavelengths list). Empty keeps the single
+	// Wavelength behaviour.
+	WavelengthSet string `yaml:"wavelength_set,omitempty"`
+	// Wavelengths is the explicit set for WavelengthSet: custom.
+	Wavelengths []WavelengthSample `yaml:"wavelengths,omitempty"`
+	// WavelengthWeight is filled by a wavelength_set expansion: the term's
+	// resolved per-wavelength weight (0 = look it up by Wavelength, or 1).
+	WavelengthWeight float64 `yaml:"-"`
+	// ResolvedWavelengths carries the normalised set to an aggregate
+	// (polychromatic_*) kind; expansion leaves it nil for expanded terms.
+	ResolvedWavelengths []WavelengthSample `yaml:"-"`
+	Target              float64            `yaml:"target,omitempty"`
 	// Frequency is the spatial frequency in lp/mm for geometric MTF kinds
 	// (geometric_mtf_sag, geometric_mtf_tan).
 	Frequency float64 `yaml:"frequency,omitempty"`
@@ -878,9 +891,14 @@ type OptimizationConfig struct {
 	PSO                *PSOConfig                `yaml:"pso,omitempty"`
 	MeritSchedule      *MeritScheduleConfig      `yaml:"merit_schedule,omitempty"`
 	MeritNormalization *MeritNormalizationConfig `yaml:"merit_normalization,omitempty"`
-	Degenerate         *DegenerateConfig         `yaml:"degenerate,omitempty"`
-	PowerSolve         *PowerSolveConfig         `yaml:"power_solve,omitempty"`
-	BackFocusSolve     *BackFocusSolveConfig     `yaml:"back_focus_solve,omitempty"`
+	// WavelengthNormalization selects how a wavelength_set expansion weights
+	// its terms: "sum" (default) normalises the set to Σw = 1 so the expanded
+	// term keeps its balance against the other terms; "none" keeps the raw
+	// weights (ZEMAX WWGT semantics).
+	WavelengthNormalization string                `yaml:"wavelength_normalization,omitempty"`
+	Degenerate              *DegenerateConfig     `yaml:"degenerate,omitempty"`
+	PowerSolve              *PowerSolveConfig     `yaml:"power_solve,omitempty"`
+	BackFocusSolve          *BackFocusSolveConfig `yaml:"back_focus_solve,omitempty"`
 	// DiffractionMTF configures the diffraction_mtf_sag / diffraction_mtf_tan
 	// merit kinds (nil = built-in defaults).
 	DiffractionMTF  *DiffractionMTFConfig  `yaml:"diffraction_mtf,omitempty"`
@@ -1078,9 +1096,22 @@ type BackFocusSolveConfig struct {
 	// plane (skipping air-gap / filter surfaces).
 	Surface int `yaml:"surface,omitempty"`
 	// Type selects the focus computation method: "paraxial" (default),
-	// "spot" (geometric spot-RMS minimum) or "wavefront" (coherent best
-	// focus).
+	// "spot" (geometric spot-RMS minimum), "wavefront" (coherent best
+	// focus) or "white" (the wavelength-weighted polychromatic focus).
 	Type string `yaml:"type,omitempty"`
+	// Objective selects the metric a "white" solve optimises: "spot"
+	// (default, closed form) or "wavefront" (weighted per-field best-focus
+	// distances).
+	Objective string `yaml:"objective,omitempty"`
+	// WavelengthSet selects the wavelengths a "white" solve combines:
+	// "design" (configs[].wavelengths, default), "spectral" (the document
+	// spectrum) or "custom" (Wavelengths).
+	WavelengthSet string `yaml:"wavelength_set,omitempty"`
+	// Wavelengths is the explicit set for WavelengthSet: custom.
+	Wavelengths []WavelengthSample `yaml:"wavelengths,omitempty"`
+	// Spectrum is the document spectrum, filled by the command layer before
+	// the solve; it is not parsed from this section.
+	Spectrum *SpectralConfig `yaml:"-"`
 	// ReferenceSurface for the wavefront and spot types (default: last
 	// optical surface).
 	ReferenceSurface int `yaml:"reference_surface,omitempty"`
@@ -1362,8 +1393,9 @@ type OptimizationResult struct {
 
 // BackFocusDiagnostics is the run-level report of the back-focus hard solve.
 type BackFocusDiagnostics struct {
-	// Method is the solve type of the last adjustment: "wavefront" or
-	// "paraxial" ("paraxial" also marks a wavefront failure that fell back).
+	// Method is the solve type of the last adjustment: "paraxial", "spot",
+	// "wavefront" or "white" ("paraxial" also marks a failed real-ray solve
+	// that fell back).
 	Method string `yaml:"method,omitempty"`
 	// ShiftMM is the last applied image-plane shift (mm).
 	ShiftMM float64 `yaml:"shift_mm,omitempty"`
@@ -1889,6 +1921,7 @@ type Input struct {
 	Metadata       *Metadata               `yaml:"metadata,omitempty"`
 	GlassCatalog   *GlassCatalog           `yaml:"glass_catalog,omitempty"`
 	CoatingCatalog *CoatingCatalog         `yaml:"coating_catalog,omitempty"`
+	Spectrum       *SpectralConfig         `yaml:"spectrum,omitempty"`
 	Configs        []Config                `yaml:"configs,omitempty"`
 	PupilModel     *PupilModelConfig       `yaml:"pupil_model,omitempty"`
 	Vignette       *VignetteConfig         `yaml:"vignette,omitempty"`
@@ -1960,8 +1993,19 @@ type RayFanConfig struct {
 }
 
 type WavelengthStats struct {
-	Value     float64   `yaml:"value"`
-	SpotStats SpotStats `yaml:"spot_stats"`
+	Value       float64   `yaml:"value"`
+	Label       string    `yaml:"label,omitempty"`
+	Weight      float64   `yaml:"weight,omitempty"`
+	ChiefHeight float64   `yaml:"chief_height,omitempty"`
+	SpotStats   SpotStats `yaml:"spot_stats"`
+}
+
+// LateralColorStats summarises a field's chief-ray height spread across the
+// config's wavelengths, measured against the reference wavelength.
+type LateralColorStats struct {
+	Reference float64 `yaml:"reference"`
+	MaxMM     float64 `yaml:"max_mm"`
+	RMSMM     float64 `yaml:"rms_mm"`
 }
 
 type ChiefRayResult struct {
@@ -1974,6 +2018,12 @@ type ChiefRayResult struct {
 	SpotStats     *SpotStats        `yaml:"spot_stats,omitempty"`
 	RayFan        *RayFan           `yaml:"ray_fan,omitempty"`
 	Wavelengths   []WavelengthStats `yaml:"wavelengths,omitempty"`
+	// WhiteSpotStats is the flux- and wavelength-weighted spot over every
+	// entry in Wavelengths: the common centroid and the combined RMS include
+	// the inter-wavelength (lateral colour) spread.
+	WhiteSpotStats *SpotStats `yaml:"white_spot_stats,omitempty"`
+	// LateralColor is the chief-ray height spread across Wavelengths.
+	LateralColor *LateralColorStats `yaml:"lateral_color,omitempty"`
 	// PupilProbe reports that the low-angle probe supplied the dynamic-pupil
 	// aperture position (stop-free systems); PupilProbeZ is the aperture Z it
 	// found. Both are informational only.
@@ -1993,34 +2043,63 @@ type Pupil struct {
 	Radius float64 `yaml:"radius"`
 }
 
+// ParaxialWavelength is one entry of a paraxial wavelength sweep.
+type ParaxialWavelength struct {
+	Value                float64 `yaml:"value"`
+	Label                string  `yaml:"label,omitempty"`
+	Weight               float64 `yaml:"weight,omitempty"`
+	FocalLength          float64 `yaml:"focal_length,omitempty"`
+	SecondPrincipalFocus float64 `yaml:"second_principal_focus,omitempty"`
+	ImageSpaceFNumber    float64 `yaml:"image_space_f_number,omitempty"`
+	ImageSpaceNA         float64 `yaml:"image_space_na,omitempty"`
+}
+
+// ParaxialColorShift is one wavelength's axial colour shift (BFL − BFL_ref).
+type ParaxialColorShift struct {
+	Value   float64 `yaml:"value"`
+	Label   string  `yaml:"label,omitempty"`
+	ShiftMM float64 `yaml:"shift_mm"`
+}
+
+// ParaxialColor summarises the colour behaviour of a paraxial sweep.
+type ParaxialColor struct {
+	Reference           float64              `yaml:"reference"`
+	AxialColor          []ParaxialColorShift `yaml:"axial_color,omitempty"`
+	SecondarySpectrumMM float64              `yaml:"secondary_spectrum_mm,omitempty"`
+	WhiteFocalLength    float64              `yaml:"white_focal_length,omitempty"`
+	WhiteBackFocal      float64              `yaml:"white_back_focal,omitempty"`
+}
+
 type ParaxialResult struct {
-	ObjectSpaceIndex         float64       `yaml:"object_space_index"`
-	ImageSpaceIndex          float64       `yaml:"image_space_index"`
-	EntrancePupilDiameter    float64       `yaml:"entrance_pupil_diameter,omitempty"`
-	ObjectConeAngle          float64       `yaml:"object_cone_angle,omitempty"`
-	ObjectSpaceFNumber       float64       `yaml:"object_space_f_number,omitempty"`
-	ObjectSpaceNA            float64       `yaml:"object_space_na,omitempty"`
-	InfConjImageSpaceFNumber float64       `yaml:"inf_conj_image_space_f_number,omitempty"`
-	InfConjImageSpaceNA      float64       `yaml:"inf_conj_image_space_na,omitempty"`
-	ImageSpaceFNumber        float64       `yaml:"image_space_f_number,omitempty"`
-	ImageSpaceNA             float64       `yaml:"image_space_na,omitempty"`
-	EntrancePupilLocation    float64       `yaml:"entrance_pupil_location,omitempty"`
-	FocalLength              float64       `yaml:"focal_length,omitempty"`
-	Magnification            float64       `yaml:"magnification,omitempty"`
-	Minification             float64       `yaml:"minification,omitempty"`
-	ExitPupilLocation        float64       `yaml:"exit_pupil_location,omitempty"`
-	ExitPupilDiameter        float64       `yaml:"exit_pupil_diameter,omitempty"`
-	HalfAngleOfView          float64       `yaml:"half_angle_of_view,omitempty"`
-	TotalTrack               float64       `yaml:"total_track"`
-	FirstFocalLength         float64       `yaml:"first_focal_length,omitempty"`
-	FirstNodalPoint          float64       `yaml:"first_nodal_point,omitempty"`
-	FirstPrincipalFocus      float64       `yaml:"first_principal_focus,omitempty"`
-	FirstPrincipalPoint      float64       `yaml:"first_principal_point,omitempty"`
-	SecondFocalLength        float64       `yaml:"second_focal_length,omitempty"`
-	SecondNodalPoint         float64       `yaml:"second_nodal_point,omitempty"`
-	SecondPrincipalFocus     float64       `yaml:"second_principal_focus,omitempty"`
-	SecondPrincipalPoint     float64       `yaml:"second_principal_point,omitempty"`
-	ElementRoles             []ElementRole `yaml:"element_roles,omitempty"`
+	ObjectSpaceIndex         float64              `yaml:"object_space_index"`
+	ImageSpaceIndex          float64              `yaml:"image_space_index"`
+	EntrancePupilDiameter    float64              `yaml:"entrance_pupil_diameter,omitempty"`
+	ObjectConeAngle          float64              `yaml:"object_cone_angle,omitempty"`
+	ObjectSpaceFNumber       float64              `yaml:"object_space_f_number,omitempty"`
+	ObjectSpaceNA            float64              `yaml:"object_space_na,omitempty"`
+	InfConjImageSpaceFNumber float64              `yaml:"inf_conj_image_space_f_number,omitempty"`
+	InfConjImageSpaceNA      float64              `yaml:"inf_conj_image_space_na,omitempty"`
+	ImageSpaceFNumber        float64              `yaml:"image_space_f_number,omitempty"`
+	ImageSpaceNA             float64              `yaml:"image_space_na,omitempty"`
+	EntrancePupilLocation    float64              `yaml:"entrance_pupil_location,omitempty"`
+	FocalLength              float64              `yaml:"focal_length,omitempty"`
+	Magnification            float64              `yaml:"magnification,omitempty"`
+	Minification             float64              `yaml:"minification,omitempty"`
+	ExitPupilLocation        float64              `yaml:"exit_pupil_location,omitempty"`
+	ExitPupilDiameter        float64              `yaml:"exit_pupil_diameter,omitempty"`
+	HalfAngleOfView          float64              `yaml:"half_angle_of_view,omitempty"`
+	TotalTrack               float64              `yaml:"total_track"`
+	FirstFocalLength         float64              `yaml:"first_focal_length,omitempty"`
+	FirstNodalPoint          float64              `yaml:"first_nodal_point,omitempty"`
+	FirstPrincipalFocus      float64              `yaml:"first_principal_focus,omitempty"`
+	FirstPrincipalPoint      float64              `yaml:"first_principal_point,omitempty"`
+	SecondFocalLength        float64              `yaml:"second_focal_length,omitempty"`
+	SecondNodalPoint         float64              `yaml:"second_nodal_point,omitempty"`
+	SecondPrincipalFocus     float64              `yaml:"second_principal_focus,omitempty"`
+	SecondPrincipalPoint     float64              `yaml:"second_principal_point,omitempty"`
+	Wavelengths              []ParaxialWavelength `yaml:"wavelengths,omitempty"`
+	Color                    *ParaxialColor       `yaml:"color,omitempty"`
+	ElementRoles             []ElementRole        `yaml:"element_roles,omitempty"`
 }
 
 // ElementRole is the YAML-serializable mirror of the paraxial glass-role
@@ -2041,6 +2120,11 @@ type ElementRole struct {
 
 type ParaxialInput struct {
 	ObjectHeight float64 `yaml:"object_height,omitempty"`
+	// Wavelengths is an explicit sweep (mm); WavelengthSet selects a resolved
+	// set instead ("design" | "spectral" | "custom"). Empty keeps the
+	// reference-wavelength-only behaviour.
+	Wavelengths   []float64 `yaml:"wavelengths,omitempty"`
+	WavelengthSet string    `yaml:"wavelength_set,omitempty"`
 }
 
 // ScaleConfig configures the `scale` subcommand (the `scale:` YAML section).
@@ -2236,6 +2320,28 @@ type SpectralEntry struct {
 	Relative   float64 `yaml:"relative"`
 }
 
+// SpectralConfig describes a continuous light source used by the "spectral"
+// wavelength set. The evaluation commands sample it at Step, the optimiser at
+// OptimizeStep; both default to 5 nm and 10 nm respectively. Entries, when
+// present, replace the range/step grid and become the explicit sample set.
+type SpectralConfig struct {
+	Curve        string          `yaml:"curve,omitempty"`         // D65 | FLAT | custom
+	Range        []float64       `yaml:"range,omitempty"`         // [min, max] nm
+	Step         float64         `yaml:"step,omitempty"`          // nm, evaluation
+	OptimizeStep float64         `yaml:"optimize_step,omitempty"` // nm, optimisation
+	Entries      []SpectralEntry `yaml:"entries,omitempty"`
+}
+
+// WavelengthSample is one resolved wavelength of a wavelength set. Value is in
+// mm, matching every other wavelength field in the document. Weight is the
+// normalised weight (Σ = 1); RawWeight is the weight before normalisation.
+type WavelengthSample struct {
+	Value     float64 `yaml:"value"`
+	Label     string  `yaml:"label,omitempty"`
+	Weight    float64 `yaml:"weight,omitempty"`
+	RawWeight float64 `yaml:"-"`
+}
+
 // PSFMTFConfig configures the OTF/MTF computation derived from each PSF grid
 // (the psf.mtf_config YAML section). A nil / empty config uses the defaults.
 type PSFMTFConfig struct {
@@ -2313,7 +2419,11 @@ type PSFConfig struct {
 	NumRays          int       `yaml:"num_rays,omitempty"`
 	Fields           []int     `yaml:"fields,omitempty"`
 	Wavelengths      []float64 `yaml:"wavelengths,omitempty"`
-	Polarization     string    `yaml:"polarization,omitempty"`
+	// WavelengthSet selects a resolved set instead of the raw Wavelengths
+	// list: "design" (configs[].wavelengths, weighted), "spectral" (the
+	// document spectrum) or "custom" (Wavelengths, equal weights).
+	WavelengthSet string `yaml:"wavelength_set,omitempty"`
+	Polarization  string `yaml:"polarization,omitempty"`
 	// Workers bounds the Huygens-integration and wavefront-tracing
 	// parallelism (0 = runtime.NumCPU()).
 	Workers int `yaml:"huygens_workers,omitempty"`
@@ -2359,6 +2469,8 @@ type FocusConfig struct {
 type FocusMTFConfig struct {
 	// Wavelengths in mm (default: config wavelengths, else the reference).
 	Wavelengths []float64 `yaml:"wavelengths,omitempty"`
+	// WavelengthSet selects a resolved set (design | spectral | custom).
+	WavelengthSet string `yaml:"wavelength_set,omitempty"`
 	// Frequencies are the spatial frequencies (cycles/mm) reported per plane
 	// (default: [50]).
 	Frequencies []float64 `yaml:"frequencies,omitempty"`
@@ -2391,6 +2503,7 @@ type FocusMTFConfig struct {
 // encircled energy, centroid) compared across the same plane conventions.
 type FocusPSFConfig struct {
 	Wavelengths      []float64 `yaml:"wavelengths,omitempty"`
+	WavelengthSet    string    `yaml:"wavelength_set,omitempty"`
 	Fields           []int     `yaml:"fields,omitempty"`
 	Planes           []string  `yaml:"planes,omitempty"`
 	NumRays          int       `yaml:"num_rays,omitempty"`
@@ -2418,6 +2531,7 @@ type FocusThroughFocus struct {
 // `focus psf`.
 type FocusSpotConfig struct {
 	Wavelengths      []float64 `yaml:"wavelengths,omitempty"`
+	WavelengthSet    string    `yaml:"wavelength_set,omitempty"`
 	Fields           []int     `yaml:"fields,omitempty"`
 	Planes           []string  `yaml:"planes,omitempty"`
 	NumRays          int       `yaml:"num_rays,omitempty"`
@@ -2441,6 +2555,8 @@ type WavefrontConfig struct {
 	Fields []int `yaml:"fields,omitempty"`
 	// Wavelengths in mm (default: chief wavelengths, else 587.56 nm).
 	Wavelengths []float64 `yaml:"wavelengths,omitempty"`
+	// WavelengthSet selects a resolved set (design | spectral | custom).
+	WavelengthSet string `yaml:"wavelength_set,omitempty"`
 	// Polarization input state: RCP (default) | LCP | X | Y | RCP+LCP.
 	Polarization string `yaml:"polarization,omitempty"`
 	// Workers bounds the per-field task parallelism (0 = runtime.NumCPU()).
@@ -2534,20 +2650,22 @@ type FocusComparison struct {
 // FocusSpotComparison is the `focus spot` table: per (field, wavelength) the
 // geometric spot RMS (and its decompositions) under each plane convention.
 type FocusSpotComparison struct {
-	Planes               []string       `yaml:"planes" json:"planes"`
-	FocusPlaneAllShiftMM float64        `yaml:"focus_plane_all_shift_mm,omitempty" json:"focus_plane_all_shift_mm,omitempty"`
-	Polarization         string         `yaml:"polarization,omitempty" json:"polarization,omitempty"`
-	Rows                 []FocusSpotRow `yaml:"rows" json:"rows"`
+	Planes                 []string       `yaml:"planes" json:"planes"`
+	FocusPlaneAllShiftMM   float64        `yaml:"focus_plane_all_shift_mm,omitempty" json:"focus_plane_all_shift_mm,omitempty"`
+	FocusPlaneWhiteShiftMM float64        `yaml:"focus_plane_white_shift_mm,omitempty" json:"focus_plane_white_shift_mm,omitempty"`
+	Polarization           string         `yaml:"polarization,omitempty" json:"polarization,omitempty"`
+	Rows                   []FocusSpotRow `yaml:"rows" json:"rows"`
 }
 
 // FocusSpotRow is one (field, wavelength) spot comparison row.
 type FocusSpotRow struct {
-	FieldIndex    int             `yaml:"field_index" json:"field_index"`
-	FieldAngle    float64         `yaml:"field_angle" json:"field_angle"`
-	Wavelength    float64         `yaml:"wavelength" json:"wavelength"`
-	File          *FocusSpotPlane `yaml:"file,omitempty" json:"file,omitempty"`
-	FocusPlaneAll *FocusSpotPlane `yaml:"focus_plane_all,omitempty" json:"focus_plane_all,omitempty"`
-	BestFocus     *FocusSpotPlane `yaml:"best_focus,omitempty" json:"best_focus,omitempty"`
+	FieldIndex      int             `yaml:"field_index" json:"field_index"`
+	FieldAngle      float64         `yaml:"field_angle" json:"field_angle"`
+	Wavelength      float64         `yaml:"wavelength" json:"wavelength"`
+	File            *FocusSpotPlane `yaml:"file,omitempty" json:"file,omitempty"`
+	FocusPlaneAll   *FocusSpotPlane `yaml:"focus_plane_all,omitempty" json:"focus_plane_all,omitempty"`
+	FocusPlaneWhite *FocusSpotPlane `yaml:"focus_plane_white,omitempty" json:"focus_plane_white,omitempty"`
+	BestFocus       *FocusSpotPlane `yaml:"best_focus,omitempty" json:"best_focus,omitempty"`
 }
 
 // FocusSpotPlane is the geometric spot summary at one plane convention. All
@@ -2631,20 +2749,22 @@ type FocusMTFComparison struct {
 	Frequencies []float64 `yaml:"frequencies" json:"frequencies"`
 	// FocusPlaneAllShiftMM is the image-plane shift the `all` convention
 	// applied (mm); 0 when the `all` plane was not requested.
-	FocusPlaneAllShiftMM float64       `yaml:"focus_plane_all_shift_mm,omitempty" json:"focus_plane_all_shift_mm,omitempty"`
-	Polarization         string        `yaml:"polarization,omitempty" json:"polarization,omitempty"`
-	Rows                 []FocusMTFRow `yaml:"rows" json:"rows"`
+	FocusPlaneAllShiftMM   float64       `yaml:"focus_plane_all_shift_mm,omitempty" json:"focus_plane_all_shift_mm,omitempty"`
+	FocusPlaneWhiteShiftMM float64       `yaml:"focus_plane_white_shift_mm,omitempty" json:"focus_plane_white_shift_mm,omitempty"`
+	Polarization           string        `yaml:"polarization,omitempty" json:"polarization,omitempty"`
+	Rows                   []FocusMTFRow `yaml:"rows" json:"rows"`
 }
 
 // FocusMTFRow is one (field, wavelength) comparison row. The plane blocks are
 // present only for the conventions that were requested.
 type FocusMTFRow struct {
-	FieldIndex    int            `yaml:"field_index" json:"field_index"`
-	FieldAngle    float64        `yaml:"field_angle" json:"field_angle"`
-	Wavelength    float64        `yaml:"wavelength" json:"wavelength"`
-	File          *FocusMTFPlane `yaml:"file,omitempty" json:"file,omitempty"`
-	FocusPlaneAll *FocusMTFPlane `yaml:"focus_plane_all,omitempty" json:"focus_plane_all,omitempty"`
-	BestFocus     *FocusMTFPlane `yaml:"best_focus,omitempty" json:"best_focus,omitempty"`
+	FieldIndex      int            `yaml:"field_index" json:"field_index"`
+	FieldAngle      float64        `yaml:"field_angle" json:"field_angle"`
+	Wavelength      float64        `yaml:"wavelength" json:"wavelength"`
+	File            *FocusMTFPlane `yaml:"file,omitempty" json:"file,omitempty"`
+	FocusPlaneAll   *FocusMTFPlane `yaml:"focus_plane_all,omitempty" json:"focus_plane_all,omitempty"`
+	FocusPlaneWhite *FocusMTFPlane `yaml:"focus_plane_white,omitempty" json:"focus_plane_white,omitempty"`
+	BestFocus       *FocusMTFPlane `yaml:"best_focus,omitempty" json:"best_focus,omitempty"`
 }
 
 // FocusMTFPlane is the MTF summary at one plane convention. FWHM is a
@@ -2663,20 +2783,22 @@ type FocusMTFPlane struct {
 // FocusPSFComparison is the `focus psf` table: per (field, wavelength) the PSF
 // metrics under each plane convention.
 type FocusPSFComparison struct {
-	Planes               []string      `yaml:"planes" json:"planes"`
-	FocusPlaneAllShiftMM float64       `yaml:"focus_plane_all_shift_mm,omitempty" json:"focus_plane_all_shift_mm,omitempty"`
-	Polarization         string        `yaml:"polarization,omitempty" json:"polarization,omitempty"`
-	Rows                 []FocusPSFRow `yaml:"rows" json:"rows"`
+	Planes                 []string      `yaml:"planes" json:"planes"`
+	FocusPlaneAllShiftMM   float64       `yaml:"focus_plane_all_shift_mm,omitempty" json:"focus_plane_all_shift_mm,omitempty"`
+	FocusPlaneWhiteShiftMM float64       `yaml:"focus_plane_white_shift_mm,omitempty" json:"focus_plane_white_shift_mm,omitempty"`
+	Polarization           string        `yaml:"polarization,omitempty" json:"polarization,omitempty"`
+	Rows                   []FocusPSFRow `yaml:"rows" json:"rows"`
 }
 
 // FocusPSFRow is one (field, wavelength) PSF comparison row.
 type FocusPSFRow struct {
-	FieldIndex    int            `yaml:"field_index" json:"field_index"`
-	FieldAngle    float64        `yaml:"field_angle" json:"field_angle"`
-	Wavelength    float64        `yaml:"wavelength" json:"wavelength"`
-	File          *FocusPSFPlane `yaml:"file,omitempty" json:"file,omitempty"`
-	FocusPlaneAll *FocusPSFPlane `yaml:"focus_plane_all,omitempty" json:"focus_plane_all,omitempty"`
-	BestFocus     *FocusPSFPlane `yaml:"best_focus,omitempty" json:"best_focus,omitempty"`
+	FieldIndex      int            `yaml:"field_index" json:"field_index"`
+	FieldAngle      float64        `yaml:"field_angle" json:"field_angle"`
+	Wavelength      float64        `yaml:"wavelength" json:"wavelength"`
+	File            *FocusPSFPlane `yaml:"file,omitempty" json:"file,omitempty"`
+	FocusPlaneAll   *FocusPSFPlane `yaml:"focus_plane_all,omitempty" json:"focus_plane_all,omitempty"`
+	FocusPlaneWhite *FocusPSFPlane `yaml:"focus_plane_white,omitempty" json:"focus_plane_white,omitempty"`
+	BestFocus       *FocusPSFPlane `yaml:"best_focus,omitempty" json:"best_focus,omitempty"`
 }
 
 // FocusPSFPlane is the PSF metric summary at one plane convention.

@@ -11,4 +11,8 @@ var Paraxial = Spec{Command: "paraxial", Flags: []Flag{
 	// needs it for the paraxial trace.
 	{Name: "wl", Kind: Float, Role: RoleSetting,
 		Help: "reference wavelength in mm for the paraxial calculation"},
+	{Name: "wavelengths", Kind: FloatList, Role: RoleSetting, Repeat: true,
+		Help: "comma-separated wavelengths in mm for a colour sweep (default: reference only)"},
+	{Name: "wavelength-set", Kind: String, Role: RoleSetting,
+		Help: "colour sweep set: design | spectral | custom (default: none)"},
 }}

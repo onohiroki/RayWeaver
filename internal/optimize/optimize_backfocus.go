@@ -9,6 +9,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/psf"
+	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 	"github.com/hiroki/rayweaver/internal/wavefront"
@@ -68,7 +69,7 @@ func (o *Optimizer) updateBackFocusType() {
 // the configured values are validated once at configuration time.
 func backFocusTypeValid(t string) bool {
 	switch t {
-	case "", "paraxial", "wavefront", "spot":
+	case "", "paraxial", "wavefront", "spot", "white":
 		return true
 	}
 	return false
@@ -86,7 +87,7 @@ func (o *Optimizer) SetBackFocusSolve(cfg *types.BackFocusSolveConfig) {
 	}
 	o.backFocusSolve = cfg
 	if !backFocusTypeValid(cfg.Type) {
-		Warnf("warning: optimization.back_focus_solve.type %q is not a known solve type (paraxial | wavefront | spot); the paraxial solve is used", cfg.Type)
+		Warnf("warning: optimization.back_focus_solve.type %q is not a known solve type (paraxial | wavefront | spot | white); the paraxial solve is used", cfg.Type)
 	}
 
 	targets := make(map[string][]backFocusSolveEntry, len(o.configs))
@@ -236,6 +237,22 @@ func (o *Optimizer) applyBackFocusSolve(configSurfaces map[string][]types.Surfac
 							"spot best focus of the surviving fields applied")
 					}
 				}
+			case "white":
+				out, bfErr := o.whiteBackFocusShift(cfg, surfaces, pupils[cfg.id], gc)
+				if bfErr != nil {
+					shift = o.paraxialBackFocusShift(cfg, surfaces, gc)
+					o.backFocusStats.record("paraxial", shift, 0, nil, true)
+					o.backFocusWarn(bfErr, "paraxial focus applied")
+				} else {
+					shift = out.ShiftMM
+					o.backFocusStats.record("white", out.ShiftMM, out.FieldsUsed, out.FieldsDropped, false)
+					if len(out.FieldsDropped) > 0 {
+						o.backFocusWarn(
+							fmt.Errorf("%d wavelength/field sample(s) dropped: %s",
+								len(out.FieldsDropped), summarizeDropped(out.FieldsDropped, 5)),
+							"white best focus of the surviving samples applied")
+					}
+				}
 			default: // "paraxial"
 				shift = o.paraxialBackFocusShift(cfg, surfaces, gc)
 				o.backFocusStats.record("paraxial", shift, 0, nil, false)
@@ -340,6 +357,15 @@ func (o *Optimizer) BackFocusDiagnostics() *types.BackFocusDiagnostics {
 	}
 	snap := o.backFocusStats.snapshot()
 	return &snap
+}
+
+// summarizeDropped joins at most max dropped entries, appending a count when
+// the list is longer (a spectral white solve can drop dozens of samples).
+func summarizeDropped(list []string, max int) string {
+	if len(list) <= max {
+		return strings.Join(list, "; ")
+	}
+	return fmt.Sprintf("%s; ... (+%d more)", strings.Join(list[:max], "; "), len(list)-max)
 }
 
 // backFocusWarn reports a back-focus solve problem (a dropped field set or a
@@ -570,6 +596,122 @@ func spotBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveCo
 	}, nil
 }
 
+// whiteBackFocusShift is the optimizer's "white" solve: it resolves the
+// config's design/spectral set and returns the wavelength-weighted focus.
+func (o *Optimizer) whiteBackFocusShift(cfg *config, surfaces []types.Surface, p appliedPupil, gc *glass.Catalog) (backFocusOutcome, error) {
+	return whiteBackFocusShiftFor(surfaces, o.backFocusSolve, cfg.stopSurface, cfg.referenceWavelength,
+		cfg.fieldDefs, cfg.wavelengths, cfg.spectrum, gc, cfg.rayDefinition,
+		backFocusPupilModel(cfg, p), true)
+}
+
+// whiteBackFocusShiftFor solves the polychromatic focus. objective "spot"
+// minimises the weighted sum of per-(field, wavelength) spot RMS² in closed
+// form (one grid trace per pair); objective "wavefront" is the weighted mean
+// of the per-wavelength wavefront best-focus shifts. optimize selects the
+// coarse spectral grid (10 nm) over the evaluation grid (5 nm).
+func whiteBackFocusShiftFor(surfaces []types.Surface, bfs *types.BackFocusSolveConfig, stopSurface int,
+	refWavelength float64, fieldDefs []types.FieldDef, wavelengths []types.WavelengthItem,
+	spectrum *types.SpectralConfig, gc *glass.Catalog, rayDefinition string,
+	pupilModel *types.PupilModelConfig, optimize bool) (backFocusOutcome, error) {
+	if bfs == nil || len(surfaces) < 2 {
+		return backFocusOutcome{}, nil
+	}
+	samples, err := resolveWhiteFocusSamples(bfs, wavelengths, spectrum, refWavelength, optimize)
+	if err != nil {
+		return backFocusOutcome{}, err
+	}
+	objective := strings.ToLower(strings.TrimSpace(bfs.Objective))
+	if objective == "" {
+		objective = "spot"
+	}
+	switch objective {
+	case "spot":
+		fields := backFocusFieldsFor(fieldDefs, bfs.WeightType)
+		weights, err := backFocusFieldWeights(bfs, fields)
+		if err != nil {
+			return backFocusOutcome{}, err
+		}
+		refSurf := bfs.ReferenceSurface
+		if refSurf <= 0 {
+			refSurf = psf.DefaultReferenceSurface(surfaces)
+		}
+		numRays := bfs.NumRays
+		if numRays <= 0 {
+			numRays = 200
+		}
+		vals := make([]float64, len(samples))
+		wavWeights := make([]float64, len(samples))
+		for i, s := range samples {
+			vals[i] = s.Value
+			wavWeights[i] = s.Weight
+		}
+		sys := types.System{Surfaces: surfaces, StopSurface: stopSurface}
+		res, err := psf.SpotFocusShift(sys, gc, fields, vals, weights, psf.Options{
+			ReferenceSurface:  refSurf,
+			NumRays:           numRays,
+			Workers:           1,
+			PupilModel:        pupilModel,
+			RayDefinition:     rayDefinition,
+			WavelengthWeights: wavWeights,
+		})
+		if err != nil {
+			return backFocusOutcome{}, fmt.Errorf("back-focus white spot solve: %w", err)
+		}
+		return backFocusOutcome{ShiftMM: res.ShiftMM, FieldsUsed: res.FieldsUsed, FieldsDropped: res.FieldsDropped}, nil
+	case "wavefront":
+		var sum, wSum float64
+		var dropped []string
+		used := 0
+		for _, s := range samples {
+			if s.Weight <= 0 {
+				continue
+			}
+			one := *bfs
+			one.Type = "wavefront"
+			one.Wavelength = s.Value
+			out, err := wavefrontBackFocusShiftFor(surfaces, &one, stopSurface, refWavelength, fieldDefs, gc, rayDefinition, pupilModel)
+			if err != nil {
+				dropped = append(dropped, fmt.Sprintf("%.3f nm: %v", s.Value*1e6, err))
+				continue
+			}
+			sum += s.Weight * out.ShiftMM
+			wSum += s.Weight
+			used++
+			dropped = append(dropped, out.FieldsDropped...)
+		}
+		if wSum <= 0 {
+			return backFocusOutcome{}, fmt.Errorf("back-focus white wavefront solve: no wavelength could be sampled")
+		}
+		return backFocusOutcome{ShiftMM: sum / wSum, FieldsUsed: used, FieldsDropped: dropped}, nil
+	default:
+		return backFocusOutcome{}, fmt.Errorf("back-focus white objective %q is not known (spot | wavefront)", bfs.Objective)
+	}
+}
+
+func resolveWhiteFocusSamples(bfs *types.BackFocusSolveConfig, wavelengths []types.WavelengthItem,
+	spectrum *types.SpectralConfig, ref float64, optimize bool) ([]types.WavelengthSample, error) {
+	mode := bfs.WavelengthSet
+	if strings.TrimSpace(mode) == "" {
+		mode = spectral.ModeDesign
+	}
+	resolver := spectral.NewResolver(wavelengths, spectrum, ref)
+	set, err := resolver.For(mode, types.MeritTerm{Wavelengths: bfs.Wavelengths}, optimize)
+	if err != nil {
+		return nil, fmt.Errorf("back-focus white solve: %w", err)
+	}
+	return set, nil
+}
+
+func backFocusFieldWeights(bfs *types.BackFocusSolveConfig, fields []types.FieldDef) ([]float64, error) {
+	if bfs.WeightType == "custom" {
+		if len(bfs.CustomWeights) != len(fields) {
+			return nil, fmt.Errorf("back-focus solve: %d custom weights for %d fields", len(bfs.CustomWeights), len(fields))
+		}
+		return bfs.CustomWeights, nil
+	}
+	return nil, nil
+}
+
 // backFocusFieldsFor selects the fields used by the back-focus spot and
 // wavefront solves from the config's field definitions and the configured
 // weight type.
@@ -631,16 +773,20 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 	surface.Precompute(surfaces)
 	var shift float64
 	switch bfType {
-	case "wavefront", "spot":
-		// Both real-ray solves share the partial contract: a degenerate
+	case "wavefront", "spot", "white":
+		// All real-ray solves share the partial contract: a degenerate
 		// field set is dropped and reported, a total failure leaves the
 		// plane untouched (and is reported here instead of being swallowed).
 		var out backFocusOutcome
 		var err error
-		if bfType == "wavefront" {
+		switch bfType {
+		case "wavefront":
 			out, err = wavefrontBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, fieldDefs, gc, rayDefinition, pupilModel)
-		} else {
+		case "spot":
 			out, err = spotBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, fieldDefs, gc, rayDefinition, pupilModel)
+		default:
+			out, err = whiteBackFocusShiftFor(surfaces, cfg, stopSurface, refWavelength, fieldDefs,
+				wavelengths, cfg.Spectrum, gc, rayDefinition, pupilModel, false)
 		}
 		if err != nil {
 			Warnf("warning: %v; the image plane keeps its current thickness", err)
@@ -649,10 +795,14 @@ func ApplyBackFocusSolve(surfaces []types.Surface, cfg *types.BackFocusSolveConf
 		shift = out.ShiftMM
 		if len(out.FieldsDropped) > 0 {
 			// Partial solve: the shift is the weighted best focus of the
-			// surviving fields. Worth stating — the persisted plane is not
-			// the one every field would have asked for.
-			Warnf("back_focus: %d of %d field(s) dropped (%s); the %s best focus of the surviving fields was applied",
-				len(out.FieldsDropped), out.FieldsUsed+len(out.FieldsDropped), strings.Join(out.FieldsDropped, "; "), bfType)
+			// surviving fields/samples. Worth stating — the persisted plane is
+			// not the one every sample would have asked for.
+			unit := "field"
+			if bfType == "white" {
+				unit = "wavelength/field sample"
+			}
+			Warnf("back_focus: %d %s(s) dropped (%s); the %s best focus of the surviving samples was applied",
+				len(out.FieldsDropped), unit, summarizeDropped(out.FieldsDropped, 5), bfType)
 		}
 	default: // "paraxial" (also the fallback for an unknown type)
 		shift = paraxialBackFocusShiftFor(surfaces, stopSurface, refWavelength, wavelengths, cfg.Wavelength, gc)

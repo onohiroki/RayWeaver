@@ -32,9 +32,13 @@ import (
 func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveBase string, powerSolve bool, powerSolveSurfaces string, glassVariables bool, keepInfeasible bool, debug bool, newExplorer func(progress *escape.Progress, seed int64) escape.Explorer) {
 	input := parseYAML[types.Input](data)
 	setReferenceWavelength(input.Chief)
+	if input.Optimization != nil && input.Optimization.BackFocusSolve != nil {
+		input.Optimization.BackFocusSolve.Spectrum = input.Spectrum
+	}
 	if input.Optimization == nil {
 		errExitf("Error: 'optimization' section is required")
 	}
+	writeBackWavelengthNormalization(&input)
 	if input.Optimization.Escape == nil {
 		errExitf("Error: 'optimization.escape' section is required")
 	}
@@ -357,32 +361,36 @@ func singleEscapeConfig(input types.Input, surfaces []types.Surface, variables [
 	}
 
 	cfg := optimize.Config{
-		Surfaces:           surfaces,
-		Variables:          variables,
-		MeritTerms:         meritTerms,
-		MeritModes:         input.Configs[0].MeritModes,
-		Fields:             fields,
-		Constraints:        constraints,
-		GlassCatalog:       gc,
-		StopSurface:        stopSurface,
-		RefSurface:         chiefRefSurface(input),
-		PupilZ:             computePupilZ(input, surfaces, gc),
-		PupilModel:         pupilModelForConfig(input),
-		RayDefinition:      chiefRayDefinition(input),
-		MaxIter:            input.Optimization.MaxIter,
-		Tol:                input.Optimization.Tol,
-		Epsilon:            input.Optimization.Epsilon,
-		NumRays:            input.Optimization.NumRays,
-		ApertureMargin:     apertureMargin,
-		ApertureMarginMM:   apertureMarginMM,
-		MuConMax:           input.Optimization.MuConMax,
-		Workers:            workers,
-		CentralDiff:        input.Optimization.CentralDiff,
-		BFGS:               input.Optimization.BFGS,
-		AdaptiveDamping:    input.Optimization.AdaptiveDamping,
-		PowerSolveSurfaces: gctx.surfaces,
-		Normalization:      input.Optimization.MeritNormalization,
-		WavefrontReference: input.Optimization.WavefrontReference,
+		Surfaces:                surfaces,
+		Variables:               variables,
+		MeritTerms:              meritTerms,
+		MeritModes:              input.Configs[0].MeritModes,
+		Fields:                  fields,
+		Wavelengths:             input.Configs[0].Wavelengths,
+		Spectrum:                input.Spectrum,
+		ReferenceWavelength:     effectiveReferenceWavelength(input.Chief),
+		WavelengthNormalization: input.Optimization.WavelengthNormalization,
+		Constraints:             constraints,
+		GlassCatalog:            gc,
+		StopSurface:             stopSurface,
+		RefSurface:              chiefRefSurface(input),
+		PupilZ:                  computePupilZ(input, surfaces, gc),
+		PupilModel:              pupilModelForConfig(input),
+		RayDefinition:           chiefRayDefinition(input),
+		MaxIter:                 input.Optimization.MaxIter,
+		Tol:                     input.Optimization.Tol,
+		Epsilon:                 input.Optimization.Epsilon,
+		NumRays:                 input.Optimization.NumRays,
+		ApertureMargin:          apertureMargin,
+		ApertureMarginMM:        apertureMarginMM,
+		MuConMax:                input.Optimization.MuConMax,
+		Workers:                 workers,
+		CentralDiff:             input.Optimization.CentralDiff,
+		BFGS:                    input.Optimization.BFGS,
+		AdaptiveDamping:         input.Optimization.AdaptiveDamping,
+		PowerSolveSurfaces:      gctx.surfaces,
+		Normalization:           input.Optimization.MeritNormalization,
+		WavefrontReference:      input.Optimization.WavefrontReference,
 	}
 	if dg := input.Optimization.Degenerate; dg != nil {
 		cfg.SpotDegenerate = dg.SpotValue

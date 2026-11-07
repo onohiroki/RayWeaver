@@ -14,6 +14,8 @@ var Wavefront = Spec{Command: "wavefront", Flags: []Flag{
 		Help: "comma-separated field indices to compute (default: all)"},
 	{Name: "wavelengths", Kind: FloatList, Role: RoleSetting, Repeat: true,
 		Help: "comma-separated wavelengths in mm (default: config wavelengths, else reference wavelength)"},
+	{Name: "wavelength-set", Kind: String, Role: RoleSetting,
+		Help: "wavelength set: design (config wavelengths with weights) | spectral (document spectrum) | custom"},
 	{Name: "polarization", Kind: String, Role: RoleSetting,
 		Help: "input polarization: RCP (default) | LCP | X | Y | RCP+LCP"},
 	{Name: "zernike-order", Kind: Int, Role: RoleSetting,

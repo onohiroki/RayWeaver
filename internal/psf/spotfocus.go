@@ -32,9 +32,10 @@ type SpotFocusResult struct {
 // refinement, one trace instead of ~20 evaluations).
 //
 // weights aligns with fields (nil = uniform); a field with weight <= 0 is not
-// traced at all. The objective is Σ_f w_f · Σ_λ RMS²_{f,λ}(u), so the
-// wavelengths are averaged and each field's own radius is normalised by its
-// total flux weight before the field weights combine them.
+// traced at all. Options.WavelengthWeights aligns with wavelengths (nil =
+// equal); the objective is Σ_f w_f · Σ_λ w_λ · RMS²_{f,λ}(u), so each field's
+// own radius is normalised by its total flux weight before the field and
+// wavelength weights combine them.
 //
 // u is measured from the *current* image plane (the last surface), so the
 // returned shift is directly applicable to that plane. A (field, wavelength)
@@ -92,7 +93,14 @@ func SpotFocusShift(system types.System, gc *glass.Catalog, fields []types.Field
 			continue
 		}
 		used := false
-		for _, wl := range wavelengths {
+		for wi, wl := range wavelengths {
+			wlWeight := 1.0
+			if len(opts.WavelengthWeights) == len(wavelengths) {
+				wlWeight = opts.WavelengthWeights[wi]
+			}
+			if wlWeight <= 0 {
+				continue
+			}
 			pg, err := ComputeFieldGrid(system, gc, fd, opts.ReferenceSurface, opts.NumRays, wl, opts.GridType, opts.PupilModel, opts.RayDefinition)
 			if err != nil {
 				out.FieldsDropped = append(out.FieldsDropped, focusDrop(fi, wl, err))
@@ -108,8 +116,8 @@ func SpotFocusShift(system types.System, gc *glass.Catalog, fields []types.Field
 				out.FieldsDropped = append(out.FieldsDropped, focusDrop(fi, wl, fmt.Errorf("only %d usable spot rays", stats.Valid)))
 				continue
 			}
-			bSum += w * b
-			cSum += w * c
+			bSum += w * wlWeight * b
+			cSum += w * wlWeight * c
 			used = true
 		}
 		if used {

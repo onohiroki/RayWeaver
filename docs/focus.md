@@ -44,8 +44,9 @@ Options shared with `focus psf`:
 | Flag | Meaning |
 |---|---|
 | `--wavelengths W,...` | wavelengths in mm (default: config wavelengths, else the chief reference) |
+| `--wavelength-set S` | resolved set instead: `design` (config wavelengths with weights), `spectral` (document spectrum) or `custom` |
 | `--fields I,...` | field indices to compare (default: all) |
-| `--planes LIST` | `file,all,best` (default: all three) |
+| `--planes LIST` | `file,all,best,white` (default: the first three); `white` is the wavelength-weighted white best focus |
 | `--num-rays N` | entrance-pupil grid rays (default 400) |
 | `--psf-grid N` | image-plane pixels per side (default 64) |
 | `--ref-surface N` | wavefront sampling surface (default: the last optical surface) |
@@ -219,6 +220,10 @@ with one sagittal/tangential column pair per frequency). See `docs/list.md`.
   reported metrics belong to one position. It is sampled at the command's
   `--num-rays` (default 400), matching the plane evaluation — the solve's
   coherent-peak objective is sampling-sensitive for strongly aberrated fields.
+- `white` is one plane for **all fields and wavelengths** (the wavelength-
+  weighted evaluation focus), unlike `best` (per field, reference wavelength).
+  It uses the run's resolved wavelength set/weights; see
+  [methods/polychromatic.md](methods/polychromatic.md).
 - Best-focus planes are per **field** (not per wavelength): the shift listed on
   the `best_focus` block is the coherent-peak-maximizing shift applied for that
   field, so a row's `best_focus` metrics share one plane across wavelengths.

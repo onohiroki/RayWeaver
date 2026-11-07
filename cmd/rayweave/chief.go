@@ -231,18 +231,22 @@ func runChief(data []byte) {
 	}
 
 	// Build ChiefRayResult for YAML output
+	samples := configWavelengthSamples(input.Configs, &configFlag)
 	chiefRays := make([]types.ChiefRayResult, len(results))
 	for i, r := range results {
+		white, lateral := chief.SummarizeWavelengths(r.Wavelengths, samples, wavelength)
 		cr := types.ChiefRayResult{
-			FieldAngle:    r.FieldAngle,
-			ChiefRay:      r.ChiefRay,
-			ImageHeight:   r.ImageHeight,
-			EntrancePupil: r.EntrancePupil,
-			SpotStats:     r.SpotStats,
-			RayFan:        r.RayFan,
-			Wavelengths:   r.Wavelengths,
-			PupilProbe:    r.ProbeOK,
-			PupilProbeZ:   r.ProbeZ,
+			WhiteSpotStats: white,
+			LateralColor:   lateral,
+			FieldAngle:     r.FieldAngle,
+			ChiefRay:       r.ChiefRay,
+			ImageHeight:    r.ImageHeight,
+			EntrancePupil:  r.EntrancePupil,
+			SpotStats:      r.SpotStats,
+			RayFan:         r.RayFan,
+			Wavelengths:    r.Wavelengths,
+			PupilProbe:     r.ProbeOK,
+			PupilProbeZ:    r.ProbeZ,
 			// Nil for a field that was not clipped below the grid's survival
 			// threshold; `omitempty` then leaves it out of the pipeline YAML.
 			EffectiveVignetting: r.EffectiveVignetting,

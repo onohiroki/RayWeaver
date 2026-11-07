@@ -157,6 +157,7 @@ everywhere, add it to the document that owns the topic, not to this file.
 | Escape-function global optimization, save/stream/signals | [docs/escape.md](docs/escape.md), [methods/escape-function.md](docs/methods/escape-function.md) |
 | Particle-swarm optimization | [docs/pso.md](docs/pso.md), [methods/pso.md](docs/methods/pso.md) |
 | Glass dispersion and the real-glass hull | [methods/glass-dispersion.md](docs/methods/glass-dispersion.md) |
+| Wavelength sets, weights, white spot / best focus, axial colour | [methods/polychromatic.md](docs/methods/polychromatic.md) |
 | Asphere candidates, coefficients, validation | [docs/asphere.md](docs/asphere.md), [methods/asphere-candidates.md](docs/methods/asphere-candidates.md) |
 | PSF / Huygens integral / MTF, image-plane comparison, wavefront analysis | [docs/psf.md](docs/psf.md), [docs/focus.md](docs/focus.md), [docs/wavefront.md](docs/wavefront.md), [methods/psf.md](docs/methods/psf.md) |
 | Pupil-grid generation and grid tracing | [methods/pupil-grids.md](docs/methods/pupil-grids.md) |
