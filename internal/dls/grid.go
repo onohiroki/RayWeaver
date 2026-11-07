@@ -27,7 +27,8 @@ func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopSurface int
 // surface, independent of any surface aperture clipping. The grid is a dense
 // hex pattern so off-axis beam edges (which the polar rings under-sample) are
 // resolved; the returned extents therefore match the chief --clear-aperture
-// beam envelope.
+// beam envelope. A ray that fails later in the path still contributes every
+// surface it reached (see surfaceExtents).
 func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64) map[int]float64 {
 	return TraceFieldGridExtentsVignetted(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, workers, epdOverride, nil)
 }
@@ -48,7 +49,9 @@ func TraceFieldGridExtentsVignetted(gc *glass.Catalog, surfaces []types.Surface,
 // (top/bottom/left/right) and 4 diagonal (45°). The entrance pupil position
 // (dynamic pupil Z) and diameter (paraxial EPD) fully determine the ray
 // origins and directions. Aperture and glass-path checks are disabled so the
-// true geometric beam envelope is measured independent of surface clipping.
+// true geometric beam envelope is measured independent of surface clipping,
+// and a ray that fails later still contributes every surface it reached (see
+// surfaceExtents).
 func TraceFieldExtents8Rays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, workers int, epdOverride float64) map[int]float64 {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
@@ -95,24 +98,45 @@ func TraceFieldExtents8Rays(gc *glass.Catalog, surfaces []types.Surface, stopSur
 
 	pupil.Trace(engine, p, surfaces, samples, wavelength, types.NewCircularJones(true), workers)
 
+	perSurfMax := surfaceExtents(samples, surfaces)
+	pupil.Release(samples)
+	return perSurfMax
+}
+
+// surfaceExtents reduces traced samples to the maximum radial ray height on
+// each surface. It reads every per-surface result a ray produced, including the
+// prefix of a ray that later failed: the beam at those surfaces is real, and
+// discarding it would leave a broken design with no measurement at all on the
+// surfaces it already reached. Failure entries are skipped because the tracer
+// records them at the previous surface's position (or with no hit point), so
+// they describe no beam on the surface they name.
+//
+// The height is measured in the surface-local frame, which is the frame the
+// aperture check uses (ray.TraceRay: h = sqrt(x^2 + y^2) against diameter/2).
+// A global max(|X|, |Y|) is a bounding-box measure and overstates the margin
+// of an off-axis, tilted or decentered bundle.
+func surfaceExtents(samples []pupil.Sample, surfaces []types.Surface) map[int]float64 {
+	byID := make(map[int]types.Surface, len(surfaces))
+	for _, s := range surfaces {
+		byID[s.ID] = s
+	}
 	perSurfMax := make(map[int]float64)
-	for _, s := range samples {
-		if !s.OK {
-			continue
-		}
-		for _, sr := range s.Surfaces {
-			ax := math.Abs(sr.Position.X)
-			ay := math.Abs(sr.Position.Y)
-			e := ax
-			if ay > e {
-				e = ay
+	for i := range samples {
+		for _, sr := range samples[i].Surfaces {
+			if sr.ErrorCode != "" || sr.Interaction == types.Missed {
+				continue
 			}
-			if e > perSurfMax[sr.SurfaceID] {
-				perSurfMax[sr.SurfaceID] = e
+			s, ok := byID[sr.SurfaceID]
+			if !ok {
+				continue
+			}
+			local := s.GlobalToLocal.MultiplyPoint(sr.Position)
+			h := math.Hypot(local.X, local.Y)
+			if h > perSurfMax[sr.SurfaceID] {
+				perSurfMax[sr.SurfaceID] = h
 			}
 		}
 	}
-	pupil.Release(samples)
 	return perSurfMax
 }
 
@@ -152,7 +176,6 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 	pupil.Trace(engine, p, surfaces, samples, wavelength, types.NewCircularJones(true), workers)
 
 	points := make([]IPoint, len(samples))
-	perSurfMax := make(map[int]float64)
 	for i, s := range samples {
 		if !s.OK || len(s.Surfaces) == 0 {
 			points[i] = IPoint{OK: false}
@@ -169,18 +192,8 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 			PupilX:    s.PupilX,
 			PupilY:    s.PupilY,
 		}
-		for _, sr := range s.Surfaces {
-			ax := math.Abs(sr.Position.X)
-			ay := math.Abs(sr.Position.Y)
-			e := ax
-			if ay > e {
-				e = ay
-			}
-			if e > perSurfMax[sr.SurfaceID] {
-				perSurfMax[sr.SurfaceID] = e
-			}
-		}
 	}
+	perSurfMax := surfaceExtents(samples, surfaces)
 	pupil.Release(samples)
 
 	return points, perSurfMax

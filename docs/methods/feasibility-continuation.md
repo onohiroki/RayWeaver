@@ -1,8 +1,10 @@
 # Feasibility continuation
 
-**Status: design, not implemented.** This document owns the design of a total,
-differentiable merit function and the continuation strategy that carries a lens
-from "rays do not reach the image plane" to a feasible, optimisable design. It
+**Status: in progress.** The design is fixed; Layer D is partially implemented
+(local-frame extents over partial ray paths). The remaining layers are design
+only. This document owns the design of a total, differentiable merit function
+and the continuation strategy that carries a lens from "rays do not reach the
+image plane" to a feasible, optimisable design. It
 is the reference for the `feat/feasibility-continuation` work; command syntax
 stays in the individual manuals and the merit catalog stays in
 [merit-and-constraints.md](../merit-and-constraints.md).
@@ -188,7 +190,7 @@ requires an analytic Jacobian and a sparse solver.
 
 | Location | Change | Layer |
 |---|---|---|
-| `internal/dls/grid.go` (`traceGridRays`) | accumulate per-surface extents over **partial** paths (a ray that fails at surface k still contributes 1…k−1); measure the radial height in the local frame | D |
+| `internal/dls/grid.go` (`traceGridRays`) | accumulate per-surface extents over **partial** paths (a ray that fails at surface k still contributes 1…k−1); measure the radial height in the local frame — **implemented** (`surfaceExtents`) | D |
 | `internal/constraint/constraint.go` (`evaluateBeamClearance`) | use Layer D; a surface with no reaching ray is a violation, never `diameter/2` | D |
 | `internal/optimize/optimize_eval.go` (degenerate penalties) | replace the constant with the margin-dependent residual (the same distance, scaled) | D |
 | `internal/optimize/optimize_apertures.go` | keep `auto_aperture` sizing as the structural phase: it removes clear-aperture clipping before the search starts | D |
