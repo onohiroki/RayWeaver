@@ -439,14 +439,14 @@ func (o *Optimizer) fieldExtents(cfg *config, surfaces []types.Surface, gc *glas
 const fieldThroughputWarn = 0.5
 
 // configGuardsFieldLiveliness reports whether cfg already penalises a dying
-// field: an active field_alive / pupil_fill merit term, or a
+// field: an active field_alive / pupil_fill / beam_clearance merit term, or a
 // vignetting_factor constraint. When it does, the field-killing warning stays
 // quiet — the user has asked for the guard, so the optimizer is not silently
 // exploiting a merit that cannot see the dead field.
 func (o *Optimizer) configGuardsFieldLiveliness(cfg *config) bool {
 	guards := func(terms []meritTerm) bool {
 		for i := range terms {
-			if terms[i].kind == MeritFieldAlive || terms[i].kind == MeritPupilFill {
+			if terms[i].kind == MeritFieldAlive || terms[i].kind == MeritPupilFill || terms[i].kind == MeritBeamClearance {
 				return true
 			}
 		}

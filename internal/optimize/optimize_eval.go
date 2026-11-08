@@ -1155,9 +1155,26 @@ func (o *Optimizer) WarnBeamClipping(x []float64) {
 	}
 }
 
-// configGuardsBeamClearance reports whether cfg already constrains the beam
-// clearance at a surface, in which case WarnBeamClipping stays quiet.
+// configGuardsBeamClearance reports whether cfg already manages the beam
+// clearance at a surface, in which case WarnBeamClipping stays quiet: either a
+// beam_clearance / beam_diameter constraint or a beam_clearance merit term.
 func configGuardsBeamClearance(cfg *config) bool {
+	hasTerm := func(terms []meritTerm) bool {
+		for i := range terms {
+			if terms[i].kind == MeritBeamClearance {
+				return true
+			}
+		}
+		return false
+	}
+	if hasTerm(cfg.meritTerms) {
+		return true
+	}
+	for _, terms := range cfg.meritModes {
+		if hasTerm(terms) {
+			return true
+		}
+	}
 	for _, c := range cfg.constraints {
 		if c.Measure == types.MeasureBeamClearance || c.Measure == types.MeasureBeamDiameter {
 			return true

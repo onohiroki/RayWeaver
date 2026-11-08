@@ -756,7 +756,7 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   measures each config field's surviving-grid fraction and warns (stderr) about
   every field below 0.5. Warning only — the merit and the solve are untouched;
   the message is suppressed when the config already carries a `field_alive` /
-  `pupil_fill` term or a `vignetting_factor` constraint. See
+  `pupil_fill` / `beam_clearance` term or a `vignetting_factor` constraint. See
   [merit-and-constraints.md §3.2](merit-and-constraints.md).
 - **A clipping clear aperture is reported.** The same incentive has a second
   cause: a **fixed** (`auto_aperture: false`) diameter nothing sizes to the
@@ -769,8 +769,9 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   reported — and warns (stderr) for every surface that is left in deficit,
   worst first, up to eight entries with a `(+N more)` tail. The stop is exempt
   (it defines the beam) and a config that already constrains
-  `beam_clearance` / `beam_diameter` is left alone (the constraint reporting
-  names the violation there). Warning only; the merit and the diameters are
+  `beam_clearance` / `beam_diameter` or carries a `beam_clearance` merit term
+  is left alone (the constraint/term reporting names the violation there).
+  Warning only; the merit and the diameters are
   untouched. This is what makes the "raise every diameter during optimization
   and trim afterwards" workaround unnecessary: the run says which surface is
   clipping instead of leaving it to be inferred from a field that lost its

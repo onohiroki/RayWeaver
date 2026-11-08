@@ -298,8 +298,9 @@ fraction (the same launch, vignetting and grid the terms use) and reports each
 field below **0.5** on stderr, naming the config, the field index and its angle.
 This is a warning only — the merit values and the solve are untouched. The
 message is suppressed for a config that already carries a `field_alive` /
-`pupil_fill` term or a `vignetting_factor` constraint, so it appears exactly for
-a merit that cannot see the dead field (a bare `spot_rms`). A field declared by
+`pupil_fill` / `beam_clearance` term or a `vignetting_factor` constraint, so it
+appears exactly for a merit that cannot see the dead field (a bare
+`spot_rms`). A field declared by
 `image_height` is measured at its resolved angle.
 
 The **weight matters as much as the kind, and it is algorithm-dependent**. The
