@@ -14,7 +14,7 @@ func rayValidityProbe(c1, diameter2 float64) *Optimizer {
 	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
 	surfaces := []types.Surface{
 		{ID: 1, Type: types.Sphere, Curvature: c1, Thickness: 20.0, Material: types.Material{Key: "N-BK7"}, Diameter: 40.0, Role: "stop"},
-		{ID: 2, Type: types.Sphere, Curvature: 0.2, Thickness: 40.0, Material: types.Material{}, Diameter: diameter2},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 40.0, Material: types.Material{}, Diameter: diameter2},
 		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 60.0},
 	}
 	surface.Precompute(surfaces)
@@ -71,6 +71,32 @@ func TestClearanceTargets(t *testing.T) {
 		if v, ok := want[key]; !ok || v != c.target {
 			t.Errorf("clearanceTargets entry = %+v, want target %v", c, want[key])
 		}
+	}
+}
+
+// TestRayValidityPhysicalGate verifies that the relaxed envelope cannot lift
+// the metric above the delivered-pupil fraction: a field whose rays miss a
+// small sphere (the virtual extension keeps the relaxed clearance positive)
+// must still read as invalid.
+func TestRayValidityPhysicalGate(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: types.Material{Key: "N-BK7"}, Diameter: 40.0, Role: "stop"},
+		{ID: 2, Type: types.Sphere, Curvature: 0.2, Thickness: 10.0, Material: types.Material{}, Diameter: 60.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 60.0},
+	}
+	surface.Precompute(surfaces)
+	opt := NewOptimizer(Config{
+		Surfaces:     surfaces,
+		GlassCatalog: gc,
+		Fields:       []types.FieldItem{{ID: 0, AngleDeg: 0, Weight: 1}},
+		StopSurface:  1,
+		RefSurface:   3,
+		NumRays:      16,
+	})
+	if v := opt.rayValidity(opt.getInitialState()); v > 0.5 {
+		t.Errorf("rayValidity = %v, want the physical survival gate (<0.5)", v)
 	}
 }
 

@@ -564,6 +564,16 @@ func (o *Optimizer) fieldClearanceValidity(cfg *config, surfaces []types.Surface
 			consider(t.surface, t.target)
 		}
 	}
+	// Physical gate: the relaxed envelope can be clear while the real trace is
+	// still dead (the virtual hit is not a delivered ray). The surviving-grid
+	// fraction is the delivered-pupil gate, so a schedule cannot leave the
+	// feasibility mode for a field the physical trace cannot deliver.
+	points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ,
+		angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation,
+		o.gridWorkers(), p.dia, cfg.fields[field].Vignetting)
+	if phys := survivingFraction(points); phys < validity {
+		validity = phys
+	}
 	return validity, measured
 }
 
