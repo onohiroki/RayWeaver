@@ -197,15 +197,20 @@ M_λ(x) = (1 − λ) · M_analytic(x) + λ · M_realtrace(x)
 ```
 
 where `M_analytic` is the paraxial/Seidel merit (`focal_length`, `seidel_*`,
-`distortion_pct`) and λ is ramped from 0 to 1. The ramp is driven by a new
-schedule metric, `ray_validity`, derived from the Layer D residuals (e.g. the
-fraction of the prescribed pupil whose worst residual is below the clearance).
-If a ramp step loses validity, step λ back one stage and restore feasibility.
+`distortion_pct`) and λ is ramped from 0 to 1. The ramp is driven by
+**`ray_validity`** (implemented): the minimum relaxed beam clearance over every
+config and field, divided by 0.5 mm and clamped to [0,1]; 0 while a clear
+aperture clips (or a surface is unreached), 1 when every aperture has at least
+0.5 mm of clearance. The stop and the image surface are excluded. If a ramp
+step loses validity, step λ back one stage and restore feasibility.
 
-The existing `optimization.merit_schedule` already ramps named merit modes by
-`merit_ratio`, `iteration`, `glass_role`, `spot_diffraction` or `phase`
+The existing `optimization.merit_schedule` ramps named merit modes by
+`merit_ratio`, `iteration`, `glass_role`, `spot_diffraction`, `phase` or
+`ray_validity`
 ([optimize.md](../optimize.md#conditional-merit-schedule-optimizationmerit_schedule));
-`ray_validity` is the missing metric, not a new scheduling mechanism.
+`ray_validity` was the missing metric, not a new scheduling mechanism. Its
+default anchors are 0.1 → 0.9, so the real-ray mode takes over only once the
+geometry is essentially clear.
 
 ### 4.5 Layer X — simultaneous solve (optional)
 
@@ -225,7 +230,7 @@ requires an analytic Jacobian and a sparse solver.
 | `internal/optimize/optimize_apertures.go` | keep `auto_aperture` sizing as the structural phase: it removes clear-aperture clipping before the search starts | D |
 | `internal/paraxial` | expose per-surface marginal height/angle as the Layer P initializer and surrogate — **accessor implemented** (`MarginalRayStates`); the initializer wiring is not | P |
 | `internal/dls` (tracer entry) | add the nested solve behind the same interface, fail-over from the forward march; residual norm as penalty — **standalone solver implemented** (`feasibility.SolveNodes`), **fail-over wired** into `TraceFieldGridExtentsRelaxed` (eight outermost missed rays) | S |
-| `internal/optimize`, `internal/escape`, `internal/pso` | expose the residual as a merit kind and a constraint (merit kind **implemented** as `beam_clearance`); add the `ray_validity` schedule metric | R |
+| `internal/optimize`, `internal/escape`, `internal/pso` | expose the residual as a merit kind and a constraint (merit kind **implemented** as `beam_clearance`); add the `ray_validity` schedule metric (**implemented**) | R |
 
 ## 6. Merit or constraint?
 
@@ -293,7 +298,7 @@ On a zoom document known to produce no feasible minimum:
 | D | residual layer + local-frame extents over partial paths | unit tests for every residual; the current `beam_clearance` no longer reports `D/2` for an unreached surface |
 | P | paraxial marginal-height accessor | a dead design has a finite paraxial path and merit |
 | S | nested ray solve behind the tracer interface (virtual scaffold, standalone `SolveNodes`, and the eight-ray relaxed fail-over implemented) | a ray that misses a surface returns a finite residual and a path; warm started Jacobian stays affordable |
-| R | `ray_validity` metric + merit-kind exposure | a dead zoom bootstraps to rays-passing under `optimize` |
+| R | `ray_validity` metric + merit-kind exposure (**metric implemented**; merit kind is `beam_clearance`) | a dead zoom bootstraps to rays-passing under `optimize` |
 | X | simultaneous solve | only if S is the measured bottleneck |
 
 Each phase is a separate commit with its own validation; no phase may change the

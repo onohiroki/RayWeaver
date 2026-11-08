@@ -637,10 +637,13 @@ type MeritScheduleMode struct {
 type MeritScheduleConfig struct {
 	// Metric is the state signal driving the blend: merit_ratio (default),
 	// iteration, glass_role (the glass-role residual magnitude summed
-	// over GlassSurfaces across all configs), or spot_diffraction (the
+	// over GlassSurfaces across all configs), spot_diffraction (the
 	// per-field weighted-average geometric spot RMS / Airy radius, normalised
 	// by the initial value so the metric always starts at 1.0 and drops as the
-	// geometric spot shrinks toward the diffraction limit).
+	// geometric spot shrinks toward the diffraction limit), or ray_validity
+	// (the minimum relaxed beam clearance over every config and field divided
+	// by 0.5 mm, clamped to [0,1]; 0 while a clear aperture clips, 1 when every
+	// aperture is clear — the metric for a paraxial-to-real homotopy).
 	Metric string `yaml:"metric"`
 	// Curve is the interpolation shape between the anchors: linear (default),
 	// sigmoid, or step (a hard mode switch at the midpoint).

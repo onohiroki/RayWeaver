@@ -13,7 +13,7 @@ import (
 // meritSchedule is the compiled optimization.merit_schedule: a smooth blend of
 // named merit modes whose weights follow a scalar state metric.
 type meritSchedule struct {
-	metric        string // merit_ratio | iteration | glass_role | spot_diffraction
+	metric        string // merit_ratio | iteration | glass_role | spot_diffraction | ray_validity
 	curve         string // linear | sigmoid | step
 	anchorFrom    float64
 	anchorTo      float64
@@ -61,6 +61,13 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 	if ms.metric == "spot_diffraction" && ms.anchorFrom == 0 && ms.anchorTo == 0 {
 		ms.anchorFrom = 1.0
 		ms.anchorTo = 0.005
+	}
+	// ray_validity rises from 0 (a clear aperture is clipped) to 1 (every
+	// surface has the full validity scale of clearance). The default anchors
+	// start the real-ray mode only once the geometry is essentially clear.
+	if ms.metric == "ray_validity" && ms.anchorFrom == 0 && ms.anchorTo == 0 {
+		ms.anchorFrom = 0.1
+		ms.anchorTo = 0.9
 	}
 	o.modeWeights = make(map[string]float64, len(s.Modes))
 	for _, m := range s.Modes {
@@ -308,6 +315,8 @@ func (o *Optimizer) scheduleMetric(x []float64, iter int) float64 {
 	case "spot_diffraction":
 		r, _ := o.spotDiffractionRatio(x)
 		return r
+	case "ray_validity":
+		return o.rayValidity(x)
 	default: // merit_ratio
 		if o.initialMerit == 0 {
 			return 1.0
@@ -442,6 +451,83 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 		return maxRatio, true
 	}
 	return weightedSum / totalWeight, true
+}
+
+// rayValidityScale is the clearance at which a surface counts as fully valid
+// (mm). A surface with no clearance contributes 0, one with this much
+// clearance contributes 1, and the metric interpolates linearly between.
+const rayValidityScale = 0.5
+
+// rayValidity is the state metric for the paraxial-to-real continuation: the
+// minimum, over every config and field, of the relaxed beam clearance divided
+// by rayValidityScale, clamped to [0,1]. It is 0 when a clear aperture clips
+// the beam (or a surface is unreached) and 1 when every aperture has at least
+// rayValidityScale of clearance. The stop and the reference/image surface are
+// excluded: the stop defines the pupil (its margin is ~0 by construction), and
+// the image surface is the sensor, not a ray-passing aperture.
+//
+// The metric uses the relaxed envelope (virtual misses, with the outermost
+// missed rays re-solved as a node system), so it is defined in exactly the
+// region where the real merit has no rays — the reason it can drive the ramp
+// out of a broken starting design.
+func (o *Optimizer) rayValidity(x []float64) float64 {
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+
+	validity := 1.0
+	hasData := false
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+		if len(surfaces) == 0 || len(cfg.fields) == 0 {
+			continue
+		}
+		wls := apertureSizingWavelengths(cfg)
+		if len(wls) == 0 {
+			continue
+		}
+		wl := wls[0]
+		p := pupils[cfg.id]
+		for fi := range cfg.fields {
+			angle := o.fieldSizingAngle(cfg, fi, surfaces, gc, wl)
+			pupilZ := o.gridCentring(cfg, p, angle)
+			extents := dls.TraceFieldGridExtentsRelaxed(gc, surfaces, cfg.stopSurface, pupilZ,
+				angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation,
+				o.gridWorkers(), p.dia, cfg.fields[fi].Vignetting)
+			margin := math.Inf(1)
+			for i := range surfaces {
+				s := &surfaces[i]
+				if s.ID == cfg.stopSurface || s.ID == cfg.refSurface || s.Diameter <= 0 {
+					continue
+				}
+				e, ok := extents[s.ID]
+				if !ok {
+					margin = -rayValidityScale
+					break
+				}
+				if m := s.Diameter/2 - e; m < margin {
+					margin = m
+				}
+			}
+			if math.IsInf(margin, 1) {
+				continue
+			}
+			v := margin / rayValidityScale
+			if v < 0 {
+				v = 0
+			} else if v > 1 {
+				v = 1
+			}
+			if v < validity {
+				validity = v
+			}
+			hasData = true
+		}
+	}
+	if !hasData {
+		return 1
+	}
+	return validity
 }
 
 // scheduleCurve maps the normalised metric t ∈ [0,1] to a blend fraction.
