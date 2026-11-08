@@ -641,9 +641,10 @@ type MeritScheduleConfig struct {
 	// per-field weighted-average geometric spot RMS / Airy radius, normalised
 	// by the initial value so the metric always starts at 1.0 and drops as the
 	// geometric spot shrinks toward the diffraction limit), or ray_validity
-	// (the minimum relaxed beam clearance over every config and field divided
-	// by 0.5 mm, clamped to [0,1]; 0 while a clear aperture clips, 1 when every
-	// aperture is clear — the metric for a paraxial-to-real homotopy).
+	// (the minimum relaxed beam clearance over every config and field, measured
+	// against each surface's beam_clearance target when declared (else 0.5 mm),
+	// clamped to [0,1]; 0 while a clear aperture clips, 1 when every measured
+	// aperture meets its target — the metric for a paraxial-to-real homotopy).
 	Metric string `yaml:"metric"`
 	// Curve is the interpolation shape between the anchors: linear (default),
 	// sigmoid, or step (a hard mode switch at the midpoint).

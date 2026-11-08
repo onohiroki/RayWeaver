@@ -460,14 +460,16 @@ maps the escape-cycle phase to a numeric value on [0,1] (`PhaseEscape`→0,
 phase boundaries (e.g. an exploration mode with few terms during the
 escape phase and a full local mode during the clean phase). `ray_validity`
 (0…1) is the minimum relaxed beam clearance over every config and field,
-divided by 0.5 mm and clamped: it is 0 while a clear aperture clips the beam
-(or a surface is unreached) and 1 when every aperture has at least 0.5 mm of
-clearance (the stop and the image surface are excluded). Because the relaxed
-envelope is defined where the real trace has no rays, `ray_validity` is the
-metric for a **paraxial/analytic → real-ray homotopy**: start in a
-first-order mode and let `anchor_from`/`anchor_to` (default 0.1/0.9) ramp the
-real terms in once the geometry is clear. The active
-mode is reported in the output (`opt_results.active_mode`) and the
+measured against the clearance the design asks for — each surface's
+`beam_clearance` `target` when the config declares one, otherwise 0.5 mm — and
+clamped. It is 0 while a clear aperture clips the beam (or a surface is
+unreached) and 1 when every measured aperture meets its target (the stop and
+the image surface are excluded). Because the relaxed envelope is defined where
+the real trace has no rays, `ray_validity` is the metric for a
+**paraxial/analytic → real-ray homotopy**: start in a first-order/feasibility
+mode and let `anchor_from`/`anchor_to` (default 0.1/0.9) ramp the real terms in
+once the geometry is clear.
+The active mode is reported in the output (`opt_results.active_mode`) and the
 per-iteration weights as JSONL `weights` events.
 
 A mode may also carry a `back_focus_type` (`paraxial` / `spot` / `wavefront`) so

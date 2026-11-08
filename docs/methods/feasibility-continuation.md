@@ -199,10 +199,11 @@ M_λ(x) = (1 − λ) · M_analytic(x) + λ · M_realtrace(x)
 where `M_analytic` is the paraxial/Seidel merit (`focal_length`, `seidel_*`,
 `distortion_pct`) and λ is ramped from 0 to 1. The ramp is driven by
 **`ray_validity`** (implemented): the minimum relaxed beam clearance over every
-config and field, divided by 0.5 mm and clamped to [0,1]; 0 while a clear
-aperture clips (or a surface is unreached), 1 when every aperture has at least
-0.5 mm of clearance. The stop and the image surface are excluded. If a ramp
-step loses validity, step λ back one stage and restore feasibility.
+config and field, measured against each surface's `beam_clearance` `target` when
+the config declares one (else 0.5 mm) and clamped to [0,1]; 0 while a clear
+aperture clips (or a surface is unreached), 1 when every measured aperture meets
+its target. The stop and the image surface are excluded. If a ramp step loses
+validity, step λ back one stage and restore feasibility.
 
 The existing `optimization.merit_schedule` ramps named merit modes by
 `merit_ratio`, `iteration`, `glass_role`, `spot_diffraction`, `phase` or

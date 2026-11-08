@@ -1,6 +1,7 @@
 package optimize
 
 import (
+	"math"
 	"testing"
 
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -36,6 +37,36 @@ func rayValidityProbe(c1, diameter2 float64) *Optimizer {
 // TestRayValidityMetric pins the Layer R state signal: 0 while a clear aperture
 // clips the beam, 1 when every aperture has the full clearance scale, and a
 // monotone rise as the first surface strengthens.
+func TestClearanceValidity(t *testing.T) {
+	cases := []struct {
+		margin, target, want float64
+	}{
+		{0.3, 0.2, 1},
+		{0.1, 0.2, 0.5},
+		{-1, 0.2, 0},
+		{0.01, 0, 0.1}, // target floor: 0.01 / 0.1
+		{0.05, 0, 0.5},
+	}
+	for _, c := range cases {
+		if got := clearanceValidity(c.margin, c.target); math.Abs(got-c.want) > 1e-12 {
+			t.Errorf("clearanceValidity(%v, %v) = %v, want %v", c.margin, c.target, got, c.want)
+		}
+	}
+}
+
+func TestClearanceTargets(t *testing.T) {
+	cfg := &config{
+		meritTerms: []meritTerm{{kind: MeritBeamClearance, surfaceSet: []int{5}, target: 0.2}},
+		meritModes: map[string][]meritTerm{
+			"feasibility": {{kind: MeritBeamClearance, surfaceSet: []int{2}, target: 0.4}},
+		},
+	}
+	got := clearanceTargets(cfg)
+	if len(got) != 2 || got[5] != 0.2 || got[2] != 0.4 {
+		t.Errorf("clearanceTargets = %v, want {2:0.4, 5:0.2}", got)
+	}
+}
+
 func TestRayValidityMetric(t *testing.T) {
 	validity := func(c1, diameter2 float64) float64 {
 		opt := rayValidityProbe(c1, diameter2)

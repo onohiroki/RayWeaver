@@ -454,17 +454,68 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 }
 
 // rayValidityScale is the clearance at which a surface counts as fully valid
-// (mm). A surface with no clearance contributes 0, one with this much
-// clearance contributes 1, and the metric interpolates linearly between.
+// when the config declares no beam_clearance term (mm). A surface with no
+// clearance contributes 0, one with this much clearance contributes 1.
 const rayValidityScale = 0.5
 
+// minClearanceTarget floors a beam_clearance term's target so the validity
+// ratio is defined for a target of 0 (only clipping is unacceptable).
+const minClearanceTarget = 0.1
+
+// clearanceValidity maps a signed clearance to [0,1] against a required target.
+func clearanceValidity(margin, target float64) float64 {
+	if target < minClearanceTarget {
+		target = minClearanceTarget
+	}
+	v := margin / target
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// clearanceTargets collects the surface -> required clearance map declared by
+// the config's beam_clearance terms (fixed merit and every merit mode, so the
+// metric is independent of which mode is currently active). An empty map means
+// the config declares no clearance term and the metric falls back to every
+// clear aperture with rayValidityScale.
+func clearanceTargets(cfg *config) map[int]float64 {
+	out := make(map[int]float64)
+	add := func(terms []meritTerm) {
+		for i := range terms {
+			t := &terms[i]
+			if t.kind != MeritBeamClearance || len(t.surfaceSet) == 0 {
+				continue
+			}
+			target := t.target
+			if target < 0 {
+				target = 0
+			}
+			if prev, ok := out[t.surfaceSet[0]]; !ok || target > prev {
+				out[t.surfaceSet[0]] = target
+			}
+		}
+	}
+	add(cfg.meritTerms)
+	for _, terms := range cfg.meritModes {
+		add(terms)
+	}
+	return out
+}
+
 // rayValidity is the state metric for the paraxial-to-real continuation: the
-// minimum, over every config and field, of the relaxed beam clearance divided
-// by rayValidityScale, clamped to [0,1]. It is 0 when a clear aperture clips
-// the beam (or a surface is unreached) and 1 when every aperture has at least
-// rayValidityScale of clearance. The stop and the reference/image surface are
-// excluded: the stop defines the pupil (its margin is ~0 by construction), and
-// the image surface is the sensor, not a ray-passing aperture.
+// minimum, over every config and field, of the relaxed beam clearance measured
+// against the clearance the design asks for, clamped to [0,1]. The required
+// clearance is each surface's beam_clearance target when the config declares
+// one (so the ramp switches to the imaging mode exactly when those terms are
+// satisfied), otherwise rayValidityScale. It is 0 when a clear aperture clips
+// the beam (or a surface is unreached). The stop and the reference/image
+// surface are excluded: the stop defines the pupil (its margin is ~0 by
+// construction), and the image surface is the sensor, not a ray-passing
+// aperture.
 //
 // The metric uses the relaxed envelope (virtual misses, with the outermost
 // missed rays re-solved as a node system), so it is defined in exactly the
@@ -488,38 +539,42 @@ func (o *Optimizer) rayValidity(x []float64) float64 {
 		}
 		wl := wls[0]
 		p := pupils[cfg.id]
+		targets := clearanceTargets(cfg)
 		for fi := range cfg.fields {
 			angle := o.fieldSizingAngle(cfg, fi, surfaces, gc, wl)
 			pupilZ := o.gridCentring(cfg, p, angle)
 			extents := dls.TraceFieldGridExtentsRelaxed(gc, surfaces, cfg.stopSurface, pupilZ,
 				angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation,
 				o.gridWorkers(), p.dia, cfg.fields[fi].Vignetting)
-			margin := math.Inf(1)
+			fieldValidity := 1.0
+			hasSurface := false
 			for i := range surfaces {
 				s := &surfaces[i]
 				if s.ID == cfg.stopSurface || s.ID == cfg.refSurface || s.Diameter <= 0 {
 					continue
 				}
-				e, ok := extents[s.ID]
-				if !ok {
-					margin = -rayValidityScale
-					break
+				scale := rayValidityScale
+				if len(targets) > 0 {
+					t, ok := targets[s.ID]
+					if !ok {
+						continue
+					}
+					scale = t
 				}
-				if m := s.Diameter/2 - e; m < margin {
-					margin = m
+				hasSurface = true
+				margin := -scale
+				if e, ok := extents[s.ID]; ok {
+					margin = s.Diameter/2 - e
+				}
+				if v := clearanceValidity(margin, scale); v < fieldValidity {
+					fieldValidity = v
 				}
 			}
-			if math.IsInf(margin, 1) {
+			if !hasSurface {
 				continue
 			}
-			v := margin / rayValidityScale
-			if v < 0 {
-				v = 0
-			} else if v > 1 {
-				v = 1
-			}
-			if v < validity {
-				validity = v
+			if fieldValidity < validity {
+				validity = fieldValidity
 			}
 			hasData = true
 		}
