@@ -100,6 +100,42 @@ func TestRayValidityPhysicalGate(t *testing.T) {
 	}
 }
 
+// TestMeritModeFieldUsesIndex pins the documented meaning of `field` in a
+// merit mode: the field index, not the field's id. An imported document used
+// to give every field id 0, which sent every mode term with field > 0 back to
+// field 0; a non-sequential id set must still resolve by index.
+func TestMeritModeFieldUsesIndex(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 40.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 40.0, Material: types.Material{}, Diameter: 40.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 40.0},
+	}
+	surface.Precompute(surfaces)
+	opt := NewMultiOptimizer([]ConfigInput{{
+		ID:     "cfg1",
+		Weight: 1,
+		Fields: []types.FieldItem{
+			{ID: 10, AngleDeg: 0, Weight: 1},
+			{ID: 20, AngleDeg: 5, Weight: 1},
+		},
+		Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1}},
+		Surfaces:    surfaces,
+		MeritModes: []types.MeritMode{{Name: "m", Terms: []types.MeritTerm{
+			{Kind: "field_alive", Field: 1, Target: 0.9, Weight: 1},
+		}}},
+	}}, nil, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 1.0, 8, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
+
+	terms := opt.configs[0].meritModes["m"]
+	if len(terms) != 1 {
+		t.Fatalf("mode terms = %d, want 1", len(terms))
+	}
+	if terms[0].fieldIndex != 1 || terms[0].fieldAngle != 5 {
+		t.Errorf("mode term field = index %d angle %v, want index 1 angle 5", terms[0].fieldIndex, terms[0].fieldAngle)
+	}
+}
+
 func TestRayValidityMetric(t *testing.T) {
 	validity := func(c1, diameter2 float64) float64 {
 		opt := rayValidityProbe(c1, diameter2)

@@ -578,23 +578,30 @@ func NewOptimizer(cfg Config) *Optimizer {
 			}
 			var terms []meritTerm
 			for _, t := range modeTerms {
-				// Resolve field index/angle/direction from the config fields, by
-				// id like buildMeritTermFromTypes: the term carries the position
-				// (for the vignetting ellipse and the frozen field angle), not
-				// the declared id.
+				// `field` is the field index (documented in
+				// merit-and-constraints.md), not the field's id. The imported
+				// documents used to give every field id 0, which made every
+				// mode term with field > 0 fall back to field 0; keep an id
+				// lookup as the fallback for a non-sequential id set.
 				fieldIndex := -1
+				if t.Field >= 0 && t.Field < len(c.fields) {
+					fieldIndex = t.Field
+				} else {
+					for i := range c.fields {
+						if c.fields[i].ID == t.Field {
+							fieldIndex = i
+							break
+						}
+					}
+				}
 				var fieldAngle, fieldWeight float64
 				var fieldDirX, fieldDirY float64 = 0.0, 1.0
-				for i := range c.fields {
-					f := &c.fields[i]
-					if f.ID == t.Field {
-						fieldIndex = i
-						fieldAngle = f.AngleDeg
-						fieldWeight = f.Weight
-						if len(f.Direction) >= 2 {
-							fieldDirX, fieldDirY = normalizeDir(f.Direction)
-						}
-						break
+				if fieldIndex >= 0 {
+					f := &c.fields[fieldIndex]
+					fieldAngle = f.AngleDeg
+					fieldWeight = f.Weight
+					if len(f.Direction) >= 2 {
+						fieldDirX, fieldDirY = normalizeDir(f.Direction)
 					}
 				}
 				if fieldWeight == 0 {

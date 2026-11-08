@@ -236,6 +236,9 @@ END
 		if f.Weight != weights[i] {
 			t.Errorf("field %d weight: expected %g, got %g", i, weights[i], f.Weight)
 		}
+		if f.ID != i {
+			t.Errorf("field %d id: expected %d, got %d", i, i, f.ID)
+		}
 	}
 }
 

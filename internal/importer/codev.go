@@ -719,7 +719,7 @@ func parseCodeVHeader(upper string, tokens []string, result *ParseResult, inchMo
 		for _, v := range tokens[1:] {
 			val := parseFloat(v)
 			result.Fields = append(result.Fields, types.FieldItem{
-				ID:       0,
+				ID:       len(result.Fields),
 				AngleDeg: val,
 				Weight:   1.0,
 			})
@@ -733,7 +733,7 @@ func parseCodeVHeader(upper string, tokens []string, result *ParseResult, inchMo
 		for _, v := range tokens[1:] {
 			val := parseFloat(v)
 			result.Fields = append(result.Fields, types.FieldItem{
-				ID:          0,
+				ID:          len(result.Fields),
 				ImageHeight: val,
 				Weight:      1.0,
 			})

@@ -139,22 +139,35 @@ func buildMeritTermFromTypes(t types.MeritTerm, ci ConfigInput, gc *glass.Catalo
 		fieldWeight:          1.0,
 		wavWeight:            1.0,
 	}
-	for i, f := range ci.Fields {
-		if f.ID == t.Field {
-			mt.fieldIndex = i
-			if f.AngleDeg != 0 || f.ImageHeight == 0 {
-				mt.fieldAngle = f.AngleDeg
-			} else {
-				mt.useImageHeight = true
-				mt.imageHeight = f.ImageHeight
+	// `field` is the field index (documented in merit-and-constraints.md), not
+	// the field's id. Keep an id lookup as the fallback for a non-sequential
+	// id set: the CODE V importer used to give every field id 0, which made
+	// every term with field > 0 fall back to the first field.
+	fieldIndex := -1
+	if t.Field >= 0 && t.Field < len(ci.Fields) {
+		fieldIndex = t.Field
+	} else {
+		for i := range ci.Fields {
+			if ci.Fields[i].ID == t.Field {
+				fieldIndex = i
+				break
 			}
-			if f.Weight > 0 {
-				mt.fieldWeight = f.Weight
-			}
-			if dx, dy, ok := fieldDir(f.Direction); ok {
-				mt.fieldDirX, mt.fieldDirY = dx, dy
-			}
-			break
+		}
+	}
+	if fieldIndex >= 0 {
+		f := ci.Fields[fieldIndex]
+		mt.fieldIndex = fieldIndex
+		if f.AngleDeg != 0 || f.ImageHeight == 0 {
+			mt.fieldAngle = f.AngleDeg
+		} else {
+			mt.useImageHeight = true
+			mt.imageHeight = f.ImageHeight
+		}
+		if f.Weight > 0 {
+			mt.fieldWeight = f.Weight
+		}
+		if dx, dy, ok := fieldDir(f.Direction); ok {
+			mt.fieldDirX, mt.fieldDirY = dx, dy
 		}
 	}
 	if t.WavelengthWeight > 0 {
