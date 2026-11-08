@@ -477,26 +477,46 @@ func clearanceValidity(margin, target float64) float64 {
 	return v
 }
 
-// clearanceTargets collects the surface -> required clearance map declared by
-// the config's beam_clearance terms (fixed merit and every merit mode, so the
-// metric is independent of which mode is currently active). An empty map means
-// the config declares no clearance term and the metric falls back to every
-// clear aperture with rayValidityScale.
-func clearanceTargets(cfg *config) map[int]float64 {
-	out := make(map[int]float64)
+// clearanceTerm is one declared beam_clearance requirement: the field, the
+// surface and the clearance the design asks for.
+type clearanceTerm struct {
+	field   int
+	surface int
+	target  float64
+}
+
+// clearanceTargets collects the requirements declared by the config's
+// beam_clearance terms (fixed merit and every merit mode, so the metric is
+// independent of which mode is currently active). The field is kept: a term
+// that guards field 5 must not be held hostage by an unrelated field's
+// clearance. An empty slice means the config declares no clearance term and
+// the metric falls back to every clear aperture with rayValidityScale.
+func clearanceTargets(cfg *config) []clearanceTerm {
+	var out []clearanceTerm
+	index := make(map[[2]int]int)
 	add := func(terms []meritTerm) {
 		for i := range terms {
 			t := &terms[i]
 			if t.kind != MeritBeamClearance || len(t.surfaceSet) == 0 {
 				continue
 			}
+			field := t.fieldIndex
+			if field < 0 {
+				field = 0
+			}
 			target := t.target
 			if target < 0 {
 				target = 0
 			}
-			if prev, ok := out[t.surfaceSet[0]]; !ok || target > prev {
-				out[t.surfaceSet[0]] = target
+			key := [2]int{field, t.surfaceSet[0]}
+			if idx, ok := index[key]; ok {
+				if target > out[idx].target {
+					out[idx].target = target
+				}
+				continue
 			}
+			index[key] = len(out)
+			out = append(out, clearanceTerm{field: field, surface: t.surfaceSet[0], target: target})
 		}
 	}
 	add(cfg.meritTerms)
@@ -506,16 +526,56 @@ func clearanceTargets(cfg *config) map[int]float64 {
 	return out
 }
 
+// fieldClearanceValidity measures one field against the declared clearance
+// terms (or, when there are none, every clear aperture with rayValidityScale).
+// It returns the minimum validity and whether any surface was measured.
+func (o *Optimizer) fieldClearanceValidity(cfg *config, surfaces []types.Surface, gc *glass.Catalog, wl float64, p appliedPupil, field int, terms []clearanceTerm, fallback bool) (float64, bool) {
+	angle := o.fieldSizingAngle(cfg, field, surfaces, gc, wl)
+	pupilZ := o.gridCentring(cfg, p, angle)
+	extents := dls.TraceFieldGridExtentsRelaxed(gc, surfaces, cfg.stopSurface, pupilZ,
+		angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation,
+		o.gridWorkers(), p.dia, cfg.fields[field].Vignetting)
+
+	radius := make(map[int]float64, len(surfaces))
+	for i := range surfaces {
+		radius[surfaces[i].ID] = surfaces[i].Diameter / 2
+	}
+	validity := 1.0
+	measured := false
+	consider := func(surface int, target float64) {
+		if surface == cfg.stopSurface || surface == cfg.refSurface || radius[surface] <= 0 {
+			return
+		}
+		measured = true
+		margin := -target
+		if e, ok := extents[surface]; ok {
+			margin = radius[surface] - e
+		}
+		if v := clearanceValidity(margin, target); v < validity {
+			validity = v
+		}
+	}
+	if fallback {
+		for i := range surfaces {
+			consider(surfaces[i].ID, rayValidityScale)
+		}
+	} else {
+		for _, t := range terms {
+			consider(t.surface, t.target)
+		}
+	}
+	return validity, measured
+}
+
 // rayValidity is the state metric for the paraxial-to-real continuation: the
-// minimum, over every config and field, of the relaxed beam clearance measured
-// against the clearance the design asks for, clamped to [0,1]. The required
-// clearance is each surface's beam_clearance target when the config declares
-// one (so the ramp switches to the imaging mode exactly when those terms are
-// satisfied), otherwise rayValidityScale. It is 0 when a clear aperture clips
-// the beam (or a surface is unreached). The stop and the reference/image
-// surface are excluded: the stop defines the pupil (its margin is ~0 by
-// construction), and the image surface is the sensor, not a ray-passing
-// aperture.
+// minimum relaxed beam clearance measured against the clearance the design asks
+// for, clamped to [0,1]. When the config declares beam_clearance terms, the
+// measurement is exactly those (field, surface) requirements and their targets,
+// so the ramp switches to the imaging mode when the feasibility terms are
+// satisfied. Without such terms it falls back to every clear aperture with
+// rayValidityScale. The stop and the reference/image surface are excluded: the
+// stop defines the pupil (its margin is ~0 by construction), and the image
+// surface is the sensor, not a ray-passing aperture.
 //
 // The metric uses the relaxed envelope (virtual misses, with the outermost
 // missed rays re-solved as a node system), so it is defined in exactly the
@@ -539,42 +599,36 @@ func (o *Optimizer) rayValidity(x []float64) float64 {
 		}
 		wl := wls[0]
 		p := pupils[cfg.id]
-		targets := clearanceTargets(cfg)
-		for fi := range cfg.fields {
-			angle := o.fieldSizingAngle(cfg, fi, surfaces, gc, wl)
-			pupilZ := o.gridCentring(cfg, p, angle)
-			extents := dls.TraceFieldGridExtentsRelaxed(gc, surfaces, cfg.stopSurface, pupilZ,
-				angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation,
-				o.gridWorkers(), p.dia, cfg.fields[fi].Vignetting)
-			fieldValidity := 1.0
-			hasSurface := false
-			for i := range surfaces {
-				s := &surfaces[i]
-				if s.ID == cfg.stopSurface || s.ID == cfg.refSurface || s.Diameter <= 0 {
+		terms := clearanceTargets(cfg)
+		if len(terms) == 0 {
+			for fi := range cfg.fields {
+				v, ok := o.fieldClearanceValidity(cfg, surfaces, gc, wl, p, fi, nil, true)
+				if !ok {
 					continue
 				}
-				scale := rayValidityScale
-				if len(targets) > 0 {
-					t, ok := targets[s.ID]
-					if !ok {
-						continue
-					}
-					scale = t
+				if v < validity {
+					validity = v
 				}
-				hasSurface = true
-				margin := -scale
-				if e, ok := extents[s.ID]; ok {
-					margin = s.Diameter/2 - e
-				}
-				if v := clearanceValidity(margin, scale); v < fieldValidity {
-					fieldValidity = v
-				}
+				hasData = true
 			}
-			if !hasSurface {
+			continue
+		}
+		byField := make([][]clearanceTerm, len(cfg.fields))
+		for _, t := range terms {
+			if t.field >= 0 && t.field < len(byField) {
+				byField[t.field] = append(byField[t.field], t)
+			}
+		}
+		for fi := range byField {
+			if len(byField[fi]) == 0 {
 				continue
 			}
-			if fieldValidity < validity {
-				validity = fieldValidity
+			v, ok := o.fieldClearanceValidity(cfg, surfaces, gc, wl, p, fi, byField[fi], false)
+			if !ok {
+				continue
+			}
+			if v < validity {
+				validity = v
 			}
 			hasData = true
 		}

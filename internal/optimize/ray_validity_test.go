@@ -56,14 +56,21 @@ func TestClearanceValidity(t *testing.T) {
 
 func TestClearanceTargets(t *testing.T) {
 	cfg := &config{
-		meritTerms: []meritTerm{{kind: MeritBeamClearance, surfaceSet: []int{5}, target: 0.2}},
+		meritTerms: []meritTerm{{kind: MeritBeamClearance, surfaceSet: []int{5}, target: 0.2, fieldIndex: 2}},
 		meritModes: map[string][]meritTerm{
-			"feasibility": {{kind: MeritBeamClearance, surfaceSet: []int{2}, target: 0.4}},
+			"feasibility": {{kind: MeritBeamClearance, surfaceSet: []int{2}, target: 0.4, fieldIndex: 3}},
 		},
 	}
 	got := clearanceTargets(cfg)
-	if len(got) != 2 || got[5] != 0.2 || got[2] != 0.4 {
-		t.Errorf("clearanceTargets = %v, want {2:0.4, 5:0.2}", got)
+	if len(got) != 2 {
+		t.Fatalf("clearanceTargets = %v, want 2 entries", got)
+	}
+	want := map[[2]int]float64{{2, 5}: 0.2, {3, 2}: 0.4}
+	for _, c := range got {
+		key := [2]int{c.field, c.surface}
+		if v, ok := want[key]; !ok || v != c.target {
+			t.Errorf("clearanceTargets entry = %+v, want target %v", c, want[key])
+		}
 	}
 }
 
