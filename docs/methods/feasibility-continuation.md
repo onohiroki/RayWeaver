@@ -273,6 +273,9 @@ On a zoom document known to produce no feasible minimum:
 
 1. **Gradient.** The clearance residual Jacobian columns are non-zero at the
    initial (dead) point; the merit is not identical across perturbed points.
+   Covered by `TestBeamClearanceMeritDrivesABrokenDesign`: a design whose rays
+   miss surface 2 still lowers its merit as the first surface strengthens, and
+   DLS follows that slope.
 2. **Progress.** The bottleneck migrates from surface to surface and eventually
    clears; the run reaches a state where `zoom` reports vignetting ≈ 1.
 3. **No cheating.** EPD and EFL do not drift (constrain EPD where the pupil is
