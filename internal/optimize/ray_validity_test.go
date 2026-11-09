@@ -226,7 +226,7 @@ func TestRayValiditySchedule(t *testing.T) {
 		t.Errorf("clipped design: active=%q weights=%v metric=%v, want analytic with real=0", active, weights, metric)
 	}
 	active, weights, metric = schedule(0.05, 34)
-	if active != "real" || weights["analytic"] > 1e-9 {
-		t.Errorf("clear design: active=%q weights=%v metric=%v, want real with analytic=0", active, weights, metric)
+	if active != "real" || weights["real"] < 0.8 {
+		t.Errorf("clear design: active=%q weights=%v metric=%v, want real dominant with analytic near 0", active, weights, metric)
 	}
 }

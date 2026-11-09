@@ -20,8 +20,15 @@ import (
 // delivered vignetted pupil. The glass-path (edge-thickness) check is skipped
 // for the on-axis field, which has no off-axis edge to protect.
 func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64, vig *types.VignettingDef) ([]IPoint, map[int]float64) {
+	return TraceFieldGridWithType(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, workers, epdOverride, vig, types.GridPolar)
+}
+
+// TraceFieldGridWithType is TraceFieldGrid with an explicit pupil-grid pattern.
+// The merit path uses GridPolar; a feasibility gate that must agree with the
+// delivered-design check (`chief` / `zoom`, GridHex) uses GridHex.
+func TraceFieldGridWithType(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64, vig *types.VignettingDef, gridType types.GridType) ([]IPoint, map[int]float64) {
 	skipGlassPath := fieldAngle == 0
-	return traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, false, workers, types.GridPolar, epdOverride, vig)
+	return traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, false, workers, gridType, epdOverride, vig)
 }
 
 // TraceFieldGridExtents traces a pupil grid with aperture and glass-path
