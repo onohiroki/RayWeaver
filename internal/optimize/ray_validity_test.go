@@ -136,6 +136,48 @@ func TestMeritModeFieldUsesIndex(t *testing.T) {
 	}
 }
 
+// TestRayValiditySkipsConfigsWithoutTerms pins the per-config feasibility
+// contract: when one config declares beam_clearance terms, the metric is
+// driven by those terms and a config that declares none keeps its own fixed
+// merit instead of holding the schedule back through the all-surfaces fallback.
+func TestRayValiditySkipsConfigsWithoutTerms(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	healthy := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: types.Material{Key: "N-BK7"}, Diameter: 40.0, Role: "stop"},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 40.0, Material: types.Material{}, Diameter: 60.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 100.0},
+	}
+	broken := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: types.Material{Key: "N-BK7"}, Diameter: 40.0, Role: "stop"},
+		{ID: 2, Type: types.Sphere, Curvature: 0.2, Thickness: 40.0, Material: types.Material{}, Diameter: 60.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 100.0},
+	}
+	surface.Precompute(healthy)
+	surface.Precompute(broken)
+	opt := NewMultiOptimizer([]ConfigInput{
+		{
+			ID: "healthy", Weight: 1, StopSurface: 1, RefSurface: 3,
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0, Weight: 1}},
+			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1}},
+			Surfaces:    healthy,
+			MeritTerms: []types.MeritTerm{
+				{Kind: MeritBeamClearance, Field: 0, SurfaceSet: []int{2}, Target: 0.2, Weight: 1},
+			},
+		},
+		{
+			ID: "broken", Weight: 1, StopSurface: 1, RefSurface: 3,
+			Fields:      []types.FieldItem{{ID: 0, AngleDeg: 0, Weight: 1}},
+			Wavelengths: []types.WavelengthItem{{ID: 0, Value: 0.00058756, Weight: 1}},
+			Surfaces:    broken,
+		},
+	}, nil, nil, nil, gc, 1, 0.01, 1e-6, 1e-6, 1.0, 32, 100, 0, nil, nil, 0, 0, false, false, nil, nil)
+
+	if v := opt.rayValidity(opt.getInitialState()); v < 0.9 {
+		t.Errorf("rayValidity = %v, want the healthy config's clearance (~1); the term-less config must not gate", v)
+	}
+}
+
 func TestRayValidityMetric(t *testing.T) {
 	validity := func(c1, diameter2 float64) float64 {
 		opt := rayValidityProbe(c1, diameter2)

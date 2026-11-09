@@ -595,6 +595,18 @@ func (o *Optimizer) rayValidity(x []float64) float64 {
 	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
 
+	// A document that declares beam_clearance terms in some configs defines the
+	// feasibility contract for those configs only. The others keep their fixed
+	// merit and constraints; applying the all-surfaces fallback to them would
+	// let an unrelated config hold the schedule in the feasibility mode forever.
+	hasAnyTerms := false
+	for ci := range o.configs {
+		if len(clearanceTargets(&o.configs[ci])) > 0 {
+			hasAnyTerms = true
+			break
+		}
+	}
+
 	validity := 1.0
 	hasData := false
 	for ci := range o.configs {
@@ -611,6 +623,9 @@ func (o *Optimizer) rayValidity(x []float64) float64 {
 		p := pupils[cfg.id]
 		terms := clearanceTargets(cfg)
 		if len(terms) == 0 {
+			if hasAnyTerms {
+				continue
+			}
 			for fi := range cfg.fields {
 				v, ok := o.fieldClearanceValidity(cfg, surfaces, gc, wl, p, fi, nil, true)
 				if !ok {
