@@ -174,7 +174,15 @@ Augmented YAML with a `chief_rays[]` section, one entry per field:
   explicit stop, the per-field dynamic-pupil crossing, or the virtual pupil
   plane
 - `spot_stats` — `centroid`, `rms_x`/`rms_y`/`rms_r`, min/max extent,
-  `traced_rays`/`missed_rays`
+  `traced_rays`/`missed_rays`. These are measured on the **delivered** pupil:
+  the full-aperture grid when the beam is clear enough, else a reduced grid
+  laid over the surviving part of the beam (see `effective_vignetting`), so
+  their traced fraction is *not* the vignetting
+- `prescribed_total` / `prescribed_traced` — launched / reached counts of the
+  **full-aperture** pupil grid, i.e. how much of the prescribed pupil the
+  design delivers. These are the counts `zoom` reports as
+  `fields[].vignetting`; on a heavily clipped field they are far below
+  `spot_stats` (measured 12/74 prescribed against 73/74 delivered)
 - `effective_vignetting` (only for a heavily vignetted field) — the estimated
   effective pupil as a `VignettingDef` in the same convention as
   `fields[].vignetting`; see

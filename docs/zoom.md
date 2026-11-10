@@ -82,13 +82,22 @@ zoom_summary:
 | `color` | the config's `paraxial_result.color`: axial colour, secondary spectrum and weighted white EFL/BFL, when it declares wavelengths |
 | `fields[].white_spot_rms` | wavelength-weighted spot RMS about the common centroid (mm) |
 | `fields[].lateral_color` | chief-ray height spread over the config wavelengths (max/rms) |
-| `fields[].vignetting`, `grid_surviving` / `grid_total` | the fraction of the prescribed pupil grid that survives an aperture clip or the glass-path (edge-thickness) check |
+| `fields[].vignetting`, `grid_surviving` / `grid_total` | the fraction of the **prescribed** (full-aperture) pupil grid that survives an aperture clip or the glass-path (edge-thickness) check — `chief_rays[].prescribed_traced` / `prescribed_total` |
 
 `vignetting` is measured on the config's surfaces as they are in the document:
 nothing is sized. Compare it with `vignette`, which also settles
 `auto_aperture` diameters, and with `optimize`'s end-of-solve warnings, which
 report the two ways this fraction is lost (a collapsed field, a clipped clear
 aperture).
+
+It is **not** the traced fraction of `chief_rays[].spot_stats`. That statistic
+is measured on the *delivered* pupil: when the beam is clipped below 25 % of the
+grid, chief follows the surviving part of the beam with a reduced grid (and
+reports it as `effective_vignetting`), so its own survival is near 1 by
+construction — a field delivering a sixth of its prescribed pupil read 0.99
+that way. `fields[].spot_rms` comes from that same delivered grid, so it
+describes the image the design actually forms, while `vignetting` says how much
+of the pupil got there.
 
 A field declared by `image_height` is solved to a field angle per config before
 the row is built. When the config's surfaces cannot form that image height the

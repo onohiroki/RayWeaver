@@ -2045,15 +2045,19 @@ type LateralColorStats struct {
 }
 
 type ChiefRayResult struct {
-	FieldAngle    float64           `yaml:"field_angle"`
-	ChiefRay      Ray               `yaml:"chief_ray"`
-	ImageHeight   Vec3              `yaml:"image_height"`
-	EntrancePupil *Pupil            `yaml:"entrance_pupil,omitempty"`
-	ExitPupil     *Pupil            `yaml:"exit_pupil,omitempty"`
-	GridPoints    []GridPoint       `yaml:"grid_points,omitempty"`
-	SpotStats     *SpotStats        `yaml:"spot_stats,omitempty"`
-	RayFan        *RayFan           `yaml:"ray_fan,omitempty"`
-	Wavelengths   []WavelengthStats `yaml:"wavelengths,omitempty"`
+	FieldAngle    float64     `yaml:"field_angle"`
+	ChiefRay      Ray         `yaml:"chief_ray"`
+	ImageHeight   Vec3        `yaml:"image_height"`
+	EntrancePupil *Pupil      `yaml:"entrance_pupil,omitempty"`
+	ExitPupil     *Pupil      `yaml:"exit_pupil,omitempty"`
+	GridPoints    []GridPoint `yaml:"grid_points,omitempty"`
+	// SpotStats is the spot of the DELIVERED pupil: the full-aperture grid when
+	// the beam is clear enough, else the reduced effective-pupil grid (see
+	// EffectiveVignetting). Its traced fraction is therefore not the
+	// prescribed-pupil vignetting; PrescribedTotal/PrescribedTraced are.
+	SpotStats   *SpotStats        `yaml:"spot_stats,omitempty"`
+	RayFan      *RayFan           `yaml:"ray_fan,omitempty"`
+	Wavelengths []WavelengthStats `yaml:"wavelengths,omitempty"`
 	// WhiteSpotStats is the flux- and wavelength-weighted spot over every
 	// entry in Wavelengths: the common centroid and the combined RMS include
 	// the inter-wavelength (lateral colour) spread.
@@ -2072,6 +2076,13 @@ type ChiefRayResult struct {
 	// atan(tangent)). Set only for heavily vignetted fields, whose beam was
 	// measured rather than taken from the nominal pupil.
 	EffectiveVignetting *VignettingDef `yaml:"effective_vignetting,omitempty"`
+	// PrescribedTotal / PrescribedTraced are the launched / reached counts of
+	// the FULL-aperture pupil grid. SpotStats is measured on the effective
+	// (pshrunk) pupil when the field is heavily clipped, so this pair is the
+	// honest "fraction of the prescribed pupil the design delivers" — the
+	// same ratio `zoom` reports as fields[].vignetting.
+	PrescribedTotal  int `yaml:"prescribed_total,omitempty"`
+	PrescribedTraced int `yaml:"prescribed_traced,omitempty"`
 }
 
 type Pupil struct {

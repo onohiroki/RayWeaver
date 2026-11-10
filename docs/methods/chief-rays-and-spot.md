@@ -215,6 +215,20 @@ survivors for the fit); otherwise the adaptive concentric radius probe
 nothing is reported. A field that is not clipped that heavily never reports an
 `effective_vignetting`.
 
+Neither fallback may deliver less than the full grid: if the probe's shrunken
+grid reaches fewer rays than the full-aperture grid, the full grid is kept as
+the statistics grid (and no ellipse is reported). The probe shrinks toward the
+pupil centre, so on a beam whose surviving crescent sits at the rim it returned
+**no rays at all** (measured 0/31 where the full grid delivered 7/31) and erased
+a spot statistic the design supports.
+
+The delivered-pupil statistics are not the vignetting. Their traced fraction
+measures the *shrunken* grid, which survives near 100% by construction, so a
+field delivering a sixth of its prescribed pupil reported 0.99. The honest
+number is the full-aperture grid's own survival, reported as
+`prescribed_traced` / `prescribed_total` and used by `zoom` for
+`fields[].vignetting`.
+
 This matters in practice: for a strongly off-axis field whose transmitted rays
 hug the pupil rim, the survivors lie far from the pupil centre, so a concentric
 probe can shrink away from all of them — `traced_rays: 0`, a zeroed `rms_*` and

@@ -280,7 +280,12 @@ constraint is the `beam_clearance` measure (`internal/constraint`); both call
 - `optimize --verbose`'s `breakdown` event gains the residual terms, so the
   merit can still be reconciled term by term.
 - The physical gate is unchanged: `zoom`'s per-field vignetting, `chief`, `psf`
-  and the terminal validation of `escape`/`pso` still trace real rays.
+  and the terminal validation of `escape`/`pso` still trace real rays. `zoom`'s
+  vignetting is the survival of the **prescribed** (full-aperture) pupil grid —
+  `chief_rays[].prescribed_traced / prescribed_total` — not the traced fraction
+  of chief's delivered-pupil spot statistics, which are measured on a reduced
+  grid following the surviving beam and read ~0.9 for a field delivering 0.16.
+  That distinction is what makes the number usable as a feasibility gate.
 
 ## 9. Validation plan
 

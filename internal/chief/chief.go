@@ -43,18 +43,26 @@ type FieldSolution struct {
 }
 
 type Result struct {
-	FieldAngle     float64
-	FieldHeight    float64
-	FieldDir       types.Vec3
-	ChiefRay       types.Ray
-	ImageHeight    types.Vec3
-	EntrancePupil  *types.Pupil
-	ExitPupil      *types.Pupil
-	GridPoints     []types.GridPoint
-	SpotStats      *types.SpotStats
-	RayFan         *types.RayFan
-	PerSurfaceMaxY []float64
-	Wavelengths    []types.WavelengthStats
+	FieldAngle    float64
+	FieldHeight   float64
+	FieldDir      types.Vec3
+	ChiefRay      types.Ray
+	ImageHeight   types.Vec3
+	EntrancePupil *types.Pupil
+	ExitPupil     *types.Pupil
+	GridPoints    []types.GridPoint
+	SpotStats     *types.SpotStats
+	// PrescribedTotal/PrescribedTraced count the full-aperture (prescribed)
+	// pupil grid: every launched ray and those that reached the reference
+	// surface. SpotStats may be measured on a reduced effective-pupil grid
+	// when the beam is heavily clipped, so it cannot answer "how much of the
+	// prescribed pupil does this design deliver?" — these counts can, and they
+	// are what `zoom` reports as the field's vignetting.
+	PrescribedTotal  int
+	PrescribedTraced int
+	RayFan           *types.RayFan
+	PerSurfaceMaxY   []float64
+	Wavelengths      []types.WavelengthStats
 	// ProbeZ is the aperture Z found by the low-angle (≈1°) probe: the Z where
 	// the probe's centroid chief ray crosses the optical axis. 0 when the probe
 	// did not run or failed.
@@ -988,6 +996,14 @@ func centroidGrid(
 	scx, scy, stats := tracePupilGrid(system, engine, path, numRays, radius,
 		pupilCenterX, pupilCenterY, zStart, rayDir, types.Vec3{},
 		refSurfaceID, pol, wavelength, dumpMap, gridType, vig, nil, numRings, numSpokes)
+	// A fallback may not deliver less than the full grid. The probe shrinks the
+	// grid toward the pupil centre, so on a beam whose surviving crescent lies
+	// at the rim it can return a grid with no rays at all — measured 0/31 where
+	// the full grid delivered 7/31 — which would erase a spot statistic that
+	// the design does support.
+	if tracedRays(stats) < tracedRays(grid) {
+		return cx, cy, grid, grid, nil
+	}
 	return scx, scy, grid, stats, nil
 }
 
@@ -2304,6 +2320,15 @@ func buildResult(
 		EntrancePupil: &types.Pupil{Radius: apertureRadius},
 		ChiefRay:      chiefRay,
 		GridPoints:    grid,
+	}
+	// The prescribed-pupil survival: the full grid, never the reduced one the
+	// spot statistics may use. Counted here so every caller reports the same
+	// number for the same grid (computeSpotStats uses the same predicate).
+	for i := range grid {
+		res.PrescribedTotal++
+		if grid[i].ImageX != nil && grid[i].ImageY != nil {
+			res.PrescribedTraced++
+		}
 	}
 	if len(sg) > 0 {
 		res.SpotStats = computeSpotStats(sg)

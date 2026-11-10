@@ -238,3 +238,72 @@ func TestZoomSummaryDispersion(t *testing.T) {
 		}
 	}
 }
+
+// zoomClippedPupilYAML is a single-position document whose 12 deg beam is
+// clipped to a sliver by surface 3 (diameter 3 mm): the full-aperture grid
+// delivers 12 of its 74 rays, while the delivered-pupil grid that chief uses
+// for its spot statistics follows the surviving sliver and arrives at 73/74.
+const zoomClippedPupilYAML = `glass_catalog:
+  entries:
+    - {type: model, name: N-BK7, nd: 1.5168, vd: 64.17}
+chief:
+  reference_surface: 4
+  reference_wavelength: 0.00058756
+  num_rays: 64
+  grid_type: hex
+  stop_surface: 2
+configs:
+  - id: clip
+    active: true
+    fields:
+      - {id: 0, angle_deg: 0.0, weight: 1.0}
+      - {id: 1, angle_deg: 12.0, weight: 1.0}
+    wavelengths:
+      - {id: 0, value: 0.00058756, weight: 1.0}
+    surfaces:
+      - {id: 1, type: sphere, radius: 100.0, thickness: 10.0, material: N-BK7, diameter: 50.0}
+      - {id: 2, type: sphere, radius: -100.0, thickness: 10.0, material: AIR, diameter: 8.0}
+      - {id: 3, type: sphere, radius: 100.0, thickness: 60.0, material: AIR, diameter: 3.0}
+      - {id: 4, type: sphere, radius: 0.0, thickness: 0.0, material: AIR, diameter: 100.0}
+`
+
+// TestZoomVignettingIsThePrescribedSurvival pins the zoom/chief contract: the
+// vignetting column is the survival of the FULL-aperture (prescribed) pupil
+// grid, so it equals the per-field prescribed counts `chief` reports — and it
+// is not the delivered-pupil fraction of spot_stats, which is measured on a
+// reduced grid following the surviving part of the beam. On this document the
+// two differ by an order of magnitude (0.16 vs 0.99); the old code reported the
+// delivered fraction, so a field delivering a sixth of its pupil read as 0.99.
+func TestZoomVignettingIsThePrescribedSurvival(t *testing.T) {
+	sum, _ := runZoomSummary(t, nil, zoomClippedPupilYAML)
+	if len(sum.Configs) != 1 || len(sum.Configs[0].Fields) != 2 {
+		t.Fatalf("unexpected summary shape: %+v", sum.Configs)
+	}
+	clipped := sum.Configs[0].Fields[1]
+
+	out := runCommand(t, []string{"rayweave", "chief"}, func() { runChief([]byte(zoomClippedPupilYAML)) })
+	var parsed types.Output
+	if err := yaml.Unmarshal(out, &parsed); err != nil {
+		t.Fatalf("chief output does not parse: %v", err)
+	}
+	if len(parsed.ChiefRays) != 2 {
+		t.Fatalf("chief fields = %d, want 2", len(parsed.ChiefRays))
+	}
+	cr := parsed.ChiefRays[1]
+	if clipped.GridTotal != cr.PrescribedTotal || clipped.GridSurviving != cr.PrescribedTraced {
+		t.Errorf("zoom reports %d/%d, chief prescribed %d/%d",
+			clipped.GridSurviving, clipped.GridTotal, cr.PrescribedTraced, cr.PrescribedTotal)
+	}
+	if clipped.Vignetting >= 0.5 {
+		t.Errorf("clipped field vignetting = %v, want the prescribed survival (< 0.5), not the delivered-pupil fraction", clipped.Vignetting)
+	}
+	// The delivered spot still exists (the reduced grid follows the surviving
+	// sliver), so a low vignetting must not be bought by dropping the field.
+	if clipped.SpotRMS <= 0 {
+		t.Errorf("clipped field spot_rms = %v, want the delivered spot", clipped.SpotRMS)
+	}
+	if cr.SpotStats == nil || cr.SpotStats.TracedRays <= cr.PrescribedTraced {
+		t.Fatalf("fixture no longer exercises the reduced grid: prescribed %d, delivered %v",
+			cr.PrescribedTraced, cr.SpotStats)
+	}
+}

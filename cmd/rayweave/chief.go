@@ -305,10 +305,14 @@ func runChief(data []byte) {
 			ImageHeight:    r.ImageHeight,
 			EntrancePupil:  r.EntrancePupil,
 			SpotStats:      r.SpotStats,
-			RayFan:         r.RayFan,
-			Wavelengths:    r.Wavelengths,
-			PupilProbe:     r.ProbeOK,
-			PupilProbeZ:    r.ProbeZ,
+			// The full-aperture survival, i.e. the vignetting number: SpotStats
+			// above may be measured on the reduced effective-pupil grid.
+			PrescribedTotal:  r.PrescribedTotal,
+			PrescribedTraced: r.PrescribedTraced,
+			RayFan:           r.RayFan,
+			Wavelengths:      r.Wavelengths,
+			PupilProbe:       r.ProbeOK,
+			PupilProbeZ:      r.ProbeZ,
 			// Nil for a field that was not clipped below the grid's survival
 			// threshold; `omitempty` then leaves it out of the pipeline YAML.
 			EffectiveVignetting: r.EffectiveVignetting,
