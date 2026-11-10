@@ -188,7 +188,10 @@ Augmented YAML with a `chief_rays[]` section, one entry per field:
   `fields[].vignetting`; see
   [methods/chief-rays-and-spot.md](methods/chief-rays-and-spot.md)
 - `grid_points` (only with `dump_map: true`) — per-ray pupil/image position,
-  intensity, OPL, and the origin/direction for re-tracing
+  intensity, OPL, and the origin/direction for re-tracing. A ray that does not
+  reach the reference surface carries `error_code` and `error_surface`, the
+  surface whose aperture or geometry stopped it, so a clipped field can be
+  diagnosed surface by surface
 - `ray_fan` (with `--ray-fan`) — meridional / sagittal / rotated fans
 - `wavelengths` (when the config defines wavelengths) — per-wavelength stats:
   `value`, `label`, `weight`, `chief_height` (the chief ray's image height at

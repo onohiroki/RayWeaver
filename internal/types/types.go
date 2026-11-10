@@ -1985,8 +1985,13 @@ type GridPoint struct {
 	Intensity float64  `yaml:"intensity"`
 	OPL       float64  `yaml:"opl,omitempty"`
 	ErrorCode string   `yaml:"error_code,omitempty"`
-	Origin    Vec3     `yaml:"-"`
-	Direction Vec3     `yaml:"-"`
+	// ErrorSurface is the surface whose trace failed (aperture clip, missed
+	// intersection, TIR or glass path) for a ray that did not reach the
+	// reference surface: the failing end of a lenient trace, so a clipped
+	// field can be diagnosed surface by surface.
+	ErrorSurface int  `yaml:"error_surface,omitempty"`
+	Origin       Vec3 `yaml:"-"`
+	Direction    Vec3 `yaml:"-"`
 }
 
 type SpotStats struct {

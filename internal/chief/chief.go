@@ -2102,11 +2102,15 @@ func tracePupilGrid(
 		py := pupilCenterY + s.PupilY
 
 		if !s.OK {
+			failed := 0
+			if n := len(s.Surfaces); n > 0 {
+				failed = s.Surfaces[n-1].SurfaceID
+			}
 			grid = append(grid, types.GridPoint{
 				PupilX: px, PupilY: py,
 				ImageX: nil, ImageY: nil, Intensity: 0,
-				ErrorCode: s.ErrorCode,
-				Origin:    s.Origin, Direction: s.Dir,
+				ErrorCode: s.ErrorCode, ErrorSurface: failed,
+				Origin: s.Origin, Direction: s.Dir,
 			})
 			continue
 		}

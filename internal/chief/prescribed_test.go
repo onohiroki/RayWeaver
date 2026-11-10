@@ -71,3 +71,35 @@ func TestPrescribedSurvivalIsTheVignettingMeasure(t *testing.T) {
 		t.Errorf("prescribed grid delivered %d rays but the spot statistics are empty", r.PrescribedTraced)
 	}
 }
+
+// TestGridPointsNameTheFailingSurface pins the diagnostic that makes a clipped
+// field actionable: a grid ray that does not reach the reference surface
+// records the surface whose aperture (or geometry) stopped it, so
+// `chief --dump-map` can say "field 1 dies at surface 6", not just
+// "aperture_stop".
+func TestGridPointsNameTheFailingSurface(t *testing.T) {
+	sys, gc := clippedSinglet(t)
+	pol := types.JonesVector{Ex: complex(1, 0), Ey: complex(0, 1)}
+	res := DetermineChiefRaysGridMode(sys, []types.FieldDef{{Angle: 12, Direction: []float64{0, 1}}},
+		4, 64, gc, pol, 0.00058756, false, types.GridHex, nil, nil, nil, nil, 0, 0, "")
+	if len(res) != 1 {
+		t.Fatalf("results = %d, want 1", len(res))
+	}
+	failed := map[int]int{}
+	for _, gp := range res[0].GridPoints {
+		if gp.ImageX != nil {
+			continue
+		}
+		if gp.ErrorCode == "" {
+			t.Fatal("a missed grid ray carries no error code")
+		}
+		failed[gp.ErrorSurface]++
+	}
+	if len(failed) == 0 {
+		t.Fatal("fixture delivered every ray; nothing to diagnose")
+	}
+	// Surface 3 is the 3 mm aperture this fixture clips on.
+	if failed[3] == 0 {
+		t.Errorf("no grid ray blames surface 3: %v", failed)
+	}
+}
