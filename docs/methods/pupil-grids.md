@@ -51,6 +51,17 @@ no `tanθ`, finite up to 90° incidence). `Sample.PupilX/PupilY` are the **relat
 offsets (consistent with `types.GridPoint` semantics); the absolute launch
 offsets are `Centre + PupilX/Y`.
 
+`hex` is a row lattice: `rows = floor(√numRays)+1` rows spanning the diameter
+with row spacing `dy = 2R/rows`, column spacing `dx = dy·√3/2` and
+`ceil(2R/dx)+1` columns, so one row spans the full diameter. Alternate rows are
+staggered by `±dx/4` about the axis — the half-cell offset of a hex lattice,
+applied symmetrically so the sampled set stays centred. Both properties matter:
+a truncated column count laid out from `-R` covered only ~0.87 of the diameter
+and left the `+x` rim unsampled (measured on a 3.448 mm pupil: x ∈ [−2.95,
++2.52]), which biased the grid centroid and changed which rays survived as the
+ray count changed (`zoom` vignetting read 0 → 0.91 → 0.99 as the same field was
+sampled with 32/64/128 rays).
+
 The `pupilZ` supplied to `GridCentre` is the per-field entrance-pupil Z: the
 dynamic-pupil crossing, the physical stop Z, or — when
 `chief.pupil_model.mode` is `virtual_entrance_pupil` — the fixed

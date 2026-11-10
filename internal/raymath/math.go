@@ -120,19 +120,26 @@ func PupilGrid(numRays int, apertureRadius float64, gridType types.GridType, rot
 		n := int(math.Sqrt(float64(numRays))) + 1
 		dy := apertureRadius * 2 / float64(n)
 		dx := dy * math.Sqrt(3) / 2
+		// A hex lattice has dx = dy·√3/2 < dy, so one row needs more than
+		// 2R/dy points to cross the pupil. The span is (nx-1)·dx, so
+		// ceil(2R/dx)+1 columns cover the full diameter; the old
+		// floor(2R/dx) columns, laid out from -R, stopped at ~0.87·2R and
+		// left the +x rim unsampled (measured on a 3.448 mm pupil at 32 rays:
+		// x ∈ [-2.95, +2.52]).
+		nx := int(math.Ceil(2*apertureRadius/dx)) + 1
 		var out []GridPoint
 		for i := 0; i < n; i++ {
 			y := -apertureRadius + (float64(i)+0.5)*dy
-			xOff := 0.0
+			// Stagger alternate rows by ±dx/4 about the axis: the half-cell
+			// offset of a hex lattice, applied symmetrically so the pattern as
+			// a set stays centred (a one-sided offset biases the centroid and
+			// the sampled pupil toward one edge).
+			xOff := -dx / 4
 			if i%2 == 1 {
-				xOff = dx / 2
-			}
-			nx := int(float64(n) * apertureRadius / (dx * float64(n) / 2))
-			if nx < 1 {
-				nx = 1
+				xOff = dx / 4
 			}
 			for j := 0; j < nx; j++ {
-				x := -apertureRadius + (float64(j)+0.5)*dx + xOff
+				x := (float64(j)-(float64(nx)-1)/2)*dx + xOff
 				if x*x+y*y <= apertureRadius*apertureRadius {
 					out = append(out, GridPoint{X: x, Y: y, Area: 1})
 				}

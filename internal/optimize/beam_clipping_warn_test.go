@@ -71,9 +71,10 @@ func TestWarnBeamClipping(t *testing.T) {
 		}
 	}
 	// The deficit is the shortfall of the diameter, not a rounding artefact.
-	// Worst first: at this probe the on-axis field's radial footprint is
-	// marginally the larger one.
-	if !strings.Contains(warns[1], "over by 3.10") || !strings.Contains(warns[2], "over by 3.08") {
+	// Worst first: at this probe the 10 deg field's footprint is marginally the
+	// larger one (the two are within 0.2 mm of each other, so the order is a
+	// property of the hex grid's sampling, not of the design).
+	if !strings.Contains(warns[1], "over by 3.09") || !strings.Contains(warns[2], "over by 2.91") {
 		t.Errorf("deficits do not match the measured envelope: %v", warns[1:])
 	}
 

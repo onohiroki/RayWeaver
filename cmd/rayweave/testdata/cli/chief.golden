@@ -1,5 +1,5 @@
 exit: 0
 stderr:
 probe --len chief_rays: 3
-probe -r chief_rays[0].spot_stats.rms_r: 0.0011145071962200517
+probe -r chief_rays[0].spot_stats.rms_r: 0.0011185087018293356
 probe -r chief_rays[1].field_angle: 16
