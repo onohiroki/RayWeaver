@@ -1,10 +1,13 @@
 # Feasibility continuation
 
-**Status: in progress.** The design is fixed; Layer D is partially implemented
-(local-frame extents over partial ray paths). The remaining layers are design
-only. This document owns the design of a total, differentiable merit function
-and the continuation strategy that carries a lens from "rays do not reach the
-image plane" to a feasible, optimisable design. It
+**Status: implemented through Layer R.** Layer D (signed residuals, local-frame
+extents over partial ray paths), Layer P (`paraxial.MarginalRayStates`), Layer S
+(`feasibility.SolveNodes`, the virtual extension and the eight-ray relaxed
+fail-over) and Layer R (the `beam_clearance` merit kind and constraint, and the
+`ray_validity` schedule metric with its physical gate) are in the tree; Layer X
+is design only. This document owns the design of a total, differentiable merit
+function and the continuation strategy that carries a lens from "rays do not
+reach the image plane" to a feasible, optimisable design. It
 is the reference for the `feat/feasibility-continuation` work; command syntax
 stays in the individual manuals and the merit catalog stays in
 [merit-and-constraints.md](../merit-and-constraints.md).
@@ -204,6 +207,12 @@ the config declares one (else 0.5 mm) and clamped to [0,1]; 0 while a clear
 aperture clips (or a surface is unreached), 1 when every measured aperture meets
 its target. The stop and the image surface are excluded. If a ramp step loses
 validity, step λ back one stage and restore feasibility.
+
+The relaxed clearance is a surrogate: a virtual hit is a scaffold, not a
+delivered ray. `ray_validity` therefore also takes the minimum with the
+**physical surviving-grid fraction** (the hex pupil grid `chief` / `zoom` use,
+so the gate and the delivered-design check measure the same pupil), and a field
+whose real trace is dead cannot reach 1 on clearance alone.
 
 The existing `optimization.merit_schedule` ramps named merit modes by
 `merit_ratio`, `iteration`, `glass_role`, `spot_diffraction`, `phase` or
