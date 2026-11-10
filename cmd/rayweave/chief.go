@@ -16,6 +16,10 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
+// clearApertureTol is the diameter change (mm) below which two sizing passes
+// agree: ten microns is far below any mechanical or optical consequence.
+const clearApertureTol = 0.01
+
 func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
 	opts := clispec.Bind(clispec.Chief, fs)
@@ -265,30 +269,52 @@ func runChief(data []byte) {
 
 	// --- --clear-aperture: scale grid points by entrance-pupil-based radius and set Diameter ---
 	if opts.Bool("clear-aperture") && len(results) > 0 {
+		clearRays := input.Chief.NumRays
 		if opts.Int("clear-aperture-rays") > 0 && opts.Int("clear-aperture-rays") != input.Chief.NumRays {
-			// Re-trace with a denser grid so the beam footprint is accurate.
-			results = chief.DetermineChiefRaysGridMode(
-				selectedSys, fields, input.Chief.ReferenceSurface, opts.Int("clear-aperture-rays"),
-				gc, pol, wavelength, dumpMap, input.Chief.GridType, pt, fanCfg, configWavelengths,
-				input.Chief.PupilModel, input.Chief.NumRings, input.Chief.NumSpokes,
-				input.Chief.ChiefRayDefinition,
-			)
+			// Use a denser grid so the beam footprint is accurate.
+			clearRays = opts.Int("clear-aperture-rays")
 		}
-		// The chief grid points already fill the aperture stop, so trace them
-		// as-is through every surface to get the true beam envelope.
-		engine2 := ray.NewEngine(gc, nil)
-		surface.Precompute(surfaces)
-		path := dls.BuildPath(surfaces)
-		envelope := chief.BeamEnvelopeMax(results, engine2, surfaces, path, clearWavelengths, pol)
-
 		refID := input.Chief.ReferenceSurface
 		stopID := input.Chief.StopSurface
-		for i := range surfaces {
-			if surfaces[i].ID == refID || (stopID > 0 && surfaces[i].ID == stopID) || !surfaces[i].AutoAperture {
-				continue
+		margin := opts.Float("clear-aperture-margin-mm")
+
+		// Size, re-trace, size again. The grid centring follows the surviving
+		// bundle (the chief aim is the traced centroid), so a nearly dead field
+		// starts centred on the few rays that got through and re-centres once
+		// the sized apertures let its own beam pass. One pass would leave those
+		// fields slightly under-sized; the sizes settle in two or three.
+		for pass := 0; pass < 4; pass++ {
+			if pass > 0 || clearRays != input.Chief.NumRays {
+				results = chief.DetermineChiefRaysGridMode(
+					types.System{Surfaces: surfaces, StopSurface: stopID},
+					fields, refID, clearRays, gc, pol, wavelength, dumpMap,
+					input.Chief.GridType, pt, fanCfg, configWavelengths,
+					input.Chief.PupilModel, input.Chief.NumRings, input.Chief.NumSpokes,
+					input.Chief.ChiefRayDefinition,
+				)
 			}
-			if e := envelope[surfaces[i].ID]; e > 0 {
-				surfaces[i].Diameter = e*2 + 2*opts.Float("clear-aperture-margin-mm")
+			// The chief grid points already fill the aperture stop, so trace
+			// them as-is through every surface to get the true beam envelope.
+			surface.Precompute(surfaces)
+			path := dls.BuildPath(surfaces)
+			envelope := chief.BeamEnvelopeMax(results, ray.NewEngine(gc, nil), surfaces, path, clearWavelengths, pol)
+
+			changed := false
+			for i := range surfaces {
+				if surfaces[i].ID == refID || (stopID > 0 && surfaces[i].ID == stopID) || !surfaces[i].AutoAperture {
+					continue
+				}
+				e := envelope[surfaces[i].ID]
+				if e <= 0 {
+					continue
+				}
+				if d := e*2 + 2*margin; math.Abs(d-surfaces[i].Diameter) > clearApertureTol {
+					changed = true
+					surfaces[i].Diameter = d
+				}
+			}
+			if !changed {
+				break
 			}
 		}
 	}

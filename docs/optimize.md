@@ -797,7 +797,13 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   azimuths and whose outermost ring sits inside the launched radius (verified
   against the dense hex envelope at 8, 16 and 64 azimuths) — and the
   end-of-solve pass replaces the diameters with the `chief --clear-aperture`
-  hex envelope.
+  hex envelope. That envelope measures the **surface-local** radial height (the
+  quantity the tracer clips on) and accumulates the reached prefix of a ray that
+  fails further on: the old global `max(|X|,|Y|)` under-read an off-axis
+  footprint by up to √2, and dropping a ray at its first failure let one
+  undersized aperture downstream starve every surface before it, so a field
+  could keep clipping an aperture that had just been "sized to the beam"
+  (measured: 39/74 rays still clipped at one surface after five sizing passes).
 - `optimization.jacobian_workers` sets the goroutines used for the finite
   difference Jacobian (default `GOMAXPROCS`). The Jacobian is deterministic:
   the result is identical for any worker count.
