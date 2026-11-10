@@ -4,6 +4,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -273,5 +274,60 @@ func TestBeamClearanceUnreachedSurface(t *testing.T) {
 	}
 	if got := beamClearanceFromExtents(map[int]float64{2: 4}, surfaces, 99); got >= 0 {
 		t.Errorf("unknown surface clearance = %v, want a violation (< 0)", got)
+	}
+}
+
+// stoppedLensSystem is a four-surface lens whose 8 mm stop (surface 3) sits
+// behind the glass, so its paraxial entrance pupil (radius 5.266 mm) differs
+// from the stop-free beam-aware cap (4 mm). The two radii disagree about the
+// beam, which is what makes this the fixture that can tell which pupil a
+// measure used.
+func stoppedLensSystem() []types.Surface {
+	return []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0.04, Thickness: 6.0, Material: types.Material{Key: "N-BK7"}, Diameter: 30.0},
+		{ID: 2, Type: types.Sphere, Curvature: -0.04, Thickness: 4.0, Material: types.Material{}, Diameter: 30.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 40.0, Material: types.Material{}, Diameter: 8.0},
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 30.0},
+	}
+}
+
+// TestVignettingFactorUsesThePrescribedPupil pins the grid a constraint sees:
+// the same prescribed pupil `chief` / `zoom` report — the stop's paraxial
+// entrance pupil on the hex lattice. The old code passed no stop (falling back
+// to the stop-free beam-aware cap) and a polar grid (which under-samples the
+// rim), so the constraint and the reported vignetting described different
+// pupils on the same design.
+func TestVignettingFactorUsesThePrescribedPupil(t *testing.T) {
+	gc := testGlassCatalog()
+	surfaces := stoppedLensSystem()
+	surface.Precompute(surfaces)
+
+	const (
+		stop   = 3
+		field  = 10.0
+		wl     = 0.00058756
+		pupilZ = 20.0
+	)
+	op := types.ConstraintOperand{Measure: types.MeasureVignettingFactor, Active: true}
+	prescribed := Evaluate(op, surfaces, field, gc, 64, 1.0, stop, pupilZ, 0)
+	stopFree := Evaluate(op, surfaces, field, gc, 64, 1.0, 0, pupilZ, 0)
+
+	points, _ := dls.TraceFieldGridWithType(gc, surfaces, stop, pupilZ, field,
+		[]float64{0, 1}, wl, 1.0, 64, 0, 1, 0, nil, types.GridHex)
+	pass := 0
+	for _, p := range points {
+		if p.OK {
+			pass++
+		}
+	}
+	want := float64(pass) / float64(len(points))
+	if math.Abs(prescribed-want) > 1e-12 {
+		t.Errorf("vignetting_factor = %v, want the prescribed hex grid's survival %v", prescribed, want)
+	}
+	if prescribed >= 1 {
+		t.Errorf("prescribed vignetting = %v, want the clipped field below 1", prescribed)
+	}
+	if stopFree == prescribed {
+		t.Errorf("vignetting_factor is %v with and without the stop: the stop does not select the pupil", prescribed)
 	}
 }

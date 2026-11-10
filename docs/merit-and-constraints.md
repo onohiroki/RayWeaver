@@ -858,7 +858,7 @@ reported with a warning rather than freezing the solve.
 | `diameter` | The surface's diameter | `surface` |
 | `f_number` | Image-space F/# (infinite conjugate), fallback `EFL/EPD` | – |
 | `beam_clearance` | `surfaceRadius − max beam extent` at the surface for the field | `surface`, `field` |
-| `vignetting_factor` | Surviving fraction of the full prescribed pupil grid | `field` |
+| `vignetting_factor` | Surviving fraction of the full prescribed pupil grid (hex lattice, stop's paraxial entrance pupil) | `field` |
 | `beam_diameter` | `2 × max beam extent` at the surface | `surface`, `field` |
 
 For `edge_thickness`, `back_surface` may be omitted; the rear surface then
@@ -873,6 +873,16 @@ the violation. A surface the trace never reached has no envelope;
 `beam_clearance` then reports a negative value (a violation) instead of the
 surface's radius, so a dead field cannot satisfy a clearance requirement by
 having no rays.
+
+All three beam measures launch the **prescribed** pupil: the stop's paraxial
+entrance pupil (or the prescribed EPD when the document carries a virtual
+pupil), and `vignetting_factor` uses the hex lattice `chief` / `zoom` report. An
+empty stop argument used to select the stop-free beam-aware cap and a polar grid
+under-sampled the pupil rim, so a constraint and the delivered-design check
+described different beams on the same lens (`vignetting_factor` read 0.29 where
+`zoom` reported 0.18 for the wide field). They are still evaluated on the
+optimizer's current apertures, so a config with `auto_aperture` surfaces reports
+the fraction after sizing, not the document's diameters.
 
 `system_length` sums every thickness, so it pins the whole track — the image
 plane measured from surface 1 — but cannot express a single group's position.

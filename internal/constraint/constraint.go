@@ -52,11 +52,11 @@ func Evaluate(op types.ConstraintOperand, surfaces []types.Surface, fieldAngle f
 	case types.MeasureFNumber:
 		return evaluateFNumber(surfaces, op.Wavelength, gc, stopSurface)
 	case types.MeasureBeamClearance:
-		return evaluateBeamClearance(surfaces, pupilZ, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin)
+		return evaluateBeamClearance(surfaces, stopSurface, pupilZ, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin, epd)
 	case types.MeasureVignettingFactor:
-		return evaluateVignettingFactor(surfaces, pupilZ, fieldAngle, op.Wavelength, gc, numRays, apertureMargin)
+		return evaluateVignettingFactor(surfaces, stopSurface, pupilZ, fieldAngle, op.Wavelength, gc, numRays, apertureMargin, epd)
 	case types.MeasureBeamDiameter:
-		return evaluateBeamDiameter(surfaces, pupilZ, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin)
+		return evaluateBeamDiameter(surfaces, stopSurface, pupilZ, fieldAngle, op.Wavelength, gc, op.Surface, numRays, apertureMargin, epd)
 	default:
 		return 0
 	}
@@ -242,11 +242,16 @@ func evaluateDiameter(surfaces []types.Surface, id int) float64 {
 	return 0
 }
 
-func evaluateBeamClearance(surfaces []types.Surface, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
+// evaluateBeamClearance measures the beam envelope of the field's prescribed
+// pupil: the stop's paraxial entrance pupil (or the prescribed EPD when the
+// document carries a virtual pupil), so the constraint sees the same beam
+// `chief --clear-aperture` reports. Passing no stop fell back to the
+// stop-free beam-aware cap, i.e. a different pupil from every other grid.
+func evaluateBeamClearance(surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin, epd float64) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
-	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, 0, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, 0)
+	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, stopSurface, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, epd)
 	return beamClearanceFromExtents(perSurfMax, surfaces, surfaceID)
 }
 
@@ -264,11 +269,11 @@ func beamClearanceFromExtents(extents map[int]float64, surfaces []types.Surface,
 	return clearance
 }
 
-func evaluateBeamDiameter(surfaces []types.Surface, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin float64) float64 {
+func evaluateBeamDiameter(surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, surfaceID int, numRays int, apertureMargin, epd float64) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
-	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, 0, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, 0)
+	perSurfMax := dls.TraceFieldGridExtents(gc, surfaces, stopSurface, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, epd)
 	if perSurfMax == nil {
 		return 0
 	}
@@ -280,14 +285,21 @@ func evaluateBeamDiameter(surfaces []types.Surface, pupilZ float64, fieldAngle, 
 	return 0
 }
 
-func evaluateVignettingFactor(surfaces []types.Surface, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, numRays int, apertureMargin float64) float64 {
+func evaluateVignettingFactor(surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle, wavelength float64, gc *glass.Catalog, numRays int, apertureMargin, epd float64) float64 {
 	if wavelength == 0 {
 		wavelength = types.DefaultWavelength
 	}
 	// No vignetting ellipse: a constraint operand has no access to the field's
 	// declared fields[].vignetting, so this measures the physical vignetting
 	// (aperture / edge-thickness clipping) of the full prescribed pupil.
-	points, _ := dls.TraceFieldGrid(gc, surfaces, 0, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, 0, nil)
+	//
+	// The grid must be the one `chief` / `zoom` report — the stop's paraxial
+	// entrance pupil (or the prescribed EPD) on the hex lattice. A polar grid
+	// under-samples the pupil rim, and the empty stop argument fell back to the
+	// stop-free beam-aware cap: on the wide field of the zoom study this read
+	// 0.34 where the prescribed (hex, stop-pupil) survival was 0.18, so the
+	// constraint and the reported vignetting disagreed by a factor of two.
+	points, _ := dls.TraceFieldGridWithType(gc, surfaces, stopSurface, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, epd, nil, types.GridHex)
 	if len(points) == 0 {
 		return 0
 	}
