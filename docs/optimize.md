@@ -804,6 +804,14 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   undersized aperture downstream starve every surface before it, so a field
   could keep clipping an aperture that had just been "sized to the beam"
   (measured: 39/74 rays still clipped at one surface after five sizing passes).
+- `optimization.cam_solve: true` keeps the zoom linkage inside the solve: every
+  merit evaluation re-solves the document's `cam:` airspaces to their per-position
+  EFL targets before it measures anything, so a DLS step cannot trade an
+  airspace against the other positions. The cam surfaces must not also be
+  variables (the solve owns them and prints a warning if one is); a position
+  whose solve fails keeps the variable layout so the merit still reports the EFL
+  error. It runs after `back_focus_solve` and wins the back-focus thickness. See
+  [cam.md](cam.md#cam-inside-optimize).
 - `optimization.jacobian_workers` sets the goroutines used for the finite
   difference Jacobian (default `GOMAXPROCS`). The Jacobian is deterministic:
   the result is identical for any worker count.

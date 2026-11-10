@@ -400,6 +400,14 @@ Configs each have their own surfaces/fields/wavelengths/merit:
         type: spot_rms
         terms: [...]
 
+Zoom linkage (optional):
+  optimization:
+    cam_solve: true           # re-solve the document's cam: airspaces before
+                              # every merit evaluation, so a DLS step cannot
+                              # trade an airspace against the zoom linkage.
+                              # The cam surfaces must not also be variables.
+                              # See docs/cam.md.
+
 Merit terms are evaluated per-config and summed weighted by config weight.
 A CONF operand selects which config's merit terms are active for each rule.
 

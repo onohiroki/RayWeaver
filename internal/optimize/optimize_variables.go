@@ -389,6 +389,12 @@ func (o *Optimizer) applyVariables(x []float64) (map[string][]types.Surface, *gl
 	// solve focuses the same bundle the merit grid just traced.
 	o.applyBackFocusSolve(configSurfaces, pupils, gc)
 
+	// Zoom linkage: re-solve the cam airspaces last, so the evaluated geometry
+	// is the one the cam prescribes. The cam owns those thicknesses, so a
+	// variable or the back-focus solve that touched one is overridden rather
+	// than allowed to break the linkage.
+	o.applyCamLink(configSurfaces)
+
 	for ci := range o.configs {
 		cfg := &o.configs[ci]
 		surface.Precompute(configSurfaces[cfg.id])

@@ -920,6 +920,12 @@ type OptimizationConfig struct {
 	Degenerate              *DegenerateConfig     `yaml:"degenerate,omitempty"`
 	PowerSolve              *PowerSolveConfig     `yaml:"power_solve,omitempty"`
 	BackFocusSolve          *BackFocusSolveConfig `yaml:"back_focus_solve,omitempty"`
+	// CamSolve makes every merit evaluation re-solve the document's `cam:`
+	// airspaces first: the zoom linkage (one detector, one EFL target per
+	// position) is part of the geometry, not a variable, so a DLS step must not
+	// be able to trade a cam airspace against the other positions. Requires a
+	// `cam:` section; the cam surfaces must not also be optimization variables.
+	CamSolve bool `yaml:"cam_solve,omitempty"`
 	// DiffractionMTF configures the diffraction_mtf_sag / diffraction_mtf_tan
 	// merit kinds (nil = built-in defaults).
 	DiffractionMTF  *DiffractionMTFConfig  `yaml:"diffraction_mtf,omitempty"`
