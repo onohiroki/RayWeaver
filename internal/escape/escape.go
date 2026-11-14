@@ -586,5 +586,15 @@ func (w *Wrapper) ensurePhaseWeights() {
 // escape-function bumps. The cycle reports every phase's before/after merit on
 // this scale so an escape bump never shows up as an improvement.
 func (w *Wrapper) InnerMerit(x []float64) float64 {
+	// Settle the frozen pupil at x first. The grid terms are launched from the
+	// config's entrance pupil, and the optimizer keeps the last settled pupil
+	// until the next UpdatePupils; after a stall perturbation (or any step that
+	// left the iterate far from the returned best point) that pupil belongs to
+	// a different design and the reported merit is measured on a different
+	// bundle. Reporting, acceptance and the store ranking must all read the
+	// merit at x, not the merit of x under a stale pupil.
+	if pu, ok := w.inner.(dls.PupilUpdater); ok {
+		pu.UpdatePupils(x)
+	}
 	return w.inner.EvaluateMerit(x)
 }

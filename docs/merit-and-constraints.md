@@ -180,7 +180,13 @@ See [methods/polychromatic.md](methods/polychromatic.md) for the definitions.
 The grid-based and wavefront terms are centred on the config's **per-iteration
 frozen pupil** — settled once per DLS iteration and held for the base point and
 every Jacobian perturbation — so the finite-difference derivative matches the
-merit actually minimized.
+merit actually minimized. The solve also settles the pupil once at its starting
+point before the baseline merit is measured, so the reported "before" merit (and
+the value the first step is accepted against) belongs to the same beam as the
+design. A merit re-evaluated outside a solve — a reported minimum, an escape
+cycle's before/after comparison — must settle the pupil at the point it
+evaluates first; otherwise a stale pupil from another iterate measures a
+different bundle.
 
 ---
 
