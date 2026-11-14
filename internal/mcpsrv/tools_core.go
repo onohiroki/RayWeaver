@@ -316,16 +316,16 @@ func buildOptimize(in optimizeIn) ([]string, error) {
 type plotIn struct {
 	DocInput
 	settings
-	Format            string   `json:"format,omitempty" jsonschema:"png (default, returned as an image) or svg"`
-	Output            string   `json:"output,omitempty" jsonschema:"workspace-relative output path (default: plots/<document>.png)"`
-	LensWidth         float64  `json:"lens_width,omitempty" jsonschema:"lens body stroke width in pixels"`
-	RayWidth          float64  `json:"ray_width,omitempty" jsonschema:"ray path stroke width in pixels"`
-	Scale             float64  `json:"scale,omitempty" jsonschema:"render scale factor (0 = auto)"`
-	RightMargin       float64  `json:"right_margin,omitempty" jsonschema:"right-side margin beyond the image plane (% of lens length)"`
-	FanRays           int      `json:"fan_rays,omitempty" jsonschema:"max fan rays drawn per field (0 = hide)"`
-	ShowInvalidRayFan bool     `json:"show_invalid_ray_fan,omitempty" jsonschema:"draw fan rays with error codes in full"`
-	ClipInvalidRayFan bool     `json:"clip_invalid_ray_fan,omitempty" jsonschema:"draw error-coded fan rays up to the first error"`
-	ElementColor      []string `json:"element_color,omitempty" jsonschema:"element fill colours as 1=#ff0000 entries"`
+	Format          string   `json:"format,omitempty" jsonschema:"png (default, returned as an image) or svg"`
+	Output          string   `json:"output,omitempty" jsonschema:"workspace-relative output path (default: plots/<document>.png)"`
+	LensWidth       float64  `json:"lens_width,omitempty" jsonschema:"lens body stroke width in pixels"`
+	RayWidth        float64  `json:"ray_width,omitempty" jsonschema:"ray path stroke width in pixels"`
+	Scale           float64  `json:"scale,omitempty" jsonschema:"render scale factor (0 = auto)"`
+	RightMargin     float64  `json:"right_margin,omitempty" jsonschema:"right-side margin beyond the image plane (% of lens length)"`
+	FanRays         int      `json:"fan_rays,omitempty" jsonschema:"max fan rays drawn per field (0 = hide)"`
+	ShowInvalidRays bool     `json:"show_invalid_rays,omitempty" jsonschema:"draw rays with error codes in full (traced results and fan rays)"`
+	ClipInvalidRays bool     `json:"clip_invalid_rays,omitempty" jsonschema:"draw error-coded rays up to the first error"`
+	ElementColor    []string `json:"element_color,omitempty" jsonschema:"element fill colours as 1=#ff0000 entries"`
 }
 
 func (s *server) addPlot() {

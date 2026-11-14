@@ -19,8 +19,8 @@ rayweave plot [-o file.svg|.png] [flags] < input.yaml
 | `--scale 0` | SVG/PNG scale factor (0 = auto) |
 | `--right-margin 20` | right-side margin beyond the image plane (% of lens length) |
 | `--fan-rays 11` | max fan rays drawn per field in the lens diagram (0 = hide fan rays) |
-| `--show-invalid-ray-fan` | boolean toggle, no value argument (default `false` = off): draw fan rays whose path carries an error code in full instead of the default hiding |
-| `--clip-invalid-ray-fan` | boolean toggle, no value argument (default `false` = off): draw error-coded fan rays only up to the first surface that errored |
+| `--show-invalid-rays` | boolean toggle, no value argument (default `false` = off): draw rays whose path carries an error code in full instead of the default hiding; `--show-invalid-ray-fan` is an alias |
+| `--clip-invalid-rays` | boolean toggle, no value argument (default `false` = off): draw error-coded rays only up to the first surface that errored; `--clip-invalid-ray-fan` is an alias |
 | `--glass-dir DIR` | AGF glass catalog directory (resolves material colours; written back into `glass_catalog.directory`) |
 | `--element-color "1=#ff0000,3=#00ff00"` | element fill colors by 1-based index (repeatable; hex, rgb(), or CSS named colors) |
 | `--asphere-color "#ff0000"` / `--asphere-color "3=#ff0000,7=#0000ff"` | aspheric **surface edge** colors (the sag curve line, not the element fill): single color for all aspheres, or per-surface-ID map (repeatable) |
@@ -71,17 +71,22 @@ All warnings are emitted to stderr, the run continues normally (exit 0), and t
 rendering proceeds with the effective (merged) values. The YAML output carries
 the merged element/asphere colors that were actually used.
 
-## Invalid fan rays
+## Invalid rays
 
-A fan ray whose path records an error code on any surface (e.g. `aperture_stop`,
+A ray whose path records an error code on any surface (e.g. `aperture_stop`,
 `missed_surface`, `total_internal_reflection`, `glass_path_too_short`,
-`glass_path_too_long`) is considered invalid. By default such fan rays are not
-drawn at all; pass `--show-invalid-ray-fan` to draw them in full (the previous
-behaviour) or `--clip-invalid-ray-fan` to stop the path at the first erroring
+`glass_path_too_long`) is considered invalid. By default such rays are not
+drawn at all; pass `--show-invalid-rays` to draw them in full (the previous
+behaviour) or `--clip-invalid-rays` to stop the path at the first erroring
 surface. Both are boolean toggles (default `false`): enabled by giving them
-alone, disabled with `--show-invalid-ray-fan=false` / `--clip-invalid-ray-fan=false`.
-The two flags are mutually exclusive. These options only affect fan
-rays; traced `results[]`, marginal and chief rays are drawn as always.
+alone, disabled with `--show-invalid-rays=false` / `--clip-invalid-rays=false`.
+The two flags are mutually exclusive.
+
+The policy covers every drawn ray: traced `results[]` (including marginal and
+chief rays written by `chief --marginal-rays`) and `chief_rays[].ray_fan` fan
+rays. A marginal ray that misses the stop is hidden like an invalid fan ray
+instead of being drawn across the aperture. The older flag spellings
+`--show-invalid-ray-fan` / `--clip-invalid-ray-fan` are kept as aliases.
 
 ## Examples
 

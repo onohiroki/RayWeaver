@@ -229,8 +229,8 @@ Options:
   --scale 0                    SVG/PNG scale factor (0 = auto)
   --right-margin 20            right-side margin beyond image plane (% of lens length)
   --fan-rays 11                max fan rays drawn per field (0 = hide fan rays)
-  --show-invalid-ray-fan       draw fan rays with error codes in full (boolean)
-  --clip-invalid-ray-fan       draw error-coded fan rays up to first error (boolean)
+  --show-invalid-rays          draw rays with error codes in full (boolean)
+  --clip-invalid-rays          draw error-coded rays up to first error (boolean)
   --glass-dir DIR              AGF glass catalog directory
   --element-color "1=#ff0000"  element fill colors by 1-based index (repeatable;
 	1 = first glass element; ignored if index out of range)
@@ -242,12 +242,13 @@ Options:
 
 Color formats: #rrggbb, #rgb, rgb(r,g,b), rgba(r,g,b,a), CSS named colors
 
-Invalid fan rays: a fan ray whose path records an error code on any surface
+Invalid rays: a ray whose path records an error code on any surface
   (aperture_stop, missed_surface, total_internal_reflection, glass-path
-  violations) is hidden by default. --show-invalid-ray-fan keeps the full
-  path; --clip-invalid-ray-fan stops it at the first erroring surface. The
-  two flags are mutually exclusive, are enabled by giving them alone (--flag)
-  or disabled with --flag=false, and only affect fan rays.
+  violations) is hidden by default, whether it is a traced result ray or a
+  fan ray. --show-invalid-rays keeps the full path; --clip-invalid-rays stops
+  it at the first erroring surface. The two flags are mutually exclusive, are
+  enabled by giving them alone (--flag) or disabled with --flag=false. The old
+  spellings --show-invalid-ray-fan / --clip-invalid-ray-fan remain aliases.
 
 Input: YAML with system surfaces + optional results[] and chief_rays[].
 Pipe after "rayweave trace" for ray paths:

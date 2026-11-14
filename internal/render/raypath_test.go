@@ -43,7 +43,7 @@ func TestBuildFanPathsInvalidModes(t *testing.T) {
 		},
 	}
 
-	collect := func(mode FanInvalidMode) []string {
+	collect := func(mode InvalidRayMode) []string {
 		paths := buildRayPaths(nil, []types.ChiefRayResult{cr}, 11, mode)
 		out := make([]string, 0, len(paths))
 		for _, r := range paths {
@@ -53,7 +53,7 @@ func TestBuildFanPathsInvalidModes(t *testing.T) {
 	}
 
 	t.Run("hide", func(t *testing.T) {
-		paths := collect(FanInvalidHide)
+		paths := collect(InvalidRayHide)
 		// clean (meridional + rotated), lastErr/firstErr/midErr all hidden.
 		if len(paths) != 2 {
 			t.Fatalf("got %d fan paths, want 2 (clean rays only): %v", len(paths), paths)
@@ -66,7 +66,7 @@ func TestBuildFanPathsInvalidModes(t *testing.T) {
 	})
 
 	t.Run("show", func(t *testing.T) {
-		paths := collect(FanInvalidShow)
+		paths := collect(InvalidRayShow)
 		if len(paths) != 6 {
 			t.Fatalf("got %d fan paths, want 6 (all rays full)", len(paths))
 		}
@@ -78,7 +78,7 @@ func TestBuildFanPathsInvalidModes(t *testing.T) {
 	})
 
 	t.Run("clip", func(t *testing.T) {
-		paths := collect(FanInvalidClip)
+		paths := collect(InvalidRayClip)
 		if len(paths) != 5 {
 			t.Fatalf("got %d fan paths, want 5 (firstErr dropped)", len(paths))
 		}
@@ -99,8 +99,9 @@ func TestBuildFanPathsInvalidModes(t *testing.T) {
 	})
 }
 
-func TestBuildRayPathsResultsUnaffected(t *testing.T) {
-	// Traced-result rays are independent of the invalid-fan mode.
+func TestBuildRayPathsResultsFollowInvalidMode(t *testing.T) {
+	// Traced-result rays (a marginal ray that misses the stop, for example)
+	// follow the same invalid-ray policy as fan rays.
 	res := types.RayResult{
 		ID: "marginal_f0_Yplus",
 		Surfaces: []types.SurfaceResult{
@@ -109,13 +110,33 @@ func TestBuildRayPathsResultsUnaffected(t *testing.T) {
 			{SurfaceID: 3, Position: types.Vec3{Z: 3, Y: 3}},
 		},
 	}
-	for _, mode := range []FanInvalidMode{FanInvalidHide, FanInvalidShow, FanInvalidClip} {
-		paths := buildRayPaths([]types.RayResult{res}, nil, 11, mode)
-		if len(paths) != 1 {
-			t.Fatalf("mode %d: got %d paths, want 1 result ray", mode, len(paths))
+	cases := []struct {
+		mode     InvalidRayMode
+		want     int // drawn paths
+		segments int
+	}{
+		{InvalidRayHide, 0, 0},
+		{InvalidRayShow, 1, 3},
+		{InvalidRayClip, 1, 2},
+	}
+	for _, tc := range cases {
+		paths := buildRayPaths([]types.RayResult{res}, nil, 11, tc.mode)
+		if len(paths) != tc.want {
+			t.Fatalf("mode %d: got %d paths, want %d", tc.mode, len(paths), tc.want)
 		}
-		if seg := pathSegments(paths[0].path); seg != 3 {
-			t.Errorf("mode %d: result ray segment count = %d, want 3", mode, seg)
+		if tc.want > 0 {
+			if seg := pathSegments(paths[0].path); seg != tc.segments {
+				t.Errorf("mode %d: segment count = %d, want %d", tc.mode, seg, tc.segments)
+			}
 		}
+	}
+
+	// An error on the first surface leaves a single point: nothing to draw.
+	firstErr := types.RayResult{ID: "x", Surfaces: []types.SurfaceResult{
+		{SurfaceID: 1, Position: types.Vec3{Z: 1, Y: 1}, ErrorCode: "aperture_stop"},
+		{SurfaceID: 2, Position: types.Vec3{Z: 2, Y: 2}},
+	}}
+	if paths := buildRayPaths([]types.RayResult{firstErr}, nil, 11, InvalidRayClip); len(paths) != 0 {
+		t.Errorf("clip with a first-surface error drew %d paths, want 0", len(paths))
 	}
 }

@@ -24,8 +24,8 @@ var Plot = Spec{Command: "plot", Flags: []Flag{
 		Help: "element fill colors: \"0=#ff0000,2=#00ff00\" (repeatable)"},
 	{Name: "asphere-color", Kind: StringList, Role: RoleOutput, Repeat: true,
 		Help: "aspheric surface edge colors: \"#ff0000\" or \"3=#ff0000,7=#0000ff\" (repeatable)"},
-	{Name: "show-invalid-ray-fan", Kind: Bool, Role: RoleOutput,
-		Help: "draw fan rays that carry an error code in full"},
-	{Name: "clip-invalid-ray-fan", Kind: Bool, Role: RoleOutput,
-		Help: "draw error-coded fan rays only up to the first erroring surface"},
+	{Name: "show-invalid-rays", Kind: Bool, Alias: "show-invalid-ray-fan", Role: RoleOutput,
+		Help: "draw rays that carry an error code in full (traced results and fan rays)"},
+	{Name: "clip-invalid-rays", Kind: Bool, Alias: "clip-invalid-ray-fan", Role: RoleOutput,
+		Help: "draw error-coded rays only up to the first erroring surface"},
 }}

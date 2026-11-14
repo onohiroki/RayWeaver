@@ -24,7 +24,7 @@ type Config struct {
 	ScaleOverride   float64
 	RightMarginPct  float64
 	MaxFanRays      int
-	FanInvalid      FanInvalidMode
+	InvalidRays     InvalidRayMode
 	StopSurfaceID   int
 	ElementColors   map[int]string
 	AsphereColors   map[int]string
@@ -67,7 +67,7 @@ func (c Config) resolveAsphereStrokeNRGBA(s types.Surface) (color.NRGBA, bool) {
 func LensSVG(cfg Config) string {
 	zPos := computeZPositions(cfg.Surfaces)
 	maxSurfZ := maxSurfaceZ(cfg.Surfaces)
-	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays, cfg.FanInvalid)
+	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays, cfg.InvalidRays)
 
 	// Compute display Z span: if object plane is far, cap the
 	// object-side extent to min(lensLength, backFocalLength).
