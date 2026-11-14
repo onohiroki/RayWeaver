@@ -326,13 +326,15 @@ type plotIn struct {
 	ShowInvalidRays bool     `json:"show_invalid_rays,omitempty" jsonschema:"draw rays with error codes in full (traced results and fan rays)"`
 	ClipInvalidRays bool     `json:"clip_invalid_rays,omitempty" jsonschema:"draw error-coded rays up to the first error"`
 	ElementColor    []string `json:"element_color,omitempty" jsonschema:"element fill colours as 1=#ff0000 entries"`
+	MultiConfig     bool     `json:"multi_config,omitempty" jsonschema:"draw several configs stacked vertically: the first 5 active configs when configs is not given"`
+	Configs         []string `json:"configs,omitempty" jsonschema:"configs to draw in multi-config mode, by id or 0-based index (implies multi_config)"`
 }
 
 func (s *server) addPlot() {
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "plot",
 		Title:       "Render the lens diagram",
-		Description: "Render a lens cross-section with ray paths. PNG is returned inline as an image (so the model can look at it); SVG is written to the workspace and returned as a resource link. Usually chained after chief/trace in a pipeline.",
+		Description: "Render a lens cross-section with ray paths. PNG is returned inline as an image (so the model can look at it); SVG is written to the workspace and returned as a resource link. Usually chained after chief/trace in a pipeline. With multi_config (or configs) several configurations are stacked in one drawing at a shared scale, aligned on their image planes, without rays.",
 		Annotations: toolAnnotations(false),
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in plotIn) (*mcp.CallToolResult, ArtifactOut, error) {
 		doc, parent, err := s.store.Resolve(in.DocInput)

@@ -223,10 +223,14 @@ system with ray paths overlaid.
 
 Options:
   -o, --output file.svg|.png   output file (default: stdout = SVG)
-  --config ID                  select a config by id (multi-config mode)
+  --config ID                  select a config by id (single-config mode)
+  --multi-config               draw several configs stacked vertically
+  --configs "id1,id2,..."      configs to draw, by id or 0-based index
+                               (comma-separated; implies --multi-config)
   --lens-width 1.5             lens body stroke width in pixels
   --ray-width 1.5              ray path stroke width in pixels
-  --scale 0                    SVG/PNG scale factor (0 = auto)
+  --scale 0                    SVG/PNG scale factor (0 = auto; shared by every
+                               config in multi-config mode)
   --right-margin 20            right-side margin beyond image plane (% of lens length)
   --fan-rays 11                max fan rays drawn per field (0 = hide fan rays)
   --show-invalid-rays          draw rays with error codes in full (boolean)
@@ -255,9 +259,22 @@ Pipe after "rayweave trace" for ray paths:
   cat system.yaml | rayweave chief | rayweave trace | rayweave plot -o lens.svg
   cat system.yaml | rayweave chief | rayweave trace | rayweave plot -o lens.png
 
-In multi-config mode, use --config to select which config to draw:
+In single-config mode, use --config to select which config to draw:
   cat result.yaml | rayweave plot --config wide -o wide.svg
   cat result.yaml | rayweave plot --config tele -o tele.png
+
+In multi-config mode, --multi-config draws the first 5 active configs
+(document order, falling back to every config when none is active) as
+stacked cross-sections, and --configs selects them explicitly:
+  cat result.yaml | rayweave plot --multi-config -o zoom.svg
+  cat result.yaml | rayweave plot --configs wide,mid,tele -o zoom.png
+
+  Every config shares one scale, the image planes are aligned on one
+  vertical line (chief.reference_surface, else the last surface), and the
+  panels are stacked so they never overlap. results[] / chief_rays[] hold
+  one config's rays only, so multi-config mode draws the lens
+  cross-sections without rays; use --config ID for a ray-overlaid single
+  plot.
 
 Glass types are colour-coded using the nd/vd values from the
 glass_catalog section.  Ray colours follow the field angle
@@ -267,6 +284,9 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
   with anti-aliasing.  No external tools required.
 
 Warnings (stderr, exit 0, rendering continues):
+  multi-config rays: --multi-config / --configs draw lens cross-sections
+    only, because results[] / chief_rays[] hold one config's rays. The
+    warning appears when they are present.
   --element-color out-of-range: index outside 1..N where N is the number
     of lens elements detected. The warning identifies the invalid index.
   --asphere-color non-asphere: surface ID specified does not correspond to

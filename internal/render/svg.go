@@ -64,63 +64,50 @@ func (c Config) resolveAsphereStrokeNRGBA(s types.Surface) (color.NRGBA, bool) {
 	return parsed, true
 }
 
+// LensSVG renders a single configuration on the fixed one-diagram canvas.
 func LensSVG(cfg Config) string {
-	zPos := computeZPositions(cfg.Surfaces)
-	maxSurfZ := maxSurfaceZ(cfg.Surfaces)
-	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays, cfg.InvalidRays)
+	sc := buildScene(cfg)
+	return svgPanels([]scene{sc}, []viewport{singleViewport(sc)})
+}
 
-	// Compute display Z span: if object plane is far, cap the
-	// object-side extent to min(lensLength, backFocalLength).
-	firstZ := zPos[0]
-	lastZ := zPos[len(zPos)-1]
-	lensLen := lastZ - firstZ
-	bfl := 0.0
-	if len(cfg.Surfaces) >= 2 {
-		bfl = cfg.Surfaces[len(cfg.Surfaces)-2].Thickness
-	}
-	if bfl <= 0 {
-		bfl = lensLen
-	}
-	leftSpan := lensLen
-	if bfl < leftSpan {
-		leftSpan = bfl
-	}
-	candidateMinZ := firstZ - leftSpan
+// MultiLensSVG renders several configurations in one drawing: one shared
+// scale, every image plane on a common canvas column, and the panels stacked
+// vertically so they never overlap.
+func MultiLensSVG(panels []Panel) string {
+	scenes, vps := multiViewports(panels)
+	return svgPanels(scenes, vps)
+}
 
-	minZ := 0.0
-	for _, r := range cfg.Results {
-		for _, sr := range r.Surfaces {
-			if sr.Position.Z < minZ {
-				minZ = sr.Position.Z
-			}
-		}
+func svgPanels(scenes []scene, vps []viewport) string {
+	if len(scenes) == 0 {
+		return ""
 	}
-	if minZ < candidateMinZ {
-		minZ = candidateMinZ
-	}
-
-	rightFrac := 0.2
-	if cfg.RightMarginPct > 0 {
-		rightFrac = cfg.RightMarginPct / 100.0
-	}
-	maxZ := maxSurfZ * (1 + rightFrac)
-	zSpan := maxZ - minZ
-	if zSpan <= 0 {
-		zSpan = maxSurfZ
-	}
-
-	maxY := computeMaxYInRange(cfg.Surfaces, cfg.Results, minZ, maxZ)
-	scale := computeScale(zSpan, maxY)
-	if cfg.ScaleOverride > 0 {
-		scale = cfg.ScaleOverride
-	}
+	vp := vps[0]
 
 	var b strings.Builder
 
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>`)
-	b.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%.0f" height="%.0f" viewBox="0 0 %.0f %.0f">`,
-		canvasW, canvasH, canvasW, canvasH))
+	b.WriteString(fmt.Sprintf(`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d">`,
+		vp.w, vp.h, vp.w, vp.h))
 
+	writeSVGDefs(&b, vp.scale, scenes[0].cfg)
+
+	for i := range scenes {
+		b.WriteString(fmt.Sprintf(`<g transform="translate(%.0f,%.0f) scale(1,-1)">`,
+			vps[i].originX, vps[i].originY))
+		b.WriteString(fmt.Sprintf(`<g transform="scale(%.6f) translate(%.6f,0)">`,
+			vps[i].scale, -vps[i].anchorZ))
+		writeSVGBody(&b, scenes[i])
+		b.WriteString("</g></g>")
+	}
+
+	b.WriteString("</svg>")
+	return b.String()
+}
+
+// writeSVGDefs writes the shared stylesheet. The stroke widths are in pixels,
+// so they are divided by the shared world scale.
+func writeSVGDefs(b *strings.Builder, scale float64, cfg Config) {
 	lw := 1.5
 	if cfg.LensWidth > 0 {
 		lw = cfg.LensWidth
@@ -137,21 +124,20 @@ func LensSVG(cfg Config) string {
 	b.WriteString(fmt.Sprintf(".axis{fill:none;stroke:rgb(160,160,160);stroke-width:%f;stroke-dasharray:%f,%f;opacity:0.5}\n", 1.0/scale, 3.0/scale, 3.0/scale))
 	b.WriteString(fmt.Sprintf(".stop{fill:none;stroke:rgb(80,80,80);stroke-width:%f}\n", 2.0/scale))
 	b.WriteString("</style></defs>")
+}
 
-	// Main group: center the full content span (minZ..maxZ) in the viewport
-	midZ := (minZ + maxZ) / 2
-	b.WriteString(fmt.Sprintf(`<g transform="translate(%.0f,%.0f) scale(1,-1)">`,
-		canvasW/2, canvasH/2))
-
-	// Apply uniform scale and shift midZ to origin
-	b.WriteString(fmt.Sprintf(`<g transform="scale(%.6f) translate(%.6f,0)">`, scale, -midZ))
+// writeSVGBody writes one panel's world-coordinate content. The caller has
+// already opened the translate/scale groups, so every coordinate here is world
+// millimetres, the same convention as before the multi-config support.
+func writeSVGBody(b *strings.Builder, sc scene) {
+	cfg := sc.cfg
 
 	// Optical axis
-	axisLen := maxSurfZ * (1 + rightFrac)
+	axisLen := sc.maxSurfZ * (1 + sc.rightFrac)
 	b.WriteString(fmt.Sprintf(`<path class="axis" d="M 0,0 L %.6f,0"/>`, axisLen))
 
 	// Rays (rendered first so they appear behind lenses)
-	for _, r := range rayPaths {
+	for _, r := range sc.rayPaths {
 		b.WriteString(fmt.Sprintf(`<path class="ray" d="%s" stroke="%s"/>`, r.path, r.color))
 	}
 
@@ -164,7 +150,7 @@ func LensSVG(cfg Config) string {
 		h := s.Diameter / 2
 		var path strings.Builder
 		path.WriteString("M ")
-		path.WriteString(f64str(zPos[i] + globalSag(s, h)))
+		path.WriteString(f64str(sc.zPos[i] + globalSag(s, h)))
 		path.WriteByte(',')
 		path.WriteString(f64str(h))
 		n := 20
@@ -172,7 +158,7 @@ func LensSVG(cfg Config) string {
 			t := float64(j) / float64(n)
 			y := h - 2*h*t
 			path.WriteString(" L ")
-			path.WriteString(f64str(zPos[i] + globalSag(s, y)))
+			path.WriteString(f64str(sc.zPos[i] + globalSag(s, y)))
 			path.WriteByte(',')
 			path.WriteString(f64str(y))
 		}
@@ -197,8 +183,8 @@ func LensSVG(cfg Config) string {
 			fill = "rgb(180,180,180)"
 		}
 
-		z1 := zPos[e.r1Idx]
-		z2 := zPos[e.r2Idx]
+		z1 := sc.zPos[e.r1Idx]
+		z2 := sc.zPos[e.r2Idx]
 		path := buildElemPath(e, z1, z2)
 		if path != "" {
 			b.WriteString(fmt.Sprintf(`<path class="lens-body" d="%s" fill="%s"/>`, path, fill))
@@ -219,12 +205,9 @@ func LensSVG(cfg Config) string {
 	}
 
 	// Aperture stop marker (drawn on top of the lenses)
-	for _, p := range buildStopLines(cfg.Surfaces, zPos, cfg.StopSurfaceID) {
+	for _, p := range buildStopLines(cfg.Surfaces, sc.zPos, cfg.StopSurfaceID) {
 		b.WriteString(fmt.Sprintf(`<path class="stop" d="%s"/>`, p))
 	}
-
-	b.WriteString("</g></g></svg>")
-	return b.String()
 }
 
 // maxSurfaceZ returns the largest physical Z reached by any surface vertex,

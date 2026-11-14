@@ -15,67 +15,53 @@ import (
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
+// LensPNG rasterizes a single configuration on the fixed one-diagram canvas.
 func LensPNG(cfg Config) ([]byte, error) {
-	zPos := computeZPositions(cfg.Surfaces)
-	maxSurfZ := maxSurfaceZ(cfg.Surfaces)
-	rayPaths := buildRayPaths(cfg.Results, cfg.ChiefRays, cfg.MaxFanRays, cfg.InvalidRays)
+	sc := buildScene(cfg)
+	vp := singleViewport(sc)
+	return pngPanels([]scene{sc}, []viewport{vp})
+}
 
-	firstZ := zPos[0]
-	lastZ := zPos[len(zPos)-1]
-	lensLen := lastZ - firstZ
-	bfl := 0.0
-	if len(cfg.Surfaces) >= 2 {
-		bfl = cfg.Surfaces[len(cfg.Surfaces)-2].Thickness
-	}
-	if bfl <= 0 {
-		bfl = lensLen
-	}
-	leftSpan := lensLen
-	if bfl < leftSpan {
-		leftSpan = bfl
-	}
-	leftEdge := firstZ - leftSpan
+// MultiLensPNG rasterizes several configurations into one image: one shared
+// scale, every image plane on a common canvas column, and the panels stacked
+// vertically so they never overlap.
+func MultiLensPNG(panels []Panel) ([]byte, error) {
+	scenes, vps := multiViewports(panels)
+	return pngPanels(scenes, vps)
+}
 
-	minZ := 0.0
-	for _, r := range cfg.Results {
-		for _, sr := range r.Surfaces {
-			if sr.Position.Z < minZ {
-				minZ = sr.Position.Z
-			}
-		}
+func pngPanels(scenes []scene, vps []viewport) ([]byte, error) {
+	if len(scenes) == 0 {
+		return nil, fmt.Errorf("render: no panels")
 	}
-	if minZ < leftEdge {
-		minZ = leftEdge
-	}
+	vp := vps[0]
 
-	rightFrac := 0.2
-	if cfg.RightMarginPct > 0 {
-		rightFrac = cfg.RightMarginPct / 100.0
-	}
-	maxZ := maxSurfZ * (1 + rightFrac)
-	zSpan := maxZ - minZ
-	if zSpan <= 0 {
-		zSpan = maxSurfZ
-	}
-
-	maxY := computeMaxYInRange(cfg.Surfaces, cfg.Results, minZ, maxZ)
-	scale := computeScale(zSpan, maxY)
-	if cfg.ScaleOverride > 0 {
-		scale = cfg.ScaleOverride
-	}
-
-	midZ := (minZ + maxZ) / 2
-
-	img := image.NewRGBA(image.Rect(0, 0, canvasW, canvasH))
+	img := image.NewRGBA(image.Rect(0, 0, vp.w, vp.h))
 	fillWhite(img)
 
-	ras := vector.NewRasterizer(canvasW, canvasH)
+	ras := vector.NewRasterizer(vp.w, vp.h)
+	for i := range scenes {
+		drawScene(ras, img, scenes[i], vps[i])
+	}
+
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// drawScene rasterizes one panel's world-coordinate content through its
+// viewport (axis, rays, mirrors, lens bodies, stop marker), in the same order
+// the SVG renderer uses.
+func drawScene(ras *vector.Rasterizer, img *image.RGBA, sc scene, vp viewport) {
+	cfg := sc.cfg
 
 	// Axis (rendered first = behind everything)
 	// SVG renders axis as "M 0,0 L axisLen,0": world z=0 to z=axisLen.
-	axisLen := maxSurfZ * (1 + rightFrac)
-	ras.Reset(canvasW, canvasH)
-	dashedLine(ras, 0, axisLen, 0, 1.0, scale, midZ, 3.0/scale, 3.0/scale)
+	axisLen := sc.maxSurfZ * (1 + sc.rightFrac)
+	ras.Reset(vp.w, vp.h)
+	dashedLine(ras, 0, axisLen, 0, 1.0, vp, 3.0/vp.scale, 3.0/vp.scale)
 	ras.Draw(img, img.Bounds(), image.NewUniform(color.NRGBA{160, 160, 160, 128}), image.Point{})
 
 	// Rays (behind lenses)
@@ -83,9 +69,9 @@ func LensPNG(cfg Config) ([]byte, error) {
 	if rayWidth <= 0 {
 		rayWidth = 0.1
 	}
-	for _, rp := range rayPaths {
+	for _, rp := range sc.rayPaths {
 		col := parseRGB(rp.color, 179)
-		drawRayPath(ras, img, rp.path, rayWidth, scale, midZ, col)
+		drawRayPath(ras, img, rp.path, rayWidth, vp, col)
 	}
 
 	// Mirror surfaces (drawn as curved lines above the rays)
@@ -97,7 +83,7 @@ func LensPNG(cfg Config) ([]byte, error) {
 		h := s.Diameter / 2
 		var path strings.Builder
 		path.WriteString("M ")
-		path.WriteString(f64str(zPos[i] + globalSag(s, h)))
+		path.WriteString(f64str(sc.zPos[i] + globalSag(s, h)))
 		path.WriteByte(',')
 		path.WriteString(f64str(h))
 		n := 20
@@ -105,7 +91,7 @@ func LensPNG(cfg Config) ([]byte, error) {
 			t := float64(j) / float64(n)
 			y := h - 2*h*t
 			path.WriteString(" L ")
-			path.WriteString(f64str(zPos[i] + globalSag(s, y)))
+			path.WriteString(f64str(sc.zPos[i] + globalSag(s, y)))
 			path.WriteByte(',')
 			path.WriteString(f64str(y))
 		}
@@ -115,8 +101,8 @@ func LensPNG(cfg Config) ([]byte, error) {
 			mirrorCol = parsed
 			mirrorCol.A = 153
 		}
-		ras.Reset(canvasW, canvasH)
-		drawSagPathFromSVG(ras, path.String(), scale, midZ)
+		ras.Reset(vp.w, vp.h)
+		drawSagPathFromSVG(ras, path.String(), vp)
 		ras.Draw(img, img.Bounds(), image.NewUniform(mirrorCol), image.Point{})
 	}
 
@@ -159,42 +145,31 @@ func LensPNG(cfg Config) ([]byte, error) {
 			r2Col.A = 255
 		}
 
-		drawElemFill(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, fill)
-		drawElemOutline(ras, img, e, zPos[e.r1Idx], zPos[e.r2Idx], scale, midZ, lw, outlineCol, r1Col, r2Col)
+		drawElemFill(ras, img, e, sc.zPos[e.r1Idx], sc.zPos[e.r2Idx], vp, fill)
+		drawElemOutline(ras, img, e, sc.zPos[e.r1Idx], sc.zPos[e.r2Idx], vp, lw, outlineCol, r1Col, r2Col)
 	}
 
 	// Aperture stop marker (drawn on top of the lenses)
 	stopCol := color.NRGBA{80, 80, 80, 255}
-	for _, p := range buildStopLines(cfg.Surfaces, zPos, cfg.StopSurfaceID) {
-		ras.Reset(canvasW, canvasH)
-		drawSagPathFromSVG(ras, p, scale, midZ)
+	for _, p := range buildStopLines(cfg.Surfaces, sc.zPos, cfg.StopSurfaceID) {
+		ras.Reset(vp.w, vp.h)
+		drawSagPathFromSVG(ras, p, vp)
 		ras.Draw(img, img.Bounds(), image.NewUniform(stopCol), image.Point{})
 	}
-
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func worldPt(z, y, midZ, scale float64) (float32, float32) {
-	px := canvasW/2 + (z-midZ)*scale
-	py := canvasH/2 - y*scale
-	return float32(px), float32(py)
 }
 
 func fillWhite(img *image.RGBA) {
-	for y := 0; y < canvasH; y++ {
-		for x := 0; x < canvasW; x++ {
+	b := img.Bounds()
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
 			img.SetRGBA(x, y, color.RGBA{255, 255, 255, 255})
 		}
 	}
 }
 
-func strokeLine(ras *vector.Rasterizer, z0, y0, z1, y1, width, scale, midZ float64) {
-	px0, py0 := worldPt(z0, y0, midZ, scale)
-	px1, py1 := worldPt(z1, y1, midZ, scale)
+func strokeLine(ras *vector.Rasterizer, z0, y0, z1, y1, width float64, vp viewport) {
+	px0, py0 := vp.pt(z0, y0)
+	px1, py1 := vp.pt(z1, y1)
 	strokeLinePx(ras, px0, py0, px1, py1, width)
 }
 
@@ -218,19 +193,19 @@ func strokeLinePx(ras *vector.Rasterizer, px0, py0, px1, py1 float32, width floa
 	ras.ClosePath()
 }
 
-func dashedLine(ras *vector.Rasterizer, z0, z1, y, width, scale, midZ float64, onLen, offLen float64) {
+func dashedLine(ras *vector.Rasterizer, z0, z1, y, width float64, vp viewport, onLen, offLen float64) {
 	z := z0
 	for z < z1 {
 		end := z + onLen
 		if end > z1 {
 			end = z1
 		}
-		strokeLine(ras, z, y, end, y, width, scale, midZ)
+		strokeLine(ras, z, y, end, y, width, vp)
 		z = end + offLen
 	}
 }
 
-func drawRayPath(ras *vector.Rasterizer, img *image.RGBA, svgPath string, width, scale, midZ float64, c color.NRGBA) {
+func drawRayPath(ras *vector.Rasterizer, img *image.RGBA, svgPath string, width float64, vp viewport, c color.NRGBA) {
 	s := svgPath
 	if !strings.HasPrefix(s, "M ") {
 		return
@@ -255,8 +230,8 @@ func drawRayPath(ras *vector.Rasterizer, img *image.RGBA, svgPath string, width,
 			first = false
 			continue
 		}
-		ras.Reset(canvasW, canvasH)
-		strokeLine(ras, prevZ, prevY, z, y, width, scale, midZ)
+		ras.Reset(vp.w, vp.h)
+		strokeLine(ras, prevZ, prevY, z, y, width, vp)
 		ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
 		prevZ, prevY = z, y
 	}
@@ -264,7 +239,7 @@ func drawRayPath(ras *vector.Rasterizer, img *image.RGBA, svgPath string, width,
 
 // drawSagPathFromSVG strokes a polyline path (e.g. a mirror surface) given in
 // the same "M z,y L z,y ..." format used by the SVG renderer.
-func drawSagPathFromSVG(ras *vector.Rasterizer, svgPath string, scale, midZ float64) {
+func drawSagPathFromSVG(ras *vector.Rasterizer, svgPath string, vp viewport) {
 	s := svgPath
 	if !strings.HasPrefix(s, "M ") {
 		return
@@ -289,31 +264,31 @@ func drawSagPathFromSVG(ras *vector.Rasterizer, svgPath string, scale, midZ floa
 			first = false
 			continue
 		}
-		strokeLine(ras, prevZ, prevY, z, y, 1.0, scale, midZ)
+		strokeLine(ras, prevZ, prevY, z, y, 1.0, vp)
 		prevZ, prevY = z, y
 	}
 }
 
-func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ float64, c color.NRGBA) {
+func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2 float64, vp viewport, c color.NRGBA) {
 	if e.h1 <= 0 || e.h2 <= 0 {
 		return
 	}
 	ee := computeElemEdges(e, z1, z2)
-	ras.Reset(canvasW, canvasH)
-	px, py := worldPt(z1+ee.sag1h, ee.h1eff, midZ, scale)
+	ras.Reset(vp.w, vp.h)
+	px, py := vp.pt(z1+ee.sag1h, ee.h1eff)
 	ras.MoveTo(px, py)
 
-	sampleSagPath(ras, e.r1Surf, ee.h1eff, -ee.h1eff, z1, scale, midZ)
+	sampleSagPath(ras, e.r1Surf, ee.h1eff, -ee.h1eff, z1, vp)
 
 	for _, p := range ee.bottomPts {
-		px, py := worldPt(p.X, p.Y, midZ, scale)
+		px, py := vp.pt(p.X, p.Y)
 		ras.LineTo(px, py)
 	}
 
-	sampleSagPath(ras, e.r2Surf, -ee.h2eff, ee.h2eff, z2, scale, midZ)
+	sampleSagPath(ras, e.r2Surf, -ee.h2eff, ee.h2eff, z2, vp)
 
 	for _, p := range ee.topPts {
-		px, py := worldPt(p.X, p.Y, midZ, scale)
+		px, py := vp.pt(p.X, p.Y)
 		ras.LineTo(px, py)
 	}
 	ras.ClosePath()
@@ -325,34 +300,34 @@ func drawElemFill(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, sc
 // its own colour (r1Col / r2Col — the asphere colour when that surface is an
 // asphere, otherwise the shared outline colour), while the top/bottom edge
 // polylines always use the outline colour.
-func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2, scale, midZ, strokeWidth float64, c color.NRGBA, r1Col, r2Col color.NRGBA) {
+func drawElemOutline(ras *vector.Rasterizer, img *image.RGBA, e element, z1, z2 float64, vp viewport, strokeWidth float64, c color.NRGBA, r1Col, r2Col color.NRGBA) {
 	if e.h1 <= 0 || e.h2 <= 0 {
 		return
 	}
 	ee := computeElemEdges(e, z1, z2)
 
 	// Left curved surface (top → bottom)
-	ras.Reset(canvasW, canvasH)
-	strokeSagPath(ras, e.r1Surf, ee.h1eff, -ee.h1eff, z1, scale, midZ, strokeWidth)
+	ras.Reset(vp.w, vp.h)
+	strokeSagPath(ras, e.r1Surf, ee.h1eff, -ee.h1eff, z1, vp, strokeWidth)
 	ras.Draw(img, img.Bounds(), image.NewUniform(r1Col), image.Point{})
 
 	// Bottom + top edges
-	ras.Reset(canvasW, canvasH)
+	ras.Reset(vp.w, vp.h)
 	for i := 0; i < len(ee.bottomPts)-1; i++ {
-		strokeLine(ras, ee.bottomPts[i].X, ee.bottomPts[i].Y, ee.bottomPts[i+1].X, ee.bottomPts[i+1].Y, strokeWidth, scale, midZ)
+		strokeLine(ras, ee.bottomPts[i].X, ee.bottomPts[i].Y, ee.bottomPts[i+1].X, ee.bottomPts[i+1].Y, strokeWidth, vp)
 	}
 	for i := 0; i < len(ee.topPts)-1; i++ {
-		strokeLine(ras, ee.topPts[i].X, ee.topPts[i].Y, ee.topPts[i+1].X, ee.topPts[i+1].Y, strokeWidth, scale, midZ)
+		strokeLine(ras, ee.topPts[i].X, ee.topPts[i].Y, ee.topPts[i+1].X, ee.topPts[i+1].Y, strokeWidth, vp)
 	}
 	ras.Draw(img, img.Bounds(), image.NewUniform(c), image.Point{})
 
 	// Right curved surface (bottom → top)
-	ras.Reset(canvasW, canvasH)
-	strokeSagPath(ras, e.r2Surf, -ee.h2eff, ee.h2eff, z2, scale, midZ, strokeWidth)
+	ras.Reset(vp.w, vp.h)
+	strokeSagPath(ras, e.r2Surf, -ee.h2eff, ee.h2eff, z2, vp, strokeWidth)
 	ras.Draw(img, img.Bounds(), image.NewUniform(r2Col), image.Point{})
 }
 
-func strokeSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset, scale, midZ, width float64) {
+func strokeSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset float64, vp viewport, width float64) {
 	n := 20
 	hPrev := hStart
 	sPrev := globalSag(surf, hPrev)
@@ -360,18 +335,18 @@ func strokeSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffs
 		t := float64(i) / float64(n)
 		h := hStart + (hEnd-hStart)*t
 		s := globalSag(surf, h)
-		strokeLine(r, zOffset+sPrev, hPrev, zOffset+s, h, width, scale, midZ)
+		strokeLine(r, zOffset+sPrev, hPrev, zOffset+s, h, width, vp)
 		hPrev, sPrev = h, s
 	}
 }
 
-func sampleSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset, scale, midZ float64) {
+func sampleSagPath(r *vector.Rasterizer, surf types.Surface, hStart, hEnd, zOffset float64, vp viewport) {
 	n := 20
 	for i := 1; i <= n; i++ {
 		t := float64(i) / float64(n)
 		h := hStart + (hEnd-hStart)*t
 		s := globalSag(surf, h)
-		px, py := worldPt(zOffset+s, h, midZ, scale)
+		px, py := vp.pt(zOffset+s, h)
 		r.LineTo(px, py)
 	}
 }

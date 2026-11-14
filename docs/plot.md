@@ -1,8 +1,10 @@
 # `rayweave plot` — SVG / PNG cross-section diagrams
 
 Renders a cross-section drawing of the lens system with ray paths overlaid, as
-SVG (default) or PNG. PNG rasterization is done in-process via
-`golang.org/x/image/vector`; no external tools are required.
+SVG (default) or PNG. A multi-config (zoom) document can be drawn as several
+stacked panels at one shared scale, aligned on their image planes (see
+[Multi-config layouts](#multi-config-layouts)). PNG rasterization is done
+in-process via `golang.org/x/image/vector`; no external tools are required.
 
 ```
 rayweave plot [-o file.svg|.png] [flags] < input.yaml
@@ -13,10 +15,12 @@ rayweave plot [-o file.svg|.png] [flags] < input.yaml
 | Flag | Description |
 |---|---|
 | `-o, --output file.svg\|.png` | output file (default: stdout, SVG) |
-| `--config ID` | select a config by id (multi-config mode) |
+| `--config ID` | select a config by id (single-config mode) |
+| `--multi-config` | draw several configs stacked vertically: the first 5 **active** configs in document order (every config when none is active) unless `--configs` is given |
+| `--configs "id1,id2,..."` | configs to draw in multi-config mode, by id or 0-based index (comma-separated; implies `--multi-config`; not capped) |
 | `--lens-width 0.1` | lens-body stroke width |
 | `--ray-width 0.1` | ray-path stroke width |
-| `--scale 0` | SVG/PNG scale factor (0 = auto) |
+| `--scale 0` | SVG/PNG scale factor (0 = auto; one shared value in multi-config mode) |
 | `--right-margin 20` | right-side margin beyond the image plane (% of lens length) |
 | `--fan-rays 11` | max fan rays drawn per field in the lens diagram (0 = hide fan rays) |
 | `--show-invalid-rays` | boolean toggle, no value argument (default `false` = off): draw rays whose path carries an error code in full instead of the default hiding; `--show-invalid-ray-fan` is an alias |
@@ -35,11 +39,62 @@ cat system.yaml | rayweave chief | rayweave trace | rayweave plot -o lens.svg
 cat system.yaml | rayweave chief | rayweave trace | rayweave plot -o lens.png
 ```
 
-In multi-config mode, use `--config` to choose which config to draw:
+In single-config mode, use `--config` to choose which config to draw:
 
 ```sh
 cat result.yaml | rayweave plot --config wide -o wide.svg
 cat result.yaml | rayweave plot --config tele -o tele.png
+```
+
+## Multi-config layouts
+
+Zoom and other multi-config documents can be drawn in one picture. Every config
+becomes a **panel**:
+
+```sh
+# the first 5 active configs, in document order
+cat zoom.yaml | rayweave plot --multi-config -o zoom.svg
+
+# an explicit selection (ids or 0-based indexes)
+cat zoom.yaml | rayweave plot --configs wide,mid,tele -o zoom.png
+cat zoom.yaml | rayweave plot --configs 0,2 -o zoom.png
+```
+
+`--configs` implies `--multi-config` and selects in the order given (duplicates
+are dropped). `--config` and the multi-config flags are mutually exclusive.
+
+Selection rules for `--multi-config` without `--configs`:
+
+- the **active** configs in document order, at most 5; when the document does
+  not mark any config active, every config is drawn in document order;
+- configs without surfaces are skipped with a warning;
+- if more than 5 configs would be drawn, the first 5 are drawn and a warning
+  says so (`--configs` selects a different set, without a cap).
+
+Layout rules:
+
+- **one shared scale** for every panel (`--scale` overrides it globally);
+- the **image planes are aligned** on one vertical line. The image plane is the
+  `chief.reference_surface` when the document declares one, else the last
+  surface of the config;
+- panels are **stacked vertically** with a fixed gap, so two configs never
+  overlap. Each band is as tall as that config's own beam envelope at the shared
+  scale, the stack is centred in the one-diagram canvas while it fits, and the
+  canvas grows taller as panels are added (a one-panel plot is the ordinary
+  diagram);
+- panel order is the selection order, and no config labels are drawn.
+
+Rays are not drawn in multi-config mode: `results[]` and `chief_rays[]` hold
+the rays of **one** config only (the last `trace --config`), so overlaying them
+on other panels would be wrong. When they are present a warning says so; use
+`--config ID` for a ray-overlaid single plot.
+
+```sh
+# zoom positions, aligned and to scale
+cat samples/simple-zoom.yaml | rayweave plot --multi-config -o zoom.png
+
+# one config with rays (the usual raytrace diagram)
+cat result.yaml | rayweave plot --config config0 -o wide.png
 ```
 
 ## Styling

@@ -12,9 +12,10 @@ set -euo pipefail
 # Steps
 #   1. optimize --verbose --log : DLS multi-config optimisation
 #   2. chief | trace | plot     : ray-overlaid layout per config, before/after
-#   3. paraxial                 : EFL per config, before/after
-#   4. chief                    : on-axis RMS per config, before/after
-#   5. geometry check           : config0 lens1-lens2 air gap >= 5 mm
+#   3. plot --multi-config      : all zoom positions in one drawing, before/after
+#   4. paraxial                 : EFL per config, before/after
+#   5. chief                    : on-axis RMS per config, before/after
+#   6. geometry check           : config0 lens1-lens2 air gap >= 5 mm
 #
 # How to read the result
 #   - All configs must be simultaneously good: on-axis RMS < 0.3 mm each.
@@ -48,6 +49,7 @@ if [ "$CLEAN" = true ]; then
     rm -f "$OUTDIR/simple-zoom-${cfg}-init-rays.png"
     rm -f "$OUTDIR/simple-zoom-${cfg}-opt-rays.png"
   done
+  rm -f "$OUTDIR/simple-zoom-init-layout.png" "$OUTDIR/simple-zoom-opt-layout.png"
   rm -f "$RESULT" "$LOG" "$RESULT_FILE"
   echo "  Removed: PNGs, $RESULT, $LOG, $RESULT_FILE"
   exit 0
@@ -128,6 +130,16 @@ for cfg in config0 config1 config2; do
 done
 echo
 
+# ── 4. Multi-config layout (all zoom positions in one drawing) ──
+# One shared scale, the image planes aligned on one vertical line, and the
+# three positions stacked so they never overlap.
+echo "=== Multi-config layout (all configs, shared scale) ==="
+cat "$YAML"   | $RAYWEAVE plot --multi-config -o "$OUTDIR/simple-zoom-init-layout.png" > /dev/null
+echo "  PNG (before): $OUTDIR/simple-zoom-init-layout.png"
+cat "$RESULT" | $RAYWEAVE plot --multi-config -o "$OUTDIR/simple-zoom-opt-layout.png" > /dev/null
+echo "  PNG (after):  $OUTDIR/simple-zoom-opt-layout.png"
+echo
+
 echo "=== Iteration log saved: $LOG ==="
 if [ -f "$LOG" ]; then
   echo "  Log entries:"
@@ -135,7 +147,7 @@ if [ -f "$LOG" ]; then
 fi
 echo
 
-# ── 4. Focal length (before and after) ──
+# ── 5. Focal length (before and after) ──
 echo "=== Focal Length (EFL) ==="
 get_efl() {
   local yaml_file="$1" cfg="$2"
@@ -149,7 +161,7 @@ for cfg in config0 config1 config2; do
 done
 echo
 
-# ── 5. Spot RMS comparison (before vs after) ──
+# ── 6. Spot RMS comparison (before vs after) ──
 echo "=== Spot RMS Comparison (on-axis, field 0°) ==="
 printf "  %-8s %12s %12s\n" "Config" "RMS before" "RMS after"
 

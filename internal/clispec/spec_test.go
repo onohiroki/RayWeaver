@@ -160,3 +160,23 @@ func TestArgsRendersToolInput(t *testing.T) {
 		t.Fatalf("Args on an empty input = %v, want none (an absent argument must not override the document)", args)
 	}
 }
+
+// TestArgsRendersPlotMultiConfig pins the MCP mapping of the plot
+// multi-config selectors: a bool becomes a bare flag and a string slice is
+// joined into the comma-separated --configs value the CLI parses.
+func TestArgsRendersPlotMultiConfig(t *testing.T) {
+	type plotInput struct {
+		MultiConfig bool     `json:"multi_config"`
+		Configs     []string `json:"configs"`
+	}
+	got := Args(Plot, plotInput{MultiConfig: true, Configs: []string{"wide", "tele"}}, nil)
+	want := []string{"--configs", "wide,tele", "--multi-config"}
+	if len(got) != len(want) {
+		t.Fatalf("Args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("Args = %v, want %v", got, want)
+		}
+	}
+}
