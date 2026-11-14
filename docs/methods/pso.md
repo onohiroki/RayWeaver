@@ -147,12 +147,15 @@ with another run that used the same `gbest` value (and the same
 `constraint_penalty`), which the `pso_init` event records as
 `gbest_criterion`.
 
-### Dynamic pupil
+### Frozen pupil
 
-At the start of each PSO iteration, the dynamic pupil is recomputed at the
+At the start of each PSO iteration, the entrance pupil is recomputed at the
 current global-best position (`UpdatePupils(gbest)`). This matches the DLS
 convention of one pupil update per iteration, keeping the merit landscape
-consistent as the lens changes.
+consistent as the lens changes. The plane is the stop's paraxial entrance pupil
+for a config with an explicit stop, the traced per-field crossing only for a
+stop-free system, and the pupil model's axial position in
+`virtual_entrance_pupil` mode.
 
 ### Stall detection
 

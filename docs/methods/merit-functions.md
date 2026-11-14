@@ -198,9 +198,10 @@ paraboloid kinds which drive the low-order coefficients separately.
 
 The entrance-pupil grid follows `optimization.num_rays` and
 `optimization.aperture_margin`, and — like every grid term — is centred on the
-config's per-iteration **frozen** pupil Z, so the DLS base point and its
-Jacobian perturbations share one pupil (the wavefront analysis itself settles
-the dynamic pupil once per iteration). A degenerate fit (no grid, fewer than
+config's per-iteration **frozen** pupil Z — the stop's paraxial entrance pupil
+for a config with an explicit `stop_surface`, the traced per-field crossing for
+a stop-free system — so the DLS base point and its Jacobian perturbations share
+one pupil. A degenerate fit (no grid, fewer than
 six valid rays) returns the bounded wavefront degenerate penalty
 (`optimization.degenerate.wavefront_value`, default 0.01 mm).
 
@@ -210,13 +211,13 @@ plane (the conventional last surface) is rejected and falls back to the last
 optical surface — the same default the standalone `wavefront` command uses —
 instead of returning the penalty.
 
-**Dynamic-pupil retry.** The frozen-grid fit does not apply the fixed-surface
+**Pupil retry.** The frozen-grid fit does not apply the fixed-surface
 vignetting cut, so a strongly off-axis field whose beam clips a fixed aperture
 can produce a singular paraboloid fit (e.g. the 24° field of the US2645157
 triplet at an un-resolved `pupilZ`). On a failed fit the term retries once with
-the dynamic pupil (chief resolves the entrance pupil), matching the standalone
-`wavefront` command's grid, before giving the bounded wavefront degenerate
-penalty.
+the pupil the wavefront analysis resolves itself (the `wavefront` command's own
+grid: the entrance pupil of the field's chief ray), before giving the bounded
+wavefront degenerate penalty.
 
 **Weight design (escape-demo).** The term weight must be balanced against the
 measured residual, not the idealised value: with `wavefront_rms_residual` the

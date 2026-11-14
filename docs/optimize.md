@@ -698,16 +698,23 @@ rayweave query --jsonl --where 'event=="breakdown"' \
 
 ## Notes
 
-- **The dynamic pupil follows the lens.** `optimize` / `escape` seed each
-  config's grid centring from the dynamic pupil at startup, and the DLS solver
-  calls the optional `dls.PupilUpdater` (`Optimizer.UpdatePupils`) at the top of
-  every iteration, so the aperture position moves with the lens while staying
-  frozen for the duration of one iteration — the base-point residuals and the
-  Jacobian columns then share the same pupil, which is what keeps the
-  derivatives consistent. A config is skipped unless `chief.reference_surface`
-  is set **and** it declares fields (`chief.fields` / `configs[].fields`); in
-  `virtual_entrance_pupil` mode the model's `axial_position` / `diameter` are
-  used directly and the chief-ray iteration is skipped.
+- **The frozen pupil follows the lens.** `optimize` / `escape` / `pso` re-derive
+  each config's grid centring at the top of every iteration
+  (`Optimizer.UpdatePupils`), so the aperture position moves with the lens while
+  staying frozen for the duration of one iteration — the base-point residuals
+  and the Jacobian columns then share the same pupil, which is what keeps the
+  derivatives consistent (and why the solve also settles the pupil once at its
+  starting point, see
+  [merit-and-constraints.md §2](merit-and-constraints.md#2-how-to-configure)).
+  The plane is the stop's **paraxial entrance pupil, the same for every field**,
+  when the config has an explicit `stop_surface` — the pupil `chief` / `zoom`
+  report for the design (the optimiser derives it directly now; it used to run a
+  redundant chief pass to obtain the same plane); a **stop-free** config keeps
+  the traced per-field dynamic pupil, and `virtual_entrance_pupil` mode uses the
+  model's `axial_position` / `diameter` directly and skips the chief-ray
+  iteration.
+  A config is skipped unless `chief.reference_surface`
+  is set **and** it declares fields (`chief.fields` / `configs[].fields`).
 - **Image-height fields are frozen at the start geometry.** A field declared by
   `image_height` (rather than `angle`) is converted to a field angle once, when
   the model is built: `optimize` launches a single probe ray **through the

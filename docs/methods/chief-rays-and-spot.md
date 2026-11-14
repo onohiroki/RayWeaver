@@ -231,11 +231,12 @@ number is the full-aperture grid's own survival, reported as
 
 This matters in practice: for a strongly off-axis field whose transmitted rays
 hug the pupil rim, the survivors lie far from the pupil centre, so a concentric
-probe can shrink away from all of them — `traced_rays: 0`, a zeroed `rms_*` and
-`min`/`max` of ±1e18. The ellipse remap keeps such a field's statistics (and its
-centroid target) meaningful: the 23° field of
-`samples/escape-6elements-init.yaml` goes from `traced_rays: 0` to
-`traced_rays: 254`.
+probe shrinks away from all of them — measured `traced_rays: 0` with a zeroed
+`rms_*` and `min`/`max` of ±1e18 before the full-grid fallback above existed. The
+ellipse remap is what makes such a field *measurable* rather than merely
+non-empty: the 23° field of `samples/escape-6elements-init.yaml` goes from
+`traced_rays: 0` to `traced_rays: 254`, and those are delivered-spot rays, not a
+shrunk-grid artefact.
 
 ## 6. Marginal rays
 

@@ -319,7 +319,58 @@ On a zoom document known to produce no feasible minimum:
 Each phase is a separate commit with its own validation; no phase may change the
 default behaviour of a successful trace.
 
-## 11. Risks and open questions
+## 11. Impact on existing behaviour
+
+This work added residuals, a merit kind, a schedule metric and a gate, but it
+also had to correct existing *measurements* that disagreed with the tracer or
+with the delivered-design checks. No optimiser feature was removed; the numbers
+below move, and the reasons are recorded so a result measured before this work
+can be compared with one measured after it.
+
+| Measurement | Before | After | Why |
+|---|---|---|---|
+| beam extents (`dls.surfaceExtents`, `chief.BeamEnvelope`) | global `max(\|X\|,\|Y\|)` over the rays that completed the trace | surface-local `hypot(x,y)` over every reached surface, including the prefix of a ray that fails later | the tracer clips on the surface-local radius; the bounding box under-reports an off-axis footprint (up to √2), and dropping a ray at its first failure starved the envelope of every surface before it |
+| `auto_aperture` sizing (`chief --clear-aperture`, `FinalApertures`) | one pass | local-frame envelope, re-traced until the diameters settle (≤ 4 passes, 0.01 mm) | the grid centring follows the surviving bundle, so a nearly dead field re-centres once its own beam passes |
+| `beam_clearance` / `beam_diameter` / `vignetting_factor` constraints | stop-free beam-aware cap; polar grid for the vignetting factor | the prescribed pupil (the stop's paraxial image, or the prescribed EPD), hex lattice for the vignetting factor | a constraint and `chief` / `zoom` must describe the same beam |
+| `zoom` `fields[].vignetting` | the traced fraction of chief's delivered-pupil spot statistics | `prescribed_traced / prescribed_total` of the full-aperture grid | once the beam is clipped, those statistics come from a reduced effective-pupil grid and read ~0.9 for a field that delivers 0.2 |
+| hex pupil lattice | columns laid out from `-R` with `floor(2R/dx)` columns (≈ 0.87 of the diameter, one-sided) | centred, alternate rows staggered ±dx/4, `ceil(2R/dx)+1` columns | the old lattice left the `+x` rim unsampled and biased the grid centroid, so the measurement moved with the ray count |
+| `ray_validity` | relaxed clearance only | also the minimum with the physical surviving-grid fraction (hex); a config that declares no `beam_clearance` term no longer gates | a virtual hit is not a delivered ray, and an unrelated config must not hold the ramp |
+
+Unchanged (checked, not touched by this work): the `optimization.degenerate`
+penalties, every other `merit_schedule` metric (`merit_ratio`, `iteration`,
+`glass_role`, `spot_diffraction`, `phase`), the `field_alive` / `pupil_fill`
+thresholds, `aperture_margin` / `aperture_margin_mm`, the glass hull / attraction
+/ `snap` path, power variables and `power_solve`, `back_focus_solve`, adaptive
+damping, `region_active`, BFGS and central differences, `--exclude-param`, the
+beam-clipping warning and its suppression rules, and the `vignette` command's own
+sizing.
+
+The stop's paraxial pupil was already the optimiser's pupil for a config with an
+explicit stop (`DetermineChiefRaysGridMode` returns the same seed Z for every
+field when a stop exists), so making it explicit in `UpdatePupils` is numerically
+a no-op: it removes a redundant chief pass and nothing else. A **stop-free**
+config keeps the traced per-field dynamic pupil, and `virtual_entrance_pupil`
+mode keeps using the model's `axial_position` / `diameter`.
+
+Two consequences matter when comparing runs:
+
+- every consumer of the hex lattice shifts slightly (aperture sizing, the
+  `beam_clearance` measure, the asphere surface metrics, the `ray_validity`
+  gate). Figures recorded against the old lattice — the `samples/` numbers, for
+  instance — are a different measurement, not a regression.
+- `vignetting_factor` now measures the prescribed pupil, so it reads *lower* on
+  the same design (0.29 → 0.18 on the wide field of the zoom study) and must not
+  be compared with a stored value measured before the change.
+
+The changes also exposed a stale-pupil bug: a merit re-read outside a solve (a
+reported minimum, an escape cycle's before/after comparison, the initial
+baseline) used whatever pupil the last iteration left behind, so two entries with
+different merits were sometimes the same design. The solve now settles the pupil
+at its start point and at every re-evaluated point; the rule is stated in
+[merit-and-constraints.md §2](../merit-and-constraints.md#2-how-to-configure) and
+[escape.md §Saving minima](../escape.md#saving-minima).
+
+## 12. Risks and open questions
 
 - **Surrogate versus truth.** A virtual path can carry a low merit while the
   physical trace still fails. The physical gate must stay mandatory, and the
@@ -341,7 +392,7 @@ default behaviour of a successful trace.
   (`cam`, `scale`, `power` variables). A topology that cannot form the field at
   all is a first-order problem, not a ray-gradient problem.
 
-## 12. References
+## 13. References
 
 - [dls-optimization.md](dls-optimization.md) — damped least squares, normalized
   variables, finite-difference Jacobian, augmented Lagrangian constraints.

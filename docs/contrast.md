@@ -349,7 +349,7 @@ DLS iteration
        └─ diffractionMTFValues  ── per-evaluation cache keyed (field, wavelength, frequency)
             └─ computeDiffractionMTF
                  ├─ frozen pupil Z (per-iteration, shared with the wavefront terms)
-                 │    └─ fallback: dynamic pupil
+                 │    └─ fallback: pupil resolved by the analysis
                  ├─ psf.FrozenPupilGrid → psf.TraceWavefront (polarized, to the reference surface)
                  ├─ psf.DefaultImageGrid → capImageGrid(max_grid)
                  ├─ direct vector Huygens integral (per polarization state)

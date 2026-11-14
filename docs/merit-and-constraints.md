@@ -180,7 +180,11 @@ See [methods/polychromatic.md](methods/polychromatic.md) for the definitions.
 The grid-based and wavefront terms are centred on the config's **per-iteration
 frozen pupil** — settled once per DLS iteration and held for the base point and
 every Jacobian perturbation — so the finite-difference derivative matches the
-merit actually minimized. The solve also settles the pupil once at its starting
+merit actually minimized. The plane is the stop's paraxial entrance pupil (the
+same for every field) when the config has an explicit `stop_surface`, the traced
+per-field crossing only for a stop-free system, and the pupil model's
+`axial_position` in `virtual_entrance_pupil` mode; that is the same pupil
+`chief` / `zoom` report for the design. The solve also settles the pupil once at its starting
 point before the baseline merit is measured, so the reported "before" merit (and
 the value the first step is accepted against) belongs to the same beam as the
 design. A merit re-evaluated outside a solve — a reported minimum, an escape
@@ -392,8 +396,9 @@ high-order residual in a single term.
 **Computation and failure handling.** The grid follows `optimization.num_rays`
 and `optimization.aperture_margin` at the frozen pupil. A reference surface set
 to the image plane is rejected and falls back to the last optical surface. On a
-failed fit the term retries once with the dynamic pupil; if it still fails it
-returns the bounded wavefront penalty (`optimization.degenerate.wavefront_value`).
+failed fit the term retries once with the pupil the wavefront analysis resolves
+itself (the `wavefront` command's grid); if it still fails it returns the
+bounded wavefront penalty (`optimization.degenerate.wavefront_value`).
 
 **Weight design caution.** The contribution is `weight × value²`, so calibrate
 the weight against the *measured* residual (use `optimize --verbose`'s
@@ -809,7 +814,7 @@ per iteration). See
 ## 6. Degenerate penalties
 
 A merit term that cannot be evaluated — a pupil grid with no valid rays, or a
-wavefront fit that fails even with the dynamic pupil — returns a **bounded
+wavefront fit that fails even on the retry pupil — returns a **bounded
 penalty** instead of the legacy `1e6` sentinel (which fed `weight·1e12` into the
 merit and stalled the line search):
 
