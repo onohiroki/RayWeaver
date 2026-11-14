@@ -271,14 +271,20 @@ vignetting report fewer points than the requested `num_rays`.
 ## 8. Clear aperture (beam footprint)
 
 `--clear-aperture` re-traces the grid rays (a denser grid with
-`--clear-aperture-rays`) through every surface and records the maximum `|X|` or
-`|Y|` at each surface (`chief.BeamEnvelope`, traced with the auto-aperture
-checks skipped so a stale, undersized input diameter never truncates the
-footprint). Each `auto_aperture: true` surface's `diameter` is then **set** to
-`2 × max(|X|,|Y|) + 2 × --clear-aperture-margin-mm` (default 0.2 mm) — a plain
-assignment, so diameters both **grow and shrink** to the beam. Skipped: the
-reference surface (`chief.reference_surface`), the stop surface when
-`chief.stop_surface` is set, and every `auto_aperture: false` surface.
+`--clear-aperture-rays`) through every surface and records each surface's
+maximum **surface-local radial height** `hypot(x, y)` — the quantity the tracer
+clips on — with the auto-aperture checks skipped, so a stale, undersized input
+diameter never truncates the footprint. A ray that fails later in the system
+still contributes the surfaces it did reach (dropping the whole ray let one
+undersized aperture downstream starve the envelope of every surface before it).
+Each `auto_aperture: true` surface's `diameter` is then **set** to
+`2 × max extent + 2 × --clear-aperture-margin-mm` (default 0.2 mm) — a plain
+assignment, so diameters both **grow and shrink** to the beam; the command
+re-traces and re-sizes until the diameters settle (≤ 4 passes, 0.01 mm), because
+the grid centring follows the surviving bundle and a nearly dead field
+re-centres once its own beam passes. Skipped: the reference surface
+(`chief.reference_surface`), the stop surface when `chief.stop_surface` is set,
+and every `auto_aperture: false` surface.
 
 `--preserve-rays` keeps the user's existing `rays` section (aperture adjustment
 only, chief rays omitted from the output).

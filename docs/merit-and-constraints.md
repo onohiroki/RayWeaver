@@ -789,7 +789,7 @@ M(x) = Σ_configs w_cfg · Σ_modes w_k(s(x)) · M_{cfg,k}(x)
 | `iteration` | DLS iteration number |
 | `glass_role` | glass-role residual magnitude summed over `glass_surfaces` (all configs) |
 | `spot_diffraction` | weighted-average geometric spot RMS / Airy radius (`0.61·λ/NA`); ratio ≥ 1 means the spot exceeds the diffraction limit. Default anchors 3→1 switch geometric→wavefront |
-| `ray_validity` | minimum relaxed beam clearance over every config and field, measured against each surface's `beam_clearance` `target` when declared (else 0.5 mm) and clamped to [0,1]; 0 = a clear aperture clips (or a surface is unreached), 1 = every measured aperture meets its target. Stop and image surface excluded |
+| `ray_validity` | minimum relaxed beam clearance over every config and field, measured against each surface's `beam_clearance` `target` when declared (else 0.5 mm) and clamped to [0,1]; 0 = a clear aperture clips (or a surface is unreached), 1 = every measured aperture meets its target. Stop and image surface excluded. Also the minimum of each field's physical surviving-grid fraction (hex, the `chief`/`zoom` grid), and a config that declares no `beam_clearance` term keeps its fixed merit instead of gating (the all-clear-aperture fallback applies only when no config declares one) |
 | `phase` (escape only) | escape cycle phase: 0 = escape, 0.5 = glass, 1 = clean |
 
 `spot_diffraction`'s aggregation is `mean` (default) or `max` (worst field). The

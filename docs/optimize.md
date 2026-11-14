@@ -464,7 +464,13 @@ measured against the clearance the design asks for — each surface's
 `beam_clearance` `target` when the config declares one, otherwise 0.5 mm — and
 clamped. It is 0 while a clear aperture clips the beam (or a surface is
 unreached) and 1 when every measured aperture meets its target (the stop and
-the image surface are excluded). Because the relaxed envelope is defined where
+the image surface are excluded). Two refinements keep it honest: the value is
+also the minimum of the field's **physical** surviving-grid fraction (an
+effective-pupil-only measurement cannot report 1 while the real trace is dead),
+and a config that declares no `beam_clearance` term defines no contract — it
+keeps its fixed merit instead of gating the ramp, while the fallback to "every
+clear aperture at 0.5 mm" applies only when no config declares a term at all.
+Because the relaxed envelope is defined where
 the real trace has no rays, `ray_validity` is the metric for a
 **paraxial/analytic → real-ray homotopy**: start in a first-order/feasibility
 mode and let `anchor_from`/`anchor_to` (default 0.1/0.9) ramp the real terms in
