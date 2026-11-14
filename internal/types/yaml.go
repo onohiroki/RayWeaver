@@ -151,6 +151,7 @@ type surfaceYAML struct {
 	Coating      string         `yaml:"coating,omitempty"`
 	Role         string         `yaml:"role,omitempty"`
 	AutoAperture bool           `yaml:"auto_aperture,omitempty"`
+	MaxDiameter  float64        `yaml:"max_diameter,omitempty"`
 	MinGlassPath float64        `yaml:"min_glass_path,omitempty"`
 	MaxGlassPath float64        `yaml:"max_glass_path,omitempty"`
 	Reflect      bool           `yaml:"reflect,omitempty"`
@@ -185,6 +186,7 @@ func (s *Surface) UnmarshalYAML(node *yaml.Node) error {
 	s.Coating = raw.Coating
 	s.Role = raw.Role
 	s.AutoAperture = raw.AutoAperture
+	s.MaxDiameter = raw.MaxDiameter
 	s.MinGlassPath = raw.MinGlassPath
 	s.MaxGlassPath = raw.MaxGlassPath
 	s.Reflect = raw.Reflect
@@ -219,6 +221,7 @@ func (s Surface) MarshalYAML() (interface{}, error) {
 		Coating:      s.Coating,
 		Role:         s.Role,
 		AutoAperture: s.AutoAperture,
+		MaxDiameter:  s.MaxDiameter,
 		MinGlassPath: s.MinGlassPath,
 		MaxGlassPath: s.MaxGlassPath,
 		Reflect:      s.Reflect,

@@ -21,7 +21,7 @@ func TestWarnFieldThroughput(t *testing.T) {
 	// field's image height, so that field's whole grid misses it while the
 	// on-axis field survives.
 	surfaces := []types.Surface{
-		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 6.0, Material: types.Material{Key: "N-BK7"}, Diameter: 50.0, Role: "stop"},
+		{ID: 1, Type: types.Sphere, Curvature: 0.02, Thickness: 6.0, Material: types.Material{Key: "N-BK7"}, Diameter: 8.0, Role: "stop"},
 		{ID: 2, Type: types.Sphere, Curvature: -0.02, Thickness: 42.0, Material: types.Material{}, Diameter: 50.0},
 		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 3.0},
 	}

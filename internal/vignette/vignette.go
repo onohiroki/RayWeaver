@@ -145,6 +145,9 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 				continue
 			}
 			newD := 2*e + 2*opts.MarginMM
+			if work[i].MaxDiameter > 0 && newD > work[i].MaxDiameter {
+				newD = work[i].MaxDiameter
+			}
 			if math.Abs(newD-work[i].Diameter) > 1e-6 {
 				changed = true
 			}
@@ -169,13 +172,16 @@ func Run(surfaces []types.Surface, opts Options, gc *glass.Catalog) *Result {
 }
 
 // analyze computes each field's report (vignetting, pupil-plane envelope,
-// marginal rays) and the per-surface max radial extent of the surviving rays.
+// marginal rays) and the per-surface max radial extent of the full beam used
+// for diameter sizing.
 //
-// The measurement re-traces every grid point (including ones the chief grid
+// The report re-traces every grid point (including ones the chief grid
 // clipped) with the aperture check skipped on auto_aperture surfaces, so the
 // surfaces being sized never clip their own measurement; vignetting is driven
 // only by the glass-path (edge-thickness) check, the fixed (auto_aperture:
-// false) surface apertures, and the crossing-Z bound.
+// false) surface apertures, and the crossing-Z bound. The sizing envelope is
+// chief.BeamEnvelope, which keeps the reached prefix of a ray that fails later
+// and measures the surface-local radius (see the comment in analyze).
 func analyze(work []types.Surface, results []chief.Result, opts Options, wavelengths []float64, gc *glass.Catalog, pol types.JonesVector) ([]FieldResult, map[int]float64) {
 	path := dls.BuildPath(work)
 	engine := ray.NewEngine(gc, nil)
@@ -215,6 +221,32 @@ func analyze(work []types.Surface, results []chief.Result, opts Options, wavelen
 	}
 	all := traceAt(opts.Wavelength)
 
+	// Envelope (for sizing): the full beam of every field, measured with the
+	// auto-aperture check disabled and with the surfaces the ray did reach
+	// still counted after it fails further on, in the surface-local frame the
+	// tracer clips on. chief.BeamEnvelope is that measurement — the same one
+	// `chief --clear-aperture` and the optimizer's final sizing use — so the
+	// three tools settle the same diameters. The local copy this replaced took
+	// max(|X|,|Y|) in the global frame (up to √2 low on an off-axis footprint)
+	// and dropped a ray at its first failure, so one undersized aperture
+	// downstream starved the envelope of every surface before it and the wide
+	// field never drove the sizes it needed.
+	extents := make(map[int]float64)
+	addEnvelope := func(wl float64) {
+		for id, e := range chief.BeamEnvelope(results, engine, work, path, wl, pol) {
+			if e > extents[id] {
+				extents[id] = e
+			}
+		}
+	}
+	addEnvelope(opts.Wavelength)
+	for _, wl := range wavelengths {
+		if math.Abs(wl-opts.Wavelength) <= 1e-15 {
+			continue
+		}
+		addEnvelope(wl)
+	}
+
 	// Vignetting comparison frames: an off-axis field's rays must fall within
 	// field 0's marginal-ray envelope, measured in the plane perpendicular to
 	// the field's own chief ray (through the entrance pupil), rather than in a
@@ -229,30 +261,9 @@ func analyze(work []types.Surface, results []chief.Result, opts Options, wavelen
 	// Diameter (extent) measurement uses the FULL beam of every field, before
 	// the bounding cut, so a narrowed off-axis bundle never shrinks the lens: an
 	// auto_aperture surface is sized to cover the union envelope of all fields'
-	// marginal rays. Only then are the per-field marginal rays re-derived
-	// against those diameters (via the bounding cut below). The extent is also
-	// taken over every sizing wavelength, so wide F/C/g beams do not get
-	// clipped by an aperture sized at d alone.
-	extents := make(map[int]float64)
-	addExtents := func(traces [][]tracedRay) {
-		for fi := range traces {
-			for _, t := range traces[fi] {
-				for j, p := range t.pos {
-					e := math.Max(math.Abs(p.X), math.Abs(p.Y))
-					if e > extents[t.ids[j]] {
-						extents[t.ids[j]] = e
-					}
-				}
-			}
-		}
-	}
-	addExtents(all)
-	for _, wl := range wavelengths {
-		if math.Abs(wl-opts.Wavelength) <= 1e-15 {
-			continue
-		}
-		addExtents(traceAt(wl))
-	}
+	// marginal rays (see the extents block above). Only then are the per-field
+	// marginal rays re-derived against those diameters (via the bounding cut
+	// below).
 
 	// Crossing-plane bounding: an off-axis field's rays must fall within field
 	// 0's marginal-ray envelope in the field's chief-ray frame, otherwise they
@@ -288,6 +299,16 @@ func analyze(work []types.Surface, results []chief.Result, opts Options, wavelen
 				GridTotal:     total,
 				GridSurviving: kept,
 			},
+		}
+		// Also report the full prescribed-pupil survival (hex, no ellipse): the
+		// number `zoom` / `chief` and the optimizer's vignetting_factor
+		// constraint use, so a vignette report can be compared with them
+		// directly. The Vignetting column above is this command's stricter
+		// glass-path / fixed-aperture / crossing-frame fraction.
+		if r := results[fi]; r.EntrancePupil != nil {
+			fr.PrescribedVignetting = dls.PrescribedSurvival(gc, work, opts.StopSurface,
+				r.EntrancePupil.Center.Z, r.FieldAngle, []float64{0, 1},
+				opts.Wavelength, opts.NumRays, 0, 0, 0)
 		}
 		if results[fi].EntrancePupil != nil {
 			fr.EntrancePupilZ = results[fi].EntrancePupil.Center.Z

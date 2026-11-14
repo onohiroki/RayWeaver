@@ -804,7 +804,7 @@ func survivingFraction(points []dls.IPoint) float64 {
 // field (nValid=0) returns threshold; a fully alive field returns 0. The
 // threshold defaults to 0.3 (30% of the grid must survive) when target is 0.
 func (o *Optimizer) evaluateFieldAliveTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
-	points := o.gridForTerm(cache, gc, surfaces, cfg, term, p)
+	points := o.prescribedGridForTerm(cache, gc, surfaces, cfg, term, p)
 	threshold := fieldAliveThreshold(term.target)
 	// A grid that could not be traced at all (no points) is fully dead, which
 	// survivingFraction reports as 0 — the same deficit as a traced-but-empty
@@ -831,7 +831,7 @@ const pupilFillCap = 999.0
 // residuals, which shrink as the pupil is clipped. It reuses the same cached
 // grid trace as the other grid kinds, so it costs no extra tracing.
 func (o *Optimizer) evaluatePupilFillTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) float64 {
-	return pupilFillFromPoints(o.gridForTerm(cache, gc, surfaces, cfg, term, p))
+	return pupilFillFromPoints(o.prescribedGridForTerm(cache, gc, surfaces, cfg, term, p))
 }
 
 // pupilFillFromPoints returns the pupil_fill value of a traced pupil grid: the

@@ -4,6 +4,7 @@ import (
 	"math"
 
 	"github.com/hiroki/rayweaver/internal/chief"
+	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/ray"
@@ -26,6 +27,19 @@ func (o *Optimizer) SetApertureMarginMM(mm float64) {
 	if mm > 0 {
 		o.apertureMarginMM = mm
 	}
+}
+
+// autoApertureDiameter returns the diameter an auto_aperture surface is sized
+// to: twice the measured beam extent plus the physical clearance, capped by the
+// surface's max_diameter when one is set. A bound surface is the deliberate
+// vignetting degree of freedom (a mechanical envelope); the run reports the cap
+// when it binds (WarnBeamClipping).
+func autoApertureDiameter(s types.Surface, extent, marginMM float64) float64 {
+	d := 2 * (extent + marginMM)
+	if s.MaxDiameter > 0 && d > s.MaxDiameter {
+		return s.MaxDiameter
+	}
+	return d
 }
 
 // sizeAutoApertures measures the true geometric beam extent of every field
@@ -110,7 +124,51 @@ func (o *Optimizer) sizeAutoApertures(cfg *config, surfaces []types.Surface, gc 
 	for id, e := range extents {
 		for i := range surfaces {
 			if surfaces[i].ID == id && surfaces[i].AutoAperture {
-				surfaces[i].Diameter = 2 * (e + o.apertureMarginMM)
+				surfaces[i].Diameter = autoApertureDiameter(surfaces[i], e, o.apertureMarginMM)
+			}
+		}
+	}
+}
+
+// WarnThinEdges reports every glass element whose sized clear aperture leaves
+// less edge thickness than its min_glass_path.
+//
+// The sizing grows an auto_aperture diameter to the beam (max_diameter only
+// caps it), so a strongly curved element can end up with a zero or negative
+// edge and the runaway is silent unless the document declares an edge_thickness
+// constraint. The measurement is the constraint's own (center thickness + back
+// sagitta − front sagitta at the rim), so the warning and a declared constraint
+// agree. Warning only; the diameters are untouched.
+func (o *Optimizer) WarnThinEdges(x []float64, apertures map[string]map[int]float64) {
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil, pupils[cfg.id])
+		if apMap := apertures[cfg.id]; apMap != nil {
+			for i := range surfaces {
+				if d, ok := apMap[surfaces[i].ID]; ok {
+					surfaces[i].Diameter = d
+				}
+			}
+		}
+		for i := range surfaces {
+			s := &surfaces[i]
+			if s.MinGlassPath <= 0 {
+				continue
+			}
+			op := types.ConstraintOperand{
+				Kind:    types.ConstraintInequalityLower,
+				Measure: types.MeasureEdgeThickness,
+				Surface: s.ID,
+				Active:  true,
+			}
+			edge := constraint.Evaluate(op, surfaces, 0, gc, 0, 1.0, cfg.stopSurface, 0, 0)
+			if edge < s.MinGlassPath {
+				Warnf("warning: config %q surface %d: the sized clear aperture %.4f mm leaves %.4f mm edge thickness, below min_glass_path %.4f mm — reduce max_diameter, raise the element thickness, or add an edge_thickness constraint",
+					cfg.id, s.ID, s.Diameter, edge, s.MinGlassPath)
 			}
 		}
 	}
@@ -152,6 +210,27 @@ func (o *Optimizer) FinalApertures(x []float64) map[string]map[int]float64 {
 			}
 		}
 		result[cfg.id] = cfgResult
+	}
+
+	// One physical element has one clear aperture: a zoom's positions share the
+	// glass, so each auto_aperture surface gets the largest diameter any
+	// position needs. Sizing the positions independently wrote a document in
+	// which the same element had three different clear apertures and only the
+	// position it was sized for was fully delivered.
+	physical := make(map[int]float64)
+	for _, m := range result {
+		for id, d := range m {
+			if d > physical[id] {
+				physical[id] = d
+			}
+		}
+	}
+	for _, m := range result {
+		for id := range m {
+			if d := physical[id]; d > 0 {
+				m[id] = d
+			}
+		}
 	}
 	return result
 }
@@ -208,7 +287,7 @@ func (o *Optimizer) finalAutoApertures(cfg *config, surfaces []types.Surface, gc
 			continue
 		}
 		if e := env[surfaces[i].ID]; e > 0 {
-			surfaces[i].Diameter = 2 * (e + o.apertureMarginMM)
+			surfaces[i].Diameter = autoApertureDiameter(surfaces[i], e, o.apertureMarginMM)
 		}
 	}
 }

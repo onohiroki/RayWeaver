@@ -565,15 +565,15 @@ func (o *Optimizer) fieldClearanceValidity(cfg *config, surfaces []types.Surface
 		}
 	}
 	// Physical gate: the relaxed envelope can be clear while the real trace is
-	// still dead (the virtual hit is not a delivered ray). The surviving-grid
-	// fraction is the delivered-pupil gate, so a schedule cannot leave the
-	// feasibility mode for a field the physical trace cannot deliver. Use the
-	// hex pattern the chief / zoom pass uses, so the gate and `zoom` measure
-	// the same pupil; the optical merit keeps its polar grid.
-	points, _ := dls.TraceFieldGridWithType(gc, surfaces, cfg.stopSurface, pupilZ,
-		angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation,
-		o.gridWorkers(), p.dia, cfg.fields[field].Vignetting, types.GridHex)
-	if phys := survivingFraction(points); phys < validity {
+	// still dead (the virtual hit is not a delivered ray). The surviving
+	// fraction of the full prescribed pupil is the delivered-pupil gate, so a
+	// schedule cannot leave the feasibility mode for a field the physical
+	// trace cannot deliver. It is dls.PrescribedSurvival — the hex, no-ellipse,
+	// margin-1.0 grid `zoom` reports — so the gate and the report agree.
+	phys := dls.PrescribedSurvival(gc, surfaces, cfg.stopSurface, pupilZ,
+		angle, []float64{0, 1}, wl, o.numRays, o.gridRotation,
+		o.gridWorkers(), p.dia)
+	if phys < validity {
 		validity = phys
 	}
 	return validity, measured

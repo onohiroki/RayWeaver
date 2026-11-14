@@ -293,23 +293,14 @@ func evaluateVignettingFactor(surfaces []types.Surface, stopSurface int, pupilZ 
 	// declared fields[].vignetting, so this measures the physical vignetting
 	// (aperture / edge-thickness clipping) of the full prescribed pupil.
 	//
-	// The grid must be the one `chief` / `zoom` report — the stop's paraxial
-	// entrance pupil (or the prescribed EPD) on the hex lattice. A polar grid
-	// under-samples the pupil rim, and the empty stop argument fell back to the
-	// stop-free beam-aware cap: on the wide field of the zoom study this read
-	// 0.34 where the prescribed (hex, stop-pupil) survival was 0.18, so the
-	// constraint and the reported vignetting disagreed by a factor of two.
-	points, _ := dls.TraceFieldGridWithType(gc, surfaces, stopSurface, pupilZ, fieldAngle, []float64{0, 1}, wavelength, apertureMargin, numRays, 0, 1, epd, nil, types.GridHex)
-	if len(points) == 0 {
-		return 0
-	}
-	passCount := 0
-	for _, p := range points {
-		if p.OK {
-			passCount++
-		}
-	}
-	return float64(passCount) / float64(len(points))
+	// The grid and the radius are dls.PrescribedSurvival's: the hex lattice
+	// chief / zoom report, at margin 1.0. A polar grid under-samples the pupil
+	// rim, and an optimizer aperture_margin > 1.0 inflated the denominator so
+	// the constraint read lower than the delivered design (the wide field of
+	// the zoom study read 0.34 on a polar/full-pupil grid where the prescribed
+	// hex survival was 0.18).
+	_ = apertureMargin
+	return dls.PrescribedSurvival(gc, surfaces, stopSurface, pupilZ, fieldAngle, []float64{0, 1}, wavelength, numRays, 0, 1, epd)
 }
 
 func sagitta(curvature, semiDiam float64) float64 {

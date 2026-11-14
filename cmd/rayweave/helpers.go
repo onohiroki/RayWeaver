@@ -677,19 +677,77 @@ func freezeFieldReport(input *types.Input, model any) {
 	if len(rows) == 0 {
 		return
 	}
-	if input.Optimization != nil {
-		input.Optimization.FieldResolution = rows
-	}
+	writeFieldResolution(input, rows)
 	for _, r := range rows {
 		if r.Resolved {
 			continue
 		}
-		label := ""
-		if r.Config != "" {
-			label = fmt.Sprintf("config %q: ", r.Config)
+		warnSolvedFieldResolution(r, false)
+	}
+}
+
+// writeFieldResolution stores the resolution rows in the output document.
+func writeFieldResolution(input *types.Input, rows []types.FieldResolution) {
+	if input.Optimization != nil {
+		input.Optimization.FieldResolution = rows
+	}
+}
+
+// fieldResolutionKey identifies one config field across the start and end
+// reports.
+func fieldResolutionKey(r types.FieldResolution) string {
+	return fmt.Sprintf("%s|%d", r.Config, r.FieldIndex)
+}
+
+// warnFieldResolution prints the warning for an image_height field the traced
+// geometry at this point cannot form. final selects the end-of-run wording: the
+// start report explains which field the run will evaluate, the final one
+// reports that the solved design no longer delivers the frozen field.
+func warnSolvedFieldResolution(r types.FieldResolution, final bool) {
+	label := ""
+	if r.Config != "" {
+		label = fmt.Sprintf("config %q: ", r.Config)
+	}
+	if final {
+		errOut("Warning: %sfield %d declares image_height %g mm, but at the solved geometry the frozen %g deg delivers %g mm — the merit measured a field the delivered document does not form",
+			label, r.FieldIndex, r.Requested, r.AngleDeg, r.Reached)
+		return
+	}
+	errOut("Warning: %sfield %d declares image_height %g mm, which this system cannot form — the closest reachable field is %g mm at %g deg, and that angle is what this run evaluates for it",
+		label, r.FieldIndex, r.Requested, r.Reached, r.AngleDeg)
+}
+
+// verifyFieldReport re-measures the image-height fields at the solved state
+// and rewrites optimization.field_resolution with the delivered values. The
+// frozen angle is kept (the run measured it), but the delivered height and the
+// resolved flag must describe the design being written: a field can stop
+// delivering its height as the variables move, and the start-geometry row then
+// claims a field the document no longer forms. Fields already reported as
+// unresolvable at the start are not repeated.
+func verifyFieldReport(input *types.Input, model any, x []float64, startRows []types.FieldResolution) {
+	if v, ok := model.(dls.FieldVerifier); ok {
+		v.VerifyFieldResolutions(x)
+	}
+	fr, ok := model.(dls.FieldResolutionReporter)
+	if !ok {
+		return
+	}
+	rows := fr.FieldResolutionDiagnostics()
+	if len(rows) == 0 {
+		return
+	}
+	writeFieldResolution(input, rows)
+	seen := make(map[string]bool, len(startRows))
+	for _, r := range startRows {
+		if !r.Resolved {
+			seen[fieldResolutionKey(r)] = true
 		}
-		errOut("Warning: %sfield %d declares image_height %g mm, which this system cannot form — the closest reachable field is %g mm at %g deg, and that angle is what this run evaluates for it",
-			label, r.FieldIndex, r.Requested, r.Reached, r.AngleDeg)
+	}
+	for _, r := range rows {
+		if r.Resolved || r.Requested == 0 || seen[fieldResolutionKey(r)] {
+			continue
+		}
+		warnSolvedFieldResolution(r, true)
 	}
 }
 

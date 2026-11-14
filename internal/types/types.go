@@ -176,9 +176,14 @@ type Surface struct {
 	Coating      string         `yaml:"coating,omitempty"`
 	Role         string         `yaml:"role,omitempty"`
 	AutoAperture bool           `yaml:"auto_aperture,omitempty"`
-	MinGlassPath float64        `yaml:"min_glass_path,omitempty"`
-	MaxGlassPath float64        `yaml:"max_glass_path,omitempty"`
-	Reflect      bool           `yaml:"reflect,omitempty"`
+	// MaxDiameter caps an auto_aperture surface's sized clear aperture (mm).
+	// The beam beyond it is vignetted — the deliberate-clipping degree of
+	// freedom a mechanical envelope gives — and the run reports the cap when it
+	// binds. Ignored on a fixed surface.
+	MaxDiameter  float64 `yaml:"max_diameter,omitempty"`
+	MinGlassPath float64 `yaml:"min_glass_path,omitempty"`
+	MaxGlassPath float64 `yaml:"max_glass_path,omitempty"`
+	Reflect      bool    `yaml:"reflect,omitempty"`
 
 	PhaseCoefficients []float64 `yaml:"phase_coefficients,omitempty"`
 	DesignWavelength  float64   `yaml:"design_wavelength,omitempty"`
@@ -2296,17 +2301,23 @@ type PlotConfig struct {
 // plane; MarginalYLower / MarginalYUpper are this field's marginal-ray heights
 // there.
 type VignettingField struct {
-	FieldIndex     int     `yaml:"field_index"`
-	AngleDeg       float64 `yaml:"angle_deg"`
-	Vignetting     float64 `yaml:"vignetting"`
-	GridTotal      int     `yaml:"grid_total"`
-	GridSurviving  int     `yaml:"grid_surviving"`
-	EntrancePupilZ float64 `yaml:"entrance_pupil_z,omitempty"`
-	ExitPupilZ     float64 `yaml:"exit_pupil_z,omitempty"`
-	BoundLower     float64 `yaml:"bound_lower,omitempty"`
-	BoundUpper     float64 `yaml:"bound_upper,omitempty"`
-	MarginalYLower float64 `yaml:"marginal_y_lower,omitempty"`
-	MarginalYUpper float64 `yaml:"marginal_y_upper,omitempty"`
+	FieldIndex    int     `yaml:"field_index"`
+	AngleDeg      float64 `yaml:"angle_deg"`
+	Vignetting    float64 `yaml:"vignetting"`
+	GridTotal     int     `yaml:"grid_total"`
+	GridSurviving int     `yaml:"grid_surviving"`
+	// PrescribedVignetting is the field's survival on the full prescribed
+	// pupil (hex, no declared ellipse) — the number `zoom` / `chief` and the
+	// optimizer's vignetting_factor constraint report. Vignetting above is the
+	// stricter glass-path/fixed-aperture/crossing-frame fraction this command
+	// reports; both are written so the two definitions can be compared.
+	PrescribedVignetting float64 `yaml:"prescribed_vignetting,omitempty"`
+	EntrancePupilZ       float64 `yaml:"entrance_pupil_z,omitempty"`
+	ExitPupilZ           float64 `yaml:"exit_pupil_z,omitempty"`
+	BoundLower           float64 `yaml:"bound_lower,omitempty"`
+	BoundUpper           float64 `yaml:"bound_upper,omitempty"`
+	MarginalYLower       float64 `yaml:"marginal_y_lower,omitempty"`
+	MarginalYUpper       float64 `yaml:"marginal_y_upper,omitempty"`
 }
 
 // DiameterState records one surface's diameter before and after a `vignette`

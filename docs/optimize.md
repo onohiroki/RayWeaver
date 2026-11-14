@@ -755,7 +755,15 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   `resolved: false` means the run optimised the closest reachable field, not the
   declared one, so a merit read off the document has to be read with that in
   mind. `rayweave zoom < doc` is the honest cross-check: it measures the
-  declared fields and exits 1 on the same one.
+  declared fields and exits 1 on the same one. The rows are **re-measured at the
+  solved geometry** before the document is written (the frozen angle is kept,
+  but `delivered_image_height` / `resolved` describe the design being shipped):
+  a run whose variables moved the design away from the frozen angle used to
+  report the start-geometry height as resolved, while the same document traced
+  26 mm and 0/74 rays there; `optimize` now prints a final `Warning: … the frozen
+  … deg delivers … mm — the merit measured a field the delivered document does
+  not form` for a field the solve broke (a field already unresolvable at the
+  start is reported once, before the solve).
 - **A stalled solve says so.** The summary always reports
   `Accepted: N` — how many iterations actually reduced the merit — so a run that
   burned its whole budget without moving is visible at a glance. When the solve
@@ -768,31 +776,69 @@ rayweave query --jsonl --where 'event=="breakdown"' \
 - **A dying field is reported.** The merit is evaluated over the rays that
   survive, so a merit without a liveliness guard (a bare `spot_rms`) can be
   lowered by clipping a field's pupil away. At the end of a solve `optimize`
-  measures each config field's surviving-grid fraction and warns (stderr) about
-  every field below 0.5. Warning only — the merit and the solve are untouched;
-  the message is suppressed when the config already carries a `field_alive` /
+  measures each config field's **full prescribed-pupil** survival
+  (`dls.PrescribedSurvival`: hex lattice, no declared vignetting ellipse, margin
+  1.0 — the same number `zoom` / `chief` report) and warns (stderr) about every
+  field below 0.5. Warning only — the merit and the solve are untouched; the
+  message is suppressed when the config already carries a `field_alive` /
   `pupil_fill` / `beam_clearance` term or a `vignetting_factor` constraint. See
   [merit-and-constraints.md §3.2](merit-and-constraints.md).
+- **One vig number.** `field_alive` / `pupil_fill` are measured on the same full
+  prescribed-pupil grid as `vignetting_factor`, the `ray_validity` gate and
+  `zoom`: hex, margin 1.0, **no** declared `fields[].vignetting` ellipse. The
+  ellipse is an input mask on the optical merit (spot / wavefront / OPD are
+  traced on the vignetted pupil), not a second definition of vig. The old
+  behaviour measured `field_alive` on the ellipsed grid and with
+  `optimization.aperture_margin` applied, so a field that declared 0.8 read 1.0
+  there and 0.8 in `zoom`, and a launch margin of 1.2 made the constraint read
+  lower than the delivered design.
 - **A clipping clear aperture is reported.** The same incentive has a second
-  cause: a **fixed** (`auto_aperture: false`) diameter nothing sizes to the
-  beam clips the merit grid, and the optimizer would otherwise exploit that
+  cause: a **fixed** (`auto_aperture: false`) diameter nothing sizes to the beam
+  clips the merit grid, and the optimizer would otherwise exploit that
   silently. At the end of a solve `optimize` measures, per config field and per
-  sizing wavelength, the prescribed (vignetting-masked) beam envelope on a
-  dense grid with aperture checks disabled — the measurement the
-  `beam_clearance` constraint and `chief --clear-aperture` use, at
-  `optimization.aperture_margin` 1.0 so the grid's deliberate overfill is not
-  reported — and warns (stderr) for every surface that is left in deficit,
-  worst first, up to eight entries with a `(+N more)` tail. The stop is exempt
-  (it defines the beam) and a config that already constrains
-  `beam_clearance` / `beam_diameter` or carries a `beam_clearance` merit term
-  is left alone (the constraint/term reporting names the violation there).
-  Warning only; the merit and the diameters are
-  untouched. This is what makes the "raise every diameter during optimization
-  and trim afterwards" workaround unnecessary: the run says which surface is
-  clipping instead of leaving it to be inferred from a field that lost its
-  rays.
+  sizing wavelength, the prescribed beam envelope on a dense grid with the
+  auto-aperture check disabled — the measurement the `beam_clearance` constraint
+  and `chief --clear-aperture` use, at `optimization.aperture_margin` 1.0 so the
+  grid's deliberate overfill is not reported — and warns (stderr) for every
+  **fixed** surface left in deficit, worst first, up to eight entries with a
+  `(+N more)` tail. The stop is exempt (it defines the beam), and so is the
+  reference/image surface (a wide field is supposed to spread there) and the
+  implicit stop-free aperture (the tightest fixed surface is the dynamic-pupil
+  cap). Size-driven `auto_aperture` surfaces are skipped — their diameter is the
+  sizing's own output, and a 128-ray sampling difference is not a prescription
+  to raise it; a surface whose `max_diameter` cap binds **is** reported, because
+  the cap is a deliberate limiter. A config that already constrains
+  `beam_clearance` / `beam_diameter` or carries a `beam_clearance` merit term is
+  left alone (the constraint/term reporting names the violation there). Warning
+  only; the merit and the diameters are untouched.
+- **Aperture targets that do nothing are reported.** An `auto_aperture` surface's
+  diameter is re-sized from the beam every evaluation and replaced by the chief
+  envelope in the output, so a `diameter` variable (or `diameter` target) on it
+  is a dead variable (zero Jacobian column), and a `beam_clearance` /
+  `beam_diameter` term or constraint on it is tautological (the diameter *is*
+  the beam plus the margin). `optimize` / `escape` / `pso` warn once per
+  (config, surface) when the input contains such a target.
+- **Too little glass at the rim is reported.** The sizing grows an
+  `auto_aperture` diameter to the beam with no edge-thickness guard of its own,
+  so a strongly curved element can end up with less edge than its
+  `min_glass_path` (or a negative edge) unless the document declares an
+  `edge_thickness` constraint. At the end of a solve `optimize` measures every
+  surface that carries `min_glass_path` with the constraint's own formula
+  (centre thickness + back sagitta − front sagitta) at the settled diameter and
+  warns when it is below the minimum.
+- **A zoom shares one clear aperture per element.** `FinalApertures` sizes each
+  position, then takes the **maximum** diameter per surface ID across the
+  configs and writes it to every position. One physical element has one clear
+  aperture; sizing the positions independently wrote a document in which the
+  same element had three different diameters and only the position it was sized
+  for was fully delivered. `optimization.aperture_margin_mm` still adds the
+  physical clearance on top of each position's beam.
 - `optimization.aperture_margin` is clamped to ≥ 1.0; smaller values make the
-  pupil grid smaller than the aperture and stall DLS.
+  pupil grid smaller than the aperture and stall DLS. It inflates the **launch**
+  (and therefore the per-evaluation auto-aperture sizing, which is deliberately
+  conservative); it does **not** enter the vig denominator — `vignetting_factor`,
+  `ray_validity`, `field_alive` / `pupil_fill` and the throughput check all
+  measure at margin 1.0, the physical pupil.
 - `optimization.aperture_margin_mm` is the physical clearance (mm) added to
   every sized `auto_aperture` diameter (default `0.4`). The auto-aperture sizing
   envelopes **every wavelength any merit term evaluates** (`apertureSizingWavelengths`:
@@ -802,21 +848,21 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   f/4 six-element that was 0.12 mm at 23°, enough for the image plane to clip
   the off-axis bundle and eat into the prescribed per-field vignetting. The
   clearance covers what remains of that difference, which is why the default is
-  0.4 rather than 0.2. The sizing also carries each field's `vignetting` ellipse
-  (`fieldDefsFromItems`), so it measures the same (vignetted) pupil the merit
-  grid traces. The per-evaluation sizing measures with aperture and glass-path
-  checks disabled, so it envelopes the *unclipped* bundle — the 8 pupil-edge
-  rays it traces bound the merit's polar grid, whose spokes land on the same
-  azimuths and whose outermost ring sits inside the launched radius (verified
-  against the dense hex envelope at 8, 16 and 64 azimuths) — and the
-  end-of-solve pass replaces the diameters with the `chief --clear-aperture`
-  hex envelope. That envelope measures the **surface-local** radial height (the
-  quantity the tracer clips on) and accumulates the reached prefix of a ray that
-  fails further on: the old global `max(|X|,|Y|)` under-read an off-axis
-  footprint by up to √2, and dropping a ray at its first failure let one
-  undersized aperture downstream starve every surface before it, so a field
-  could keep clipping an aperture that had just been "sized to the beam"
-  (measured: 39/74 rays still clipped at one surface after five sizing passes).
+  0.4 rather than 0.2. The **final** sizing carries each field's `vignetting`
+  ellipse (`fieldDefsFromItems`) and keeps the fixed apertures, stop and glass
+  path closed; it measures the **surface-local** radial height (the quantity the
+  tracer clips on) and accumulates the reached prefix of a ray that fails
+  further on. That is `chief.BeamEnvelope`, so `vignette`, `chief
+  --clear-aperture` and `optimize` settle the same diameters (an earlier local
+  copy in `vignette` took a global `max(|X|,|Y|)` and dropped a ray at its first
+  failure: on the zoom study it kept a wide field's surfaces at 9.7/21.0 mm
+  where 20.3/45.0 mm were needed, and reported 0.176 prescribed survival where
+  0.297 was reachable). The **per-evaluation** sizing keeps the cheaper 8-ray
+  `dls.TraceFieldExtents8Rays`, which skips the apertures and the glass path so
+  it is a conservative, unclipped envelope: an undersized auto aperture would
+  clip the merit grid and kill a field. A surface may cap the sizing with
+  `max_diameter: D`; the beam beyond the cap is vignetted by design and the
+  value is written back.
 - `optimization.cam_solve: true` keeps the zoom linkage inside the solve: every
   merit evaluation re-solves the document's `cam:` airspaces to their per-position
   EFL targets before it measures anything, so a DLS step cannot trade an

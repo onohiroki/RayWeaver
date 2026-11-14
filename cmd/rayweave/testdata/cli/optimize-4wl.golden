@@ -7,8 +7,6 @@ stderr:
   Before:      5.825403e+00
   After:       2.541702e+00
   Improvement: 56.37%
-rayweave[optimize]: warning: the prescribed beam leaves the clear aperture of a surface, so the merit grid loses those rays and a spot-only residual is lowered by the clipping (the stop is exempt):
-rayweave[optimize]:   config "visible" field 1 (10.00 deg): surface 2 has diameter 20.0000 mm, the beam needs 20.2178 mm (over by 0.1089 mm) — raise the diameter, enable auto_aperture on it, or add a beam_clearance constraint
 probe -r opt_results.status: max_iterations
 probe -r opt_results.back_focus.method: white
 probe -r opt_results.wavelength_summary[1].weight: 0.2857142857142857

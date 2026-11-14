@@ -452,16 +452,18 @@ unbounded `pupil_fill` kind: a partially clipped pupil shrinks the survivor-only
 spot/OPD residuals, so `pupil_fill` (a non-zero weight) keeps the solver from
 buying a smaller residual by killing a field's periphery.
 
-The ratio is measured on the field's **prescribed** grid — the vignetting-masked
-per-field grid the merit's `field_alive` / `pupil_fill` terms trace — so a design
-that delivers the vignetting it prescribes has `ratio ~ 1` and the value reads as
-"fraction of the prescribed pupil this design actually delivers". The 0.3 default
-(and the 0.1 some inputs set) therefore labels a design that loses most of its
-prescribed pupil feasible: the delivered-design checks allow only `+-0.03` around
-the prescribed fill, i.e. `ratio >= ~0.94`. Use a value near **0.9** unless the
-lens is deliberately over-vignetted. Measured on the repository's 6-element
-double-Gauss benchmark, raising 0.8 -> 0.9 reclassified only over-clipped points
-and lost no gate-passing design.
+The ratio is measured on the field's **prescribed** grid — `dls.PrescribedSurvival`:
+the hex lattice `zoom` / `chief` report, the full pupil (no declared
+`fields[].vignetting` ellipse) and margin 1.0, the same number the merit's
+`field_alive` / `pupil_fill` terms and the `vignetting_factor` constraint use —
+so a design that delivers its declared pupil has `ratio ~ 1` and the value reads
+as "fraction of the prescribed pupil this design actually delivers". The 0.3
+default (and the 0.1 some inputs set) therefore labels a design that loses most
+of its prescribed pupil feasible: the delivered-design checks allow only
+`+-0.03` around the prescribed fill, i.e. `ratio >= ~0.94`. Use a value near
+**0.9** unless the lens is deliberately over-vignetted. Measured on the
+repository's 6-element double-Gauss benchmark, raising 0.8 -> 0.9 reclassified
+only over-clipped points and lost no gate-passing design.
 
 Validation happens **post-DLS only** — after the clean DLS converges, the point's
 throughput is measured on the **optimizer's own grids**: the same launch

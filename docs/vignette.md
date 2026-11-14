@@ -76,6 +76,9 @@ configs:
 ```
 
 - `auto_aperture: true` surfaces are re-sized to the beam envelope each pass.
+- `auto_aperture: true` surfaces may carry `max_diameter: D`: the sizing stops
+  at `D` and the beam beyond it is vignetted (the deliberate mechanical-envelope
+  case). A capped surface is reported like any other diameter change.
 - `auto_aperture: false` surfaces are fixed limiters; rays exceeding their
   clear aperture are vignetted. `chief.stop_surface` is never an
   `auto_aperture` surface and is also excluded from re-sizing (a physical stop
@@ -90,13 +93,23 @@ configs:
 Each pass re-traces every field's pupil grid against the **current** diameters
 and takes two measurements:
 
-1. **Envelope (for sizing)** — the full beam of every field, measured *before*
-   the vignetting cut, so a vignetted off-axis bundle never shrinks the lens.
-   Each `auto_aperture: true` surface is re-sized to `2 × max extent + 2 ×
-   margin-mm` over the union of all fields' envelopes.
+1. **Envelope (for sizing)** — the full beam of every field, measured with the
+   auto-aperture check disabled so the surfaces being sized never clip their own
+   measurement (fixed apertures, the stop and the glass path stay closed: a ray
+   blocked there is not part of the delivered beam further on). The envelope is
+   `chief.BeamEnvelope`, the same **surface-local** measurement (the quantity
+   the tracer clips on) that `chief --clear-aperture` and the optimizer's final
+   sizing use, and a ray that fails later still contributes the surfaces it did
+   reach. Each `auto_aperture: true` surface is re-sized to `2 × max extent +
+   2 × margin-mm` over the union of all fields' envelopes, capped by its
+   `max_diameter` when one is set.
 2. **Vignetting (for the report)** — the surviving fraction of each field's
    grid. Rays are dropped when they fail the glass-path (edge-thickness) check,
-   exceed a fixed-surface aperture, or fall outside the bounding envelope.
+   exceed a fixed-surface aperture, or fall outside the bounding envelope. In
+   addition `prescribed_vignetting` reports the full prescribed-pupil survival
+   (hex lattice, no declared ellipse) — the number `zoom`, `chief` and the
+   optimizer's `vignetting_factor` constraint use — so the two definitions can
+   be compared.
 
 The off-axis comparison frame is the plane perpendicular to **each field's own
 chief ray** through its entrance pupil, not a plane perpendicular to the optical
@@ -146,7 +159,8 @@ Per-field fields:
 
 | Field | Meaning |
 |---|---|
-| `vignetting` | surviving fraction of the pupil grid (1.0 = no vignetting) |
+| `vignetting` | surviving fraction of the pupil grid (1.0 = no vignetting), including the glass-path, fixed-aperture and crossing-frame cuts |
+| `prescribed_vignetting` | survival of the full prescribed pupil (hex, no declared ellipse): the `zoom` / `chief` / `vignetting_factor` definition |
 | `grid_total` / `grid_surviving` | grid points before / after the cuts |
 | `entrance_pupil_z` | dynamic entrance pupil Z (absent when ill-conditioned) |
 | `exit_pupil_z` | exit pupil Z from the image-side chief-ray crossing (omitted when unreliable) |
@@ -182,7 +196,8 @@ See `samples/vignette-demo.bash` (6-element lens, dynamic pupil — no stop) and
 
 - Use `chief --clear-aperture` for a **one-shot** size-to-footprint (no
   iteration, always grow+shrink); `vignette` is the iterative, glass-path-aware
-  settling tool.
+  settling tool. Both use `chief.BeamEnvelope` for the sizing measurement, so
+  the diameters they settle agree.
 - The stop (`role: "stop"`) is inert metadata; the aperture is defined by the
   surfaces' `auto_aperture` flags and the chief-ray-crossing pupils themselves.
 - The dynamic-pupil convention and the interplay of the pupil with fixed

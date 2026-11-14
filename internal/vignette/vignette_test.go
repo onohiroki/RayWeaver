@@ -4,7 +4,10 @@ import (
 	"math"
 	"testing"
 
+	"github.com/hiroki/rayweaver/internal/chief"
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
+	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
@@ -111,6 +114,74 @@ func TestVignetteGlassPathNarrowing(t *testing.T) {
 
 	if resStrict.Fields[1].Vignetting > resLoose.Fields[1].Vignetting+1e-9 {
 		t.Errorf("vignetting with stricter glass path = %v, want <= loose %v", resStrict.Fields[1].Vignetting, resLoose.Fields[1].Vignetting)
+	}
+}
+
+// TestVignetteSizingCoversChiefEnvelope pins the sizing measurement: every
+// auto_aperture diameter the solve settles must cover chief.BeamEnvelope at the
+// settled state — the same surface-local, prefixed-prefix measurement
+// `chief --clear-aperture` and the optimizer's final sizing use. The local
+// measurement this replaced took the global max(|X|,|Y|) and dropped a ray at
+// its first failure, so a fixed aperture or a missed surface downstream starved
+// the envelope of every surface before it: on the zoom study the wide field's
+// 20.3/45.0 mm surfaces stayed at 9.7/21.0 mm and the tool "settled" a 0.176
+// prescribed survival where 0.297 was reachable.
+func TestVignetteSizingCoversChiefEnvelope(t *testing.T) {
+	gc := tripletGC()
+	opts := tripletOptions(0.5)
+	// Converge first: Run sizes from the analysis of the previous state, so a
+	// single call may lag the final pupil re-centring by one pass.
+	res := Run(tripletSurfaces(), opts, gc)
+	res = Run(res.Surfaces, opts, gc)
+
+	work := append([]types.Surface{}, res.Surfaces...)
+	surface.Precompute(work)
+	pol := types.NewCircularJones(true)
+	results := chief.DetermineChiefRaysGridMode(
+		types.System{Surfaces: work, StopSurface: opts.StopSurface},
+		opts.Fields, opts.RefSurface, opts.NumRays, gc, pol, opts.Wavelength,
+		true, opts.GridType, nil, nil, nil, nil, 0, 0, opts.RayDefinition,
+	)
+	env := chief.BeamEnvelope(results, ray.NewEngine(gc, nil), work, dls.BuildPath(work), opts.Wavelength, pol)
+
+	for i := range work {
+		if !work[i].AutoAperture {
+			continue
+		}
+		e := env[work[i].ID]
+		if e <= 0 {
+			continue
+		}
+		want := 2*e + 2*opts.MarginMM
+		if work[i].Diameter < want-1e-6 {
+			t.Errorf("surface %d diameter = %.6f, want >= %.6f (chief beam envelope %.6f + margin)",
+				work[i].ID, work[i].Diameter, want, e)
+		}
+	}
+}
+
+// TestVignetteRespectsMaxDiameter pins the mechanical bound in the vignette
+// sizing: max_diameter caps the auto_aperture diameter instead of growing it to
+// the beam (the beam beyond it is the deliberate vignetting case).
+func TestVignetteRespectsMaxDiameter(t *testing.T) {
+	surfs := tripletSurfaces()
+	for i := range surfs {
+		if surfs[i].ID == 6 {
+			surfs[i].MaxDiameter = 1.0
+		}
+	}
+	res := Run(surfs, tripletOptions(0.5), tripletGC())
+	s6 := surfaceByID(res.Surfaces, 6)
+	if s6 == nil || math.Abs(s6.Diameter-1.0) > 1e-9 {
+		t.Errorf("capped surface 6 diameter = %v, want max_diameter 1", func() float64 {
+			if s6 == nil {
+				return -1
+			}
+			return s6.Diameter
+		}())
+	}
+	if s1 := surfaceByID(res.Surfaces, 1); s1 == nil || s1.Diameter <= 1.0 {
+		t.Errorf("surface 1 diameter = %v, want uncapped (the cap is per surface)", s1)
 	}
 }
 

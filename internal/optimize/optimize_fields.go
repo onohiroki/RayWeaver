@@ -155,35 +155,13 @@ func flatnessFieldTerm(cfg *config, base *meritTerm, i int) meritTerm {
 // with resolved=false, so the caller can never mistake it for the declared
 // field.
 func (o *Optimizer) resolveImageHeightField(cfg *config, surfaces []types.Surface, targetHeight, wavelength float64, gc *glass.Catalog) (angle, reached float64, resolved bool) {
-	path := dls.BuildPath(surfaces)
-	engine := ray.NewEngine(gc, nil)
-
 	apertureRadius := dls.ApertureRadiusForGrid(surfaces, cfg.stopSurface, wavelength, gc, o.apertureMargin, 0)
 	if apertureRadius <= 0 {
 		return 0, 0, false
 	}
 
-	pol := types.NewCircularJones(true)
-	pupilZ := resolvedPupilZ(cfg)
-
 	heightAt := func(angle float64) (float64, bool) {
-		dir := raymath.DirectionFromAngle(angle)
-		origin := types.Vec3{X: 0, Y: 0, Z: -100.0}
-		if pupilZ != nil {
-			origin.X, origin.Y = pupil.GridCentre(dir, *pupilZ, -100.0)
-		}
-		r := types.Ray{
-			Wavelength:         wavelength,
-			Initial:            types.RayState{Origin: origin, Direction: dir},
-			Path:               path,
-			Jones:              pol,
-			SkipGlassPathCheck: angle == 0,
-		}
-		result := engine.TraceRay(r, surfaces, false)
-		if result.Error != "" || len(result.Surfaces) == 0 {
-			return 0, false
-		}
-		return result.Surfaces[len(result.Surfaces)-1].Position.Y, true
+		return o.imageHeightAtAngle(cfg, surfaces, angle, wavelength, gc)
 	}
 
 	// Signed target: the traced image height carries the field sign (angle
@@ -368,6 +346,74 @@ func frozenFieldAngle(cfg *config, i int) (float64, bool) {
 	return cfg.fieldResolutions[i].angle, true
 }
 
+// imageHeightAtAngle traces the chief-style ray for the field angle and returns
+// the signed image-plane height it delivers. The launch matches
+// resolveImageHeightField: parallel bundle through the resolved entrance-pupil
+// centre, so the two functions invert each other.
+func (o *Optimizer) imageHeightAtAngle(cfg *config, surfaces []types.Surface, angle, wavelength float64, gc *glass.Catalog) (float64, bool) {
+	path := dls.BuildPath(surfaces)
+	engine := ray.NewEngine(gc, nil)
+	pol := types.NewCircularJones(true)
+	dir := raymath.DirectionFromAngle(angle)
+	origin := types.Vec3{X: 0, Y: 0, Z: -100.0}
+	if pupilZ := resolvedPupilZ(cfg); pupilZ != nil {
+		origin.X, origin.Y = pupil.GridCentre(dir, *pupilZ, -100.0)
+	}
+	r := types.Ray{
+		Wavelength:         wavelength,
+		Initial:            types.RayState{Origin: origin, Direction: dir},
+		Path:               path,
+		Jones:              pol,
+		SkipGlassPathCheck: angle == 0,
+	}
+	result := engine.TraceRay(r, surfaces, false)
+	if result.Error != "" || len(result.Surfaces) == 0 {
+		return 0, false
+	}
+	return result.Surfaces[len(result.Surfaces)-1].Position.Y, true
+}
+
+// VerifyFieldResolutions re-measures every image-height field at x.
+//
+// The frozen angle is kept — the merit, the aperture sizing and the constraints
+// all used it, and re-resolving would move the field the run optimised — but
+// the delivered height and the resolved flag are re-evaluated at the solved
+// geometry. A run whose design moved away from the frozen angle used to report
+// resolved: true with the start-geometry height; on the zoom study that
+// document traced 26.3 mm and 0/74 rays at the very angle it called resolved.
+func (o *Optimizer) VerifyFieldResolutions(x []float64) {
+	if len(o.configs) == 0 {
+		return
+	}
+	configSurfaces, tempGC, _ := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces, ok := configSurfaces[cfg.id]
+		if !ok {
+			continue
+		}
+		wl := cfg.referenceWavelength
+		if wl <= 0 {
+			wl = types.DefaultWavelength
+		}
+		for i := range cfg.fieldResolutions {
+			r := &cfg.fieldResolutions[i]
+			if r.requested == 0 {
+				continue
+			}
+			y, ok := o.imageHeightAtAngle(cfg, surfaces, r.angle, wl, gc)
+			if !ok {
+				r.reached = 0
+				r.resolved = false
+				continue
+			}
+			r.reached = math.Abs(y)
+			r.resolved = math.Abs(r.reached-r.requested) <= chief.ImageHeightTol(r.requested)
+		}
+	}
+}
+
 // FieldResolutionDiagnostics reports every config field declared by image
 // height together with the angle the run froze for it and whether that angle
 // delivers the declared height. It is the run-level answer to "which fields did
@@ -493,19 +539,19 @@ type FieldThroughput struct {
 }
 
 // FieldThroughputs measures, at x, the surviving fraction of every field's
-// pupil grid.
+// full prescribed pupil grid.
 //
-// The measurement uses the same launch the merit terms use — the entrance-pupil
-// centring, the aperture margin, the field's vignetting and the auto-aperture
-// diameters the merit sized — so a caller can judge a point by exactly the rays
-// the objective saw. That is what the escape feasibility check wants: measuring
-// it on a separate chief grid can call a point feasible whose merit grid has no
-// rays left (or the reverse), and then `list global` disagrees with a direct
-// trace.
+// The measurement is dls.PrescribedSurvival: the hex lattice `zoom` reports at
+// margin 1.0 with no declared vignetting ellipse, on the current surfaces
+// (including the auto_aperture diameters the run uses). That makes the number a
+// caller compares with `zoom` / `chief` the same number, which is what the
+// escape feasibility check needs; the earlier merit-grid variant applied the
+// field's ellipse and the optimizer's inflated launch, so a point could pass
+// here and fail a direct trace (or the reverse) and `list global` disagreed
+// with the delivered design.
 //
 // rayCount <= 0 keeps the optimizer's own merit ray count; a larger value
-// validates on a denser grid than the DLS objective sampled, without changing
-// the launch geometry.
+// validates on a denser grid than the DLS objective sampled.
 func (o *Optimizer) FieldThroughputs(x []float64, rayCount int) []FieldThroughput {
 	if rayCount <= 0 {
 		rayCount = o.numRays
@@ -541,13 +587,19 @@ func (o *Optimizer) FieldThroughputs(x []float64, rayCount int) []FieldThroughpu
 				angle = o.imageHeightToFieldAngle(cfg, surfaces, f.ImageHeight, wl, gc)
 			}
 			pupilZ := o.gridCentring(cfg, p, angle)
-			points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, wl, o.apertureMargin, rayCount, o.gridRotation, o.gridWorkers(), p.dia, f.Vignetting)
+			// The same prescribed-pupil measurement `zoom` / the constraint /
+			// the schedule gate use: hex, full pupil, margin 1.0. A field that
+			// declares vignetting is measured on the full pupil here, because
+			// this is the feasibility gate ("how much of the declared pupil is
+			// delivered"), not the optical merit's ellipsed sampling.
+			ratio, points := dls.PrescribedSurvivalPoints(gc, surfaces, cfg.stopSurface, pupilZ, angle,
+				[]float64{0, 1}, wl, rayCount, o.gridRotation, o.gridWorkers(), p.dia)
 			out = append(out, FieldThroughput{
 				Config: cfg.id,
 				Field:  fi,
 				Angle:  angle,
-				Ratio:  survivingFraction(points),
-				Points: len(points),
+				Ratio:  ratio,
+				Points: points,
 			})
 		}
 	}

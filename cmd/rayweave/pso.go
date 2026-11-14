@@ -23,6 +23,7 @@ func runPSO(data []byte, glassDir string, verbose bool, logFile string, saveBase
 	if input.Optimization.PSO == nil {
 		errExitf("Error: 'optimization.pso' section is required")
 	}
+	warnApertureTargetConflicts(input)
 
 	// Apply the Go soft memory limit (CLI --mem-limit wins over
 	// optimization.mem_limit_mb); the effective value is written back.

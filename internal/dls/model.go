@@ -204,6 +204,15 @@ type FieldResolutionReporter interface {
 	FieldResolutionDiagnostics() []types.FieldResolution
 }
 
+// FieldVerifier is an optional Model capability: re-measure the image-height
+// fields at x (the frozen angles stay, the delivered height/resolved flag are
+// refreshed). The solver itself never calls it; the end-of-run report does, so
+// a document records what the solved geometry delivers rather than only what
+// the start geometry promised.
+type FieldVerifier interface {
+	VerifyFieldResolutions(x []float64)
+}
+
 // ActiveConstraintIndices is an optional Model capability: return the indices
 // of constraints that should be included in the augmented system. The solver
 // calls this after UpdateRegionActiveSet to determine which constraints to

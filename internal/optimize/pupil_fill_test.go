@@ -99,7 +99,7 @@ func TestPupilFillMerit(t *testing.T) {
 	ccfg := opt.primaryConfig()
 	term := &ccfg.meritTerms[0]
 
-	want := pupilFillFromPoints(opt.gridForTerm(nil, gc, ccfg.surfaces, ccfg, term, appliedPupil{}))
+	want := pupilFillFromPoints(opt.prescribedGridForTerm(nil, gc, ccfg.surfaces, ccfg, term, appliedPupil{}))
 	got := opt.evaluateKindTerm(ccfg, term, ccfg.surfaces, gc, nil, appliedPupil{})
 	if math.Abs(got-want) > 1e-9 {
 		t.Fatalf("evaluateKindTerm(pupil_fill) = %v, want the grid fill value %v", got, want)

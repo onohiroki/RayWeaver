@@ -42,6 +42,7 @@ func runEscape(data []byte, glassDir string, verbose bool, logFile string, saveB
 	if input.Optimization.Escape == nil {
 		errExitf("Error: 'optimization.escape' section is required")
 	}
+	warnApertureTargetConflicts(input)
 
 	// Resolve the power-preserving glass phase under the CLI/YAML rule (CLI
 	// wins), mirroring optimize. --glass-variables additionally auto-generates

@@ -51,7 +51,12 @@ type LaunchSpec struct {
 	Vig               *types.VignettingDef // nil = no vignetting clip
 	OPLMode           OPLMode
 	SkipApertureCheck bool
-	SkipGlassPath     bool
+	// SkipAutoApertureCheck skips the aperture check on auto_aperture surfaces
+	// only: the surfaces being sized (or measured for an envelope) must not
+	// clip their own measurement, while the fixed apertures, the stop and the
+	// glass path keep bounding the beam the delivered lens actually passes.
+	SkipAutoApertureCheck bool
+	SkipGlassPath         bool
 	// VirtualMiss forwards types.Ray.VirtualMiss: a missed surface is extended
 	// to its vertex tangent plane instead of ending the ray.
 	VirtualMiss bool
@@ -80,8 +85,9 @@ type Sample struct {
 	Dir            types.Vec3
 	OPLDelta       float64 // subtracted from OPLTotal to null the launch tilt
 	// Skip flags forwarded to the tracer.
-	SkipApertureCheck  bool
-	SkipGlassPathCheck bool
+	SkipApertureCheck     bool
+	SkipAutoApertureCheck bool
+	SkipGlassPathCheck    bool
 	// VirtualMiss extends the ray through a missed surface's vertex tangent
 	// plane (types.Ray.VirtualMiss).
 	VirtualMiss bool
@@ -162,12 +168,13 @@ func Launch(spec LaunchSpec) []Sample {
 		py := spec.CentreY + y
 
 		s := Sample{
-			PupilX:             x,
-			PupilY:             y,
-			Area:               area,
-			SkipApertureCheck:  spec.SkipApertureCheck,
-			SkipGlassPathCheck: spec.SkipGlassPath,
-			VirtualMiss:        spec.VirtualMiss,
+			PupilX:                x,
+			PupilY:                y,
+			Area:                  area,
+			SkipApertureCheck:     spec.SkipApertureCheck,
+			SkipAutoApertureCheck: spec.SkipAutoApertureCheck,
+			SkipGlassPathCheck:    spec.SkipGlassPath,
+			VirtualMiss:           spec.VirtualMiss,
 		}
 		if spec.HeightOrigin != nil {
 			s.Origin = *spec.HeightOrigin
@@ -254,14 +261,15 @@ func Trace(engine *ray.Engine, path []int, surfaces []types.Surface,
 	traceOne := func(i int) {
 		s := &samples[i]
 		r := types.Ray{
-			Wavelength:         wavelength,
-			Initial:            types.RayState{Origin: s.Origin, Direction: s.Dir},
-			Path:               path,
-			Jones:              pol,
-			IndexByMaterial:    idxByMat,
-			SkipApertureCheck:  s.SkipApertureCheck,
-			SkipGlassPathCheck: s.SkipGlassPathCheck,
-			VirtualMiss:        s.VirtualMiss,
+			Wavelength:            wavelength,
+			Initial:               types.RayState{Origin: s.Origin, Direction: s.Dir},
+			Path:                  path,
+			Jones:                 pol,
+			IndexByMaterial:       idxByMat,
+			SkipApertureCheck:     s.SkipApertureCheck,
+			SkipAutoApertureCheck: s.SkipAutoApertureCheck,
+			SkipGlassPathCheck:    s.SkipGlassPathCheck,
+			VirtualMiss:           s.VirtualMiss,
 		}
 		s.Surfaces, s.ErrorCode = engine.TraceRayInto(r, surfaces, false, s.Surfaces)
 

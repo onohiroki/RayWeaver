@@ -329,21 +329,22 @@ can be compared with one measured after it.
 
 | Measurement | Before | After | Why |
 |---|---|---|---|
-| beam extents (`dls.surfaceExtents`, `chief.BeamEnvelope`) | global `max(\|X\|,\|Y\|)` over the rays that completed the trace | surface-local `hypot(x,y)` over every reached surface, including the prefix of a ray that fails later | the tracer clips on the surface-local radius; the bounding box under-reports an off-axis footprint (up to √2), and dropping a ray at its first failure starved the envelope of every surface before it |
-| `auto_aperture` sizing (`chief --clear-aperture`, `FinalApertures`) | one pass | local-frame envelope, re-traced until the diameters settle (≤ 4 passes, 0.01 mm) | the grid centring follows the surviving bundle, so a nearly dead field re-centres once its own beam passes |
-| `beam_clearance` / `beam_diameter` / `vignetting_factor` constraints | stop-free beam-aware cap; polar grid for the vignetting factor | the prescribed pupil (the stop's paraxial image, or the prescribed EPD), hex lattice for the vignetting factor | a constraint and `chief` / `zoom` must describe the same beam |
+| beam extents (`dls.surfaceExtents`, `chief.BeamEnvelope`) | global `max(\|X\|,\|Y\|)` over the rays that completed the trace | surface-local `hypot(x,y)` over every reached surface, including the prefix of a ray that fails later; the auto-aperture check is disabled but the fixed apertures, the stop and the glass path stay closed | the tracer clips on the surface-local radius; the bounding box under-reports an off-axis footprint (up to √2), dropping a ray at its first failure starved the envelope of every surface before it, and skipping *every* aperture measured a bundle the fixed stop never delivers |
+| `auto_aperture` sizing (`chief --clear-aperture`, `FinalApertures`, `vignette`) | one pass; `vignette` kept its own global-frame, drop-at-first-failure copy | local-frame envelope, re-traced until the diameters settle (≤ 4 passes, 0.01 mm); `vignette` delegates to `chief.BeamEnvelope`; `max_diameter` caps a surface | the grid centring follows the surviving bundle, so a nearly dead field re-centres once its own beam passes; the local copy left a wide field's surfaces at 9.7/21.0 mm where 20.3/45.0 mm were needed |
+| `beam_clearance` / `beam_diameter` / `vignetting_factor` constraints | stop-free beam-aware cap; polar grid for the vignetting factor | the prescribed pupil (the stop's paraxial image, or the prescribed EPD); fixed apertures stay closed; hex lattice and margin 1.0 for the vignetting factor | a constraint and `chief` / `zoom` must describe the same beam |
+| `field_alive` / `pupil_fill` / `ray_validity` / escape throughput | the merit's polar, ellipsed, `aperture_margin`-scaled grid | `dls.PrescribedSurvival`: hex, no declared ellipse, margin 1.0 | the guards and `zoom` must report the same vig; a declared ellipse is an input mask, not a second definition |
 | `zoom` `fields[].vignetting` | the traced fraction of chief's delivered-pupil spot statistics | `prescribed_traced / prescribed_total` of the full-aperture grid | once the beam is clipped, those statistics come from a reduced effective-pupil grid and read ~0.9 for a field that delivers 0.2 |
 | hex pupil lattice | columns laid out from `-R` with `floor(2R/dx)` columns (≈ 0.87 of the diameter, one-sided) | centred, alternate rows staggered ±dx/4, `ceil(2R/dx)+1` columns | the old lattice left the `+x` rim unsampled and biased the grid centroid, so the measurement moved with the ray count |
-| `ray_validity` | relaxed clearance only | also the minimum with the physical surviving-grid fraction (hex); a config that declares no `beam_clearance` term no longer gates | a virtual hit is not a delivered ray, and an unrelated config must not hold the ramp |
+| `ray_validity` | relaxed clearance only | also the minimum with the physical surviving-grid fraction (`PrescribedSurvival`, hex); a config that declares no `beam_clearance` term no longer gates | a virtual hit is not a delivered ray, and an unrelated config must not hold the ramp |
+| frozen image-height fields | the start-geometry `delivered_image_height` / `resolved` written to the output | re-measured at the solved geometry; a field the solve broke is warned about and written `resolved: false` | a run whose design moved reported `resolved: true` for an angle that traced 26 mm / 0 rays in the delivered document |
 
 Unchanged (checked, not touched by this work): the `optimization.degenerate`
 penalties, every other `merit_schedule` metric (`merit_ratio`, `iteration`,
 `glass_role`, `spot_diffraction`, `phase`), the `field_alive` / `pupil_fill`
 thresholds, `aperture_margin` / `aperture_margin_mm`, the glass hull / attraction
 / `snap` path, power variables and `power_solve`, `back_focus_solve`, adaptive
-damping, `region_active`, BFGS and central differences, `--exclude-param`, the
-beam-clipping warning and its suppression rules, and the `vignette` command's own
-sizing.
+damping, `region_active`, BFGS and central differences, `--exclude-param`, and
+the beam-clipping warning's suppression rules.
 
 The stop's paraxial pupil was already the optimiser's pupil for a config with an
 explicit stop (`DetermineChiefRaysGridMode` returns the same seed Z for every

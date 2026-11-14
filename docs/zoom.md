@@ -85,10 +85,13 @@ zoom_summary:
 | `fields[].vignetting`, `grid_surviving` / `grid_total` | the fraction of the **prescribed** (full-aperture) pupil grid that survives an aperture clip or the glass-path (edge-thickness) check — `chief_rays[].prescribed_traced` / `prescribed_total` |
 
 `vignetting` is measured on the config's surfaces as they are in the document:
-nothing is sized. Compare it with `vignette`, which also settles
-`auto_aperture` diameters, and with `optimize`'s end-of-solve warnings, which
-report the two ways this fraction is lost (a collapsed field, a clipped clear
-aperture).
+nothing is sized. It is the full prescribed pupil (hex lattice, margin 1.0, no
+declared `fields[].vignetting` ellipse) — the same number the optimizer's
+`vignetting_factor` constraint, its `field_alive` / `pupil_fill` guards and
+`vignette`'s `prescribed_vignetting` report. Compare it with `vignette`, which
+also settles `auto_aperture` diameters, and with `optimize`'s end-of-solve
+warnings, which report the two ways this fraction is lost (a collapsed field, a
+clipped fixed clear aperture).
 
 It is **not** the traced fraction of `chief_rays[].spot_stats`. That statistic
 is measured on the *delivered* pupil: when the beam is clipped below 25 % of the

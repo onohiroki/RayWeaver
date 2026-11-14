@@ -48,7 +48,123 @@ func beamClipProbe(surface2Diameter float64, vig *types.VignettingDef, cons []ty
 	return opt, warns
 }
 
-// TestWarnBeamClipping pins the G7 diagnostic: a clear aperture the prescribed
+// TestWarnBeamClippingMeasuresSizedAutoAperture pins the wrong-diameter bug it
+// used to have: the warning read the stored input diameter, so an
+// auto_aperture surface whose placeholder was small was reported as clipping
+// and told to "enable auto_aperture on it". The sizing covers the beam, so the
+// delivered document is clean and the diagnostic must be silent.
+func TestWarnBeamClippingMeasuresSizedAutoAperture(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfs := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 20.0, Role: "stop"},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 40.0, Material: types.Material{}, Diameter: 1.0, AutoAperture: true},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 80.0},
+	}
+	surface.Precompute(surfs)
+	opt := NewOptimizer(Config{
+		Surfaces: surfs,
+		Fields: []types.FieldItem{
+			{ID: 0, AngleDeg: 0, Weight: 1},
+			{ID: 1, AngleDeg: 10, Weight: 1},
+		},
+		MeritTerms: []MeritTerm{
+			{Kind: MeritSpotRMS, FieldAngle: 0, FieldIndex: 0, FieldWeight: 1, Wavelength: 0.00058756, WavWeight: 1, Weight: 1},
+		},
+		GlassCatalog: gc,
+		StopSurface:  1,
+		RefSurface:   3,
+		NumRays:      64,
+	})
+	var warns []string
+	prev := Warnf
+	Warnf = func(format string, args ...interface{}) { warns = append(warns, fmt.Sprintf(format, args...)) }
+	defer func() { Warnf = prev }()
+	opt.WarnBeamClipping(opt.getInitialState())
+	if len(warns) != 0 {
+		t.Errorf("auto_aperture surface warned against its stored placeholder: %v", warns)
+	}
+}
+
+// TestWarnBeamClippingExemptsImageSurface pins the second false positive: the
+// reference/image surface is where the beam is supposed to spread, so a wide
+// field leaving its diameter is not a clipped clear aperture (ray_validity
+// already exempts it).
+func TestWarnBeamClippingExemptsImageSurface(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfs := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 20.0, Role: "stop"},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 40.0, Material: types.Material{}, Diameter: 80.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 5.0},
+	}
+	surface.Precompute(surfs)
+	opt := NewOptimizer(Config{
+		Surfaces: surfs,
+		Fields: []types.FieldItem{
+			{ID: 0, AngleDeg: 0, Weight: 1},
+			{ID: 1, AngleDeg: 10, Weight: 1},
+		},
+		MeritTerms: []MeritTerm{
+			{Kind: MeritSpotRMS, FieldAngle: 10, FieldIndex: 1, FieldWeight: 1, Wavelength: 0.00058756, WavWeight: 1, Weight: 1},
+		},
+		GlassCatalog: gc,
+		StopSurface:  1,
+		RefSurface:   3,
+		NumRays:      64,
+	})
+	var warns []string
+	prev := Warnf
+	Warnf = func(format string, args ...interface{}) { warns = append(warns, fmt.Sprintf(format, args...)) }
+	defer func() { Warnf = prev }()
+	opt.WarnBeamClipping(opt.getInitialState())
+	for _, w := range warns {
+		if strings.Contains(w, "surface 3") {
+			t.Errorf("image surface reported as a clipped clear aperture: %v", warns)
+		}
+	}
+}
+
+// TestWarnBeamClippingExemptsStopFreeCap pins the implicit-aperture rule: with
+// no stop_surface the tightest fixed surface is the dynamic-pupil cap, and the
+// grid is launched at its edge. The off-axis rim landing outside the projected
+// circle is the design's vignetting, not a diameter nobody sized, so the
+// diagnostic must stay quiet (it flagged the f/4 sample's 12.5 mm limiter).
+func TestWarnBeamClippingExemptsStopFreeCap(t *testing.T) {
+	gc := glass.NewCatalog()
+	gc.Add(types.Glass{Type: types.GlassTypeModel, Label: "N-BK7", ND: 1.5168, VD: 64.17})
+	surfs := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 5.0, Material: types.Material{Key: "N-BK7"}, Diameter: 80.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0, Thickness: 40.0, Material: types.Material{}, Diameter: 20.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 20.0, Material: types.Material{}, Diameter: 1.0, AutoAperture: true},
+		{ID: 4, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 80.0},
+	}
+	surface.Precompute(surfs)
+	opt := NewOptimizer(Config{
+		Surfaces: surfs,
+		Fields: []types.FieldItem{
+			{ID: 0, AngleDeg: 0, Weight: 1},
+			{ID: 1, AngleDeg: 10, Weight: 1},
+		},
+		MeritTerms: []MeritTerm{
+			{Kind: MeritSpotRMS, FieldAngle: 10, FieldIndex: 1, FieldWeight: 1, Wavelength: 0.00058756, WavWeight: 1, Weight: 1},
+		},
+		GlassCatalog: gc,
+		RefSurface:   4,
+		NumRays:      64,
+	})
+	var warns []string
+	prev := Warnf
+	Warnf = func(format string, args ...interface{}) { warns = append(warns, fmt.Sprintf(format, args...)) }
+	defer func() { Warnf = prev }()
+	opt.WarnBeamClipping(opt.getInitialState())
+	for _, w := range warns {
+		if strings.Contains(w, "surface 2 ") {
+			t.Errorf("stop-free dynamic-pupil cap reported as clipping: %v", warns)
+		}
+	}
+}
+
 // beam leaves is reported with the surface, field and deficit; a generous
 // aperture is silent; a config that already manages the clearance is silent;
 // and a deliberately vignetted field is measured on its prescribed pupil, not

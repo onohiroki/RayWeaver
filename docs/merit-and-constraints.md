@@ -280,8 +280,8 @@ penalty.
 
 ### 3.2 Pupil-coverage kinds
 
-Both reuse the same grid trace (no extra tracing), with `ratio` = the fraction
-of grid rays that survived (OK):
+Both reuse the same prescribed-pupil grid trace (no extra tracing), with
+`ratio` = the fraction of grid rays that survived (OK):
 
 | Kind | Residual |
 |---|---|
@@ -293,6 +293,15 @@ of grid rays that survived (OK):
 - {kind: pupil_fill,  field: 2, weight: 50000}
 ```
 
+`ratio` is the **full prescribed-pupil** survival: the hex lattice `zoom` /
+`chief` report, margin 1.0 and **no** declared `fields[].vignetting` ellipse.
+That ellipse is an input mask on the optical merit (spot / wavefront / OPD
+trace the vignetted pupil), not a second definition of vig, so a field that
+declares `compression_x/y: 0.2` reports its physical delivery here (≈0.8 when
+the declared pupil is fully delivered), not 1.0. `optimization.aperture_margin`
+does not enter the denominator either: it inflates the merit's launch, but vig
+is measured at the physical pupil.
+
 `field_alive` is a guardrail; its `target` is the **threshold only** and the
 residual target is always 0, so a high threshold penalises any fill below it and
 never rewards a dead field. `pupil_fill` exists because the spot/OPD kinds are
@@ -303,9 +312,9 @@ so a design could otherwise trade a dead periphery for a smaller aberration.
 clipping dominant. Use both together (a bounded-plus-unbounded pair).
 
 Because the spot/OPD kinds are blind to a dead field, `optimize` **warns about
-it by default**: at the end of a solve it measures every field's surviving-grid
-fraction (the same launch, vignetting and grid the terms use) and reports each
-field below **0.5** on stderr, naming the config, the field index and its angle.
+it by default**: at the end of a solve it measures every field's prescribed
+survival (the same definition as above) and reports each field below **0.5** on
+stderr, naming the config, the field index and its angle.
 This is a warning only — the merit values and the solve are untouched. The
 message is suppressed for a config that already carries a `field_alive` /
 `pupil_fill` / `beam_clearance` term or a `vignetting_factor` constraint, so it
@@ -526,8 +535,9 @@ constraint-based EFL preference); the sign is preserved, so a flipped
 own stop and chief-ray definition, so they measure what `chief` reports.
 
 `beam_clearance` is the merit-side twin of the constraint of the same name: it
-measures the same kind of beam envelope (aperture checks disabled, the field's
-prescribed pupil) and returns the clearance, clamped at `target`. Unlike the
+measures the same kind of beam envelope (the field's prescribed pupil, with the
+auto-aperture check disabled and the fixed apertures, stop and glass path kept
+closed) and returns the clearance, clamped at `target`. Unlike the
 constraint, it uses the **relaxed** envelope: a ray that misses a surface is
 extended to that surface's vertex tangent plane, and the eight outermost missed
 rays are re-solved as a node system when a physical path exists, so the surfaces
@@ -540,7 +550,11 @@ alone reaches only the DLS augmented Lagrangian — the escape bump and the PSO
 fitness rank on the **merit**, so a clearance that lives only in constraints
 leaves their landscape flat ([methods/feasibility-continuation.md](methods/feasibility-continuation.md)).
 A surface no traced ray reaches reports a negative clearance (a violation), not
-a vanishing term.
+a vanishing term. On an `auto_aperture: true` surface the term is
+**tautological**: the diameter is defined as the beam plus the margin, so the
+clearance is always ≈ +margin and the term cannot guard clipping. The
+optimizer warns when a document targets one (set `auto_aperture: false` to
+constrain the clearance).
 
 ### 3.9 Contrast / MTF kinds
 
@@ -869,7 +883,7 @@ reported with a warning rather than freezing the solve.
 | `diameter` | The surface's diameter | `surface` |
 | `f_number` | Image-space F/# (infinite conjugate), fallback `EFL/EPD` | – |
 | `beam_clearance` | `surfaceRadius − max beam extent` at the surface for the field | `surface`, `field` |
-| `vignetting_factor` | Surviving fraction of the full prescribed pupil grid (hex lattice, stop's paraxial entrance pupil) | `field` |
+| `vignetting_factor` | Surviving fraction of the full prescribed pupil grid (hex lattice, no declared ellipse, margin 1.0 — the same number `zoom` reports) | `field` |
 | `beam_diameter` | `2 × max beam extent` at the surface | `surface`, `field` |
 
 For `edge_thickness`, `back_surface` may be omitted; the rear surface then
@@ -877,21 +891,26 @@ defaults to the next surface in system order (the surface the front's thickness
 is measured to).
 
 `beam_clearance` and `beam_diameter` measure the same envelope the optimizer's
-beam-clipping warning does (a dense grid of the field's prescribed pupil with
-aperture checks disabled), and declaring either one suppresses that warning:
+beam-clipping warning does (a dense grid of the field's prescribed pupil, with
+the auto-aperture check disabled and the fixed apertures, stop and glass path
+kept closed), and declaring either one suppresses that warning:
 the config is already managing the clearance, and the constraint reporting names
 the violation. A surface the trace never reached has no envelope;
 `beam_clearance` then reports a negative value (a violation) instead of the
 surface's radius, so a dead field cannot satisfy a clearance requirement by
-having no rays.
+having no rays. On an `auto_aperture: true` surface both measures are
+**tautological** (the diameter is the beam plus the margin); the optimizer warns
+about such a target.
 
 All three beam measures launch the **prescribed** pupil: the stop's paraxial
 entrance pupil (or the prescribed EPD when the document carries a virtual
-pupil), and `vignetting_factor` uses the hex lattice `chief` / `zoom` report. An
-empty stop argument used to select the stop-free beam-aware cap and a polar grid
+pupil). `vignetting_factor` is `dls.PrescribedSurvival`: the hex lattice
+`chief` / `zoom` report, margin 1.0 and no declared ellipse. An empty stop
+argument used to select the stop-free beam-aware cap and a polar grid
 under-sampled the pupil rim, so a constraint and the delivered-design check
 described different beams on the same lens (`vignetting_factor` read 0.29 where
-`zoom` reported 0.18 for the wide field). They are still evaluated on the
+`zoom` reported 0.18 for the wide field), and an `aperture_margin` > 1.0
+inflated the denominator further. They are still evaluated on the
 optimizer's current apertures, so a config with `auto_aperture` surfaces reports
 the fraction after sizing, not the document's diameters.
 

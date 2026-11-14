@@ -290,7 +290,23 @@ func (e *Engine) TraceRayInto(ray types.Ray, surfaces []types.Surface, detail bo
 					record(sr)
 					continue
 				}
-				return errAppend(string(ErrApertureStop), currentID), string(ErrApertureStop)
+				// Record the hit before failing: the ray did reach this
+				// surface, so its height is a real measurement of the beam the
+				// aperture has to cover. Extent/envelope callers read it;
+				// returning the previous surface's position instead made a
+				// clipped fixed aperture look like a surface the beam never
+				// reached.
+				record(types.SurfaceResult{
+					SurfaceID:   currentID,
+					Position:    currentSurf.LocalToGlobal.MultiplyPoint(hitPoint),
+					Direction:   state.Direction,
+					Interaction: types.Missed,
+					Thickness:   t,
+					OPL:         prevOPL(),
+					Jones:       jones,
+					ErrorCode:   string(ErrApertureStop),
+				})
+				return surfs, string(ErrApertureStop)
 			}
 		}
 

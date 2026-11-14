@@ -197,6 +197,11 @@ type gridKey struct {
 	fieldIndex int
 	fieldAngle float64
 	wavelength float64
+	// prescribed marks the full-prescribed-pupil grid (hex, no ellipse,
+	// margin 1.0) the field_alive / pupil_fill terms measure, which is a
+	// different trace from the optical merit's (polar, ellipsed, margin)
+	// grid for the same field and wavelength.
+	prescribed bool
 }
 
 // evalGridCache is a per-evaluation cache of pupil-grid traces. The DLS solver
@@ -304,6 +309,31 @@ func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surface
 	return pts
 }
 
+// prescribedGridForTerm returns the cached (or freshly traced) full
+// prescribed-pupil grid for the vivacity terms (field_alive / pupil_fill): the
+// hex lattice `zoom` reports, margin 1.0, no declared vignetting ellipse. The
+// optical merit keeps its own (polar, ellipsed) grid; vig is a property of the
+// delivered pupil, so the guard must not be measured on the mask that defines
+// the field.
+func (o *Optimizer) prescribedGridForTerm(cache *evalGridCache, gc *glass.Catalog, surfaces []types.Surface, cfg *config, term *meritTerm, p appliedPupil) []dls.IPoint {
+	angle := o.termFieldAngle(cfg, term, surfaces, gc)
+	trace := func() []dls.IPoint {
+		pupilZ := o.gridCentring(cfg, p, angle)
+		points, _ := dls.TraceFieldGridWithType(gc, surfaces, cfg.stopSurface, pupilZ, angle, []float64{0, 1}, term.wavelength, 1.0, o.numRays, o.gridRotation, o.gridWorkers(), p.dia, nil, types.GridHex)
+		return points
+	}
+	if cache == nil {
+		return trace()
+	}
+	key := gridKey{configID: cfg.id, fieldIndex: term.fieldIndex, fieldAngle: angle, wavelength: term.wavelength, prescribed: true}
+	if pts, ok := cache.spots[key]; ok {
+		return pts
+	}
+	pts := trace()
+	cache.spots[key] = pts
+	return pts
+}
+
 // precomputeGrids traces all grid merit terms for cfg in parallel, storing the
 // results in cache. This avoids redundant traces when multiple terms share the
 // same (field, wavelength) key, and the parallel trace overlaps the CPU-bound
@@ -312,10 +342,11 @@ func (o *Optimizer) gridForTerm(cache *evalGridCache, gc *glass.Catalog, surface
 func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *glass.Catalog, cache *evalGridCache, p appliedPupil) {
 	// Collect unique grid keys from the scheduled terms.
 	type traceJob struct {
-		key   gridKey
-		angle float64
-		wl    float64
-		vig   *types.VignettingDef
+		key        gridKey
+		angle      float64
+		wl         float64
+		vig        *types.VignettingDef
+		prescribed bool
 	}
 	seen := make(map[gridKey]bool)
 	var jobs []traceJob
@@ -328,11 +359,25 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 		seen[key] = true
 		jobs = append(jobs, traceJob{key: key, angle: angle, wl: t.wavelength, vig: o.fieldVignetting(cfg, t)})
 	}
+	enqueuePrescribed := func(t *meritTerm) {
+		angle := o.termFieldAngle(cfg, t, surfaces, gc)
+		key := gridKey{configID: cfg.id, fieldIndex: t.fieldIndex, fieldAngle: angle, wavelength: t.wavelength, prescribed: true}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		jobs = append(jobs, traceJob{key: key, angle: angle, wl: t.wavelength, prescribed: true})
+	}
 	for _, st := range o.scheduledTerms(cfg) {
 		if !isGridTraceKind(st.term.kind) {
 			continue
 		}
-		enqueue(st.term)
+		switch st.term.kind {
+		case MeritFieldAlive, MeritPupilFill:
+			enqueuePrescribed(st.term)
+		default:
+			enqueue(st.term)
+		}
 		// spot_flatness measures its own field against the mean over ALL of the
 		// config's fields at the same wavelength, so those grids are needed as
 		// well: pre-trace them here (in parallel) rather than letting the mean
@@ -376,7 +421,12 @@ func (o *Optimizer) precomputeGrids(cfg *config, surfaces []types.Surface, gc *g
 			for job := range ch {
 				gridTraceSem <- struct{}{}
 				pupilZ := o.gridCentring(cfg, p, job.angle)
-				points, _ := dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, 1, p.dia, job.vig)
+				var points []dls.IPoint
+				if job.prescribed {
+					points, _ = dls.TraceFieldGridWithType(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, 1.0, o.numRays, o.gridRotation, 1, p.dia, nil, types.GridHex)
+				} else {
+					points, _ = dls.TraceFieldGrid(gc, surfaces, cfg.stopSurface, pupilZ, job.angle, []float64{0, 1}, job.wl, o.apertureMargin, o.numRays, o.gridRotation, 1, p.dia, job.vig)
+				}
 				<-gridTraceSem
 				mu.Lock()
 				cache.spots[job.key] = points
@@ -1081,22 +1131,27 @@ func (o *Optimizer) ComputeResiduals(x []float64) []float64 {
 	return allR
 }
 
-// WarnBeamClipping reports the clear apertures the prescribed beam leaves at x,
-// as a deficit in mm per surface.
+// WarnBeamClipping reports the fixed clear apertures the prescribed beam leaves
+// at x, as a deficit in mm per surface.
 //
 // A fixed (non-auto_aperture) diameter is the user's prescription, so nothing
 // sizes it to the beam: the merit grid simply loses the rays it clips, which
 // lowers a spot-only residual (the same incentive the G4 field warning
-// describes) without anyone seeing the cause. The envelope is measured with
-// aperture and glass-path checks disabled at margin 1.0 — the physical marginal
-// beam, not the merit grid's deliberately inflated launch — on a dense grid of
-// the field's prescribed (vignetted) pupil, the measurement the beam_clearance
+// describes) without anyone seeing the cause. The envelope is measured with the
+// auto-aperture check disabled at margin 1.0 — the physical marginal beam, not
+// the merit grid's deliberately inflated launch — on a dense grid of the
+// field's prescribed (vignetted) pupil, with the fixed apertures, the stop and
+// the glass path kept closed; the measurement is the one the beam_clearance
 // constraint and chief --clear-aperture use, for every config field and every
-// sizing wavelength. Auto-aperture surfaces are checked too (the sizing should
-// have covered them; a miss is worth knowing) and the stop is skipped: it
-// defines the beam. A config that already constrains beam_clearance /
-// beam_diameter is left alone — the user is managing the clearance there, and
-// the constraint reporting already names a violation.
+// sizing wavelength. An auto_aperture diameter is the sizing's own output (the
+// delivered value comes from the denser chief envelope), so those surfaces are
+// skipped: reporting a sampling difference as "enable auto_aperture on it" told
+// the user to raise a diameter the run had just sized. The stop is skipped (it
+// defines the beam) and so is the reference/image surface (a wide field is
+// supposed to spread there), matching ray_validity. A config that already
+// constrains beam_clearance / beam_diameter is left alone — the user is
+// managing the clearance there, and the constraint reporting already names a
+// violation.
 func (o *Optimizer) WarnBeamClipping(x []float64) {
 	type finding struct {
 		config   string
@@ -1105,6 +1160,7 @@ func (o *Optimizer) WarnBeamClipping(x []float64) {
 		surface  int
 		diameter float64
 		needs    float64
+		capped   bool
 	}
 	configSurfaces, tempGC, pupils := o.applyVariables(x)
 	gc := effectiveGC(o.gc, tempGC)
@@ -1121,6 +1177,28 @@ func (o *Optimizer) WarnBeamClipping(x []float64) {
 		}
 		surfaces := configSurfaces[cfg.id]
 		p := pupils[cfg.id]
+		// Size the auto apertures first: a max_diameter cap is applied there,
+		// and the diagnostic has to measure the cap (the stored diameter is the
+		// input placeholder).
+		o.restoreDiameters(cfg, surfaces)
+		o.sizeAutoApertures(cfg, surfaces, gc, nil, p)
+		// A stop-free config has an implicit aperture: the tightest fixed
+		// surface is the dynamic-pupil cap, and the grid is launched at its
+		// edge, so the off-axis rim landing outside the projected circle is
+		// the vignetting the design asks for — not a diameter someone forgot
+		// to size. Skip it exactly like an explicit stop.
+		capR := math.Inf(1)
+		if cfg.stopSurface == 0 {
+			for i := range surfaces {
+				s := &surfaces[i]
+				if s.AutoAperture || s.Diameter <= 0 || s.ID == cfg.refSurface {
+					continue
+				}
+				if r := s.Diameter / 2; r < capR {
+					capR = r
+				}
+			}
+		}
 		wls := apertureSizingWavelengths(cfg)
 		for fi := range cfg.fields {
 			f := &cfg.fields[fi]
@@ -1137,13 +1215,31 @@ func (o *Optimizer) WarnBeamClipping(x []float64) {
 			}
 			for i := range surfaces {
 				s := &surfaces[i]
-				if s.ID == cfg.stopSurface || s.Diameter <= 0 {
+				// The stop defines the beam, the reference surface is the
+				// sensor (a wide field is supposed to spread there; ray_validity
+				// excludes both), and an auto_aperture diameter is the sizing's
+				// own output, not a prescription: the delivered value comes from
+				// the denser chief envelope, and the 128-ray check here differs
+				// from it by sampling alone. Reporting that as clipping told the
+				// user to raise a diameter the run had just sized. A surface
+				// whose max_diameter caps the sizing is the exception: the cap
+				// is a deliberate limiter and the run says when it binds.
+				if s.ID == cfg.stopSurface || s.ID == cfg.refSurface || s.Diameter <= 0 {
+					continue
+				}
+				capped := s.AutoAperture && s.MaxDiameter > 0 && math.Abs(s.Diameter-s.MaxDiameter) < 1e-12
+				if s.AutoAperture && !capped {
+					continue
+				}
+				if math.Abs(s.Diameter/2-capR) < 1e-9 {
+					// The implicit (stop-free) aperture: same role as the stop.
 					continue
 				}
 				if deficit := worst[s.ID] - s.Diameter/2; deficit > beamClipTolerance {
 					findings = append(findings, finding{
 						config: cfg.id, field: fi, angle: angle,
 						surface: s.ID, diameter: s.Diameter, needs: worst[s.ID],
+						capped: capped,
 					})
 				}
 			}
@@ -1155,15 +1251,20 @@ func (o *Optimizer) WarnBeamClipping(x []float64) {
 	sort.SliceStable(findings, func(i, j int) bool {
 		return findings[i].needs-findings[i].diameter/2 > findings[j].needs-findings[j].diameter/2
 	})
-	Warnf("warning: the prescribed beam leaves the clear aperture of a surface, so the merit grid loses those rays and a spot-only residual is lowered by the clipping (the stop is exempt):")
+	Warnf("warning: the prescribed beam leaves a fixed clear aperture, so the merit grid loses those rays and a spot-only residual is lowered by the clipping (the stop, the image surface and size-driven auto_aperture surfaces are exempt):")
 	shown := 0
 	for _, f := range findings {
 		if shown == beamClipWarnMax {
 			Warnf("  (+%d more surface/field pairs)", len(findings)-shown)
 			break
 		}
-		Warnf("  config %q field %d (%.2f deg): surface %d has diameter %.4f mm, the beam needs %.4f mm (over by %.4f mm) — raise the diameter, enable auto_aperture on it, or add a beam_clearance constraint",
-			f.config, f.field, f.angle, f.surface, f.diameter, 2*f.needs, f.needs-f.diameter/2)
+		if f.capped {
+			Warnf("  config %q field %d (%.2f deg): auto_aperture surface %d is capped at max_diameter %.4f mm, the beam needs %.4f mm (over by %.4f mm) — the cap vignettes by design; raise max_diameter or add a beam_clearance constraint",
+				f.config, f.field, f.angle, f.surface, f.diameter, 2*f.needs, f.needs-f.diameter/2)
+		} else {
+			Warnf("  config %q field %d (%.2f deg): surface %d has diameter %.4f mm, the beam needs %.4f mm (over by %.4f mm) — raise the diameter, enable auto_aperture on it, or add a beam_clearance constraint",
+				f.config, f.field, f.angle, f.surface, f.diameter, 2*f.needs, f.needs-f.diameter/2)
+		}
 		shown++
 	}
 }

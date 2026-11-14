@@ -368,6 +368,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		return
 	}
 	input := run.input
+	warnApertureTargetConflicts(input)
 	configs := run.configs
 	sharedVars := run.sharedVars
 	localVars := run.localVars
@@ -462,7 +463,10 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 
 	// Report (and warn about) the field angles the model froze at this start
 	// geometry: from here the merit, the constraints and the aperture sizing all
-	// measure those fields, whatever the variables do to the geometry.
+	// measure those fields, whatever the variables do to the geometry. The rows
+	// are kept so the end-of-run report can tell a field that was unresolvable
+	// from the start apart from one the solve broke.
+	startFieldRows := opt.FieldResolutionDiagnostics()
 	freezeFieldReport(&input, opt)
 
 	// Two-stage stop on SIGINT/SIGTERM.
@@ -587,18 +591,9 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 		}
 	}
 
-	// Warn about fields whose pupil grid collapsed. A spot-only merit is
-	// computed over the surviving rays, so clipping a field away lowers its
-	// residual; the warning surfaces the dead corner instead of shipping it
-	// silently. Warning only — the merit values are untouched.
-	opt.WarnFieldThroughput(finalX)
-
-	// Warn about fixed clear apertures the beam leaves: the same incentive,
-	// but the cause is a diameter nothing sizes (auto_aperture off), and
-	// naming it saves the "raise every diameter and trim afterwards" detour.
-	opt.WarnBeamClipping(finalX)
-
-	// Apply final auto_aperture diameters.
+	// Apply final auto_aperture diameters before the end-of-solve diagnostics,
+	// so the beam-clipping warning measures the document the run writes rather
+	// than the stored input diameters.
 	finalAps := opt.FinalApertures(finalX)
 	for cfgID, apMap := range finalAps {
 		surfaces, ok := configSurfaces[cfgID]
@@ -611,6 +606,34 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 			}
 		}
 	}
+
+	// Settle the frozen pupil at the final state before the diagnostics: the
+	// last DLS iteration's pupil belongs to the pre-step geometry, and a stale
+	// launch centre makes a wide field's footprint look displaced (the same
+	// reason a merit re-read outside the solve settles the pupil first). The
+	// output document's diameters come from FinalApertures, which searches its
+	// own pupil, so this only aligns the warnings.
+	opt.UpdatePupils(finalX)
+
+	// Re-measure the frozen image-height fields at the solved geometry and
+	// rewrite optimization.field_resolution with what the delivered document
+	// forms (a field the solve moved away from must not stay "resolved").
+	verifyFieldReport(&input, opt, finalX, startFieldRows)
+
+	// Warn about fields whose pupil grid collapsed. A spot-only merit is
+	// computed over the surviving rays, so clipping a field away lowers its
+	// residual; the warning surfaces the dead corner instead of shipping it
+	// silently. Warning only — the merit values are untouched.
+	opt.WarnFieldThroughput(finalX)
+
+	// Warn about clear apertures the beam leaves: the same incentive, but the
+	// cause is a diameter nothing sizes, and naming it saves the "raise every
+	// diameter and trim afterwards" detour.
+	opt.WarnBeamClipping(finalX)
+
+	// Warn when the sized clear aperture leaves too little glass at the rim:
+	// the sizing grows diameters with no edge-thickness guard of its own.
+	opt.WarnThinEdges(finalX, finalAps)
 
 	// Update input configs with optimized surfaces.
 	for i := range input.Configs {
@@ -666,6 +689,108 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	output.OptResults = optResults
 
 	writeYAML(&output)
+}
+
+// warnApertureTargetConflicts reports optimization targets the aperture model
+// silently overrides or makes meaningless.
+//
+// An auto_aperture surface's diameter is re-sized from the traced beam at every
+// evaluation (sizeAutoApertures) and replaced by the chief envelope in the
+// output (FinalApertures). A `diameter` variable on such a surface is therefore
+// a dead variable — its Jacobian column is identically zero and the run cannot
+// use it — and a beam_clearance / beam_diameter term or constraint on it is
+// tautological (the diameter is defined as the beam plus the margin, so the
+// clearance is always ≈ +margin and it cannot guard clipping). Both used to
+// pass silently; the surface has to be fixed (auto_aperture: false) for either
+// to mean something.
+func warnApertureTargetConflicts(input types.Input) {
+	auto := make(map[string]map[int]bool)
+	for _, cfg := range input.Configs {
+		m := make(map[int]bool)
+		for _, s := range cfg.Surfaces {
+			if s.AutoAperture {
+				m[s.ID] = true
+			}
+		}
+		if len(m) > 0 {
+			auto[cfg.ID] = m
+		}
+	}
+	if len(auto) == 0 {
+		return
+	}
+	soleID := ""
+	if len(input.Configs) == 1 {
+		soleID = input.Configs[0].ID
+	}
+	isAuto := func(config string, id int) bool {
+		if config == "" {
+			config = soleID
+		}
+		return auto[config][id]
+	}
+
+	diameterWarn := func(what string, config string, id int) {
+		if isAuto(config, id) {
+			optimize.Warnf("Warning: %s targets auto_aperture surface %d; its diameter is re-sized from the beam every evaluation, so the variable/diameter target has no effect (set auto_aperture: false to optimize or constrain it)", what, id)
+		}
+	}
+	if input.Optimization != nil {
+		for _, v := range input.Optimization.Variables {
+			if v.Active && v.Target.Param == "diameter" {
+				diameterWarn(fmt.Sprintf("variable %q", v.Name), v.Target.Config, v.Target.ID)
+			}
+		}
+		for _, v := range input.Optimization.SharedVariables {
+			if !v.Active {
+				continue
+			}
+			for _, b := range v.Bindings {
+				if b.Param == "diameter" {
+					diameterWarn(fmt.Sprintf("shared variable %q", v.Name), b.Config, b.ID)
+				}
+			}
+		}
+		for _, v := range input.Optimization.LocalVariables {
+			if v.Active && v.Target.Param == "diameter" {
+				diameterWarn(fmt.Sprintf("local variable %q", v.Name), v.Config, v.Target.ID)
+			}
+		}
+	}
+
+	clearanceSeen := make(map[string]bool)
+	clearanceWarn := func(what string, config string, id int) {
+		if !isAuto(config, id) {
+			return
+		}
+		key := fmt.Sprintf("%s|%d", config, id)
+		if clearanceSeen[key] {
+			return
+		}
+		clearanceSeen[key] = true
+		optimize.Warnf("Warning: %s targets auto_aperture surface %d; the diameter is defined as the beam plus the aperture margin, so the measurement is tautological and cannot guard clipping (set auto_aperture: false to constrain it)", what, id)
+	}
+	for _, cfg := range input.Configs {
+		if cfg.Merit != nil {
+			for _, t := range cfg.Merit.Terms {
+				if t.Kind == optimize.MeritBeamClearance && len(t.SurfaceSet) > 0 {
+					clearanceWarn(fmt.Sprintf("%s merit term", t.Kind), cfg.ID, t.SurfaceSet[0])
+				}
+			}
+		}
+		for _, m := range cfg.MeritModes {
+			for _, t := range m.Terms {
+				if t.Kind == optimize.MeritBeamClearance && len(t.SurfaceSet) > 0 {
+					clearanceWarn(fmt.Sprintf("%s merit term (mode %q)", t.Kind, m.Name), cfg.ID, t.SurfaceSet[0])
+				}
+			}
+		}
+		for _, c := range cfg.Constraints {
+			if (c.Measure == types.MeasureBeamClearance || c.Measure == types.MeasureBeamDiameter) && c.Active {
+				clearanceWarn(fmt.Sprintf("%s constraint %q", c.Measure, c.ID), cfg.ID, c.Surface)
+			}
+		}
+	}
 }
 
 // runOptimizeSnap implements `optimize snap`: it does not run DLS. It reads a
