@@ -148,28 +148,29 @@ func validAtHeight(surf types.Surface, h float64) bool {
 // converging (convex) lens has c1 >= c2. This covers biconvex, biconcave,
 // plano and meniscus shapes alike.
 //
-//   - Concave lens (c1 < c2) or a cemented element: the chamfer carrier (the
-//     surface from which the edge chamfer extends) is the cemented surface
-//     when the element is part of a cemented pair, otherwise the taller
-//     surface — except for negative curvature radii where the mirror-image
-//     geometry makes surface 2 the carrier.  The chamfer geometry depends on
-//     the curvature sign:
-//   - Positive curvature, free (non-cemented) surfaces: when the carrier edge
-//     is closer to the image plane (zChamfer >= zOther), the taller surface's
-//     rim is the element's physical edge, so the edge is drawn as the real
-//     edge: an axial land at the carrier height running from the carrier rim
-//     back to the other surface's rim, then a radial shoulder to the other
-//     rim's height. A +Z flange here would draw a face perpendicular to the
-//     axis outside the element, since the carrier rim is already the most +Z
-//     point of the body. Otherwise (zChamfer < zOther) the classic
-//     midpoint-Z chamfer is used.
-//   - Positive curvature with a cemented surface (and cemented negative
-//     curvature): the edge extends from the carrier in the +Z direction by the
-//     edge thickness (minimum 1 mm), drops vertically to the Y-midpoint, then
-//     connects diagonally to the other edge; otherwise the classic
-//     midpoint-Z chamfer is used.
-//   - Negative curvature (c1 < 0, non-cemented): the carrier is surface
-//     2.  When Z1 < Z2 (R2's edge lies on the +Z side of R1's edge,
+//   - Cemented element: at least one surface is bonded to the neighbouring
+//     element, so both elements draw that surface at its own semi-diameter
+//     (never the taller shared height) and the interface curves coincide. The
+//     rim is an axial land along the taller rim plus a diagonal to the shorter
+//     rim, so a lens whose free front is the largest diameter keeps a
+//     parallel-to-axis edge before it steps in to the bond. A Z-flange is
+//     never used on a bonded surface: it would cross the interface into the
+//     neighbouring element.
+//   - Concave lens (c1 < c2) with two free surfaces: the chamfer carrier (the
+//     surface from which the edge chamfer extends) is the taller surface —
+//     except for negative curvature radii where the mirror-image geometry
+//     makes surface 2 the carrier.  The chamfer geometry depends on the
+//     curvature sign:
+//   - Positive curvature: when the carrier edge is closer to the image plane
+//     (zChamfer >= zOther), the taller surface's rim is the element's physical
+//     edge, so the edge is drawn as the real edge: an axial land at the
+//     carrier height running from the carrier rim back to the other surface's
+//     rim, then a radial shoulder to the other rim's height. A +Z flange there
+//     would draw a face perpendicular to the axis outside the element, since
+//     the carrier rim is already the most +Z point of the body. Otherwise
+//     (zChamfer < zOther) the classic midpoint-Z chamfer is used.
+//   - Negative curvature (c1 < 0): the carrier is surface 2.
+//     When Z1 < Z2 (R2's edge lies on the +Z side of R1's edge,
 //     e.g. a tight concave R1 with a looser R2): classic midpoint
 //     chamfer — a Z-parallel line at the carrier height (Y2) up to the
 //     midpoint of Z1 and Z2, then a single diagonal to Y1 (no vertical
@@ -179,7 +180,7 @@ func validAtHeight(surf types.Surface, h float64) bool {
 //     (minimum 1 mm), drops vertically to the Y-midpoint, then connects
 //     diagonally to p1Top.
 //     Equal-height elements keep a plain horizontal rim.
-//   - Convex lens (c1 >= c2) with no cemented surface: both surfaces are drawn
+//   - Convex lens (c1 >= c2) with two free surfaces: both surfaces are drawn
 //     at the taller surface's height so the rim is a plain horizontal line,
 //     the classic drawing style. When that shared height would exceed a
 //     surface's radius of curvature (the sag becomes undefined), it falls back
@@ -230,30 +231,45 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 		return ee
 	}
 
-	// Convex lens with unequal effective heights and no cemented surface (the
-	// shared height broke): join the two edges directly with a diagonal.
-	if !concave && !e.r1Cemented && !e.r2Cemented {
+	// Cemented element: a bonded surface is drawn at its own semi-diameter,
+	// and the neighbouring element draws the identical curve, so the rim has
+	// to close on this element's side of the bond. The axial land follows the
+	// taller rim — the element's physical edge — and the diagonal falls on the
+	// shorter one, which is the bonded surface when the bond is the smaller
+	// diameter. The ±1 mm Z-flange used on a free edge is never drawn on a
+	// bonded one: it would cross the interface into the neighbouring element.
+	if e.r1Cemented || e.r2Cemented {
+		landR1 := h1eff >= h2eff
+		hLand, zLand, zOther := h2eff, z2Top, z1Top
+		if landR1 {
+			hLand, zLand, zOther = h1eff, z1Top, z2Top
+		}
+		zLandEnd := (zLand + zOther) / 2
+		ee.topPts = []vec2{p2Top, {X: zLandEnd, Y: hLand}, p1Top}
+		ee.bottomPts = []vec2{p1Bot, {X: zLandEnd, Y: -hLand}, p2Bot}
+		return ee
+	}
+
+	// Convex lens with unequal effective heights (the shared height broke):
+	// join the two edges directly with a diagonal.
+	if !concave {
 		ee.topPts = []vec2{p2Top, p1Top}
 		ee.bottomPts = []vec2{p1Bot, p2Bot}
 		return ee
 	}
 
-	// Unequal heights on a concave lens or a cemented element: the chamfer
-	// (horizontal, parallel to the optical axis) is placed on the cemented
-	// surface when the element is part of a cemented pair, else on the taller
-	// surface; the other surface connects diagonally. The chamfer point must
-	// always sit at a greater height (in absolute value) than where the
-	// diagonal meets the other surface; if a cemented surface would force the
-	// chamfer onto the shorter side, connect with a horizontal rim at a
-	// shared height instead (the taller height when both surfaces are
-	// well-defined there, else the shorter one).
+	// Unequal heights on a concave lens: the chamfer (horizontal, parallel to
+	// the optical axis) is placed on the taller surface; the other surface
+	// connects diagonally. The chamfer point must always sit at a greater
+	// height (in absolute value) than where the diagonal meets the other
+	// surface; when the negative-curvature carrier below puts the chamfer on
+	// the shorter side, connect with a horizontal rim at a shared height
+	// instead (the taller height when both surfaces are well-defined there,
+	// else the shorter one).
 	chamferR1 := h1eff >= h2eff
-	if e.r1Cemented != e.r2Cemented {
-		chamferR1 = e.r1Cemented
-	}
 	// Negative curvature radii produce a mirror-image geometry: the chamfer
 	// carrier is always surface 2 (R2/Z2) rather than the taller surface.
-	if c1 < 0 && e.r1Cemented == e.r2Cemented {
+	if c1 < 0 {
 		chamferR1 = false
 	}
 	var hChamfer, zChamfer, hOther, zOther float64
@@ -289,7 +305,7 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 	// surface 2 (swapped above), so zChamfer = z2Top and zOther = z1Top.
 	// Z1 < Z2 restores the classic midpoint chamfer (no vertical segment);
 	// Z1 >= Z2 keeps the 1 mm −Z chamfer with the vertical drop.
-	if c1 < 0 && e.r1Cemented == e.r2Cemented {
+	if c1 < 0 {
 		if zChamfer > zOther {
 			chZ := (zChamfer + zOther) / 2
 			ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hChamfer}, p1Top}
@@ -300,34 +316,19 @@ func computeElemEdges(e element, z1, z2 float64) elemEdge {
 			ee.topPts = []vec2{p2Top, vec2{X: chamferZ, Y: hChamfer}, vec2{X: chamferZ, Y: chamferY}, p1Top}
 			ee.bottomPts = []vec2{p1Bot, vec2{X: chamferZ, Y: -chamferY}, vec2{X: chamferZ, Y: -hChamfer}, p2Bot}
 		}
+	} else if zChamfer >= zOther {
+		// Positive curvature with the carrier rim already at the most +Z
+		// point of the body: the taller surface's rim is the element's
+		// physical edge. Draw the real edge — a land at the carrier height
+		// from the carrier rim back to the other rim, then a radial shoulder
+		// down to the other rim's height. A +Z flange would draw a face
+		// perpendicular to the axis outside the element.
+		ee.topPts = []vec2{p2Top, vec2{X: zOther, Y: hChamfer}, p1Top}
+		ee.bottomPts = []vec2{p1Bot, vec2{X: zOther, Y: -hChamfer}, p2Bot}
 	} else {
-		// Positive curvature or cemented element with negative curvature:
-		// determine direction and use the existing logic.
-		direction := 1.0
-		if c1 < 0 {
-			direction = -1.0
-		}
-		if (zChamfer-zOther)*direction >= 0 {
-			if direction > 0 && !e.r1Cemented && !e.r2Cemented {
-				// Positive curvature: the taller surface's rim is the
-				// element's physical edge. Draw the edge land at the carrier
-				// height from the carrier rim back to the other rim, then a
-				// shoulder down to the other rim height. The former +Z 1 mm
-				// flange drew a face perpendicular to the axis outside the
-				// element (its own rim was already the most +Z point).
-				ee.topPts = []vec2{p2Top, vec2{X: zOther, Y: hChamfer}, p1Top}
-				ee.bottomPts = []vec2{p1Bot, vec2{X: zOther, Y: -hChamfer}, p2Bot}
-				return ee
-			}
-			chamferZ := zChamfer + direction*1.0
-			chamferY := (h1eff + h2eff) / 2
-			ee.topPts = []vec2{p2Top, vec2{X: chamferZ, Y: chamferY}, vec2{X: chamferZ, Y: hChamfer}, p1Top}
-			ee.bottomPts = []vec2{p1Bot, vec2{X: chamferZ, Y: -hChamfer}, vec2{X: chamferZ, Y: -chamferY}, p2Bot}
-		} else {
-			chZ := (zChamfer + zOther) / 2
-			ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hChamfer}, p1Top}
-			ee.bottomPts = []vec2{p1Bot, vec2{X: chZ, Y: -hChamfer}, p2Bot}
-		}
+		chZ := (zChamfer + zOther) / 2
+		ee.topPts = []vec2{p2Top, vec2{X: chZ, Y: hChamfer}, p1Top}
+		ee.bottomPts = []vec2{p1Bot, vec2{X: chZ, Y: -hChamfer}, p2Bot}
 	}
 	return ee
 }
