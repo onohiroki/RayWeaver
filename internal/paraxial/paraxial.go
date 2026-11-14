@@ -14,6 +14,14 @@ type rayState struct {
 	U float64
 }
 
+// MarginalRayState is the paraxial marginal ray at one surface vertex. Height
+// is y (the beam-radius scale factor for a unit-height input), Angle is the
+// paraxial angle u in radians.
+type MarginalRayState struct {
+	Height float64
+	Angle  float64
+}
+
 func surfacePower(s types.Surface, nBefore, nAfter, R float64) float64 {
 	if s.Reflects() {
 		return -2.0 * nBefore / R
@@ -189,20 +197,44 @@ func totalTrack(surfaces []types.Surface) float64 {
 	return imgZ - z[0]
 }
 
+// MarginalRayStates returns the paraxial marginal ray at every surface vertex
+// for a unit-height, infinite-conjugate input ray. It is the total first-order
+// surrogate of the beam envelope: unlike a real ray trace it depends on no
+// aperture, vignetting or ray-surface intersection, so it stays defined wherever
+// the geometry is (a non-empty surface list with finite refractive indices).
+// Height is the beam-radius scale factor of that surface relative to the input
+// (multiply by the entrance-pupil radius for the actual marginal-ray height);
+// Angle is the paraxial angle u.
+//
+// Layer P of the feasibility-continuation design uses this as the initializer
+// for the nested ray solve and as the fallback merit when a real-ray evaluation
+// fails (see docs/methods/feasibility-continuation.md).
+func MarginalRayStates(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) []MarginalRayState {
+	if len(surfaces) == 0 {
+		return nil
+	}
+	nIndex := resolveIndices(surfaces, wavelength, gc)
+	vertices, _ := traceForward(surfaces, nIndex, 1.0, 0.0)
+	states := make([]MarginalRayState, len(vertices))
+	for i, v := range vertices {
+		states[i] = MarginalRayState{Height: v.Y, Angle: v.U}
+	}
+	return states
+}
+
 // MarginalRayHeights returns the paraxial marginal-ray height at each
 // surface's vertex for a unit-height, infinite-conjugate input ray. The trace
 // runs in the unfolded local frame (reflections flip the index sign, not the
 // direction of travel), so each value is the beam-radius scale factor of that
 // surface relative to the unit-height input.
 func MarginalRayHeights(surfaces []types.Surface, wavelength float64, gc *glass.Catalog) []float64 {
-	if len(surfaces) == 0 {
+	states := MarginalRayStates(surfaces, wavelength, gc)
+	if len(states) == 0 {
 		return nil
 	}
-	nIndex := resolveIndices(surfaces, wavelength, gc)
-	vertices, _ := traceForward(surfaces, nIndex, 1.0, 0.0)
-	y := make([]float64, len(vertices))
-	for i, v := range vertices {
-		y[i] = v.Y
+	y := make([]float64, len(states))
+	for i, s := range states {
+		y[i] = s.Height
 	}
 	return y
 }

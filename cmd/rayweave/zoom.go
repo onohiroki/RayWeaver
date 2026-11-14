@@ -198,11 +198,21 @@ func runZoom(data []byte) {
 			}
 			if r.SpotStats != nil {
 				field.SpotRMS = r.SpotStats.RMS_R
+			}
+			// Vignetting is the prescribed-pupil survival (GridSurviving /
+			// GridTotal) and must come from the full-aperture grid: chief's
+			// spot statistics are measured on a reduced effective-pupil grid
+			// once the beam is heavily clipped, so their traced fraction is a
+			// survival of the *shrunken* pupil (measured 0.90 where the
+			// prescribed pupil delivered 0.16).
+			field.GridTotal = r.PrescribedTotal
+			field.GridSurviving = r.PrescribedTraced
+			if field.GridTotal == 0 && r.SpotStats != nil {
 				field.GridTotal = r.SpotStats.TotalRays
 				field.GridSurviving = r.SpotStats.TracedRays
-				if field.GridTotal > 0 {
-					field.Vignetting = float64(field.GridSurviving) / float64(field.GridTotal)
-				}
+			}
+			if field.GridTotal > 0 {
+				field.Vignetting = float64(field.GridSurviving) / float64(field.GridTotal)
 			}
 			row.Fields = append(row.Fields, field)
 		}

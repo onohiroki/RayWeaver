@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/hiroki/rayweaver/internal/cam"
 	"github.com/hiroki/rayweaver/internal/constraint"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
@@ -325,6 +326,9 @@ type Optimizer struct {
 	hullMargin       float64
 	hullWeight       float64
 	hullPairs        []glassPair
+	// camLink, when set, re-solves the zoom cam airspaces on every evaluation
+	// (see SetCamCoupling): the linkage is geometry, not a variable.
+	camLink *camCoupling
 	// Glass attraction: soft-min potential pulling nd/vd toward catalog glasses.
 	catalogField         *glass.CatalogField
 	attractionWeight     float64 // current run-level weight w(t)
@@ -578,23 +582,30 @@ func NewOptimizer(cfg Config) *Optimizer {
 			}
 			var terms []meritTerm
 			for _, t := range modeTerms {
-				// Resolve field index/angle/direction from the config fields, by
-				// id like buildMeritTermFromTypes: the term carries the position
-				// (for the vignetting ellipse and the frozen field angle), not
-				// the declared id.
+				// `field` is the field index (documented in
+				// merit-and-constraints.md), not the field's id. The imported
+				// documents used to give every field id 0, which made every
+				// mode term with field > 0 fall back to field 0; keep an id
+				// lookup as the fallback for a non-sequential id set.
 				fieldIndex := -1
+				if t.Field >= 0 && t.Field < len(c.fields) {
+					fieldIndex = t.Field
+				} else {
+					for i := range c.fields {
+						if c.fields[i].ID == t.Field {
+							fieldIndex = i
+							break
+						}
+					}
+				}
 				var fieldAngle, fieldWeight float64
 				var fieldDirX, fieldDirY float64 = 0.0, 1.0
-				for i := range c.fields {
-					f := &c.fields[i]
-					if f.ID == t.Field {
-						fieldIndex = i
-						fieldAngle = f.AngleDeg
-						fieldWeight = f.Weight
-						if len(f.Direction) >= 2 {
-							fieldDirX, fieldDirY = normalizeDir(f.Direction)
-						}
-						break
+				if fieldIndex >= 0 {
+					f := &c.fields[fieldIndex]
+					fieldAngle = f.AngleDeg
+					fieldWeight = f.Weight
+					if len(f.Direction) >= 2 {
+						fieldDirX, fieldDirY = normalizeDir(f.Direction)
 					}
 				}
 				if fieldWeight == 0 {
@@ -1218,6 +1229,61 @@ func (o *Optimizer) Options() dls.Options {
 
 func (o *Optimizer) InitialState() []float64 {
 	return o.getInitialState()
+}
+
+// camCoupling is the zoom linkage the optimizer applies to every evaluation:
+// the cam airspace set, the solver options, and the EFL target of each config.
+type camCoupling struct {
+	opts    cam.Options
+	targets map[string]float64
+}
+
+// SetCamCoupling makes every merit evaluation re-solve the cam airspaces of the
+// coupled configs, so a DLS step cannot trade an airspace against the zoom
+// linkage (one detector, one EFL per position). Call it with the document's
+// `cam:` section resolved; the cam surfaces must not also be variables, or the
+// solve overrides them. A config whose solve fails keeps the layout the
+// variables produced, so the merit still reports the resulting EFL error
+// instead of hiding it.
+func (o *Optimizer) SetCamCoupling(opts cam.Options, targets map[string]float64) {
+	if len(opts.Surfaces) == 0 || len(targets) == 0 {
+		return
+	}
+	o.camLink = &camCoupling{opts: opts, targets: targets}
+}
+
+// applyCamLink solves the cam airspaces of every coupled config in place. A
+// single-config run whose config carries no id takes the sole target, so a
+// document without config ids still couples.
+func (o *Optimizer) applyCamLink(configSurfaces map[string][]types.Surface) {
+	if o.camLink == nil {
+		return
+	}
+	sole := 0.0
+	if len(o.configs) == 1 && len(o.camLink.targets) == 1 {
+		for _, v := range o.camLink.targets {
+			sole = v
+		}
+	}
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		target, ok := o.camLink.targets[cfg.id]
+		if !ok && sole > 0 {
+			target, ok = sole, true
+		}
+		if !ok || target <= 0 {
+			continue
+		}
+		cur := configSurfaces[cfg.id]
+		if len(cur) == 0 {
+			continue
+		}
+		res, err := cam.Solve([]cam.Config{{ID: cfg.id, Surfaces: cur, TargetEFL: target}}, o.gc, o.camLink.opts)
+		if err != nil || len(res.Configs) == 0 || len(res.Configs[0].Surfaces) != len(cur) {
+			continue
+		}
+		configSurfaces[cfg.id] = res.Configs[0].Surfaces
+	}
 }
 
 // effectiveGC returns the glass catalog reflecting any in-flight nd/vd

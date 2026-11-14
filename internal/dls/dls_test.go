@@ -162,8 +162,10 @@ func TestSolveCallsPupilUpdaterPerIteration(t *testing.T) {
 	if len(m.updates) < 1 {
 		t.Fatalf("UpdatePupils never called")
 	}
-	if len(m.updates) != res.Iterations && len(m.updates) != res.Iterations-1 {
-		t.Errorf("UpdatePupils called %d times, want %d or %d (once per iteration)", len(m.updates), res.Iterations, res.Iterations-1)
+	// One extra call settles the pupil at the start point before the baseline
+	// merit is measured, so the reference is once per iteration plus that.
+	if len(m.updates) != res.Iterations+1 && len(m.updates) != res.Iterations {
+		t.Errorf("UpdatePupils called %d times, want %d or %d (once per iteration plus the start-point settle)", len(m.updates), res.Iterations+1, res.Iterations)
 	}
 	for _, x := range m.updates {
 		for _, xi := range x {
@@ -557,7 +559,10 @@ func (m *interruptibleModel) Options() Options {
 
 func (m *interruptibleModel) UpdatePupils(x []float64) {
 	m.iter++
-	if m.iter >= 2 && m.stop != nil {
+	// The solver settles the pupil once before the baseline merit, so the
+	// second call is the first iteration's: block from the third on, when at
+	// least one descent step has already been accepted.
+	if m.iter >= 3 && m.stop != nil {
 		<-m.stop // pause the solve mid-descent until the test interrupts it
 	}
 }

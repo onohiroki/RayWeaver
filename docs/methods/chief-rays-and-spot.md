@@ -215,13 +215,28 @@ survivors for the fit); otherwise the adaptive concentric radius probe
 nothing is reported. A field that is not clipped that heavily never reports an
 `effective_vignetting`.
 
+Neither fallback may deliver less than the full grid: if the probe's shrunken
+grid reaches fewer rays than the full-aperture grid, the full grid is kept as
+the statistics grid (and no ellipse is reported). The probe shrinks toward the
+pupil centre, so on a beam whose surviving crescent sits at the rim it returned
+**no rays at all** (measured 0/31 where the full grid delivered 7/31) and erased
+a spot statistic the design supports.
+
+The delivered-pupil statistics are not the vignetting. Their traced fraction
+measures the *shrunken* grid, which survives near 100% by construction, so a
+field delivering a sixth of its prescribed pupil reported 0.99. The honest
+number is the full-aperture grid's own survival, reported as
+`prescribed_traced` / `prescribed_total` and used by `zoom` for
+`fields[].vignetting`.
+
 This matters in practice: for a strongly off-axis field whose transmitted rays
 hug the pupil rim, the survivors lie far from the pupil centre, so a concentric
-probe can shrink away from all of them — `traced_rays: 0`, a zeroed `rms_*` and
-`min`/`max` of ±1e18. The ellipse remap keeps such a field's statistics (and its
-centroid target) meaningful: the 23° field of
-`samples/escape-6elements-init.yaml` goes from `traced_rays: 0` to
-`traced_rays: 254`.
+probe shrinks away from all of them — measured `traced_rays: 0` with a zeroed
+`rms_*` and `min`/`max` of ±1e18 before the full-grid fallback above existed. The
+ellipse remap is what makes such a field *measurable* rather than merely
+non-empty: the 23° field of `samples/escape-6elements-init.yaml` goes from
+`traced_rays: 0` to `traced_rays: 254`, and those are delivered-spot rays, not a
+shrunk-grid artefact.
 
 ## 6. Marginal rays
 
@@ -257,14 +272,20 @@ vignetting report fewer points than the requested `num_rays`.
 ## 8. Clear aperture (beam footprint)
 
 `--clear-aperture` re-traces the grid rays (a denser grid with
-`--clear-aperture-rays`) through every surface and records the maximum `|X|` or
-`|Y|` at each surface (`chief.BeamEnvelope`, traced with the auto-aperture
-checks skipped so a stale, undersized input diameter never truncates the
-footprint). Each `auto_aperture: true` surface's `diameter` is then **set** to
-`2 × max(|X|,|Y|) + 2 × --clear-aperture-margin-mm` (default 0.2 mm) — a plain
-assignment, so diameters both **grow and shrink** to the beam. Skipped: the
-reference surface (`chief.reference_surface`), the stop surface when
-`chief.stop_surface` is set, and every `auto_aperture: false` surface.
+`--clear-aperture-rays`) through every surface and records each surface's
+maximum **surface-local radial height** `hypot(x, y)` — the quantity the tracer
+clips on — with the auto-aperture checks skipped, so a stale, undersized input
+diameter never truncates the footprint. A ray that fails later in the system
+still contributes the surfaces it did reach (dropping the whole ray let one
+undersized aperture downstream starve the envelope of every surface before it).
+Each `auto_aperture: true` surface's `diameter` is then **set** to
+`2 × max extent + 2 × --clear-aperture-margin-mm` (default 0.2 mm) — a plain
+assignment, so diameters both **grow and shrink** to the beam; the command
+re-traces and re-sizes until the diameters settle (≤ 4 passes, 0.01 mm), because
+the grid centring follows the surviving bundle and a nearly dead field
+re-centres once its own beam passes. Skipped: the reference surface
+(`chief.reference_surface`), the stop surface when `chief.stop_surface` is set,
+and every `auto_aperture: false` surface.
 
 `--preserve-rays` keeps the user's existing `rays` section (aperture adjustment
 only, chief rays omitted from the output).

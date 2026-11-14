@@ -20,7 +20,7 @@ rayweave chief [flags] < system.yaml
 | `--pass-through N` | constrain the chief ray to pass through `(0,0,0)` (centre) of surface N; overrides the YAML `pass_through.surface` |
 | `--chief-ray MODE` | chief-ray definition `entrance_pupil_centre` \| `centroid` \| `vignetting_centre` (empty = `chief.chief_ray_definition`); written back into the output when given. A definition the system cannot honour (a prescribed pupil without `stop_surface` or a virtual `pupil_model`), or an unknown name, exits 1 |
 | `--marginal-rays` | extract marginal (max/min) rays from the grid points and append them for piping into trace/plot |
-| `--clear-aperture` | trace the chief pupil grid through every surface and **set** each `auto_aperture: true` surface's `diameter = 2 × max radial extent + 2 × margin`. The envelope is taken over the reference and every declared/evaluated wavelength (design table, `--wavelength-set`, or `chief.wavelengths`), so an off-design beam does not get clipped. Because it is an assignment, diameters both **grow and shrink** to the beam footprint. The footprint comes from `chief.BeamEnvelope`, traced with the auto-aperture checks skipped, so a stale/undersized input diameter never truncates the measurement. The **reference surface** (`chief.reference_surface`), the stop surface (when `chief.stop_surface` is set) and every `auto_aperture: false` surface are skipped — a document whose reference surface is the image plane therefore cannot be re-sized this way (use the optimizer's own sizing pass for that) |
+| `--clear-aperture` | trace the chief pupil grid through every surface and **set** each `auto_aperture: true` surface's `diameter = 2 × max radial extent + 2 × margin`. The envelope is taken over the reference and every declared/evaluated wavelength (design table, `--wavelength-set`, or `chief.wavelengths`), so an off-design beam does not get clipped. Because it is an assignment, diameters both **grow and shrink** to the beam footprint. The footprint comes from `chief.BeamEnvelope`, traced with the auto-aperture checks skipped, so a stale/undersized input diameter never truncates the measurement; the extent is the **surface-local** radial height (the quantity the tracer clips on, not a global `max(\|X\|,\|Y\|)` bounding box, which under-reads an off-axis footprint by up to √2), and a ray that fails later in the system still contributes the surfaces it did reach (dropping the whole ray let one undersized aperture downstream starve the envelope of every surface before it). The **reference surface** (`chief.reference_surface`), the stop surface (when `chief.stop_surface` is set) and every `auto_aperture: false` surface are skipped — a document whose reference surface is the image plane therefore cannot be re-sized this way (use the optimizer's own sizing pass for that) |
 | `--clear-aperture-margin-mm` | with `--clear-aperture`, extra clearance added to each side of the beam footprint (mm, default 0.2) |
 | `--clear-aperture-rays` | ray count for `--clear-aperture` beam tracing (0 = use `chief.num_rays`; use a dense grid for accurate footprints) |
 | `--preserve-rays` | with `--clear-aperture`, keep the existing `rays` section instead of replacing it with chief rays, and omit `chief_rays` from the output (aperture adjustment only) |
@@ -174,13 +174,24 @@ Augmented YAML with a `chief_rays[]` section, one entry per field:
   explicit stop, the per-field dynamic-pupil crossing, or the virtual pupil
   plane
 - `spot_stats` — `centroid`, `rms_x`/`rms_y`/`rms_r`, min/max extent,
-  `traced_rays`/`missed_rays`
+  `traced_rays`/`missed_rays`. These are measured on the **delivered** pupil:
+  the full-aperture grid when the beam is clear enough, else a reduced grid
+  laid over the surviving part of the beam (see `effective_vignetting`), so
+  their traced fraction is *not* the vignetting
+- `prescribed_total` / `prescribed_traced` — launched / reached counts of the
+  **full-aperture** pupil grid, i.e. how much of the prescribed pupil the
+  design delivers. These are the counts `zoom` reports as
+  `fields[].vignetting`; on a heavily clipped field they are far below
+  `spot_stats` (measured 12/74 prescribed against 73/74 delivered)
 - `effective_vignetting` (only for a heavily vignetted field) — the estimated
   effective pupil as a `VignettingDef` in the same convention as
   `fields[].vignetting`; see
   [methods/chief-rays-and-spot.md](methods/chief-rays-and-spot.md)
 - `grid_points` (only with `dump_map: true`) — per-ray pupil/image position,
-  intensity, OPL, and the origin/direction for re-tracing
+  intensity, OPL, and the origin/direction for re-tracing. A ray that does not
+  reach the reference surface carries `error_code` and `error_surface`, the
+  surface whose aperture or geometry stopped it, so a clipped field can be
+  diagnosed surface by surface
 - `ray_fan` (with `--ray-fan`) — meridional / sagittal / rotated fans
 - `wavelengths` (when the config defines wavelengths) — per-wavelength stats:
   `value`, `label`, `weight`, `chief_height` (the chief ray's image height at

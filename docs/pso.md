@@ -196,7 +196,7 @@ Each cycle's PSO phase runs a standard global-best PSO in normalized space:
 
 1. Initialize particles and velocities.
 2. For each iteration:
-   a. Update the dynamic pupil at the current global best (`UpdatePupils`).
+   a. Re-settle the entrance pupil at the current global best (`UpdatePupils`).
    b. Evaluate each particle's merit and fitness `f`.
    c. Update personal bests on `f`, and the global best on the `gbest` scale.
    d. Update velocities: `v = w·v + c1·r1·(pbest−x) + c2·r2·(gbest−x)`
@@ -214,12 +214,15 @@ The algorithm terminates early if the global best has not improved by
 `stall_rel_tol` over a `stall_window_frac` window (status "converged"),
 or when `pso_iterations` is exhausted (status "max_iterations").
 
-### Dynamic pupil
+### Frozen pupil
 
-The dynamic pupil grid (entrance-pupil Z) is recomputed at the global-best
-position at the start of each PSO iteration, matching the DLS convention
-of one pupil update per iteration. This keeps the merit landscape consistent
-with the moving lens.
+The pupil grid (entrance-pupil Z) is recomputed at the global-best position at
+the start of each PSO iteration, matching the DLS convention of one pupil update
+per iteration. This keeps the merit landscape consistent with the moving lens.
+The plane is the stop's paraxial entrance pupil (the same for every field) when
+the config has an explicit `stop_surface`, the traced per-field crossing only for
+a stop-free system, and the pupil model's `axial_position` in
+`virtual_entrance_pupil` mode.
 
 ## Output
 

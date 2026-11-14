@@ -2,7 +2,9 @@ package dls
 
 import (
 	"math"
+	"sort"
 
+	"github.com/hiroki/rayweaver/internal/feasibility"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/pupil"
@@ -18,8 +20,15 @@ import (
 // delivered vignetted pupil. The glass-path (edge-thickness) check is skipped
 // for the on-axis field, which has no off-axis edge to protect.
 func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64, vig *types.VignettingDef) ([]IPoint, map[int]float64) {
+	return TraceFieldGridWithType(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, workers, epdOverride, vig, types.GridPolar)
+}
+
+// TraceFieldGridWithType is TraceFieldGrid with an explicit pupil-grid pattern.
+// The merit path uses GridPolar; a feasibility gate that must agree with the
+// delivered-design check (`chief` / `zoom`, GridHex) uses GridHex.
+func TraceFieldGridWithType(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64, vig *types.VignettingDef, gridType types.GridType) ([]IPoint, map[int]float64) {
 	skipGlassPath := fieldAngle == 0
-	return traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, workers, types.GridPolar, epdOverride, vig)
+	return traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, false, skipGlassPath, false, workers, gridType, epdOverride, vig)
 }
 
 // TraceFieldGridExtents traces a pupil grid with aperture and glass-path
@@ -27,7 +36,8 @@ func TraceFieldGrid(gc *glass.Catalog, surfaces []types.Surface, stopSurface int
 // surface, independent of any surface aperture clipping. The grid is a dense
 // hex pattern so off-axis beam edges (which the polar rings under-sample) are
 // resolved; the returned extents therefore match the chief --clear-aperture
-// beam envelope.
+// beam envelope. A ray that fails later in the path still contributes every
+// surface it reached (see surfaceExtents).
 func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64) map[int]float64 {
 	return TraceFieldGridExtentsVignetted(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, workers, epdOverride, nil)
 }
@@ -39,7 +49,23 @@ func TraceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurf
 // aperture would report the prescription itself as clipping. Aperture and
 // glass-path checks stay disabled.
 func TraceFieldGridExtentsVignetted(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64, vig *types.VignettingDef) map[int]float64 {
-	_, perSurfMax := traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, workers, types.GridHex, epdOverride, vig)
+	return traceFieldGridExtents(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, workers, epdOverride, vig, false)
+}
+
+// TraceFieldGridExtentsRelaxed is TraceFieldGridExtentsVignetted with a
+// virtual extension past a surface the ray misses: the ray is advanced to that
+// surface's vertex tangent plane and the surfaces beyond it are measured too.
+// It is a feasibility surrogate used by the beam_clearance merit kind to give
+// a slope where the physical trace has no beam at all. Sizing, the clipping
+// warning and the beam_clearance constraint keep using the physical envelope:
+// a ray that misses a surface entirely is not part of the delivered beam, and
+// extending it can only inflate the envelope.
+func TraceFieldGridExtentsRelaxed(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64, vig *types.VignettingDef) map[int]float64 {
+	return traceFieldGridExtents(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, workers, epdOverride, vig, true)
+}
+
+func traceFieldGridExtents(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, workers int, epdOverride float64, vig *types.VignettingDef, virtualMiss bool) map[int]float64 {
+	_, perSurfMax := traceGridRays(gc, surfaces, stopSurface, pupilZ, fieldAngle, fieldDir, wavelength, apertureMargin, numRays, rotationOffset, true, true, virtualMiss, workers, types.GridHex, epdOverride, vig)
 	return perSurfMax
 }
 
@@ -48,7 +74,9 @@ func TraceFieldGridExtentsVignetted(gc *glass.Catalog, surfaces []types.Surface,
 // (top/bottom/left/right) and 4 diagonal (45°). The entrance pupil position
 // (dynamic pupil Z) and diameter (paraxial EPD) fully determine the ray
 // origins and directions. Aperture and glass-path checks are disabled so the
-// true geometric beam envelope is measured independent of surface clipping.
+// true geometric beam envelope is measured independent of surface clipping,
+// and a ray that fails later still contributes every surface it reached (see
+// surfaceExtents).
 func TraceFieldExtents8Rays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, workers int, epdOverride float64) map[int]float64 {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
@@ -95,28 +123,168 @@ func TraceFieldExtents8Rays(gc *glass.Catalog, surfaces []types.Surface, stopSur
 
 	pupil.Trace(engine, p, surfaces, samples, wavelength, types.NewCircularJones(true), workers)
 
-	perSurfMax := make(map[int]float64)
-	for _, s := range samples {
-		if !s.OK {
-			continue
-		}
-		for _, sr := range s.Surfaces {
-			ax := math.Abs(sr.Position.X)
-			ay := math.Abs(sr.Position.Y)
-			e := ax
-			if ay > e {
-				e = ay
-			}
-			if e > perSurfMax[sr.SurfaceID] {
-				perSurfMax[sr.SurfaceID] = e
-			}
-		}
-	}
+	perSurfMax := surfaceExtents(samples, surfaces)
 	pupil.Release(samples)
 	return perSurfMax
 }
 
-func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck bool, workers int, gridType types.GridType, epdOverride float64, vig *types.VignettingDef) ([]IPoint, map[int]float64) {
+// surfaceExtents reduces traced samples to the maximum radial ray height on
+// each surface. It reads every per-surface result a ray produced, including the
+// prefix of a ray that later failed: the beam at those surfaces is real, and
+// discarding it would leave a broken design with no measurement at all on the
+// surfaces it already reached. A Missed entry is skipped because the tracer
+// records it at the previous surface's position (or with no hit point); a
+// Virtual hit is a real point on the extended ray and is measured.
+//
+// The height is measured in the surface-local frame, which is the frame the
+// aperture check uses (ray.TraceRay: h = sqrt(x^2 + y^2) against diameter/2).
+// A global max(|X|, |Y|) is a bounding-box measure and overstates the margin
+// of an off-axis, tilted or decentered bundle.
+func surfaceExtents(samples []pupil.Sample, surfaces []types.Surface) map[int]float64 {
+	byID := make(map[int]types.Surface, len(surfaces))
+	for _, s := range surfaces {
+		byID[s.ID] = s
+	}
+	perSurfMax := make(map[int]float64)
+	for i := range samples {
+		for _, sr := range samples[i].Surfaces {
+			if sr.Interaction == types.Missed {
+				continue
+			}
+			s, ok := byID[sr.SurfaceID]
+			if !ok {
+				continue
+			}
+			local := s.GlobalToLocal.MultiplyPoint(sr.Position)
+			h := math.Hypot(local.X, local.Y)
+			if h > perSurfMax[sr.SurfaceID] {
+				perSurfMax[sr.SurfaceID] = h
+			}
+		}
+	}
+	return perSurfMax
+}
+
+// UnreachedClearance is the clearance a caller should use for a surface no
+// traced ray reached. It is negative, so an inequality-lower bound treats the
+// absent measurement as a violation instead of reading it as the safest
+// surface; a caller that needs the distinction can use BeamClearance directly.
+const UnreachedClearance = -1.0 // mm
+
+// BeamClearance returns surfaceRadius - radial beam extent for one surface.
+// reached is false when the traced samples produced no hit on that surface (a
+// missed surface, total internal reflection before it, or a grid that could not
+// be launched), so the caller can apply the "absence is a violation" policy.
+func BeamClearance(extents map[int]float64, surfaces []types.Surface, surfaceID int) (clearance float64, reached bool) {
+	for _, s := range surfaces {
+		if s.ID != surfaceID {
+			continue
+		}
+		e, ok := extents[surfaceID]
+		if !ok {
+			return 0, false
+		}
+		return s.Diameter/2 - e, true
+	}
+	return 0, false
+}
+
+// maxNodeSolves bounds the per-call node solves in the relaxed extents trace:
+// the eight outermost missed rays dominate the envelope, and solving more
+// would multiply the cost of every merit evaluation (and every finite-
+// difference Jacobian column) without moving the measured envelope.
+const maxNodeSolves = 8
+
+// solveMissedNodes replaces the virtual (vertex-plane) hits of the outermost
+// missed rays with a node-solved physical path when one exists. The node solve
+// is the feasibility Layer S fail-over: it turns "this ray has no beam past the
+// surface" into an actual path, or leaves the virtual fallback when the least-
+// squares path does not converge. It is bounded to maxNodeSolves per call.
+func solveMissedNodes(samples []pupil.Sample, surfaces []types.Surface, wavelength float64, gc *glass.Catalog) {
+	type candidate struct {
+		index  int
+		radius float64
+	}
+	var candidates []candidate
+	for i := range samples {
+		if hasVirtualHit(samples[i].Surfaces) {
+			candidates = append(candidates, candidate{i, math.Hypot(samples[i].PupilX, samples[i].PupilY)})
+		}
+	}
+	if len(candidates) == 0 {
+		return
+	}
+	sort.Slice(candidates, func(a, b int) bool { return candidates[a].radius > candidates[b].radius })
+	if len(candidates) > maxNodeSolves {
+		candidates = candidates[:maxNodeSolves]
+	}
+	path := BuildPath(surfaces)
+	for _, c := range candidates {
+		s := &samples[c.index]
+		np := feasibility.SolveNodes(surfaces, path,
+			types.RayState{Origin: s.Origin, Direction: s.Dir},
+			wavelength, gc,
+			feasibility.SolveOptions{MaxIter: 20, Tolerance: 1e-7, Initial: initialPath(*s, path)},
+		)
+		if !np.Converged {
+			continue
+		}
+		byID := make(map[int]types.Vec3, len(np.Surfaces))
+		for k, id := range np.Surfaces {
+			byID[id] = np.Points[k]
+		}
+		for k := range s.Surfaces {
+			sr := &s.Surfaces[k]
+			p, ok := byID[sr.SurfaceID]
+			if !ok {
+				continue
+			}
+			sr.Position = p
+			sr.Interaction = types.Transmit
+			if idx := SurfaceIndex(surfaces, sr.SurfaceID); idx >= 0 && surfaces[idx].Reflects() {
+				sr.Interaction = types.Reflect
+			}
+			sr.ErrorCode = ""
+		}
+	}
+}
+
+func hasVirtualHit(results []types.SurfaceResult) bool {
+	for _, sr := range results {
+		if sr.Interaction == types.Virtual {
+			return true
+		}
+	}
+	return false
+}
+
+// initialPath builds the node solver's warm start from the trace's per-surface
+// positions (a virtual hit is still a point on the extended ray). It returns
+// nil when a path surface has no result, which makes SolveNodes fall back to
+// its launch-line initial guess.
+func initialPath(s pupil.Sample, path []int) []types.Vec3 {
+	byID := make(map[int]types.Vec3, len(s.Surfaces))
+	for _, sr := range s.Surfaces {
+		if sr.Interaction == types.Missed {
+			continue
+		}
+		byID[sr.SurfaceID] = sr.Position
+	}
+	out := make([]types.Vec3, 0, len(path)-1)
+	for _, id := range path {
+		if id == 0 {
+			continue
+		}
+		p, ok := byID[id]
+		if !ok {
+			return nil
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int, pupilZ float64, fieldAngle float64, fieldDir []float64, wavelength float64, apertureMargin float64, numRays int, rotationOffset float64, skipApertureCheck, skipGlassPathCheck, virtualMiss bool, workers int, gridType types.GridType, epdOverride float64, vig *types.VignettingDef) ([]IPoint, map[int]float64) {
 	engine := ray.NewEngine(gc, nil)
 	p := BuildPath(surfaces)
 
@@ -147,12 +315,15 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 		OPLMode:           pupil.OPLScalar,
 		SkipApertureCheck: skipApertureCheck,
 		SkipGlassPath:     skipGlassPathCheck,
+		VirtualMiss:       virtualMiss,
 		Vig:               vig,
 	})
 	pupil.Trace(engine, p, surfaces, samples, wavelength, types.NewCircularJones(true), workers)
+	if virtualMiss {
+		solveMissedNodes(samples, surfaces, wavelength, gc)
+	}
 
 	points := make([]IPoint, len(samples))
-	perSurfMax := make(map[int]float64)
 	for i, s := range samples {
 		if !s.OK || len(s.Surfaces) == 0 {
 			points[i] = IPoint{OK: false}
@@ -169,18 +340,8 @@ func traceGridRays(gc *glass.Catalog, surfaces []types.Surface, stopSurface int,
 			PupilX:    s.PupilX,
 			PupilY:    s.PupilY,
 		}
-		for _, sr := range s.Surfaces {
-			ax := math.Abs(sr.Position.X)
-			ay := math.Abs(sr.Position.Y)
-			e := ax
-			if ay > e {
-				e = ay
-			}
-			if e > perSurfMax[sr.SurfaceID] {
-				perSurfMax[sr.SurfaceID] = e
-			}
-		}
 	}
+	perSurfMax := surfaceExtents(samples, surfaces)
 	pupil.Release(samples)
 
 	return points, perSurfMax

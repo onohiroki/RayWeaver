@@ -33,6 +33,11 @@ const (
 	// Missed indicates the ray passed through a surface location without
 	// intersecting it (used in Lenient mode to record a skipped surface).
 	Missed InteractionType = "MISSED"
+	// Virtual marks a point where the ray did not meet the surface but was
+	// extended to its vertex tangent plane so the trace could continue. The
+	// position is a real point on the ray; the surface was not physically hit,
+	// so a ray containing a Virtual result is not a physically valid ray.
+	Virtual InteractionType = "VIRTUAL"
 )
 
 type GlassType string
@@ -258,6 +263,12 @@ type Ray struct {
 	// Chief rays and marginal rays use Lenient mode so they trace as far as the
 	// geometry allows even when partially vignetted.
 	Lenient bool `yaml:"lenient,omitempty"`
+	// VirtualMiss, when true, extends the ray to the vertex tangent plane of a
+	// surface it misses (recording a Virtual result at that point) instead of
+	// stopping, so the surfaces beyond the miss still report a beam. It is the
+	// geometric-envelope (extents) trace's scaffolding for feasibility
+	// continuation; a physical merit trace leaves it false.
+	VirtualMiss bool `yaml:"-"`
 	// IncludeErrorSurfaces, when true, appends a MISSED SurfaceResult for the
 	// surface where a non-lenient trace stops (aperture, TIR, missed,
 	// glass-path, surface-not-found), so the partial result shows where the ray
@@ -626,10 +637,14 @@ type MeritScheduleMode struct {
 type MeritScheduleConfig struct {
 	// Metric is the state signal driving the blend: merit_ratio (default),
 	// iteration, glass_role (the glass-role residual magnitude summed
-	// over GlassSurfaces across all configs), or spot_diffraction (the
+	// over GlassSurfaces across all configs), spot_diffraction (the
 	// per-field weighted-average geometric spot RMS / Airy radius, normalised
 	// by the initial value so the metric always starts at 1.0 and drops as the
-	// geometric spot shrinks toward the diffraction limit).
+	// geometric spot shrinks toward the diffraction limit), or ray_validity
+	// (the minimum relaxed beam clearance over every config and field, measured
+	// against each surface's beam_clearance target when declared (else 0.5 mm),
+	// clamped to [0,1]; 0 while a clear aperture clips, 1 when every measured
+	// aperture meets its target — the metric for a paraxial-to-real homotopy).
 	Metric string `yaml:"metric"`
 	// Curve is the interpolation shape between the anchors: linear (default),
 	// sigmoid, or step (a hard mode switch at the midpoint).
@@ -905,6 +920,12 @@ type OptimizationConfig struct {
 	Degenerate              *DegenerateConfig     `yaml:"degenerate,omitempty"`
 	PowerSolve              *PowerSolveConfig     `yaml:"power_solve,omitempty"`
 	BackFocusSolve          *BackFocusSolveConfig `yaml:"back_focus_solve,omitempty"`
+	// CamSolve makes every merit evaluation re-solve the document's `cam:`
+	// airspaces first: the zoom linkage (one detector, one EFL target per
+	// position) is part of the geometry, not a variable, so a DLS step must not
+	// be able to trade a cam airspace against the other positions. Requires a
+	// `cam:` section; the cam surfaces must not also be optimization variables.
+	CamSolve bool `yaml:"cam_solve,omitempty"`
 	// DiffractionMTF configures the diffraction_mtf_sag / diffraction_mtf_tan
 	// merit kinds (nil = built-in defaults).
 	DiffractionMTF  *DiffractionMTFConfig  `yaml:"diffraction_mtf,omitempty"`
@@ -1970,8 +1991,13 @@ type GridPoint struct {
 	Intensity float64  `yaml:"intensity"`
 	OPL       float64  `yaml:"opl,omitempty"`
 	ErrorCode string   `yaml:"error_code,omitempty"`
-	Origin    Vec3     `yaml:"-"`
-	Direction Vec3     `yaml:"-"`
+	// ErrorSurface is the surface whose trace failed (aperture clip, missed
+	// intersection, TIR or glass path) for a ray that did not reach the
+	// reference surface: the failing end of a lenient trace, so a clipped
+	// field can be diagnosed surface by surface.
+	ErrorSurface int  `yaml:"error_surface,omitempty"`
+	Origin       Vec3 `yaml:"-"`
+	Direction    Vec3 `yaml:"-"`
 }
 
 type SpotStats struct {
@@ -2030,15 +2056,19 @@ type LateralColorStats struct {
 }
 
 type ChiefRayResult struct {
-	FieldAngle    float64           `yaml:"field_angle"`
-	ChiefRay      Ray               `yaml:"chief_ray"`
-	ImageHeight   Vec3              `yaml:"image_height"`
-	EntrancePupil *Pupil            `yaml:"entrance_pupil,omitempty"`
-	ExitPupil     *Pupil            `yaml:"exit_pupil,omitempty"`
-	GridPoints    []GridPoint       `yaml:"grid_points,omitempty"`
-	SpotStats     *SpotStats        `yaml:"spot_stats,omitempty"`
-	RayFan        *RayFan           `yaml:"ray_fan,omitempty"`
-	Wavelengths   []WavelengthStats `yaml:"wavelengths,omitempty"`
+	FieldAngle    float64     `yaml:"field_angle"`
+	ChiefRay      Ray         `yaml:"chief_ray"`
+	ImageHeight   Vec3        `yaml:"image_height"`
+	EntrancePupil *Pupil      `yaml:"entrance_pupil,omitempty"`
+	ExitPupil     *Pupil      `yaml:"exit_pupil,omitempty"`
+	GridPoints    []GridPoint `yaml:"grid_points,omitempty"`
+	// SpotStats is the spot of the DELIVERED pupil: the full-aperture grid when
+	// the beam is clear enough, else the reduced effective-pupil grid (see
+	// EffectiveVignetting). Its traced fraction is therefore not the
+	// prescribed-pupil vignetting; PrescribedTotal/PrescribedTraced are.
+	SpotStats   *SpotStats        `yaml:"spot_stats,omitempty"`
+	RayFan      *RayFan           `yaml:"ray_fan,omitempty"`
+	Wavelengths []WavelengthStats `yaml:"wavelengths,omitempty"`
 	// WhiteSpotStats is the flux- and wavelength-weighted spot over every
 	// entry in Wavelengths: the common centroid and the combined RMS include
 	// the inter-wavelength (lateral colour) spread.
@@ -2057,6 +2087,13 @@ type ChiefRayResult struct {
 	// atan(tangent)). Set only for heavily vignetted fields, whose beam was
 	// measured rather than taken from the nominal pupil.
 	EffectiveVignetting *VignettingDef `yaml:"effective_vignetting,omitempty"`
+	// PrescribedTotal / PrescribedTraced are the launched / reached counts of
+	// the FULL-aperture pupil grid. SpotStats is measured on the effective
+	// (pshrunk) pupil when the field is heavily clipped, so this pair is the
+	// honest "fraction of the prescribed pupil the design delivers" — the
+	// same ratio `zoom` reports as fields[].vignetting.
+	PrescribedTotal  int `yaml:"prescribed_total,omitempty"`
+	PrescribedTraced int `yaml:"prescribed_traced,omitempty"`
 }
 
 type Pupil struct {

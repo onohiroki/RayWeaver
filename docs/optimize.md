@@ -431,7 +431,7 @@ and the weights are scheduled globally:
 ```yaml
 optimization:
   merit_schedule:
-    metric: merit_ratio        # merit_ratio | iteration | glass_role | spot_diffraction | phase
+    metric: merit_ratio        # merit_ratio | iteration | glass_role | spot_diffraction | phase | ray_validity
     curve: linear              # linear | sigmoid | step
     anchor_from: 1.0
     anchor_to: 0.05
@@ -458,8 +458,24 @@ are recomputed once per DLS iteration and frozen for it, and
 maps the escape-cycle phase to a numeric value on [0,1] (`PhaseEscape`→0,
 `PhaseGlassSolve`→0.5, `PhaseClean`→1), enabling hard mode switches at
 phase boundaries (e.g. an exploration mode with few terms during the
-escape phase and a full local mode during the clean phase). The active
-mode is reported in the output (`opt_results.active_mode`) and the
+escape phase and a full local mode during the clean phase). `ray_validity`
+(0…1) is the minimum relaxed beam clearance over every config and field,
+measured against the clearance the design asks for — each surface's
+`beam_clearance` `target` when the config declares one, otherwise 0.5 mm — and
+clamped. It is 0 while a clear aperture clips the beam (or a surface is
+unreached) and 1 when every measured aperture meets its target (the stop and
+the image surface are excluded). Two refinements keep it honest: the value is
+also the minimum of the field's **physical** surviving-grid fraction (an
+effective-pupil-only measurement cannot report 1 while the real trace is dead),
+and a config that declares no `beam_clearance` term defines no contract — it
+keeps its fixed merit instead of gating the ramp, while the fallback to "every
+clear aperture at 0.5 mm" applies only when no config declares a term at all.
+Because the relaxed envelope is defined where
+the real trace has no rays, `ray_validity` is the metric for a
+**paraxial/analytic → real-ray homotopy**: start in a first-order/feasibility
+mode and let `anchor_from`/`anchor_to` (default 0.1/0.9) ramp the real terms in
+once the geometry is clear.
+The active mode is reported in the output (`opt_results.active_mode`) and the
 per-iteration weights as JSONL `weights` events.
 
 A mode may also carry a `back_focus_type` (`paraxial` / `spot` / `wavefront`) so
@@ -682,16 +698,23 @@ rayweave query --jsonl --where 'event=="breakdown"' \
 
 ## Notes
 
-- **The dynamic pupil follows the lens.** `optimize` / `escape` seed each
-  config's grid centring from the dynamic pupil at startup, and the DLS solver
-  calls the optional `dls.PupilUpdater` (`Optimizer.UpdatePupils`) at the top of
-  every iteration, so the aperture position moves with the lens while staying
-  frozen for the duration of one iteration — the base-point residuals and the
-  Jacobian columns then share the same pupil, which is what keeps the
-  derivatives consistent. A config is skipped unless `chief.reference_surface`
-  is set **and** it declares fields (`chief.fields` / `configs[].fields`); in
-  `virtual_entrance_pupil` mode the model's `axial_position` / `diameter` are
-  used directly and the chief-ray iteration is skipped.
+- **The frozen pupil follows the lens.** `optimize` / `escape` / `pso` re-derive
+  each config's grid centring at the top of every iteration
+  (`Optimizer.UpdatePupils`), so the aperture position moves with the lens while
+  staying frozen for the duration of one iteration — the base-point residuals
+  and the Jacobian columns then share the same pupil, which is what keeps the
+  derivatives consistent (and why the solve also settles the pupil once at its
+  starting point, see
+  [merit-and-constraints.md §2](merit-and-constraints.md#2-how-to-configure)).
+  The plane is the stop's **paraxial entrance pupil, the same for every field**,
+  when the config has an explicit `stop_surface` — the pupil `chief` / `zoom`
+  report for the design (the optimiser derives it directly now; it used to run a
+  redundant chief pass to obtain the same plane); a **stop-free** config keeps
+  the traced per-field dynamic pupil, and `virtual_entrance_pupil` mode uses the
+  model's `axial_position` / `diameter` directly and skips the chief-ray
+  iteration.
+  A config is skipped unless `chief.reference_surface`
+  is set **and** it declares fields (`chief.fields` / `configs[].fields`).
 - **Image-height fields are frozen at the start geometry.** A field declared by
   `image_height` (rather than `angle`) is converted to a field angle once, when
   the model is built: `optimize` launches a single probe ray **through the
@@ -748,7 +771,7 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   measures each config field's surviving-grid fraction and warns (stderr) about
   every field below 0.5. Warning only — the merit and the solve are untouched;
   the message is suppressed when the config already carries a `field_alive` /
-  `pupil_fill` term or a `vignetting_factor` constraint. See
+  `pupil_fill` / `beam_clearance` term or a `vignetting_factor` constraint. See
   [merit-and-constraints.md §3.2](merit-and-constraints.md).
 - **A clipping clear aperture is reported.** The same incentive has a second
   cause: a **fixed** (`auto_aperture: false`) diameter nothing sizes to the
@@ -761,8 +784,9 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   reported — and warns (stderr) for every surface that is left in deficit,
   worst first, up to eight entries with a `(+N more)` tail. The stop is exempt
   (it defines the beam) and a config that already constrains
-  `beam_clearance` / `beam_diameter` is left alone (the constraint reporting
-  names the violation there). Warning only; the merit and the diameters are
+  `beam_clearance` / `beam_diameter` or carries a `beam_clearance` merit term
+  is left alone (the constraint/term reporting names the violation there).
+  Warning only; the merit and the diameters are
   untouched. This is what makes the "raise every diameter during optimization
   and trim afterwards" workaround unnecessary: the run says which surface is
   clipping instead of leaving it to be inferred from a field that lost its
@@ -786,7 +810,21 @@ rayweave query --jsonl --where 'event=="breakdown"' \
   azimuths and whose outermost ring sits inside the launched radius (verified
   against the dense hex envelope at 8, 16 and 64 azimuths) — and the
   end-of-solve pass replaces the diameters with the `chief --clear-aperture`
-  hex envelope.
+  hex envelope. That envelope measures the **surface-local** radial height (the
+  quantity the tracer clips on) and accumulates the reached prefix of a ray that
+  fails further on: the old global `max(|X|,|Y|)` under-read an off-axis
+  footprint by up to √2, and dropping a ray at its first failure let one
+  undersized aperture downstream starve every surface before it, so a field
+  could keep clipping an aperture that had just been "sized to the beam"
+  (measured: 39/74 rays still clipped at one surface after five sizing passes).
+- `optimization.cam_solve: true` keeps the zoom linkage inside the solve: every
+  merit evaluation re-solves the document's `cam:` airspaces to their per-position
+  EFL targets before it measures anything, so a DLS step cannot trade an
+  airspace against the other positions. The cam surfaces must not also be
+  variables (the solve owns them and prints a warning if one is); a position
+  whose solve fails keeps the variable layout so the merit still reports the EFL
+  error. It runs after `back_focus_solve` and wins the back-focus thickness. See
+  [cam.md](cam.md#cam-inside-optimize).
 - `optimization.jacobian_workers` sets the goroutines used for the finite
   difference Jacobian (default `GOMAXPROCS`). The Jacobian is deterministic:
   the result is identical for any worker count.

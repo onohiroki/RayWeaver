@@ -180,7 +180,17 @@ See [methods/polychromatic.md](methods/polychromatic.md) for the definitions.
 The grid-based and wavefront terms are centred on the config's **per-iteration
 frozen pupil** — settled once per DLS iteration and held for the base point and
 every Jacobian perturbation — so the finite-difference derivative matches the
-merit actually minimized.
+merit actually minimized. The plane is the stop's paraxial entrance pupil (the
+same for every field) when the config has an explicit `stop_surface`, the traced
+per-field crossing only for a stop-free system, and the pupil model's
+`axial_position` in `virtual_entrance_pupil` mode; that is the same pupil
+`chief` / `zoom` report for the design. The solve also settles the pupil once at its starting
+point before the baseline merit is measured, so the reported "before" merit (and
+the value the first step is accepted against) belongs to the same beam as the
+design. A merit re-evaluated outside a solve — a reported minimum, an escape
+cycle's before/after comparison — must settle the pupil at the point it
+evaluates first; otherwise a stale pupil from another iterate measures a
+different bundle.
 
 ---
 
@@ -298,8 +308,9 @@ fraction (the same launch, vignetting and grid the terms use) and reports each
 field below **0.5** on stderr, naming the config, the field index and its angle.
 This is a warning only — the merit values and the solve are untouched. The
 message is suppressed for a config that already carries a `field_alive` /
-`pupil_fill` term or a `vignetting_factor` constraint, so it appears exactly for
-a merit that cannot see the dead field (a bare `spot_rms`). A field declared by
+`pupil_fill` / `beam_clearance` term or a `vignetting_factor` constraint, so it
+appears exactly for a merit that cannot see the dead field (a bare
+`spot_rms`). A field declared by
 `image_height` is measured at its resolved angle.
 
 The **weight matters as much as the kind, and it is algorithm-dependent**. The
@@ -385,8 +396,9 @@ high-order residual in a single term.
 **Computation and failure handling.** The grid follows `optimization.num_rays`
 and `optimization.aperture_margin` at the frozen pupil. A reference surface set
 to the image plane is rejected and falls back to the last optical surface. On a
-failed fit the term retries once with the dynamic pupil; if it still fails it
-returns the bounded wavefront penalty (`optimization.degenerate.wavefront_value`).
+failed fit the term retries once with the pupil the wavefront analysis resolves
+itself (the `wavefront` command's grid); if it still fails it returns the
+bounded wavefront penalty (`optimization.degenerate.wavefront_value`).
 
 **Weight design caution.** The contribution is `weight × value²`, so calibrate
 the weight against the *measured* residual (use `optimize --verbose`'s
@@ -497,12 +509,14 @@ Cooke-triplet example.
 | `pupil_diameter` | Entrance-pupil diameter (mm) | `field`; `target` = desired EPD |
 | `vignetting` | Vignetted fraction of the pupil grid (0 = none) | `field`, `surface_set[0]` |
 | `clear_aperture` | Beam-envelope diameter at the surface (mm) | `field`, `surface_set[0]` |
+| `beam_clearance` | Clearance `surfaceRadius − beam extent` (mm), clamped at `target` so only under-clearance is penalised | `field`, `surface_set[0]`; `target` = required clearance (default 0 = only clipping) |
 | `edge_thickness` | Glass-path span at the surface (mm) | `surface_set[0]`; nonzero only when `min_glass_path`/`max_glass_path` are set |
 
 ```yaml
 - {kind: focal_length, weight: 5000, target: 50.0}
 - {kind: pupil_diameter, field: 0, weight: 1000, target: 25.4}
 - {kind: clear_aperture, field: 2, surface_set: [7], target: 40.0, weight: 10}
+- {kind: beam_clearance, field: 2, surface_set: [7], target: 0.3, weight: 200}
 ```
 
 `focal_length` is the system-level EFL term (it replaces the older
@@ -510,6 +524,23 @@ constraint-based EFL preference); the sign is preserved, so a flipped
 (negative-EFL) system receives a large penalty. `pupil_position`,
 `pupil_diameter` and `clear_aperture` run a chief pass mirroring the document's
 own stop and chief-ray definition, so they measure what `chief` reports.
+
+`beam_clearance` is the merit-side twin of the constraint of the same name: it
+measures the same kind of beam envelope (aperture checks disabled, the field's
+prescribed pupil) and returns the clearance, clamped at `target`. Unlike the
+constraint, it uses the **relaxed** envelope: a ray that misses a surface is
+extended to that surface's vertex tangent plane, and the eight outermost missed
+rays are re-solved as a node system when a physical path exists, so the surfaces
+beyond the miss still contribute. Sizing, the clipping warning and the
+constraint keep the physical envelope. The residual
+is therefore the one-sided hinge `max(0, target − clearance)²`: an aperture at
+or above the required clearance contributes nothing, and only clipping (or a
+shortfall against `target`) is penalised. It exists because the constraint
+alone reaches only the DLS augmented Lagrangian — the escape bump and the PSO
+fitness rank on the **merit**, so a clearance that lives only in constraints
+leaves their landscape flat ([methods/feasibility-continuation.md](methods/feasibility-continuation.md)).
+A surface no traced ray reaches reports a negative clearance (a violation), not
+a vanishing term.
 
 ### 3.9 Contrast / MTF kinds
 
@@ -763,6 +794,7 @@ M(x) = Σ_configs w_cfg · Σ_modes w_k(s(x)) · M_{cfg,k}(x)
 | `iteration` | DLS iteration number |
 | `glass_role` | glass-role residual magnitude summed over `glass_surfaces` (all configs) |
 | `spot_diffraction` | weighted-average geometric spot RMS / Airy radius (`0.61·λ/NA`); ratio ≥ 1 means the spot exceeds the diffraction limit. Default anchors 3→1 switch geometric→wavefront |
+| `ray_validity` | minimum relaxed beam clearance over every config and field, measured against each surface's `beam_clearance` `target` when declared (else 0.5 mm) and clamped to [0,1]; 0 = a clear aperture clips (or a surface is unreached), 1 = every measured aperture meets its target. Stop and image surface excluded. Also the minimum of each field's physical surviving-grid fraction (hex, the `chief`/`zoom` grid), and a config that declares no `beam_clearance` term keeps its fixed merit instead of gating (the all-clear-aperture fallback applies only when no config declares one) |
 | `phase` (escape only) | escape cycle phase: 0 = escape, 0.5 = glass, 1 = clean |
 
 `spot_diffraction`'s aggregation is `mean` (default) or `max` (worst field). The
@@ -782,7 +814,7 @@ per iteration). See
 ## 6. Degenerate penalties
 
 A merit term that cannot be evaluated — a pupil grid with no valid rays, or a
-wavefront fit that fails even with the dynamic pupil — returns a **bounded
+wavefront fit that fails even on the retry pupil — returns a **bounded
 penalty** instead of the legacy `1e6` sentinel (which fed `weight·1e12` into the
 merit and stalled the line search):
 
@@ -837,7 +869,7 @@ reported with a warning rather than freezing the solve.
 | `diameter` | The surface's diameter | `surface` |
 | `f_number` | Image-space F/# (infinite conjugate), fallback `EFL/EPD` | – |
 | `beam_clearance` | `surfaceRadius − max beam extent` at the surface for the field | `surface`, `field` |
-| `vignetting_factor` | Surviving fraction of the full prescribed pupil grid | `field` |
+| `vignetting_factor` | Surviving fraction of the full prescribed pupil grid (hex lattice, stop's paraxial entrance pupil) | `field` |
 | `beam_diameter` | `2 × max beam extent` at the surface | `surface`, `field` |
 
 For `edge_thickness`, `back_surface` may be omitted; the rear surface then
@@ -848,7 +880,20 @@ is measured to).
 beam-clipping warning does (a dense grid of the field's prescribed pupil with
 aperture checks disabled), and declaring either one suppresses that warning:
 the config is already managing the clearance, and the constraint reporting names
-the violation.
+the violation. A surface the trace never reached has no envelope;
+`beam_clearance` then reports a negative value (a violation) instead of the
+surface's radius, so a dead field cannot satisfy a clearance requirement by
+having no rays.
+
+All three beam measures launch the **prescribed** pupil: the stop's paraxial
+entrance pupil (or the prescribed EPD when the document carries a virtual
+pupil), and `vignetting_factor` uses the hex lattice `chief` / `zoom` report. An
+empty stop argument used to select the stop-free beam-aware cap and a polar grid
+under-sampled the pupil rim, so a constraint and the delivered-design check
+described different beams on the same lens (`vignetting_factor` read 0.29 where
+`zoom` reported 0.18 for the wide field). They are still evaluated on the
+optimizer's current apertures, so a config with `auto_aperture` surfaces reports
+the fraction after sizing, not the document's diameters.
 
 `system_length` sums every thickness, so it pins the whole track — the image
 plane measured from surface 1 — but cannot express a single group's position.
@@ -951,6 +996,7 @@ per-config constraints when present, else `optimization.constraints` (marked
 | `pupil_position` / `_diameter` | pin the pupil | `field`, `target` | Z / EPD (mm) |
 | `vignetting` | bound vignetting | `field`, `surface_set[0]` | vignetted fraction |
 | `clear_aperture` | size a surface | `field`, `surface_set[0]` | beam-envelope diameter |
+| `beam_clearance` | keep the beam off the clear aperture | `field`, `surface_set[0]`, `target` | clearance (mm), hinged at `target` |
 | `edge_thickness` | control glass path | `surface_set[0]` | glass-path span |
 | `geometric_mtf_sag` / `_tan` | raise MTF | `frequency`, `target` | MTF (hinge) |
 | `wavefront_shift_sag` / `_tan` | raise MTF at ν (not defocus) | `frequency` | Var(δW) over the pupil shear |

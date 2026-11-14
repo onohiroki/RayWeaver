@@ -402,6 +402,13 @@ so far (see [Streaming output](#streaming-output)); the completion block
 
 ### Saving minima
 
+Every merit the cycle reports — the escape and clean before/after values, the
+`minimum` events, the store ranking and the saved files' merits — is measured
+with the optimizer's frozen pupil settled **at that point**, so two entries with
+different merits are two different designs, not two different pupil states. (A
+DLS solve holds one pupil across its base point and Jacobian columns by design;
+a point read back after the solve is re-settled before it is measured.)
+
 `--save FILE` writes each discovered local minimum to a clean,
 pipeline-compatible lens YAML (the full `Input` with that minimum's surfaces
 applied, ready for `chief`/`trace`/`plot` or a re-optimisation):

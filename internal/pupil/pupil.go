@@ -52,6 +52,9 @@ type LaunchSpec struct {
 	OPLMode           OPLMode
 	SkipApertureCheck bool
 	SkipGlassPath     bool
+	// VirtualMiss forwards types.Ray.VirtualMiss: a missed surface is extended
+	// to its vertex tangent plane instead of ending the ray.
+	VirtualMiss bool
 	// HeightOrigin, when non-nil, launches a finite-conjugate bundle from the
 	// object point: every sample origin is HeightOrigin and its direction
 	// points from there through the grid sample. No OPL delta is applied.
@@ -79,6 +82,9 @@ type Sample struct {
 	// Skip flags forwarded to the tracer.
 	SkipApertureCheck  bool
 	SkipGlassPathCheck bool
+	// VirtualMiss extends the ray through a missed surface's vertex tangent
+	// plane (types.Ray.VirtualMiss).
+	VirtualMiss bool
 	// Filled by Trace.
 	OK        bool
 	Err       string
@@ -161,6 +167,7 @@ func Launch(spec LaunchSpec) []Sample {
 			Area:               area,
 			SkipApertureCheck:  spec.SkipApertureCheck,
 			SkipGlassPathCheck: spec.SkipGlassPath,
+			VirtualMiss:        spec.VirtualMiss,
 		}
 		if spec.HeightOrigin != nil {
 			s.Origin = *spec.HeightOrigin
@@ -254,6 +261,7 @@ func Trace(engine *ray.Engine, path []int, surfaces []types.Surface,
 			IndexByMaterial:    idxByMat,
 			SkipApertureCheck:  s.SkipApertureCheck,
 			SkipGlassPathCheck: s.SkipGlassPathCheck,
+			VirtualMiss:        s.VirtualMiss,
 		}
 		s.Surfaces, s.ErrorCode = engine.TraceRayInto(r, surfaces, false, s.Surfaces)
 
@@ -276,6 +284,15 @@ func Trace(engine *ray.Engine, path []int, surfaces []types.Surface,
 		}
 		last := s.Surfaces[len(s.Surfaces)-1]
 		s.OK = true
+		// A virtual hit is a point on the extended ray, not a physical
+		// intersection: the ray must not count as a survivor even though it
+		// reached the end of the path.
+		for _, sr := range s.Surfaces {
+			if sr.Interaction == types.Virtual {
+				s.OK = false
+				break
+			}
+		}
 		s.Intensity = (last.IntensityS + last.IntensityP) / 2
 		s.OPL = last.OPL - s.OPLDelta
 	}

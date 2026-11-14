@@ -9,10 +9,12 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/hiroki/rayweaver/internal/cam"
 	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/optimize"
 	"github.com/hiroki/rayweaver/internal/spectral"
+	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -416,6 +418,7 @@ func runOptimize(data []byte, verbose bool, logFile string, glassDir string, exc
 	if input.Optimization.BackFocusSolve != nil && input.Optimization.BackFocusSolve.Enabled {
 		opt.SetBackFocusSolve(input.Optimization.BackFocusSolve)
 	}
+	setUpCamCoupling(opt, input, gc)
 	opt.SetDiffractionMTF(input.Optimization.DiffractionMTF)
 	if input.Optimization.GlassAttraction != nil {
 		opt.SetGlassAttraction(input.Optimization.GlassAttraction, gc)
@@ -1047,4 +1050,107 @@ type finalLog struct {
 	Constraints []constraintInfo `json:"constraints,omitempty"`
 	Variables   []float64        `json:"variables"`
 	Status      string           `json:"status"`
+}
+
+// setUpCamCoupling wires optimization.cam_solve: the document's `cam:` section
+// is resolved once (image plane, held Z, stop, wavelength) and every evaluation
+// re-solves the cam airspaces to its per-position EFL targets, so a DLS step
+// cannot trade an airspace against the zoom linkage. A cam surface that is also
+// a variable is overridden by the solve, which is almost certainly not what the
+// document meant, so the run says so.
+func setUpCamCoupling(opt *optimize.Optimizer, input types.Input, gc *glass.Catalog) {
+	if input.Cam == nil || input.Optimization == nil || !input.Optimization.CamSolve {
+		return
+	}
+	if len(input.Cam.Surfaces) == 0 {
+		errExitf("Error: optimization.cam_solve needs cam.surfaces")
+	}
+	targets := make(map[string]float64, len(input.Cam.Targets))
+	for _, t := range input.Cam.Targets {
+		if t.EFL > 0 {
+			targets[t.Config] = t.EFL
+		}
+	}
+	if len(targets) == 0 {
+		errExitf("Error: optimization.cam_solve needs cam.targets (one {config, efl} per position)")
+	}
+
+	// The reference layout the image plane and its Z are resolved against: the
+	// first active config (the cam command uses the same rule).
+	var refSurfaces []types.Surface
+	for i := range input.Configs {
+		if input.Configs[i].Active && len(input.Configs[i].Surfaces) > 0 {
+			refSurfaces = append([]types.Surface{}, input.Configs[i].Surfaces...)
+			break
+		}
+	}
+	if len(refSurfaces) == 0 {
+		errExitf("Error: optimization.cam_solve needs an active config with surfaces")
+	}
+	surface.Precompute(refSurfaces)
+
+	imagePlane := input.Cam.ImagePlane
+	if imagePlane <= 0 && input.Chief != nil {
+		imagePlane = input.Chief.ReferenceSurface
+	}
+	if imagePlane <= 0 {
+		imagePlane = refSurfaces[len(refSurfaces)-1].ID
+	}
+	imagePlaneZ := input.Cam.ImagePlaneZ
+	if imagePlaneZ <= 0 {
+		for i := range refSurfaces {
+			if refSurfaces[i].ID == imagePlane {
+				imagePlaneZ = refSurfaces[i].PhysicalZ
+				break
+			}
+		}
+	}
+	if imagePlaneZ <= 0 {
+		errExitf("Error: optimization.cam_solve cannot resolve the image plane Z (image plane %d)", imagePlane)
+	}
+	hold := true
+	if input.Cam.HoldImagePlane != nil {
+		hold = *input.Cam.HoldImagePlane
+	}
+	stop := 0
+	if input.Chief != nil {
+		stop = input.Chief.StopSurface
+	}
+	wavelength := types.DefaultWavelength
+	if input.Chief != nil && input.Chief.ReferenceWavelength > 0 {
+		wavelength = input.Chief.ReferenceWavelength
+	}
+
+	for _, v := range input.Optimization.Variables {
+		if v.Target.Param == "thickness" && containsInt(input.Cam.Surfaces, v.Target.ID) {
+			optimize.Warnf("Warning: surface %d is both a cam airspace and an optimization variable; optimization.cam_solve overrides it every evaluation", v.Target.ID)
+		}
+	}
+	for _, v := range input.Optimization.LocalVariables {
+		if v.Target.Param == "thickness" && containsInt(input.Cam.Surfaces, v.Target.ID) {
+			optimize.Warnf("Warning: surface %d is both a cam airspace and a local variable; optimization.cam_solve overrides it every evaluation", v.Target.ID)
+		}
+	}
+
+	opt.SetCamCoupling(cam.Options{
+		Surfaces:       input.Cam.Surfaces,
+		ImagePlane:     imagePlane,
+		ImagePlaneZ:    imagePlaneZ,
+		HoldImagePlane: hold,
+		StopSurface:    stop,
+		Wavelength:     wavelength,
+		MaxIterations:  input.Cam.MaxIterations,
+		Tolerance:      input.Cam.Tolerance,
+		MotionWeight:   input.Cam.MotionWeight,
+	}, targets)
+}
+
+// containsInt reports whether xs holds v.
+func containsInt(xs []int, v int) bool {
+	for _, x := range xs {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }

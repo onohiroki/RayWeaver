@@ -85,6 +85,16 @@ func Solve(m Model) Result {
 		allActive[j] = j
 	}
 
+	// Settle the model's frozen state at the start point before the baseline
+	// merit is measured. The loop below settles it at the top of every
+	// iteration; without the same call here the baseline was evaluated with an
+	// unresolved pupil (Z=0) on a system with an explicit stop, so the first
+	// step was accepted against a merit that had nothing to do with the design
+	// and the solve could leave a good starting point.
+	if pu, ok := m.(PupilUpdater); ok {
+		pu.UpdatePupils(xPhys0)
+	}
+
 	merit := m.EvaluateMerit(xPhys0)
 	if hasConstraints {
 		merit += sumConstraintTerms(c0, allActive, lambdas, muConJ)

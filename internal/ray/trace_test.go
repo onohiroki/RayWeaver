@@ -407,6 +407,63 @@ func TestTraceRayLenientMissedSurface(t *testing.T) {
 	}
 }
 
+// TestTraceRayVirtualMissExtendsToVertexPlane verifies the feasibility
+// scaffold: a ray that misses a surface is advanced to that surface's vertex
+// tangent plane and the trace continues, so the surfaces beyond the miss still
+// report a beam. A Virtual result is not a physical hit, so the ray must not be
+// treated as a survivor (pupil.Trace clears OK).
+func TestTraceRayVirtualMissExtendsToVertexPlane(t *testing.T) {
+	gc := glass.NewCatalog()
+	engine := NewEngine(gc, nil)
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Curvature: 0, Thickness: 10.0, Material: types.Material{}, Diameter: 200.0},
+		{ID: 2, Type: types.Sphere, Curvature: 0.1, Thickness: 10.0, Material: types.Material{}, Diameter: 200.0},
+		{ID: 3, Type: types.Sphere, Curvature: 0, Thickness: 0, Material: types.Material{}, Diameter: 200.0},
+	}
+	surface.Precompute(surfaces)
+	// Y = 50 misses the R = 10 sphere at surface 2; the vertex plane there is
+	// at global Z = 10, and surface 3 follows at Z = 20.
+	r := types.Ray{
+		ID:          "virtual-miss",
+		Wavelength:  0.00058756,
+		VirtualMiss: true,
+		Path:        []int{1, 2, 3},
+		Initial: types.RayState{
+			Origin:    types.Vec3{X: 0, Y: 50.0, Z: -100.0},
+			Direction: types.Vec3{X: 0, Y: 0, Z: 1.0},
+		},
+	}
+	result := engine.TraceRay(r, surfaces, false)
+	if result.Error != "" {
+		t.Fatalf("virtual-miss ray errored: %v", result.Error)
+	}
+
+	var surface2, surface3 *types.SurfaceResult
+	for i := range result.Surfaces {
+		switch result.Surfaces[i].SurfaceID {
+		case 2:
+			surface2 = &result.Surfaces[i]
+		case 3:
+			surface3 = &result.Surfaces[i]
+		}
+	}
+	if surface2 == nil || surface2.Interaction != types.Virtual {
+		t.Fatalf("surface 2 result = %+v, want a Virtual hit", surface2)
+	}
+	if surface2.ErrorCode != string(ErrMissedSurface) {
+		t.Errorf("surface 2 ErrorCode = %q, want %q", surface2.ErrorCode, string(ErrMissedSurface))
+	}
+	if math.Abs(surface2.Position.Y-50) > 1e-9 || math.Abs(surface2.Position.Z-10) > 1e-9 {
+		t.Errorf("virtual hit = %+v, want (Y=50, Z=10) on the vertex plane", surface2.Position)
+	}
+	if surface3 == nil || surface3.Interaction != types.Transmit {
+		t.Fatalf("surface 3 result = %+v, want the trace to continue past the miss", surface3)
+	}
+	if math.Abs(surface3.Position.Y-50) > 1e-9 {
+		t.Errorf("surface 3 hit Y = %v, want 50 (the extended ray)", surface3.Position.Y)
+	}
+}
+
 func TestTraceRayLenientTIR(t *testing.T) {
 	engine, surfaces := highIndexTIRSetup()
 

@@ -193,6 +193,33 @@ rayweave[cam]: Warning: cam did not converge for wide (EFL off 11.3 mm, focus of
 rayweave[cam]: Warning: wide: a cam airspace is at its lower bound — the barrels cannot reach this EFL with a fixed image plane here
 ```
 
+## Cam inside `optimize`
+
+`cam` lays the zoom out; `optimize` must keep that linkage while it moves the
+shared elements. Set `optimization.cam_solve: true` and every merit evaluation
+re-solves the document's `cam:` airspaces first, so a DLS step cannot trade an
+airspace against the EFL targets:
+
+```yaml
+optimization:
+  cam_solve: true          # requires a cam: section with surfaces and targets
+  shared_variables: [...]  # the elements every position shares
+```
+
+- The cam surfaces are **not** variables: the solve owns those thicknesses, and
+  a DLS column that perturbs a shared curvature sees the airspaces absorbed back
+  onto the targets. A cam surface that is also a (local) `thickness` variable
+  prints a warning, because the solve overrides it on every evaluation.
+- The solve runs inside `applyVariables`, which stays pure: it reads the
+  document's `cam:` settings and the trial geometry and returns new surfaces, so
+  the finite-difference Jacobian stays deterministic.
+- A position whose cam solve fails keeps the layout the variables produced, so
+  the merit reports the resulting EFL error instead of hiding it; `optimize`
+  still warns about unsatisfied `efl` constraints at the end.
+- `back_focus_solve` and `cam_solve` both write the back-focus thickness. The
+  cam runs last and wins (it holds one detector across the positions), so use
+  one or the other.
+
 ## Method
 
 [methods/cam.md](methods/cam.md) derives the residuals, the regularised

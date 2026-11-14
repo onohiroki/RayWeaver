@@ -499,3 +499,47 @@ func TestWavefrontGridCenter(t *testing.T) {
 		t.Errorf("90° centre non-finite: %v", g)
 	}
 }
+
+// TestPupilGridHexCentred pins the hex grid's geometry: the lattice must be
+// centred on the pupil (its x extents balance about 0) and reach both rims, so
+// a beam measured on it is not biased toward one edge. The previous layout laid
+// the columns out from -R with a truncated column count, so at 32 rays a
+// 3.448 mm pupil was sampled over x ∈ [-2.95, +2.52] — a 0.43 mm offset that
+// moved the grid centroid and changed which rays survived.
+func TestPupilGridHexCentred(t *testing.T) {
+	const R = 10.0
+	for _, n := range []int{12, 20, 32, 64, 128, 256} {
+		pts := PupilGrid(n, R, types.GridHex, 0, 0, 0)
+		if len(pts) < n/2 {
+			t.Fatalf("%d rays: only %d grid points", n, len(pts))
+		}
+		minX, maxX := math.Inf(1), math.Inf(-1)
+		maxR := 0.0
+		for _, p := range pts {
+			if p.X < minX {
+				minX = p.X
+			}
+			if p.X > maxX {
+				maxX = p.X
+			}
+			if r := math.Hypot(p.X, p.Y); r > maxR {
+				maxR = r
+			}
+			if math.Hypot(p.X, p.Y) > R*(1+1e-12) {
+				t.Fatalf("%d rays: point (%g,%g) outside the pupil", n, p.X, p.Y)
+			}
+		}
+		cell := 2 * R / (math.Sqrt(float64(n)) + 1) * math.Sqrt(3) / 2
+		// An odd row count leaves the centre row staggered by half a cell, so
+		// the set may be off centre by up to one cell; more than that is bias.
+		if math.Abs(minX+maxX) > cell {
+			t.Errorf("%d rays: x extents [%g,%g] are not balanced about 0", n, minX, maxX)
+		}
+		if maxX < R-cell || minX > -(R-cell) {
+			t.Errorf("%d rays: x extents [%g,%g] do not reach both rims (R=%g, cell=%g)", n, minX, maxX, R, cell)
+		}
+		if maxR < R-cell {
+			t.Errorf("%d rays: max radius %g does not reach the rim (R=%g, cell=%g)", n, maxR, R, cell)
+		}
+	}
+}

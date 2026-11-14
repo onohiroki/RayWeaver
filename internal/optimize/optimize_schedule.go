@@ -13,7 +13,7 @@ import (
 // meritSchedule is the compiled optimization.merit_schedule: a smooth blend of
 // named merit modes whose weights follow a scalar state metric.
 type meritSchedule struct {
-	metric        string // merit_ratio | iteration | glass_role | spot_diffraction
+	metric        string // merit_ratio | iteration | glass_role | spot_diffraction | ray_validity
 	curve         string // linear | sigmoid | step
 	anchorFrom    float64
 	anchorTo      float64
@@ -61,6 +61,13 @@ func (o *Optimizer) SetMeritSchedule(s *types.MeritScheduleConfig) {
 	if ms.metric == "spot_diffraction" && ms.anchorFrom == 0 && ms.anchorTo == 0 {
 		ms.anchorFrom = 1.0
 		ms.anchorTo = 0.005
+	}
+	// ray_validity rises from 0 (a clear aperture is clipped) to 1 (every
+	// surface has the full validity scale of clearance). The default anchors
+	// start the real-ray mode only once the geometry is essentially clear.
+	if ms.metric == "ray_validity" && ms.anchorFrom == 0 && ms.anchorTo == 0 {
+		ms.anchorFrom = 0.1
+		ms.anchorTo = 0.9
 	}
 	o.modeWeights = make(map[string]float64, len(s.Modes))
 	for _, m := range s.Modes {
@@ -308,6 +315,8 @@ func (o *Optimizer) scheduleMetric(x []float64, iter int) float64 {
 	case "spot_diffraction":
 		r, _ := o.spotDiffractionRatio(x)
 		return r
+	case "ray_validity":
+		return o.rayValidity(x)
 	default: // merit_ratio
 		if o.initialMerit == 0 {
 			return 1.0
@@ -442,6 +451,219 @@ func (o *Optimizer) spotDiffractionRatioRaw(x []float64) (float64, bool) {
 		return maxRatio, true
 	}
 	return weightedSum / totalWeight, true
+}
+
+// rayValidityScale is the clearance at which a surface counts as fully valid
+// when the config declares no beam_clearance term (mm). A surface with no
+// clearance contributes 0, one with this much clearance contributes 1.
+const rayValidityScale = 0.5
+
+// minClearanceTarget floors a beam_clearance term's target so the validity
+// ratio is defined for a target of 0 (only clipping is unacceptable).
+const minClearanceTarget = 0.1
+
+// clearanceValidity maps a signed clearance to [0,1] against a required target.
+func clearanceValidity(margin, target float64) float64 {
+	if target < minClearanceTarget {
+		target = minClearanceTarget
+	}
+	v := margin / target
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// clearanceTerm is one declared beam_clearance requirement: the field, the
+// surface and the clearance the design asks for.
+type clearanceTerm struct {
+	field   int
+	surface int
+	target  float64
+}
+
+// clearanceTargets collects the requirements declared by the config's
+// beam_clearance terms (fixed merit and every merit mode, so the metric is
+// independent of which mode is currently active). The field is kept: a term
+// that guards field 5 must not be held hostage by an unrelated field's
+// clearance. An empty slice means the config declares no clearance term and
+// the metric falls back to every clear aperture with rayValidityScale.
+func clearanceTargets(cfg *config) []clearanceTerm {
+	var out []clearanceTerm
+	index := make(map[[2]int]int)
+	add := func(terms []meritTerm) {
+		for i := range terms {
+			t := &terms[i]
+			if t.kind != MeritBeamClearance || len(t.surfaceSet) == 0 {
+				continue
+			}
+			field := t.fieldIndex
+			if field < 0 {
+				field = 0
+			}
+			target := t.target
+			if target < 0 {
+				target = 0
+			}
+			key := [2]int{field, t.surfaceSet[0]}
+			if idx, ok := index[key]; ok {
+				if target > out[idx].target {
+					out[idx].target = target
+				}
+				continue
+			}
+			index[key] = len(out)
+			out = append(out, clearanceTerm{field: field, surface: t.surfaceSet[0], target: target})
+		}
+	}
+	add(cfg.meritTerms)
+	for _, terms := range cfg.meritModes {
+		add(terms)
+	}
+	return out
+}
+
+// fieldClearanceValidity measures one field against the declared clearance
+// terms (or, when there are none, every clear aperture with rayValidityScale).
+// It returns the minimum validity and whether any surface was measured.
+func (o *Optimizer) fieldClearanceValidity(cfg *config, surfaces []types.Surface, gc *glass.Catalog, wl float64, p appliedPupil, field int, terms []clearanceTerm, fallback bool) (float64, bool) {
+	angle := o.fieldSizingAngle(cfg, field, surfaces, gc, wl)
+	pupilZ := o.gridCentring(cfg, p, angle)
+	extents := dls.TraceFieldGridExtentsRelaxed(gc, surfaces, cfg.stopSurface, pupilZ,
+		angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation,
+		o.gridWorkers(), p.dia, cfg.fields[field].Vignetting)
+
+	radius := make(map[int]float64, len(surfaces))
+	for i := range surfaces {
+		radius[surfaces[i].ID] = surfaces[i].Diameter / 2
+	}
+	validity := 1.0
+	measured := false
+	consider := func(surface int, target float64) {
+		if surface == cfg.stopSurface || surface == cfg.refSurface || radius[surface] <= 0 {
+			return
+		}
+		measured = true
+		margin := -target
+		if e, ok := extents[surface]; ok {
+			margin = radius[surface] - e
+		}
+		if v := clearanceValidity(margin, target); v < validity {
+			validity = v
+		}
+	}
+	if fallback {
+		for i := range surfaces {
+			consider(surfaces[i].ID, rayValidityScale)
+		}
+	} else {
+		for _, t := range terms {
+			consider(t.surface, t.target)
+		}
+	}
+	// Physical gate: the relaxed envelope can be clear while the real trace is
+	// still dead (the virtual hit is not a delivered ray). The surviving-grid
+	// fraction is the delivered-pupil gate, so a schedule cannot leave the
+	// feasibility mode for a field the physical trace cannot deliver. Use the
+	// hex pattern the chief / zoom pass uses, so the gate and `zoom` measure
+	// the same pupil; the optical merit keeps its polar grid.
+	points, _ := dls.TraceFieldGridWithType(gc, surfaces, cfg.stopSurface, pupilZ,
+		angle, []float64{0, 1}, wl, o.apertureMargin, o.numRays, o.gridRotation,
+		o.gridWorkers(), p.dia, cfg.fields[field].Vignetting, types.GridHex)
+	if phys := survivingFraction(points); phys < validity {
+		validity = phys
+	}
+	return validity, measured
+}
+
+// rayValidity is the state metric for the paraxial-to-real continuation: the
+// minimum relaxed beam clearance measured against the clearance the design asks
+// for, clamped to [0,1]. When the config declares beam_clearance terms, the
+// measurement is exactly those (field, surface) requirements and their targets,
+// so the ramp switches to the imaging mode when the feasibility terms are
+// satisfied. Without such terms it falls back to every clear aperture with
+// rayValidityScale. The stop and the reference/image surface are excluded: the
+// stop defines the pupil (its margin is ~0 by construction), and the image
+// surface is the sensor, not a ray-passing aperture.
+//
+// The metric uses the relaxed envelope (virtual misses, with the outermost
+// missed rays re-solved as a node system), so it is defined in exactly the
+// region where the real merit has no rays — the reason it can drive the ramp
+// out of a broken starting design.
+func (o *Optimizer) rayValidity(x []float64) float64 {
+	configSurfaces, tempGC, pupils := o.applyVariables(x)
+	gc := effectiveGC(o.gc, tempGC)
+
+	// A document that declares beam_clearance terms in some configs defines the
+	// feasibility contract for those configs only. The others keep their fixed
+	// merit and constraints; applying the all-surfaces fallback to them would
+	// let an unrelated config hold the schedule in the feasibility mode forever.
+	hasAnyTerms := false
+	for ci := range o.configs {
+		if len(clearanceTargets(&o.configs[ci])) > 0 {
+			hasAnyTerms = true
+			break
+		}
+	}
+
+	validity := 1.0
+	hasData := false
+	for ci := range o.configs {
+		cfg := &o.configs[ci]
+		surfaces := configSurfaces[cfg.id]
+		if len(surfaces) == 0 || len(cfg.fields) == 0 {
+			continue
+		}
+		wls := apertureSizingWavelengths(cfg)
+		if len(wls) == 0 {
+			continue
+		}
+		wl := wls[0]
+		p := pupils[cfg.id]
+		terms := clearanceTargets(cfg)
+		if len(terms) == 0 {
+			if hasAnyTerms {
+				continue
+			}
+			for fi := range cfg.fields {
+				v, ok := o.fieldClearanceValidity(cfg, surfaces, gc, wl, p, fi, nil, true)
+				if !ok {
+					continue
+				}
+				if v < validity {
+					validity = v
+				}
+				hasData = true
+			}
+			continue
+		}
+		byField := make([][]clearanceTerm, len(cfg.fields))
+		for _, t := range terms {
+			if t.field >= 0 && t.field < len(byField) {
+				byField[t.field] = append(byField[t.field], t)
+			}
+		}
+		for fi := range byField {
+			if len(byField[fi]) == 0 {
+				continue
+			}
+			v, ok := o.fieldClearanceValidity(cfg, surfaces, gc, wl, p, fi, byField[fi], false)
+			if !ok {
+				continue
+			}
+			if v < validity {
+				validity = v
+			}
+			hasData = true
+		}
+	}
+	if !hasData {
+		return 1
+	}
+	return validity
 }
 
 // scheduleCurve maps the normalised metric t ∈ [0,1] to a blend fraction.

@@ -2,4 +2,4 @@ exit: 0
 stderr:
 probe --len results: 6
 probe -r results[3].opl_total: 132.04996369611302
-probe -r chief_rays[0].spot_stats.rms_r: 0.0011145071962200517
+probe -r chief_rays[0].spot_stats.rms_r: 0.0011185087018293356

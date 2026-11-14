@@ -80,6 +80,27 @@ func (e *Engine) TraceRay(ray types.Ray, surfaces []types.Surface, detail bool) 
 	return result
 }
 
+// virtualHit returns where the ray crosses the surface's vertex tangent plane
+// (local z = 0), used to keep a ray alive past a surface it misses. It is a
+// geometric extension, not a physical intersection: the point lies on the ray
+// and the direction is unchanged, so the surfaces after the miss are measured
+// from a defined state. ok is false when the ray is parallel to the plane or
+// the plane lies behind the ray (no forward extension).
+func virtualHit(localOrigin, localDir types.Vec3) (t float64, hit types.Vec3, ok bool) {
+	if math.Abs(localDir.Z) < 1e-12 {
+		return 0, types.Vec3{}, false
+	}
+	t = -localOrigin.Z / localDir.Z
+	if t < 0 {
+		return 0, types.Vec3{}, false
+	}
+	return t, types.Vec3{
+		X: localOrigin.X + localDir.X*t,
+		Y: localOrigin.Y + localDir.Y*t,
+		Z: 0,
+	}, true
+}
+
 // TraceRayInto is like TraceRay but appends per-surface results into dst and
 // returns the extended slice plus an error code (empty on success). When dst
 // is nil a new slice is allocated (same as TraceRay). Callers that trace many
@@ -188,6 +209,24 @@ func (e *Engine) TraceRayInto(ray types.Ray, surfaces []types.Surface, detail bo
 
 		t, ok := intersect(currentSurf, localOrigin, localDir)
 		if !ok {
+			if ray.VirtualMiss {
+				if vt, vhit, vok := virtualHit(localOrigin, localDir); vok {
+					globalPos := currentSurf.LocalToGlobal.MultiplyPoint(vhit)
+					sr := types.SurfaceResult{
+						SurfaceID:   currentID,
+						Position:    globalPos,
+						Direction:   state.Direction,
+						Interaction: types.Virtual,
+						Thickness:   vt,
+						OPL:         prevOPL(),
+						Jones:       jones,
+						ErrorCode:   string(ErrMissedSurface),
+					}
+					record(sr)
+					state.Origin = globalPos
+					continue
+				}
+			}
 			if ray.Lenient {
 				sr := types.SurfaceResult{
 					SurfaceID:   currentID,

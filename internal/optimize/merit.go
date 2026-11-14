@@ -89,6 +89,14 @@ const (
 	MeritClearAperture = "clear_aperture"
 	MeritEdgeThickness = "edge_thickness"
 
+	// beam_clearance penalises the beam leaving a surface's clear aperture.
+	// The value is the clearance radius - beam extent (mm), clamped at target
+	// so the generic squared residual is a one-sided hinge
+	// max(0, target - clearance)^2. It is the merit-side twin of the
+	// beam_clearance constraint: DLS sees the constraint, while escape/PSO —
+	// which rank on the merit — need the same slope in the merit itself.
+	MeritBeamClearance = "beam_clearance"
+
 	// System-level EFL merit kind (replaces the constraint-based focal_length).
 	MeritFocalLength = "focal_length"
 
@@ -193,6 +201,8 @@ func (o *Optimizer) evaluateKindTerm(cfg *config, term *meritTerm, surfaces []ty
 		return dls.ComputeWavefrontPairPhase(points, apR, term.wavelength)
 	case MeritPolychromaticStrehl, MeritPolychromaticMTFSag, MeritPolychromaticMTFTan:
 		return o.evaluateWhiteDiffraction(cfg, term, surfaces, gc, cache, p)
+	case MeritBeamClearance:
+		return o.evaluateBeamClearanceTerm(cfg, term, surfaces, gc, p)
 	default:
 		if isGridKind(term.kind) {
 			return o.evaluateGridKind(cfg, term, surfaces, gc, cache, p)
@@ -843,6 +853,48 @@ func pupilFillValue(ratio float64) float64 {
 		return pupilFillCap
 	}
 	return (1 - ratio) / ratio
+}
+
+// evaluateBeamClearanceTerm returns the clearance at the term's surface,
+// clamped at target so the generic squared residual is the one-sided hinge
+// max(0, target - clearance)^2. target is the required clearance (0 = only
+// actual clipping is penalised). A surface no traced ray reached reports
+// dls.UnreachedClearance: a definite violation, not a vanishing term exactly
+// where the design is broken.
+//
+// The measurement uses the extents machinery shared with the beam_clearance
+// constraint and the end-of-solve clipping warning (aperture checks disabled,
+// the field's prescribed pupil), but in its *relaxed* form: a ray that misses a
+// surface is extended to that surface's vertex tangent plane and the surfaces
+// beyond it are measured too. Sizing, the warning and the constraint keep the
+// physical envelope; this term wants a slope where the physical trace has no
+// beam. The merit kind resolves the pupil through the config's stop, which the
+// constraint operand does not carry. The extents are accumulated over partial
+// ray paths, so a point that already fails later in the system still
+// contributes the surfaces it reached — the gradient this term provides in the
+// infeasible region.
+func (o *Optimizer) evaluateBeamClearanceTerm(cfg *config, term *meritTerm, surfaces []types.Surface, gc *glass.Catalog, p appliedPupil) float64 {
+	if len(term.surfaceSet) == 0 {
+		return term.target
+	}
+	wl := term.wavelength
+	if wl <= 0 {
+		wl = effectiveReferenceWavelength(cfg.referenceWavelength)
+	}
+	pupilZ := o.gridCentring(cfg, p, term.fieldAngle)
+	extents := dls.TraceFieldGridExtentsRelaxed(
+		gc, surfaces, cfg.stopSurface, pupilZ, term.fieldAngle, []float64{0, 1},
+		wl, o.apertureMargin, o.numRays, o.gridRotation, o.gridWorkers(), p.dia,
+		o.fieldVignetting(cfg, term),
+	)
+	clearance, reached := dls.BeamClearance(extents, surfaces, term.surfaceSet[0])
+	if !reached {
+		clearance = dls.UnreachedClearance
+	}
+	if clearance >= term.target {
+		return term.target
+	}
+	return clearance
 }
 
 // evaluateDistortionPct returns the distortion percentage for the term's field.

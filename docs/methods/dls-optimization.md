@@ -243,7 +243,7 @@ and Lagrange multiplier management).  Equality constraints are always included.
 | `optimization.tol` | 1e-6 | gradient / step tolerance |
 | `optimization.epsilon` | 1e-6 | finite-difference step |
 | `optimization.num_rays` | 64 | pupil grid rays per merit evaluation |
-| `optimization.aperture_margin` | 2.0 | pupil grid radius multiplier (clamped ≥ 1) |
+| `optimization.aperture_margin` | 1.0 | pupil grid radius multiplier (clamped ≥ 1) |
 | `optimization.mu_con_max` | 100 | max constraint penalty weight |
 | `optimization.jacobian_workers` | GOMAXPROCS | Jacobian parallelism |
 | `optimization.central_diff` | false | central-difference Jacobian (2nd-order) |

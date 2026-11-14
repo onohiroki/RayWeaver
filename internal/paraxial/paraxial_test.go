@@ -29,6 +29,37 @@ func TestComputeSingletEFL(t *testing.T) {
 	}
 }
 
+// TestMarginalRayStates pins the total first-order accessor: the height at the
+// first surface is the unit input, the first angle is the power deflection, and
+// the heights agree with MarginalRayHeights.
+func TestMarginalRayStates(t *testing.T) {
+	sys, gc := singletSystem()
+	states := MarginalRayStates(sys.Surfaces, 0.00058756, gc)
+	heights := MarginalRayHeights(sys.Surfaces, 0.00058756, gc)
+
+	if len(states) != len(sys.Surfaces) || len(states) != len(heights) {
+		t.Fatalf("states = %d, heights = %d, surfaces = %d", len(states), len(heights), len(sys.Surfaces))
+	}
+	for i := range states {
+		if states[i].Height != heights[i] {
+			t.Errorf("surface %d height %v != MarginalRayHeights %v", i, states[i].Height, heights[i])
+		}
+	}
+	if math.Abs(states[0].Height-1) > 1e-12 {
+		t.Errorf("first-surface height = %v, want 1", states[0].Height)
+	}
+	// u = (n_before*u_before - y*phi) / n_after at the first surface, with
+	// u_before = 0, y = 1 and phi = (n-1)*curvature.
+	n, err := gc.RefractiveIndex(types.Material{Key: "N-BK7"}, 0.00058756)
+	if err != nil {
+		t.Fatalf("glass index: %v", err)
+	}
+	want := -(n - 1) * 0.01 / n
+	if math.Abs(states[0].Angle-want) > 1e-12 {
+		t.Errorf("first-surface angle = %v, want %v", states[0].Angle, want)
+	}
+}
+
 // TestComputeElementRoles verifies that Compute populates the element_roles
 // classification (mapped from GlassRoles) with the Cooke-triplet grouping and
 // a flint-side middle element.

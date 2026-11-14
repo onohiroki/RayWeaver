@@ -72,9 +72,10 @@ GOBIN=$HOME/.local/bin go install honnef.co/go/tools/cmd/staticcheck@latest
   `import | trace | paraxial`, CSV status report (manual:
   [docs/importsweep.md](docs/importsweep.md)).
 - `internal/<domain>` — `asphere`, `chief`, `coating`, `constraint`, `dls`,
-  `escape`, `exporter`, `fft`, `glass`, `importer`, `mcpsrv`, `mesh`, `optimize`,
-  `paraxial`, `polarization`, `psf`, `pso`, `pupil`, `ray`, `raymath`, `render`,
-  `resource`, `runctl`, `spectral`, `surface`, `types`, `vignette`, `wavefront`.
+  `escape`, `exporter`, `feasibility`, `fft`, `glass`, `importer`, `mcpsrv`,
+  `mesh`, `optimize`, `paraxial`, `polarization`, `psf`, `pso`, `pupil`, `ray`,
+  `raymath`, `render`, `resource`, `runctl`, `spectral`, `surface`, `types`,
+  `vignette`, `wavefront`.
   `runctl` is the detached-launch/SIGTERM-twice policy shared by `rwrun` and the
   MCP server; `mcpsrv` is only the protocol adapter (it must not reimplement
   YAML semantics).
@@ -165,6 +166,7 @@ everywhere, add it to the document that owns the topic, not to this file.
 | DLS internals, determinism, adaptive damping, active-set region method | [methods/dls-optimization.md](docs/methods/dls-optimization.md), [methods/region-active.md](docs/methods/region-active.md) |
 | Escape-function global optimization, save/stream/signals | [docs/escape.md](docs/escape.md), [methods/escape-function.md](docs/methods/escape-function.md) |
 | Particle-swarm optimization | [docs/pso.md](docs/pso.md), [methods/pso.md](docs/methods/pso.md) |
+| Feasibility continuation, total merit, node solve | [methods/feasibility-continuation.md](docs/methods/feasibility-continuation.md) |
 | Glass dispersion and the real-glass hull | [methods/glass-dispersion.md](docs/methods/glass-dispersion.md) |
 | Wavelength sets, weights, white spot / best focus, axial colour | [methods/polychromatic.md](docs/methods/polychromatic.md) |
 | Asphere candidates, coefficients, validation | [docs/asphere.md](docs/asphere.md), [methods/asphere-candidates.md](docs/methods/asphere-candidates.md) |

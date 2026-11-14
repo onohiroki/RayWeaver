@@ -74,10 +74,31 @@ func (o *Optimizer) UpdatePupils(x []float64) {
 			continue
 		}
 
+		wl := effectiveReferenceWavelength(cfg.referenceWavelength)
+		// An explicit stop defines the pupil as its paraxial image, and every
+		// field shares that plane. Using the per-field dynamic crossing instead
+		// moved the launch centre for off-axis fields, so the optimiser's grid
+		// disagreed with chief / zoom on the same design (a wide field read
+		// ~0.23 there and 0.90 in zoom). Keep the stop's paraxial pupil for all
+		// fields; a stop-free system keeps the dynamic per-field pupil.
+		if cfg.stopSurface > 0 {
+			if z, ok := chief.StopEntrancePupilZ(surfaces, cfg.stopSurface, wl, gc); ok {
+				if cfg.pupilZs == nil {
+					cfg.pupilZs = make(map[float64]float64)
+				}
+				for _, fd := range cfg.fieldDefs {
+					cfg.pupilZs[fd.Angle] = z
+				}
+				cfg.pupilZ = z
+				cfg.pupilResolved = true
+				continue
+			}
+		}
+
 		results := chief.DetermineChiefRaysGridMode(
 			types.System{Surfaces: surfaces, StopSurface: cfg.stopSurface},
 			cfg.fieldDefs, cfg.refSurface, o.numRays, gc, pol,
-			effectiveReferenceWavelength(cfg.referenceWavelength), false, types.GridPolar, nil, nil, nil, nil, 0, 0,
+			wl, false, types.GridPolar, nil, nil, nil, nil, 0, 0,
 			cfg.rayDefinition,
 		)
 		for i, r := range results {
