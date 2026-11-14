@@ -6,7 +6,6 @@ import (
 
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/raymath"
-	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
 )
 
@@ -89,50 +88,50 @@ func MarginalRaysForField(fi int, r Result, wavelength float64, path []int, pol 
 	return rays
 }
 
-// marginalsAtStop builds the cardinal marginal rays for one field. Each marginal
-// starts as a ray through the aperture-stop edge (stop vertex centre +/- physical
-// stop radius, in the stop vertex plane) and is then vignetted against every
-// other surface's clear aperture: a bisection search on the pupil fraction
-// f (0 = chief, 1 = stop edge) finds the largest f whose ray passes all surfaces
-// without an aperture or glass-path clip. Only that validated ray is emitted, so
-// the marginal truly grazes the effective (vignetted) aperture. It is independent
-// of the pupil grid and of the ray launch plane (robust for tilted / off-axis
-// fields).
+// marginalsAtStop builds the cardinal marginal rays for one field as the rays
+// through the aperture-stop edge. The edge is located where it is actually
+// traced: a launch offset from the entrance pupil is solved by bisection on the
+// traced hit at the stop until the ray crosses the stop at its clear-aperture
+// radius. Aiming a straight line from the launch plane at the stop vertex plane
+// is not enough — the refracting surfaces in front of the stop change the beam
+// height, so a demagnifying front group overshoots the stop by the inverse pupil
+// magnification (about 2.6x on the P2008 zoom, where a launch at the stop radius
+// crossed the stop at 6.85 mm for a 2.643 mm radius).
 //
-// The bundle is taken along the field's chief direction (angle / image-height
-// fields, object at infinity -- a parallel bundle grazing the stop edge) or from
-// the object point through the edge for a finite conjugate (object-height)
-// field. Sagittal (X) marginals are only produced for fields that carry an X
-// direction component; otherwise only the Y pair is emitted. A marginal is
-// omitted when it is fully vignetted (its maximum valid fraction is ~0).
+// The stop-edge ray is then vignetted against every other surface's clear
+// aperture: a bisection on the pupil fraction f (0 = chief, 1 = stop edge) finds
+// the largest f whose ray passes all non-stop surfaces. A marginal is omitted
+// when it is fully vignetted (its maximum valid fraction is ~0).
 //
-// ok is false when there is no usable stop edge, signalling the caller to fall
-// back to the pupil-grid extremes (MarginalRaysForField). engine may be nil, in
-// which case vignetting is not applied and the raw stop-edge rays are returned
-// (the final rays always use Lenient mode for plotting).
+// The bundle is launched from the entrance pupil (the stop's image): a parallel
+// bundle along the field's chief direction for angle / image-height fields, or
+// from the object point toward the pupil edge for a finite conjugate
+// (object-height) field. Sagittal (X) marginals are only produced for fields
+// that carry an X direction component; otherwise only the Y pair is emitted.
+//
+// ok is false when there is no usable stop edge or no engine to solve it with,
+// signalling the caller to fall back to the already-traced pupil-grid extremes
+// (MarginalRaysForField).
 func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, surfaces []types.Surface, wavelength float64, path []int, pol types.JonesVector) ([]types.Ray, bool) {
 	radius := stop.Diameter / 2
-	if radius <= 0 {
+	hasStopEdge := radius > 0
+	if !hasStopEdge {
 		// No physical aperture declared on the stop: fall back to the paraxial
-		// entrance-pupil radius if it was recorded.
+		// entrance-pupil radius if it was recorded. There is no stop edge to
+		// solve for; the marginal is the pupil edge itself.
 		if ep := r.EntrancePupil; ep != nil && ep.Radius > 0 {
 			radius = ep.Radius
 		} else {
 			return nil, false
 		}
 	}
-
-	// Stop aperture centre: the clear aperture is centred on the stop vertex
-	// (its X/Y decenter), not on the chief ray's position at the stop plane. The
-	// marginal must graze the aperture edge (vertex +/- radius), so it is
-	// anchored to the vertex. The sag-aware rim Z is added below so a curved
-	// stop is not clipped (for a flat stop the sag is zero).
-	center := types.Vec3{Z: stop.PhysicalZ}
-	if v := stop.LocalToGlobal.MultiplyPoint(types.Vec3{}); v.X != 0 || v.Y != 0 || v.Z != 0 {
-		center.X = v.X
-		center.Y = v.Y
+	if engine == nil {
+		// Without an engine the stop edge cannot be located; let the caller use
+		// the already-traced pupil-grid extremes instead of a straight-line
+		// guess that ignores refraction.
+		return nil, false
 	}
-	rimZ := stopRimSag(stop, radius)
+
 	rayDir := r.ChiefRay.Initial.Direction
 	if rayDir.LengthSq() == 0 {
 		return nil, false
@@ -143,30 +142,51 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 	hasX := math.Abs(r.FieldDir.X) > 1e-6
 	fid := fmt.Sprintf("f%d", fi)
 
-	// construct builds the marginal ray for the given pupil fraction f and
-	// leniency, or nil when the geometry is degenerate (grazing chief, etc.).
-	construct := func(f float64, edir types.Vec3, tag string, lenient bool) *types.Ray {
-		edgeW := center.Add(edir.Scale(f * radius))
-		edgeW.Z += rimZ
+	// Stop aperture centre: the clear aperture is centred on the stop vertex
+	// (its X/Y decenter), not on the chief ray's position at the stop plane.
+	stopVertex := types.Vec3{Z: stop.PhysicalZ}
+	if v := stop.LocalToGlobal.MultiplyPoint(types.Vec3{}); v.X != 0 || v.Y != 0 || v.Z != 0 {
+		stopVertex = v
+	}
+
+	// Launch basis: the entrance-pupil centre and radius (the stop's image).
+	// Fall back to the chief launch point for a parallel bundle, or the stop
+	// vertex for a finite conjugate, when the result carries no pupil record.
+	pupilCenter := stopVertex
+	pupilRadius := radius
+	if ep := r.EntrancePupil; ep != nil {
+		pupilCenter = ep.Center
+		if ep.Radius > 0 {
+			pupilRadius = ep.Radius
+		}
+	} else if !isHeight {
+		pupilCenter = origin0
+	}
+	launchCenter := pupilCenter
+	if !isHeight {
+		// Point on the launch plane whose chief-direction ray crosses the pupil
+		// centre; the grid and fan rays use the same point.
+		launchCenter = raymath.WavefrontGridCenter(pupilCenter, rayDir, zStart)
+	}
+
+	// construct builds the marginal ray for the given pupil-plane offset and
+	// leniency, or nil when the geometry is degenerate.
+	construct := func(offset float64, edir types.Vec3, tag string, lenient bool) *types.Ray {
 		var origin, d types.Vec3
 		if isHeight {
-			d = edgeW.Subtract(origin0).Normalize()
+			aim := pupilCenter.Add(edir.Scale(offset))
+			d = aim.Subtract(origin0).Normalize()
 			if d.LengthSq() == 0 {
 				return nil
 			}
 			origin = origin0
 		} else {
 			d = rayDir
-			if math.Abs(d.Z) < 1e-12 {
-				return nil
-			}
-			t := (edgeW.Z - zStart) / d.Z
-			origin = edgeW.Subtract(d.Scale(t))
-			// Launch from the wavefront plane (perpendicular to rayDir)
-			// through the chief ray's launch point, so the marginal's OPL
-			// shares the same reference as the grid rays and carries no
-			// launch-geometry tilt.
-			origin = raymath.ProjectOntoWavefront(origin, origin0, d)
+			// Launch from the wavefront plane (perpendicular to rayDir) through
+			// the chief ray's launch point, so the marginal's OPL shares the
+			// same reference as the grid rays and carries no launch-geometry
+			// tilt.
+			origin = raymath.ProjectOntoWavefront(launchCenter.Add(edir.Scale(offset)), origin0, d)
 		}
 		return &types.Ray{
 			ID:         fmt.Sprintf("marginal_%s_%s", fid, tag),
@@ -176,6 +196,75 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 			Jones:      pol,
 			Lenient:    lenient,
 		}
+	}
+
+	// stopCoord returns the lateral coordinate of the candidate's hit on the
+	// stop, measured in the stop's local frame along edir (the same coordinate
+	// the aperture check uses), or ok=false when the ray does not reach the
+	// stop.
+	stopCoord := func(cand *types.Ray, edir types.Vec3) (float64, bool) {
+		if cand == nil {
+			return 0, false
+		}
+		cand.Lenient = true
+		res := engine.TraceRay(*cand, surfaces, false)
+		for _, sr := range res.Surfaces {
+			if sr.SurfaceID != stop.ID {
+				continue
+			}
+			local := stop.GlobalToLocal.MultiplyPoint(sr.Position)
+			e := stop.GlobalToLocal.MultiplyVector(edir)
+			l := math.Hypot(e.X, e.Y)
+			if l < 1e-12 {
+				return 0, false
+			}
+			e.X, e.Y = e.X/l, e.Y/l
+			w := local.X*e.X + local.Y*e.Y
+			if math.IsNaN(w) || math.IsInf(w, 0) {
+				return 0, false
+			}
+			return w, true
+		}
+		return 0, false
+	}
+
+	// edgeOffset solves for the launch offset whose traced stop hit sits on the
+	// clear-aperture edge. It returns ok=false when the chief is already outside
+	// on this side or the ray cannot reach the stop.
+	edgeOffset := func(edir types.Vec3) (float64, bool) {
+		if !hasStopEdge {
+			return pupilRadius, pupilRadius > 0
+		}
+		w0, ok := stopCoord(construct(0, edir, "", false), edir)
+		if !ok || w0 >= radius {
+			return 0, false
+		}
+		hi := math.Max(pupilRadius, radius)
+		wHi, ok := stopCoord(construct(hi, edir, "", false), edir)
+		for i := 0; i < 8 && ok && wHi < radius; i++ {
+			hi *= 2
+			wHi, ok = stopCoord(construct(hi, edir, "", false), edir)
+		}
+		if !ok || wHi < radius {
+			return 0, false
+		}
+		lo := 0.0
+		for i := 0; i < 40; i++ {
+			mid := (lo + hi) / 2
+			w, ok := stopCoord(construct(mid, edir, "", false), edir)
+			if !ok {
+				return 0, false
+			}
+			if w < radius {
+				lo = mid
+			} else {
+				hi = mid
+			}
+			if hi-lo < 1e-6*(1+radius) {
+				break
+			}
+		}
+		return lo, true
 	}
 
 	// traces reports whether the candidate ray can actually pass through the
@@ -191,8 +280,8 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 	// Glass-path (edge-thickness) constraints are deliberately not considered
 	// during the search.
 	traces := func(cand *types.Ray) bool {
-		if cand == nil || engine == nil {
-			return cand != nil
+		if cand == nil {
+			return false
 		}
 		cand.Lenient = true
 		res := engine.TraceRay(*cand, surfaces, false)
@@ -210,11 +299,11 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 	}
 
 	// maxValidFraction returns the largest pupil fraction f in [0,1] whose ray
-	// passes every surface aperture, via bisection, or 0 when not even the chief
-	// fraction (f=0) traces.
-	maxValidFraction := func(edir types.Vec3) float64 {
+	// passes every non-stop surface aperture, via bisection, or 0 when not even
+	// the chief fraction (f=0) traces.
+	maxValidFraction := func(edge float64, edir types.Vec3) float64 {
 		lo, hi := 0.0, 1.0
-		if traces(construct(hi, edir, "", false)) {
+		if traces(construct(hi*edge, edir, "", false)) {
 			return hi // fast path: the full stop-edge ray already passes
 		}
 		if !traces(construct(lo, edir, "", false)) {
@@ -222,7 +311,7 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 		}
 		for i := 0; i < 20; i++ {
 			mid := (lo + hi) / 2
-			if traces(construct(mid, edir, "", false)) {
+			if traces(construct(mid*edge, edir, "", false)) {
 				lo = mid
 			} else {
 				hi = mid
@@ -250,30 +339,34 @@ func marginalsAtStop(fi int, r Result, stop types.Surface, engine *ray.Engine, s
 	}
 
 	var rays []types.Ray
+	solved := false
 	for _, e := range edges {
-		f := 1.0
-		if engine != nil {
-			f = maxValidFraction(e.dir)
-		}
-		if f <= 0 {
-			// Even the chief fraction does not pass on this side; there is no
-			// marginal ray at all. Otherwise emit the largest fraction that
-			// passes every surface, however small, so both sides always get a
-			// marginal.
+		edge, ok := edgeOffset(e.dir)
+		if !ok || edge <= 0 {
 			continue
 		}
-		if r := construct(f, e.dir, e.tag, true); r != nil {
+		solved = true
+		f := maxValidFraction(edge, e.dir)
+		if f <= 0 {
+			// Even a vanishing fraction of the stop edge does not pass on this
+			// side: there is no marginal ray at all. Otherwise emit the largest
+			// fraction that passes every surface, however small, so both sides
+			// always get a marginal.
+			continue
+		}
+		if r := construct(f*edge, e.dir, e.tag, true); r != nil {
 			rays = append(rays, *r)
 		}
 	}
-	return rays, true
+	return rays, solved
 }
 
 // MarginalRays extracts the marginal rays for one field. When an aperture stop
 // is defined (stopSurfaceID > 0) the rays through the (vignetted) stop edge are
 // used -- robust and grid-independent, correct for tilted / off-axis fields;
 // otherwise the pupil-grid extremes (MarginalRaysForField) are used as a
-// fallback. engine (may be nil) drives the vignetting bisection.
+// fallback. A nil engine cannot solve the stop edge, so the grid extremes are
+// used there too.
 func MarginalRays(fi int, r Result, stopSurfaceID int, surfaces []types.Surface, engine *ray.Engine, wavelength float64, path []int, pol types.JonesVector) []types.Ray {
 	if stopSurfaceID > 0 {
 		for i := range surfaces {
@@ -286,22 +379,4 @@ func MarginalRays(fi int, r Result, stopSurfaceID int, surfaces []types.Surface,
 		}
 	}
 	return MarginalRaysForField(fi, r, wavelength, path, pol)
-}
-
-// stopRimSag returns the global Z-offset, relative to the stop vertex plane, of
-// the stop surface rim at radial distance radius. It is used so a marginal ray
-// grazes the curved rim instead of the flat vertex-plane edge (which would
-// otherwise be clipped by a curved stop). Returns 0 for a flat stop, for a
-// radius beyond the surface's valid sag domain, or when the surface has not been
-// precomputed.
-func stopRimSag(stop types.Surface, radius float64) float64 {
-	if stop.Curvature == 0 || radius <= 0 {
-		return 0
-	}
-	s := surface.SagFunc(stop)(radius)
-	if math.IsNaN(s) {
-		return 0
-	}
-	p := stop.LocalToGlobal.MultiplyPoint(types.Vec3{Y: radius, Z: s})
-	return p.Z - stop.PhysicalZ
 }
