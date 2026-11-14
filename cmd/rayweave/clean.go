@@ -68,6 +68,23 @@ func runClean(data []byte) {
 		removed = append(removed, removedEntry{Field: "wavefront_result", Count: 1})
 		output.WavefrontResults = nil
 	}
+	// Per-config ray results (chief --all-configs and trace) live inside
+	// configs[]; their computed sections are removed like the top-level ones.
+	// configs[].rays is a ray definition (like the top-level rays section), so
+	// it is preserved.
+	var cfgChief, cfgResults int
+	for i := range output.Configs {
+		cfgChief += len(output.Configs[i].ChiefRays)
+		output.Configs[i].ChiefRays = nil
+		cfgResults += len(output.Configs[i].Results)
+		output.Configs[i].Results = nil
+	}
+	if cfgChief > 0 {
+		removed = append(removed, removedEntry{Field: "configs[].chief_rays", Count: cfgChief})
+	}
+	if cfgResults > 0 {
+		removed = append(removed, removedEntry{Field: "configs[].results", Count: cfgResults})
+	}
 	// optimization.field_resolution is a run result (the field angles a solve
 	// froze at its start geometry), not a setting: a re-run resolves it again.
 	if output.Input.Optimization != nil && len(output.Input.Optimization.FieldResolution) > 0 {

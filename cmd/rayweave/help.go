@@ -19,6 +19,11 @@ Determines chief rays for each field.
 
 Options:
   --config ID          select config by id (multi-config mode)
+  --all-configs        compute every active config (document order, every
+                         config when none is active) and write each config's
+                         chief_rays / marginal rays into configs[]
+  --configs "id1,..."  configs to compute, by id or 0-based index
+                         (comma-separated; implies --all-configs)
   --pass-through N     constrain chief ray to pass through (0,0) centre of
                          surface N (overrides YAML pass_through.surface)
   --chief-ray NAME     chief-ray definition: entrance_pupil_centre | centroid |
@@ -88,6 +93,13 @@ Input YAML — chief section:
 Output: augmented YAML with chief_rays[] section.
   Pipe into "rayweave trace" to trace each chief ray through the system.
 
+With --all-configs (or --configs), each selected config's fields and design
+  wavelengths drive its own chief pass, and the results are stored per config
+  (configs[].chief_rays, plus configs[].rays for --marginal-rays). The
+  top-level chief_rays[] keeps its single-config meaning and describes the
+  first selected config, so chief | trace | plot pipelines still work.
+  --fnum is rejected here (one EFL per document); use --epd instead.
+
 Without pass_through, the chief ray passes through the spot centroid on
   the reference surface.  This definition is robust during optimisation
   where the stop may be ill-defined.
@@ -109,8 +121,11 @@ See also: samples/us2645157.yaml
 Traces rays through the system.
 
 Without 'single':
-  Traces rays from the input 'rays' section and chief_rays.
-  Results are appended to any existing results in the input.
+  Traces the rays the document carries: the input 'rays' section plus
+  chief_rays. A document with per-config rays (chief --all-configs) is
+  traced config by config without a flag, and each config's results are
+  written to configs[].results; the top-level results[] holds the first
+  traced config.
 
 With 'single':
   Traces a single ray specified via CLI flags.
@@ -130,6 +145,10 @@ Single-ray options:
 
 Common options:
   --config ID           select config by id (multi-config mode)
+  --configs "id1,..."   trace only these configs, by id or 0-based index
+                          (comma-separated). Without a selector, every config
+                          that carries its own rays (chief --all-configs) is
+                          traced and written to configs[].results
   --glass-dir DIR       AGF glass catalog directory
   --lenient             skip aperture/glass-path checks
   --details             add per-surface detail (AOI, n1/n2, Fresnel) to output YAML
@@ -271,10 +290,10 @@ stacked cross-sections, and --configs selects them explicitly:
 
   Every config shares one scale, the image planes are aligned on one
   vertical line (chief.reference_surface, else the last surface), and the
-  panels are stacked so they never overlap. results[] / chief_rays[] hold
-  one config's rays only, so multi-config mode draws the lens
-  cross-sections without rays; use --config ID for a ray-overlaid single
-  plot.
+  panels are stacked so they never overlap. Each panel draws its own rays
+  from configs[].results / configs[].chief_rays; produce them with
+  "chief --all-configs ... | trace". Without per-config rays
+  the panels are cross-sections and a warning says so.
 
 Glass types are colour-coded using the nd/vd values from the
 glass_catalog section.  Ray colours follow the field angle
@@ -284,9 +303,10 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
   with anti-aliasing.  No external tools required.
 
 Warnings (stderr, exit 0, rendering continues):
-  multi-config rays: --multi-config / --configs draw lens cross-sections
-    only, because results[] / chief_rays[] hold one config's rays. The
-    warning appears when they are present.
+  multi-config rays: a panel draws configs[].results / configs[].chief_rays
+    when they exist. A document that only carries the top-level arrays
+    (from a plain chief | trace) is drawn as cross-sections, with a
+    warning; use chief --all-configs for ray-overlaid panels.
   --element-color out-of-range: index outside 1..N where N is the number
     of lens elements detected. The warning identifies the invalid index.
   --asphere-color non-asphere: surface ID specified does not correspond to

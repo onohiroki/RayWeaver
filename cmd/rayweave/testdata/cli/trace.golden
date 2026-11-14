@@ -1,4 +1,4 @@
 exit: 0
 stderr:
-probe --len results: 6
-probe -r results[3].opl_total: 132.04996369611302
+probe --len results: 3
+probe -r results[0].opl_total: 132.04996369611302

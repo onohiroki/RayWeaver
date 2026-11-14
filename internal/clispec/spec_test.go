@@ -180,3 +180,28 @@ func TestArgsRendersPlotMultiConfig(t *testing.T) {
 		}
 	}
 }
+
+// TestArgsRendersAllConfigs pins the same mapping for chief, which still takes
+// an explicit --all-configs (trace infers the scope from the document).
+func TestArgsRendersAllConfigs(t *testing.T) {
+	type stageInput struct {
+		AllConfigs bool     `json:"all_configs"`
+		Configs    []string `json:"configs"`
+	}
+	in := stageInput{AllConfigs: true, Configs: []string{"wide", "tele"}}
+	want := []string{"--all-configs", "--configs", "wide,tele"}
+	got := Args(Chief, in, nil)
+	if len(got) != len(want) {
+		t.Fatalf("chief: Args = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("chief: Args = %v, want %v", got, want)
+		}
+	}
+
+	// trace has no --all-configs: the same input must not invent the flag.
+	if args := Args(Trace, in, nil); len(args) != 2 || args[0] != "--configs" {
+		t.Errorf("trace: Args = %v, want only --configs wide,tele", args)
+	}
+}

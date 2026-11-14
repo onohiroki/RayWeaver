@@ -131,12 +131,19 @@ done
 echo
 
 # ── 4. Multi-config layout (all zoom positions in one drawing) ──
-# One shared scale, the image planes aligned on one vertical line, and the
-# three positions stacked so they never overlap.
-echo "=== Multi-config layout (all configs, shared scale) ==="
-cat "$YAML"   | $RAYWEAVE plot --multi-config -o "$OUTDIR/simple-zoom-init-layout.png" > /dev/null
+# One shared scale, the image planes aligned on one vertical line, and each
+# position traced with its own rays (chief --all-configs writes them per
+# config; plain trace picks them all up).
+echo "=== Multi-config layout (all configs, shared scale, own rays) ==="
+cat "$YAML" \
+  | $RAYWEAVE chief --all-configs --clear-aperture --marginal-rays --ray-fan \
+  | $RAYWEAVE trace \
+  | $RAYWEAVE plot --multi-config -o "$OUTDIR/simple-zoom-init-layout.png" > /dev/null 2>/dev/null
 echo "  PNG (before): $OUTDIR/simple-zoom-init-layout.png"
-cat "$RESULT" | $RAYWEAVE plot --multi-config -o "$OUTDIR/simple-zoom-opt-layout.png" > /dev/null
+cat "$RESULT" \
+  | $RAYWEAVE chief --all-configs --clear-aperture --marginal-rays --ray-fan \
+  | $RAYWEAVE trace \
+  | $RAYWEAVE plot --multi-config -o "$OUTDIR/simple-zoom-opt-layout.png" > /dev/null 2>/dev/null
 echo "  PNG (after):  $OUTDIR/simple-zoom-opt-layout.png"
 echo
 

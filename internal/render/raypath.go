@@ -13,6 +13,50 @@ type rayRenderData struct {
 	path       string
 	color      string
 	fieldAngle float64
+	// points is the polyline in world coordinates (X = z, Y = y). The
+	// multi-config layout clips it to each panel's drawing box so a ray's
+	// object-side tail cannot reach into the neighbouring panel; path is kept
+	// in sync with points.
+	points []vec2
+}
+
+// rayPathFromPoints renders a polyline as the "M z,y L z,y ..." SVG path the
+// renderers parse.
+func rayPathFromPoints(pts []vec2) string {
+	if len(pts) < 2 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("M ")
+	b.WriteString(f64str(pts[0].X))
+	b.WriteByte(',')
+	b.WriteString(f64str(pts[0].Y))
+	for _, p := range pts[1:] {
+		b.WriteString(" L ")
+		b.WriteString(f64str(p.X))
+		b.WriteByte(',')
+		b.WriteString(f64str(p.Y))
+	}
+	return b.String()
+}
+
+// rayPointsFromPath parses a "M z,y L z,y ..." path back into its points.
+func rayPointsFromPath(path string) []vec2 {
+	if !strings.HasPrefix(path, "M ") {
+		return nil
+	}
+	var pts []vec2
+	for _, tok := range strings.Fields(path[2:]) {
+		if tok == "L" {
+			continue
+		}
+		i := strings.IndexByte(tok, ',')
+		if i < 0 {
+			continue
+		}
+		pts = append(pts, vec2{X: parseF64(tok[:i]), Y: parseF64(tok[i+1:])})
+	}
+	return pts
 }
 
 type angleColorEntry struct {
@@ -54,6 +98,7 @@ func buildRayPaths(results []types.RayResult, chiefRays []types.ChiefRayResult, 
 			path:       path,
 			color:      col,
 			fieldAngle: angle,
+			points:     rayPointsFromPath(path),
 		})
 	}
 
@@ -85,6 +130,7 @@ func buildFanPaths(chiefRays []types.ChiefRayResult, maxFanRays int, colors []an
 					path:       path,
 					color:      col,
 					fieldAngle: cr.FieldAngle,
+					points:     rayPointsFromPath(path),
 				})
 			}
 		}

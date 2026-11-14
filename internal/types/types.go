@@ -680,6 +680,15 @@ type Config struct {
 	Merit       *MeritFunction      `yaml:"merit,omitempty"`
 	MeritModes  []MeritMode         `yaml:"merit_modes,omitempty"`
 	Constraints []ConstraintOperand `yaml:"constraints,omitempty"`
+	// Per-config ray pipeline. chief --all-configs writes each position's
+	// chief_rays/rays here, and trace writes the results of every config that
+	// carries per-config rays, so a multi-config plot draws each config's own
+	// rays and no command mistakes one position's rays for another's. The
+	// top-level chief_rays/results sections keep their single-config meaning
+	// (the selected config, or the first one).
+	ChiefRays []ChiefRayResult `yaml:"chief_rays,omitempty"`
+	Rays      *RayInput        `yaml:"rays,omitempty"`
+	Results   []RayResult      `yaml:"results,omitempty"`
 }
 
 type VariableTarget struct {

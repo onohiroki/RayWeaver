@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strconv"
+	"strings"
 
 	"github.com/hiroki/rayweaver/internal/spectral"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -96,4 +97,115 @@ func configSurfaces(configs []types.Config, configFlag *string) []types.Surface 
 		return configs[0].Surfaces
 	}
 	return nil
+}
+
+// configTargets resolves a config selection shared by plot, chief and trace:
+// --config selects one config, --configs selects an explicit list (ids or
+// 0-based indexes, in the given order, duplicates dropped) and multi selects
+// the active configs in document order, falling back to every config when none
+// is active. limit > 0 caps the implicit multi selection (plot draws at most 5
+// by default); an explicit list is never capped. multiLabel names the flag(s)
+// that turn multi selection on, for the error message when one is combined with
+// --config.
+//
+// The returned warnings cover configs without surfaces (skipped) and an
+// implicit selection truncated by the limit. In single-config mode exactly one
+// index is returned.
+func configTargets(configs []types.Config, configFlag string, multi bool, list []string, limit int, multiLabel string) ([]int, bool, []string, error) {
+	multiMode := multi || len(list) > 0
+	if configFlag != "" && multiMode {
+		return nil, false, nil, fmt.Errorf("--config and %s are mutually exclusive", multiLabel)
+	}
+
+	if !multiMode {
+		idx := 0
+		if configFlag != "" {
+			i, msg := resolveConfig(configs, configFlag)
+			if i < 0 {
+				return nil, false, nil, fmt.Errorf("%s", msg)
+			}
+			idx = i
+		}
+		if len(configs[idx].Surfaces) == 0 {
+			return nil, false, nil, fmt.Errorf("no surfaces to process (define configs[].surfaces)")
+		}
+		return []int{idx}, false, nil, nil
+	}
+
+	candidates := make([]int, 0, len(configs))
+	if len(list) > 0 {
+		seen := make(map[int]bool, len(list))
+		for _, token := range list {
+			i, msg := resolveConfig(configs, token)
+			if i < 0 {
+				return nil, true, nil, fmt.Errorf("%s", msg)
+			}
+			if seen[i] {
+				continue
+			}
+			seen[i] = true
+			candidates = append(candidates, i)
+		}
+	} else {
+		for i := range configs {
+			if configs[i].Active {
+				candidates = append(candidates, i)
+			}
+		}
+		if len(candidates) == 0 {
+			for i := range configs {
+				candidates = append(candidates, i)
+			}
+		}
+	}
+
+	var warnings []string
+	indices := make([]int, 0, len(candidates))
+	for _, i := range candidates {
+		if len(configs[i].Surfaces) == 0 {
+			warnings = append(warnings, fmt.Sprintf("config %q has no surfaces — skipped", configLabel(configs, i)))
+			continue
+		}
+		indices = append(indices, i)
+	}
+	if len(list) == 0 && limit > 0 && len(indices) > limit {
+		warnings = append(warnings, fmt.Sprintf("%d configs selected; using the first %d (use --configs to choose)", len(indices), limit))
+		indices = indices[:limit]
+	}
+	if len(indices) == 0 {
+		return nil, true, warnings, fmt.Errorf("no config to process")
+	}
+	return indices, true, warnings, nil
+}
+
+// hasPerConfigRays reports whether the document carries the per-config ray
+// pipeline (chief --all-configs): any config with its own chief_rays or rays.
+func hasPerConfigRays(configs []types.Config) bool {
+	for i := range configs {
+		if len(configs[i].Results) > 0 || len(configs[i].ChiefRays) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// splitConfigList parses a --configs value: comma-separated config ids or
+// 0-based indexes, surrounding whitespace ignored.
+func splitConfigList(raw string) []string {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// configLabel names a config in warnings, falling back to its document
+// position when the config declares no id.
+func configLabel(configs []types.Config, idx int) string {
+	if idx >= 0 && idx < len(configs) && configs[idx].ID != "" {
+		return configs[idx].ID
+	}
+	return fmt.Sprintf("#%d", idx)
 }

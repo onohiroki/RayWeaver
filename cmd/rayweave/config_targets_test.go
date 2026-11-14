@@ -27,10 +27,10 @@ func selectionConfigs() []types.Config {
 	}
 }
 
-func TestPlotTargetsSingleConfig(t *testing.T) {
+func TestConfigTargetsSingle(t *testing.T) {
 	cfgs := selectionConfigs()
 
-	indices, multi, warnings, err := plotTargets(cfgs, "", false, nil, 5)
+	indices, multi, warnings, err := configTargets(cfgs, "", false, nil, 5, "--multi-config or --configs")
 	if err != nil {
 		t.Fatalf("default: %v", err)
 	}
@@ -38,21 +38,21 @@ func TestPlotTargetsSingleConfig(t *testing.T) {
 		t.Errorf("default = %v, multi=%v, warnings=%v; want [0], false, none", indices, multi, warnings)
 	}
 
-	indices, multi, _, err = plotTargets(cfgs, "tele", false, nil, 5)
+	indices, multi, _, err = configTargets(cfgs, "tele", false, nil, 5, "--multi-config or --configs")
 	if err != nil || multi || !reflect.DeepEqual(indices, []int{2}) {
 		t.Errorf("--config tele = %v, multi=%v, err=%v; want [2], false", indices, multi, err)
 	}
 
-	if _, _, _, err = plotTargets(cfgs, "nope", false, nil, 5); err == nil {
+	if _, _, _, err = configTargets(cfgs, "nope", false, nil, 5, "--multi-config or --configs"); err == nil {
 		t.Error("unknown --config did not fail")
 	}
 }
 
-func TestPlotTargetsMultiDefaults(t *testing.T) {
+func TestConfigTargetsMultiDefaults(t *testing.T) {
 	cfgs := selectionConfigs()
 
 	// Active configs in document order; the surfaceless one is skipped.
-	indices, multi, warnings, err := plotTargets(cfgs, "", true, nil, 5)
+	indices, multi, warnings, err := configTargets(cfgs, "", true, nil, 5, "--multi-config or --configs")
 	if err != nil {
 		t.Fatalf("--multi-config: %v", err)
 	}
@@ -66,11 +66,11 @@ func TestPlotTargetsMultiDefaults(t *testing.T) {
 		t.Errorf("warnings = %v, want one surfaceless-config warning", warnings)
 	}
 
-	// A document that never sets active still draws every config.
+	// A document that never sets active still selects every config.
 	for i := range cfgs {
 		cfgs[i].Active = false
 	}
-	indices, _, _, err = plotTargets(cfgs, "", true, nil, 5)
+	indices, _, _, err = configTargets(cfgs, "", true, nil, 5, "--multi-config or --configs")
 	if err != nil {
 		t.Fatalf("inactive document: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestPlotTargetsMultiDefaults(t *testing.T) {
 	}
 }
 
-func TestPlotTargetsMultiLimit(t *testing.T) {
+func TestConfigTargetsLimit(t *testing.T) {
 	var cfgs []types.Config
 	for i := 0; i < 7; i++ {
 		cfgs = append(cfgs, types.Config{
@@ -89,7 +89,7 @@ func TestPlotTargetsMultiLimit(t *testing.T) {
 		})
 	}
 
-	indices, multi, warnings, err := plotTargets(cfgs, "", true, nil, 5)
+	indices, multi, warnings, err := configTargets(cfgs, "", true, nil, 5, "--multi-config or --configs")
 	if err != nil || !multi {
 		t.Fatalf("--multi-config: indices=%v multi=%v err=%v", indices, multi, err)
 	}
@@ -99,12 +99,21 @@ func TestPlotTargetsMultiLimit(t *testing.T) {
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "first 5") {
 		t.Errorf("warnings = %v, want a truncation warning", warnings)
 	}
+
+	// chief/trace pass limit 0: every active config is processed.
+	indices, _, warnings, err = configTargets(cfgs, "", true, nil, 0, "--all-configs or --configs")
+	if err != nil {
+		t.Fatalf("--all-configs: %v", err)
+	}
+	if len(indices) != len(cfgs) || len(warnings) != 0 {
+		t.Errorf("indices = %v warnings=%v, want every config and no warning", indices, warnings)
+	}
 }
 
-func TestPlotTargetsExplicitSelection(t *testing.T) {
+func TestConfigTargetsExplicitSelection(t *testing.T) {
 	cfgs := selectionConfigs()
 
-	indices, multi, warnings, err := plotTargets(cfgs, "", false, []string{"wide", "extra"}, 5)
+	indices, multi, warnings, err := configTargets(cfgs, "", false, []string{"wide", "extra"}, 5, "--multi-config or --configs")
 	if err != nil {
 		t.Fatalf("--configs wide,extra: %v", err)
 	}
@@ -119,7 +128,7 @@ func TestPlotTargetsExplicitSelection(t *testing.T) {
 	}
 
 	// Indexes resolve like ids, and duplicates are dropped in first-seen order.
-	indices, _, _, err = plotTargets(cfgs, "", true, []string{"2", "0", "2"}, 5)
+	indices, _, _, err = configTargets(cfgs, "", true, []string{"2", "0", "2"}, 5, "--multi-config or --configs")
 	if err != nil {
 		t.Fatalf("--configs 2,0,2: %v", err)
 	}
@@ -128,7 +137,7 @@ func TestPlotTargetsExplicitSelection(t *testing.T) {
 	}
 
 	// An explicit selection is not capped, and a surfaceless config is skipped.
-	indices, _, warnings, err = plotTargets(cfgs, "", true, []string{"wide", "empty", "extra"}, 1)
+	indices, _, warnings, err = configTargets(cfgs, "", true, []string{"wide", "empty", "extra"}, 1, "--multi-config or --configs")
 	if err != nil {
 		t.Fatalf("explicit with empty surface list: %v", err)
 	}
@@ -139,18 +148,22 @@ func TestPlotTargetsExplicitSelection(t *testing.T) {
 		t.Errorf("warnings = %v, want one surfaceless-config warning", warnings)
 	}
 
-	if _, _, _, err = plotTargets(cfgs, "", true, []string{"nope"}, 5); err == nil {
+	if _, _, _, err = configTargets(cfgs, "", true, []string{"nope"}, 5, "--multi-config or --configs"); err == nil {
 		t.Error("unknown --configs entry did not fail")
 	}
 }
 
-func TestPlotTargetsRejectsBothSelectors(t *testing.T) {
+func TestConfigTargetsRejectsBothSelectors(t *testing.T) {
 	cfgs := selectionConfigs()
-	if _, _, _, err := plotTargets(cfgs, "wide", true, nil, 5); err == nil {
+	if _, _, _, err := configTargets(cfgs, "wide", true, nil, 5, "--multi-config or --configs"); err == nil {
 		t.Error("--config with --multi-config did not fail")
 	}
-	if _, _, _, err := plotTargets(cfgs, "wide", false, []string{"mid"}, 5); err == nil {
+	if _, _, _, err := configTargets(cfgs, "wide", false, []string{"mid"}, 5, "--multi-config or --configs"); err == nil {
 		t.Error("--config with --configs did not fail")
+	}
+	if _, _, _, err := configTargets(cfgs, "wide", true, nil, 0, "--all-configs or --configs"); err == nil ||
+		!strings.Contains(err.Error(), "--all-configs or --configs") {
+		t.Errorf("--config with --all-configs error = %v, want the flag named", err)
 	}
 }
 

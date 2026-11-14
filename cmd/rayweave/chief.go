@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"math"
 	"os"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/hiroki/rayweaver/internal/chief"
 	"github.com/hiroki/rayweaver/internal/clispec"
 	"github.com/hiroki/rayweaver/internal/dls"
+	"github.com/hiroki/rayweaver/internal/glass"
 	"github.com/hiroki/rayweaver/internal/paraxial"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/spectral"
@@ -19,6 +21,44 @@ import (
 // clearApertureTol is the diameter change (mm) below which two sizing passes
 // agree: ten microns is far below any mechanical or optical consequence.
 const clearApertureTol = 0.01
+
+// chiefSamples is the per-wavelength stats set a chief run applies. design
+// samples come from each config's own wavelength table (so every zoom position
+// is measured at its lines); fixed samples are the same for every config
+// (--wavelengths, chief.wavelengths or the document spectrum).
+type chiefSamples struct {
+	fixed  []types.WavelengthSample
+	design bool
+}
+
+func (s chiefSamples) forConfig(items []types.WavelengthItem) []types.WavelengthSample {
+	if s.design {
+		return spectral.DesignSamples(items)
+	}
+	return s.fixed
+}
+
+// chiefRun holds the settings shared by every config of a chief invocation;
+// runConfig carries out the per-config part with that config's surfaces,
+// fields and design wavelengths.
+type chiefRun struct {
+	input      *types.Input
+	opts       *clispec.Options
+	gc         *glass.Catalog
+	pol        types.JonesVector
+	pt         *types.PassThroughTarget
+	fanCfg     *types.RayFanConfig
+	wavelength float64
+	samples    chiefSamples
+	dumpMap    bool
+}
+
+// chiefConfigResult is what one config's chief pass produces for the output.
+type chiefConfigResult struct {
+	chiefRays []types.ChiefRayResult
+	marginal  []types.Ray
+	stop      *types.StopInfo
+}
 
 func runChief(data []byte) {
 	fs := flag.NewFlagSet("chief", flag.ExitOnError)
@@ -62,6 +102,29 @@ func runChief(data []byte) {
 	// effective value depends on the document).
 	opts.WriteBack(&input)
 
+	if len(input.Configs) == 0 {
+		errExitf("Error: no configs to process (define configs[].surfaces)")
+	}
+
+	var configList []string
+	if opts.Set("configs") {
+		configList = splitConfigList(opts.String("configs"))
+		if len(configList) == 0 {
+			errExitf("Error: --configs needs at least one config id")
+		}
+	}
+	targets, multi, warnings, err := configTargets(
+		input.Configs, opts.String("config"), opts.Bool("all-configs"), configList, 0, "--all-configs or --configs")
+	if err != nil {
+		errExitf("Error: %v", err)
+	}
+	for _, w := range warnings {
+		errOut("Warning: %s", w)
+	}
+	if multi && fnumSet {
+		errExitf("Error: --fnum cannot be combined with --all-configs/--configs (one EFL per document); use --epd or pupil_model.diameter")
+	}
+
 	pt := input.Chief.PassThrough
 	if opts.Int("pass-through") > 0 {
 		if pt == nil {
@@ -70,17 +133,6 @@ func runChief(data []byte) {
 			pt.Surface = opts.Int("pass-through")
 		}
 		input.Chief.StopSurface = opts.Int("pass-through")
-	}
-
-	configFlag := opts.String("config")
-
-	// Resolve field definitions: the config selected by --config supplies its
-	// own fields (a zoom position carries its own field angles / target image
-	// heights), falling back to configs[0] and then the top-level chief section
-	// — the same order as trace / psf / focus / asphere.
-	fields := resolveConfigFieldDefs(input, &configFlag)
-	if len(fields) == 0 {
-		errExitf("Error: 'fields' or 'field_angles' is required")
 	}
 
 	// Reference wavelength: --wl wins over chief.reference_wavelength, with
@@ -96,75 +148,57 @@ func runChief(data []byte) {
 	input.Chief.ReferenceWavelength = wavelength
 
 	// Per-wavelength stats set: CLI > chief.wavelength_set > the config table
-	// (or no set when the config declares no wavelengths).
+	// (or no set when the config declares no wavelengths). A `design` set is
+	// resolved per config; the explicit/spectral/custom sets are one list for
+	// every config.
 	wavelengthSet := input.Chief.WavelengthSet
 	if opts.Set("wavelength-set") {
 		wavelengthSet = opts.String("wavelength-set")
 	}
 	explicit := opts.Floats("wavelengths")
-	wavelengthSamples := []types.WavelengthSample(nil)
+	samples := chiefSamples{}
 	switch {
 	case len(explicit) > 0:
+		var list []types.WavelengthSample
 		for _, wl := range explicit {
 			if wl > 0 {
-				wavelengthSamples = append(wavelengthSamples, types.WavelengthSample{Value: wl, RawWeight: 1})
+				list = append(list, types.WavelengthSample{Value: wl, RawWeight: 1})
 			}
 		}
-		wavelengthSamples = spectral.NormalizeSet(wavelengthSamples)
+		samples.fixed = spectral.NormalizeSet(list)
 		wavelengthSet = spectral.ModeCustom
 		input.Chief.WavelengthSet = wavelengthSet
-		input.Chief.Wavelengths = append([]types.WavelengthSample(nil), wavelengthSamples...)
+		input.Chief.Wavelengths = append([]types.WavelengthSample(nil), samples.fixed...)
 	case strings.EqualFold(wavelengthSet, spectral.ModeDesign):
-		wavelengthSamples = spectral.DesignSamples(selectedConfigWavelengths(input.Configs, configFlag))
+		samples.design = true
 		input.Chief.WavelengthSet = spectral.ModeDesign
 	case strings.EqualFold(wavelengthSet, spectral.ModeSpectral):
-		var err error
-		wavelengthSamples, err = spectral.SpectralSamples(input.Spectrum, 0)
+		list, err := spectral.SpectralSamples(input.Spectrum, 0)
 		if err != nil {
 			errExitf("Error: %v", err)
 		}
+		samples.fixed = list
 		input.Chief.WavelengthSet = spectral.ModeSpectral
 	case strings.EqualFold(wavelengthSet, spectral.ModeCustom):
-		var err error
-		wavelengthSamples, err = spectral.CustomSamples(input.Chief.Wavelengths)
+		list, err := spectral.CustomSamples(input.Chief.Wavelengths)
 		if err != nil {
 			errExitf("Error: %v", err)
 		}
+		samples.fixed = list
 	case strings.TrimSpace(wavelengthSet) == "":
-		if items := selectedConfigWavelengths(input.Configs, configFlag); len(items) > 0 {
-			wavelengthSamples = spectral.DesignSamples(items)
-		}
+		// No set declared: use each config's design table when it has one.
+		samples.design = true
 	default:
 		errExitf("Error: unknown chief.wavelength_set %q (design | spectral | custom)", wavelengthSet)
-	}
-	configWavelengths := make([]float64, len(wavelengthSamples))
-	for i, s := range wavelengthSamples {
-		configWavelengths[i] = s.Value
-	}
-	// Aperture sizing is conservative: cover every declared/evaluated line
-	// plus the reference, even a line excluded from the white combination.
-	clearWavelengths := append([]float64(nil), wavelength)
-	seenClear := map[float64]bool{wavelength: true}
-	addClear := func(wl float64) {
-		if wl > 0 && !seenClear[wl] {
-			seenClear[wl] = true
-			clearWavelengths = append(clearWavelengths, wl)
-		}
-	}
-	for _, w := range selectedConfigWavelengths(input.Configs, configFlag) {
-		addClear(w.Value)
-	}
-	for _, s := range wavelengthSamples {
-		addClear(s.Value)
 	}
 
 	gc, _ := openGlass(&input, opts.String("glass-dir"))
 
-	surfaces := configSurfaces(input.Configs, &configFlag)
-	surface.Precompute(surfaces)
+	firstSurfaces := input.Configs[targets[0]].Surfaces
+	surface.Precompute(firstSurfaces)
 
 	selectedSys := input.System
-	selectedSys.Surfaces = surfaces
+	selectedSys.Surfaces = firstSurfaces
 	selectedSys.StopSurface = input.Chief.StopSurface
 
 	pol := types.NewCircularJones(true)
@@ -225,32 +259,148 @@ func runChief(data []byte) {
 		dumpMap = true
 	}
 
+	run := &chiefRun{
+		input:      &input,
+		opts:       opts,
+		gc:         gc,
+		pol:        pol,
+		pt:         pt,
+		fanCfg:     fanCfg,
+		wavelength: wavelength,
+		samples:    samples,
+		dumpMap:    dumpMap,
+	}
+
+	// Fields every config falls back to when it declares none: configs[0]'s
+	// fields, then the top-level chief section (the order every single-config
+	// field command uses).
+	fallbackFields := resolveConfigFieldDefs(input, nil)
+
+	preserveRays := opts.Bool("preserve-rays")
+	results := make([]chiefConfigResult, len(targets))
+	for ti, idx := range targets {
+		cfg := &input.Configs[idx]
+		fields := fieldDefsFromItems(cfg.Fields)
+		if len(fields) == 0 {
+			fields = fallbackFields
+		}
+		label := ""
+		if multi {
+			label = fmt.Sprintf("config %q", configLabel(input.Configs, idx))
+		}
+		results[ti] = run.runConfig(cfg, fields, samples.forConfig(cfg.Wavelengths), label)
+	}
+
+	// The per-config store is what makes a multi-config plot draw each
+	// position's own rays; the top-level sections keep their single-config
+	// meaning and describe the first target.
+	first := results[0]
+	if multi {
+		for ti, idx := range targets {
+			cfg := &input.Configs[idx]
+			if !preserveRays {
+				cfg.ChiefRays = results[ti].chiefRays
+				// Mirror the top-level rule: without --preserve-rays the rays
+				// section holds only what this pass produced.
+				cfg.Rays = nil
+			}
+			if len(results[ti].marginal) > 0 {
+				if cfg.Rays == nil {
+					cfg.Rays = &types.RayInput{Polarization: pol}
+				}
+				cfg.Rays.Polarization = pol
+				cfg.Rays.Rays = append(cfg.Rays.Rays, results[ti].marginal...)
+			}
+		}
+	}
+
+	// The chief rays live in chief_rays[].chief_ray (single source); the rays
+	// section carries only the extras needed by `trace` (marginal rays) plus
+	// the polarization, so the output stays pipe-compatible without duplicating
+	// every chief ray.
+	switch {
+	case !preserveRays:
+		input.Rays = &types.RayInput{Polarization: pol}
+	case input.Rays == nil && len(first.marginal) > 0:
+		input.Rays = &types.RayInput{Polarization: pol}
+	}
+	if len(first.marginal) > 0 {
+		input.Rays.Rays = append(input.Rays.Rays, first.marginal...)
+	}
+
+	output := types.Output{
+		Input:     input,
+		ChiefRays: first.chiefRays,
+		Stop:      first.stop,
+	}
+	if preserveRays {
+		output.ChiefRays = nil
+	}
+	withOutputMetadata(&output.Input, "chief", subcmdArgs())
+
+	writeYAML(&output)
+}
+
+// runConfig runs the chief pass, aperture sizing and marginal-ray extraction
+// for one configuration. label names the config in field-resolution errors
+// ("" in single-config mode, which keeps the historical message).
+func (r *chiefRun) runConfig(cfg *types.Config, fields []types.FieldDef, samples []types.WavelengthSample, label string) chiefConfigResult {
+	input := r.input
+	opts := r.opts
+	surfaces := cfg.Surfaces
+	surface.Precompute(surfaces)
+
+	sys := input.System
+	sys.Surfaces = surfaces
+	sys.StopSurface = input.Chief.StopSurface
+
+	configWavelengths := make([]float64, len(samples))
+	for i, s := range samples {
+		configWavelengths[i] = s.Value
+	}
+	// Aperture sizing is conservative: cover every declared/evaluated line
+	// plus the reference, even a line excluded from the white combination.
+	clearWavelengths := append([]float64(nil), r.wavelength)
+	seenClear := map[float64]bool{r.wavelength: true}
+	addClear := func(wl float64) {
+		if wl > 0 && !seenClear[wl] {
+			seenClear[wl] = true
+			clearWavelengths = append(clearWavelengths, wl)
+		}
+	}
+	for _, w := range cfg.Wavelengths {
+		addClear(w.Value)
+	}
+	for _, s := range samples {
+		addClear(s.Value)
+	}
+
 	results := chief.DetermineChiefRaysGridMode(
-		selectedSys,
+		sys,
 		fields,
 		input.Chief.ReferenceSurface,
 		input.Chief.NumRays,
-		gc,
-		pol,
-		wavelength,
-		dumpMap,
+		r.gc,
+		r.pol,
+		r.wavelength,
+		r.dumpMap,
 		input.Chief.GridType,
-		pt,
-		fanCfg,
+		r.pt,
+		r.fanCfg,
 		configWavelengths,
 		input.Chief.PupilModel,
 		input.Chief.NumRings, input.Chief.NumSpokes,
 		input.Chief.ChiefRayDefinition,
 	)
-	requireFieldResolution("", results)
+	requireFieldResolution(label, results)
 
 	// --- default clear-aperture: size unset-diameter surfaces ---
 	{
 		margin := opts.Float("clear-aperture-margin-mm")
-		envEngine := ray.NewEngine(gc, nil)
+		envEngine := ray.NewEngine(r.gc, nil)
 		surface.Precompute(surfaces)
 		path := dls.BuildPath(surfaces)
-		envelope := chief.BeamEnvelopeMax(results, envEngine, surfaces, path, clearWavelengths, pol)
+		envelope := chief.BeamEnvelopeMax(results, envEngine, surfaces, path, clearWavelengths, r.pol)
 
 		refID := input.Chief.ReferenceSurface
 		stopID := input.Chief.StopSurface
@@ -287,8 +437,8 @@ func runChief(data []byte) {
 			if pass > 0 || clearRays != input.Chief.NumRays {
 				results = chief.DetermineChiefRaysGridMode(
 					types.System{Surfaces: surfaces, StopSurface: stopID},
-					fields, refID, clearRays, gc, pol, wavelength, dumpMap,
-					input.Chief.GridType, pt, fanCfg, configWavelengths,
+					fields, refID, clearRays, r.gc, r.pol, r.wavelength, r.dumpMap,
+					input.Chief.GridType, r.pt, r.fanCfg, configWavelengths,
 					input.Chief.PupilModel, input.Chief.NumRings, input.Chief.NumSpokes,
 					input.Chief.ChiefRayDefinition,
 				)
@@ -297,7 +447,7 @@ func runChief(data []byte) {
 			// them as-is through every surface to get the true beam envelope.
 			surface.Precompute(surfaces)
 			path := dls.BuildPath(surfaces)
-			envelope := chief.BeamEnvelopeMax(results, ray.NewEngine(gc, nil), surfaces, path, clearWavelengths, pol)
+			envelope := chief.BeamEnvelopeMax(results, ray.NewEngine(r.gc, nil), surfaces, path, clearWavelengths, r.pol)
 
 			changed := false
 			for i := range surfaces {
@@ -321,67 +471,47 @@ func runChief(data []byte) {
 
 	// Build ChiefRayResult for YAML output
 	chiefRays := make([]types.ChiefRayResult, len(results))
-	for i, r := range results {
-		white, lateral := chief.SummarizeWavelengths(r.Wavelengths, wavelengthSamples, wavelength)
+	for i, res := range results {
+		white, lateral := chief.SummarizeWavelengths(res.Wavelengths, samples, r.wavelength)
 		cr := types.ChiefRayResult{
 			WhiteSpotStats: white,
 			LateralColor:   lateral,
-			FieldAngle:     r.FieldAngle,
-			ChiefRay:       r.ChiefRay,
-			ImageHeight:    r.ImageHeight,
-			EntrancePupil:  r.EntrancePupil,
-			SpotStats:      r.SpotStats,
+			FieldAngle:     res.FieldAngle,
+			ChiefRay:       res.ChiefRay,
+			ImageHeight:    res.ImageHeight,
+			EntrancePupil:  res.EntrancePupil,
+			SpotStats:      res.SpotStats,
 			// The full-aperture survival, i.e. the vignetting number: SpotStats
 			// above may be measured on the reduced effective-pupil grid.
-			PrescribedTotal:  r.PrescribedTotal,
-			PrescribedTraced: r.PrescribedTraced,
-			RayFan:           r.RayFan,
-			Wavelengths:      r.Wavelengths,
-			PupilProbe:       r.ProbeOK,
-			PupilProbeZ:      r.ProbeZ,
+			PrescribedTotal:  res.PrescribedTotal,
+			PrescribedTraced: res.PrescribedTraced,
+			RayFan:           res.RayFan,
+			Wavelengths:      res.Wavelengths,
+			PupilProbe:       res.ProbeOK,
+			PupilProbeZ:      res.ProbeZ,
 			// Nil for a field that was not clipped below the grid's survival
 			// threshold; `omitempty` then leaves it out of the pipeline YAML.
-			EffectiveVignetting: r.EffectiveVignetting,
+			EffectiveVignetting: res.EffectiveVignetting,
 		}
-		if dumpMap && len(r.GridPoints) > 0 {
-			cr.GridPoints = r.GridPoints
+		if r.dumpMap && len(res.GridPoints) > 0 {
+			cr.GridPoints = res.GridPoints
 		}
 		chiefRays[i] = cr
 	}
 
-	// The chief rays live in chief_rays[].chief_ray (single source); the rays
-	// section carries only the extras needed by `trace` (marginal rays) plus
-	// the polarization, so the output stays pipe-compatible without duplicating
-	// every chief ray.
-	rayList := []types.Ray(nil)
-	if !opts.Bool("preserve-rays") {
-		input.Rays = &types.RayInput{
-			Polarization: pol,
-			Rays:         rayList,
-		}
-	}
-
-	// --- --marginal-rays: extract marginal rays from grid points ---
+	var marginal []types.Ray
 	if opts.Bool("marginal-rays") && len(results) > 0 {
-		engine := ray.NewEngine(gc, nil)
-		input.Rays.Rays = append(input.Rays.Rays, extractMarginalRays(results, input.Chief.StopSurface, engine, wavelength, surfaces, pol)...)
+		engine := ray.NewEngine(r.gc, nil)
+		marginal = extractMarginalRays(results, input.Chief.StopSurface, engine, r.wavelength, surfaces, r.pol)
 	}
 
-	output := types.Output{
-		Input:     input,
-		ChiefRays: chiefRays,
-	}
-	if opts.Bool("preserve-rays") {
-		output.ChiefRays = nil
-	}
-	withOutputMetadata(&output.Input, "chief", subcmdArgs())
-
+	var stop *types.StopInfo
 	stopID := input.Chief.StopSurface
 	if stopID > 0 {
 		for _, s := range surfaces {
 			if s.ID == stopID {
-				output.Stop = &types.StopInfo{
-					SurfaceID: stopID,
+				stop = &types.StopInfo{
+					SurfaceID: s.ID,
 					PhysicalZ: s.PhysicalZ,
 					Diameter:  s.Diameter,
 				}
@@ -390,7 +520,7 @@ func runChief(data []byte) {
 		}
 	}
 
-	writeYAML(&output)
+	return chiefConfigResult{chiefRays: chiefRays, marginal: marginal, stop: stop}
 }
 
 // extractMarginalRays finds the grid rays with max/min image Y (and X for

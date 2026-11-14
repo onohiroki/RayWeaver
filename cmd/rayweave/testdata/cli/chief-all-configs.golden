@@ -1,0 +1,7 @@
+exit: 0
+stderr:
+probe --len chief_rays: 3
+probe --len configs[0].chief_rays: 3
+probe --len configs[2].chief_rays: 3
+probe --len configs[1].rays.rays: 6
+probe -r configs[2].chief_rays[1].field_angle: 3.19

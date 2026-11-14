@@ -9,17 +9,21 @@ rayweave trace [--config ID] [--glass-dir DIR] [--verbose] [--details] < system.
 rayweave trace single [FLAGS] < system.yaml
 ```
 
-Without `single`, `trace` propagates every ray in the input `rays` section plus the
-per-field chief rays from `chief_rays`, appending the results to any existing
-`results[]`. The `trace single` form traces exactly one ray specified via CLI
-flags (or the `trace_single:` YAML section) and **overwrites** `results[]` with a
-single entry.
+Without `single`, `trace` propagates the rays the document carries and writes
+the results to `results[]`. A document with per-config rays (written by
+`chief --all-configs`) is traced **config by config without any flag**: every
+config that carries its own rays is traced with its own surfaces, and the
+results go to `configs[].results`. Otherwise the top-level `chief_rays` /
+`rays` sections are traced for the selected config. The `trace single` form
+traces exactly one ray specified via CLI flags (or the `trace_single:` YAML
+section) and **overwrites** `results[]` with a single entry.
 
 ## Options
 
 | Flag | Description |
 |---|---|
-| `--config ID` | select a config by id (multi-config mode); defaults to `configs[0]` |
+| `--config ID` | trace only this config (its own per-config rays when the document has them); defaults to `configs[0]` for a single-config document |
+| `--configs "id1,id2"` | trace only the listed configs (ids or 0-based indexes, comma-separated) |
 | `--glass-dir DIR` | AGF glass catalog directory (for resolving material names) |
 | `--lenient BOOL` | trace leniently (`true`/`false`): skip aperture/glass-path checks and continue past missed surfaces and TIR (default: `rays.lenient` from the input YAML, else `false`; written back into the output) |
 | `--verbose` | print per-ray trace info to stderr (JSONL) |
@@ -66,6 +70,47 @@ coefficients, `interaction` (`TRANSMIT`/`REFLECT`), `thickness`, `opl`
 (optical path length, cumulative), `intensity_s`/`intensity_p`, and the Jones
 vector. The final surface's intensity and OPL are also summarised on the
 result.
+
+## Multi-config runs
+
+No flag is needed: `trace` consumes whatever `chief` wrote. A document with
+per-config rays (produced by `chief --all-configs`) is traced config by config,
+and each position's results are stored in that config:
+
+```yaml
+configs:
+  - id: wide
+    surfaces: [...]
+    chief_rays: [...]   # from chief --all-configs
+    rays: {...}         # its marginal rays
+    results: [...]      # written by trace
+```
+
+- A config is traced with **its own** rays only (`configs[].rays` and
+  `configs[].chief_rays`); a config without them is skipped with a warning, so
+  one position's rays are never traced through another position's surfaces.
+  `--config` / `--configs` narrow the scope to one config or a subset.
+- The top-level `results[]` keeps its single-config meaning: it holds the
+  results of the **first traced config**, so `trace | plot` and `list rays`
+  keep working.
+- A config without per-config rays in such a document is an error when selected
+  explicitly (`trace --config tele`), and a skipped warning when tracing all.
+- Per-ray error warnings name the config (`Warning: config "tele": ray ...`),
+  and the JSONL `--verbose` records carry a `config` field.
+
+```sh
+# chief writes each position's rays; trace consumes them all automatically
+rayweave chief --all-configs --marginal-rays < zoom.yaml \
+  | rayweave trace \
+  | rayweave plot --multi-config -o zoom.svg
+
+# only two positions
+rayweave trace --configs wide,tele < traced-chief.yaml
+```
+
+A command that analyses one config uses that config's own results when they
+exist: `rayweave plot --config tele < traced.yaml` draws tele's
+`configs[tele].results`, not the top-level copy.
 
 ## Piping
 

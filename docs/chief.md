@@ -14,6 +14,8 @@ rayweave chief [flags] < system.yaml
 | Flag | Description |
 |---|---|
 | `--config ID` | select a config by id (multi-config mode) |
+| `--all-configs` | run every active config (document order; every config when none is active) and store each position's `chief_rays` / marginal `rays` under `configs[]` |
+| `--configs "id1,id2"` | run the listed configs (ids or 0-based indexes, comma-separated; implies `--all-configs`; never capped) |
 | `--wl W` | reference wavelength in mm (default `0.00058756`) |
 | `--wavelength-set S` | per-wavelength stats set: `design` (config table), `spectral` (document `spectrum`) or `custom` |
 | `--wavelengths W1,...` | explicit per-wavelength stats list in mm (custom set; equal weights) |
@@ -29,7 +31,7 @@ rayweave chief [flags] < system.yaml
 | `--fan-rotation DEG` | compute fans in planes rotated by DEG around Z (0 = XZ, 90 = YZ; implies `--ray-fan`; repeatable or space-separated: `--fan-rotation 0 45 90`) |
 | `--epz Z` | shorthand for a virtual entrance pupil at axial position Z (mm); activates `virtual_entrance_pupil` mode |
 | `--epd D` | shorthand for `--pupil-model-diameter` (mm): virtual entrance pupil diameter |
-| `--fnum N` | F-number; sets the virtual entrance pupil diameter to the paraxial EFL / N (mutually exclusive with `--epd`) |
+| `--fnum N` | F-number; sets the virtual entrance pupil diameter to the paraxial EFL / N (mutually exclusive with `--epd`; rejected with `--all-configs`, which has one EFL per position — use `--epd`) |
 | `--pupil-model-axial-position Z` | virtual entrance pupil Z (mm; activates virtual pupil mode) |
 | `--pupil-model-diameter D` | virtual entrance pupil diameter (mm) |
 | `--pupil-model-mode MODE` | pupil model mode (default `virtual_entrance_pupil`) |
@@ -212,6 +214,47 @@ The top-level `rays` section carries only the extras needed for tracing
 geometry is not duplicated; `trace` gathers the ray list from `chief_rays[]`
 and the `rays` section. With `--preserve-rays` the existing `rays` section is
 kept and `chief_rays` is omitted (aperture adjustment only).
+
+## Multi-config runs
+
+A zoom position carries its own surfaces, fields and design wavelengths, so
+`--all-configs` (or `--configs`) runs the chief pass for each selected config
+and stores the results in that config:
+
+```yaml
+configs:
+  - id: wide
+    surfaces: [...]
+    chief_rays: [...]   # this position's fields and spot statistics
+    rays:               # its marginal rays, with --marginal-rays
+      polarization: [1, 0, 0, 1]
+      rays: [...]
+```
+
+- `--all-configs` selects the active configs in document order (every config
+  when none is active); `--configs wide,tele` selects explicitly; `--config`
+  and these two are mutually exclusive.
+- Each config uses its own `fields` (and its own `wavelengths` for a `design`
+  set); a config that declares no fields falls back to `configs[0].fields`,
+  then `chief.fields` / `chief.field_angles`, the same order the single-config
+  commands use. `--wl`, `--epd`, `--epz` and the pupil model are document-wide.
+- The top-level `chief_rays[]` keeps its single-config meaning and describes the
+  **first selected config**, so `chief | trace | plot` keeps working unchanged.
+  A later single-config command that selects another config should read
+  `configs[<id>].chief_rays` (for example `trace --config tele` does).
+- `--fnum` is rejected with a multi-config run (each position has its own EFL);
+  `--epd` / `--epz` apply the same virtual pupil to every position.
+- With `--clear-aperture`, each position's `auto_aperture` surfaces are sized
+  from that position's own beam, which is what a zoom needs.
+
+```sh
+# every zoom position, with marginal rays and fans, ready for trace/plot
+rayweave chief --all-configs --clear-aperture --marginal-rays --ray-fan \
+  < zoom.yaml | rayweave trace | rayweave plot --multi-config -o zoom.svg
+```
+
+`clean` removes the per-config `chief_rays` / `results` but keeps
+`configs[].rays` (a ray definition, like the top-level `rays` section).
 
 ## Examples
 

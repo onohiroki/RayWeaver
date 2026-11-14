@@ -126,6 +126,103 @@ func singleViewport(sc scene) viewport {
 	}
 }
 
+// clipSceneRays truncates every ray polyline to the scene's horizontal drawing
+// box (minZ..maxZ) and grows maxY to cover the clipped geometry, so a panel's
+// vertical band contains everything its renderer draws. The object-side tail of
+// a ray starts far behind the displayed span; leaving it in would let it spill
+// into the neighbouring panel even though the extents only measure points
+// inside the box.
+func clipSceneRays(sc *scene) {
+	paths, rayMaxY := clipRaysToBox(sc.rayPaths, sc.minZ, sc.maxZ)
+	sc.rayPaths = paths
+	if rayMaxY > sc.maxY {
+		sc.maxY = rayMaxY
+	}
+}
+
+func clipRaysToBox(paths []rayRenderData, minZ, maxZ float64) ([]rayRenderData, float64) {
+	out := make([]rayRenderData, 0, len(paths))
+	maxY := 0.0
+	for _, rp := range paths {
+		pts := clipPolylineZ(rp.points, minZ, maxZ)
+		if len(pts) < 2 {
+			continue
+		}
+		for _, p := range pts {
+			maxY = math.Max(maxY, math.Abs(p.Y))
+		}
+		rp.points = pts
+		rp.path = rayPathFromPoints(pts)
+		out = append(out, rp)
+	}
+	return out, maxY
+}
+
+// clipPolylineZ clips a polyline to minZ <= z <= maxZ, inserting the crossing
+// points so the drawn path stops exactly at the box edge.
+func clipPolylineZ(pts []vec2, minZ, maxZ float64) []vec2 {
+	if len(pts) < 2 {
+		return nil
+	}
+	var out []vec2
+	for i := 0; i < len(pts)-1; i++ {
+		seg, ok := clipSegmentZ(pts[i], pts[i+1], minZ, maxZ)
+		if !ok {
+			continue
+		}
+		if len(out) == 0 || out[len(out)-1] != seg[0] {
+			out = append(out, seg[0])
+		}
+		out = append(out, seg[1])
+	}
+	if len(out) < 2 {
+		return nil
+	}
+	return out
+}
+
+// clipSegmentZ is Liang-Barsky restricted to the two z bounds.
+func clipSegmentZ(a, b vec2, minZ, maxZ float64) ([2]vec2, bool) {
+	t0, t1 := 0.0, 1.0
+	dz := b.X - a.X
+	clip := func(p, q float64) bool {
+		if p == 0 {
+			return q >= 0
+		}
+		t := q / p
+		if p < 0 {
+			if t > t1 {
+				return false
+			}
+			if t > t0 {
+				t0 = t
+			}
+		} else {
+			if t < t0 {
+				return false
+			}
+			if t < t1 {
+				t1 = t
+			}
+		}
+		return true
+	}
+	if !clip(-dz, a.X-minZ) {
+		return [2]vec2{}, false
+	}
+	if !clip(dz, maxZ-a.X) {
+		return [2]vec2{}, false
+	}
+	at := func(t float64) vec2 {
+		p := vec2{X: a.X + t*dz, Y: a.Y + t*(b.Y-a.Y)}
+		// Snap the crossing coordinate to the bound so the clipped path lands
+		// exactly on the box edge (t is a division, not exact).
+		p.X = math.Max(minZ, math.Min(maxZ, p.X))
+		return p
+	}
+	return [2]vec2{at(t0), at(t1)}, true
+}
+
 // multiViewports lays out a multi-config plot. Every panel shares one scale
 // (pixels per millimetre), every image plane lands on the same canvas X, and
 // the panels are stacked vertically without overlapping.
@@ -148,6 +245,9 @@ func multiViewports(panels []Panel) ([]scene, []viewport) {
 	scenes := make([]scene, len(panels))
 	for i := range panels {
 		scenes[i] = buildScene(panels[i].Config)
+		// Keep every drawn ray inside the panel's own drawing box: a ray's
+		// object-side tail would otherwise reach into the neighbouring band.
+		clipSceneRays(&scenes[i])
 	}
 
 	maxLeft, maxRight, maxY := 0.0, 0.0, 0.0

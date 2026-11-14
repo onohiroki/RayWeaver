@@ -225,6 +225,8 @@ func (s *server) addParaxial() {
 type chiefIn struct {
 	DocInput
 	settings
+	AllConfigs          bool      `json:"all_configs,omitempty" jsonschema:"compute every active config and write per-config chief_rays/rays"`
+	Configs             []string  `json:"configs,omitempty" jsonschema:"configs to compute, by id or 0-based index (implies all_configs)"`
 	Wavelength          float64   `json:"wavelength,omitempty" jsonschema:"reference wavelength in mm"`
 	Wavelengths         []float64 `json:"wavelengths,omitempty" jsonschema:"custom per-wavelength stats list in mm"`
 	WavelengthSet       string    `json:"wavelength_set,omitempty" jsonschema:"per-wavelength stats set: design, spectral or custom"`
@@ -245,7 +247,7 @@ type chiefIn struct {
 
 func (s *server) addChief() {
 	addStage(s, "chief", "Chief rays",
-		"Determine the chief ray of each field and trace the pupil grid: fields, chief_rays[] with per-field spot statistics, and optionally the ray fan and clear apertures. This is the usual first stage before trace or plot.",
+		"Determine the chief ray of each field and trace the pupil grid: fields, chief_rays[] with per-field spot statistics, and optionally the ray fan and clear apertures. This is the usual first stage before trace or plot. With all_configs (or configs) every selected config is computed and stored per config.",
 		"chief", func(in chiefIn) []string {
 			return clispec.Args(clispec.Chief, in, map[string]string{"wavelength": "wl"})
 		})
@@ -254,14 +256,15 @@ func (s *server) addChief() {
 type traceIn struct {
 	DocInput
 	settings
-	Details bool  `json:"details,omitempty" jsonschema:"add per-surface detail (AOI, n1/n2, Fresnel) to the output"`
-	Lenient *bool `json:"lenient,omitempty" jsonschema:"skip aperture and glass-path checks"`
-	Verbose bool  `json:"verbose,omitempty" jsonschema:"print per-surface info to stderr (returned as logs)"`
+	Configs []string `json:"configs,omitempty" jsonschema:"trace only these configs, by id or 0-based index"`
+	Details bool     `json:"details,omitempty" jsonschema:"add per-surface detail (AOI, n1/n2, Fresnel) to the output"`
+	Lenient *bool    `json:"lenient,omitempty" jsonschema:"skip aperture and glass-path checks"`
+	Verbose bool     `json:"verbose,omitempty" jsonschema:"print per-surface info to stderr (returned as logs)"`
 }
 
 func (s *server) addTrace() {
 	addStage(s, "trace", "Trace rays",
-		"Trace the rays and chief_rays the document already carries through every surface. Needs a preceding chief (or a document with a rays section); results[] is appended. Use chief first in the same pipeline.",
+		"Trace the rays and chief_rays the document already carries through every surface. Needs a preceding chief (or a document with a rays section); results[] is appended. Use chief first in the same pipeline. A document with per-config rays (chief --all-configs) is traced config by config, without a flag, and the results are stored per config.",
 		"trace", func(in traceIn) []string {
 			return clispec.Args(clispec.Trace, in, nil)
 		})

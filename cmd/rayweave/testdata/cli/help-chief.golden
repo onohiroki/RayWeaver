@@ -7,6 +7,11 @@ Determines chief rays for each field.
 
 Options:
   --config ID          select config by id (multi-config mode)
+  --all-configs        compute every active config (document order, every
+                         config when none is active) and write each config's
+                         chief_rays / marginal rays into configs[]
+  --configs "id1,..."  configs to compute, by id or 0-based index
+                         (comma-separated; implies --all-configs)
   --pass-through N     constrain chief ray to pass through (0,0) centre of
                          surface N (overrides YAML pass_through.surface)
   --chief-ray NAME     chief-ray definition: entrance_pupil_centre | centroid |
@@ -75,6 +80,13 @@ Input YAML — chief section:
 
 Output: augmented YAML with chief_rays[] section.
   Pipe into "rayweave trace" to trace each chief ray through the system.
+
+With --all-configs (or --configs), each selected config's fields and design
+  wavelengths drive its own chief pass, and the results are stored per config
+  (configs[].chief_rays, plus configs[].rays for --marginal-rays). The
+  top-level chief_rays[] keeps its single-config meaning and describes the
+  first selected config, so chief | trace | plot pipelines still work.
+  --fnum is rejected here (one EFL per document); use --epd instead.
 
 Without pass_through, the chief ray passes through the spot centroid on
   the reference surface.  This definition is robust during optimisation

@@ -1,0 +1,7 @@
+exit: 0
+stderr:
+probe --len results: 9
+probe --len configs[0].results: 9
+probe --len configs[2].results: 9
+probe -r configs[1].results[0].opl_total: 286.5691956193027
+probe -r configs[2].results[0].opl_total: 287.0122262059197

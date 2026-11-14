@@ -77,10 +77,42 @@ var cliCases = []cliCase{
 			{"--len", "chief_rays[0].wavelengths"},
 		}},
 
+	// Per-config ray pipeline: chief --all-configs and trace store each zoom
+	// position's own rays inside configs[], while the top-level sections keep
+	// describing the first config.
+	{name: "chief-all-configs", stdin: "simple-zoom.yaml",
+		steps: [][]string{{"chief", "--all-configs", "--marginal-rays"}},
+		probes: [][]string{
+			{"--len", "chief_rays"},
+			{"--len", "configs[0].chief_rays"},
+			{"--len", "configs[2].chief_rays"},
+			{"--len", "configs[1].rays.rays"},
+			{"-r", "configs[2].chief_rays[1].field_angle"},
+		}},
+
+	{name: "trace-all-configs", stdin: "simple-zoom.yaml",
+		steps: [][]string{{"chief", "--all-configs", "--marginal-rays"}, {"trace"}},
+		probes: [][]string{
+			{"--len", "results"},
+			{"--len", "configs[0].results"},
+			{"--len", "configs[2].results"},
+			{"-r", "configs[1].results[0].opl_total"},
+			{"-r", "configs[2].results[0].opl_total"},
+		}},
+
+	{name: "clean-all-configs", stdin: "simple-zoom.yaml",
+		steps: [][]string{{"chief", "--all-configs", "--marginal-rays"}, {"trace"}, {"clean"}},
+		probes: [][]string{
+			{"--len", "results"},
+			{"--len", "configs[0].chief_rays"},
+			{"--len", "configs[0].results"},
+			{"--len", "configs[1].rays.rays"},
+		}},
+
 	{name: "trace", stdin: "us2645157.yaml", steps: [][]string{{"chief"}, {"trace"}},
 		probes: [][]string{
 			{"--len", "results"},
-			{"-r", "results[3].opl_total"},
+			{"-r", "results[0].opl_total"},
 		}},
 
 	// `trace single` is the one-ray debugging path: it reads the document
@@ -193,7 +225,7 @@ var cliCases = []cliCase{
 		steps: [][]string{{"chief"}, {"trace"}, {"list", "summary", "--format", "json"}},
 		probes: [][]string{
 			{"--len", "results"},
-			{"-r", "results[3].opl_total"},
+			{"-r", "results[0].opl_total"},
 			{"-r", "chief_rays[0].spot_stats.rms_r"},
 		}},
 

@@ -81,9 +81,10 @@ falling back to every config when none is active) as stacked cross-sections;
 
   Every config shares one scale, the image planes are aligned on one vertical
   line (chief.reference_surface, else the last surface), and the panels are
-  stacked so they never overlap. results[] / chief_rays[] hold one config's
-  rays only, so multi-config mode draws the lens cross-sections without rays;
-  use --config ID for a ray-overlaid single plot.
+  stacked so they never overlap. Each panel draws its own rays from
+  configs[].results / configs[].chief_rays; produce them with
+  "chief --all-configs ... | trace". Without per-config rays the
+  panels are drawn as cross-sections (and a warning says so).
 
 Glass types are colour-coded using the nd/vd values from the
 glass_catalog section.  Ray colours follow the field angle
@@ -190,16 +191,30 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 		}
 	}
 
-	indices, multiMode, warnings, err := plotTargets(
-		output.Configs, opts.String("config"), opts.Bool("multi-config"), configList, defaultMultiConfigLimit)
+	indices, multiMode, warnings, err := configTargets(
+		output.Configs, opts.String("config"), opts.Bool("multi-config"), configList, defaultMultiConfigLimit, "--multi-config or --configs")
 	if err != nil {
 		errExitf("Error: %v", err)
 	}
 	for _, w := range warnings {
 		errOut("Warning: %s", w)
 	}
-	if multiMode && (len(output.Results) > 0 || len(output.ChiefRays) > 0) {
-		errOut("Warning: multi-config plot draws lens cross-sections only; results[]/chief_rays[] are not drawn (use --config ID for a ray-overlaid single plot)")
+
+	// The top-level results[]/chief_rays[] describe one config (the last
+	// chief/trace run). A document that carries per-config rays (produced by
+	// chief --all-configs) uses each panel's own copy, so no panel can
+	// show another position's rays.
+	perConfigRays := hasPerConfigRays(output.Configs)
+	if multiMode && !perConfigRays && (len(output.Results) > 0 || len(output.ChiefRays) > 0) {
+		errOut("Warning: multi-config plot draws lens cross-sections only; results[]/chief_rays[] describe one config (run chief --all-configs; plain trace then writes the per-config rays)")
+	}
+	if multiMode && perConfigRays {
+		for _, idx := range indices {
+			c := output.Configs[idx]
+			if len(c.Results) == 0 && len(c.ChiefRays) == 0 {
+				errOut("Warning: config %q has no per-config rays — its panel is drawn without rays", configLabel(output.Configs, idx))
+			}
+		}
 	}
 
 	invalidRays := render.InvalidRayHide
@@ -250,11 +265,12 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 			AsphereColorAll: asphereColorAll,
 			InvalidRays:     invalidRays,
 		}
-		if !multiMode {
-			// results[] and chief_rays[] belong to one config only, so they are
-			// drawn in single-config mode alone (see the warning above).
-			cfg.Results = output.Results
-			cfg.ChiefRays = output.ChiefRays
+		if perConfigRays {
+			cfg.Results, cfg.ChiefRays = plotPanelRays(output, idx, multiMode, true)
+		} else if !multiMode {
+			// Legacy single-config documents keep their rays in the top-level
+			// sections.
+			cfg.Results, cfg.ChiefRays = plotPanelRays(output, idx, false, false)
 		}
 		panels = append(panels, render.Panel{
 			Config:      cfg,
@@ -332,101 +348,19 @@ Note: PNG output uses golang.org/x/image/vector for rasterization
 	}
 }
 
-// plotTargets resolves which configs a plot draws and whether multi-config mode
-// is on. It returns the config indexes in drawing order, the mode, and the
-// non-fatal warnings (configs without surfaces, truncation to the default
-// limit). Single-config mode always returns exactly one index.
-func plotTargets(configs []types.Config, configFlag string, multi bool, list []string, limit int) ([]int, bool, []string, error) {
-	multiMode := multi || len(list) > 0
-	if configFlag != "" && multiMode {
-		return nil, false, nil, fmt.Errorf("--config and --multi-config/--configs are mutually exclusive")
+// plotPanelRays returns the rays one panel draws. A document with per-config
+// rays uses each panel's own copy (perConfig); otherwise single-config mode
+// falls back to the top-level sections and a multi-config plot draws no rays
+// (they belong to one config only).
+func plotPanelRays(output types.Output, idx int, multi, perConfig bool) ([]types.RayResult, []types.ChiefRayResult) {
+	if perConfig {
+		c := output.Configs[idx]
+		return c.Results, c.ChiefRays
 	}
-	if limit <= 0 {
-		limit = defaultMultiConfigLimit
+	if !multi {
+		return output.Results, output.ChiefRays
 	}
-
-	if !multiMode {
-		idx := 0
-		if configFlag != "" {
-			i, msg := resolveConfig(configs, configFlag)
-			if i < 0 {
-				return nil, false, nil, fmt.Errorf("%s", msg)
-			}
-			idx = i
-		}
-		if len(configs[idx].Surfaces) == 0 {
-			return nil, false, nil, fmt.Errorf("no surfaces to plot (define configs[].surfaces)")
-		}
-		return []int{idx}, false, nil, nil
-	}
-
-	candidates := make([]int, 0, len(configs))
-	if len(list) > 0 {
-		seen := make(map[int]bool, len(list))
-		for _, token := range list {
-			i, msg := resolveConfig(configs, token)
-			if i < 0 {
-				return nil, true, nil, fmt.Errorf("%s", msg)
-			}
-			if seen[i] {
-				continue
-			}
-			seen[i] = true
-			candidates = append(candidates, i)
-		}
-	} else {
-		// Document order, active configs first; a document that never sets
-		// `active` still plots every config.
-		for i := range configs {
-			if configs[i].Active {
-				candidates = append(candidates, i)
-			}
-		}
-		if len(candidates) == 0 {
-			for i := range configs {
-				candidates = append(candidates, i)
-			}
-		}
-	}
-
-	var warnings []string
-	indices := make([]int, 0, len(candidates))
-	for _, i := range candidates {
-		if len(configs[i].Surfaces) == 0 {
-			warnings = append(warnings, fmt.Sprintf("config %q has no surfaces — skipped", plotConfigLabel(configs, i)))
-			continue
-		}
-		indices = append(indices, i)
-	}
-	if len(list) == 0 && len(indices) > limit {
-		warnings = append(warnings, fmt.Sprintf("%d configs to draw; drawing the first %d (use --configs to choose)", len(indices), limit))
-		indices = indices[:limit]
-	}
-	if len(indices) == 0 {
-		return nil, true, warnings, fmt.Errorf("no config to draw")
-	}
-	return indices, true, warnings, nil
-}
-
-// splitConfigList parses the --configs value: comma-separated config ids or
-// 0-based indexes, surrounding whitespace ignored.
-func splitConfigList(raw string) []string {
-	var out []string
-	for _, part := range strings.Split(raw, ",") {
-		if p := strings.TrimSpace(part); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// plotConfigLabel names a config in warnings, falling back to its document
-// position when the config declares no id.
-func plotConfigLabel(configs []types.Config, idx int) string {
-	if idx >= 0 && idx < len(configs) && configs[idx].ID != "" {
-		return configs[idx].ID
-	}
-	return fmt.Sprintf("#%d", idx)
+	return nil, nil
 }
 
 // buildGlassMap resolves the materials actually used on surfaces through the

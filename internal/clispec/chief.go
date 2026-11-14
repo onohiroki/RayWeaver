@@ -8,6 +8,10 @@ import (
 var Chief = Spec{Command: "chief", Flags: []Flag{
 	{Name: "config", Kind: String, Role: RoleSelector,
 		Help: "select config by id (multi-config mode)"},
+	{Name: "all-configs", Kind: Bool, Role: RoleSelector,
+		Help: "compute every active config (document order) and write per-config chief_rays/rays"},
+	{Name: "configs", Kind: String, Role: RoleSelector,
+		Help: "configs to compute, comma-separated ids or 0-based indexes (implies --all-configs)"},
 	{Name: "pass-through", Kind: Int, Role: RoleAction,
 		Help: "constrain the chief ray to pass through (0,0) centre of surface N"},
 	{Name: "chief-ray", Kind: String, Role: RoleSetting,

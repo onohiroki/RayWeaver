@@ -7,6 +7,8 @@ import "github.com/hiroki/rayweaver/internal/types"
 var Trace = Spec{Command: "trace", Flags: []Flag{
 	{Name: "config", Kind: String, Role: RoleSelector,
 		Help: "select config by id (multi-config mode)"},
+	{Name: "configs", Kind: String, Role: RoleSelector,
+		Help: "trace only these configs, comma-separated ids or 0-based indexes"},
 	{Name: "glass-dir", Kind: String, Role: RoleSetting,
 		Help: "AGF glass catalog directory"},
 	{Name: "verbose", Kind: Bool, Role: RoleAction,

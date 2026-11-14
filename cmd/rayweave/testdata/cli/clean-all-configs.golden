@@ -1,0 +1,6 @@
+exit: 0
+stderr:
+probe --len results: -1
+probe --len configs[0].chief_rays: -1
+probe --len configs[0].results: -1
+probe --len configs[1].rays.rays: 6

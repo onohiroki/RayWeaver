@@ -29,6 +29,8 @@ nothing for the CLI/YAML three-principles rule to apply to.
 |---|---|
 | `chief_rays` | `chief` |
 | `results` | `trace` / `trace single` |
+| `configs[].chief_rays` | `chief --all-configs` / `chief --configs` |
+| `configs[].results` | `trace` (per-config rays) / `trace --configs` |
 | `paraxial_result` | `paraxial` |
 | `opt_results` | `optimize` (including `spot_flatness[]`, `back_focus[]`, `glass_attraction`, `snap`, `constraints`) |
 | `global_result` | `escape` / `pso` |
@@ -54,7 +56,9 @@ reported (and not listed by `--verbose`).
   which `chief` writes but which may equally be hand-entered as input; it is
   configuration, not a calculation result.
 - Input data such as `rays` … — note that `results` (the traced output of
-  `rays`) *is* removed, while the `rays` definitions stay.
+  `rays`) *is* removed, while the `rays` definitions stay. The same applies per
+  config: `configs[].rays` (a ray definition) stays, while
+  `configs[].chief_rays` and `configs[].results` are removed.
 
 ## Metadata
 

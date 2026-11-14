@@ -74,7 +74,7 @@ Top-level sections (all except `metadata` may be `omitempty`):
 | `spectrum`          | `spectrum,omitempty`         | Continuous source spectrum (`curve`, `range` nm, `step`/`optimize_step` nm, `entries`) used by the `spectral` wavelength set. |
 | `metadata`          | `metadata,omitempty`         | Document identity & provenance (above). |
 | `optimization`      | `optimization,omitempty`     | Multi-config optimizer definition. |
-| `configs`           | `configs,omitempty`          | Lens surfaces, fields, wavelengths, ray paths (one or more). |
+| `configs`           | `configs,omitempty`          | Lens surfaces, fields, wavelengths, ray paths (one or more), plus the per-config ray pipeline (`chief_rays`, `rays`, `results`) written by `chief --all-configs` and `trace`. |
 | `chief`             | `chief,omitempty`            | Chief-ray / pupil-grid parameters. |
 | `rays`              | `rays,omitempty`            | Explicit ray list to trace. |
 | `paraxial`          | `paraxial,omitempty`        | Paraxial-analysis parameters. |
@@ -102,3 +102,14 @@ The one result written *into* an input section rather than appended beside it is
 for the fields the input declares by image height. It is what the run actually
 measured, so it belongs with the settings rather than in a result block (and
 `clean` removes it — see [clean.md](clean.md), [optimize.md](optimize.md)).
+
+A second, explicit exception is the **per-config ray pipeline**:
+`chief --all-configs` writes `configs[].chief_rays` and `configs[].rays`, and
+`trace` writes `configs[].results` for every config that carries per-config
+rays. A zoom position is a complete
+system state (its own surfaces, fields and wavelengths), so its rays belong to
+that position, not to the document as a whole; the top-level `chief_rays[]` /
+`results[]` keep their single-config meaning (the first/selected config). The
+per-config `chief_rays` and `results` are computed output and are removed by
+`clean`; `configs[].rays` is a ray definition and is preserved, like the
+top-level `rays` section.

@@ -82,16 +82,35 @@ Layout rules:
   scale, the stack is centred in the one-diagram canvas while it fits, and the
   canvas grows taller as panels are added (a one-panel plot is the ordinary
   diagram);
+- each panel's rays are clipped to that panel's displayed Z span, so a ray's
+  object-side tail cannot reach into the neighbouring band;
 - panel order is the selection order, and no config labels are drawn.
 
-Rays are not drawn in multi-config mode: `results[]` and `chief_rays[]` hold
-the rays of **one** config only (the last `trace --config`), so overlaying them
-on other panels would be wrong. When they are present a warning says so; use
-`--config ID` for a ray-overlaid single plot.
+Rays are drawn from each panel's **own** rays: `configs[].results` and
+`configs[].chief_rays`, written by `chief --all-configs` / `trace`:
 
 ```sh
-# zoom positions, aligned and to scale
-cat samples/simple-zoom.yaml | rayweave plot --multi-config -o zoom.png
+rayweave chief --all-configs --clear-aperture --marginal-rays --ray-fan < zoom.yaml \
+  | rayweave trace \
+  | rayweave plot --multi-config -o zoom.png
+```
+
+A panel whose config has no per-config rays is drawn as a cross-section and a
+warning says so. When the document only carries the top-level `results[]` /
+`chief_rays[]` (one config, from a plain `chief | trace`), a multi-config plot
+draws the lens cross-sections without rays and warns, because those rays belong
+to one position only; run `chief` with `--all-configs` (plain `trace` then
+consumes the per-config rays) to overlay them.
+
+In single-config mode the drawn rays are `configs[<selected>].results` when the
+document has them, else the top-level sections.
+
+```sh
+# zoom positions, aligned and to scale, each with its own rays
+cat samples/simple-zoom.yaml \
+  | rayweave chief --all-configs --marginal-rays \
+  | rayweave trace \
+  | rayweave plot --multi-config -o zoom.png
 
 # one config with rays (the usual raytrace diagram)
 cat result.yaml | rayweave plot --config config0 -o wide.png
