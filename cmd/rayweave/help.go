@@ -761,9 +761,10 @@ Examples:
 		fmt.Print(`Usage: rayweave scale --efl TARGET [--config ID] < system.yaml > scaled.yaml
 
 Scales a system so its effective focal length equals TARGET (mm). A uniform
-scale of every length (radii, thicknesses, diameters, asphere coefficients and
-normalization radii) by s = TARGET / current_EFL scales the EFL exactly by s,
-preserving the f-number and the normalized aberration balance.
+scale of every length (radii, thicknesses, diameters, polynomial asphere
+coefficients, normalization radii, field image heights and virtual-pupil
+positions) by s = TARGET / current_EFL scales the EFL exactly by s, preserving
+the f-number and the normalized aberration balance.
 
 Useful for building a starting point at a target focal length before
 optimizing (e.g. a 25 mm patent lens scaled to a 50 mm standard).

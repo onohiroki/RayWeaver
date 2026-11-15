@@ -19,9 +19,13 @@ The quantities scaled are:
 - surface **radii** (`radius = 1/curvature`)
 - **thicknesses** and surface positions
 - **diameters**
-- asphere **coefficients** `a₄, a₆, …` (which scale as `1/s^(2i)`, so that the
-  physical sag `aᵢ h^(2i+4)` scales as `s`)
-- asphere **normalization radii**
+- polynomial asphere **coefficients** `a₄, a₆, …` (which scale as
+  `1/s^(2i+3)`, so that the physical sag `aᵢ h^(2i+4)` scales as `s`; for
+  `a₄` this is `1/s³`, for `a₆` `1/s⁵`, …)
+- asphere **normalization radii** (Zernike coefficients are dimensionless in
+  `h/norm_radius` and therefore stay unchanged)
+- field **image heights**, finite-conjugate object distances and the virtual
+  entrance-pupil position/diameter
 - the `scale`/`offset`-style glass model is untouched (glass indices have no
   units)
 

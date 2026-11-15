@@ -64,6 +64,24 @@ func runScale(data []byte) {
 		}
 		input.Configs[ci].Surfaces = scaled
 	}
+	// Field image heights, object distances and virtual-pupil positions are
+	// lengths too; leaving them at the old scale would make the scaled
+	// document describe a different field than the surfaces form.
+	scaleFieldLengths(input.Chief, s)
+	for ci := range input.Configs {
+		for fi := range input.Configs[ci].Fields {
+			scaleFieldItem(&input.Configs[ci].Fields[fi], s)
+		}
+	}
+	scalePupilModel(input.PupilModel, s)
+	if input.Chief != nil {
+		scalePupilModel(input.Chief.PupilModel, s)
+		if input.Chief.PassThrough != nil {
+			input.Chief.PassThrough.Coordinate.X *= s
+			input.Chief.PassThrough.Coordinate.Y *= s
+			input.Chief.PassThrough.Coordinate.Z *= s
+		}
+	}
 
 	output := types.Output{
 		Input: input,
@@ -89,10 +107,48 @@ func scaleSurface(sf types.Surface, s float64) types.Surface {
 		sf.NormRadius *= s
 	}
 	// Conic constant is dimensionless and unchanged.
-	// Asphere coefficients a_n for h^n scale as s^(n-1), n = 2i+4.
-	for i, c := range sf.Coefficients {
-		power := 2*i + 4
-		sf.Coefficients[i] = c * math.Pow(s, float64(power-1))
+	//
+	// A polynomial asphere term is a_n*h^n (n = 2i+4).  Under h -> s*h the
+	// sag must scale by s, so a_n -> a_n/s^(n-1).  A Zernike asphere instead
+	// evaluates c_i*(h/norm_radius)^k: scaling both h and norm_radius leaves
+	// the normalised shape — and therefore the coefficients — unchanged.
+	switch sf.Type {
+	case types.AspherePolynomial:
+		for i, c := range sf.Coefficients {
+			power := 2*i + 4
+			sf.Coefficients[i] = c / math.Pow(s, float64(power-1))
+		}
+	case types.AsphereZernike:
+		// coefficients untouched; NormRadius was scaled above
 	}
 	return sf
+}
+
+// scaleFieldItem scales the length-valued fields of a per-config field.
+func scaleFieldItem(f *types.FieldItem, s float64) {
+	f.ImageHeight *= s
+	f.Height *= s
+	f.ObjectZ *= s
+}
+
+// scaleFieldLengths scales the length-valued fields of the top-level chief
+// field table.
+func scaleFieldLengths(c *types.ChiefInput, s float64) {
+	if c == nil {
+		return
+	}
+	for i := range c.Fields {
+		c.Fields[i].ImageHeight *= s
+		c.Fields[i].Height *= s
+		c.Fields[i].ObjectZ *= s
+	}
+}
+
+// scalePupilModel scales the virtual entrance pupil geometry.
+func scalePupilModel(p *types.PupilModelConfig, s float64) {
+	if p == nil {
+		return
+	}
+	p.AxialPosition *= s
+	p.Diameter *= s
 }

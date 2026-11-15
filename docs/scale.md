@@ -1,11 +1,14 @@
 # `rayweave scale` — scale a system to a target EFL
 
 Uniformly scales a system so its effective focal length (EFL) equals a target
-value. Every length (radii, thicknesses, diameters, asphere coefficients and
-normalization radii) is multiplied by `s = TARGET / current_EFL`. This scales
-the EFL exactly by `s`, preserves the f-number and the normalised aberration
-balance, and is useful for building a starting point at a target focal length
-before optimizing.
+value. Every length (radii, thicknesses, diameters, polynomial asphere
+coefficients, normalization radii, field image heights and virtual-pupil
+positions) is multiplied by the same `s = TARGET / current_EFL` (polynomial
+asphere coefficients by `1/s^(2i+3)` so the physical sag scales with `s`; see
+[methods/efl-scaling.md](methods/efl-scaling.md)). This scales the EFL exactly
+by `s`, preserves the f-number and the normalised aberration balance, and is
+useful for building a starting point at a target focal length before
+optimizing.
 
 ```
 rayweave scale --efl TARGET [--config ID] < system.yaml > scaled.yaml
