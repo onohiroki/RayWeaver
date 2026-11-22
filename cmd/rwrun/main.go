@@ -33,6 +33,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -46,10 +47,22 @@ import (
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		var ec exitCode
+		if errors.As(err, &ec) {
+			// -wait's outcome codes (124 = still running) are not failures;
+			// they are how a caller tells the cases apart without parsing.
+			os.Exit(int(ec))
+		}
 		fmt.Fprintf(os.Stderr, "rwrun: %v\n", err)
 		os.Exit(1)
 	}
 }
+
+// exitCode carries a mode's outcome as a process exit status. It prints
+// nothing: the mode has already reported.
+type exitCode int
+
+func (e exitCode) Error() string { return fmt.Sprintf("exit %d", int(e)) }
 
 // run parses the flags and dispatches to the requested mode. It returns an error
 // rather than exiting so the tests can drive the same code path.
@@ -71,18 +84,26 @@ func run(argv []string) error {
 		status  = fs.Bool("status", false, "report whether the run is alive")
 		stop    = fs.Bool("stop", false, "graceful stop: two stages, never a force-kill")
 		purge   = fs.Bool("purge", false, "remove the pidfile")
+		// -wait blocks until the run exits and reports the outcome, so a
+		// caller that is billed per turn pays for the wait once instead of
+		// polling. It never signals the run; -stop does that.
+		waiting  = fs.Bool("wait", false, "block until the run finishes, then report (one result)")
+		waitFor  = fs.Duration("wait-timeout", 60*time.Minute, "longest -wait blocks before reporting the run as still running (0 = forever)")
+		waitPoll = fs.Duration("wait-interval", 2*time.Second, "liveness check interval while -wait blocks")
+		tailN    = fs.Int("tail", 15, "log lines -wait shows (0 = none)")
+		jsonOut  = fs.Bool("json", false, "machine-readable -wait summary")
 	)
 	if err := fs.Parse(expandAliases(argv)); err != nil {
 		return err
 	}
 	modes := 0
-	for _, m := range []bool{*fg, *status, *stop, *purge} {
+	for _, m := range []bool{*fg, *status, *stop, *purge && !*waiting, *waiting} {
 		if m {
 			modes++
 		}
 	}
 	if modes > 1 {
-		return fmt.Errorf("-fg, -status, -stop and -purge are mutually exclusive")
+		return fmt.Errorf("-fg, -status, -stop and -wait are mutually exclusive (-purge may accompany -wait)")
 	}
 
 	args := fs.Args()
@@ -100,6 +121,26 @@ func run(argv []string) error {
 	absPid := runctl.AbsPath(*pidfile)
 
 	switch {
+	case *waiting:
+		code, err := waitForRun(waitOptions{
+			pidfile: *pidfile,
+			output:  *output,
+			logPath: *logFile,
+			timeout: *waitFor,
+			poll:    *waitPoll,
+			tail:    *tailN,
+			json:    *jsonOut,
+		})
+		if err != nil {
+			return err
+		}
+		if *purge {
+			purgeArtifacts(*pidfile)
+		}
+		if code != 0 {
+			return exitCode(code)
+		}
+		return nil
 	case *status:
 		return reportStatus(*pidfile, *output, *logFile)
 	case *stop:
@@ -182,6 +223,7 @@ func runDetached(bin string, argv []string, work, input, output, errPath, pidfil
 	fmt.Printf("  command : %s %s\n", bin, strings.Join(argv, " "))
 	fmt.Printf("  status  : go run ./cmd/rwrun -status -name %s -pidfile %s\n", name, runctl.AbsPath(pidfile))
 	fmt.Printf("  stop    : go run ./cmd/rwrun -stop   -name %s -pidfile %s   (%s)\n", name, runctl.AbsPath(pidfile), runctl.StopHint())
+	fmt.Printf("  wait    : go run ./cmd/rwrun -wait   -name %s -pidfile %s   (one result when it exits)\n", name, runctl.AbsPath(pidfile))
 	return nil
 }
 
@@ -382,13 +424,21 @@ Usage:
       -status        report whether the run is alive
       -stop          graceful stop: two stages (SIGTERM on Unix, control file on
                      Windows), never a force-kill
-      -purge         remove the pidfile
+      -purge         remove the pidfile (may accompany -wait)
+      -wait          block until the run exits, then report it in one result
+                     (pid, elapsed, artefact sizes, log tail). Exit 0 finished,
+                     124 still running at the timeout, 2 no pidfile
+      -wait-timeout D  longest -wait blocks (default 60m; 0 = forever)
+      -wait-interval D liveness check interval while waiting (default 2s)
+      -tail N        log lines -wait shows (default 15; 0 = none)
+      -json          machine-readable -wait summary
 
 Examples:
   rwrun -n v42 -i v42-escape-input.yaml -o v42-result.yaml -e v42-stderr.jsonl \
       -- escape --verbose --keep-infeasible --log v42-progress.jsonl --save v42-min
   rwrun -status -n v42
   rwrun -stop   -n v42
+  rwrun -wait   -n v42     # blocks, then prints the result once
 
 Everything after -- goes to rayweave unchanged. When the first argument is an
 existing executable it is used as the command as-is (-- ./rayweave escape ...);
