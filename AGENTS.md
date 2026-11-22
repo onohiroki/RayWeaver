@@ -19,11 +19,14 @@ reference — product behaviour lives in [`docs/`](docs/README.md) and
 - **Stay on the working branch.** Do not switch to or modify `main`. `origin` is
   GitHub and is not a push target; the gitea remote `private` is. Re-timestamping
   commits and force-pushing need explicit approval.
-- **Long `escape` / `pso` runs: launch detached, then leave them alone.** See
+- **Long `escape` / `pso` runs: launch detached, then wait once.** See
   `cmd/rwrun` below. Print the optimisation conditions (merit, variable count,
-  cycle budget, timeout), the PID, the save directory and the log path — then do
-  **not** poll, tail the log, watch saved minima or block on it. Report only when
-  the user asks.
+  cycle budget, timeout), the PID, the save directory and the log path — then
+  **`rwrun -wait`** (one blocking call, one turn) instead of polling: polling
+  costs a turn per check and each turn re-sends the conversation. `-wait` prints
+  the state, elapsed time, artefact sizes and the log tail when the run exits;
+  exit 124 means it is still running, so re-issue the wait only when the user
+  asks. Do not tail the log or watch saved minima in separate turns.
 - **Never merge a `rayweave` process's stdout and stderr.** No `2>&1`, no `|&`.
   stdout is the pipeline document; stderr carries verbose JSONL and progress. If
   both are needed, write them to separate files.
@@ -109,6 +112,7 @@ tree:
 go run ./cmd/rwrun -n v42 -i v42-escape-input.yaml -o v42-result.yaml \
     -e v42-stderr.jsonl -- escape --verbose --keep-infeasible \
     --log v42-progress.jsonl --save v42-min
+go run ./cmd/rwrun -wait   -n v42     # block, then report once (0 done / 124 running)
 go run ./cmd/rwrun -status -n v42     # pid, elapsed, artefact sizes
 go run ./cmd/rwrun -stop   -n v42     # two stages (see below)
 go run ./cmd/rwrun -purge  -n v42     # drop a stale pidfile

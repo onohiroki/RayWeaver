@@ -101,6 +101,11 @@ rwrun [options] -- [rayweave] SUBCOMMAND [ARGS...]
       -status       report whether the run is alive
       -stop         graceful stop: two stages, never a force-kill
       -purge        remove the pidfile (and the Windows stop file)
+      -wait         block until the run exits, then report it once
+      -wait-timeout D  longest -wait blocks (default 60m; 0 = forever)
+      -wait-interval D liveness check interval while waiting (default 2s)
+      -tail N       log lines -wait shows (default 15; 0 = none)
+      -json         machine-readable -wait summary
 ```
 
 Everything after `--` is handed to rayweave unchanged. When the first argument
@@ -159,6 +164,48 @@ The transport differs by platform:
 `rwrun -stop` refuses to touch a pid whose image is not a rayweave run, so a
 recycled pid left behind in a stale pidfile can never be hit (Windows compares
 the image name case-insensitively).
+
+## Waiting on a run: `-wait`
+
+An agent that polls a running job pays for a model turn per check, and each
+turn re-sends the whole conversation, so the cost grows with both the number of
+checks and the session size. `-wait` moves the waiting inside one tool call: it
+blocks locally (a sleep loop, no model tokens) until the run exits or the
+timeout expires, then prints the outcome once.
+
+```sh
+go run ./cmd/rwrun -wait -name v42                  # blocks, then prints
+go run ./cmd/rwrun -wait -name v42 -wait-timeout 60m
+go run ./cmd/rwrun -wait -name v42 -json -tail 5    # for a script
+```
+
+The default timeout is 60 minutes; set it above the expected run time, or
+re-issue the wait when it expires. The report is:
+
+```
+state   : FINISHED  (pid 1234 no longer running)
+elapsed : 29m12s
+exit    : not recorded (the run is detached; a non-empty stdout means the document was written)
+output  : /…/v42-result.yaml  12582912 bytes  10:41:03
+log     : /…/v42-stderr.jsonl     4183 bytes  10:41:02
+--- log tail (15 lines) ---
+…
+```
+
+Exit codes: **0** finished, **124** still running at the timeout (re-issue the
+wait), **2** no pidfile. `-json` returns the same fields as one JSON object.
+
+Notes:
+
+- The **exit status of the child is not available**: `rwrun` detaches it, so the
+  status is never collected. Judge the outcome from the document (a non-empty
+  stdout is the completed pipeline YAML) and the log tail.
+- `-wait` never signals the run; stopping stays a deliberate `-stop`.
+- It is **idempotent**: if the harness evicts the waiting call, the run keeps
+  going (it is in its own session) and a later `-wait` re-attaches.
+- `-purge` may accompany `-wait` to remove the pidfile once the run is over.
+- Elapsed time is measured from the pidfile's mtime, which is written right
+  after the launch.
 
 ## Reporting on a run
 
