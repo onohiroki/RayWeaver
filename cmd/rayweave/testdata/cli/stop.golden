@@ -1,0 +1,15 @@
+exit: 0
+stderr:
+=== Stop materialized ===
+  virtual pupil: Z=6.0000 mm, diameter=10.0000 mm
+  config cfg1: surface 5 at Z=7.2741 mm, diameter 9.2194 mm, magnification 1.08467 -> EP Z=6.0000 mm / EPD 10.0000 mm
+  verification: max spot-RMS delta 0.0000 mm (0.00%)
+rayweave[stop]: Warning: removed 1 optimisation variable(s) targeting the virtual pupil: vp_z
+probe -r chief.stop_surface: 5
+probe -r stop_insert_result.configs[0].stop_surface: 5
+probe -r stop_insert_result.configs[0].stop_diameter: 9.219422075821644
+probe -r stop_insert_result.configs[0].entrance_pupil_z: 6.000000052445195
+probe -r stop_insert_result.configs[0].entrance_pupil_diameter: 9.999999999999998
+probe -r configs[0].surfaces[2].role: stop
+probe -r optimization.variables[0].name: s1_c
+probe --len configs[0].surfaces: 5

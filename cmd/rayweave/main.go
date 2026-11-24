@@ -287,6 +287,8 @@ func main() {
 		runExport(data)
 	case "scale":
 		runScale(data)
+	case "stop":
+		runStop(data)
 	case "cam":
 		runCam(data)
 	case "asphere":

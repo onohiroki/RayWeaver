@@ -161,6 +161,12 @@ mutually exclusive, and virtual mode requires a positive diameter. The
 `paraxial` command honors the virtual pupil, so its entrance-pupil location,
 diameter and F-number reflect the fixed plane.
 
+To turn the virtual pupil into a physical stop — solving the stop plane whose
+paraxial image is the requested entrance pupil and the clear diameter that keeps
+the EPD — run [`rayweave stop`](stop.md). `stop` removes `chief.pupil_model` and
+sets `chief.stop_surface`, so the design no longer depends on the virtual
+model.
+
 Flags override the corresponding YAML values (`--wl` → `chief.reference_wavelength`,
 `--pass-through` → `pass_through.surface`); the effective values are written
 back into the output YAML (CLI/YAML rule).

@@ -1994,6 +1994,7 @@ type Input struct {
 	Wavefront      *WavefrontConfig        `yaml:"wavefront,omitempty"`
 	Scale          *ScaleConfig            `yaml:"scale,omitempty"`
 	Cam            *CamConfig              `yaml:"cam,omitempty"`
+	StopInsert     *StopInsertConfig       `yaml:"stop_insert,omitempty"`
 	GlobalMinimum  *GlobalMinimumInfo      `yaml:"global_minimum,omitempty"`
 }
 
@@ -2283,6 +2284,72 @@ type StopInfo struct {
 	SurfaceID int     `yaml:"surface_id"`
 	PhysicalZ float64 `yaml:"physical_z"`
 	Diameter  float64 `yaml:"diameter"`
+}
+
+// StopInsertConfig configures `rayweave stop` (the `stop_insert:` YAML
+// section): how the stop follows the reference config in a multi-config
+// document, and which surface ID to insert. Both fields are optional; the
+// command fills the defaults and writes the effective values back when the
+// corresponding flag is given.
+type StopInsertConfig struct {
+	// Anchor places the stop in the non-reference configs: "rear" (default)
+	// keeps the distance to the surface behind the stop, "front" the distance
+	// to the surface in front of it.
+	Anchor string `yaml:"anchor,omitempty"`
+	// ID is the surface ID to insert; 0 selects one above the largest ID.
+	ID int `yaml:"id,omitempty"`
+}
+
+// StopInsertResult is the report emitted by `rayweave stop`: the virtual pupil
+// it consumed, the stop it inserted per config, and the front-group
+// magnification that converts the entrance-pupil diameter into the stop's
+// clear diameter.
+type StopInsertResult struct {
+	PupilModel      PupilModelConfig `yaml:"pupil_model"`
+	Anchor          string           `yaml:"anchor"`
+	ReferenceConfig string           `yaml:"reference_config,omitempty"`
+	// FrameShiftMM is the rigid translation applied to the document when the
+	// stop becomes the new first surface (the entrance pupil lies at or in
+	// front of the first surface). Absolute-Z inputs are shifted with it.
+	FrameShiftMM float64                  `yaml:"frame_shift_mm,omitempty"`
+	DryRun       bool                     `yaml:"dry_run,omitempty"`
+	Configs      []StopInsertConfigResult `yaml:"configs"`
+	Verification *StopInsertVerification  `yaml:"verification,omitempty"`
+	Warnings     []string                 `yaml:"warnings,omitempty"`
+}
+
+// StopInsertConfigResult reports one config's materialized stop.
+type StopInsertConfigResult struct {
+	ConfigID              string  `yaml:"id,omitempty"`
+	Reference             bool    `yaml:"reference,omitempty"`
+	StopSurface           int     `yaml:"stop_surface"`
+	StopZ                 float64 `yaml:"stop_z"`
+	StopDiameter          float64 `yaml:"stop_diameter"`
+	Magnification         float64 `yaml:"magnification"`
+	EntrancePupilZ        float64 `yaml:"entrance_pupil_z"`
+	EntrancePupilDiameter float64 `yaml:"entrance_pupil_diameter"`
+	EPZErrorMM            float64 `yaml:"ep_z_error_mm"`
+	EPDErrorMM            float64 `yaml:"epd_error_mm"`
+	PreviousSurface       int     `yaml:"previous_surface,omitempty"`
+	NextSurface           int     `yaml:"next_surface,omitempty"`
+	GapFrontMM            float64 `yaml:"gap_front_mm"`
+	GapRearMM             float64 `yaml:"gap_rear_mm"`
+}
+
+// StopInsertVerification compares the virtual-pupil system with the
+// materialized one: the per-field chief-ray spot RMS before and after.
+type StopInsertVerification struct {
+	Fields         []StopInsertFieldCheck `yaml:"fields,omitempty"`
+	MaxRMSDeltaMM  float64                `yaml:"max_spot_rms_delta_mm"`
+	MaxRMSDeltaRel float64                `yaml:"max_spot_rms_delta_rel"`
+	Warning        string                 `yaml:"warning,omitempty"`
+}
+
+// StopInsertFieldCheck is one field's spot RMS in the verification.
+type StopInsertFieldCheck struct {
+	Index    int     `yaml:"index"`
+	BeforeMM float64 `yaml:"before_spot_rms_mm"`
+	AfterMM  float64 `yaml:"after_spot_rms_mm"`
 }
 
 // VignetteConfig configures the `vignette` subcommand (the `vignette:` YAML
@@ -3065,6 +3132,7 @@ type Output struct {
 	FocusComparison  *FocusComparison        `yaml:"focus_comparison,omitempty"`
 	WavefrontResults *WavefrontResult        `yaml:"wavefront_result,omitempty"`
 	Stop             *StopInfo               `yaml:"stop,omitempty"`
+	StopInsertResult *StopInsertResult       `yaml:"stop_insert_result,omitempty"`
 }
 
 type TMMInput struct {

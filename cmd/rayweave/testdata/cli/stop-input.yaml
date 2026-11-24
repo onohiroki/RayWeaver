@@ -1,0 +1,29 @@
+glass_catalog:
+  entries: []
+configs:
+  - id: cfg1
+    active: true
+    fields:
+      - {id: 0, angle_deg: 0, weight: 1}
+      - {id: 1, angle_deg: 3, weight: 1}
+    wavelengths:
+      - {id: 0, value: 0.0005876, weight: 1}
+    surfaces:
+      - {id: 1, type: sphere, radius: 50, thickness: 5, material: {nd: 1.5, vd: 50}, diameter: 30}
+      - {id: 2, type: sphere, radius: -50, thickness: 5, material: AIR, diameter: 30}
+      - {id: 3, type: sphere, radius: 50, thickness: 5, material: {nd: 1.5, vd: 50}, diameter: 30}
+      - {id: 4, type: sphere, thickness: 100, material: AIR, diameter: 30}
+chief:
+  reference_surface: 4
+  fields:
+    - {angle: 0, direction: [0, 1]}
+    - {angle: 3, direction: [0, 1]}
+  pupil_model:
+    mode: virtual_entrance_pupil
+    axial_position: 6
+    diameter: 10
+  num_rays: 64
+optimization:
+  variables:
+    - {name: vp_z, target: {type: pupil_model, param: axial_position}, min: 0, max: 20, active: true}
+    - {name: s1_c, target: {type: surface, id: 1, param: curvature}, min: 0, max: 0.1, active: true}

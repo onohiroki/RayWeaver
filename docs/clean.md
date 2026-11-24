@@ -40,6 +40,7 @@ nothing for the CLI/YAML three-principles rule to apply to.
 | `psf_results` | `psf` |
 | `focus_comparison` | `focus mtf` / `focus psf` / `focus spot` |
 | `wavefront_result` | `wavefront` |
+| `stop_insert_result` | `stop` (the materialization report; the inserted surface and `chief.stop_surface` stay) |
 | `optimization.field_resolution` | `optimize` / `optimize snap` / `escape` / `pso` (the per-field image-height resolution the run froze at its start geometry) |
 
 Only the fields above are touched; a field that is absent is simply not
@@ -55,6 +56,9 @@ reported (and not listed by `--verbose`).
 - **The top-level `stop` section** (`surface_id` / `physical_z` / `diameter`),
   which `chief` writes but which may equally be hand-entered as input; it is
   configuration, not a calculation result.
+- **The `stop_insert` section**, the `rayweave stop` placement settings
+  (`anchor`, `id`), along with the inserted surface itself and
+  `chief.stop_surface`.
 - Input data such as `rays` … — note that `results` (the traced output of
   `rays`) *is* removed, while the `rays` definitions stay. The same applies per
   config: `configs[].rays` (a ray definition) stays, while

@@ -1,0 +1,4 @@
+exit: 1
+stderr:
+rayweave[stop]: Error: chief.pupil_model.mode must be virtual_entrance_pupil (the document has no virtual entrance pupil to materialize)
+stdout:

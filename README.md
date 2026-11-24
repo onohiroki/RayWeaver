@@ -64,6 +64,7 @@ Subcommands are grouped by their role in the data flow
 | Analysis | `paraxial` | First-order / cardinal properties: EFL, BFL, FFL, principal points, pupil positions, f/#. | system → paraxial_result |
 | Analysis | `tmm` | Thin-film coating analysis: reflectance, transmittance, phase. | system + coating → R/T/phase |
 | Transform | `scale` | Uniformly scale a system so its EFL equals `--efl TARGET` (exact; preserves f/#). Useful for building a starting point before optimizing. | system → scaled system |
+| Transform | `stop` | Materialize the virtual entrance pupil (`chief.pupil_model`) as a real plane stop: solve the stop plane whose paraxial image is the requested pupil and the clear diameter that keeps the EPD, insert it in every config, remove the virtual model and the pupil-model variables, and report each config's entrance pupil. Flags: `--config ID`, `--anchor rear\|front`, `--id N`, `--wl`, `--no-verify`, `--dry-run`. See `docs/stop.md`. | system + virtual pupil → system + `stop_insert_result` |
 | Synthesis | `vignette` | Iteratively settle per-field vignetting and `auto_aperture` surface diameters using the dynamic pupil; glass-path (edge-thickness) rejection and fixed (`auto_aperture: false`) surfaces narrow the beam. Flags: `--iterations`, `--min-glass-path`, `--margin-mm`, `--config`. See `docs/vignette.md`. | system → sized system + `vignetting_result` |
 | Synthesis | `optimize` | DLS optimization of lens surfaces. Reads `optimization` and `configs` sections from YAML. `--verbose` also emits a per-term merit breakdown. `--exclude-param` drops target params (e.g. asphere coefficients) from the variable set. | system + merit → optimized system |
 | Synthesis | `escape` | Escape-function global optimization (Ishiki-Ono style): repeatedly run DLS, adding a smooth merit-function bump at each discovered local minimum so the next run escapes the valley and finds other minima. Sub-command `escape extract --index N` pulls one minimum out as a clean lens. Flags: `--glass-dir`, `--verbose`, `--log FILE`, `--save FILE` (versioned per-minimum files), `--index N` (extract). See `docs/escape.md`. | system + merit → best solution + `global_result` |
@@ -90,6 +91,7 @@ Per-subcommand usage manuals live in [`docs/`](docs/):
 | [docs/vignette.md](docs/vignette.md) | vignetting and `auto_aperture` diameter settlement |
 | [docs/plot.md](docs/plot.md) | SVG / PNG diagrams |
 | [docs/scale.md](docs/scale.md) | EFL scaling |
+| [docs/stop.md](docs/stop.md) | materialize the virtual entrance pupil as a real stop |
 | [docs/optimize.md](docs/optimize.md) | DLS optimization |
 | [docs/escape.md](docs/escape.md) | escape-function global optimization |
 | [docs/pso.md](docs/pso.md) | particle-swarm global optimization |

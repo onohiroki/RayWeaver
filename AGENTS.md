@@ -91,7 +91,7 @@ transitive modules come with it). No Makefile, no lint/CI configuration.
 
 Subcommands (each has a manual in [`docs/`](docs/README.md)): `chief`, `trace`,
 `paraxial`, `tmm`, `plot`, `vignette`, `optimize`, `escape`, `pso`, `import`,
-`export`, `scale`, `asphere`, `psf`, `focus`, `wavefront`, `query`, `clean`,
+`export`, `scale`, `stop`, `asphere`, `psf`, `focus`, `wavefront`, `query`, `clean`,
 `list`, `zoom`, `cam`. `--config ID` selects a configuration on the commands
 that support multi-config documents.
 
@@ -164,6 +164,7 @@ everywhere, add it to the document that owns the topic, not to this file.
 | Vignetting and `auto_aperture` sizing | [docs/vignette.md](docs/vignette.md) |
 | Diagrams | [docs/plot.md](docs/plot.md) |
 | EFL scaling | [docs/scale.md](docs/scale.md), [methods/efl-scaling.md](docs/methods/efl-scaling.md) |
+| Physical stop from the virtual entrance pupil | [docs/stop.md](docs/stop.md) |
 | Coatings (transfer matrix) | [docs/tmm.md](docs/tmm.md), [methods/thin-film-tmm.md](docs/methods/thin-film-tmm.md) |
 | DLS optimization, variables, hard solves, apertures, glass hull/attraction, snap | [docs/optimize.md](docs/optimize.md) |
 | Merit terms and constraints (full catalog), contrast/MTF kinds | [docs/merit-and-constraints.md](docs/merit-and-constraints.md), [docs/contrast.md](docs/contrast.md), [methods/merit-functions.md](docs/methods/merit-functions.md) |

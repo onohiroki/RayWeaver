@@ -139,6 +139,24 @@ var cliCases = []cliCase{
 			{"--len", "configs"},
 		}},
 
+	// `stop` materializes the virtual entrance pupil as a plane stop: the
+	// solved stop diameter, the resulting pupil, the removed model and the
+	// removed pupil-model variable are all pinned.
+	{name: "stop", stdinFile: "testdata/cli/stop-input.yaml",
+		steps: [][]string{{"stop"}},
+		probes: [][]string{
+			{"-r", "chief.stop_surface"},
+			{"-r", "stop_insert_result.configs[0].stop_surface"},
+			{"-r", "stop_insert_result.configs[0].stop_diameter"},
+			{"-r", "stop_insert_result.configs[0].entrance_pupil_z"},
+			{"-r", "stop_insert_result.configs[0].entrance_pupil_diameter"},
+			{"-r", "configs[0].surfaces[2].role"},
+			{"-r", "optimization.variables[0].name"},
+			{"--len", "configs[0].surfaces"},
+		}},
+	{name: "error-stop-no-pupil", stdin: "us2645157.yaml",
+		steps: [][]string{{"stop"}}},
+
 	{name: "asphere", stdin: "asphere-demo-init.yaml", steps: [][]string{{"asphere"}},
 		probes: [][]string{
 			{"-r", "asphere_candidate_result.rankings[0].surface_id"},

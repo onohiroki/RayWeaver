@@ -476,6 +476,17 @@ func stopEntrancePupil(surfaces []types.Surface, stopSurface int, wavelength flo
 	return loc, math.Abs(eRay.Y + eRay.U*loc), true
 }
 
+// EntrancePupil returns the paraxial entrance pupil of an explicit stop: the
+// object-space axis crossing of the ray back-traced from the stop centre
+// (location, measured from surface 0's vertex) and the entrance-pupil radius
+// (stop radius imaged through the preceding surfaces). The entrance pupil is
+// the stop's *image*, so the location is generally not the stop's own Z. ok is
+// false when the system has no explicit stop, the stop has no clear aperture,
+// or the crossing is ill-conditioned.
+func EntrancePupil(surfaces []types.Surface, stopSurface int, wavelength float64, gc *glass.Catalog) (location, radius float64, ok bool) {
+	return stopEntrancePupil(surfaces, stopSurface, wavelength, gc)
+}
+
 // EntrancePupilLocation returns the paraxial entrance-pupil Z for a system with
 // an explicit stop: the object-space axis crossing of the ray back-traced from
 // the stop centre, i.e. the same quantity Compute reports as

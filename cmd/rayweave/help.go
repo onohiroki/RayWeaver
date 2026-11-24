@@ -783,6 +783,61 @@ written back into the output):
 Example:
   rayweave scale --efl 50 < ref25.yaml | rayweave optimize > optimized.yaml
 `)
+	case "stop":
+		printHelpText(`Usage: rayweave stop [--config ID] [--anchor rear|front] [--id N] [--wl MM]
+                    [--glass-dir DIR] [--no-verify] [--dry-run]
+                    < lens-with-virtual-pupil.yaml > lens-with-stop.yaml
+
+Materializes chief.pupil_model (mode virtual_entrance_pupil) as a real plane
+stop. The virtual pupil is an *entrance-pupil* specification, so the stop is
+not simply placed at the pupil plane: the surfaces in front of the stop image
+it, and a stop at the pupil plane with the pupil diameter would change the
+delivered beam. The command solves for the plane inside an air gap whose
+paraxial image is the requested entrance pupil and sets the clear diameter to
+the pupil diameter divided by the front-group magnification, so the beam,
+f-number and per-field vignetting definitions are unchanged. The virtual pupil
+model is then removed and chief.stop_surface points at the new surface.
+
+In a multi-config (zoom) document the reference config's stop plane is solved
+and the other configs follow the anchor rule, with the diameter computed from
+each config's entrance-pupil diameter. One physical stop cannot hold every
+zoom position's pupil position, so each config's resulting entrance pupil is
+reported.
+
+Options:
+  --config ID      reference config by id (default: the first config)
+  --anchor MODE    placement in the other configs: rear (default; keep the
+                     distance to the surface behind the stop) | front (keep the
+                     distance to the surface in front). front is an error when
+                     the reference stop becomes the first surface (the virtual
+                     pupil at Z <= 0), because there is no front surface then.
+  --id N           surface ID to insert (0 = one above the largest ID)
+  --wl MM          reference wavelength for the paraxial pupil solve
+  --glass-dir DIR  AGF glass catalog directory
+  --no-verify      skip the chief-ray spot-RMS comparison before/after
+  --dry-run        report the planned stop without modifying the document
+
+Input YAML — stop_insert section (optional; flags override and the effective
+values are written back):
+  stop_insert:
+    anchor: rear     # rear (default) | front
+    id: 0            # 0 = one above the largest existing ID
+
+What is written:
+  - the stop surface (plane, air, auto_aperture: false, role: stop) in every
+    config's surface list;
+  - chief.stop_surface = the new ID, chief.pupil_model removed;
+  - optimisation variables that targeted the virtual pupil are removed;
+  - computed result sections (chief_rays, results, paraxial_result, ...) are
+    stripped like 'clean' (stored rays describe the pre-conversion geometry);
+  - stop_insert_result: the virtual pupil, per-config stop plane/diameter,
+    magnification, resulting entrance pupil and errors, the verification, and
+    warnings.
+
+Example:
+  rayweave escape extract --index 0 < run.yaml \
+    | rayweave clean | rayweave stop | rayweave paraxial
+`)
 	case "cam":
 		printHelpText(`Usage: rayweave cam [--config ID] [--wl MM] [--max-iter N] [--tolerance T] < system.yaml
 
@@ -1509,6 +1564,7 @@ Subcommands:
   escape     Escape-function global optimization (multiple local minima)
   pso        PSO global optimization (particle swarm, no escape bumps)
   scale      Scale a system so its EFL equals --efl TARGET
+  stop       Materialize the virtual entrance pupil as a real plane stop
   cam        First-order cam solve of a zoom (airspaces, fixed image plane)
   asphere    Rank surfaces for asphere introduction, estimate initial coefficients
   psf        Point-spread function via direct vector Huygens integration

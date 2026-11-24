@@ -25,6 +25,7 @@ system → ray bundle → quantities
 | [vignette.md](vignette.md) | `rayweave vignette` | settle per-field vignetting and `auto_aperture` diameters with the dynamic pupil |
 | [plot.md](plot.md) | `rayweave plot` | SVG / PNG cross-section diagrams |
 | [scale.md](scale.md) | `rayweave scale` | scale a system so its EFL matches a target |
+| [stop.md](stop.md) | `rayweave stop` | materialize the virtual entrance pupil as a real plane stop |
 | [optimize.md](optimize.md) | `rayweave optimize` | DLS (damped least squares) local optimization |
 | [merit-and-constraints.md](merit-and-constraints.md) | _optimization reference_ | consolidated catalog of configurable merit terms and constraints (setting, effect, computation) |
 | [contrast.md](contrast.md) | _optimization reference_ | contrast optimization: geometric MTF, wavefront-shift and diffraction (Huygens) MTF merit kinds |

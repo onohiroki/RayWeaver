@@ -82,6 +82,7 @@ Top-level sections (all except `metadata` may be `omitempty`):
 | `psf`               | `psf,omitempty`              | Point-spread-function settings. |
 | `vignette`          | `vignette,omitempty`         | Vignetting solver settings. |
 | `scale`             | `scale,omitempty`            | EFL-scaling settings. |
+| `stop_insert`       | `stop_insert,omitempty`      | `rayweave stop` settings: multi-config placement anchor (`rear` / `front`) and the surface ID to insert. |
 | `cam`               | `cam,omitempty`              | First-order cam-solve settings (cam surfaces, per-position EFL targets, fixed image plane). |
 
 `configs[].wavelengths[]` is the design wavelength table: `value` (mm),
@@ -94,7 +95,8 @@ list). The definitions and weighting rules are in
 
 Output documents inline the full input (preserving every section and `metadata`)
 and append the computed result sections on top (e.g. `chief_rays`, `results`,
-`paraxial_result`, `zoom_summary`, `cam_result`, `global_result`, etc.), so a pipeline such as
+`paraxial_result`, `zoom_summary`, `cam_result`, `global_result`,
+`stop_insert_result`, etc.), so a pipeline such as
 `chief → trace → plot` stays pipe-compatible at every stage.
 
 The one result written *into* an input section rather than appended beside it is
