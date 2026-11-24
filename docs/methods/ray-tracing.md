@@ -23,8 +23,13 @@ which the ray meets the surface is found.
 
 **Sphere** (`type: sphere`): a quadratic solved in closed form,
 `IntersectSphere`. For radius 0 (a plane) the intersection is the plane at the
-vertex. The smallest positive root is chosen, with a tolerance guard
-(`t > 1e-12`) so a ray already sitting on a surface does not immediately "miss".
+vertex. The root is the sphere's **cap around the vertex**: of the two roots
+(the cap and the far side), the hit closest to the vertex plane is chosen — the
+smaller one for a convex surface, the larger one for a concave surface.
+Choosing the smallest positive root instead would meet a concave surface at the
+sphere's far side, 2|R| in front of the vertex, where there is no glass. A ray
+already on the surface at its vertex is accepted (t ≈ 0), so a zero-thickness
+surface does not immediately "miss".
 
 **Asphere** (`type: asphere_polynomial`, `asphere_zernike`): the sag is
 `z = sag(h)`, and the intersection is solved with Newton iteration

@@ -114,6 +114,33 @@ func TestIntersectSphereTangent(t *testing.T) {
 	}
 }
 
+// TestIntersectSphereTakesTheVertexSideRoot pins the root choice: an optical
+// surface is the sphere's cap around the vertex, not the rest of the sphere. A
+// concave surface (R < 0) seen from the object side has its cap at the larger
+// ray parameter; the smaller one is the sphere's far side, 2|R| in front of the
+// vertex, and refracting there traces a surface that is not part of the lens.
+func TestIntersectSphereTakesTheVertexSideRoot(t *testing.T) {
+	const radius = -42.2
+	// Axial ray from the object side: the cap is the vertex itself.
+	if tHit, ok := IntersectSphere(types.Vec3{Z: -100}, types.Vec3{Z: 1}, radius); !ok || math.Abs(-100+tHit) > 1e-12 {
+		t.Fatalf("axial concave: z = %v, ok = %v, want the vertex at z = 0", -100+tHit, ok)
+	}
+	// Marginal ray at height h: the cap sits at R + sqrt(R² − h²).
+	const h = 4.3579
+	want := radius + math.Sqrt(radius*radius-h*h)
+	if tHit, ok := IntersectSphere(types.Vec3{Y: h, Z: -100}, types.Vec3{Z: 1}, radius); !ok || math.Abs(-100+tHit-want) > 1e-12 {
+		t.Fatalf("marginal concave: z = %v, ok = %v, want %v", -100+tHit, ok, want)
+	}
+	// A convex surface keeps the cap it already had (the smaller root).
+	if tHit, ok := IntersectSphere(types.Vec3{Z: -100}, types.Vec3{Z: 1}, 50); !ok || math.Abs(-100+tHit) > 1e-12 {
+		t.Fatalf("axial convex: z = %v, ok = %v, want the vertex at z = 0", -100+tHit, ok)
+	}
+	// A ray already on the surface at its vertex is still accepted.
+	if _, ok := IntersectSphere(types.Vec3{}, types.Vec3{Z: 1}, radius); !ok {
+		t.Fatal("coincident concave: no hit")
+	}
+}
+
 func TestIntersectSphereCoincidentConvex(t *testing.T) {
 	// Ray is already on a zero-thickness (coincident) surface at the vertex of
 	// a convex sphere: t1 = 0, t2 = 2R. The vertex hit must be accepted so the

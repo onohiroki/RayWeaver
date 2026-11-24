@@ -272,25 +272,30 @@ func IntersectSphere(origin, dir types.Vec3, radius float64) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
-	if t1 > 1e-12 {
-		return t1, true
+	// An optical surface is the sphere's cap around the vertex, not the rest of
+	// the sphere. The two roots are the cap and the far side; the cap is the
+	// smaller t for a convex surface and the larger one for a concave surface,
+	// so the root is chosen by its distance from the vertex plane (|z| in the
+	// local frame), which is the one rule that holds for both. Taking the
+	// smallest positive t instead lands on the far side of a concave surface —
+	// 2|R| in front of the vertex — where the trace refracts at a surface that
+	// is not there.
+	bestT, bestZ, found := 0.0, 0.0, false
+	for _, t := range [2]float64{t1, t2} {
+		if t < -1e-9 {
+			continue // behind the ray
+		}
+		z := math.Abs(origin.Z + t*dir.Z)
+		if !found || z < bestZ {
+			bestT, bestZ, found = t, z, true
+		}
 	}
-	// A ray arriving at a zero-thickness (coincident) surface is already on
-	// the next sphere at its vertex: the near intersection is t1 ≈ 0 for a
-	// convex surface and t2 ≈ 0 for a concave one. Accept that hit so the
-	// trace continues instead of reporting a missed surface. TraceRay rejects
-	// t ≈ 0 on the first surface of a path, so this only relaxes later
-	// surfaces.
-	if math.Abs(t1) < 1e-9 {
-		return t1, true
+	if !found {
+		return 0, false
 	}
-	if t2 > 1e-12 {
-		return t2, true
-	}
-	if math.Abs(t2) < 1e-9 {
-		return t2, true
-	}
-	return 0, false
+	// A ray arriving at a zero-thickness (coincident) surface is already on the
+	// sphere at its vertex: the cap root is t ≈ 0, which the loop above keeps.
+	return bestT, true
 }
 
 // IntersectSphereBoth returns both intersection parameters of the ray with the
