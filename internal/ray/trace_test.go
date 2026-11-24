@@ -664,3 +664,35 @@ func TestTraceRayIncludeErrorSurfaces(t *testing.T) {
 			missLast.SurfaceID, missLast.ErrorCode, string(ErrSurfaceNotFound))
 	}
 }
+
+// TestTraceRayNonMonotonicIDs guards the list-order interaction rule: surface
+// IDs are labels, and the path direction is read from the surface positions.
+// A stop inserted between two surfaces carries an ID above every existing one
+// (the stop command's fresh-ID insertion), and a forward path through it must
+// transmit, not reflect at the numeric discontinuity.
+func TestTraceRayNonMonotonicIDs(t *testing.T) {
+	engine := NewEngine(glass.NewCatalog(), nil)
+	surfaces := []types.Surface{
+		{ID: 1, Type: types.Sphere, Thickness: 5, Material: types.Material{}, Diameter: 50},
+		{ID: 9, Type: types.Sphere, Thickness: 5, Material: types.Material{}, Diameter: 50},
+		{ID: 2, Type: types.Sphere, Thickness: 5, Material: types.Material{}, Diameter: 50},
+		{ID: 3, Type: types.Sphere, Thickness: 0, Material: types.Material{}, Diameter: 50},
+	}
+	surface.Precompute(surfaces)
+	res := engine.TraceRay(types.Ray{
+		ID:      "forward",
+		Initial: types.RayState{Origin: types.Vec3{Z: -10}, Direction: types.Vec3{Z: 1}},
+		Path:    []int{0, 1, 9, 2, 3},
+	}, surfaces, true)
+	if res.ErrorCode != "" {
+		t.Fatalf("forward path through non-monotonic IDs failed: %s (%s)", res.ErrorCode, res.Error)
+	}
+	for _, sr := range res.Surfaces {
+		if sr.SurfaceID == 9 && sr.Interaction != types.Transmit {
+			t.Errorf("interaction at ID 9 = %v, want TRANSMIT", sr.Interaction)
+		}
+	}
+	if n := len(res.Surfaces); n != 5 {
+		t.Errorf("traced %d surfaces, want 5 (object plane + four surfaces)", n)
+	}
+}

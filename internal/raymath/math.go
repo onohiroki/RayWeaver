@@ -511,6 +511,13 @@ func AsphereNormal(p types.Vec3, sagFunc func(float64) float64) types.Vec3 {
 	}.Normalize()
 }
 
+// DetermineInteraction decides how a ray interacts with the current surface of
+// a path. The arguments are the *positions* of the previous, current and next
+// path surfaces in the surface list (not their numeric IDs, which are labels):
+// a path that reverses direction through the list is a path-encoded reflection,
+// and a monotonic path refracts. Using list positions keeps surface IDs pure
+// labels, so a surface inserted anywhere in the list (with any unused ID) does
+// not read as a fold.
 func DetermineInteraction(prev, current, next int) types.InteractionType {
 	d1 := current - prev
 	d2 := next - current

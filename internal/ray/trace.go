@@ -170,6 +170,16 @@ func (e *Engine) TraceRayInto(ray types.Ray, surfaces []types.Surface, detail bo
 	skipGlassPath := ray.SkipGlassPathCheck
 	skipAutoAperture := ray.SkipAutoApertureCheck
 
+	// ranks maps every path entry to its surface's position in the list. The
+	// interaction (refraction vs path-encoded reflection) is decided by the
+	// direction of the *surface sequence*, not by the numeric IDs: an inserted
+	// surface may carry any unused ID (e.g. 14 between 6 and 7) and the IDs are
+	// labels, while the list order is the physical order the fold walk builds.
+	ranks := make([]int, len(ray.Path))
+	for i, id := range ray.Path {
+		ranks[i] = indexOfSurface(surfaces, id)
+	}
+
 	for i := 0; i < len(ray.Path); i++ {
 		currentID := ray.Path[i]
 
@@ -188,11 +198,6 @@ func (e *Engine) TraceRayInto(ray types.Ray, surfaces []types.Surface, detail bo
 			}
 			record(sr)
 			continue
-		}
-
-		prevID := 0
-		if i > 0 {
-			prevID = ray.Path[i-1]
 		}
 
 		currentSurf := findSurface(surfaces, currentID)
@@ -322,7 +327,13 @@ func (e *Engine) TraceRayInto(ray types.Ray, surfaces []types.Surface, detail bo
 		if currentSurf.Reflects() {
 			interaction = types.Reflect
 		} else if i+1 < len(ray.Path) {
-			interaction = raymath.DetermineInteraction(prevID, currentID, ray.Path[i+1])
+			// The object entry has no predecessor in the list; use its own rank
+			// so the direction test sees a zero first step (a refraction).
+			prevRank := ranks[i]
+			if i > 0 {
+				prevRank = ranks[i-1]
+			}
+			interaction = raymath.DetermineInteraction(prevRank, ranks[i], ranks[i+1])
 		}
 
 		// Incident and emergent media depend on the physical travel direction.

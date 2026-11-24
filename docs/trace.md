@@ -146,7 +146,7 @@ rayweave trace single --origin 0,5,-100 --aim 0,2.5,25 --path 0,1,2,3,4 < lens.y
 | `--aim X,Y,Z` | aim target: the direction is auto-computed from the origin toward the point |
 | `--angle-yz DEG` | incidence angle in the YZ plane (degrees); sets direction `(0, sin θ, cos θ)` |
 | `--pass-through S:Y:X` | solve the direction so the ray passes through `(x, y)` on surface `S` (in the YZ-plane convention, `Y` comes before `X`) |
-| `--path 0,1,2,...` | surface path (comma-separated IDs; default: sequential `0,1,…,N`) |
+| `--path 0,1,2,...` | surface path (comma-separated IDs; default: the document's surface list in order, `0` then every stored surface ID) |
 | `--wavelength MM` | wavelength in mm; CLI > `trace_single.wavelength` > `chief.reference_wavelength` > 587.56 nm |
 | `--id NAME` | ray ID (default: `trace_single`) |
 | `--details` | populate per-surface detail fields in the output YAML |
@@ -176,7 +176,7 @@ trace_single:
   aim: [0, 2.5, 25]
   angle_yz: 5               # degrees
   pass_through: [5, 2.5, 0] # [surface, Y, X]
-  path: [0, 1, 2, 3, 4]     # surface IDs (default: sequential)
+  path: [0, 1, 2, 3, 4]     # surface IDs (default: the list order, 0 then every surface)
   wavelength: 0.00058756    # mm
   id: "my_ray"
   lenient: false

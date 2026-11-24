@@ -65,17 +65,22 @@ Every ray carries a `path` — an ordered list of surface IDs to visit. This is
 the fundamental design that lets rayweaver trace both normal sequential rays and
 ghost paths in a single framework, without a separate non-sequential mode.
 
-The interaction at each surface is determined by the direction of the surface-ID
-sequence around it:
+The interaction at each surface is determined by the direction of the *surface
+sequence* around it — the position of each path entry in the document's surface
+list, not its numeric ID. Surface IDs are labels: a command may insert a
+surface with any unused ID (for example `rayweave stop` inserts the stop with
+one above the largest ID, in the middle of the list), and the list order is what
+the fold walk and the trace follow.
 
-| Sequence pattern | Meaning | Example |
+| Sequence pattern | Meaning | Example (list positions) |
 |---|---|---|
 | continuous ascent or descent | refraction (TRANSMIT) | `[1, 2, 3]` |
 | direction reversal | reflection (REFLECT) at the turning point | `[3, 4, 3]` |
 
 `DetermineInteraction(prev, current, next)` implements this: if
 `(current − prev)` and `(next − current)` have opposite signs, the ray
-reflects at `current`; otherwise it transmits.
+reflects at `current`; otherwise it transmits. The trace passes the three
+surfaces' list positions, so the rule is independent of ID numbering.
 
 This differs from other tools:
 

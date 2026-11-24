@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/hiroki/rayweaver/internal/dls"
 	"github.com/hiroki/rayweaver/internal/ray"
 	"github.com/hiroki/rayweaver/internal/surface"
 	"github.com/hiroki/rayweaver/internal/types"
@@ -250,13 +251,12 @@ func resolvePath(fs *flag.FlagSet, cfg *types.RayTraceConfig, pathFlag *string,
 	if pathStr != "" {
 		return parseIntList(pathStr, "path")
 	}
-	// Default: sequential [0, 1, ..., N]
+	// Default: the surface sequence in list order, as IDs (0, then every
+	// stored surface). Alignment is by list position, not numeric ID order, so
+	// an inserted surface keeps its physical place even with a non-contiguous
+	// ID (see dls.BuildPath).
 	surfaces := configSurfaces(configs, configFlag)
-	path := make([]int, len(surfaces)+1)
-	for i := range path {
-		path[i] = i
-	}
-	return path
+	return dls.BuildPath(surfaces)
 }
 
 // printTraceSingleVerbose prints per-surface detail to stderr.
