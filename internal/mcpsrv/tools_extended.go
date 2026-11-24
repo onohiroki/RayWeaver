@@ -21,6 +21,7 @@ func (s *server) registerExtendedTools() {
 	s.addAsphere()
 	s.addTMM()
 	s.addScale()
+	s.addStop()
 	s.addPSF()
 	s.addFocus()
 	s.addWavefront()
@@ -130,6 +131,24 @@ func (s *server) addScale() {
 		"Scale every length in the system so its effective focal length matches the target.",
 		"scale", func(in scaleIn) []string {
 			return clispec.Args(clispec.Scale, in, nil)
+		})
+}
+
+type stopIn struct {
+	DocInput
+	settings
+	Anchor     string  `json:"anchor,omitempty" jsonschema:"multi-config stop placement: rear (default) or front"`
+	ID         int     `json:"id,omitempty" jsonschema:"surface ID for the inserted stop (0 = one above the largest ID)"`
+	Wavelength float64 `json:"wavelength,omitempty" jsonschema:"reference wavelength in mm for the paraxial pupil solve"`
+	NoVerify   bool    `json:"no_verify,omitempty" jsonschema:"skip the chief-ray spot-RMS comparison"`
+	DryRun     bool    `json:"dry_run,omitempty" jsonschema:"report the planned stop without modifying the document"`
+}
+
+func (s *server) addStop() {
+	addStage(s, "stop", "Materialize the virtual entrance pupil",
+		"Insert a real plane stop that reproduces the document's virtual entrance pupil (position and diameter), remove the virtual model, and report the per-config stop plane, clear diameter and resulting pupil. The entrance pupil is the stop's image, so the stop plane and diameter are solved, not copied.",
+		"stop", func(in stopIn) []string {
+			return clispec.Args(clispec.Stop, in, map[string]string{"wavelength": "wl"})
 		})
 }
 

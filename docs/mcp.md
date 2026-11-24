@@ -373,8 +373,8 @@ not a setting.
 
 ### `all`
 
-Adds `zoom`, `cam`, `vignette`, `asphere`, `tmm`, `scale`, `psf`, `focus`,
-`wavefront`, `clean`, `import` and `export`. The full tool set is 27 tools;
+Adds `zoom`, `cam`, `vignette`, `asphere`, `tmm`, `scale`, `stop`, `psf`, `focus`,
+`wavefront`, `clean`, `import` and `export`. The full tool set is 28 tools;
 `core` exists to keep a small model's tool list (and context cost) manageable,
 not because the extended tools are less stable.
 

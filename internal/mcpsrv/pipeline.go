@@ -22,6 +22,7 @@ var pipelineCommands = map[string]bool{
 	"asphere":   true,
 	"tmm":       true,
 	"scale":     true,
+	"stop":      true,
 	"psf":       true,
 	"focus":     true,
 	"wavefront": true,
